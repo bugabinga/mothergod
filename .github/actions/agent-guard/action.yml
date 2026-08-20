@@ -1,0 +1,48 @@
+name: agent-guard
+description: >-
+  Pause gate for all agent workflows (ADR-0004). The pause state is an open
+  issue labeled `agents-paused` whose body may contain `RESUME-AT: <ISO-8601
+  UTC>`. While such an issue is open and RESUME-AT is in the future (or
+  absent), agent jobs must skip. Once RESUME-AT has passed, this guard closes
+  the issue and lets the run proceed (auto-resume).
+inputs:
+  token:
+    description: GitHub token with issues read/write
+    required: true
+outputs:
+  paused:
+    description: "'true' while the agent system is paused"
+    value: ${{ steps.check.outputs.paused }}
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        paused=false
+        issue_json="$(gh issue list --repo "$GITHUB_REPOSITORY" --label agents-paused --state open --json number,body --limit 1)"
+        number="$(jq -r '.[0].number // empty' <<<"$issue_json")"
+        if [ -n "$number" ]; then
+          resume_at="$(jq -r '.[0].body // ""' <<<"$issue_json" | sed -n 's/^RESUME-AT:[[:space:]]*//p' | head -n1 | tr -d '\r')"
+          if [ -z "$resume_at" ]; then
+            paused=true
+            echo "Paused indefinitely by issue #$number (no RESUME-AT line)."
+          else
+            resume_epoch="$(date -u -d "$resume_at" +%s 2>/dev/null || echo '')"
+            if [ -z "$resume_epoch" ]; then
+              paused=true
+              echo "Paused by issue #$number; RESUME-AT '$resume_at' is unparseable — staying paused. Fix or close the issue to resume."
+            elif [ "$(date -u +%s)" -lt "$resume_epoch" ]; then
+              paused=true
+              echo "Paused until $resume_at by issue #$number."
+            else
+              gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+                --comment "RESUME-AT ($resume_at) has passed — agent operations resume with this run." || true
+              echo "Pause expired; closed issue #$number, resuming."
+            fi
+          fi
+        fi
+        echo "paused=$paused" >> "$GITHUB_OUTPUT"

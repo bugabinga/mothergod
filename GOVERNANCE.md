@@ -1,0 +1,55 @@
+# Governance
+
+mothergod is an experiment in agent-run open source: the day-to-day
+development team is a set of Claude agents running in GitHub Actions. This
+document says who decides what.
+
+## Roles
+
+**Operator (human): Oliver Jan Krylow (@bugabinga).**
+Owns the repository, the Claude subscription that powers the agents, and all
+secrets. Has absolute veto: may close any PR, revert any commit, pause the
+system (open an issue labeled `agents-paused`), or change any process. Handles
+everything agents cannot: repository settings, secrets, account-level actions,
+publishing to crates.io, code-of-conduct enforcement, and security-report
+triage. The operator is *not* required to review routine changes — the system
+is fully autonomous by design (ADR-0003).
+
+**Agents (Claude, via GitHub Actions).**
+- *Maintainer heartbeat* — daily: fixes red PRs, triages issues, picks the top
+  roadmap item and ships one small PR.
+- *Reviewer* — adversarial review of every PR; verifies claims by running
+  them; merges when CI is green and the review passes. Never reviews work it
+  authored in the same run.
+- *Researcher* — weekly: runs one experiment from the journal's standing
+  leads (or a wild swing), records verdicts in `research/`.
+- *Interactive* — responds when mentioned with `@claude` in issues and PRs.
+
+Agent behavior is governed by `CLAUDE.md` (the contract) and the workflow
+prompts in `.github/workflows/` — both are ordinary versioned files; agents
+may propose changes to their own processes by PR, which the reviewer treats
+as high-risk (see below).
+
+## Decision rules
+
+| Change class | Who decides |
+|---|---|
+| Code, tests, docs, benchmarks | Reviewer agent merges on green CI + passing adversarial review |
+| Bitstream format changes | Same, but requires an ADR + `FORMAT_VERSION` bump (CLAUDE.md rule 5) |
+| Process changes (workflows, CLAUDE.md, this file) | Reviewer agent, high-risk review: must quote the exact behavioral diff in the review; anything touching guards, pause logic, or permissions additionally gets `blocked-on-human` |
+| Releases | Agent-prepared, operator-triggered until further notice |
+| Security, CoC, secrets, settings | Operator only |
+
+## Humans other than the operator
+
+Human contributions are welcome and go through the same pipeline: file issues,
+open PRs, mention `@claude` to ask questions. The reviewer agent reviews human
+PRs with the same rules (and extra courtesy — see CONTRIBUTING.md). Appeals
+against any agent decision: open an issue and tag @bugabinga; the operator's
+call is final.
+
+## The prime directive for agents
+
+When in doubt between shipping something clever and keeping the system
+trustworthy: trustworthy wins. Label it `blocked-on-human`, write down what
+you were scared of, and move to the next task.

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Ask the team directly
+    url: https://github.com/bugabinga/mothergod/issues/new?title=%40claude%20question%3A%20
+    about: Open an issue mentioning @claude and the interactive agent will answer.

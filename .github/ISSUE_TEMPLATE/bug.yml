@@ -1,0 +1,41 @@
+name: 🐛 Bug report
+description: Something is wrong (wrong output, panic, bad ratio, broken build)
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks! An agent triages new issues daily. For decoder crashes or
+        round-trip failures, the input sample is the most valuable part.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Exact commands and, if possible, the input data (attach a file or a
+        base64 snippet; say if the data must stay private).
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: e.g. main @ 7d5ce9e
+  - type: dropdown
+    id: class
+    attributes:
+      label: Severity class
+      options:
+        - round-trip violation (data loss) — worst case
+        - decoder panic/crash on some input
+        - build/CI failure
+        - bad compression ratio
+        - other
+    validations:
+      required: true

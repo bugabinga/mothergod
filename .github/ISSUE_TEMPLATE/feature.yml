@@ -1,0 +1,16 @@
+name: ✨ Feature request
+description: Propose a capability (API, CLI, platform, tooling)
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today? Why does it matter?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Optional — the triage agent will map it onto the roadmap either way.
