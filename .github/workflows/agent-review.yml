@@ -1,6 +1,9 @@
 # Adversarial reviewer: reviews every same-repo PR and, in the fully
 # autonomous model (ADR-0003), merges when the review and CI both pass.
-# Fork PRs are excluded (no secrets there); the heartbeat reviews those.
+# Fork PRs and dependabot PRs are excluded — neither event carries repo
+# secrets, so the Claude step cannot authenticate; the heartbeat handles
+# both kinds instead. The reviewer deliberately gets NO file-write tools:
+# it judges and merges, it does not modify code.
 #
 # Identity note: gh runs with the workflow's GITHUB_TOKEN (github-actions
 # bot), a different identity from the claude[bot] app that authors agent
@@ -22,7 +25,8 @@ concurrency:
 jobs:
   review:
     if: github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
