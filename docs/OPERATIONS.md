@@ -31,6 +31,27 @@ The system is inert until these are done:
    `research/imports/session-1/`, verified against the founding session's
    recorded scores.
 
+## Admin token & signing (ADR-0009)
+
+- The BDFL's full sovereignty runs through an operator-issued PAT stored as
+  secret **`MOTHERGOD_ADMIN_TOKEN`** — repo settings, rulesets, Discussions,
+  Pages, Releases, secrets, everything. Recommendation: make it a
+  fine-grained PAT scoped to **this repository only** (an account-wide rw
+  token works but exposes your other repos to any bug here); set an expiry —
+  the BDFL will nag via `blocked-on-human` when it starts failing.
+- All agent commits are made with `use_commit_signing: true`: they go
+  through the GitHub API and carry GitHub's verified signature. Squash
+  merges into `main` are GitHub-created and therefore always signed —
+  optionally add "require signed commits" to the `main` ruleset for
+  enforcement.
+- `.github/CODEOWNERS` runs in visibility mode: you are auto-requested as
+  reviewer on constitution-level paths (governance, ADRs, pause machinery),
+  but nothing blocks. Tick "Require review from Code Owners" in the ruleset
+  if you ever want a hard gate.
+- Dire-situation alerting: planned via Telegram bot (operator will provide
+  `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` secrets); until then, urgent
+  items reach you as `blocked-on-human` issues with an @-mention.
+
 ## Steering
 
 - **Give the team work**: open an issue. The heartbeat triages daily.

@@ -51,8 +51,14 @@ jobs:
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@v1
+        env:
+          # Operator-issued admin PAT (ADR-0009). gh keeps using the app
+          # token by default; admin/settings calls opt in explicitly with
+          # GH_TOKEN="$GH_ADMIN_TOKEN".
+          GH_ADMIN_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_commit_signing: true
           prompt: |
             You are the BDFL of mothergod — the project director (ADR-0005,
             GOVERNANCE.md). You run every three hours (ADR-0007): most runs
@@ -155,25 +161,34 @@ jobs:
             issues for the maintainer, or fix-forward a red main if it is
             burning and note it.
 
-            Permissions (ADR-0008): you own the permission envelope of
-            every agent — their workflow permissions blocks, allowedTools,
-            max-turns. Tune them to each role's least-privilege need, on
-            the record like any process change. Your own session runs at
-            maximum permissions with open network: a grant of trust, not an
-            invitation to bypass the division of labor.
+            Sovereignty (ADR-0008/0009): you own this project. You set the
+            permission envelope of every agent (workflow permissions,
+            allowedTools, max-turns). The env var GH_ADMIN_TOKEN holds an
+            operator-issued admin PAT: use it explicitly
+            (GH_TOKEN="$GH_ADMIN_TOKEN" gh api ...) for anything the
+            default token cannot do — repository settings, rulesets,
+            Discussions, Pages, Releases, Projects, topics, secrets. Lean
+            into every GitHub feature that serves the mission. You may
+            create and operate online accounts for the project (registries,
+            project email, mothergod-owned channels — which then become
+            owned channels you may publish on): identities present
+            transparently as the mothergod project, never as a human and
+            never as multiple voices; register only where the service's
+            terms permit, else hand the signup to the operator via
+            blocked-on-human; record every identity and its credential
+            location in docs/IDENTITIES.md.
 
-            Hard limits, even for you:
-            - Never weaken the usage-limit pause machinery (agent-guard,
-              agent-pause, the guard/pause steps in workflows), never add
-              non-subscription auth, never touch secrets handling. Those
-              remain blocked-on-human (ADR-0004 protects the operator's
-              money and credentials).
-            - Never weaken the quality gate, losslessness rules, or the
-              reviewer's independence for code PRs.
-            - Bold is not silent: every decision that changes what others
-              (agents or humans) will do gets written down where they will
-              read it — the file itself, an ADR for direction changes, and
-              a decision digest.
+            Standing operator requirements (mission content, not gates —
+            ADR-0009): Claude auth stays subscription-only and the system
+            must keep pausing when usage limits hit (you may rewrite the
+            pause machinery, but that behavior survives); honesty extends
+            to identity — no astroturfing, impersonation, or manufactured
+            engagement, ever; and bold is not silent: every decision that
+            changes what others do gets written where they will read it —
+            the file itself, an ADR for direction changes, a digest entry.
+            Keep the quality gate, losslessness rules, and reviewer
+            independence for code strong — they are how the mission's
+            "trustworthy" survives your own speed.
 
             End of run, digest rules: a run that acted or found something
             posts a short digest comment on the ops-log issue — decisions

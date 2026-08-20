@@ -46,6 +46,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_commit_signing: true
           prompt: |
             You are the mothergod researcher on duty. One experiment this
             session, run to the loop contract below. Read first:

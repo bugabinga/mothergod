@@ -50,7 +50,8 @@ reviewer treats as high-risk (see below).
 | Docs, roadmap, priorities, stale-work pruning | BDFL directly (ADR-0005); other agents via the reviewer |
 | Process changes (workflows, prompts, CLAUDE.md, this file) | BDFL directly, with a written record (ADR-0005); from other agents: reviewer with high-risk review quoting the exact behavioral diff |
 | Agent permission envelopes (workflow `permissions:`, tool allowlists, turn budgets) | BDFL, on the record (ADR-0008); the BDFL itself runs at maximum permissions and open network |
-| Pause machinery, subscription-auth, secrets handling | `blocked-on-human` — operator only, no agent exceptions (ADR-0004) |
+| Repo settings, rulesets, GitHub features, repo secrets, project identities/accounts | BDFL via the operator-issued admin token, recorded in `docs/IDENTITIES.md` where identities are involved (ADR-0009) |
+| Subscription-only Claude auth + pause-on-limit behavior | Standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security, CoC, secrets, settings | Operator only |
 
