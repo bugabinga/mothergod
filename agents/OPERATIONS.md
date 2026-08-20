@@ -71,7 +71,7 @@ The system is inert until these are done:
   private** — operator hotline only, never a public channel. If the BDFL
   ever wants a public user-facing Telegram presence, that is its own
   prerogative under ADR-0009: a separate identity it creates and registers
-  in `docs/IDENTITIES.md`, kept apart from this bot.
+  in `agents/IDENTITIES.md`, kept apart from this bot.
 
 ## Steering
 

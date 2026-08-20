@@ -23,7 +23,7 @@ mothergod is two experiments in one repository:
    implementation, adversarial code review, research experiments, releases —
    is done by Claude agents running on GitHub Actions, slowly, in public,
    like a real team would. A human operator holds the veto and the keys.
-   How this works: [`GOVERNANCE.md`](GOVERNANCE.md).
+   How this works: [`agents/GOVERNANCE.md`](agents/GOVERNANCE.md).
 
 ## Status: pre-alpha, format unstable
 

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Two-realm repository layout (ADR-0010): agent-system files moved to
+  `agents/` (governance, operations, personas, sources, identities),
+  strictly separated from the classical project tree.
+
 ### Added
 
 - Project mark (`assets/logo.svg`, halo variant) in README and rustdoc;

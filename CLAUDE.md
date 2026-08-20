@@ -64,16 +64,21 @@ A push that fails them wastes a cycle.
 
 ## Where things live
 
+Two realms, strictly separated (ADR-0010): the classical project
+(`src/`, `docs/`, `research/`, `assets/`, root community files) and the
+agent system (`agents/`, plus `.github/` and this file by platform
+requirement). New files follow the placement rule in `agents/README.md`.
+
 | Path | What |
 |---|---|
 | `src/` | the crate |
 | `research/JOURNAL.md` | falsification journal — laws, dead theories, standing leads |
 | `research/progress.jsonl` | machine-readable experiment log (schema in `research/README.md`) |
 | `research/corpus/POLICY.md` | benchmark corpus rules: sealed validation, regret-scored additions |
-| `docs/PERSONALITY.md` | house temperament + your role's persona — embody it |
-| `docs/SOURCES.md` | trusted reading list + adoption log; BDFL reviews weekly |
+| `agents/` | the agent system: governance, operations, personas, sources, identities |
+| `agents/PERSONALITY.md` | house temperament + your role's persona — embody it |
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
-| `docs/adr/` | architecture decision records |
+| `docs/adr/` | architecture decision records (single series, both realms) |
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
 | `ROADMAP.md` | mission, success scorecard, milestones; heartbeat picks work from here |
 | `.github/workflows/` | the agent processes themselves — changeable by PR like any code |
