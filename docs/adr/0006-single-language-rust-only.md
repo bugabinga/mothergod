@@ -27,11 +27,16 @@ subscription on synchronization instead of progress.
    in-repo Rust codec. For proxy-speed iteration, build an ideal-cost
    accounting mode into the Rust models (sum `-log2(p)` instead of emitting
    bits) — same trick, no port step, no drift, faster than Python.
-3. **`research/imports/session-1/` is a frozen, read-only oracle.** It is
-   historical evidence and a cross-check: agents may *run* it read-only to
-   settle a port question ("what did the champion do here?"), and must never
-   edit, extend, or maintain it. It stays outside CI, lints, and review
-   scope.
+3. **The Python harness lives in git history, not the tree.** It was
+   imported, verified working (reproduces the it31 champion's sealed
+   validation exactly), and then removed from HEAD so the tree is
+   single-language; it is preserved verbatim at commit `1a3b1c8`
+   (`git show 1a3b1c8:research/imports/session-1/autoresearch2.py`). To use
+   it as an oracle, extract to a scratch directory outside the repo and run
+   read-only. In-tree, `research/imports/session-1/` keeps only Rust
+   (`mothergod.rs`, the M1 port source and differential oracle) and
+   language-neutral data records (`research_state.json`, `progress.jsonl`) —
+   all frozen, outside CI, lints, and review scope.
 4. Numbers produced by the archive's model-cost proxy are quotable only as
    historical context, clearly marked; new claims require real bitstreams
    from the Rust codec (corpus rules per `research/corpus/POLICY.md`).

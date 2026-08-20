@@ -61,11 +61,12 @@ jobs:
 
             Language rule (ADR-0006): experiments run against the in-repo
             Rust codec; all new code — experiments, harness, corpus tooling —
-            is Rust. Do NOT resume or extend the Python loop in
-            research/imports/session-1/; you may RUN it read-only as an
-            oracle to settle a question about the founding champion's
-            behavior, quoting its numbers only as clearly-marked historical
-            context.
+            is Rust, and no Python enters the tree. The founding Python loop
+            is preserved in git history (commit 1a3b1c8 under
+            research/imports/session-1/); to consult it as an oracle,
+            extract it to a scratch directory outside the repo, run it
+            read-only, and quote its numbers only as clearly-marked
+            historical model-cost context.
 
             Otherwise pick exactly ONE, defaulting to the first:
             a) the journal's top standing lead (kind=patch or param),

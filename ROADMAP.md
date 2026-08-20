@@ -20,15 +20,19 @@ agent processes. Done 2026-08-20.
       (JOURNAL S1-A*). The archive file stays untouched; the port must meet
       the crate's rules the archive predates: decoder never panics on
       adversarial input (the archive uses assert/unwrap), docs, strict lints.
-- [x] Complete Python harness archived and verified: reproduces the it31
-      champion's sealed-validation scores (2026-08-20). Frozen as a
-      read-only oracle — not resumed (ADR-0006).
+- [x] Python harness verified (reproduces the it31 champion's sealed
+      validation exactly), then moved to git history (commit `1a3b1c8`) to
+      keep the tree single-language (ADR-0006).
 
 ## M2 — Honest benchmarking (JOURNAL S1-D2)
 
-- [ ] `bench/` harness, in Rust (ADR-0006): Silesia + Canterbury at pinned
-      revisions, entropy ladder + markov-H8/2 generators, sealed validation
-      split per `research/corpus/POLICY.md`.
+- [ ] `bench/` harness, in Rust (ADR-0006): `bench/corpus.toml` manifest
+      pinning Silesia + Canterbury by URL + SHA-256 (fetch-and-cache, never
+      committed), deterministic in-repo generators (entropy ladder,
+      markov-H8/2, structured classes), three-tier train/sealed/finals split
+      per `research/corpus/POLICY.md`.
+- [ ] Adversarial decode seed corpus + suite (`tests/adversarial/`,
+      `docs/TESTING.md` layer 2).
 - [ ] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
       emitting bits) — recovers the archive's proxy-speed experiment loop
       inside the codec of record.
@@ -45,8 +49,10 @@ real bitstreams; then xz -9e.
 
 ## M4 — Production hardening
 
-- [ ] cargo-fuzz targets: decoder-never-panics, round-trip, bomb resistance.
-- [ ] cargo-mutants in scheduled CI; surviving mutants become issues.
+- [ ] cargo-fuzz targets and cargo-mutants in scheduled CI
+      (`docs/TESTING.md` layers 3–4); surviving mutants become issues.
+- [ ] Cross-platform determinism CI + golden frames per `FORMAT_VERSION`
+      (layer 5).
 - [ ] Streaming/block API, bounded-memory decode guarantees.
 - [ ] Frozen format spec v1 (`docs/format/SPEC.md`) + `FORMAT_VERSION` 1.
 
