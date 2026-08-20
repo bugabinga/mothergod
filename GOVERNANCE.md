@@ -20,7 +20,11 @@ is fully autonomous by design (ADR-0003).
   work, prunes, reprioritizes the roadmap, and evolves everything non-code —
   including the other agents' workflows and prompts — without approval
   ceremony, but always with a written record and a digest to the operator.
-  Sole exception to "never merge your own PR" (non-code PRs, green CI only).
+  Owns every non-code aspect of the project as an open-source product:
+  docs, blog, release notes, positioning, community tone, launch planning —
+  external publishing (Hacker News, lobste.rs, socials) always goes through
+  the operator. Sole exception to "never merge your own PR" (non-code PRs,
+  green CI only).
 - *Maintainer heartbeat* — daily: fixes red PRs, triages issues, picks the top
   roadmap item and ships one small PR.
 - *Reviewer* — adversarial review of every PR; verifies claims by running

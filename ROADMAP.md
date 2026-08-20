@@ -3,13 +3,35 @@
 ## Mission
 
 Build the best general-purpose lossless compressor — "mother god of all
-general purpose compressors" — under two non-negotiables that define "best":
+general purpose compressors" — as a real open-source project that **real
+human users** choose, trust, and enjoy. Three non-negotiables define "best":
 
 1. **Trustworthy**: lossless always, decoder safe on any input, deterministic
    across platforms. A ratio win that costs trust is a loss.
 2. **Honest**: every claim measured on named corpora with real bitstreams,
    every design decision traceable to a recorded experiment. We beat the
-   incumbents on their benchmarks, not ours.
+   incumbents on their benchmarks, not ours. Honesty extends to marketing:
+   no astroturfing, no manufactured engagement, ever.
+3. **Wanted**: the target audience is people, not benchmarks. Ease of
+   building, integrating, and understanding the project are first-class
+   outcomes; the more happy users, the better. A technically superior
+   compressor nobody adopts has failed.
+
+Guiding principles:
+
+- **The less code, the better.** Simplicity is a feature; every line is a
+  liability some future session must understand and maintain. Prefer
+  deleting to adding; quality and performance come from design, not
+  accretion.
+- **Beat the competition, and learn from it shamelessly.** Study how zstd,
+  lz4, brotli, xz — and great OSS beyond compression (ripgrep, SQLite,
+  curl) and OSS history at large — do engineering, docs, releases, and
+  community. Write down what was learned and applied.
+- **Every aspect of open source is in scope**, not just code: README first
+  impressions, docs, release notes, the blog, positioning, launch moments
+  (Show HN, lobste.rs), community tone. The BDFL steers all of it. Agents
+  draft and decide timing; **publishing on external platforms is always
+  operator-gated** (`blocked-on-human` with ready-to-post text).
 
 The BDFL owns this mission; every weekly BDFL session judges the project
 against the scorecard below and reports it in the ops-log digest. A metric
@@ -33,6 +55,17 @@ Outcome metrics (the product):
 - **SPEED** — tracked, not yet optimized: report encode/decode MB/s on the
   finals each benchmark run; floor of ≥1 MB/s decode single-thread until M5
   makes speed a first-class target.
+- **USERS** — evidence real humans use and like it: GitHub stars/forks/
+  watchers and their trend, external (non-agent, non-operator) issue and PR
+  authors, crates.io downloads once published, unsolicited mentions found
+  in the wild. Report weekly. These are outcomes to earn, never to
+  manufacture — gaming them is a HONESTY incident. Launch moments (Show HN,
+  lobste.rs) are planned and drafted by the BDFL when a milestone genuinely
+  warrants one, and submitted only by the operator.
+- **SIMPLICITY** — total `src/` SLOC and public API surface, reported with
+  weekly delta; growth must be justified by wins elsewhere on this
+  scorecard. Dependency count stays zero (ADR-0002). Deletions are
+  celebrated in the digest.
 
 Process metrics (the team — BDFL's machinery gauge):
 
