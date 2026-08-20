@@ -8,6 +8,8 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Project mark (`assets/logo.svg`, halo variant) in README and rustdoc;
+  brand sheet at `assets/mark.html` (anatomy, palette, scale test, source).
 - Telegram status bot integration: automatic pause alerts from every agent
   workflow, dire escalations and weekly digest from the BDFL, and an
   operator inbox read at each BDFL wake-up; chat id self-bootstraps on the
