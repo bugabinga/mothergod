@@ -48,6 +48,12 @@ The system is inert until these are done:
   reviewer on constitution-level paths (governance, ADRs, pause machinery),
   but nothing blocks. Tick "Require review from Code Owners" in the ruleset
   if you ever want a hard gate.
+- **mothergod.dev / Cloudflare** (secret `MOTHERGOD_CLOUDFLARE_TOKEN`): the
+  operator-purchased domain and its zone token — the BDFL's web estate
+  (site, blog, webhook infra) per ADR-0009. The token carries all *zone*
+  permission groups; if the BDFL reports a 403 deploying Workers or Pages,
+  add the account-level "Workers Scripts: Edit" (and "Cloudflare Pages:
+  Edit") permission groups to it in the Cloudflare dashboard.
 - **Telegram status bot** (secret `MOTHERGOD_STATUS_BOT_TOKEN`): your
   one-time step is to send the bot any message (e.g. /start) — the next
   BDFL run detects it, stores your chat id as repo variable
