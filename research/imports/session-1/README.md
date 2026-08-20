@@ -25,4 +25,6 @@ say so in a journal entry rather than silently picking one.
 end-to-end and reproduces the it31 champion's sealed-validation scores
 exactly (VAL TOTAL 20.697, per-dataset identical to `progress.jsonl` it30/31;
 train slices rotate by iteration, so TRAIN varies as designed). The loop is
-resumable at it31.
+technically resumable at it31 — but per ADR-0006 it is NOT resumed: this
+archive is a read-only oracle, and new experiments run against the in-repo
+Rust codec.

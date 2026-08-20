@@ -20,3 +20,7 @@ All notable changes to this project are documented here. Format follows
   `research/imports/session-1/` (codec import-verified lossless), and a
   weekly BDFL driver agent that directs the project and evolves the
   non-code processes without ceremony (ADR-0005).
+- Single-language policy (ADR-0006): Rust only going forward; the archived
+  Python research loop is a frozen read-only oracle, and its proxy-speed
+  experimentation is to be recovered via an ideal-cost accounting mode in
+  the Rust models.

@@ -21,13 +21,17 @@ agent processes. Done 2026-08-20.
       the crate's rules the archive predates: decoder never panics on
       adversarial input (the archive uses assert/unwrap), docs, strict lints.
 - [x] Complete Python harness archived and verified: reproduces the it31
-      champion's sealed-validation scores and is resumable (2026-08-20).
+      champion's sealed-validation scores (2026-08-20). Frozen as a
+      read-only oracle — not resumed (ADR-0006).
 
 ## M2 — Honest benchmarking (JOURNAL S1-D2)
 
-- [ ] `bench/` harness: Silesia + Canterbury at pinned revisions, entropy
-      ladder + markov-H8/2 generators, sealed validation split per
-      `research/corpus/POLICY.md`.
+- [ ] `bench/` harness, in Rust (ADR-0006): Silesia + Canterbury at pinned
+      revisions, entropy ladder + markov-H8/2 generators, sealed validation
+      split per `research/corpus/POLICY.md`.
+- [ ] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
+      emitting bits) — recovers the archive's proxy-speed experiment loop
+      inside the codec of record.
 - [ ] CI benchmark gate: PR fails on regression vs `bench/baseline.json`.
 - [ ] Nightly/weekly report: bits/byte vs gzip/zstd/xz, per-dataset graphs
       rendered from `research/progress.jsonl` into `docs/benchmarks/`.

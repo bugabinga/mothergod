@@ -59,6 +59,14 @@ jobs:
             slice of that capability instead — treat it as kind="patch" work
             and still record it.
 
+            Language rule (ADR-0006): experiments run against the in-repo
+            Rust codec; all new code — experiments, harness, corpus tooling —
+            is Rust. Do NOT resume or extend the Python loop in
+            research/imports/session-1/; you may RUN it read-only as an
+            oracle to settle a question about the founding champion's
+            behavior, quoting its numbers only as clearly-marked historical
+            context.
+
             Otherwise pick exactly ONE, defaulting to the first:
             a) the journal's top standing lead (kind=patch or param),
             b) a literature merge: search the web for recent compression

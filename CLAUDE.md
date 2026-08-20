@@ -50,7 +50,11 @@ CI (`quality-gate`) runs exactly these. A push that fails them wastes a cycle.
 
 ## Style
 
-- Edition 2024, zero runtime dependencies in the core crate (dev-deps are fine).
+- Rust only, edition 2024, zero runtime dependencies in the core crate
+  (dev-deps are fine). No new Python or other-language code — experiments,
+  bench harness, and corpus tooling are Rust too (ADR-0006). The Python
+  archive in `research/imports/session-1/` is a frozen read-only oracle:
+  run it to settle port questions, never edit or extend it.
 - Lints are strict (`clippy::pedantic`, `missing_docs`); fix, don't allow —
   an `#[allow]` needs a one-line justification comment.
 - Comments state invariants the code can't show. The port bug of session-1
