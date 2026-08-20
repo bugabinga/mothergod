@@ -25,10 +25,10 @@ The system is inert until these are done:
    status check `fmt + clippy + test + doc` (the `quality-gate` job) to pass
    before merging. Do not require human approvals — that's the reviewer
    agent's job (ADR-0003). Optionally block force pushes.
-7. ~~Seed the founding artifacts~~ Done 2026-08-20 — archived in
-   `research/imports/session-1/`. One file is still missing: the harness's
-   base `autoresearch.py` (see that folder's README); supply it if you have
-   it, otherwise the researcher reconstructs it.
+7. ~~Seed the founding artifacts~~ Done 2026-08-20 — the complete archive
+   (codec + runnable research harness + loop state) lives in
+   `research/imports/session-1/`, verified against the founding session's
+   recorded scores.
 
 ## Steering
 

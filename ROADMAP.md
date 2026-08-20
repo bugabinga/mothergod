@@ -20,9 +20,8 @@ agent processes. Done 2026-08-20.
       (JOURNAL S1-A*). The archive file stays untouched; the port must meet
       the crate's rules the archive predates: decoder never panics on
       adversarial input (the archive uses assert/unwrap), docs, strict lints.
-- [ ] `blocked-on-human` Operator supplies the missing `autoresearch.py`
-      base file for the Python harness, or the researcher reconstructs its
-      primitives (see `research/imports/session-1/README.md`).
+- [x] Complete Python harness archived and verified: reproduces the it31
+      champion's sealed-validation scores and is resumable (2026-08-20).
 
 ## M2 — Honest benchmarking (JOURNAL S1-D2)
 
