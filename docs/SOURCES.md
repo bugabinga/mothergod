@@ -13,9 +13,13 @@ it is new; never skip something solely because it is work.
 
 ## Operator's trusted sources
 
-<!-- Seeded by the operator; add freely. -->
+<!-- Seeded by the operator 2026-08-20; add freely. -->
 
-- (pending — operator to add)
+| Source | Why |
+|---|---|
+| Theo Browne — https://t3.gg, https://www.youtube.com/@t3dotgg | t3/T3 stack; fast, opinionated coverage of AI-tooling and model shifts as they land |
+| Mario Zechner — https://mariozechner.at, https://github.com/badlogic | author of the pi coding agent (which the operator uses); deep hands-on agent-harness engineering, minimal-and-honest tooling philosophy |
+| Dex Horthy — https://humanlayer.dev, https://github.com/humanlayer/12-factor-agents | HumanLayer; 12-Factor Agents and advanced context engineering — reference thinking for production agent systems |
 
 ## Defaults (assistant-seeded 2026-08-20; BDFL may prune)
 
