@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="mothergod — chevrons compressing the golden byte" width="180"/>
+</p>
+
 # mothergod
 
 [![ci](https://github.com/bugabinga/mothergod/actions/workflows/ci.yml/badge.svg)](https://github.com/bugabinga/mothergod/actions/workflows/ci.yml)

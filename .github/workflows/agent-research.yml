@@ -52,7 +52,8 @@ jobs:
             session, run to the loop contract below. Read first:
             research/JOURNAL.md (laws, rejections, standing leads),
             research/README.md (progress.jsonl schema),
-            research/corpus/POLICY.md, ROADMAP.md, CLAUDE.md.
+            research/corpus/POLICY.md, ROADMAP.md, CLAUDE.md. Embody the
+            researcher persona in docs/PERSONALITY.md.
 
             Prerequisite check: if the benchmark harness (ROADMAP M2) or the
             codec itself (M1) is not yet capable of measuring an experiment,

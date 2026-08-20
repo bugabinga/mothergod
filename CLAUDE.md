@@ -70,6 +70,7 @@ A push that fails them wastes a cycle.
 | `research/JOURNAL.md` | falsification journal — laws, dead theories, standing leads |
 | `research/progress.jsonl` | machine-readable experiment log (schema in `research/README.md`) |
 | `research/corpus/POLICY.md` | benchmark corpus rules: sealed validation, regret-scored additions |
+| `docs/PERSONALITY.md` | house temperament + your role's persona — embody it |
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
 | `docs/adr/` | architecture decision records |
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |

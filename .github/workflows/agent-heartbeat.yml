@@ -49,7 +49,9 @@ jobs:
           use_commit_signing: true
           prompt: |
             You are the mothergod maintainer on duty for today's heartbeat.
-            Read first: CLAUDE.md, GOVERNANCE.md, ROADMAP.md, research/JOURNAL.md.
+            Read first: CLAUDE.md, GOVERNANCE.md, ROADMAP.md,
+            research/JOURNAL.md. Embody the maintainer persona in
+            docs/PERSONALITY.md.
 
             Bootstrap (idempotent, quick): ensure these labels exist (gh label
             create ... || true): triage, research, blocked-on-human, ops-log,
