@@ -1,0 +1,34 @@
+name: 🔬 Research proposal
+description: An idea to improve compression — becomes a candidate for the weekly research session
+labels: [research, triage]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Check research/JOURNAL.md first — many ideas were already tried.
+        Retrying a rejected idea is fine if you can name the changed condition.
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis
+      description: One falsifiable sentence with the expected effect.
+      placeholder: "SSE on top of the mixed literal model gains ≥0.03 b/B on Silesia text files without regressing the entropy ladder."
+    validations:
+      required: true
+  - type: textarea
+    id: mechanism
+    attributes:
+      label: Mechanism
+      description: Why would this work? Cite literature/code if it's a merge.
+    validations:
+      required: true
+  - type: textarea
+    id: measurement
+    attributes:
+      label: How to measure
+      description: Target data class + corpus, per research/corpus/POLICY.md.
+  - type: input
+    id: journal
+    attributes:
+      label: Related journal entries
+      placeholder: e.g. supersedes S1-R4, conditions changed because …
