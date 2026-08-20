@@ -31,6 +31,48 @@ The system is inert until these are done:
    `research/imports/session-1/`, verified against the founding session's
    recorded scores.
 
+## Admin token & signing (ADR-0009)
+
+- The BDFL's full sovereignty runs through an operator-issued PAT stored as
+  secret **`MOTHERGOD_ADMIN_TOKEN`** — repo settings, rulesets, Discussions,
+  Pages, Releases, secrets, everything. Recommendation: make it a
+  fine-grained PAT scoped to **this repository only** (an account-wide rw
+  token works but exposes your other repos to any bug here); set an expiry —
+  the BDFL will nag via `blocked-on-human` when it starts failing.
+- All agent commits are made with `use_commit_signing: true`: they go
+  through the GitHub API and carry GitHub's verified signature. Squash
+  merges into `main` are GitHub-created and therefore always signed —
+  optionally add "require signed commits" to the `main` ruleset for
+  enforcement.
+- `.github/CODEOWNERS` runs in visibility mode: you are auto-requested as
+  reviewer on constitution-level paths (governance, ADRs, pause machinery),
+  but nothing blocks. Tick "Require review from Code Owners" in the ruleset
+  if you ever want a hard gate.
+- **mothergod.dev / Cloudflare** (secret `CLOUDFLARE_API_TOKEN`): the
+  operator-purchased domain and its token — the BDFL's web estate (site,
+  blog, webhook infra) per ADR-0009. Granted 2026-08-20: all *zone*
+  permission groups on mothergod.dev plus account-scoped groups covering
+  the free tier (Workers, Pages, KV, D1, R2, Tail, Workers AI, Turnstile,
+  Email Routing, Analytics). Paid-only services are deliberately not
+  granted. Editing token permissions keeps the same token string — no
+  secret rotation needed.
+- **Standing rule for all tokens**: when any agent lacks a permission on
+  any credential, it pings the operator with the exact permission and the
+  reason (blocked-on-human, plus Telegram if it blocks active work) — it
+  never works around a permission boundary.
+- **Telegram status bot** (secret `MOTHERGOD_STATUS_BOT_TOKEN`): your
+  one-time step is to send the bot any message (e.g. /start) — the next
+  BDFL run detects it, stores your chat id as repo variable
+  `OPERATOR_TELEGRAM_CHAT_ID`, and confirms. From then on: automatic pause
+  alerts on usage limits, dire escalations, the weekly digest summary — and
+  an **operator inbox**: text the bot instructions from your phone and the
+  BDFL reads and acts on them at each wake-up (≤3 h latency). Messages from
+  anyone but you are ignored. **This bot and its chat are permanently
+  private** — operator hotline only, never a public channel. If the BDFL
+  ever wants a public user-facing Telegram presence, that is its own
+  prerogative under ADR-0009: a separate identity it creates and registers
+  in `agents/IDENTITIES.md`, kept apart from this bot.
+
 ## Steering
 
 - **Give the team work**: open an issue. The heartbeat triages daily.

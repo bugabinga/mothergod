@@ -58,6 +58,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_commit_signing: true
           claude_args: --max-turns 60
 
       - if: always() && steps.claude.outcome != 'skipped'
@@ -65,3 +66,5 @@ jobs:
         with:
           token: ${{ github.token }}
           execution_file: ${{ steps.claude.outputs.execution_file }}
+          telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}

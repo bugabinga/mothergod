@@ -1,0 +1,10 @@
+# Visibility, not a gate (ADR-0009): "Require review from Code Owners" is
+# deliberately OFF in the ruleset, so these entries only auto-request the
+# operator's review on PRs touching constitution-level paths — the operator
+# sees every such change without blocking any of them. Tick that ruleset box
+# later to turn this into a hard gate; no other change needed.
+
+/agents/GOVERNANCE.md           @bugabinga
+/docs/adr/                      @bugabinga
+/.github/actions/agent-guard/   @bugabinga
+/.github/actions/agent-pause/   @bugabinga

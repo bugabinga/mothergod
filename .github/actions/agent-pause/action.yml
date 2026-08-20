@@ -13,6 +13,14 @@ inputs:
     description: Path to the claude-code-action execution output file
     required: false
     default: ''
+  telegram_bot_token:
+    description: Telegram status-bot token (optional; alerts skip if empty)
+    required: false
+    default: ''
+  telegram_chat_id:
+    description: Operator's Telegram chat id (optional; alerts skip if empty)
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -20,6 +28,8 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         EXEC_FILE: ${{ inputs.execution_file }}
+        TG_TOKEN: ${{ inputs.telegram_bot_token }}
+        TG_CHAT: ${{ inputs.telegram_chat_id }}
       run: |
         set -euo pipefail
         if [ -z "$EXEC_FILE" ] || [ ! -f "$EXEC_FILE" ]; then
@@ -47,3 +57,9 @@ runs:
           --label agents-paused \
           --body "$body"
         echo "Agent system paused until $resume_at."
+        if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=⏸️ mothergod agents paused (Claude usage limit, marker: ${hit}). Auto-resume at ${resume_at} UTC. Close the agents-paused issue to resume earlier." \
+            >/dev/null && echo "Telegram pause alert sent." || echo "Telegram alert failed (non-fatal)."
+        fi

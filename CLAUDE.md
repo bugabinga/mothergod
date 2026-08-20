@@ -61,8 +61,18 @@ A push that fails them wastes a cycle.
 - Comments state invariants the code can't show. The port bug of session-1
   (rep-symbol/offset-bucket collision) existed because an invariant lived only
   in one implementation's window size. Write invariants down.
+- The operator's engineering laws and coding ladder in
+  `agents/PERSONALITY.md` bind every agent: half-tested is not tested,
+  deletion over addition, no unrequested scope, enforce the reuse ladder
+  before writing custom code. Voice rules (verdicts not hedges, no em dash)
+  apply to all outward text.
 
 ## Where things live
+
+Two realms, strictly separated (ADR-0010): the classical project
+(`src/`, `docs/`, `research/`, `assets/`, root community files) and the
+agent system (`agents/`, plus `.github/` and this file by platform
+requirement). New files follow the placement rule in `agents/README.md`.
 
 | Path | What |
 |---|---|
@@ -70,10 +80,12 @@ A push that fails them wastes a cycle.
 | `research/JOURNAL.md` | falsification journal — laws, dead theories, standing leads |
 | `research/progress.jsonl` | machine-readable experiment log (schema in `research/README.md`) |
 | `research/corpus/POLICY.md` | benchmark corpus rules: sealed validation, regret-scored additions |
+| `agents/` | the agent system: governance, operations, personas, sources, identities |
+| `agents/PERSONALITY.md` | house temperament + your role's persona — embody it |
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
-| `docs/adr/` | architecture decision records |
+| `docs/adr/` | architecture decision records (single series, both realms) |
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
-| `ROADMAP.md` | milestones; heartbeat picks work from here |
+| `ROADMAP.md` | mission, success scorecard, milestones; heartbeat picks work from here |
 | `.github/workflows/` | the agent processes themselves — changeable by PR like any code |
 
 ## Issue/PR conventions

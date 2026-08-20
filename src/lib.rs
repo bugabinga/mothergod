@@ -1,3 +1,6 @@
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/bugabinga/mothergod/main/assets/logo.svg"
+)]
 //! mothergod — general purpose compression.
 //!
 //! The library speaks a tiny framed container format. Every frame starts

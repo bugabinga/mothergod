@@ -41,7 +41,7 @@ change before approving it. It is instructed to be courteous to humans, to
 explain its reasoning, and to escalate to the human operator
 ([@bugabinga](https://github.com/bugabinga)) when a disagreement isn't
 resolving. If a review feels wrong, say so in the thread or open an issue;
-appeals go to the operator (see [`GOVERNANCE.md`](GOVERNANCE.md)).
+appeals go to the operator (see [`agents/GOVERNANCE.md`](agents/GOVERNANCE.md)).
 
 ## Conduct
 

@@ -1,0 +1,222 @@
+<!-- mothergod brand sheet: the mark, its anatomy, palette, scale test, and
+     copyable source. Self-contained on purpose (publishable as a Claude
+     artifact; published copy: claude.ai/code/artifact/c9cf499b-6498-4df1-870c-1df8f472cd9b).
+     ../logo.svg is the canonical mark — the inline <svg class="mark"> below
+     is a copy; when iterating on the logo, change both in the same commit.
+     Visual identity stewardship: BDFL (agents/PERSONALITY.md, ADR-0005). -->
+<title>mothergod mark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Albert+Sans:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Single-theme by design: the mark lives in its own violet cosmos, and the
+     sheet commits to it on any host ground. */
+  :root {
+    --void: #0b0618;
+    --nebula: #1c1136;
+    --raised: #251646;
+    --line: #382a5e;
+    --starlight: #f2ecff;
+    --muted: #a396c9;
+    --gold: #ffd76a;
+    --gold-deep: #e0a12f;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background:
+      radial-gradient(120% 90% at 50% 0%, #241548 0%, var(--void) 62%) fixed,
+      var(--void);
+    color: var(--starlight);
+    font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    padding: 4rem 1.25rem 5rem;
+  }
+  main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 3.5rem; }
+
+  header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1.4rem; }
+  .mark { width: min(300px, 68vw); border-radius: 28px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.8), 0 0 0 1px var(--line); }
+  h1 {
+    font-family: "Unbounded", "Albert Sans", sans-serif;
+    font-weight: 600; font-size: clamp(1.8rem, 5vw, 2.4rem);
+    letter-spacing: .02em; text-wrap: balance;
+  }
+  h1 span { color: var(--gold); }
+  .tagline { color: var(--muted); max-width: 46ch; }
+
+  h2 {
+    font-family: "Unbounded", "Albert Sans", sans-serif;
+    font-weight: 400; font-size: .8rem; letter-spacing: .28em;
+    text-transform: uppercase; color: var(--gold);
+    display: flex; align-items: center; gap: 1rem;
+  }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  section { display: flex; flex-direction: column; gap: 1.2rem; }
+
+  .anatomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+  .anatomy div {
+    background: var(--nebula); border: 1px solid var(--line);
+    border-radius: 14px; padding: 1rem 1.1rem;
+  }
+  .anatomy b {
+    display: block; font-family: "JetBrains Mono", monospace;
+    font-size: .8rem; font-weight: 500; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--gold); margin-bottom: .35rem;
+  }
+  .anatomy p { font-size: .93rem; color: var(--muted); }
+
+  .swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
+  .swatch { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--nebula); }
+  .swatch .chip { height: 64px; }
+  .swatch dl { padding: .7rem .9rem; }
+  .swatch dt { font-size: .9rem; font-weight: 500; }
+  .swatch dd { font-family: "JetBrains Mono", monospace; font-size: .78rem; color: var(--muted); }
+
+  .scale { display: flex; align-items: flex-end; gap: 2rem; flex-wrap: wrap; }
+  .scale figure { display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+  .scale img { border-radius: 18%; display: block; }
+  .scale figcaption { font-family: "JetBrains Mono", monospace; font-size: .75rem; color: var(--muted); }
+  .scale-note { font-size: .93rem; color: var(--muted); max-width: 60ch; }
+
+  .src { position: relative; }
+  pre {
+    background: var(--nebula); border: 1px solid var(--line); border-radius: 14px;
+    padding: 1.1rem 1.2rem; overflow-x: auto;
+    font-family: "JetBrains Mono", monospace; font-size: .74rem; line-height: 1.55;
+    color: var(--muted); max-height: 340px;
+  }
+  pre .tag { color: var(--starlight); }
+  pre .gold { color: var(--gold); }
+  .copy {
+    position: absolute; top: .7rem; right: .7rem;
+    font-family: "JetBrains Mono", monospace; font-size: .75rem;
+    background: var(--raised); color: var(--starlight);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: .35rem .7rem; cursor: pointer;
+  }
+  .copy:hover, .copy:focus-visible { border-color: var(--gold); outline: none; }
+  .prov { font-size: .9rem; color: var(--muted); }
+  .prov code { font-family: "JetBrains Mono", monospace; font-size: .82rem; color: var(--starlight); }
+  a { color: var(--gold); }
+</style>
+
+<main>
+  <header>
+    <svg class="mark" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="mothergod mark">
+      <defs>
+        <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+          <stop offset="0%" stop-color="#332055"/><stop offset="55%" stop-color="#1c1136"/><stop offset="100%" stop-color="#0b0618"/>
+        </radialGradient>
+        <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#ffd76a"/><stop offset="100%" stop-color="#e0a12f"/>
+        </linearGradient>
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffd76a" stop-opacity="0.55"/><stop offset="100%" stop-color="#ffd76a" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="1024" height="1024" fill="url(#bg)"/>
+      <circle cx="512" cy="512" r="400" fill="none" stroke="url(#gold)" stroke-width="10" opacity="0.9"/>
+      <circle cx="512" cy="512" r="400" fill="none" stroke="#ffd76a" stroke-width="26" opacity="0.12"/>
+      <circle cx="512" cy="512" r="190" fill="url(#glow)"/>
+      <g stroke="#f2ecff" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M 190 380 L 330 512 L 190 644"/>
+        <path d="M 320 402 L 438 512 L 320 622" opacity="0.72"/>
+        <path d="M 834 380 L 694 512 L 834 644"/>
+        <path d="M 704 402 L 586 512 L 704 622" opacity="0.72"/>
+      </g>
+      <g transform="rotate(45 512 512)">
+        <rect x="452" y="452" width="120" height="120" rx="18" fill="url(#gold)"/>
+        <rect x="452" y="452" width="120" height="120" rx="18" fill="none" stroke="#fff3cf" stroke-width="6" opacity="0.8"/>
+      </g>
+    </svg>
+    <h1>mother<span>god</span></h1>
+    <p class="tagline">The mark of the mother of all general-purpose compressors —
+    an open-source project built and run by an autonomous agent team.</p>
+  </header>
+
+  <section>
+    <h2>Anatomy</h2>
+    <div class="anatomy">
+      <div><b>the halo</b><p>A thin golden ring — the "god" in mothergod, and the frame that makes the mark read as a badge at any size.</p></div>
+      <div><b>the pressure</b><p>Paired chevrons drive inward from both sides: compression as force. The fainter inner pair is the second pass, closing the gap.</p></div>
+      <div><b>the byte</b><p>A golden diamond at dead center — the data itself, smaller and more precious for having been squeezed.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Palette</h2>
+    <div class="swatches">
+      <div class="swatch"><div class="chip" style="background:#0b0618"></div><dl><dt>void</dt><dd>#0b0618</dd></dl></div>
+      <div class="swatch"><div class="chip" style="background:#1c1136"></div><dl><dt>nebula</dt><dd>#1c1136</dd></dl></div>
+      <div class="swatch"><div class="chip" style="background:#f2ecff"></div><dl><dt>starlight</dt><dd>#f2ecff</dd></dl></div>
+      <div class="swatch"><div class="chip" style="background:linear-gradient(135deg,#ffd76a,#e0a12f)"></div><dl><dt>gold</dt><dd>#ffd76a → #e0a12f</dd></dl></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>At scale</h2>
+    <div class="scale" id="scaleRow"></div>
+    <p class="scale-note">The mark must survive as a 32-pixel avatar: at that size the halo
+    becomes a rim, the chevrons a texture, and the golden byte stays the focal point.
+    That is the test every revision has to pass.</p>
+  </section>
+
+  <section class="src">
+    <h2>Source</h2>
+    <button class="copy" id="copyBtn" type="button">copy svg</button>
+    <pre id="srcBlock"></pre>
+    <p class="prov">Canonical file: <code>assets/logo.svg</code> in
+    <a href="https://github.com/bugabinga/mothergod">bugabinga/mothergod</a> —
+    also the avatar of the project's private status bot. Seeded by the operator, 2026-08-20;
+    stewardship of the visual identity belongs to the BDFL (ADR-0005/0009).</p>
+  </section>
+</main>
+
+<script>
+  const svgSource = document.querySelector('svg.mark').outerHTML
+    .replace(' class="mark"', ' width="1024" height="1024"');
+
+  // escape for display, with light syntax tinting
+  const esc = svgSource.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  document.getElementById('srcBlock').innerHTML = esc
+    .replace(/(&lt;\/?[a-zA-Z]+)/g, '<span class="tag">$1</span>')
+    .replace(/(#ffd76a|#e0a12f|#fff3cf)/g, '<span class="gold">$1</span>');
+
+  // rasterized scale previews from the very SVG on this page
+  const sizes = [256, 64, 32];
+  const row = document.getElementById('scaleRow');
+  const blob = new Blob([svgSource], {type: 'image/svg+xml'});
+  const url = URL.createObjectURL(blob);
+  const probe = new Image();
+  probe.onload = () => {
+    for (const s of sizes) {
+      const c = document.createElement('canvas');
+      c.width = c.height = s * 2; // 2x for crispness
+      c.getContext('2d').drawImage(probe, 0, 0, c.width, c.height);
+      const fig = document.createElement('figure');
+      const img = new Image();
+      img.src = c.toDataURL('image/png');
+      img.width = img.height = s;
+      img.alt = `mark at ${s}px`;
+      const cap = document.createElement('figcaption');
+      cap.textContent = s + 'px';
+      fig.append(img, cap);
+      row.append(fig);
+    }
+    URL.revokeObjectURL(url);
+  };
+  probe.src = url;
+
+  const btn = document.getElementById('copyBtn');
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(svgSource);
+      btn.textContent = 'copied ✓';
+    } catch {
+      const r = document.createRange();
+      r.selectNodeContents(document.getElementById('srcBlock'));
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      btn.textContent = 'select + ctrl-c';
+    }
+    setTimeout(() => btn.textContent = 'copy svg', 2000);
+  });
+</script>

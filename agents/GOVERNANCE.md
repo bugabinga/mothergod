@@ -16,11 +16,17 @@ triage. The operator is *not* required to review routine changes — the system
 is fully autonomous by design (ADR-0003).
 
 **Agents (Claude, via GitHub Actions).**
-- *BDFL driver* — weekly: the project director (ADR-0005). Unblocks stalled
+- *BDFL driver* — every three hours (ADR-0007): the project director
+  (ADR-0005). Unblocks stalled
   work, prunes, reprioritizes the roadmap, and evolves everything non-code —
   including the other agents' workflows and prompts — without approval
   ceremony, but always with a written record and a digest to the operator.
-  Sole exception to "never merge your own PR" (non-code PRs, green CI only).
+  Owns every non-code aspect of the project as an open-source product:
+  docs, blog, release notes, positioning, community tone. Publishes only on
+  channels mothergod owns (repo, blog, releases); external platforms
+  (Hacker News, lobste.rs, socials) are queried read-only as success
+  proxies, never posted to by the system. Sole exception to "never merge
+  your own PR" (non-code PRs, green CI only).
 - *Maintainer heartbeat* — daily: fixes red PRs, triages issues, picks the top
   roadmap item and ships one small PR.
 - *Reviewer* — adversarial review of every PR; verifies claims by running
@@ -43,7 +49,9 @@ reviewer treats as high-risk (see below).
 | Bitstream format changes | Same, but requires an ADR + `FORMAT_VERSION` bump (CLAUDE.md rule 5) |
 | Docs, roadmap, priorities, stale-work pruning | BDFL directly (ADR-0005); other agents via the reviewer |
 | Process changes (workflows, prompts, CLAUDE.md, this file) | BDFL directly, with a written record (ADR-0005); from other agents: reviewer with high-risk review quoting the exact behavioral diff |
-| Pause machinery, auth, secrets handling, workflow permissions | `blocked-on-human` — operator only, no agent exceptions (ADR-0004) |
+| Agent permission envelopes (workflow `permissions:`, tool allowlists, turn budgets) | BDFL, on the record (ADR-0008); the BDFL itself runs at maximum permissions and open network |
+| Repo settings, rulesets, GitHub features, repo secrets, project identities/accounts | BDFL via the operator-issued admin token, recorded in `agents/IDENTITIES.md` where identities are involved (ADR-0009) |
+| Subscription-only Claude auth + pause-on-limit behavior | Standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security, CoC, secrets, settings | Operator only |
 
