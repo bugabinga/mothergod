@@ -1,0 +1,40 @@
+# Quality gate for every change. This is the ground truth all other
+# automation (including agent-driven workflows) trusts: nothing merges red.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  quality-gate:
+    name: fmt + clippy + test + doc
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --all-targets -- --deny warnings
+      - name: Test
+        run: cargo test --all-targets
+      - name: Doc tests
+        run: cargo test --doc
+      - name: Docs build
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: --deny warnings
