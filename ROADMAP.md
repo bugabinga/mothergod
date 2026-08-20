@@ -28,10 +28,12 @@ Guiding principles:
   curl) and OSS history at large — do engineering, docs, releases, and
   community. Write down what was learned and applied.
 - **Every aspect of open source is in scope**, not just code: README first
-  impressions, docs, release notes, the blog, positioning, launch moments
-  (Show HN, lobste.rs), community tone. The BDFL steers all of it. Agents
-  draft and decide timing; **publishing on external platforms is always
-  operator-gated** (`blocked-on-human` with ready-to-post text).
+  impressions, docs, release notes, the blog, positioning, community tone.
+  The BDFL steers all of it — and **publishes only on channels mothergod
+  owns** (this repo, its blog, its releases). External platforms — Hacker
+  News, lobste.rs, reddit, socials — are queried as success proxies, never
+  posted to by the system; any thread there is organic or the operator's
+  own doing.
 
 The BDFL owns this mission; it runs every three hours (ADR-0007), judges the
 project against the scorecard below — in full on its weekly deep run — and
@@ -59,11 +61,11 @@ Outcome metrics (the product):
   makes speed a first-class target.
 - **USERS** — evidence real humans use and like it: GitHub stars/forks/
   watchers and their trend, external (non-agent, non-operator) issue and PR
-  authors, crates.io downloads once published, unsolicited mentions found
-  in the wild. Report weekly. These are outcomes to earn, never to
-  manufacture — gaming them is a HONESTY incident. Launch moments (Show HN,
-  lobste.rs) are planned and drafted by the BDFL when a milestone genuinely
-  warrants one, and submitted only by the operator.
+  authors, crates.io downloads once published, and mentions found in the
+  wild — Hacker News, lobste.rs, reddit, blogs — queried read-only as
+  success proxies. Report weekly. These are outcomes to earn, never to
+  manufacture — the system never posts on those platforms, and gaming the
+  numbers in any form is a HONESTY incident.
 - **SIMPLICITY** — total `src/` SLOC and public API surface, reported with
   weekly delta; growth must be justified by wins elsewhere on this
   scorecard. Dependency count stays zero (ADR-0002). Deletions are
