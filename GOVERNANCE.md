@@ -16,6 +16,11 @@ triage. The operator is *not* required to review routine changes — the system
 is fully autonomous by design (ADR-0003).
 
 **Agents (Claude, via GitHub Actions).**
+- *BDFL driver* — weekly: the project director (ADR-0005). Unblocks stalled
+  work, prunes, reprioritizes the roadmap, and evolves everything non-code —
+  including the other agents' workflows and prompts — without approval
+  ceremony, but always with a written record and a digest to the operator.
+  Sole exception to "never merge your own PR" (non-code PRs, green CI only).
 - *Maintainer heartbeat* — daily: fixes red PRs, triages issues, picks the top
   roadmap item and ships one small PR.
 - *Reviewer* — adversarial review of every PR; verifies claims by running
@@ -26,17 +31,19 @@ is fully autonomous by design (ADR-0003).
 - *Interactive* — responds when mentioned with `@claude` in issues and PRs.
 
 Agent behavior is governed by `CLAUDE.md` (the contract) and the workflow
-prompts in `.github/workflows/` — both are ordinary versioned files; agents
-may propose changes to their own processes by PR, which the reviewer treats
-as high-risk (see below).
+prompts in `.github/workflows/` — both are ordinary versioned files. The
+BDFL evolves them directly; other agents propose changes by PR, which the
+reviewer treats as high-risk (see below).
 
 ## Decision rules
 
 | Change class | Who decides |
 |---|---|
-| Code, tests, docs, benchmarks | Reviewer agent merges on green CI + passing adversarial review |
+| Code, tests, benchmarks | Reviewer agent merges on green CI + passing adversarial review |
 | Bitstream format changes | Same, but requires an ADR + `FORMAT_VERSION` bump (CLAUDE.md rule 5) |
-| Process changes (workflows, CLAUDE.md, this file) | Reviewer agent, high-risk review: must quote the exact behavioral diff in the review; anything touching guards, pause logic, or permissions additionally gets `blocked-on-human` |
+| Docs, roadmap, priorities, stale-work pruning | BDFL directly (ADR-0005); other agents via the reviewer |
+| Process changes (workflows, prompts, CLAUDE.md, this file) | BDFL directly, with a written record (ADR-0005); from other agents: reviewer with high-risk review quoting the exact behavioral diff |
+| Pause machinery, auth, secrets handling, workflow permissions | `blocked-on-human` — operator only, no agent exceptions (ADR-0004) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security, CoC, secrets, settings | Operator only |
 

@@ -27,8 +27,10 @@ Numbers are bits/byte deltas vs the current champion (negative = better).
 train improvement AND no validation regression.
 
 Iterations it1–it41 happened in the founding session before this repo
-existed; their full record lives in `research_state.json` (pending import,
-see ROADMAP M1). Do not fabricate their rows here.
+existed; the surviving record (it1–it31) is archived verbatim in
+`imports/session-1/` (`research_state.json`, `progress.jsonl` — note the
+archive's older schema). This file is the new-era log only; do not mix the
+two or fabricate archive rows here.
 
 ## corpus/POLICY.md
 

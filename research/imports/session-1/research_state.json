@@ -1,0 +1,288 @@
+{
+ "genome": {
+  "min_match": 4,
+  "cand": 64,
+  "lazy": 256,
+  "maxlen": 32767,
+  "W": 32767,
+  "inc": 8,
+  "lim": 65536,
+  "fallback": 1,
+  "ac_arm": 1,
+  "rep": 1,
+  "opt": 1,
+  "rep3": 1,
+  "mix": 1,
+  "mm3": 1,
+  "mix2": 1,
+  "stctx": 1,
+  "reppar": 1,
+  "dpctx": 1,
+  "o2": 1,
+  "opt2": 1,
+  "rep2": 1,
+  "lensep": 1
+ },
+ "ctx_code": null,
+ "filters": {
+  "b64": "import base64, string\n_A=set(string.ascii_letters+string.digits+'+/=')\ndef filt(d):\n    try:\n        if len(d)>=8 and all(chr(b) in _A for b in d[:4096]) and len(d)%4==0:\n            dec=base64.b64decode(d,validate=True)\n            if base64.b64encode(dec)==d: return b'\\x01'+dec\n    except Exception: pass\n    return b'\\x00'+d\ndef unfilt(d):\n    return base64.b64encode(d[1:]) if d[0]==1 else d[1:]",
+  "rev": "def filt(d):\n    return d[::-1]\ndef unfilt(d):\n    return d[::-1]",
+  "bcj": "def filt(d):\n    b=bytearray(d); i=0; n=len(b)\n    while i+5<=n:\n        if b[i]==0xE8 or b[i]==0xE9:\n            rel=int.from_bytes(b[i+1:i+5],'little')\n            b[i+1:i+5]=((rel+i+5)&0xFFFFFFFF).to_bytes(4,'little')\n            i+=5\n        else: i+=1\n    return bytes(b)\ndef unfilt(d):\n    b=bytearray(d); i=0; n=len(b)\n    while i+5<=n:\n        if b[i]==0xE8 or b[i]==0xE9:\n            a=int.from_bytes(b[i+1:i+5],'little')\n            b[i+1:i+5]=((a-i-5)&0xFFFFFFFF).to_bytes(4,'little')\n            i+=5\n        else: i+=1\n    return bytes(b)"
+ },
+ "corpus": {
+  "jsonl": "def gen(N, rng):\n    lines=[]\n    evs=['click','view','purchase','scroll']\n    while sum(len(l) for l in lines)<N+200:\n        i=len(lines)\n        lines.append('{\"event\":\"%s\",\"user_id\":%d,\"session\":\"%08x\",\"ts\":%d,\"props\":{\"page\":\"/p/%d\",\"ref\":\"%s\"}}'%(rng.choice(evs),10000+rng.randrange(5000),rng.getrandbits(32),1700000000+i,rng.randrange(300),rng.choice(['google','direct','email'])))\n    return '\\n'.join(lines).encode()[:N]"
+ },
+ "journal": [
+  {
+   "it": 1,
+   "kind": "param",
+   "idea": "stored-block fallback: incompressible rows (zipped 8.68, iid-H8 8.73) should cost at most 8.0001; min() is risk-free elsewhere",
+   "dTrain": 2.196,
+   "dVal": -0.733,
+   "accepted": false
+  },
+  {
+   "it": 2,
+   "kind": "param",
+   "idea": "stored-block fallback: incompressible rows (zipped 8.68, iid-H8 8.73) should cost at most 8.0001; min() is risk-free elsewhere",
+   "dTrain": -0.722,
+   "dVal": -0.726,
+   "accepted": true
+  },
+  {
+   "it": 3,
+   "kind": "corpus",
+   "idea": "adversarial corpus: JSONL records target our missing repeat-offset capability; zstd should crush it, we should lag -> positive regret",
+   "dTrain": 1.317,
+   "dVal": 0.0,
+   "accepted": true
+  },
+  {
+   "it": 4,
+   "kind": "context",
+   "idea": "iid rows pay 16x context learning tax (iid-H2: 2.67 vs 2.0 floor); halve to 8 coarser contexts (b1>>5) to cut adaptation cost, val guards the text-side risk",
+   "dTrain": 0.005,
+   "dVal": -0.126,
+   "accepted": false
+  },
+  {
+   "it": 5,
+   "kind": "param",
+   "idea": "pure-AC arm: skip LZ when it only adds token noise (iid ladder pays LZ tax); min() over arms is safe",
+   "dTrain": -1.287,
+   "dVal": -0.412,
+   "accepted": true
+  },
+  {
+   "it": 6,
+   "kind": "param",
+   "idea": "repeat-offset codes (patched into codec): record-structured data (jsonl regret +0.40, json, sqlite) reuses the same match distance; rep symbol costs ~2 bits vs ~20-bit offset",
+   "dTrain": -0.299,
+   "dVal": -0.179,
+   "accepted": true
+  },
+  {
+   "it": 7,
+   "kind": "context",
+   "idea": "resurrect it4 under new conditions: two-byte partial context (256 ctx) for text-family; iid rows now protected by ac_only order-0 arm",
+   "dTrain": 0.743,
+   "dVal": 0.648,
+   "accepted": false
+  },
+  {
+   "it": 8,
+   "kind": "param",
+   "idea": "faster stat refresh (lim 32768) \u2014 younger models track local shifts in text/elf; ladder guarded by arms",
+   "dTrain": 0.009,
+   "dVal": 0.004,
+   "accepted": false
+  },
+  {
+   "it": 9,
+   "kind": "param",
+   "idea": "optimal parse (2-pass priced DP) + 3-slot repeat-offset cache: closes greedy-parse gap on record data (jsonl/json/sqlite/code)",
+   "dTrain": -0.072,
+   "dVal": -0.132,
+   "accepted": true
+  },
+  {
+   "it": 10,
+   "kind": "param",
+   "idea": "mix contexted + order-0 literal models with adaptive weights (PAQ-lite): text-family gets context without paying full learning tax",
+   "dTrain": -0.105,
+   "dVal": -0.191,
+   "accepted": true
+  },
+  {
+   "it": 11,
+   "kind": "filter",
+   "idea": "format-aware filter: transparently unwrap base64 payloads so LZ/AC see the underlying structure; identity on non-b64 data, marker byte keeps it invertible",
+   "dTrain": 0.0,
+   "dVal": -1.206,
+   "accepted": true
+  },
+  {
+   "it": 12,
+   "kind": "param",
+   "idea": "price iteration: re-price DP from its own parse (greedy prices bias the parse; zstd btultra2 trick)",
+   "dTrain": 0.034,
+   "dVal": -0.02,
+   "accepted": false
+  },
+  {
+   "it": 13,
+   "kind": "context",
+   "idea": "third trial of rich context, now with the right guard: full prev-byte context (256), mixing provides automatic order-0 backoff for sparse contexts",
+   "dTrain": 0.568,
+   "dVal": 0.082,
+   "accepted": false
+  },
+  {
+   "it": 14,
+   "kind": "param",
+   "idea": "3-byte matches (offset<4096) under optimal parse: only DP can judge when they pay; targets json/jsonl short repeated keys",
+   "dTrain": -0.001,
+   "dVal": 0.003,
+   "accepted": true
+  },
+  {
+   "it": 15,
+   "kind": "param",
+   "idea": "count-aware backoff (PPM-style): per-context confidence blend toward order-0; young contexts defer automatically \u2014 fixes the adaptation-tax mechanism that killed it4/it7/it13",
+   "dTrain": -0.185,
+   "dVal": 0.081,
+   "accepted": false
+  },
+  {
+   "it": 16,
+   "kind": "context",
+   "idea": "fourth trial of full prev-byte context (256): backoff now neutralizes young-context tax, so context richness should finally be free where unused and paid where earned",
+   "dTrain": 0.599,
+   "dVal": 0.079,
+   "accepted": false
+  },
+  {
+   "it": 17,
+   "kind": "param",
+   "idea": "gentler backoff (K=384): it15 improved train -0.185 but overshot val by 0.03; halve the backoff pressure",
+   "dTrain": -0.21,
+   "dVal": 0.063,
+   "accepted": false
+  },
+  {
+   "it": 18,
+   "kind": "param",
+   "idea": "brotli-style state context: literals after a match come from a different distribution (the byte the match could not extend into); 2x contexts, not 16x",
+   "dTrain": 0.016,
+   "dVal": 0.022,
+   "accepted": false
+  },
+  {
+   "it": 19,
+   "kind": "param",
+   "idea": "RESEARCH MERGE (Mahoney adaptive weighting / ZPAQ MIX2): exponentiated-gradient mixture weights on log-loss replaces ad-hoc multiplicative update",
+   "dTrain": -0.19,
+   "dVal": -0.028,
+   "accepted": true
+  },
+  {
+   "it": 20,
+   "kind": "param",
+   "idea": "WILD: position-parity context \u2014 audio16 interleaves lo/hi bytes; let literal models know which phase they are in",
+   "dTrain": -0.059,
+   "dVal": 0.061,
+   "accepted": false
+  },
+  {
+   "it": 21,
+   "kind": "filter",
+   "idea": "WILD: reverse filter \u2014 compress the byte stream backwards; suffix structure (file trailers, right-anchored formats) becomes prefix-predictable",
+   "dTrain": -0.018,
+   "dVal": -0.039,
+   "accepted": true
+  },
+  {
+   "it": 22,
+   "kind": "param",
+   "idea": "WILD: offset model split by length class \u2014 short matches use near offsets, long matches far; separate stats sharpen both",
+   "dTrain": 0.006,
+   "dVal": 0.001,
+   "accepted": false
+  },
+  {
+   "it": 23,
+   "kind": "param",
+   "idea": "retry state-context under EG mixing (failed at it18 under crude mixer): post-match literals get own bank, mixer now arbitrates properly",
+   "dTrain": -0.023,
+   "dVal": 0.013,
+   "accepted": true
+  },
+  {
+   "it": 24,
+   "kind": "param",
+   "idea": "repeat-offsets inside the DP (zstd btopt): rep cache carried along the optimal path, rep matches priced ~2.5 bits vs ~20-bit offsets \u2014 the standing lead for jsonl/json/sqlite",
+   "dTrain": -0.283,
+   "dVal": -0.065,
+   "accepted": true
+  },
+  {
+   "it": 25,
+   "kind": "param",
+   "idea": "context-aware DP literal prices: parse and coder finally agree on what literals cost (prices from prev-nibble contexted stats)",
+   "dTrain": -0.025,
+   "dVal": -0.002,
+   "accepted": true
+  },
+  {
+   "it": 26,
+   "kind": "filter",
+   "idea": "BCJ x86 filter (7-Zip classic): E8/E9 call/jump rel32 -> abs32 so repeated call targets become repeated bytes; aimed at elf",
+   "dTrain": -0.131,
+   "dVal": 0.0,
+   "accepted": true
+  },
+  {
+   "it": 27,
+   "kind": "param",
+   "idea": "GO BEYOND (CM philosophy, 5th life of rich context): hashed order-2 model as ADDITIONAL third expert under EG mixing \u2014 never replace, only add and let the gradient arbitrate",
+   "dTrain": -0.085,
+   "dVal": 0.004,
+   "accepted": true
+  },
+  {
+   "it": 28,
+   "kind": "param",
+   "idea": "resurrect it12 price iteration under rep-DP: round 2 prices reps from round 1's measured rep frequency instead of a 2.5-bit guess",
+   "dTrain": -0.024,
+   "dVal": 0.021,
+   "accepted": true
+  },
+  {
+   "it": 29,
+   "kind": "param",
+   "idea": "rep matches down to length 2: a 2-byte rep costs ~lenc+rp bits vs ~2 contexted literals \u2014 only rep offsets make length-2 matches affordable",
+   "dTrain": -0.013,
+   "dVal": 0.001,
+   "accepted": true
+  },
+  {
+   "it": 30,
+   "kind": "param",
+   "idea": "split length codes out of literal models: shared models pollute both statistics; lengths get a clean dedicated bank",
+   "dTrain": -1.3,
+   "dVal": -0.539,
+   "accepted": true
+  },
+  {
+   "it": 31,
+   "kind": "param",
+   "idea": "o2 expert at full 16-bit context capacity (65536 hash) \u2014 code/json key pairs need the resolution",
+   "dTrain": 0.055,
+   "dVal": 0.0,
+   "accepted": false
+  }
+ ],
+ "it": 31,
+ "best_train": 39.01445871978246,
+ "best_val": 23.47956707608939
+}

@@ -43,7 +43,8 @@ CI (`quality-gate`) runs exactly these. A push that fails them wastes a cycle.
    accepts; record the mechanism of failure, not just the score.
 7. Small PRs. One idea per PR. Update `CHANGELOG.md` (Unreleased) in the same
    PR for anything user-visible.
-8. Do not merge your own PR. The reviewer workflow does that.
+8. Do not merge your own PR. The reviewer workflow does that. Sole
+   exception: the BDFL driver merges its own non-code PRs (ADR-0005).
 9. Respect the pause: if an open issue labeled `agents-paused` exists and its
    RESUME-AT is in the future, stop and exit cleanly.
 

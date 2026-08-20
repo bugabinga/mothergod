@@ -25,11 +25,10 @@ The system is inert until these are done:
    status check `fmt + clippy + test + doc` (the `quality-gate` job) to pass
    before merging. Do not require human approvals — that's the reviewer
    agent's job (ADR-0003). Optionally block force pushes.
-7. **Seed the founding artifacts** (ROADMAP M1): commit the session files
-   `mothergod.rs` (v0.6), `autoresearch2.py`, `research_state.json`,
-   `progress.jsonl` into `research/imports/` on a branch and open a PR — or
-   attach them to an issue labeled `blocked-on-human` and the heartbeat will
-   integrate them.
+7. ~~Seed the founding artifacts~~ Done 2026-08-20 — archived in
+   `research/imports/session-1/`. One file is still missing: the harness's
+   base `autoresearch.py` (see that folder's README); supply it if you have
+   it, otherwise the researcher reconstructs it.
 
 ## Steering
 
@@ -56,7 +55,9 @@ The system is inert until these are done:
 ## Watching the system
 
 - The **ops-log issue** (label `ops-log`) gets a short status comment after
-  every heartbeat — the team's daily standup.
+  every heartbeat — the team's daily standup — and a weekly **BDFL digest**
+  (decisions, process changes, and your personal nag list of
+  `blocked-on-human` items).
 - `research/progress.jsonl` + `research/JOURNAL.md` — the experiment record.
 - Issues labeled `blocked-on-human` — your personal work queue; the agents
   put things there when only you can act.

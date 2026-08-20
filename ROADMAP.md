@@ -10,18 +10,19 @@ their ordering.
 Crate skeleton, v0 frame format (Stored), quality-gate CI, governance and
 agent processes. Done 2026-08-20.
 
-## M1 — Recover the founding-session codec
+## M1 — Port the founding-session codec
 
-- [ ] `blocked-on-human` Operator uploads founding-session artifacts:
-      `mothergod.rs` (codec v0.6), `autoresearch2.py`, `research_state.json`,
-      `progress.jsonl`. Issue to track: label `blocked-on-human`.
-- [ ] If artifacts arrive: port v0.6 into `src/` as reviewable modules
-      (filters, parse, models, coder), tests per module, invariants written
-      down (JOURNAL S1-A*).
-- [ ] If artifacts do NOT arrive within 14 days: reimplement from
-      `research/JOURNAL.md` — it is the spec. Start: stored floor → order-0
-      adaptive AC → LZ greedy → filters → mixing, validating each stage
-      against the journal's recorded behavior.
+- [x] Founding artifacts imported to `research/imports/session-1/` and the
+      codec import-verified lossless (2026-08-20).
+- [ ] Port `research/imports/session-1/mothergod.rs` into `src/` as
+      reviewable modules (filters, parse, models, coder) behind the frame
+      format, one PR per module, tests per module, invariants written down
+      (JOURNAL S1-A*). The archive file stays untouched; the port must meet
+      the crate's rules the archive predates: decoder never panics on
+      adversarial input (the archive uses assert/unwrap), docs, strict lints.
+- [ ] `blocked-on-human` Operator supplies the missing `autoresearch.py`
+      base file for the Python harness, or the researcher reconstructs its
+      primitives (see `research/imports/session-1/README.md`).
 
 ## M2 — Honest benchmarking (JOURNAL S1-D2)
 

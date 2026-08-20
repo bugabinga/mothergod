@@ -91,9 +91,12 @@ record.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
-- S1-D1 | DEBT | Import founding-session artifacts (mothergod.rs v0.6,
-  autoresearch2.py, research_state.json, progress.jsonl). Blocked-on-human.
-  Fallback: reimplement from this journal — everything above is the spec.
+- S1-D1 | DEBT, mostly resolved 2026-08-20 | Founding artifacts imported to
+  `research/imports/session-1/` (codec, harness, state, progress log) and the
+  codec import-verified lossless. Residue: the harness's base file
+  `autoresearch.py` was not uploaded (blocked-on-human to supply, or
+  reconstruct its small primitives from usage), and the it32–it41 artifacts
+  postdate the import. Porting the codec into `src/` is ROADMAP M1.
 - S1-D2 | DEBT | Benchmark harness in-repo: Silesia + Canterbury fetch,
   entropy-ladder + markov-trap generators, sealed validation split, regret
   scoring, baseline gate in CI, progress graphs from progress.jsonl.
