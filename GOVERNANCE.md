@@ -49,7 +49,8 @@ reviewer treats as high-risk (see below).
 | Bitstream format changes | Same, but requires an ADR + `FORMAT_VERSION` bump (CLAUDE.md rule 5) |
 | Docs, roadmap, priorities, stale-work pruning | BDFL directly (ADR-0005); other agents via the reviewer |
 | Process changes (workflows, prompts, CLAUDE.md, this file) | BDFL directly, with a written record (ADR-0005); from other agents: reviewer with high-risk review quoting the exact behavioral diff |
-| Pause machinery, auth, secrets handling, workflow permissions | `blocked-on-human` — operator only, no agent exceptions (ADR-0004) |
+| Agent permission envelopes (workflow `permissions:`, tool allowlists, turn budgets) | BDFL, on the record (ADR-0008); the BDFL itself runs at maximum permissions and open network |
+| Pause machinery, subscription-auth, secrets handling | `blocked-on-human` — operator only, no agent exceptions (ADR-0004) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security, CoC, secrets, settings | Operator only |
 

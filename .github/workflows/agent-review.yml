@@ -88,10 +88,14 @@ jobs:
                in this same PR, else request changes.
             5. For process changes (.github/**, CLAUDE.md, GOVERNANCE.md):
                high risk — quote the exact behavioral difference in your
-               review. If the change touches pause logic, the guard actions,
-               workflow permissions, or secrets: do NOT approve; apply the
+               review. If the change touches pause logic, the guard
+               actions, or secrets: do NOT approve; apply the
                blocked-on-human label and request changes, whatever the
-               change's apparent merit.
+               change's apparent merit. If it changes an agent's permission
+               envelope (workflow permissions, allowedTools, max-turns) and
+               the author is not the BDFL: do not approve either — those
+               are the BDFL's to decide (ADR-0008); request changes and say
+               so.
 
             Verdict:
             - PASS: submit an approving review (gh pr review --approve) with
