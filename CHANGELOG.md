@@ -20,6 +20,7 @@ All notable changes to this project are documented here. Format follows
   `research/imports/session-1/` (codec import-verified lossless), and a
   weekly BDFL driver agent that directs the project and evolves the
   non-code processes without ceremony (ADR-0005).
+- BDFL core mandate and success scorecard (RATIO/TRUST/SPEED, FLOW/HEALTH/HONESTY) codified in ROADMAP.md and wired into the weekly digest.
 - Single-language policy (ADR-0006): Rust only — the founding Python
   harness was verified, then moved to git history; its proxy-speed
   experimentation is to be recovered via an ideal-cost accounting mode in

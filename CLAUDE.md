@@ -73,7 +73,7 @@ A push that fails them wastes a cycle.
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
 | `docs/adr/` | architecture decision records |
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
-| `ROADMAP.md` | milestones; heartbeat picks work from here |
+| `ROADMAP.md` | mission, success scorecard, milestones; heartbeat picks work from here |
 | `.github/workflows/` | the agent processes themselves — changeable by PR like any code |
 
 ## Issue/PR conventions

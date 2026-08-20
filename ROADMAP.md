@@ -1,5 +1,51 @@
 # Roadmap
 
+## Mission
+
+Build the best general-purpose lossless compressor — "mother god of all
+general purpose compressors" — under two non-negotiables that define "best":
+
+1. **Trustworthy**: lossless always, decoder safe on any input, deterministic
+   across platforms. A ratio win that costs trust is a loss.
+2. **Honest**: every claim measured on named corpora with real bitstreams,
+   every design decision traceable to a recorded experiment. We beat the
+   incumbents on their benchmarks, not ours.
+
+The BDFL owns this mission; every weekly BDFL session judges the project
+against the scorecard below and reports it in the ops-log digest. A metric
+that cannot yet be measured is itself a top gap — the BDFL schedules the work
+that makes it measurable before the work it would measure.
+
+## Scorecard
+
+Outcome metrics (the product):
+
+- **RATIO** — aggregate bits/byte on the held-out finals (whole-file
+  Silesia + Canterbury, real bitstreams) vs pinned `gzip -9`, `zstd -19`,
+  `xz -9e`. Success ladder: (1) reclaim the founding v0.6 standing —
+  aggregate below zstd -19 (archive reference: 31.63 vs 32.65 over 13 files,
+  partly 256 KB slices — whole-file numbers must be re-established);
+  (2) win or tie every file vs zstd -19; (3) aggregate below xz -9e;
+  (4) hold all of it as the corpus grows adversarially.
+- **TRUST** — zero known round-trip violations and zero decoder
+  panics/overallocations, ever; adversarial suite green; cumulative clean
+  fuzzing hours growing week over week once M4 lands.
+- **SPEED** — tracked, not yet optimized: report encode/decode MB/s on the
+  finals each benchmark run; floor of ≥1 MB/s decode single-thread until M5
+  makes speed a first-class target.
+
+Process metrics (the team — BDFL's machinery gauge):
+
+- **FLOW** — ≥1 merged PR and ≥1 recorded experiment (accept or reject) per
+  week; median PR open→merge under 7 days; no PR red or stalled >14 days.
+- **HEALTH** — <20% of agent sessions in a week wasted (failed, stalled, or
+  produced no artifact); pause downtime reported; new issues triaged <48 h.
+- **HONESTY** — every published number names corpus+version; sealed-set
+  discipline unbroken (no experiment tuned against validation or finals).
+  Any violation is an incident: journal entry plus process fix, same week.
+
+## Milestones
+
 Ordered milestones. The daily heartbeat picks the top unblocked item and ships
 the smallest useful slice of it. Items marked `blocked-on-human` need the
 operator. Research-flavored items defer to `research/JOURNAL.md` leads for
