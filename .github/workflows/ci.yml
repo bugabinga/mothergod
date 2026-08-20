@@ -1,5 +1,8 @@
 # Quality gate for every change. This is the ground truth all other
 # automation (including agent-driven workflows) trusts: nothing merges red.
+# The four job names (fmt, clippy, test, doc) are load-bearing: the main
+# ruleset requires exactly these check names. Rename only together with the
+# ruleset — a mismatch blocks every merge.
 name: ci
 
 on:
@@ -16,25 +19,44 @@ env:
   RUSTFLAGS: --deny warnings
 
 jobs:
-  quality-gate:
-    name: fmt + clippy + test + doc
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  clippy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Format
-        run: cargo fmt --check
-      - name: Lint
-        run: cargo clippy --all-targets -- --deny warnings
-      - name: Test
-        run: cargo test --all-targets
-      - name: Doc tests
-        run: cargo test --doc
-      - name: Docs build
-        run: cargo doc --no-deps
+      - run: cargo clippy --all-targets -- --deny warnings
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+
+  doc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --doc
+      - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: --deny warnings

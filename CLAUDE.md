@@ -21,7 +21,8 @@ cargo test --doc
 RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps
 ```
 
-CI (`quality-gate`) runs exactly these. A push that fails them wastes a cycle.
+CI runs exactly these as the required checks `fmt`, `clippy`, `test`, `doc`.
+A push that fails them wastes a cycle.
 
 ## Hard rules
 

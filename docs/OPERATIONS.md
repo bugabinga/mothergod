@@ -22,7 +22,8 @@ The system is inert until these are done:
 5. **Enable auto-merge** (Settings → General → Pull Requests → "Allow
    auto-merge") and **squash merging**.
 6. **Branch protection / ruleset on `main`** (Settings → Branches): require
-   status check `fmt + clippy + test + doc` (the `quality-gate` job) to pass
+   the status checks `fmt`, `clippy`, `test`, `doc` (the ci workflow's four
+   jobs — names must match the ruleset exactly) to pass
    before merging. Do not require human approvals — that's the reviewer
    agent's job (ADR-0003). Optionally block force pushes.
 7. ~~Seed the founding artifacts~~ Done 2026-08-20 — the complete archive

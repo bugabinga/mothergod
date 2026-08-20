@@ -1,7 +1,8 @@
 # Test strategy
 
-What "tested" means for this project, in layers. CI's `quality-gate` runs
-layer 1 on every change; the deeper layers have their own cadence. Corpus
+What "tested" means for this project, in layers. CI's required checks
+(`fmt`, `clippy`, `test`, `doc`) run layer 1 on every change; the deeper
+layers have their own cadence. Corpus
 rules live in `research/corpus/POLICY.md`.
 
 ## 1. Round-trip and unit tests (every PR)
