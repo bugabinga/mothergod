@@ -61,6 +61,11 @@ A push that fails them wastes a cycle.
 - Comments state invariants the code can't show. The port bug of session-1
   (rep-symbol/offset-bucket collision) existed because an invariant lived only
   in one implementation's window size. Write invariants down.
+- The operator's engineering laws and coding ladder in
+  `agents/PERSONALITY.md` bind every agent: half-tested is not tested,
+  deletion over addition, no unrequested scope, enforce the reuse ladder
+  before writing custom code. Voice rules (verdicts not hedges, no em dash)
+  apply to all outward text.
 
 ## Where things live
 
