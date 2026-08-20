@@ -55,9 +55,11 @@ The system is inert until these are done:
   alerts on usage limits, dire escalations, the weekly digest summary — and
   an **operator inbox**: text the bot instructions from your phone and the
   BDFL reads and acts on them at each wake-up (≤3 h latency). Messages from
-  anyone but you are ignored. Optional later: create a public mothergod
-  Telegram channel and add the bot as admin — it becomes an owned
-  publishing channel for release announcements.
+  anyone but you are ignored. **This bot and its chat are permanently
+  private** — operator hotline only, never a public channel. If the BDFL
+  ever wants a public user-facing Telegram presence, that is its own
+  prerogative under ADR-0009: a separate identity it creates and registers
+  in `docs/IDENTITIES.md`, kept apart from this bot.
 
 ## Steering
 
