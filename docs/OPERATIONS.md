@@ -48,9 +48,16 @@ The system is inert until these are done:
   reviewer on constitution-level paths (governance, ADRs, pause machinery),
   but nothing blocks. Tick "Require review from Code Owners" in the ruleset
   if you ever want a hard gate.
-- Dire-situation alerting: planned via Telegram bot (operator will provide
-  `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` secrets); until then, urgent
-  items reach you as `blocked-on-human` issues with an @-mention.
+- **Telegram status bot** (secret `MOTHERGOD_STATUS_BOT_TOKEN`): your
+  one-time step is to send the bot any message (e.g. /start) — the next
+  BDFL run detects it, stores your chat id as repo variable
+  `OPERATOR_TELEGRAM_CHAT_ID`, and confirms. From then on: automatic pause
+  alerts on usage limits, dire escalations, the weekly digest summary — and
+  an **operator inbox**: text the bot instructions from your phone and the
+  BDFL reads and acts on them at each wake-up (≤3 h latency). Messages from
+  anyone but you are ignored. Optional later: create a public mothergod
+  Telegram channel and add the bot as admin — it becomes an owned
+  publishing channel for release announcements.
 
 ## Steering
 

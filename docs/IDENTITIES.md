@@ -13,3 +13,4 @@ Credentials live in repository Actions secrets; never in the tree.
 | Service | Identity | Purpose | Credential (secret name) | Since |
 |---|---|---|---|---|
 | GitHub | `bugabinga/mothergod` | the project itself | operator-owned; agents act via the Claude GitHub App (`claude[bot]`) and `MOTHERGOD_ADMIN_TOKEN` | 2026-08-20 |
+| Telegram | mothergod status bot (operator-created) | operator alerts, weekly digest, operator inbox; potential release channel later | `MOTHERGOD_STATUS_BOT_TOKEN`; operator chat id in repo variable `OPERATOR_TELEGRAM_CHAT_ID` | 2026-08-20 |

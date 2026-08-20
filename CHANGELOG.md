@@ -8,6 +8,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Telegram status bot integration: automatic pause alerts from every agent
+  workflow, dire escalations and weekly digest from the BDFL, and an
+  operator inbox read at each BDFL wake-up; chat id self-bootstraps on the
+  operator's first message to the bot.
+
 - Crate skeleton with v0 framed container format (magic, version, method
   byte); `Stored` method only.
 - Quality-gate CI (fmt, clippy, tests, docs).

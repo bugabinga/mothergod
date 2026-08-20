@@ -66,3 +66,5 @@ jobs:
         with:
           token: ${{ github.token }}
           execution_file: ${{ steps.claude.outputs.execution_file }}
+          telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
