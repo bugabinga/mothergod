@@ -33,10 +33,12 @@ Guiding principles:
   draft and decide timing; **publishing on external platforms is always
   operator-gated** (`blocked-on-human` with ready-to-post text).
 
-The BDFL owns this mission; every weekly BDFL session judges the project
-against the scorecard below and reports it in the ops-log digest. A metric
-that cannot yet be measured is itself a top gap — the BDFL schedules the work
-that makes it measurable before the work it would measure.
+The BDFL owns this mission; it runs every three hours (ADR-0007), judges the
+project against the scorecard below — in full on its weekly deep run — and
+reports in the ops-log digest. Its default is to solve problems by improving
+the agent system itself, not by one-off work. A metric that cannot yet be
+measured is itself a top gap — the BDFL schedules the work that makes it
+measurable before the work it would measure.
 
 ## Scorecard
 

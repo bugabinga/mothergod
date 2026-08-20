@@ -24,7 +24,9 @@ All notable changes to this project are documented here. Format follows
   trustworthy, honest, wanted; metrics: RATIO/TRUST/SPEED/USERS/SIMPLICITY,
   FLOW/HEALTH/HONESTY) and wired into the weekly digest; BDFL steers all
   non-code OSS aspects (docs, blog, launches — external posting
-  operator-gated).
+  operator-gated). BDFL cadence raised to every three hours with run-economy
+  rules, and an explicit bias to solve problems by improving the agent
+  system itself (ADR-0007).
 - Single-language policy (ADR-0006): Rust only — the founding Python
   harness was verified, then moved to git history; its proxy-speed
   experimentation is to be recovered via an ideal-cost accounting mode in
