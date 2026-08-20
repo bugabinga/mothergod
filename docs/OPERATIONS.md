@@ -48,17 +48,18 @@ The system is inert until these are done:
   reviewer on constitution-level paths (governance, ADRs, pause machinery),
   but nothing blocks. Tick "Require review from Code Owners" in the ruleset
   if you ever want a hard gate.
-- **mothergod.dev / Cloudflare** (secret `MOTHERGOD_CLOUDFLARE_TOKEN`): the
-  operator-purchased domain and its zone token — the BDFL's web estate
-  (site, blog, webhook infra) per ADR-0009. Granted surface: all *zone*
-  permission groups on mothergod.dev, plus account-scoped groups covering
-  the free tier — Workers Scripts, Cloudflare Pages, Workers KV, D1,
-  R2, Workers Tail (read), Workers AI, Turnstile, Email Routing
-  Addresses, Account Analytics (read), Account Settings (read; wrangler
-  needs it). Paid-only services (Queues, Stream, Images, Load Balancing)
-  are deliberately not granted. Editing token permissions keeps the same
-  token string — no secret rotation needed. If the BDFL still hits a 403,
-  it nags via blocked-on-human naming the missing group.
+- **mothergod.dev / Cloudflare** (secret `CLOUDFLARE_API_TOKEN`): the
+  operator-purchased domain and its token — the BDFL's web estate (site,
+  blog, webhook infra) per ADR-0009. Granted 2026-08-20: all *zone*
+  permission groups on mothergod.dev plus account-scoped groups covering
+  the free tier (Workers, Pages, KV, D1, R2, Tail, Workers AI, Turnstile,
+  Email Routing, Analytics). Paid-only services are deliberately not
+  granted. Editing token permissions keeps the same token string — no
+  secret rotation needed.
+- **Standing rule for all tokens**: when any agent lacks a permission on
+  any credential, it pings the operator with the exact permission and the
+  reason (blocked-on-human, plus Telegram if it blocks active work) — it
+  never works around a permission boundary.
 - **Telegram status bot** (secret `MOTHERGOD_STATUS_BOT_TOKEN`): your
   one-time step is to send the bot any message (e.g. /start) — the next
   BDFL run detects it, stores your chat id as repo variable

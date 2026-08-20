@@ -61,9 +61,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
           TELEGRAM_UPDATE_OFFSET: ${{ vars.TELEGRAM_UPDATE_OFFSET }}
-          # Cloudflare token for the mothergod.dev zone (ADR-0009): DNS,
-          # routes, workers/site infra. wrangler reads this env var natively.
-          CLOUDFLARE_API_TOKEN: ${{ secrets.MOTHERGOD_CLOUDFLARE_TOKEN }}
+          # Cloudflare token (ADR-0009): all zone groups on mothergod.dev
+          # plus account-scoped free-tier groups. wrangler reads this env
+          # var natively.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
@@ -124,10 +125,15 @@ jobs:
             the machinery fix is overdue.
 
             Web estate: the operator bought mothergod.dev and issued a
-            Cloudflare token for its zone (CLOUDFLARE_API_TOKEN — all zone
-            permissions; account-level permissions like Workers Scripts may
-            be missing, and if a deploy 403s, nag the operator with the
-            exact permission groups to add). The domain is an owned channel:
+            Cloudflare token (CLOUDFLARE_API_TOKEN — all zone permissions
+            on mothergod.dev plus account-scoped groups for the free-tier
+            services: Workers, Pages, KV, D1, R2, Tail, Workers AI,
+            Turnstile, Email Routing, Analytics). Standing rule for ALL
+            tokens (Cloudflare, GitHub, any future credential): if you hit
+            a permission you lack, never route around it — ping the
+            operator with the exact permission needed and why
+            (blocked-on-human issue; Telegram too if it blocks active
+            work). The domain is an owned channel:
             project site, docs, blog, and infrastructure like the real-time
             Telegram command webhook are yours to build there — keep infra
             source in-repo (infra/) so it evolves by PR like everything
