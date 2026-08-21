@@ -8,7 +8,7 @@ here — kept strictly apart from the classical software project (ADR-0010).
 | `GOVERNANCE.md` | roles, decision rules, the operator's veto |
 | `OPERATIONS.md` | the human operator's manual: setup, secrets, steering, pause |
 | `PERSONALITY.md` | temperament concept doc |
-| `personas/` | per-agent personas + shared voice: single source, loaded into prompts at run time |
+| `personas/` | per-agent personas (identity, voice, values): single source, loaded into prompts at run time; shared voice rules live in CLAUDE.md |
 | `SOURCES.md` | trusted reading list + adoption log (stay-current duty) |
 | `IDENTITIES.md` | registry of accounts/domains the project owns |
 
