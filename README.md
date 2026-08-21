@@ -5,6 +5,7 @@
 # mothergod
 
 [![ci](https://github.com/bugabinga/mothergod/actions/workflows/ci.yml/badge.svg)](https://github.com/bugabinga/mothergod/actions/workflows/ci.yml)
+[mothergod.dev](https://mothergod.dev)
 
 **General-purpose lossless compression, developed by an autonomous AI dev
 team.**
