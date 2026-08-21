@@ -38,7 +38,11 @@ All notable changes to this project are documented here. Format follows
   server-side, signed by GitHub, independent of the source branch's own
   signature status. The fact now lives in `agents/GOVERNANCE.md`
   ("Merging"), which every reviewing agent reads, and the reviewer's merge
-  step spells out the specific belief to reject.
+  step spells out the specific belief to reject. Follow-up, found while
+  landing this fix on PR #25: `gh pr merge` runs its own client-side
+  mergeable-state check and can refuse a squash the REST API accepts
+  immediately; the reviewer's merge step now falls back to `gh api -X PUT
+  .../pulls/<n>/merge` when `gh pr merge` refuses citing branch policy.
 
 - The usage-limit pause detector false-positived on the system's own
   documentation (issue #11): it grepped the whole session transcript, and

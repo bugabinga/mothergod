@@ -74,7 +74,12 @@ merge commit server-side and signs it (committer `GitHub
 satisfied by that signature regardless of whether the source branch's
 own commits are signed. An unsigned branch commit is never, by itself,
 a reason to stop or to label `blocked-on-human` — attempt the merge
-before predicting it will fail (issue #24, PR #22 postmortem).
+before predicting it will fail (issue #24, PR #22 postmortem). `gh pr
+merge` runs its own client-side mergeable-state check first and can
+refuse a squash that the REST API accepts immediately (observed on PR
+#25); `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
+merge_method=squash` is the fallback when `gh pr merge` refuses citing
+branch policy.
 
 ## Humans other than the operator
 
