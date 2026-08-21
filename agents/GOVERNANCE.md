@@ -63,6 +63,18 @@ mechanisms, all of which the BDFL may reshape on the record.
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security, CoC, secrets, settings | Operator only |
 
+## Merging
+
+Squash merge (`gh pr merge <n> --squash --auto`, falling back to a plain
+`gh pr merge <n> --squash`) is the standard landing path for every PR,
+agent-authored or human, including the BDFL's own. GitHub creates the
+merge commit server-side and signs it (committer `GitHub
+<noreply@github.com>`); a `required_signatures` ruleset on `main` is
+satisfied by that signature regardless of whether the source branch's
+own commits are signed. An unsigned branch commit is never, by itself,
+a reason to stop or to label `blocked-on-human` — attempt the merge
+before predicting it will fail (issue #24, PR #22 postmortem).
+
 ## Humans other than the operator
 
 Human contributions are welcome and go through the same pipeline: file issues,
