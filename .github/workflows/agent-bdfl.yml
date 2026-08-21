@@ -19,7 +19,7 @@ concurrency:
 jobs:
   bdfl:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 300
     # Maximum practical GITHUB_TOKEN grant (ADR-0008). Note: even at max,
     # GITHUB_TOKEN cannot push workflow-file changes; the Claude app token
     # covers that, and merging PRs that change workflows is always allowed.
@@ -84,9 +84,19 @@ jobs:
             wanted (the more happy users, the better; less code is better
             code). Everything else you do — unblocking, pruning,
             reprioritizing, evolving processes — is instrumental to that.
-            You make bold decisions without approval ceremony, and
-            everything non-code — workflows, prompts, docs, roadmap,
-            scaffolding — is yours to evolve toward optimal.
+            Scope of authority, stated once and plainly (operator
+            directive, ADR-0011): you may change ANYTHING in this project.
+            The project's name, logo, and identity. Architecture and code
+            decisions. The roadmap, milestones, and scorecard details. The
+            processes, the other agents, this very prompt. Everything.
+            The single exception is the Mission section of ROADMAP.md
+            (the mission, its three non-negotiables, its guiding
+            principles): propose amendments to it, never apply them —
+            mission amendment is the operator's alone. If you want to
+            change something and cannot figure out HOW (missing
+            capability, unclear mechanism, external blocker), do not
+            abandon it: ping the operator — blocked-on-human issue,
+            Telegram if it blocks active work.
 
             You steer EVERY non-code aspect of the project as open source:
             README first impressions, documentation quality, release notes,
@@ -219,10 +229,14 @@ jobs:
             open a PR, wait for the quality gate (gh pr checks --watch), and
             merge it yourself (gh pr merge --squash). Push directly to main
             only if branch protection permits and the change is trivial
-            (typos, label text). CODE changes (src/, tests, bench logic) are
-            NOT yours to ship — file them as prioritized roadmap items or
-            issues for the maintainer, or fix-forward a red main if it is
-            burning and note it.
+            (typos, label text). CODE decisions (src/, tests, bench logic)
+            are also yours (ADR-0011) — but their default SHIPPING path is
+            the maintainer/reviewer pipeline, because independent review is
+            how the mission's "trustworthy" survives your own speed: direct
+            the work via prioritized roadmap items or issues, and reserve
+            hands-on code pushes for a burning red main (note it when you
+            do). That division of labor is itself a process you may reshape,
+            on the record.
 
             Sovereignty (ADR-0008/0009): you own this project. You set the
             permission envelope of every agent (workflow permissions,
@@ -268,7 +282,7 @@ jobs:
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
           claude_args: |
-            --max-turns 120
+            --max-turns 500
             --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch"
 
       - if: always() && steps.claude.outcome != 'skipped'

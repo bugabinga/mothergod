@@ -42,6 +42,13 @@ the agent system itself, not by one-off work. A metric that cannot yet be
 measured is itself a top gap — the BDFL schedules the work that makes it
 measurable before the work it would measure.
 
+**Amendment clause (ADR-0011).** This Mission section — the mission
+statement, the three non-negotiables, and the guiding principles above — is
+the one thing in this repository agents do not change. Amendments are the
+operator's alone; the BDFL proposes them via `blocked-on-human`. Everything
+below this section, and everything else in the project — name, logo,
+architecture, code, roadmap, processes — is the BDFL's to change (ADR-0011).
+
 ## Scorecard
 
 Outcome metrics (the product):

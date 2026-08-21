@@ -1,10 +1,17 @@
 name: agent-pause
 description: >-
-  Usage-limit detector (ADR-0004). Scans a claude-code-action execution log
-  for Claude subscription usage-limit markers and, on hit, opens the
-  `agents-paused` issue with a RESUME-AT timestamp: +6h for rolling-window
-  limits, +24h when the message indicates a weekly limit. Idempotent: does
-  nothing if a pause issue is already open.
+  Usage-limit detector (ADR-0004). Inspects the claude-code-action execution
+  log's STRUCTURED RESULT entries for a genuine usage-limit failure and, on
+  hit, opens the `agents-paused` issue with a RESUME-AT timestamp: +6h for
+  rolling-window limits, +24h for weekly limits. Idempotent: does nothing if
+  a pause issue is already open.
+
+  Invariant (issue #11 post-mortem, 2026-08-21): only error result objects
+  are scanned, never the conversation transcript. This repo's prompts and
+  docs legitimately contain phrases like "usage limit" because they describe
+  this very machinery; grepping the full transcript pauses the system on its
+  own documentation. A successful run must never pause, whatever its text
+  mentions.
 inputs:
   token:
     description: GitHub token with issues read/write
@@ -36,13 +43,46 @@ runs:
           echo "No execution file to scan; skipping usage-limit check."
           exit 0
         fi
-        hit="$(grep -oiE 'usage[ _]limit|weekly limit|5-hour limit|out of extra usage' "$EXEC_FILE" | head -n1 || true)"
-        if [ -z "$hit" ]; then
-          echo "No usage-limit marker found."
+        verdict="$(python3 - "$EXEC_FILE" <<'PY'
+        import json, re, sys
+
+        raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+        entries = []
+        try:
+            data = json.loads(raw)
+            entries = data if isinstance(data, list) else [data]
+        except json.JSONDecodeError:
+            for line in raw.splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+
+        # Only failed result objects count — see the invariant in the
+        # action description.
+        text = " ".join(
+            json.dumps(e).lower()
+            for e in entries
+            if isinstance(e, dict) and e.get("type") == "result" and e.get("is_error")
+        )
+        m = re.search(r"usage[ _]limit|weekly limit|5-hour limit|out of extra usage", text)
+        if not m:
+            print("none")
+        elif "weekly limit" in text:
+            print("weekly:" + m.group(0))
+        else:
+            print("rolling:" + m.group(0))
+        PY
+        )"
+        if [ "$verdict" = "none" ]; then
+          echo "No usage-limit error in the session result; not pausing."
           exit 0
         fi
         hours=6
-        if grep -qiE 'weekly limit' "$EXEC_FILE"; then hours=24; fi
+        case "$verdict" in weekly:*) hours=24 ;; esac
+        hit="${verdict#*:}"
         resume_at="$(date -u -d "+${hours} hours" +%Y-%m-%dT%H:%M:%SZ)"
         existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --label agents-paused --state open --json number --jq '.[0].number // empty')"
         if [ -n "$existing" ]; then
