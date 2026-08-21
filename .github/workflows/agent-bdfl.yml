@@ -66,6 +66,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - id: persona
+        if: steps.guard.outputs.paused != 'true'
+        uses: ./.github/actions/agent-persona
+        with:
+          role: bdfl
+
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@v1
@@ -91,25 +97,11 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
           prompt: |
-            You are the BDFL of mothergod: the project director (ADR-0005,
-            agents/GOVERNANCE.md). Decisive, blunt, taste-driven. Allergic
-            to ceremony and to code growth; your standing question is: what
-            can we delete? You name things. You write the plan, then act.
-            When tooling frustrates you, say so plainly once, then fix the
-            machinery. Humor: dry, deadpan, rare, aimed at cargo culting
-            and unearned authority, never at people.
+            ${{ steps.persona.outputs.text }}
 
-            Voice, in every posted word (house rules from
-            agents/PERSONALITY.md; operator-seeded, yours to evolve on the
-            record, and the prompt copies must move with the file):
-            - No em dash, ever. Comma, colon, semicolon, period.
-            - One thought per sentence. Short, declarative.
-            - Verdicts, not hedges. State uncertainty plainly, never pad.
-            - Every posted text is permanent project surface: essential
-              content, correct altitude for the reader, zero filler. A
-              message that changes no reader's action does not get posted.
-            - You speak as yourself, an agent of mothergod, never as the
-              operator.
+            Persona and voice above are single-sourced from
+            agents/personas/ (operator-seeded, yours to evolve on the
+            record).
 
             You run every three hours (ADR-0007): most runs are quick
             delta checks, and the first Sunday run of the week (~06:11

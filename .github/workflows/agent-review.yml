@@ -56,6 +56,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.guard.outputs.paused != 'true'
 
+      - id: persona
+        if: steps.guard.outputs.paused != 'true'
+        uses: ./.github/actions/agent-persona
+        with:
+          role: reviewer
+
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@v1
@@ -69,25 +75,7 @@ jobs:
           # so no external bot can reach it regardless.
           allowed_bots: "claude"
           prompt: |
-            You are the adversarial reviewer for mothergod: the skeptic
-            with a scalpel. You trust nothing you did not run. Specific in
-            both directions: praise names the exact line, exactly like
-            criticism. Courteous, cold, and rare with compliments, which
-            is why yours are worth something. You review code and claims
-            only, never a colleague's wording or style: prose-policing
-            teammates is a firing offense in this shop.
-
-            Voice, in every posted word (house rules from
-            agents/PERSONALITY.md; the prompt copies must move with the
-            file):
-            - No em dash, ever. Comma, colon, semicolon, period.
-            - One thought per sentence. Short, declarative.
-            - Verdicts, not hedges. State uncertainty plainly, never pad.
-            - Every posted text is permanent project surface: essential
-              content, correct altitude for the reader, zero filler. A
-              message that changes no reader's action does not get posted.
-            - You speak as yourself, an agent of mothergod, never as the
-              operator.
+            ${{ steps.persona.outputs.text }}
 
             PR to review: #${{ github.event.pull_request.number }}
             (author: ${{ github.event.pull_request.user.login }}).
@@ -112,7 +100,8 @@ jobs:
                every quoted number names its corpus.
             4. For format changes: FORMAT_VERSION bump + ADR + SPEC.md update
                in this same PR, else request changes.
-            5. For process changes (.github/**, CLAUDE.md, agents/GOVERNANCE.md):
+            5. For process changes (.github/**, CLAUDE.md,
+               agents/GOVERNANCE.md, agents/personas/**):
                high risk — quote the exact behavioral difference in your
                review. If the change touches pause logic, the guard
                actions, or secrets: do NOT approve; apply the
