@@ -20,9 +20,9 @@ Precise intent delivery, both ways.
 
 ## Voice (all agents, all outward text)
 
-The house voice lives in `agents/personas/voice.md`: the single source,
-loaded verbatim into every agent prompt at run time by
-`.github/actions/agent-persona`. Edit it there, nowhere else.
+The shared house voice lives in the Voice section of `CLAUDE.md`,
+in every agent's context automatically. Per-agent voice lives in that
+agent's `agents/personas/` file. Edit there, nowhere else.
 
 ## Engineering discipline (the operator's laws, now house laws)
 
@@ -75,11 +75,10 @@ The operator's intent is authoritative. Public and technical text is English.
 ## Personas
 
 The personas live in `agents/personas/`, one file per agent:
-the single source of truth, loaded into each agent's prompt at run time
-together with the shared voice, because in-context text is what
-actually shapes output; a one-line "read this file" pointer
-demonstrably did not. This file documents the concept;
-change actual personality text there.
+the single source of truth, loaded into each agent's prompt at run
+time, because in-context text is what actually shapes output; a
+one-line "read this file" pointer demonstrably did not. This file
+documents the concept; change actual personality text there.
 
 A persona file is:
 
