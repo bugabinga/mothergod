@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Removed
+
+- The interactive `@claude` mention agent (operator directive). Mentions
+  no longer trigger anything; open an issue instead, the heartbeat
+  triages and answers daily.
+
 ### Changed
 
 - Two-realm repository layout (ADR-0010): agent-system files moved to

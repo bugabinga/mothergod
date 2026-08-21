@@ -1,6 +1,6 @@
 # CLAUDE.md — agent contract for mothergod
 
-Audience: Claude agents (CI sessions, heartbeat, reviewer, researcher, interactive).
+Audience: Claude agents (CI sessions, heartbeat, reviewer, researcher, BDFL).
 Humans: read README.md and CONTRIBUTING.md instead.
 
 ## What this project is

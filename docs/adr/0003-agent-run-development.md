@@ -22,6 +22,10 @@ The dev team is a set of Claude sessions launched by GitHub Actions
 | Researcher | weekly cron | one experiment per session, per the autoresearch loop contract (propose → guard → benchmark → journal) |
 | Interactive | `@claude` mention | Q&A, small on-demand tasks |
 
+(Amended 2026-08-21: the interactive agent was removed by operator
+directive; `@claude` mentions no longer trigger anything. Questions go
+in issues, triaged by the heartbeat.)
+
 Separation of duties is the safety mechanism replacing human review: the
 proposer never merges its own work; the reviewer runs in a separate session
 with an adversarial prompt; CI guards are independent of both. Process files

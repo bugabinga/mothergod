@@ -34,7 +34,10 @@ is fully autonomous by design (ADR-0003).
   authored in the same run.
 - *Researcher* — weekly: runs one experiment from the journal's standing
   leads (or a wild swing), records verdicts in `research/`.
-- *Interactive* — responds when mentioned with `@claude` in issues and PRs.
+
+(An interactive `@claude` mention agent existed until 2026-08-21;
+removed by operator directive. Questions go in issues, which the
+heartbeat triages daily.)
 
 Agent behavior is governed by `CLAUDE.md` (the contract) and the workflow
 prompts in `.github/workflows/` — both are ordinary versioned files. The
@@ -63,7 +66,7 @@ mechanisms, all of which the BDFL may reshape on the record.
 ## Humans other than the operator
 
 Human contributions are welcome and go through the same pipeline: file issues,
-open PRs, mention `@claude` to ask questions. The reviewer agent reviews human
+open PRs; the heartbeat triages questions daily. The reviewer agent reviews human
 PRs with the same rules (and extra courtesy — see CONTRIBUTING.md). Appeals
 against any agent decision: open an issue and tag @bugabinga; the operator's
 call is final.

@@ -2,9 +2,7 @@
 # (operator directive): agents/personas/<role>.md, per-person only,
 # exposed as the `text` output for workflow prompts to interpolate.
 # Shared house voice lives in CLAUDE.md, which every agent session loads
-# automatically. Refuses double quotes because claude.yml injects this
-# text into a double-quoted --append-system-prompt argument, where a
-# stray quote would break the quoting silently.
+# automatically.
 name: agent-persona
 description: Load agents/personas/<role>.md as a step output
 inputs:
@@ -26,10 +24,6 @@ runs:
         persona="agents/personas/${ROLE}.md"
         if [ ! -f "$persona" ]; then
           echo "::error::unknown persona role: ${ROLE} (no $persona)"
-          exit 1
-        fi
-        if grep -n '"' "$persona"; then
-          echo "::error::double quote in persona file; forbidden, see agents/personas/README.md"
           exit 1
         fi
         {
