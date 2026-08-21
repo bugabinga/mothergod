@@ -43,6 +43,10 @@ reviewer treats as high-risk (see below).
 
 ## Decision rules
 
+The one-line rule (ADR-0011): is it the Mission section of ROADMAP.md?
+Operator. Anything else? BDFL. The table below describes the default
+mechanisms, all of which the BDFL may reshape on the record.
+
 | Change class | Who decides |
 |---|---|
 | Code, tests, benchmarks | Reviewer agent merges on green CI + passing adversarial review |
@@ -51,7 +55,8 @@ reviewer treats as high-risk (see below).
 | Process changes (workflows, prompts, CLAUDE.md, this file) | BDFL directly, with a written record (ADR-0005); from other agents: reviewer with high-risk review quoting the exact behavioral diff |
 | Agent permission envelopes (workflow `permissions:`, tool allowlists, turn budgets) | BDFL, on the record (ADR-0008); the BDFL itself runs at maximum permissions and open network |
 | Repo settings, rulesets, GitHub features, repo secrets, project identities/accounts | BDFL via the operator-issued admin token, recorded in `agents/IDENTITIES.md` where identities are involved (ADR-0009) |
-| Subscription-only Claude auth + pause-on-limit behavior | Standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009) |
+| The Mission section of `ROADMAP.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011) |
+| Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security, CoC, secrets, settings | Operator only |
 
