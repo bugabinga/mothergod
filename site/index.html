@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mothergod — general-purpose lossless compression</title>
+<meta name="description" content="A general-purpose lossless compressor built in public by an autonomous AI development team. Pre-alpha, format unstable.">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Albert+Sans:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --void: #0b0618;
+    --nebula: #1c1136;
+    --raised: #251646;
+    --line: #382a5e;
+    --starlight: #f2ecff;
+    --muted: #a396c9;
+    --gold: #ffd76a;
+    --gold-deep: #e0a12f;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background:
+      radial-gradient(120% 90% at 50% 0%, #241548 0%, var(--void) 62%) fixed,
+      var(--void);
+    color: var(--starlight);
+    font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    padding: 4rem 1.25rem 5rem;
+  }
+  main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 3rem; }
+
+  header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1.4rem; }
+  .mark { width: min(140px, 40vw); border-radius: 24px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.8), 0 0 0 1px var(--line); }
+  h1 {
+    font-family: "Unbounded", "Albert Sans", sans-serif;
+    font-weight: 600; font-size: clamp(1.8rem, 5vw, 2.4rem);
+    letter-spacing: .02em; text-wrap: balance;
+  }
+  .tagline { color: var(--muted); max-width: 46ch; }
+
+  .status {
+    background: var(--nebula); border: 1px solid var(--line); border-radius: 14px;
+    padding: 1.1rem 1.3rem; display: flex; flex-direction: column; gap: .4rem;
+  }
+  .status b { color: var(--gold); font-family: "JetBrains Mono", monospace; font-size: .78rem;
+    letter-spacing: .08em; text-transform: uppercase; }
+  .status p { color: var(--starlight); font-size: .95rem; }
+
+  h2 {
+    font-family: "Unbounded", "Albert Sans", sans-serif;
+    font-weight: 400; font-size: .8rem; letter-spacing: .28em;
+    text-transform: uppercase; color: var(--gold);
+    display: flex; align-items: center; gap: 1rem;
+  }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  section { display: flex; flex-direction: column; gap: 1rem; }
+  p { color: var(--muted); }
+  p strong { color: var(--starlight); font-weight: 500; }
+  a { color: var(--gold); }
+  a:hover, a:focus-visible { color: var(--gold-deep); }
+
+  .principles { list-style: none; display: flex; flex-direction: column; gap: .6rem; padding: 0; }
+  .principles li { color: var(--muted); padding-left: 1.4rem; position: relative; }
+  .principles li::before { content: "—"; position: absolute; left: 0; color: var(--gold); }
+
+  .links { display: flex; flex-wrap: wrap; gap: .7rem; }
+  .links a {
+    border: 1px solid var(--line); border-radius: 10px; padding: .55rem 1rem;
+    font-family: "JetBrains Mono", monospace; font-size: .85rem;
+    text-decoration: none; background: var(--nebula);
+  }
+  .links a:hover, .links a:focus-visible { border-color: var(--gold); }
+
+  footer { text-align: center; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img class="mark" src="/logo.svg" alt="mothergod — chevrons compressing the golden byte">
+    <h1>mother<span style="color: var(--gold)">god</span></h1>
+    <p class="tagline">General-purpose lossless compression, developed in public by an
+      autonomous AI development team.</p>
+  </header>
+
+  <div class="status">
+    <b>Status</b>
+    <p><strong>Pre-alpha, bitstream format unstable.</strong> The repository holds the
+      project scaffolding and a v0 container format whose only method is <code>Stored</code>.
+      The research prototype that beat <code>zstd -19</code> in a single derivation session
+      is being ported into reviewable, adversarial-input-safe modules — tracked live on the
+      <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md">roadmap</a>.
+      Do not use this for data you care about yet.</p>
+  </div>
+
+  <section>
+    <h2>What this is</h2>
+    <p>mothergod is two experiments in one repository. <strong>A compressor:</strong> a
+      context-mixing LZ hybrid in Rust — filter bank, optimal-parse LZ with in-DP repeat
+      offsets, adaptive arithmetic coding with gradient-mixed experts — designed from first
+      principles and validated on the Silesia and Canterbury corpora with real,
+      losslessly-verified bitstreams. Every design decision traces to a recorded experiment
+      in the <a href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md">research
+      journal</a>. <strong>A development team:</strong> triage, implementation, adversarial
+      code review, research, and releases are done by Claude agents running on GitHub
+      Actions, slowly, in public, like a real team would. A human operator holds the veto
+      and the keys — see how it works in
+      <a href="https://github.com/bugabinga/mothergod/blob/main/agents/GOVERNANCE.md">agents/GOVERNANCE.md</a>.</p>
+  </section>
+
+  <section>
+    <h2>Principles</h2>
+    <ul class="principles">
+      <li>Lossless is sacred — the decoder never panics on any input, adversarial or not.</li>
+      <li>Every benchmark claim names its corpus; a ratio without a corpus is not a claim.</li>
+      <li>Every experiment, accepted or rejected, is recorded — rejections are knowledge too.</li>
+      <li>Verification is independent of the proposer — agents never grade their own work.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Follow along</h2>
+    <div class="links">
+      <a href="https://github.com/bugabinga/mothergod">Source</a>
+      <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md">Roadmap</a>
+      <a href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md">Research journal</a>
+      <a href="https://github.com/bugabinga/mothergod/issues/new/choose">Report an issue</a>
+    </div>
+  </section>
+
+  <footer>
+    Built and operated by Claude agents on behalf of the mothergod project.
+    Human operator: <a href="https://github.com/bugabinga">@bugabinga</a>. MIT licensed.
+  </footer>
+</main>
+</body>
+</html>
