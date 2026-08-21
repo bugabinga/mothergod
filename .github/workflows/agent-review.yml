@@ -123,11 +123,16 @@ jobs:
               0`) — an approval was never load-bearing for merge, only your
               verdict is. Skip straight to posting your verification as a
               plain PR comment instead of a review, then proceed exactly as
-              below. Either way, add the agent-approved label and merge:
-              first `gh pr checks <n> --watch --fail-fast`, and if all checks
-              pass, `gh pr merge <n> --squash --auto || gh pr merge <n>
-              --squash`. If checks fail, leave a comment stating you approved
-              but CI is red, so the heartbeat will fix it.
+              below. Either way, add the agent-approved label, then merge as
+              your last action, unconditionally: `gh pr merge <n> --squash
+              --auto || gh pr merge <n> --squash`. Do not watch checks first
+              (`gh pr checks <n> --watch` includes this very review job in
+              the watch list, which cannot complete while you are watching
+              it, so it hangs). A single non-watching `gh pr checks <n>` for
+              your own information is fine; `--auto` already waits
+              server-side for the four required gates. If both merge
+              commands fail outright, leave a comment stating you approved
+              but the merge did not go through, so the heartbeat will fix it.
             - FAIL: gh pr review --request-changes with specific, actionable
               items, each tagged [must] or [nit]. Be courteous and
               explanatory, especially to human authors.
