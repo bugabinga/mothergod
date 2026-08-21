@@ -38,9 +38,17 @@ jobs:
       github.actor == 'bugabinga'
     runs-on: ubuntu-latest
     timeout-minutes: 300
-    # Maximum practical GITHUB_TOKEN grant (ADR-0008). Note: even at max,
-    # GITHUB_TOKEN cannot push workflow-file changes; the Claude app token
-    # covers that, and merging PRs that change workflows is always allowed.
+    # Maximum practical GITHUB_TOKEN grant (ADR-0008). Note: neither
+    # GITHUB_TOKEN nor the Claude app's own installation token (verified
+    # 2026-08-21, issue #24) can push commits touching
+    # .github/workflows/**; GitHub rejects both for lacking the
+    # app-installation-level `workflows` permission. Merging PRs that
+    # change workflows is always allowed regardless. Landing a
+    # workflow-file commit from a BDFL session currently needs
+    # MOTHERGOD_ADMIN_TOKEN as the git remote credential for that one
+    # push; see agents/GOVERNANCE.md "Merging" — a standing fix (wiring
+    # the admin token as this action's github_token input) is tracked
+    # but not yet done.
     permissions:
       contents: write
       pull-requests: write
