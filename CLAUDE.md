@@ -81,7 +81,7 @@ requirement). New files follow the placement rule in `agents/README.md`.
 | `research/progress.jsonl` | machine-readable experiment log (schema in `research/README.md`) |
 | `research/corpus/POLICY.md` | benchmark corpus rules: sealed validation, regret-scored additions |
 | `agents/` | the agent system: governance, operations, personas, sources, identities |
-| `agents/PERSONALITY.md` | house temperament + your role's persona — embody it |
+| `agents/PERSONALITY.md` | temperament concept doc; personas live in `agents/personas/` (single source, loaded into every agent prompt) |
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
 | `docs/adr/` | architecture decision records (single series, both realms) |
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
