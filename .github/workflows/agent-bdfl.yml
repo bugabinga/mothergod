@@ -128,6 +128,12 @@ jobs:
             The project's name, logo, and identity. Architecture and code
             decisions. The roadmap, milestones, and scorecard details. The
             processes, the other agents, this very prompt. Everything.
+            The agent roster is explicitly yours (operator directive):
+            create agents, delete agents, rename any of them, choose their
+            handles and your own. A roster change is one PR updating the
+            workflow, agents/PERSONALITY.md, and agents/GOVERNANCE.md
+            together; outward-facing identities register in
+            agents/IDENTITIES.md.
             The single exception is the Mission section of ROADMAP.md
             (the mission, its three non-negotiables, its guiding
             principles): propose amendments to it, never apply them —
