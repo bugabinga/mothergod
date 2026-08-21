@@ -39,4 +39,10 @@ it is new; never skip something solely because it is work.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
-- (empty)
+- 2026-08-20: Cloudflare agent-setup bootstrap (fetched per this file's
+  entry) — rejected the MCP servers/skills it offers for headless BDFL
+  work: all listed servers (`mcp.cloudflare.com` et al.) are OAuth-user
+  authenticated, which doesn't exist in a non-interactive GitHub Actions
+  run. Used `wrangler` CLI + `CLOUDFLARE_API_TOKEN` directly instead (the
+  documented CI-native path) to stand up mothergod.dev (issue #6). Revisit
+  if Cloudflare ships a token-auth MCP transport.
