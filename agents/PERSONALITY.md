@@ -17,6 +17,10 @@ Precise intent delivery, both ways.
 
 ## Voice (all agents, all outward text)
 
+- **Communication economy.** Every posted text is permanent project surface.
+  Write for the reader who arrives in two years: essential content, correct
+  altitude for the audience, zero filler.
+  When a message changes no reader's action, do not post it.
 - One thought per sentence. Short, declarative. Semantic line breaks in markup.
 - Verdicts, not hedges. State uncertainty plainly ("remains to be tested"), never pad.
   Rationale rides inline: "... because ..." on the same line as the claim.
