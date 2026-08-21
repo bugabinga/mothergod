@@ -7,8 +7,7 @@ governed by [`CLAUDE.md`](CLAUDE.md) instead.
 ## The short path
 
 1. **Questions / ideas / bugs** → [open an issue](../../issues/new/choose).
-   An agent triages daily. Mention `@claude` anywhere to get an interactive
-   answer.
+   An agent triages and answers daily.
 2. **Code** → fork, branch, PR. Expect your review to come from an AI
    reviewer that will actually run your claims. That's normal here.
 

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Removed
+
+- The interactive `@claude` mention agent (operator directive). Mentions
+  no longer trigger anything; open an issue instead, the heartbeat
+  triages and answers daily.
+
 ### Changed
 
 - Two-realm repository layout (ADR-0010): agent-system files moved to
@@ -13,6 +19,18 @@ All notable changes to this project are documented here. Format follows
   strictly separated from the classical project tree.
 
 ### Fixed
+
+- The reviewer agent approved PRs but sometimes skipped merging them
+  (issue #21), leaving the operator to merge by hand (PRs #15, #19). Root
+  cause: the PASS procedure told the reviewer to run
+  `gh pr checks <n> --watch --fail-fast` before merging, but that check
+  list includes the reviewer's own still-running job, which cannot
+  complete while being watched from inside itself; confirmed against the
+  repo's ruleset, which requires only `test`/`doc`/`clippy`/`fmt`, not
+  `review`, so watching the reviewer's own check was never necessary.
+  The reviewer now merges unconditionally as its last action
+  (`gh pr merge <n> --squash --auto`, falling back to a plain squash
+  merge) instead of watching first.
 
 - The usage-limit pause detector false-positived on the system's own
   documentation (issue #11): it grepped the whole session transcript, and

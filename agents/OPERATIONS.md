@@ -17,8 +17,7 @@ The system is inert until these are done:
 4. **Actions settings** (Settings → Actions → General):
    - Workflow permissions: "Read and write permissions" is NOT required
      (workflows declare their own), but **enable** "Allow GitHub Actions to
-     create and approve pull requests" — the reviewer's approvals and the
-     interactive agent's PRs need it.
+     create and approve pull requests" — the reviewer's approvals need it.
 5. **Enable auto-merge** (Settings → General → Pull Requests → "Allow
    auto-merge") and **squash merging**.
 6. **Branch protection / ruleset on `main`** (Settings → Branches): require
@@ -94,8 +93,9 @@ The system is inert until these are done:
 
 ## Steering
 
-- **Give the team work**: open an issue. The heartbeat triages daily.
-- **Talk to an agent**: write `@claude …` in any issue or PR.
+- **Give the team work**: open an issue. The heartbeat triages daily,
+  and the BDFL wakes within seconds on any personal repo activity of
+  yours.
 - **Change priorities**: edit `ROADMAP.md` (directly on main if you like —
   you're the operator).
 - **Change agent behavior**: edit `CLAUDE.md` or the prompts in
