@@ -20,6 +20,14 @@ All notable changes to this project are documented here. Format follows
   silently broken review→automerge for every agent-authored PR the moment
   heartbeat opened one. Scoped `allowed_bots: "claude"` to fix; fork PRs
   stay excluded so no external bot gains anything.
+- `agent-review` also could not merge what it just verified when the PR
+  author is `claude[bot]`: GitHub refuses self-approval at the platform
+  level (`gh pr review --approve` → "Can not approve your own pull
+  request"), independent of branch protection. Since this repo's ruleset
+  requires zero approving reviews to merge, an approval was never actually
+  load-bearing — the reviewer's prompt now posts its verification as a
+  plain comment instead when self-approval fails, then proceeds to label
+  and merge as normal.
 
 ### Added
 
