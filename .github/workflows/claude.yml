@@ -53,13 +53,25 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - id: persona
+        if: steps.guard.outputs.paused != 'true'
+        uses: ./.github/actions/agent-persona
+        with:
+          role: interactive
+
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
-          claude_args: --max-turns 200
+          # Persona rides in the system prompt: this agent answers mentions
+          # (tag mode), so a custom `prompt` would replace the mention
+          # context instead of supplementing it. The loader guarantees the
+          # text is free of double quotes, so the quoting below holds.
+          claude_args: |
+            --max-turns 200
+            --append-system-prompt "${{ steps.persona.outputs.text }}"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause

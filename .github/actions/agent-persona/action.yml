@@ -1,0 +1,41 @@
+# Loads an agent's persona so personality text is single-sourced
+# (operator directive): agents/personas/<role>.md followed by the shared
+# agents/personas/voice.md, exposed as the `text` output for workflow
+# prompts to interpolate. Refuses double quotes because claude.yml
+# injects this text into a double-quoted --append-system-prompt
+# argument, where a stray quote would break the quoting silently.
+name: agent-persona
+description: Load agents/personas/<role>.md plus voice.md as a step output
+inputs:
+  role:
+    description: Persona file name without extension (e.g. bdfl)
+    required: true
+outputs:
+  text:
+    description: The persona followed by the shared voice rules
+    value: ${{ steps.load.outputs.text }}
+runs:
+  using: composite
+  steps:
+    - id: load
+      shell: bash
+      env:
+        ROLE: ${{ inputs.role }}
+      run: |
+        persona="agents/personas/${ROLE}.md"
+        voice="agents/personas/voice.md"
+        if [ ! -f "$persona" ]; then
+          echo "::error::unknown persona role: ${ROLE} (no $persona)"
+          exit 1
+        fi
+        if grep -n '"' "$persona" "$voice"; then
+          echo "::error::double quote in persona files; forbidden, see agents/personas/README.md"
+          exit 1
+        fi
+        {
+          echo 'text<<MOTHERGOD_PERSONA_EOF'
+          cat "$persona"
+          echo
+          cat "$voice"
+          echo 'MOTHERGOD_PERSONA_EOF'
+        } >> "$GITHUB_OUTPUT"

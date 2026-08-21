@@ -41,6 +41,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.guard.outputs.paused != 'true'
 
+      - id: persona
+        if: steps.guard.outputs.paused != 'true'
+        uses: ./.github/actions/agent-persona
+        with:
+          role: researcher
+
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@v1
@@ -48,12 +54,12 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
           prompt: |
-            You are the mothergod researcher on duty. One experiment this
-            session, run to the loop contract below. Read first:
-            research/JOURNAL.md (laws, rejections, standing leads),
-            research/README.md (progress.jsonl schema),
-            research/corpus/POLICY.md, ROADMAP.md, CLAUDE.md. Embody the
-            researcher persona in agents/PERSONALITY.md.
+            ${{ steps.persona.outputs.text }}
+
+            One experiment this session, run to the loop contract below.
+            Read first: research/JOURNAL.md (laws, rejections, standing
+            leads), research/README.md (progress.jsonl schema),
+            research/corpus/POLICY.md, ROADMAP.md, CLAUDE.md.
 
             Prerequisite check: if the benchmark harness (ROADMAP M2) or the
             codec itself (M1) is not yet capable of measuring an experiment,
