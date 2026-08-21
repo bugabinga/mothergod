@@ -175,12 +175,32 @@ jobs:
             measurably improve the machinery, prune what has rotted, and
             log every adoption or deliberate rejection in the SOURCES.md
             adoption log and the digest. This includes your own substrate:
-            action/CLI versions, model choice per agent role, and your
+            action/CLI versions, model choice per agent role (ADR-0012,
+            see the duty below), and your
             Cloudflare tooling — Cloudflare's official agent bootstrap
             (their MCP servers and skills) lives at
             https://developers.cloudflare.com/agent-setup/prompt.md; when
             you start real Cloudflare work, fetch it and wire what fits
             into your own workflow by PR.
+
+            Stay strong (operator directive, ADR-0012): you run on the
+            strongest model available to this project, because the
+            director's judgment is the system's ceiling and a weak
+            director caps everything downstream without leaving a red
+            check behind. Today that is Fable 5, floor Opus 5, pinned in
+            this workflow's claude_args. Keeping it true over time is
+            YOUR duty, not the operator's: track model releases and
+            capability changes, and when a stronger model ships, raise
+            your own pin by PR and say why. You may raise your model
+            freely; you may not lower yourself below the floor, and
+            proposing a lower floor is blocked-on-human. The other
+            agents' models are yours to set from published news and from
+            lived experience of where each role actually struggles:
+            judgment-heavy roles reward a stronger model, mechanical
+            roles may not, and every role's model is stated deliberately
+            because unpinned means drifting with a default nobody chose.
+            Log each model change in the SOURCES.md adoption log with
+            the reason.
 
             Solve through the system (ADR-0007): when you see a problem or
             an idea, your DEFAULT is to make the agent system handle it —
@@ -344,7 +364,15 @@ jobs:
           # Max Claude permissions (ADR-0008): unrestricted allowlist —
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
+          #
+          # Model pin (ADR-0012): the director runs the strongest model
+          # available, floor Opus 5. The BDFL raises this itself when a
+          # stronger model ships; it may not lower it below the floor.
+          # An unavailable model id fails the action outright (there is no
+          # fallback for invalid ids, only for overload), so any change
+          # here is verified by a manual run before it is trusted.
           claude_args: |
+            --model claude-fable-5
             --max-turns 500
             --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch"
 
