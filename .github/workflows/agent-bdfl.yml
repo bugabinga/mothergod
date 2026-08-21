@@ -19,7 +19,7 @@ concurrency:
 jobs:
   bdfl:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 300
     # Maximum practical GITHUB_TOKEN grant (ADR-0008). Note: even at max,
     # GITHUB_TOKEN cannot push workflow-file changes; the Claude app token
     # covers that, and merging PRs that change workflows is always allowed.
@@ -282,7 +282,7 @@ jobs:
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
           claude_args: |
-            --max-turns 120
+            --max-turns 500
             --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch"
 
       - if: always() && steps.claude.outcome != 'skipped'

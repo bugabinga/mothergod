@@ -14,6 +14,18 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- The usage-limit pause detector false-positived on the system's own
+  documentation (issue #11): it grepped the whole session transcript, and
+  this repo's prompts and docs legitimately contain phrases like "usage
+  limit" and "weekly limit" because they describe the pause machinery
+  itself. A max-turns failure of the BDFL's first run was thereby
+  misclassified as a weekly usage limit, pausing all agents for 24 hours.
+  The detector now inspects only structured error result objects, so a
+  successful run can never pause the system and only a genuine limit error
+  triggers. Turn and time budgets raised generously across all agents
+  (BDFL 120→500 turns, heartbeat 130→400, researcher 150→500, reviewer
+  100→300, interactive 60→200) per the operator's directive: tight limits
+  poison good runs, smart limits need experience first.
 - `agent-review` refused to run on any PR authored by our own `claude[bot]`
   identity (BDFL or heartbeat PRs) — `claude-code-action`'s default
   bot-actor guard blocked it before it read a single file. Would have
