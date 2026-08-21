@@ -1,0 +1,30 @@
+# Deploy site/ (mothergod.dev) to Cloudflare Pages. Boring on purpose: no
+# framework, no build step, wrangler pushes the static tree as-is.
+name: deploy-site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/deploy-site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx wrangler@4 pages deploy site --project-name=mothergod-site --branch=main --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: Cloudflare account ids are opaque identifiers, not
+          # credentials. Needed because the API token is scoped to a single
+          # account without implying it in every call.
+          CLOUDFLARE_ACCOUNT_ID: c9526445475a4d62fd6e330810573ef0

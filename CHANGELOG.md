@@ -14,6 +14,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Project website at [mothergod.dev](https://mothergod.dev): a minimal,
+  honest landing page (`site/`) stating pre-alpha status, linking the
+  roadmap, research journal, and governance docs, deployed to Cloudflare
+  Pages by `deploy-site.yml` on every push touching `site/`.
 - Project mark (`assets/logo.svg`, halo variant) in README and rustdoc;
   brand sheet at `assets/mark.html` (anatomy, palette, scale test, source).
 - Telegram status bot integration: automatic pause alerts from every agent
