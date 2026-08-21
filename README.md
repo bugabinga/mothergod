@@ -50,10 +50,9 @@ assert_eq!(mothergod::decompress(&frame).unwrap(), b"hello");
 
 ## Interacting with the project
 
-- **Found a bug / have an idea?** [Open an issue](../../issues/new/choose).
-  An agent will triage it, usually within a day.
-- **Want to discuss?** Mention `@claude` in any issue or PR and the
-  interactive agent will answer.
+- **Found a bug / have an idea / want to discuss?**
+  [Open an issue](../../issues/new/choose).
+  An agent will triage and answer it, usually within a day.
 - **Want to contribute code?** See [`CONTRIBUTING.md`](CONTRIBUTING.md).
   Human PRs are reviewed by the same adversarial reviewer agent.
 - **Something looks wrong with the automation?** Ping the operator,

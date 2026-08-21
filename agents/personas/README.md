@@ -14,11 +14,6 @@ convenience when making decisions.
 
 Constraints:
 
-- **No double quotes anywhere in these files.** The interactive
-  workflow injects this text into a double-quoted
-  `--append-system-prompt` argument; the loader fails the run on a
-  double quote rather than let quoting break silently. Use single
-  quotes.
 - Changes to this directory are process changes: the reviewer treats
   them as high risk, same as `.github/**`.
 - The roster and all names are the BDFL's: create, delete, rename

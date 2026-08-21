@@ -96,10 +96,7 @@ jobs:
             a PR you authored. Update CHANGELOG.md
             and the research journal as CLAUDE.md requires. Anything only the
             human operator can do gets an issue labeled blocked-on-human with
-            exact instructions, and you move on. Do not write the literal
-            @-mention trigger for the interactive agent in any text you post
-            (it would re-trigger workflows); say "the interactive agent"
-            instead.
+            exact instructions, and you move on.
 
             End of every run: post a 3–6 line status comment on the ops-log
             issue — what you did, what is next, blockers. End every comment,
