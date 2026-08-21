@@ -40,9 +40,10 @@ The system is inert until these are done:
   the BDFL will nag via `blocked-on-human` when it starts failing.
 - All agent commits are made with `use_commit_signing: true`: they go
   through the GitHub API and carry GitHub's verified signature. Squash
-  merges into `main` are GitHub-created and therefore always signed —
-  optionally add "require signed commits" to the `main` ruleset for
-  enforcement.
+  merges into `main` are GitHub-created and therefore always signed
+  regardless of branch signature status (mechanism: `agents/GOVERNANCE.md`
+  "Merging") — optionally add "require signed commits" to the `main`
+  ruleset for enforcement.
 - `.github/CODEOWNERS` runs in visibility mode: you are auto-requested as
   reviewer on constitution-level paths (governance, ADRs, pause machinery),
   but nothing blocks. Tick "Require review from Code Owners" in the ruleset

@@ -130,9 +130,15 @@ jobs:
               the watch list, which cannot complete while you are watching
               it, so it hangs). A single non-watching `gh pr checks <n>` for
               your own information is fine; `--auto` already waits
-              server-side for the four required gates. If both merge
-              commands fail outright, leave a comment stating you approved
-              but the merge did not go through, so the heartbeat will fix it.
+              server-side for the four required gates. Unconditionally
+              means unconditionally: an unsigned commit on the PR branch is
+              never a reason to stop short and hand off to the operator —
+              GitHub creates and signs the squash merge commit itself, so
+              `required_signatures` on `main` is satisfied either way (see
+              agents/GOVERNANCE.md "Merging"). Attempt the merge before
+              predicting it will fail. If both merge commands fail outright,
+              leave a comment stating you approved but the merge did not go
+              through, so the heartbeat will fix it.
             - FAIL: gh pr review --request-changes with specific, actionable
               items, each tagged [must] or [nit]. Be courteous and
               explanatory, especially to human authors.

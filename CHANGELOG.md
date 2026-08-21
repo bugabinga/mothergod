@@ -32,6 +32,14 @@ All notable changes to this project are documented here. Format follows
   (`gh pr merge <n> --squash --auto`, falling back to a plain squash
   merge) instead of watching first.
 
+- The reviewer wrongly labeled PR #22 `blocked-on-human`, believing an
+  unsigned branch commit would fail the `required_signatures` ruleset on
+  `main` (issue #24). It does not: squash merge creates a new commit
+  server-side, signed by GitHub, independent of the source branch's own
+  signature status. The fact now lives in `agents/GOVERNANCE.md`
+  ("Merging"), which every reviewing agent reads, and the reviewer's merge
+  step spells out the specific belief to reject.
+
 - The usage-limit pause detector false-positived on the system's own
   documentation (issue #11): it grepped the whole session transcript, and
   this repo's prompts and docs legitimately contain phrases like "usage
