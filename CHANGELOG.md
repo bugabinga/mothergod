@@ -12,6 +12,15 @@ All notable changes to this project are documented here. Format follows
   `agents/` (governance, operations, personas, sources, identities),
   strictly separated from the classical project tree.
 
+### Fixed
+
+- `agent-review` refused to run on any PR authored by our own `claude[bot]`
+  identity (BDFL or heartbeat PRs) — `claude-code-action`'s default
+  bot-actor guard blocked it before it read a single file. Would have
+  silently broken review→automerge for every agent-authored PR the moment
+  heartbeat opened one. Scoped `allowed_bots: "claude"` to fix; fork PRs
+  stay excluded so no external bot gains anything.
+
 ### Added
 
 - Project mark (`assets/logo.svg`, halo variant) in README and rustdoc;
