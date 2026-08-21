@@ -26,6 +26,25 @@ The system is inert until these are done:
    jobs — names must match the ruleset exactly) to pass
    before merging. Do not require human approvals — that's the reviewer
    agent's job (ADR-0003). Optionally block force pushes.
+
+   **Do not enable** the ruleset's `copilot_code_review`, `code_coverage`,
+   `code_quality`, or `code_scanning` rules, and leave
+   `require_extra_approval_for_unattributed_changes` off. None of those
+   tools run in this repo (no Copilot review, no coverage upload, no code
+   scanning workflow), so GitHub can never satisfy them — every merge
+   attempt with a non-admin token then reports `mergeStateStatus: BLOCKED`
+   forever, with no error naming which rule failed. The extra-approval
+   rule fails the same way for a different reason: the reviewer and every
+   agent-authored PR share the `claude[bot]` identity, and GitHub refuses
+   self-approval, so the "extra approval" can never be produced either.
+   The repo ran with all four of these enabled from 2026-08-20 to
+   2026-08-21 and every merge to `main` in that window silently fell back
+   to the operator manually merging via the admin-bypass role — the
+   autonomous pipeline in ADR-0003 was never actually exercised. Fixed by
+   the BDFL 2026-08-21 by removing those rules via the rulesets API; keep
+   the ruleset to exactly: `non_fast_forward`, `deletion`,
+   `required_status_checks` (the four CI jobs), `pull_request` (0 required
+   approvals, no extra-approval flag), `required_signatures`.
 7. ~~Seed the founding artifacts~~ Done 2026-08-20 — the complete archive
    (codec + runnable research harness + loop state) lives in
    `research/imports/session-1/`, verified against the founding session's
