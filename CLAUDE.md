@@ -48,6 +48,12 @@ A push that fails them wastes a cycle.
    exception: the BDFL driver merges its own non-code PRs (ADR-0005).
 9. Respect the pause: if an open issue labeled `agents-paused` exists and its
    RESUME-AT is in the future, stop and exit cleanly.
+10. Never print a secret. Pass credentials through environment variables and
+    never echo, log, or paste their values. Where an API forces a token into a
+    URL (Telegram's `/bot<token>/`), keep it in a variable, keep it out of
+    command echoes, and redact it in anything you post or write to a file.
+    GitHub masks secrets in workflow logs only: artifacts, transcripts, commit
+    contents and issue comments are unmasked.
 
 ## Style
 
