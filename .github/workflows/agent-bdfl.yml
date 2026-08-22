@@ -348,13 +348,16 @@ jobs:
             4. State check: ops-log tail, gh run list, open PRs/issues,
                recent commits. Known stalls to sweep for, each silent
                by construction:
-               - An open PR labeled agent-approved whose
-                 mergeable_state is dirty — auto-merge is waiting
-                 forever and nobody is told. Rescue per
-                 agents/GOVERNANCE.md "Stalled auto-merge" and "Push
-                 identity": mechanical merge of main, deliberate push
-                 identity, close/reopen to re-attribute held runs, REST
-                 squash merge once the four gates are green,
+               - An open PR labeled agent-approved that auto-merge is
+                 not landing — mergeable_state dirty (conflict), or
+                 clean with the four gates green and auto-merge still
+                 armed (unsigned tip, GitHub reports blocked while the
+                 REST merge succeeds; PR #84). Rescue per
+                 agents/GOVERNANCE.md "Stalled auto-merge": dirty
+                 needs the mechanical merge of main, deliberate push
+                 identity, close/reopen to re-attribute held runs;
+                 clean needs only the REST squash merge. Either way
+                 land by REST once the four gates are green,
                  blocked-on-human if still stuck.
                - An open non-draft PR, gates green, no reviewer verdict
                  on the current head — the review check passed

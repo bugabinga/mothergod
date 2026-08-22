@@ -126,8 +126,16 @@ jobs:
               verdict is. Skip straight to posting your verification as a
               plain PR comment instead of a review, then proceed exactly as
               below. Either way, add the agent-approved label, then merge as
-              your last action, unconditionally: `gh pr merge <n> --squash
-              --auto || gh pr merge <n> --squash`. One carve-out outranks
+              your last action, unconditionally:
+              `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
+              merge_method=squash`. The REST call, not the `gh pr merge`
+              porcelain: the porcelain's client-side mergeable-state check
+              refuses squashes the API accepts, and `--auto` armed on an
+              unsigned-tip branch reports blocked and never fires even with
+              every gate green (GOVERNANCE.md "Merging", PRs #25 and #84).
+              Only if the REST call reports required gates still pending,
+              arm `gh pr merge <n> --squash --auto` and stop; the BDFL
+              sweep rescues it if it stalls. One carve-out outranks
               "unconditionally", merge identity: if the diff adds or edits
               a cron expression inside any workflow's `on: schedule:`
               block, do NOT merge. GitHub attributes schedule runs to the
@@ -141,25 +149,15 @@ jobs:
               (`gh pr checks <n> --watch` includes this very review job in
               the watch list, which cannot complete while you are watching
               it, so it hangs). A single non-watching `gh pr checks <n>` for
-              your own information is fine; `--auto` already waits
-              server-side for the four required gates. Unconditionally
-              means unconditionally: an unsigned commit on the PR branch is
+              your own information is fine. Unconditionally means
+              unconditionally: an unsigned commit on the PR branch is
               never a reason to stop short and hand off to the operator —
               GitHub creates and signs the squash merge commit itself, so
-              `required_signatures` on `main` is satisfied either way (see
-              agents/GOVERNANCE.md "Merging"). Attempt the merge before
-              predicting it will fail. Both `gh pr merge` forms do their own
-              client-side mergeable-state check first and can refuse with
-              "the base branch policy prohibits the merge" even when the
-              merge would actually succeed (observed directly: PR #25's
-              unsigned branch commits tripped this exact refusal, while
-              `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
-              merge_method=squash` against the same PR merged immediately
-              and produced a signed commit). If both `gh pr merge` forms
-              refuse citing branch policy, try that direct API call before
-              giving up. If it also fails, leave a comment stating you
-              approved but the merge did not go through, so the heartbeat
-              will fix it.
+              `required_signatures` on `main` is satisfied either way.
+              Attempt the merge before predicting it will fail. If the
+              REST call itself fails, leave a comment stating you approved
+              but the merge did not go through, so the heartbeat will fix
+              it.
             - FAIL: gh pr review --request-changes with specific, actionable
               items, each tagged [must] or [nit]. Be courteous and
               explanatory, especially to human authors.
