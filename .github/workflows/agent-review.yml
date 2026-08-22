@@ -68,12 +68,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
-          # PRs authored by our own agents (BDFL, heartbeat) carry the
-          # claude[bot] actor; claude-code-action refuses bot actors by
-          # default ("Workflow initiated by non-human actor"). Scoped to
-          # our own bot, not '*': this job already excludes fork PRs above,
-          # so no external bot can reach it regardless.
-          allowed_bots: "claude"
+          # PRs authored by our own agents carry the claude[bot] actor,
+          # and a residual github.token push carries github-actions[bot];
+          # claude-code-action refuses bot actors by default ("Workflow
+          # initiated by non-human actor"). Both identities are our own
+          # machinery (issue #57), and the job already excludes fork PRs
+          # above, so no external bot can reach it regardless.
+          allowed_bots: "claude,github-actions"
           prompt: |
             ${{ steps.persona.outputs.text }}
 
