@@ -104,6 +104,11 @@ keeps moving (issue #57). Pick deliberately:
 - The admin PAT (actor `bugabinga`): operator-attributed, and
   operator-attributed events wake the BDFL (issue #50). Reserved for
   what the app cannot do: workflow-file pushes and cron-line changes.
+  A token in the push URL is not enough: the runner injects the app
+  credential as `http.extraheader`, which overrides URL auth, so a PAT
+  push must clear it
+  (`git -c http.https://github.com/.extraheader= push ...`), or the
+  remote silently sees the app and applies its rules.
 
 A held `action_required` run is cleared by re-attributing its event,
 not by approving it (no agent token approves a held run, PR #43):
