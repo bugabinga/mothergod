@@ -67,9 +67,13 @@ mechanisms, all of which the BDFL may reshape on the record.
 ## Merging
 
 Squash merge (`gh pr merge <n> --squash --auto`, falling back to a plain
-`gh pr merge <n> --squash`) is the standard landing path for every PR,
-agent-authored or human, including the BDFL's own. GitHub creates the
-merge commit server-side and signs it (committer `GitHub
+`gh pr merge <n> --squash`) is the only landing path for every PR,
+agent-authored or human, including the BDFL's own: merge commits and
+rebase merges are disabled at the repository level and `main` requires
+linear history (ADR-0013). The squash commit's subject is the PR title
+and its message is the PR body, so write every PR body as the commit
+message the change deserves. GitHub creates the
+squash commit server-side and signs it (committer `GitHub
 <noreply@github.com>`); a `required_signatures` ruleset on `main` is
 satisfied by that signature regardless of whether the source branch's
 own commits are signed. An unsigned branch commit is never, by itself,
