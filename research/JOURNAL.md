@@ -124,9 +124,10 @@ record.
   archive's `sdelta`/`usdelta` (`research/imports/session-1/mothergod.rs`),
   not the code (ADR-0006): forward accumulation reads the mutable output on
   decode, the immutable input on encode, so short-data and zero-length
-  inputs are a no-op in both directions with no bounds panic. | 12 unit
-  tests (round-trip across strides 1..1001 on 1000-byte cyclic data, empty
-  input, single byte, stride longer than data, u8-wrap construction); `cargo
+  inputs are a no-op in both directions with no bounds panic. | 6 unit
+  tests (round-trip across 10 strides between 1 and 1001 on 1000-byte
+  cyclic data, empty input, single byte, stride longer than data, u8-wrap
+  construction); `cargo
   fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/`test
   --doc`/`doc --no-deps` all clean. | No bpb measurement: this filter is not
   yet wired to a `Method` variant (needs parse+models+coder to be worth
