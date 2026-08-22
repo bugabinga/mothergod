@@ -1,6 +1,6 @@
 # ADR-0004: Claude subscription auth only; system pauses on usage limits
 
-Status: accepted · Date: 2026-08-20
+Status: accepted · Date: 2026-08-20 · Concurrency clause amended by ADR-0014
 
 ## Context
 
