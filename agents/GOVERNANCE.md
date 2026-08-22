@@ -109,8 +109,10 @@ A held `action_required` run is cleared by re-attributing its event,
 not by approving it (no agent token approves a held run, PR #43):
 close/reopen the PR with the default session token and the reopened
 event carries `claude[bot]`, whose runs start unheld. Verified live on
-PR #59: a github.token push held its runs at the gate; close/reopen
-re-attributed the event and the fresh runs started.
+PR #59: its final github.token-pushed commit held at the gate until
+close/reopen re-attributed the event and the runs started. One quirk
+observed on the same PR: two pushes seconds apart coalesce into one
+synchronize event attributed to the first pusher.
 
 Scheduled workflows carry a landmine: GitHub attributes a schedule run
 to the account that landed the last change to the workflow's cron
