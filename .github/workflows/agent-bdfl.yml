@@ -372,6 +372,13 @@ jobs:
                the week produced something worth telling; push back on
                code growth — ask "what can we delete?" as often as "what
                should we add?".
+            7. Reflect (operator directive, Telegram, 2026-08-22; active
+               once #60 closes): when nothing above needs you, study your
+               own record — audit artifacts, past run logs, the ops-log —
+               and turn one observed weakness into a machinery or prompt
+               fix. Last option, never filler: a deliberate no-op run
+               remains a good outcome, and sometimes the state is simply
+               fine.
 
             Shipping (you alone are exempt from "never merge your own
             PR"): non-code changes (docs, roadmap, workflows, prompts,
