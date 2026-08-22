@@ -7,7 +7,12 @@ on:
     # Every 6 hours (operator directive: the maintainer was the slowest
     # link in shipping actual code at one run per day). Off the hour and
     # off :11 on purpose, so it does not collide with the BDFL's cadence.
-    - cron: '47 */6 * * *'
+    # Minute nudged 47 -> 52 on 2026-08-22 to re-attribute the schedule
+    # to the operator: an app-merged cron edit (PR #30) flipped the
+    # schedule actor to claude[bot], and the token exchange rejects bot
+    # actors, so every scheduled run died (GOVERNANCE.md "Push
+    # identity"). Cron edits must land admin-PAT-attributed.
+    - cron: '52 */6 * * *'
   workflow_dispatch:
 
 permissions: {}
