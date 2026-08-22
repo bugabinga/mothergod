@@ -69,24 +69,26 @@ mechanisms, all of which the BDFL may reshape on the record.
 
 ## Merging
 
-Squash merge (`gh pr merge <n> --squash --auto`, falling back to a plain
-`gh pr merge <n> --squash`) is the only landing path for every PR,
-agent-authored or human, including the BDFL's own: merge commits and
-rebase merges are disabled at the repository level and `main` requires
-linear history (ADR-0013). The squash commit's subject is the PR title
-and its message is the PR body, so write every PR body as the commit
-message the change deserves. GitHub creates the
-squash commit server-side and signs it (committer `GitHub
-<noreply@github.com>`); a `required_signatures` ruleset on `main` is
-satisfied by that signature regardless of whether the source branch's
-own commits are signed. An unsigned branch commit is never, by itself,
-a reason to stop or to label `blocked-on-human` — attempt the merge
-before predicting it will fail (issue #24, PR #22 postmortem). `gh pr
-merge` runs its own client-side mergeable-state check first and can
-refuse a squash that the REST API accepts immediately (observed on PR
-#25); `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
-merge_method=squash` is the fallback when `gh pr merge` refuses citing
-branch policy.
+Squash is the only landing path for every PR, agent-authored or
+human, including the BDFL's own: merge commits and rebase merges are
+disabled at the repository level and `main` requires linear history
+(ADR-0013). The squash commit's subject is the PR title and its
+message is the PR body, so write every PR body as the commit message
+the change deserves. Land with the REST call, not the porcelain:
+`gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
+merge_method=squash`. The porcelain's client-side mergeable-state
+check refuses squashes the API accepts (PR #25), and `--auto` armed
+on a branch whose tip commit is unsigned reports `blocked` and never
+fires, even with every gate green (PR #84). Arm
+`gh pr merge <n> --squash --auto` only when the REST call reports
+required gates still pending, and expect the BDFL sweep to rescue it
+if the tip is unsigned. GitHub creates the squash commit server-side
+and signs it (committer `GitHub <noreply@github.com>`); the
+`required_signatures` rule on `main` is satisfied by that signature
+regardless of whether the source branch's own commits are signed. An
+unsigned branch commit is never, by itself, a reason to stop or to
+label `blocked-on-human` — attempt the REST merge before predicting
+it will fail (issue #24, PR #22 postmortem).
 
 ### The reviewer skips any PR whose `agent-review.yml` differs from main
 
@@ -111,19 +113,24 @@ both observed on 2026-08-22:
 
 ### Stalled auto-merge
 
-The reviewer arms auto-merge and exits; if `main` then moves and
-conflicts the branch, auto-merge waits forever and nobody is told
-(first hit: PR #34, a CHANGELOG append collision). The BDFL sweeps
-every run for the signature — an open `agent-approved` PR whose
-mergeable state is dirty — and rescues it mechanically, so the
-reviewer's standing verdict still covers the content: merge `main`
-into the branch, resolve without judgment calls (append conflicts
-keep both sides), push with a deliberate identity (see Push identity
-below), and clear the held runs that push creates by close/reopen.
-Once the required gates are green, land with the REST squash merge
-above, because auto-merge stays stuck even with green gates (PR #25's
-quirk, verified again on #34) and close/reopen disarms it anyway. If
-a held run still blocks after re-attribution, comment on the PR
+Armed auto-merge waits forever and nobody is told. Two signatures,
+both swept by the BDFL every run on open `agent-approved` PRs:
+
+- Mergeable state `dirty`: `main` moved and conflicted the branch
+  (first hit PR #34, a CHANGELOG append collision). Rescue: merge
+  `main` into the branch, resolve without judgment calls (append
+  conflicts keep both sides), push with a deliberate identity (see
+  Push identity below), clear the held runs that push creates by
+  close/reopen, then land with the REST squash merge above once the
+  required gates are green.
+- Mergeable state clean, four gates green, auto-merge armed, PR still
+  open: the branch tip is unsigned, so GitHub's own evaluation sits
+  at `blocked` while the REST squash merge succeeds immediately
+  (first hit PR #84; same porcelain/API asymmetry as PR #25). Rescue:
+  the REST squash merge, nothing else — the reviewer's verdict
+  already covers the exact head SHA.
+
+If a held run still blocks after re-attribution, comment on the PR
 naming it, label `blocked-on-human`, move on.
 
 ## Push identity
