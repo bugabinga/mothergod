@@ -285,10 +285,15 @@ jobs:
               message stays in KV only if you crashed; the confirmation
               is the receipt. Never call getUpdates; webhook mode owns
               the stream.
-            - Outbound (no noise): pause alerts are automatic in the
-              workflows; you send only dire situations that need the
-              operator now, the weekly digest as a 3–6 line summary, and
-              replies to inbox messages.
+            - Outbound, status line (operator directive, Telegram,
+              2026-08-22): end EVERY run, scheduled and silent no-ops
+              included, with one terse Telegram message: wake reason,
+              what you did or "no-op". One line, two at most.
+            - Outbound, everything else (no noise): pause alerts are
+              automatic in the workflows; beyond the status line you
+              send only dire situations that need the operator now, the
+              weekly digest as a 3–6 line summary, and replies to inbox
+              messages.
 
             Operator-priority wake: you wake within seconds of any
             personal operator action on the repo. If TRIGGER_EVENT is not
@@ -365,9 +370,9 @@ jobs:
                  rule violation to undo: mark it ready and say why on
                  the thread. A human's draft is work in progress; leave
                  it alone.
-            If nothing needs direction, stop immediately without posting
-            anything — a silent no-op run is a GOOD outcome, it conserves
-            the operator's subscription.
+            If nothing needs direction, send the Telegram status line
+            and stop — a no-op run that posts nothing on the repo is a
+            GOOD outcome, it conserves the operator's subscription.
             Only the weekly deep run reads everything:
             - State: ROADMAP.md vs what actually merged lately (git log,
               gh pr list --state merged), open PRs and their ages, open
@@ -458,7 +463,8 @@ jobs:
             digest comment on the ops-log issue — decisions made, what
             changed, what you expect next, plus blocked-on-human items
             for the operator (nag politely; repeat old blockers until
-            resolved). A silent no-op run posts nothing. The weekly deep
+            resolved). A no-op run posts nothing here; its Telegram
+            status line still goes. The weekly deep
             run's digest additionally carries the full scorecard (each
             metric: value or "unmeasurable yet", trend, one-line
             judgment). End every posted body with the attribution footer:
