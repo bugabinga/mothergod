@@ -6,21 +6,11 @@ signals. Follow project rules first.
 ## Type specificity
 
 Rust cannot have missing types, but it can have wrong ones: too general
-or too specific.
-
-The general consensus in compiled languages:
-
-- use general types for parameters and declarations
-- use specific types for values
-
-A parameter typed narrower than the function body needs rejects valid
-callers. A value typed wider than it can ever be forces every consumer
-to handle cases that cannot occur.
-
-The stronger form: a type that admits illegal states is imprecise. A
-`&str` that secretly means one of five subcommands is a bug waiting for
-a typo; an enum of five variants says the same thing in less space and
-closes every misuse.
+or too specific. The signal is yours to flag; the rules are
+Rust-specific, so they live in the rust-craft skill,
+`references/type-precision.md`: newtypes where confusion would be
+silent, enums instead of stringly values, wide parameters and narrow
+values, range encoded in the type. Judge the finding there, not here.
 
 ## Missing docs or comments
 

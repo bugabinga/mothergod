@@ -1,186 +1,39 @@
 # Poor patterns
 
-Poor patterns include blindly applying SOLID, Uncle Bob-style “Clean Code”, or
-old OOP patterns when they add ceremony, indirection, or hidden costs instead of
-making the system simpler.
+Patterns applied by reflex, not by need: SOLID, "Clean Code", and
+classic OOP patterns deployed where they add ceremony, indirection, or
+hidden cost instead of removing any.
 
-## What to look for
+A pattern is a tool with a price: indirection, allocation, dispatch,
+hierarchy, conceptual weight. Reflex application pays the price without
+collecting the benefit. "Maintainability" is not an argument when
+nothing gets easier to maintain, and it never excuses ignoring memory
+and performance costs.
 
-Look for code shaped by patterns such as:
+## The tells
 
-- SOLID applied mechanically
-- “Clean Code” rules applied mechanically
-- deep type hierarchies
-- reference types for everything
-- ignoring memory and performance implications in the name of “maintainability”
+Every SOLID and Clean-Code anti-pattern is the same defect wearing a
+different principle: **structure added for variation, substitution, or
+extension that does not exist yet and may never come.** The surface
+signals:
 
-## Why it matters
+- names that describe structure, not behavior: Factory, Provider,
+  Registry, Coordinator, Manager, Abstract-anything
+- an interface or trait with exactly one implementation and nothing
+  else, not even a test double, using the seam
+- a type hierarchy deeper than two, or one that encodes combinations
+  of behavior as subtypes
+- extension points, plugins, or registries with a single registrant
+- one concept fragmented across many tiny interfaces or classes, so
+  that no single piece makes sense alone
+- a subtype that technically satisfies its parent but throws, no-ops,
+  or surprises on part of the contract
+- reference or heap types for everything, costs hidden behind
+  abstraction in paths where they matter
 
-Patterns can make code worse when they add indirection, allocation, dispatch,
-hierarchy, or conceptual weight without a real need.
+## Two examples stand for the catalog
 
-Maintainability does not mean ignoring memory and performance implications.
-
-Prefer composition over inheritance when behavior can be assembled directly instead of encoded in a type hierarchy.
-
-## SOLID anti-patterns
-
-SOLID concepts can be useful, but applied mechanically they often create slop.
-
-### Single Responsibility Principle
-
-Anti-pattern: splitting code until every tiny operation becomes a separate class, service, or function, even when the pieces do not make sense independently.
-
-```text
-class UserNameTrimmer
-class UserEmailLowercaser
-class UserAgeValidator
-class UserNormalizerCoordinator
-```
-
-This may satisfy a narrow idea of “one responsibility” while making behavior harder to read as a whole.
-
-### Open/Closed Principle
-
-Anti-pattern: adding extension points, inheritance, plugins, or registries before there is a real need for variation.
-
-```text
-interface PriceRule
-class DefaultPriceRule implements PriceRule
-class PriceRuleRegistry
-class PriceRuleFactory
-```
-
-This can make simple code harder to change because future flexibility was guessed too early.
-
-### Liskov Substitution Principle
-
-Anti-pattern: deep inheritance hierarchies where subclasses technically share a parent type but violate expectations through special cases, unsupported operations, or surprising overrides.
-
-```text
-class Storage
-class ReadOnlyStorage extends Storage:
-    function write(data):
-        throw unsupported_operation
-```
-
-The type relationship claims substitutability, but the behavior does not support it.
-
-### Interface Segregation Principle
-
-Anti-pattern: creating many tiny interfaces that add names, files, dispatch, and navigation without reducing real coupling.
-
-```text
-interface CanGetName
-interface CanSetName
-interface CanValidateName
-interface CanNormalizeName
-```
-
-Small interfaces are not automatically simple if they fragment one concept across many places.
-
-### Dependency Inversion Principle
-
-Anti-pattern: wrapping every direct dependency in an interface, adapter, provider, or factory even when there is only one implementation and no useful boundary.
-
-```text
-interface ClockProvider
-class SystemClockProvider implements ClockProvider
-class ClockProviderFactory
-class ClockProviderFactoryProvider
-```
-
-This can replace a clear dependency with ceremony and indirection.
-
-## Pseudo-code examples
-
-### Bad: deep type hierarchy
-
-```text
-interface Thing
-class AbstractThing implements Thing
-class AbstractNamedThing extends AbstractThing
-class ConfigurableNamedThing extends AbstractNamedThing
-class RuntimeConfigurableNamedThing extends ConfigurableNamedThing
-class UserRuntimeConfigurableNamedThing extends RuntimeConfigurableNamedThing
-```
-
-The hierarchy becomes the thing the reader must understand before understanding
-the behavior.
-
-### Better: flatter data and behavior
-
-```text
-type Thing:
-    name
-    config
-
-function run_thing(thing, runtime):
-    use thing.name
-    use thing.config
-    use runtime
-```
-
-Prefer a simpler shape when the hierarchy does not carry real value.
-
-### Bad: inheritance for assembled behavior
-
-```text
-class Exporter
-class CsvExporter extends Exporter
-class CompressedCsvExporter extends CsvExporter
-class EncryptedCompressedCsvExporter extends CompressedCsvExporter
-```
-
-The type hierarchy encodes combinations of behavior.
-
-### Better: composition over inheritance
-
-```text
-exporter = compose(
-    csv_format,
-    compression,
-    encryption,
-)
-
-exporter.export(data)
-```
-
-Assemble behavior directly when that is simpler than encoding combinations in subclasses.
-
-### Bad: reference types for everything
-
-```text
-class UserName:
-    value
-
-class UserAge:
-    value
-
-class UserEmail:
-    value
-
-class User:
-    name: UserName reference
-    age: UserAge reference
-    email: UserEmail reference
-```
-
-Reference types for everything can add allocation, navigation, and runtime cost
-without improving the system.
-
-### Better: use direct values when appropriate
-
-```text
-type User:
-    name
-    age
-    email
-```
-
-Do not introduce reference-heavy structure unless it has a real purpose.
-
-### Bad: ceremony in the name of maintainability
+Ceremony instead of construction:
 
 ```text
 interface UserFactory
@@ -191,33 +44,30 @@ class UserFactoryProviderFactory
 user = UserFactoryProviderFactory.create().provider().factory().create_user(data)
 ```
 
-This may satisfy pattern rules while making the actual behavior harder to see.
+versus `user = create_user(data)`.
 
-### Better: direct construction when enough
-
-```text
-user = create_user(data)
-```
-
-Avoid pattern ceremony when direct code is simpler and sufficient.
-
-### Bad: ignoring performance implications
+Hierarchy instead of composition:
 
 ```text
-function draw_frame(items):
-    objects = items.map(item -> new DrawableItemWrapper(item))
-    objects.each(object -> object.render())
+class Exporter
+class CsvExporter extends Exporter
+class CompressedCsvExporter extends CsvExporter
+class EncryptedCompressedCsvExporter extends CompressedCsvExporter
 ```
 
-A maintainability argument is weak if the code creates avoidable memory or
-performance costs in a hot path.
-
-### Better: consider the runtime context
+versus assembling the three behaviors at the call site:
 
 ```text
-function draw_frame(items):
-    for each item in items:
-        render item
+exporter = compose(csv_format, compression, encryption)
 ```
 
-When memory or performance matters, do not hide costs behind abstraction.
+The hierarchy makes the reader understand the tree before the behavior,
+and every new combination costs a new subtype.
+
+## Preferred fix
+
+Direct construction, direct calls, flat data. Compose behavior at the
+call site instead of encoding combinations in a hierarchy. Delete the
+layer whose only job is delegating to the next layer, and keep deleting
+until every remaining name denotes behavior a reader can observe. Add
+the seam back on the day a second implementation actually exists.

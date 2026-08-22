@@ -35,6 +35,14 @@ in raw values.
 
 Do not newtype everything. A loop counter is a loop counter.
 
+## Wide parameters, narrow values
+
+Take the most general type that does the job (`&[u8]`, not
+`&Vec<u8>`); return and store the most specific one. A parameter
+narrower than the body needs rejects valid callers; a value wider than
+it can ever be forces every consumer to handle states that cannot
+occur.
+
 ## Related, from the Rust API Guidelines
 
 - **C-NEWTYPE**: newtypes provide static distinctions.

@@ -42,12 +42,5 @@ body: a second copy of a plan is a plan that will drift.
 Read the ones the code in front of you triggers. Do not read all five
 by reflex.
 
-## Mechanisable, and therefore not here
-
-Some of this could be a lint rather than prose, and a rule that fails
-the build beats a rule an agent has to remember. Candidates:
-`forbid(unsafe_code)`, and a decode-path deny list covering
-`indexing_slicing`, `arithmetic_side_effects`, and `unwrap_used`.
-
-Not proposed here and not implemented here. Whether the gates change is
-the system's call, through its own process.
+Rules mechanisable as lints get promoted to build gates and removed
+from this prose; issue #76 tracks the current batch.
