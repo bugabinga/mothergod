@@ -33,6 +33,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- CI gate (operator directive): the four cargo jobs (fmt, clippy, test,
+  doc) skip on pull requests that change no cargo input, decided by one
+  `changes` job filtering on tool-input file types rather than tree
+  paths; pushes to `main` always run everything.
 - Pause detector (ADR-0004, amended): the usage-limit marker list gains
   the "session limit" dialect after run 32588022230 slipped through
   unpaused, and RESUME-AT now honors a UTC reset time advertised in the

@@ -26,9 +26,44 @@ env:
   RUSTFLAGS: --deny warnings
 
 jobs:
+  # Path filter (operator directive, Telegram, 2026-08-22). All four gates
+  # are cargo gates; a PR that changes no cargo input gets four skips, and
+  # the ruleset counts a skipped required check as satisfied. The filter
+  # enumerates tool-INPUT FILE TYPES, never tree paths: globs like *.rs and
+  # Cargo.toml stay correct when directories move, so the list drifts only
+  # when the toolchain itself changes. Sync rule: a PR that adds a new tool
+  # input class (say, a Markdown formatter) extends this regex in the same
+  # diff that adds the tool, ten lines away. Non-PR events always run
+  # everything, so main's green is never vacuous.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - name: Detect cargo-input changes
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename')"
+          if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
   fmt:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -39,6 +74,8 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -50,6 +87,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -59,6 +98,8 @@ jobs:
   doc:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
