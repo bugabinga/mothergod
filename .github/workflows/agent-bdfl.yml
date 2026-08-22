@@ -130,6 +130,10 @@ jobs:
           # plus account-scoped free-tier groups. wrangler reads this env
           # var natively.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Job-scoped fallback for gh writes after the claude app token
+          # expires ~1h into a session (issue #81). Comments only, never
+          # pushes or merges (GOVERNANCE.md "Push identity").
+          GH_WORKFLOW_TOKEN: ${{ github.token }}
           # Why this run woke: 'schedule', 'workflow_dispatch', or an
           # operator event (issues, issue_comment, pull_request, ...).
           TRIGGER_EVENT: ${{ github.event_name }}
