@@ -309,13 +309,15 @@ jobs:
             resolution mechanical so the standing verdict still covers
             the content: merge main into the PR branch, resolve (append
             conflicts keep both sides), push, wait for the four required
-            gates (approve action_required runs with GH_ADMIN_TOKEN:
-            gh api -X POST .../actions/runs/<id>/approve; the re-run
-            review job fails its bot-actor guard because your push makes
-            the actor github-actions, noise, ignore it), then land with
+            gates, then land with
             gh api -X PUT .../pulls/<n>/merge -f merge_method=squash,
             because auto-merge stays stuck even with the gates green
-            (the gh pr merge quirk of PR #25, verified again on #34). If
+            (the gh pr merge quirk of PR #25, verified again on #34).
+            If the re-triggered runs sit at action_required, stop there:
+            that hold is a GitHub approval gate, and no agent clears an
+            approval gate with any token (review verdict on PR #43).
+            Comment on the PR naming the held run, label the PR
+            blocked-on-human, and move on. If
             nothing needs direction,
             stop immediately without posting anything — a silent no-op run
             is a GOOD outcome, it conserves the operator's subscription.
