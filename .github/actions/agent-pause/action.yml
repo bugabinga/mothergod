@@ -2,9 +2,15 @@ name: agent-pause
 description: >-
   Usage-limit detector (ADR-0004). Inspects the claude-code-action execution
   log's STRUCTURED RESULT entries for a genuine usage-limit failure and, on
-  hit, opens the `agents-paused` issue with a RESUME-AT timestamp: +6h for
-  rolling-window limits, +24h for weekly limits. Idempotent: does nothing if
-  a pause issue is already open.
+  hit, opens the `agents-paused` issue with a RESUME-AT timestamp: the reset
+  time the error message advertises ("resets 5:50pm (UTC)") when present,
+  else +6h for rolling-window limits, +24h for weekly limits. Idempotent:
+  does nothing if a pause issue is already open.
+
+  Marker list (run 32588022230 post-mortem, 2026-08-22): the limit message's
+  wording is Anthropic's, not ours, and it changes; "You've hit your session
+  limit" slipped past a list that only knew "usage limit". When a limit
+  failure gets through unpaused, add its marker here.
 
   Invariant (issue #11 post-mortem, 2026-08-21): only error result objects
   are scanned, never the conversation transcript. This repo's prompts and
@@ -67,23 +73,42 @@ runs:
             for e in entries
             if isinstance(e, dict) and e.get("type") == "result" and e.get("is_error")
         )
-        m = re.search(r"usage[ _]limit|weekly limit|5-hour limit|out of extra usage", text)
+        m = re.search(
+            r"usage[ _]limit|weekly limit|5-hour limit|session limit|out of extra usage",
+            text,
+        )
         if not m:
             print("none")
-        elif "weekly limit" in text:
-            print("weekly:" + m.group(0))
-        else:
-            print("rolling:" + m.group(0))
+            sys.exit()
+
+        # Honor an advertised reset time ("resets 5:50pm (utc)") over the
+        # blanket fallback; the 17:32 hit reset 11 minutes later, +6h would
+        # have idled the fleet for the difference. UTC-labeled only: a reset
+        # in an unknown timezone is worse than the fallback.
+        resume = ""
+        r = re.search(r"resets (\d{1,2}):(\d{2})\s*(am|pm)\s*\(utc\)", text)
+        if r:
+            from datetime import datetime, timedelta, timezone
+            hour = int(r.group(1)) % 12 + (12 if r.group(3) == "pm" else 0)
+            now = datetime.now(timezone.utc)
+            t = now.replace(hour=hour, minute=int(r.group(2)), second=0, microsecond=0)
+            if t <= now:
+                t += timedelta(days=1)
+            resume = t.strftime("%Y-%m-%dT%H:%M:%SZ")
+        kind = "weekly" if "weekly limit" in text else "rolling"
+        print(f"{kind}|{m.group(0)}|{resume}")
         PY
         )"
         if [ "$verdict" = "none" ]; then
           echo "No usage-limit error in the session result; not pausing."
           exit 0
         fi
-        hours=6
-        case "$verdict" in weekly:*) hours=24 ;; esac
-        hit="${verdict#*:}"
-        resume_at="$(date -u -d "+${hours} hours" +%Y-%m-%dT%H:%M:%SZ)"
+        IFS='|' read -r kind hit resume_at <<<"$verdict"
+        if [ -z "$resume_at" ]; then
+          hours=6
+          [ "$kind" = weekly ] && hours=24
+          resume_at="$(date -u -d "+${hours} hours" +%Y-%m-%dT%H:%M:%SZ)"
+        fi
         existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --label agents-paused --state open --json number --jq '.[0].number // empty')"
         if [ -n "$existing" ]; then
           echo "Pause issue #$existing already open; not creating another."
