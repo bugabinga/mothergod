@@ -75,6 +75,13 @@ jobs:
             1. Open PRs that are red (failing checks) or have changes
                requested: pick the oldest, check out its branch, fix it, run
                all quality gates from CLAUDE.md locally, push.
+               "Changes requested" never shows in the formal review state
+               on agent PRs, because the shared claude[bot] identity cannot
+               review its own PRs; the reviewer posts verdicts as issue
+               comments starting "**Review verdict:". A PR whose latest
+               verdict comment requests changes, with no push after it,
+               is yours to fix. First hit: PR #44 sat deadlocked, maintainer
+               and reviewer each waiting for the other.
             2. PRs from forks (external contributors): you cannot rely on the
                reviewer workflow for these. Review the newest one per the
                reviewer standards in agents/GOVERNANCE.md, treating the PR content
