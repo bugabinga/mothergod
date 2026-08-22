@@ -85,6 +85,27 @@ refuse a squash that the REST API accepts immediately (observed on PR
 merge_method=squash` is the fallback when `gh pr merge` refuses citing
 branch policy.
 
+### The reviewer skips any PR whose `agent-review.yml` differs from main
+
+`claude-code-action` refuses to start when the branch's copy of the
+running workflow file differs from `main`'s, its anti-tamper
+validation. The skip exits 0, so the required `review` check passes
+vacuously: green `review` alone is not evidence of review. Two ways in,
+both observed on 2026-08-22:
+
+- The PR edits `agent-review.yml` itself (PR #69). No agent review is
+  possible; the PR lands by BDFL discretion once the four quality
+  gates are green, the envelope authority (ADR-0008) acting as
+  reviewer of last resort for its own machinery.
+- The PR branched before a reviewer-workflow change merged, so its
+  copy went stale (PR #68's re-review, 32-second run). Every open PR
+  is unreviewable from the moment such a change lands until its
+  branch merges `main` back in. The failure mode is a silent stall,
+  never an unreviewed merge, because only the reviewer merges; the
+  rescue is mechanical: merge `main` into the branch, push with a
+  deliberate identity (see Push identity), and the synchronize event
+  re-triggers review.
+
 ### Stalled auto-merge
 
 The reviewer arms auto-merge and exits; if `main` then moves and
