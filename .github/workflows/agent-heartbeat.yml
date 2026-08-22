@@ -4,7 +4,10 @@ name: agent-heartbeat
 
 on:
   schedule:
-    - cron: '17 5 * * *' # daily, off the hour on purpose
+    # Every 6 hours (operator directive: the maintainer was the slowest
+    # link in shipping actual code at one run per day). Off the hour and
+    # off :11 on purpose, so it does not collide with the BDFL's cadence.
+    - cron: '47 */6 * * *'
   workflow_dispatch:
 
 permissions: {}
