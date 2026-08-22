@@ -16,7 +16,7 @@ triage. The operator is *not* required to review routine changes — the system
 is fully autonomous by design (ADR-0003).
 
 **Agents (Claude, via GitHub Actions).**
-- *BDFL driver* — every three hours (ADR-0007): the project director
+- *BDFL driver* — hourly (ADR-0015): the project director
   (ADR-0005). Unblocks stalled
   work, prunes, reprioritizes the roadmap, and evolves everything non-code —
   including the other agents' workflows and prompts — without approval
