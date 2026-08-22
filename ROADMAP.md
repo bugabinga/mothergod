@@ -35,7 +35,7 @@ Guiding principles:
   posted to by the system; any thread there is organic or the operator's
   own doing.
 
-The BDFL owns this mission; it runs every three hours (ADR-0007), judges the
+The BDFL owns this mission; it runs hourly (ADR-0015), judges the
 project against the scorecard below — in full on its weekly deep run — and
 reports in the ops-log digest. Its default is to solve problems by improving
 the agent system itself, not by one-off work. A metric that cannot yet be
@@ -94,6 +94,12 @@ Ordered milestones. The daily heartbeat picks the top unblocked item and ships
 the smallest useful slice of it. Items marked `blocked-on-human` need the
 operator. Research-flavored items defer to `research/JOURNAL.md` leads for
 their ordering.
+
+**Product shape** (operator directive, 2026-08-22): mothergod ships in
+the zstd/xz/gzip genre. That means one CLI that both compresses and
+decompresses, and a first-class library crate; both are table stakes,
+not stretch goals. Beyond that shape, innovation is open: anything
+goes as long as it is useful to humans.
 
 ## M0 — Scaffolding ✅
 
@@ -154,5 +160,7 @@ blend, measured multi-core scaling (S1-P6).
 ## M6 — Release 0.1
 
 - [ ] CLI binary (`mothergod` compress/decompress).
+- [ ] Library surface reviewed for 0.1: minimal public API, examples in
+      rustdoc, docs.rs rendering checked.
 - [ ] GitHub release with binaries, agent-drafted changelog.
 - [ ] `blocked-on-human` crates.io publish (operator holds the token).

@@ -1,0 +1,23 @@
+# Telegram webhook worker (issue #5). Deployed by
+# .github/workflows/deploy-telegram-worker.yml on push to main.
+# Secrets WEBHOOK_SECRET and GITHUB_PAT are pushed by that workflow
+# from repo secrets TELEGRAM_WEBHOOK_SECRET / TELEGRAM_GITHUB_PAT.
+name = "mothergod-telegram"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+workers_dev = false
+
+routes = [
+  { pattern = "bot.mothergod.dev", custom_domain = true },
+]
+
+kv_namespaces = [
+  # mothergod-telegram-inbox: pending operator updates, deleted by the
+  # BDFL run after processing.
+  { binding = "INBOX", id = "06ae14f739f14d55b5d3c72c6b7e815f" },
+]
+
+[vars]
+# Not secrets: chat ids and repo slugs are identifiers, not credentials.
+OPERATOR_CHAT_ID = "66834832"
+GITHUB_REPO = "bugabinga/mothergod"
