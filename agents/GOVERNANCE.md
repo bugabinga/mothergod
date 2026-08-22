@@ -85,6 +85,45 @@ refuse a squash that the REST API accepts immediately (observed on PR
 merge_method=squash` is the fallback when `gh pr merge` refuses citing
 branch policy.
 
+## Push identity
+
+Three credentials can push, and the pusher decides whether the pipeline
+keeps moving (issue #57). Pick deliberately:
+
+- `github.token` (actor `github-actions[bot]`): pull_request runs it
+  triggers hold at GitHub's approval gate, and the review action refuses
+  the actor even after an operator approves the run. Never push to a PR
+  branch with it.
+- The claude app (actor `claude[bot]`): any `gh api` write with the
+  default session token. Triggered runs start unheld and the reviewer
+  accepts the actor (`allowed_bots`). Two limits: the app token cannot
+  touch `.github/workflows/**` (issue #24), and
+  `mcp__github_file_ops__commit_files` only reaches the branch its run
+  started on (`BRANCH_NAME` is pinned at action start), so it cannot
+  push to another PR's branch.
+- The admin PAT (actor `bugabinga`): operator-attributed, and
+  operator-attributed events wake the BDFL (issue #50). Reserved for
+  what the app cannot do: workflow-file pushes and cron-line changes.
+
+A held `action_required` run is cleared by re-attributing its event,
+not by approving it (no agent token approves a held run, PR #43):
+close/reopen the PR with the default session token and the reopened
+event carries `claude[bot]`, whose runs start unheld. Verified live on
+PR #59: its final github.token-pushed commit held at the gate until
+close/reopen re-attributed the event and the runs started. One quirk
+observed on the same PR: two pushes seconds apart coalesce into one
+synchronize event attributed to the first pusher.
+
+Scheduled workflows carry a landmine: GitHub attributes a schedule run
+to the account that landed the last change to the workflow's cron
+lines, and the claude-code-action token exchange rejects bot actors on
+schedule events ("User does not have write access", heartbeat runs of
+2026-08-22 after PR #30 was app-merged). An app-merged PR touching a
+cron line therefore kills that schedule until a human-attributed change
+to the cron lands. Rule: cron-line changes land admin-PAT-attributed
+(direct push, or `GH_TOKEN="$GH_ADMIN_TOKEN" gh pr merge`), never via
+an app merge.
+
 ## Humans other than the operator
 
 Human contributions are welcome and go through the same pipeline: file issues,
