@@ -12,8 +12,8 @@ on:
   # Operator-priority wake: any personal repo activity by the operator
   # starts a BDFL run within seconds (the job condition filters to the
   # operator's account, so agent and bot events never match). Bursts
-  # debounce via the agents-work concurrency group: at most one running
-  # plus one pending run, the pending one reading everything new.
+  # debounce via the agent-bdfl concurrency group (ADR-0014): at most one
+  # running plus one pending run, the pending one reading everything new.
   issues:
     types: [opened, reopened]
   issue_comment:
@@ -28,7 +28,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: agents-work
+  group: agent-bdfl
   cancel-in-progress: false
 
 jobs:

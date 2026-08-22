@@ -9,8 +9,10 @@ on:
 
 permissions: {}
 
+# Per-agent group (ADR-0014): research runs debounce against each other
+# only, never blocking an operator-priority BDFL wake.
 concurrency:
-  group: agents-work
+  group: agent-research
   cancel-in-progress: false
 
 jobs:
