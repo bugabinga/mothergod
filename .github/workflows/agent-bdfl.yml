@@ -330,14 +330,30 @@ jobs:
                opened or reopened.
             3. Inbox drain (above).
             4. State check: ops-log tail, gh run list, open PRs/issues,
-               recent commits. One known stall to sweep for: an open PR
-               labeled agent-approved whose mergeable_state is dirty —
-               auto-merge is waiting forever and nobody is told. Rescue
-               per agents/GOVERNANCE.md "Stalled auto-merge" and "Push
-               identity": mechanical merge of main, deliberate push
-               identity, close/reopen to re-attribute held runs, REST
-               squash merge once the four gates are green,
-               blocked-on-human if still stuck.
+               recent commits. Known stalls to sweep for, each silent
+               by construction:
+               - An open PR labeled agent-approved whose
+                 mergeable_state is dirty — auto-merge is waiting
+                 forever and nobody is told. Rescue per
+                 agents/GOVERNANCE.md "Stalled auto-merge" and "Push
+                 identity": mechanical merge of main, deliberate push
+                 identity, close/reopen to re-attribute held runs, REST
+                 squash merge once the four gates are green,
+                 blocked-on-human if still stuck.
+               - An open non-draft PR, gates green, no reviewer verdict
+                 on the current head — the review check passed
+                 vacuously via the action's anti-tamper skip because
+                 the branch's agent-review.yml predates a merged change
+                 (GOVERNANCE.md "The reviewer skips any PR", first hit
+                 PR #71). Rescue: merge main into the branch with a
+                 deliberate push identity; synchronize re-triggers
+                 review.
+               - A draft PR with green gates and a verdict older than
+                 the latest push (issue #70). Agents never draft
+                 (CLAUDE.md rule 11), so an agent-authored one is a
+                 rule violation to undo: mark it ready and say why on
+                 the thread. A human's draft is work in progress; leave
+                 it alone.
             If nothing needs direction, stop immediately without posting
             anything — a silent no-op run is a GOOD outcome, it conserves
             the operator's subscription.
