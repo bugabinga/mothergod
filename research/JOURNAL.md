@@ -138,8 +138,29 @@ record.
   without tripping `dead_code` under `--deny warnings` while unwired, and
   filters are a defensible standalone library surface on their own merits.
   Remaining M1 scope: see S2-D2.
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 delta-filter slice: the
-  other filter kinds (transpose, BCJ, base64-unwrap, reverse) and the
+- S2-A3 | ACCEPTED | Second slice of M1: the row-major-to-column-major
+  transpose filter (`JOURNAL` S1-A2) ported to `src/filters.rs` as a
+  standalone reversible transform (`transpose::encode`/`decode`), mirroring
+  S2-A2's structure. Behavior ported from the archive's `tpose`/`untpose`
+  (`research/imports/session-1/mothergod.rs`), not the code (ADR-0006):
+  rewrites `data`, interpreted as rows of `columns` bytes, column by
+  column; `columns` is `NonZeroUsize` so a zero column count (no rows to
+  transpose) is unrepresentable. `filters.rs` split its flat `encode`/
+  `decode` into `delta` and `transpose` submodules so the two filters'
+  functions of the same name don't collide — no external code referenced
+  the old flat names (grepped clean), so the rename is not a breaking
+  change to anything real. | 6 unit tests per filter kind (12 total, up
+  from 6): round-trip across 10 column counts between 1 and 1001 on
+  1000-byte cyclic data, empty input, single byte, columns wider than the
+  data, an explicit grouping check on a short example, single-column
+  identity; `cargo fmt`/`clippy --all-targets -- --deny
+  warnings`/`test --all-targets`/`test --doc`/`doc --no-deps` all clean. |
+  No bpb measurement, same reason as S2-A2: not yet wired to a `Method`
+  variant, so there is still no champion to diff against —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
+  Remaining M1 scope: see S2-D2.
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2/S2-A3 filter slices: the
+  other filter kinds (BCJ, base64-unwrap, reverse) and the
   `pick_filters` trial-selection heuristic; the optimal-parse LZ stage
   (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the context-mixing
   entropy models (`Lit` six-expert arena, flag/length/offset models); the
