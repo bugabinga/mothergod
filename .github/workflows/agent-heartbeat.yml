@@ -122,3 +122,18 @@ jobs:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+
+      # Audit trail (operator directive): prompt and metadata in, final
+      # response out. Never the transcript, which records command lines and
+      # can carry credentials. Must not fail the run.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        uses: ./.github/actions/agent-audit
+        with:
+          role: maintainer
+          execution_file: ${{ steps.claude.outputs.execution_file }}
+          redact: |
+            ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+            ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+            ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+            ${{ secrets.CLOUDFLARE_API_TOKEN }}

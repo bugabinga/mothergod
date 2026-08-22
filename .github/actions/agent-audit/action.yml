@@ -1,0 +1,150 @@
+# Audit trail: publishes one agent run as the function it is, text and
+# metadata in, text out.
+#
+# Deliberately NOT the full session transcript. Transcripts record command
+# lines, and some APIs force a credential into the command itself (Telegram's
+# /bot<token>/ path), so publishing one on a public repository would leak.
+# Artifacts are world-readable on public repos and GitHub's secret masking
+# covers workflow logs only, never artifact contents. Every extracted file is
+# scrubbed against the run's known secret values as a second line of defence,
+# and CLAUDE.md hard rule 10 is the first.
+#
+# This step must never fail an agent run: observability does not get to break
+# the thing it observes.
+name: agent-audit
+description: Publish an agent run's prompt, metadata and final response as an artifact
+inputs:
+  role:
+    description: Which agent produced this run (bdfl, maintainer, reviewer, researcher)
+    required: true
+  execution_file:
+    description: claude-code-action's execution_file output
+    required: true
+  redact:
+    description: Newline-separated secret values to scrub from the output
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - id: extract
+      if: inputs.execution_file != ''
+      shell: bash
+      env:
+        ROLE: ${{ inputs.role }}
+        EXEC_FILE: ${{ inputs.execution_file }}
+        REDACT: ${{ inputs.redact }}
+        EVENT: ${{ github.event_name }}
+        ACTOR: ${{ github.actor }}
+        NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || '' }}
+        SHA: ${{ github.sha }}
+        REF: ${{ github.ref }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
+      run: |
+        set -uo pipefail
+        out="${RUNNER_TEMP}/agent-audit"
+        mkdir -p "$out"
+        python3 - "$out" <<'PY' || echo "::warning::audit extraction incomplete"
+        import json, os, sys
+
+        out = sys.argv[1]
+        path = os.environ.get("EXEC_FILE", "")
+
+        entries = []
+        try:
+            raw = open(path, encoding="utf-8", errors="replace").read()
+            try:
+                data = json.loads(raw)
+                entries = data if isinstance(data, list) else [data]
+            except json.JSONDecodeError:
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+        except OSError as exc:
+            print(f"cannot read execution file: {exc}")
+
+        def text_of(content):
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                    elif isinstance(block, str):
+                        parts.append(block)
+                return "\n".join(p for p in parts if p)
+            return ""
+
+        # Input: the first user turn is the composed prompt as the model saw it.
+        prompt = ""
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            if e.get("type") == "user":
+                msg = e.get("message", e)
+                prompt = text_of(msg.get("content") if isinstance(msg, dict) else "")
+                if prompt:
+                    break
+
+        # Output: the last result entry carries the agent's final response.
+        response, is_error, num_turns = "", None, None
+        for e in entries:
+            if isinstance(e, dict) and e.get("type") == "result":
+                for key in ("result", "text", "content"):
+                    if e.get(key):
+                        response = text_of(e[key])
+                        break
+                is_error = e.get("is_error", is_error)
+                num_turns = e.get("num_turns", num_turns)
+
+        meta = {
+            "role": os.environ.get("ROLE", ""),
+            "trigger": {
+                "event": os.environ.get("EVENT", ""),
+                "actor": os.environ.get("ACTOR", ""),
+                "number": os.environ.get("NUMBER", ""),
+            },
+            "commit": os.environ.get("SHA", ""),
+            "ref": os.environ.get("REF", ""),
+            "run_id": os.environ.get("RUN_ID", ""),
+            "run_attempt": os.environ.get("RUN_ATTEMPT", ""),
+            "is_error": is_error,
+            "num_turns": num_turns,
+            "entries_parsed": len(entries),
+            "prompt_extracted": bool(prompt),
+            "response_extracted": bool(response),
+        }
+
+        files = {
+            "input-prompt.md": prompt or "(prompt not found in execution file)",
+            "output-response.md": response or "(final response not found in execution file)",
+            "metadata.json": json.dumps(meta, indent=2),
+        }
+
+        secrets = [v.strip() for v in os.environ.get("REDACT", "").splitlines() if len(v.strip()) >= 8]
+        redactions = 0
+        for name, body in files.items():
+            for value in secrets:
+                if value in body:
+                    body = body.replace(value, "***REDACTED***")
+                    redactions += 1
+            with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
+                fh.write(body)
+
+        print(f"audit: {len(entries)} entries, prompt={bool(prompt)}, "
+              f"response={bool(response)}, redactions={redactions}")
+        PY
+
+    - if: inputs.execution_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: audit-${{ inputs.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/agent-audit
+        retention-days: 90
+        if-no-files-found: warn
