@@ -21,6 +21,9 @@ All notable changes to this project are documented here. Format follows
   row-major-to-column-major transpose filter, ported from the founding
   session's archived codec. `filters` is now submodules (`delta`,
   `transpose`) to keep each filter's `encode`/`decode` pair namespaced.
+- Codec port, third filter slice (`research/JOURNAL.md` S2-A4): the x86
+  call/jmp (BCJ) filter, ported from the founding session's archived
+  codec as a `bcj` submodule of `filters`.
 - Deslopper agent (ADR-0016): a fifth agent seat that removes slop from
   `src/` twice daily without changing observable behaviour, one scope per
   PR, approved by the reviewer like any other agent PR. Its taxonomy and
