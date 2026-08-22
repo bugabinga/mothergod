@@ -140,8 +140,8 @@ ride in your prompt from `agents/personas/`.
 
 Two realms, strictly separated (ADR-0010): the classical project
 (`src/`, `docs/`, `research/`, `assets/`, root community files) and the
-agent system (`agents/`, plus `.github/` and this file by platform
-requirement). New files follow the placement rule in `agents/README.md`.
+agent system (`agents/`, plus `.github/`, `.claude/` and this file by
+platform requirement). New files follow the placement rule in `agents/README.md`.
 
 | Path | What |
 |---|---|
@@ -156,6 +156,7 @@ requirement). New files follow the placement rule in `agents/README.md`.
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
 | `ROADMAP.md` | mission, success scorecard, milestones; heartbeat picks work from here |
 | `.github/workflows/` | the agent processes themselves — changeable by PR like any code |
+| `.claude/skills/` | agent operating manuals, one directory per skill (ADR-0016) |
 
 ## Issue/PR conventions
 
