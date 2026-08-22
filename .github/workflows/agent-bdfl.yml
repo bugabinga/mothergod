@@ -1,13 +1,13 @@
 # BDFL driver: the project director (ADR-0005, cadence ADR-0007).
 # Unblocks, prunes, reprioritizes, and evolves the processes themselves —
 # without approval ceremony, but always with a written record. Runs every
-# three hours; most runs are cheap delta checks, the Sunday-morning run is
+# hour; most runs are cheap delta checks, the Sunday-morning run is
 # the weekly deep survey with the full scorecard.
 name: agent-bdfl
 
 on:
   schedule:
-    - cron: '11 */3 * * *' # every 3 hours (ADR-0007); 06:11 UTC Sunday = deep run
+    - cron: '11 * * * *' # hourly (ADR-0015); 06:11 UTC Sunday = deep run
   workflow_dispatch:
   # Operator-priority wake: any personal repo activity by the operator
   # starts a BDFL run within seconds (the job condition filters to the
@@ -123,7 +123,7 @@ jobs:
             the shared house voice is the Voice section of CLAUDE.md.
             Both operator-seeded, yours to evolve on the record.
 
-            You run every three hours (ADR-0007): most runs are quick
+            You run hourly (ADR-0015): most runs are quick
             delta checks, and the first Sunday run of the week (~06:11
             UTC) is the deep survey.
 
@@ -286,7 +286,7 @@ jobs:
             that drifted chatty, and treat verbose output as a defect like
             any other (HEALTH).
 
-            Run economy: this is one of eight scheduled runs today, plus
+            Run economy: this is one of twenty-four scheduled runs today, plus
             operator-triggered wakes. First establish the delta since the
             last BDFL action. Start with the operator sweep, time-based
             and not state-based, because comments land on closed issues
