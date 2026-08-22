@@ -1,3 +1,9 @@
+[workspace]
+members = ["bench"]
+# CLAUDE.md's required checks invoke bare `cargo <cmd>` (no --workspace), so
+# make that cover the bench crate too, not just the root package.
+default-members = [".", "bench"]
+
 [package]
 name = "mothergod"
 version = "0.0.1"
@@ -12,9 +18,12 @@ categories = ["compression"]
 
 [dependencies]
 
-[lints.rust]
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 missing_docs = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }

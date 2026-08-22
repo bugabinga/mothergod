@@ -6,6 +6,14 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Benchmark harness, first slice (`research/JOURNAL.md` S2-A1): a new
+  `bench/` workspace crate with the two mandatory corpus generators from
+  `research/corpus/POLICY.md` ported to Rust — `entropy_ladder` (iid bytes
+  at a chosen order-0 entropy) and `markov_h8_2_trap` (uniform histogram,
+  low conditional entropy). Core `mothergod` crate stays zero-dependency.
+
 ### Removed
 
 - The interactive `@claude` mention agent (operator directive). Mentions

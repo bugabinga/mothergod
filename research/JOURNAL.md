@@ -101,6 +101,29 @@ record.
 - S1-D2 | DEBT | Benchmark harness in-repo: Silesia + Canterbury fetch,
   entropy-ladder + markov-trap generators, sealed validation split, regret
   scoring, baseline gate in CI, progress graphs from progress.jsonl.
+- S2-A1 | ACCEPTED | First slice of S1-D2: the two mandatory corpus
+  generators (POLICY.md) ported to Rust as a new `bench/` workspace crate —
+  `entropy_ladder` (iid bytes at a chosen order-0 entropy) and
+  `markov_h8_2_trap` (uniform histogram, low conditional entropy). Behavior
+  ported from the founding session's `corpus.py` (`_skewed_weights` bisection
+  + additive random walk), not the code (ADR-0006). | Measured on 200,000-byte
+  samples, seed 0xC0FFEE123456789A: entropy ladder targets {1,2,4,6,8} bits
+  landed at {0.998, 1.998, 3.997, 5.996, 7.999} (all within 0.004 bits);
+  markov-H8/2 trap landed at h0=7.998, h1=1.987 (targets 8.0/2.0). | No
+  round-trip, ratio, or sealed-validation measurement in this change — there
+  is no real codec yet (M1) and no champion to diff against, so this is
+  infra, not an experiment; `progress.jsonl` records it as `kind: "patch"`
+  with null bpb deltas per the prerequisite-check rule. Root `Cargo.toml`
+  gained `[workspace]`; core crate (`mothergod`) still zero-deps (ADR-0002),
+  `bench/` depends on it by path. Remaining S1-D2 scope untouched: see S2-D1.
+- S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
+  Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
+  URL+SHA-256), the structured generator classes (jsonl/log, json,
+  base64-wrapped, audio, image, sqlite-like, x86 binary — specs in
+  `corpus.py`), the three-tier train/sealed/finals split plumbing, regret
+  scoring, the CI baseline gate, and progress-graph rendering. Ideal-cost
+  accounting mode (M2) additionally needs real model code (M1) to hang off
+  of.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
