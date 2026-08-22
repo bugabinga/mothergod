@@ -14,6 +14,10 @@ on:
   # operator's account, so agent and bot events never match). Bursts
   # debounce via the agent-bdfl concurrency group (ADR-0014): at most one
   # running plus one pending run, the pending one reading everything new.
+  # The trigger's job is "wake up", never "here is what happened": a
+  # displaced run reads nothing, so the surviving run re-derives the
+  # window with the time-based operator sweep in the prompt (issue #36).
+  # Event payloads are hints; the sweep is the truth.
   issues:
     types: [opened, reopened]
   issue_comment:
@@ -101,6 +105,14 @@ jobs:
           # operator event (issues, issue_comment, pull_request, ...).
           TRIGGER_EVENT: ${{ github.event_name }}
           TRIGGER_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || '' }}
+          # What kind of action (opened, created, submitted, ...) and the
+          # exact comment/review URL when there is one — TRIGGER_NUMBER
+          # names the thread, TRIGGER_URL names the message, and it works
+          # on closed issues and merged PRs. Deliberately no body field:
+          # prose is fetched with gh, never piped into the prompt
+          # (issue #36).
+          TRIGGER_ACTION: ${{ github.event.action || '' }}
+          TRIGGER_URL: ${{ github.event.comment.html_url || github.event.review.html_url || '' }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
@@ -254,11 +266,16 @@ jobs:
             Operator-priority wake: besides the schedule, you wake within
             seconds whenever the operator personally acts on the repo.
             Check TRIGGER_EVENT: if it is not schedule or
-            workflow_dispatch, the operator did something (TRIGGER_NUMBER
-            names the issue or PR when there is one). Their action is your
-            top priority: read it with gh before anything else, act on it
-            first, and only then consider other work. Operator input
-            outranks all queued and scheduled work.
+            workflow_dispatch, the operator did something. TRIGGER_ACTION
+            says what kind, TRIGGER_NUMBER names the thread, TRIGGER_URL
+            points at the exact comment or review when there is one.
+            Their action is your top priority: read it with gh before
+            anything else, act on it first, and only then consider other
+            work. Operator input outranks all queued and scheduled work.
+            The trigger is a hint, not the record: bursts debounce to one
+            surviving run (ADR-0014) and the displaced run reads nothing,
+            so the operator sweep in the delta check is what guarantees
+            no operator action is lost. Run it every wake.
 
             Communication economy (operator directive): this repo may live
             for years, and its written record must not drown in sloppy LLM
@@ -270,9 +287,19 @@ jobs:
             any other (HEALTH).
 
             Run economy: this is one of eight scheduled runs today, plus
-            operator-triggered wakes. First establish
-            the delta since the last BDFL action (ops-log tail, gh run list,
-            open PRs/issues, recent commits). If nothing needs direction,
+            operator-triggered wakes. First establish the delta since the
+            last BDFL action. Start with the operator sweep, time-based
+            and not state-based, because comments land on closed issues
+            and merged PRs too (issue #36): anchor on the previous
+            successful agent-bdfl run's start time (gh run list), then
+              gh api "repos/$GITHUB_REPOSITORY/issues/comments?since=<anchor>"
+              gh api "repos/$GITHUB_REPOSITORY/pulls/comments?since=<anchor>"
+            filtered to the operator's login; act on anything not yet
+            acted on. (Residual gap, accepted: a review with no comment
+            on a merged PR is outside both endpoints and covered only by
+            its own wake's TRIGGER_URL.) Then the state check: ops-log
+            tail, gh run list, open PRs/issues, recent commits. If
+            nothing needs direction,
             stop immediately without posting anything — a silent no-op run
             is a GOOD outcome, it conserves the operator's subscription.
             Only the weekly deep run reads everything:
