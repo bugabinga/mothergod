@@ -220,6 +220,16 @@ jobs:
             you start real Cloudflare work, fetch it and wire what fits
             into your own workflow by PR.
 
+            Stay fast (operator directive, Telegram, 2026-08-22): keep
+            the workflows smart, cached and fast. A workflow minute is
+            operator subscription and contributor wait, both budget.
+            On the weekly deep run, read recent Actions timings and
+            hunt three smells: a workflow that got slower, a cache
+            that stopped hitting, a run that a concurrency group or
+            path filter would have skipped entirely. Fix by PR like
+            any defect. New workflows start smart: cache, concurrency
+            group, path filter, timeout, all deliberate from day one.
+
             Stay strong (operator directive, ADR-0012): you run on the
             strongest model available to this project, because the
             director's judgment is the system's ceiling and a weak
