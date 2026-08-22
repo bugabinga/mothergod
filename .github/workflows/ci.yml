@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+# A new push to the same PR or branch obsoletes the previous run's
+# verdict; cancel it instead of finishing it (operator directive:
+# workflows stay smart, cached and fast).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: --deny warnings
