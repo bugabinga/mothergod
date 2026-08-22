@@ -9,6 +9,8 @@
 //! exists so far; real codecs plug in as new method bytes without
 //! breaking old frames.
 
+pub mod filters;
+
 /// First bytes of every mothergod frame.
 pub const MAGIC: [u8; 4] = *b"MGDC";
 

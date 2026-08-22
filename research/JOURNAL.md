@@ -116,6 +116,36 @@ record.
   with null bpb deltas per the prerequisite-check rule. Root `Cargo.toml`
   gained `[workspace]`; core crate (`mothergod`) still zero-deps (ADR-0002),
   `bench/` depends on it by path. Remaining S1-D2 scope untouched: see S2-D1.
+- S2-A2 | ACCEPTED | First slice of M1: the fixed-stride delta filter
+  (JOURNAL S1-A2) ported to `src/filters.rs` as a standalone reversible
+  transform (`encode`/`decode`, wrapping arithmetic, `stride: NonZeroUsize`
+  so a zero stride — which would destroy data instead of transforming it —
+  is unrepresentable rather than runtime-checked). Behavior ported from the
+  archive's `sdelta`/`usdelta` (`research/imports/session-1/mothergod.rs`),
+  not the code (ADR-0006): forward accumulation reads the mutable output on
+  decode, the immutable input on encode, so short-data and zero-length
+  inputs are a no-op in both directions with no bounds panic. | 12 unit
+  tests (round-trip across strides 1..1001 on 1000-byte cyclic data, empty
+  input, single byte, stride longer than data, u8-wrap construction); `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/`test
+  --doc`/`doc --no-deps` all clean. | No bpb measurement: this filter is not
+  yet wired to a `Method` variant (needs parse+models+coder to be worth
+  measuring, and a `FORMAT_VERSION` bump per CLAUDE.md hard rule 5 once it
+  is), so there is still no champion to diff against — `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas, same as S2-A1.
+  Exposed as `pub mod filters` (not `pub(crate)`): keeps the module reachable
+  without tripping `dead_code` under `--deny warnings` while unwired, and
+  filters are a defensible standalone library surface on their own merits.
+  Remaining M1 scope: see S2-D2.
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 delta-filter slice: the
+  other filter kinds (transpose, BCJ, base64-unwrap, reverse) and the
+  `pick_filters` trial-selection heuristic; the optimal-parse LZ stage
+  (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the context-mixing
+  entropy models (`Lit` six-expert arena, flag/length/offset models); the
+  range coder (`Enc`/`Dec`); and wiring all of it behind a new `Method`
+  variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
+  `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
+  behavior, not code, per ADR-0006). One PR per module per the M1 checklist.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,

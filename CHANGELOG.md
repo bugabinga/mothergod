@@ -13,6 +13,10 @@ All notable changes to this project are documented here. Format follows
   `research/corpus/POLICY.md` ported to Rust — `entropy_ladder` (iid bytes
   at a chosen order-0 entropy) and `markov_h8_2_trap` (uniform histogram,
   low conditional entropy). Core `mothergod` crate stays zero-dependency.
+- Codec port, first slice (`research/JOURNAL.md` S2-A2): `filters` module
+  with a fixed-stride delta filter, ported from the founding session's
+  archived codec. Not yet wired to a compression `Method` — the LZ, model,
+  and coder modules it will sit behind are still to come.
 - Real-time operator wake (issue #5): Telegram messages hit a Cloudflare
   Worker at `bot.mothergod.dev` that stores them in KV and dispatches
   the BDFL within seconds, replacing the per-run `getUpdates` poll.
