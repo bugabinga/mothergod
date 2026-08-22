@@ -1,0 +1,51 @@
+# Deploy infra/telegram-worker/ (bot.mothergod.dev) and point the
+# status bot's webhook at it. Order matters: deploy, then secrets, then
+# setWebhook — no traffic arrives before the worker can authenticate it.
+name: deploy-telegram-worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      ["infra/telegram-worker/**", ".github/workflows/deploy-telegram-worker.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-telegram-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/telegram-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Not a secret: Cloudflare account ids are opaque identifiers, not
+      # credentials (same as deploy-site.yml).
+      CLOUDFLARE_ACCOUNT_ID: c9526445475a4d62fd6e330810573ef0
+    steps:
+      - uses: actions/checkout@v7
+      - run: npx wrangler@4 deploy
+      - name: Push worker secrets
+        run: |
+          printf '%s' "$WEBHOOK_SECRET" | npx wrangler@4 secret put WEBHOOK_SECRET
+          printf '%s' "$GITHUB_PAT" | npx wrangler@4 secret put GITHUB_PAT
+        env:
+          WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          GITHUB_PAT: ${{ secrets.TELEGRAM_GITHUB_PAT }}
+      - name: Point the bot's webhook at the worker
+        run: |
+          curl -sS -f -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+            -d url=https://bot.mothergod.dev/ \
+            -d secret_token="${WEBHOOK_SECRET}" \
+            -d 'allowed_updates=["message"]' > /dev/null
+          echo "webhook set"
+        env:
+          BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}

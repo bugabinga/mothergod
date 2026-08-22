@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- Real-time operator wake (issue #5): Telegram messages hit a Cloudflare
+  Worker at `bot.mothergod.dev` that stores them in KV and dispatches
+  the BDFL within seconds, replacing the per-run `getUpdates` poll.
+
 ### Removed
 
 - The interactive `@claude` mention agent (operator directive). Mentions
