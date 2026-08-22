@@ -12,7 +12,7 @@ on:
   # Operator-priority wake: any personal repo activity by the operator
   # starts a BDFL run within seconds (the job condition filters to the
   # operator's account, so agent and bot events never match). Bursts
-  # debounce via the agents-work concurrency group: at most one running
+  # debounce via the agents-bdfl concurrency group: at most one running
   # plus one pending run, the pending one reading everything new.
   issues:
     types: [opened, reopened]
@@ -27,8 +27,14 @@ on:
 
 permissions: {}
 
+# The director gets its own lane, deliberately not the workers'
+# agents-work group. "Within seconds" for an operator wake is only true
+# while the lane is free, and sharing a group with the heartbeat and the
+# researcher made that guarantee depend on whatever a worker happened to
+# be doing. Debounce is unchanged: one running plus one pending, newest
+# pending wins.
 concurrency:
-  group: agents-work
+  group: agents-bdfl
   cancel-in-progress: false
 
 jobs:
