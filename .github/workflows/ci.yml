@@ -36,14 +36,20 @@ jobs:
   # diff that adds the tool, ten lines away. Non-PR events always run
   # everything, so main's green is never vacuous.
   #
-  # Fail-safe by inversion (review on #79): the gates skip only when this
-  # job POSITIVELY outputs rust=false. If it fails or is cut short, the
-  # output is empty, the gates' `!= 'false'` condition holds, and they
-  # run; `!cancelled()` keeps them eligible despite the failed needs.
-  # A broken filter costs runner minutes, never a vacuous green.
+  # Fail-safe by inversion (review on #79, two rounds): the gates skip
+  # only when this job POSITIVELY outputs rust=false. Any other upstream
+  # conclusion (failure, timeout-as-cancelled, skip) leaves the output
+  # empty, the gates' `!= 'false'` condition holds, and they run.
+  # `always()` and not `!cancelled()` on the gates: a timed-out needs job
+  # concludes "cancelled", and whether job-level `cancelled()` reads the
+  # run or the needs job is ambiguous in the docs, so the primitive that
+  # runs under every upstream conclusion is the only unambiguous one.
+  # Accepted trade: a concurrency-cancelled run's gates still finish,
+  # costing seconds of runner time. A broken filter costs runner
+  # minutes, never a vacuous green.
   changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     permissions:
       pull-requests: read
     outputs:
@@ -69,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -81,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -94,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -105,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
