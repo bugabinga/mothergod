@@ -54,6 +54,10 @@ A push that fails them wastes a cycle.
     command echoes, and redact it in anything you post or write to a file.
     GitHub masks secrets in workflow logs only: artifacts, transcripts, commit
     contents and issue comments are unmasked.
+11. Never convert a PR to draft. A draft is a human's work-in-progress
+    signal; an agent draft silences the reviewer and deadlocks the PR
+    (issue #70). Merge interlocks belong in the reviewer's prompt, not
+    in PR state.
 
 ## Style
 
