@@ -35,6 +35,12 @@ jobs:
   # input class (say, a Markdown formatter) extends this regex in the same
   # diff that adds the tool, ten lines away. Non-PR events always run
   # everything, so main's green is never vacuous.
+  #
+  # Fail-safe by inversion (review on #79): the gates skip only when this
+  # job POSITIVELY outputs rust=false. If it fails or is cut short, the
+  # output is empty, the gates' `!= 'false'` condition holds, and they
+  # run; `!cancelled()` keeps them eligible despite the failed needs.
+  # A broken filter costs runner minutes, never a vacuous green.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -52,7 +58,7 @@ jobs:
             echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename')"
+          files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
           if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$'; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -63,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -75,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -88,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -99,7 +105,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
