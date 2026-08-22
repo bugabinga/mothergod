@@ -110,7 +110,12 @@ runs:
                         prompt = candidate
 
         # Output: the last result entry carries the agent's final response.
-        response, is_error, num_turns = "", None, None
+        # Telemetry (issue #64): run economics lifted from the result entry
+        # by whitelist, never wholesale. These values are API-authored
+        # numbers and enums, so the keys-only rule (which guards against
+        # model-authored prose) does not apply. permission_denials is the
+        # exception: its tool_input is model text, keep count and names only.
+        response, is_error, telemetry = "", None, {}
         for e in entries:
             if isinstance(e, dict) and e.get("type") == "result":
                 for key in ("result", "text", "content"):
@@ -118,7 +123,27 @@ runs:
                         response = text_of(e[key])
                         break
                 is_error = e.get("is_error", is_error)
-                num_turns = e.get("num_turns", num_turns)
+                for key in ("num_turns", "total_cost_usd", "duration_ms",
+                            "duration_api_ms", "ttft_ms", "stop_reason",
+                            "terminal_reason", "api_error_status", "usage",
+                            "modelUsage"):
+                    if key in e:
+                        telemetry[key] = e[key]
+                denials = e.get("permission_denials")
+                if isinstance(denials, list):
+                    telemetry["permission_denials"] = {
+                        "count": len(denials),
+                        "tools": sorted({d.get("tool_name", "?")
+                                         for d in denials if isinstance(d, dict)}),
+                    }
+
+        # Rate-limit state (issue #63): the typed rate_limit_event payload is
+        # API-authored metadata, published verbatim so its semantics can be
+        # decided from evidence. Presence alone is NOT a pause signal: it
+        # appeared in a healthy no-op run (issue #11's lesson applies).
+        rate_limits = [e.get("rate_limit_info") for e in entries
+                       if isinstance(e, dict) and e.get("type") == "rate_limit_event"
+                       and e.get("rate_limit_info") is not None]
 
         shape = {}
         for e in entries:
@@ -141,7 +166,8 @@ runs:
             "run_id": os.environ.get("RUN_ID", ""),
             "run_attempt": os.environ.get("RUN_ATTEMPT", ""),
             "is_error": is_error,
-            "num_turns": num_turns,
+            "telemetry": telemetry,
+            "rate_limit_events": rate_limits,
             "entries_parsed": len(entries),
             "prompt_extracted": bool(prompt),
             "response_extracted": bool(response),
