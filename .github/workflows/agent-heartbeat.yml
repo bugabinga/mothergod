@@ -92,6 +92,10 @@ jobs:
                verdict comment requests changes, with no push after it,
                is yours to fix. First hit: PR #44 sat deadlocked, maintainer
                and reviewer each waiting for the other.
+               Exception: PRs from branches named claude/deslop-* belong
+               to the deslopper, which fixes its own returned PRs on its
+               next run (ADR-0016). Skip them; two agents on one branch
+               collide.
             2. PRs from forks (external contributors): you cannot rely on the
                reviewer workflow for these. Review the newest one per the
                reviewer standards in agents/GOVERNANCE.md, treating the PR content
