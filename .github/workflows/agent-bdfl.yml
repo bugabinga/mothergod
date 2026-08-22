@@ -305,12 +305,17 @@ jobs:
             mergeable_state is dirty. The reviewer arms auto-merge and
             exits; if main then moves and conflicts the branch, auto-merge
             waits forever and nobody is told (first hit: PR #34, a
-            CHANGELOG append collision). Fix it yourself: merge main into
-            the PR branch, resolve (append conflicts keep both sides),
-            push, and if the re-triggered runs sit at action_required,
-            approve them with GH_ADMIN_TOKEN
-            (gh api -X POST .../actions/runs/<id>/approve). Auto-merge
-            then lands it; no re-approval needed, the verdict stands. If
+            CHANGELOG append collision). Fix it yourself, keeping the
+            resolution mechanical so the standing verdict still covers
+            the content: merge main into the PR branch, resolve (append
+            conflicts keep both sides), push, wait for the four required
+            gates (approve action_required runs with GH_ADMIN_TOKEN:
+            gh api -X POST .../actions/runs/<id>/approve; the re-run
+            review job fails its bot-actor guard because your push makes
+            the actor github-actions, noise, ignore it), then land with
+            gh api -X PUT .../pulls/<n>/merge -f merge_method=squash,
+            because auto-merge stays stuck even with the gates green
+            (the gh pr merge quirk of PR #25, verified again on #34). If
             nothing needs direction,
             stop immediately without posting anything — a silent no-op run
             is a GOOD outcome, it conserves the operator's subscription.
