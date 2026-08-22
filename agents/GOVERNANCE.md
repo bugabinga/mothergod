@@ -163,6 +163,19 @@ keeps moving (issue #57). Pick deliberately:
   (`git -c http.https://github.com/.extraheader= push ...`), or the
   remote silently sees the app and applies its rules.
 
+Token lifetime (issue #81): the claude app token expires about an hour
+into a session; past that, every `gh` call riding the default
+credential returns 401 Bad credentials (first hit: run 32590951126,
+whose ops-log comment died seconds after its merges succeeded).
+Front-load token-dependent writes. For comments that must land late in
+a long run, fall back to the job-scoped workflow token, exposed to
+agent sessions as `GH_WORKFLOW_TOKEN`:
+`GH_TOKEN="$GH_WORKFLOW_TOKEN" gh api ...`. That identity is
+`github-actions[bot]`, blessed for issue and PR comments only, never
+for pushes (first bullet above) and never for merges. The reviewer is
+exempt from all of this; its `gh` rides `github.token` job-wide
+already.
+
 A held `action_required` run is cleared by re-attributing its event,
 not by approving it (no agent token approves a held run, PR #43):
 close/reopen the PR with the default session token and the reopened
