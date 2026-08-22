@@ -85,6 +85,23 @@ refuse a squash that the REST API accepts immediately (observed on PR
 merge_method=squash` is the fallback when `gh pr merge` refuses citing
 branch policy.
 
+### Stalled auto-merge
+
+The reviewer arms auto-merge and exits; if `main` then moves and
+conflicts the branch, auto-merge waits forever and nobody is told
+(first hit: PR #34, a CHANGELOG append collision). The BDFL sweeps
+every run for the signature — an open `agent-approved` PR whose
+mergeable state is dirty — and rescues it mechanically, so the
+reviewer's standing verdict still covers the content: merge `main`
+into the branch, resolve without judgment calls (append conflicts
+keep both sides), push with a deliberate identity (see Push identity
+below), and clear the held runs that push creates by close/reopen.
+Once the required gates are green, land with the REST squash merge
+above, because auto-merge stays stuck even with green gates (PR #25's
+quirk, verified again on #34) and close/reopen disarms it anyway. If
+a held run still blocks after re-attribution, comment on the PR
+naming it, label `blocked-on-human`, move on.
+
 ## Push identity
 
 Three credentials can push, and the pusher decides whether the pipeline
