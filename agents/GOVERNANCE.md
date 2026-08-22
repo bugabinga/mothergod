@@ -94,11 +94,13 @@ keeps moving (issue #57). Pick deliberately:
   triggers hold at GitHub's approval gate, and the review action refuses
   the actor even after an operator approves the run. Never push to a PR
   branch with it.
-- The claude app (actor `claude[bot]`): `mcp__github_file_ops__commit_files`
-  or any `gh api` write with the default session token. Triggered runs
-  start unheld and the reviewer accepts the actor (`allowed_bots`). The
-  default for every agent push, with one limit: the app token cannot
-  touch `.github/workflows/**` (issue #24).
+- The claude app (actor `claude[bot]`): any `gh api` write with the
+  default session token. Triggered runs start unheld and the reviewer
+  accepts the actor (`allowed_bots`). Two limits: the app token cannot
+  touch `.github/workflows/**` (issue #24), and
+  `mcp__github_file_ops__commit_files` only reaches the branch its run
+  started on (`BRANCH_NAME` is pinned at action start), so it cannot
+  push to another PR's branch.
 - The admin PAT (actor `bugabinga`): operator-attributed, and
   operator-attributed events wake the BDFL (issue #50). Reserved for
   what the app cannot do: workflow-file pushes and cron-line changes.
@@ -106,7 +108,9 @@ keeps moving (issue #57). Pick deliberately:
 A held `action_required` run is cleared by re-attributing its event,
 not by approving it (no agent token approves a held run, PR #43):
 close/reopen the PR with the default session token and the reopened
-event carries `claude[bot]`, whose runs start unheld.
+event carries `claude[bot]`, whose runs start unheld. Verified live on
+PR #59: a github.token push held its runs at the gate; close/reopen
+re-attributed the event and the fresh runs started.
 
 Scheduled workflows carry a landmine: GitHub attributes a schedule run
 to the account that landed the last change to the workflow's cron
