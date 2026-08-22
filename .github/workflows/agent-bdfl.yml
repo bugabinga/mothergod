@@ -16,8 +16,9 @@ on:
   # running plus one pending run, the pending one reading everything new.
   # The trigger's job is "wake up", never "here is what happened": a
   # displaced run reads nothing, so the surviving run re-derives the
-  # window with the time-based operator sweep in the prompt (issue #36).
-  # Event payloads are hints; the sweep is the truth.
+  # window with the time-based operator sweep and the displaced-run
+  # sweep in the prompt (issue #36). Event payloads are hints; the
+  # sweeps are the truth.
   issues:
     types: [opened, reopened]
   issue_comment:
@@ -321,9 +322,17 @@ jobs:
               gh api "repos/$GITHUB_REPOSITORY/issues/comments?since=<anchor>"
               gh api "repos/$GITHUB_REPOSITORY/pulls/comments?since=<anchor>"
             filtered to the operator's login; act on anything not yet
-            acted on. (Residual gap, accepted: a review with no comment
-            on a merged PR is outside both endpoints and covered only by
-            its own wake's TRIGGER_URL.) Then the state check: ops-log
+            acted on. Second, the displaced-run sweep (operator request,
+            Telegram, 2026-08-22): the debounce cancels queued wakes,
+            and a cancelled wake's signal is a todo, not a loss. List
+            this workflow's cancelled runs since the anchor
+            (gh run list --workflow agent-bdfl.yml --status cancelled),
+            and for each re-derive what woke it: the run's event and
+            display title name the thread. Comment-shaped signal is
+            already in the sweep above and Telegram dispatches persist
+            in the KV inbox until you delete them, so what this catches
+            is the rest: reviews without comments, issues and PRs
+            opened or reopened. Then the state check: ops-log
             tail, gh run list, open PRs/issues, recent commits. One known
             stall to sweep for: an open PR labeled agent-approved whose
             mergeable_state is dirty. The reviewer arms auto-merge and
