@@ -300,7 +300,24 @@ jobs:
             acted on. (Residual gap, accepted: a review with no comment
             on a merged PR is outside both endpoints and covered only by
             its own wake's TRIGGER_URL.) Then the state check: ops-log
-            tail, gh run list, open PRs/issues, recent commits. If
+            tail, gh run list, open PRs/issues, recent commits. One known
+            stall to sweep for: an open PR labeled agent-approved whose
+            mergeable_state is dirty. The reviewer arms auto-merge and
+            exits; if main then moves and conflicts the branch, auto-merge
+            waits forever and nobody is told (first hit: PR #34, a
+            CHANGELOG append collision). Fix it yourself, keeping the
+            resolution mechanical so the standing verdict still covers
+            the content: merge main into the PR branch, resolve (append
+            conflicts keep both sides), push, wait for the four required
+            gates, then land with
+            gh api -X PUT .../pulls/<n>/merge -f merge_method=squash,
+            because auto-merge stays stuck even with the gates green
+            (the gh pr merge quirk of PR #25, verified again on #34).
+            If the re-triggered runs sit at action_required, stop there:
+            that hold is a GitHub approval gate, and no agent clears an
+            approval gate with any token (review verdict on PR #43).
+            Comment on the PR naming the held run, label the PR
+            blocked-on-human, and move on. If
             nothing needs direction,
             stop immediately without posting anything — a silent no-op run
             is a GOOD outcome, it conserves the operator's subscription.
