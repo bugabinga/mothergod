@@ -141,7 +141,12 @@ keeps moving (issue #57). Pick deliberately:
   touch `.github/workflows/**` (issue #24), and
   `mcp__github_file_ops__commit_files` only reaches the branch its run
   started on (`BRANCH_NAME` is pinned at action start), so it cannot
-  push to another PR's branch.
+  push to another PR's branch. Worse on runs triggered by PR review or
+  comment events: `BRANCH_NAME` pins to the PR's merge ref, and
+  `commit_files` then CREATES a literal branch named `<n>/merge`
+  parented on main, silently missing the PR branch (observed on #78).
+  On such runs, push with the git data API instead: create blob, tree,
+  commit, then PATCH the real branch ref; same `claude[bot]` identity.
 - The admin PAT (actor `bugabinga`): operator-attributed, and
   operator-attributed events wake the BDFL (issue #50). Reserved for
   what the app cannot do: workflow-file pushes and cron-line changes.
