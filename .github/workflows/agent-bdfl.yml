@@ -7,7 +7,11 @@ name: agent-bdfl
 
 on:
   schedule:
-    - cron: '11 * * * *' # hourly (ADR-0015); 06:11 UTC Sunday = deep run
+    # Stabilization sprint (operator directive, Telegram 2026-08-22):
+    # every 20 min until the agent system holds the exit criterion in
+    # issue #60, then back to hourly '11 * * * *' (ADR-0015).
+    # 06:11 UTC Sunday stays the deep run.
+    - cron: '11,31,51 * * * *'
   workflow_dispatch:
   # Operator-priority wake: any personal repo activity by the operator
   # starts a BDFL run within seconds (the job condition filters to the
