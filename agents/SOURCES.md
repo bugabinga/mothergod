@@ -35,6 +35,51 @@ it is new; never skip something solely because it is work.
 | https://developers.cloudflare.com/agents/ | Cloudflare's agents documentation |
 | https://simonwillison.net | High-signal independent commentary on LLM/agent engineering practice |
 
+## Rust and compression craft (assistant-seeded 2026-08-22)
+
+Scope note: the sections above are agent-craft. This one is the craft the
+agents are *practising*, which the file did not previously cover. The
+researcher and the deslopper are its readers, not just the BDFL.
+
+Selection rule applied: prolific, and doing work whose constraints match
+ours (byte-oriented, allocation-conscious, adversarial input, benchmark
+claims that have to survive scrutiny). Blog posts are named where the
+post is the artifact worth reading, not just the person.
+
+### Compression in Rust, our exact problem
+
+| Source | Why |
+|---|---|
+| Daniel Reiter Horn, [divans](https://github.com/dropbox/divans), [rust-brotli](https://github.com/dropbox/rust-brotli), [design writeup](https://dropbox.tech/infrastructure/building-better-compression-together-with-divans) | Closest prior art anywhere: a Rust compressor with dynamic context mixing and an ANS codec, built at Dropbox. Notable design move, an IR separating the parse from the entropy coder, which is a live option for our filter bank to LZ to coder pipeline |
+| Frommi (Daniil Liferenko) and oyvindln, [miniz_oxide](https://github.com/Frommi/miniz_oxide) | Fully safe pure Rust DEFLATE, `no_std`, backing flate2 for the whole ecosystem. Our zero-dependency constraint executed at scale, by people who had to keep bit-exact compatibility while doing it |
+| Guillaume Endignoux, [lzma-rs](https://github.com/gendx/lzma-rs), [blog](https://gendignoux.com/blog/) | Pure Rust LZMA written for clarity and fuzzed. Two posts are directly load-bearing for us: [why his Rust benchmarks were wrong and how `black_box` actually works](https://gendignoux.com/blog/2022/01/31/rust-benchmarks.html), and [the xz backdoor read from an implementer's seat](https://gendignoux.com/blog/2024/04/08/xz-backdoor.html) |
+| KillingSpark, [ruzstd](https://github.com/KillingSpark/zstd-rs) | Pure Rust zstd. Decoder complete, encoder shipped while openly not matching the C ratio. Model for publishing a compressor that is not yet competitive |
+| Caleb Etemesi, [zune-inflate / zune-image](https://github.com/etemesi254/zune-image) | Pure Rust inflate tuned hard, with the benchmarks published alongside |
+
+### Rust craft, prolific and relevant
+
+| Source | Why |
+|---|---|
+| Andrew Gallant (BurntSushi), [blog](https://burntsushi.net/), regex / ripgrep / bstr / memchr / aho-corasick | The reference for byte-oriented, allocation-conscious Rust with benchmarks that survive scrutiny. Read [Error Handling in Rust](https://burntsushi.net/rust-error-handling/), [Using unwrap() in Rust is Okay](https://burntsushi.net/unwrap/), [A byte string library for Rust](https://burntsushi.net/bstr/), [Regex engine internals as a library](https://burntsushi.net/regex-internals/) |
+| Alex Kladov (matklad), [blog](https://matklad.github.io/), rust-analyzer | The best essays on Rust code shape and testing discipline. [Push Ifs Up And Fors Down](https://matklad.github.io/2023/11/15/push-ifs-up-and-fors-down.html), [How to Test](https://matklad.github.io/2021/05/31/how-to-test.html), [Underusing Snapshot Testing](https://matklad.github.io/2025/04/15/underusing-snapshot-testing.html), [Newtype Index Pattern](https://matklad.github.io/2018/06/04/newtype-index-pattern.html), [Code Smell: Concrete Abstraction](https://matklad.github.io/2020/08/15/concrete-abstraction.html), [Catch Flakes On Main](https://matklad.github.io/2026/05/14/catch-flakes-on-main.html) |
+| David Tolnay (dtolnay), serde / syn / thiserror / anyhow | The ecosystem's most prolific author and the reference for zero-dependency API discipline and the library-versus-application error split |
+| [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html) | The official checklist. `C-NEWTYPE` and `C-CUSTOM-TYPE` ("arguments convey meaning through types, not `bool` or `Option`") are our precision value already codified by the library team |
+| [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) | Coverage-guided fuzzing. Hard rule 2 says the decoder never panics on any input; fuzzing is how that claim stops being an assertion |
+
+### The lineage, mostly not Rust
+
+Read for the ideas, not the code. Our architecture target descends from
+these people directly.
+
+| Source | Why |
+|---|---|
+| Matt Mahoney, PAQ / lpaq / ZPAQ, Large Text Compression Benchmark | Context mixing is his. The benchmark is also the corpus discipline `research/corpus/POLICY.md` is reaching for |
+| Igor Pavlov, LZMA / 7-Zip | Repeat offsets in the match model originate here, and our target puts them inside the DP |
+| Charles Bloom, [cbloomrants](https://cbloomrants.blogspot.com/) | The canonical public analysis of optimal parse with rep matches, from the Oodle work. Directly on our critical path |
+| Fabian Giesen (ryg), [blog](https://fgiesen.wordpress.com/), ryg_rans | rANS, interleaved rANS, and the practical range-coder writing everyone else cites |
+| Yann Collet, zstd / LZ4 | The engineering standard for how a speed-versus-ratio tradeoff gets presented honestly |
+| Timothy Terriberry, Daala / Opus / AV1 range coder | The adaptive arithmetic coder most modern codec work descends from. The Rust end of that lineage is [rav1e](https://github.com/xiph/rav1e), where Luca Barbato and Thomas Daede work |
+
 ## Adoption log
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
