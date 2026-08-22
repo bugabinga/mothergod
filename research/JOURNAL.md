@@ -159,8 +159,36 @@ record.
   variant, so there is still no champion to diff against —
   `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
   Remaining M1 scope: see S2-D2.
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2/S2-A3 filter slices: the
-  other filter kinds (BCJ, base64-unwrap, reverse) and the
+- S2-A4 | ACCEPTED | Third slice of M1: the x86 call/jmp (BCJ) filter
+  (`JOURNAL` S1-A2) ported to `src/filters.rs` as a standalone reversible
+  transform (`bcj::encode`/`decode`), mirroring S2-A2/S2-A3's structure.
+  Behavior ported from the archive's `bcj(d, enc)` (`research/imports/
+  session-1/mothergod.rs`), not the code (ADR-0006): the single
+  boolean-flag function became two functions, one per direction, matching
+  this module's established encode/decode-pair shape. Rewrites the 4-byte
+  little-endian operand following every `0xE8`/`0xE9` opcode between a
+  position-relative offset and an absolute one; only the opcode byte gates
+  which positions are touched, and the scan jumps past the whole
+  instruction on a match, so the operand bytes it just wrote are never
+  re-examined as a new opcode — decode rediscovers exactly the same
+  positions encode found. | 8 unit tests: round-trip on empty input, an
+  opcode with too few trailing bytes to hold an operand (identity), an
+  explicit E8 and E9 operand rewrite check, identity when no opcode byte
+  is present, round-trip over 2000 bytes of cyclic data (which contains
+  0xE8/0xE9), 20 adjacent instructions back to back, and an operand large
+  enough that the relative-to-absolute add wraps u32; `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/`test
+  --doc` all clean (`doc --no-deps` under `RUSTDOCFLAGS=--deny warnings`
+  blocked locally by an unrelated sandbox permission gate on env-prefixed
+  commands; plain `cargo doc --no-deps` built with zero warnings and CI's
+  `doc` gate re-verifies with the flag before merge). | No bpb measurement,
+  same reason as S2-A2/S2-A3: not yet wired to a `Method` variant, so
+  there is still no champion to diff against — `progress.jsonl` records
+  this as `kind: "patch"` with null bpb deltas. Remaining M1 scope: see
+  S2-D2 (now base64-unwrap, reverse, `pick_filters`, LZ, models, coder,
+  and `Method` wiring only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2/S2-A3/S2-A4 filter
+  slices: the other filter kinds (base64-unwrap, reverse) and the
   `pick_filters` trial-selection heuristic; the optimal-parse LZ stage
   (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the context-mixing
   entropy models (`Lit` six-expert arena, flag/length/offset models); the
@@ -168,6 +196,13 @@ record.
   variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
   `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
   behavior, not code, per ADR-0006). One PR per module per the M1 checklist.
+  Note: base64-unwrap and reverse do not appear in the archived Rust codec
+  (`mothergod.rs` has only `sdelta`/`tpose`/`bcj`); their source lives
+  in-tree at `research/imports/session-1/research_state.json`
+  (`.filters.b64`, `.filters.rev`), the founding session's Python `filt`/
+  `unfilt` pair for each — confirmed accurate by cross-check: that same
+  file's `.filters.bcj` matches `mothergod.rs`'s `bcj` exactly, which is
+  what S2-A4 above ported.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,

@@ -6,8 +6,8 @@
 //! to apply a filter; each submodule here only provides the reversible
 //! transform itself. The `pick_filters` trial-selection heuristic and
 //! wiring behind a [`crate::Method`] variant are follow-up slices
-//! (`JOURNAL` S2-D2). Remaining filter kinds (BCJ, base64-unwrap, reverse):
-//! same DEBT entry.
+//! (`JOURNAL` S2-D2). Remaining filter kinds (base64-unwrap, reverse): same
+//! DEBT entry.
 
 /// Fixed-stride delta filter.
 ///
@@ -215,6 +215,134 @@ pub mod transpose {
             let c = nz(1);
             assert_eq!(encode(&data, c), data);
             assert_eq!(decode(&data, c), data);
+        }
+    }
+}
+
+/// x86 call/jmp (BCJ) relative-to-absolute address filter.
+///
+/// Rewrites the 4-byte little-endian operand following every `0xE8`/`0xE9`
+/// opcode (`call rel32` / `jmp rel32`) between a position-relative offset
+/// and an absolute one. Executable code's call targets cluster (many calls
+/// target the same handful of functions); as relative offsets each
+/// occurrence encodes a different byte pattern, but as absolute addresses
+/// they collide, which is what a downstream model actually matches
+/// against. `JOURNAL` S1-A2.
+pub mod bcj {
+    /// Rewrites each `0xE8`/`0xE9` opcode's operand from relative to
+    /// absolute.
+    ///
+    /// Reversible by [`decode`]. Only the opcode byte gates which
+    /// positions are rewritten; the 4-byte operand that follows is never
+    /// itself mistaken for a new opcode, because the scan jumps past the
+    /// whole 5-byte instruction on a match — so `decode` rediscovers
+    /// exactly the same positions from the same untouched opcode bytes.
+    #[must_use]
+    pub fn encode(data: &[u8]) -> Vec<u8> {
+        let mut out = data.to_vec();
+        let n = out.len();
+        let mut i = 0usize;
+        while i + 5 <= n {
+            if out[i] == 0xE8 || out[i] == 0xE9 {
+                let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
+                // x86 rel32 addressing itself wraps at 2^32; truncating
+                // the position to u32 before adding matches that hardware
+                // semantic rather than losing information.
+                #[allow(clippy::cast_possible_truncation)]
+                let post_addr = (i as u32).wrapping_add(5);
+                let absolute = operand.wrapping_add(post_addr);
+                out[i + 1..i + 5].copy_from_slice(&absolute.to_le_bytes());
+                i += 5;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Inverts [`encode`].
+    #[must_use]
+    pub fn decode(data: &[u8]) -> Vec<u8> {
+        let mut out = data.to_vec();
+        let n = out.len();
+        let mut i = 0usize;
+        while i + 5 <= n {
+            if out[i] == 0xE8 || out[i] == 0xE9 {
+                let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
+                #[allow(clippy::cast_possible_truncation)] // see encode's comment
+                let post_addr = (i as u32).wrapping_add(5);
+                let relative = operand.wrapping_sub(post_addr);
+                out[i + 1..i + 5].copy_from_slice(&relative.to_le_bytes());
+                i += 5;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn roundtrip_empty() {
+            assert_eq!(decode(&encode(&[])), Vec::<u8>::new());
+        }
+
+        #[test]
+        fn roundtrip_too_short_for_any_instruction() {
+            // An 0xE8 opcode with fewer than 4 trailing bytes has no full
+            // operand to rewrite; both directions are the identity.
+            let data = vec![0xE8, 0x01, 0x02, 0x03];
+            assert_eq!(encode(&data), data);
+            assert_eq!(decode(&data), data);
+        }
+
+        #[test]
+        fn encode_rewrites_e8_call_operand() {
+            // call rel32 at offset 0, relative operand 0x10 -> absolute
+            // target 0x10 + (0 + 5) = 0x15.
+            let data = vec![0xE8, 0x10, 0x00, 0x00, 0x00];
+            assert_eq!(encode(&data), vec![0xE8, 0x15, 0x00, 0x00, 0x00]);
+        }
+
+        #[test]
+        fn encode_rewrites_e9_jmp_operand() {
+            let data = vec![0xE9, 0x10, 0x00, 0x00, 0x00];
+            assert_eq!(encode(&data), vec![0xE9, 0x15, 0x00, 0x00, 0x00]);
+        }
+
+        #[test]
+        fn encode_is_identity_when_no_opcode_present() {
+            let data = vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+            assert_eq!(encode(&data), data);
+        }
+
+        #[test]
+        fn roundtrip_various_data() {
+            // 0xE8 == 232 and 0xE9 == 233 fall inside this cycle, so the
+            // scan is actually exercised, not just a no-op pass-through.
+            let data: Vec<u8> = (0..=255u8).cycle().take(2000).collect();
+            assert_eq!(decode(&encode(&data)), data);
+        }
+
+        #[test]
+        fn roundtrip_adjacent_instructions() {
+            let mut data = vec![];
+            for _ in 0..20 {
+                data.push(0xE8);
+                data.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
+            }
+            assert_eq!(decode(&encode(&data)), data);
+        }
+
+        #[test]
+        fn roundtrip_wrapping_overflow() {
+            // Operand large enough that adding the post-instruction
+            // address wraps u32; must still round-trip losslessly.
+            let data = vec![0xE8, 0xFF, 0xFF, 0xFF, 0xFF];
+            assert_eq!(decode(&encode(&data)), data);
         }
     }
 }
