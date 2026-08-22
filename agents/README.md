@@ -19,7 +19,7 @@ Two agent-system pieces cannot live here, by platform requirement:
   machinery). GitHub only runs workflows from `.github/`.
 - **`/CLAUDE.md`** — the agent contract. The Claude Code harness loads it
   from the repository root.
-- **`/.claude/skills/`** — skills, an agent's operating manual for one
+- **`/.claude/skills/`**: skills, an agent's operating manual for one
   kind of work (currently `deslop`, ADR-0016). The Claude Code harness
   only discovers skills there.
 

@@ -32,7 +32,7 @@ is fully autonomous by design (ADR-0003).
 - *Reviewer* — adversarial review of every PR; verifies claims by running
   them; merges when CI is green and the review passes. Never reviews work it
   authored in the same run.
-- *Deslopper* — twice daily: removes slop from `src/` without changing
+- *Deslopper*, twice daily: removes slop from `src/` without changing
   observable behaviour, one scope per PR (ADR-0016). Never merges; the
   reviewer approves. Its operating manual is the `deslop` skill.
 - *Researcher* — weekly: runs one experiment from the journal's standing
