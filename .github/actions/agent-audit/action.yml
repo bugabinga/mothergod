@@ -46,7 +46,7 @@ runs:
         out="${RUNNER_TEMP}/agent-audit"
         mkdir -p "$out"
         python3 - "$out" <<'PY' || echo "::warning::audit extraction incomplete"
-        import glob, json, os, sys
+        import json, os, sys
 
         out = sys.argv[1]
         path = os.environ.get("EXEC_FILE", "")
@@ -83,18 +83,20 @@ runs:
 
         # Input. The first user turn was expected to carry the composed
         # prompt, but a live run (32562011724) parsed 152 entries and matched
-        # none, so try the action's own prompt file first and record the log's
-        # shape for diagnosis. Keys only, never values: a census must not
-        # become a leak.
+        # none. claude-code-action writes the composed prompt to exactly
+        # $RUNNER_TEMP/claude-prompts/claude-prompt.txt (verified live from
+        # inside run 32562967070 of this repo); read that one path, no
+        # globbing, so an unrelated file can never masquerade as the prompt.
+        # The log fallback keeps the longest user turn. Census below is keys
+        # only, never values: a census must not become a leak.
         prompt = ""
-        for cand in sorted(glob.glob(os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "**", "*prompt*"), recursive=True)):
-            if os.path.isfile(cand) and os.path.getsize(cand) > 200:
-                try:
-                    prompt = open(cand, encoding="utf-8", errors="replace").read()
-                    print(f"prompt from file: {cand}")
-                    break
-                except OSError:
-                    pass
+        prompt_file = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "claude-prompts", "claude-prompt.txt")
+        if os.path.isfile(prompt_file):
+            try:
+                prompt = open(prompt_file, encoding="utf-8", errors="replace").read()
+                print(f"prompt from file: {prompt_file}")
+            except OSError:
+                pass
 
         if not prompt:
             for e in entries:
@@ -106,8 +108,6 @@ runs:
                     candidate = text_of(msg.get("content"))
                     if len(candidate) > len(prompt):
                         prompt = candidate
-                    if prompt:
-                        break
 
         # Output: the last result entry carries the agent's final response.
         response, is_error, num_turns = "", None, None
