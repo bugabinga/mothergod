@@ -1,6 +1,9 @@
 # ADR-0014: one concurrency group per scheduled agent
 
 Status: accepted · Date: 2026-08-22 · Proposed by the BDFL (follow-up to PR #30)
+· Amended 2026-08-22: the operator flagged the worker-collision risk
+(PR #32); a claim check in both worker prompts now prevents duplicate
+work without re-serializing the lanes.
 
 ## Context
 

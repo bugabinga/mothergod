@@ -67,7 +67,10 @@ jobs:
             codec itself (M1) is not yet capable of measuring an experiment,
             then this session's "experiment" is building the next smallest
             slice of that capability instead — treat it as kind="patch" work
-            and still record it.
+            and still record it. Capability work shares the heartbeat's
+            lane and agents run concurrently (ADR-0014): check open PRs and
+            claude/* branches first, and build the next slice nobody has in
+            flight.
 
             Language rule (ADR-0006): experiments run against the in-repo
             Rust codec; all new code — experiments, harness, corpus tooling —
