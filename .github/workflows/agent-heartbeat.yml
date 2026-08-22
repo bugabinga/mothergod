@@ -90,7 +90,10 @@ jobs:
                ask clarifying questions, close duplicates politely, and link
                research/JOURNAL.md entries when an idea was already tried.
             5. Otherwise ship progress: pick the top unblocked ROADMAP item
-               (or the journal's top standing lead), implement the smallest
+               (or the journal's top standing lead). Claim check first,
+               because agents run concurrently (ADR-0014): an item an open
+               PR or claude/* branch already covers is claimed, take the
+               next one. Implement the smallest
                useful slice on a new branch claude/<short-slug>, run all
                quality gates locally, then open a PR whose body states what,
                why, how it was verified, and which ROADMAP/journal ids it
