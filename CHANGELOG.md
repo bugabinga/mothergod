@@ -33,6 +33,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- Pause detector (ADR-0004, amended): the usage-limit marker list gains
+  the "session limit" dialect after run 32588022230 slipped through
+  unpaused, and RESUME-AT now honors a UTC reset time advertised in the
+  error message, falling back to the blanket +6h/+24h rule when none is
+  present.
 - Two-realm repository layout (ADR-0010): agent-system files moved to
   `agents/` (governance, operations, personas, sources, identities),
   strictly separated from the classical project tree.

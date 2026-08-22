@@ -1,6 +1,7 @@
 # ADR-0004: Claude subscription auth only; system pauses on usage limits
 
 Status: accepted · Date: 2026-08-20 · Concurrency clause amended by ADR-0014
+· RESUME-AT clause amended 2026-08-22 (PR #78, operator-approved)
 
 ## Context
 
@@ -23,8 +24,15 @@ fail chaotically when limits hit.
      issue (auto-resume) and proceed.
    - After every Claude run, the detector (`.github/actions/agent-pause`)
      scans the execution log for usage-limit markers; on hit it opens the
-     pause issue — RESUME-AT now+6h for rolling-window limits, now+24h when
-     the message indicates a weekly limit.
+     pause issue. RESUME-AT is the reset time the error message advertises
+     (UTC-labeled only), else the blanket fallback: now+6h for
+     rolling-window limits, now+24h when the message indicates a weekly
+     limit. An advertised reset is honored regardless of limit kind; a
+     weekly message carrying a same-day clock time would resume early.
+     Accepted until observed, because no such message shape has been seen.
+     The marker list tracks Anthropic's wording, which changes: every limit
+     failure that slips through unpaused adds its marker (run 32588022230
+     post-mortem: "session limit").
    - The operator can pause manually at any time by opening such an issue
      (any body; missing RESUME-AT means "until manually closed") and resume
      by closing it.
