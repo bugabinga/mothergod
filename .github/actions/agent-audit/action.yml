@@ -115,6 +115,15 @@ runs:
         # numbers and enums, so the keys-only rule (which guards against
         # model-authored prose) does not apply. permission_denials is the
         # exception: its tool_input is model text, keep count and names only.
+        # usage/modelUsage publish unsanitized, a deliberate deviation from
+        # upstream (claude-code-action's sanitizeModelUsage strips them to
+        # model limits for console logs): upstream protects arbitrary users'
+        # sessions, while this project publishes its own agents' usage as
+        # scorecard evidence, per the operator's issue #64 line that
+        # aggregate numbers are safe to be public and prose is not.
+        # total_cost_usd re-keys to total_cost_usd_notional: under
+        # subscription auth it is a notional figure, not a bill, and a
+        # public number that reads as spend but is not fails honesty.
         response, is_error, telemetry = "", None, {}
         for e in entries:
             if isinstance(e, dict) and e.get("type") == "result":
@@ -123,12 +132,14 @@ runs:
                         response = text_of(e[key])
                         break
                 is_error = e.get("is_error", is_error)
-                for key in ("num_turns", "total_cost_usd", "duration_ms",
+                for key in ("num_turns", "duration_ms",
                             "duration_api_ms", "ttft_ms", "stop_reason",
                             "terminal_reason", "api_error_status", "usage",
                             "modelUsage"):
                     if key in e:
                         telemetry[key] = e[key]
+                if "total_cost_usd" in e:
+                    telemetry["total_cost_usd_notional"] = e["total_cost_usd"]
                 denials = e.get("permission_denials")
                 if isinstance(denials, list):
                     telemetry["permission_denials"] = {
@@ -141,6 +152,10 @@ runs:
         # API-authored metadata, published verbatim so its semantics can be
         # decided from evidence. Presence alone is NOT a pause signal: it
         # appeared in a healthy no-op run (issue #11's lesson applies).
+        # Its shape is unconfirmed until the first live payload; verbatim
+        # anyway because the field is API-authored and the secret scrub
+        # still covers the file. Revisit the whitelist once the shape is
+        # on record (issue #63 tracks that read).
         rate_limits = [e.get("rate_limit_info") for e in entries
                        if isinstance(e, dict) and e.get("type") == "rate_limit_event"
                        and e.get("rate_limit_info") is not None]
