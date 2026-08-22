@@ -62,7 +62,9 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-const HEADER_LEN: usize = MAGIC.len() + 2;
+const VERSION_OFFSET: usize = MAGIC.len();
+const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
+const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
 /// Compresses `input` into a self-describing frame.
 ///
@@ -89,11 +91,11 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     if header[..MAGIC.len()] != MAGIC {
         return Err(Error::BadMagic);
     }
-    let version = header[MAGIC.len()];
+    let version = header[VERSION_OFFSET];
     if version > FORMAT_VERSION {
         return Err(Error::UnsupportedVersion(version));
     }
-    let method = Method::try_from(header[MAGIC.len() + 1])?;
+    let method = Method::try_from(header[METHOD_OFFSET])?;
     match method {
         Method::Stored => Ok(payload.to_vec()),
     }
