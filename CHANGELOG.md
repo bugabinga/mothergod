@@ -17,6 +17,10 @@ All notable changes to this project are documented here. Format follows
   with a fixed-stride delta filter, ported from the founding session's
   archived codec. Not yet wired to a compression `Method` — the LZ, model,
   and coder modules it will sit behind are still to come.
+- Codec port, second filter slice (`research/JOURNAL.md` S2-A3): a
+  row-major-to-column-major transpose filter, ported from the founding
+  session's archived codec. `filters` is now submodules (`delta`,
+  `transpose`) to keep each filter's `encode`/`decode` pair namespaced.
 - Deslopper agent (ADR-0016): a fifth agent seat that removes slop from
   `src/` twice daily without changing observable behaviour, one scope per
   PR, approved by the reviewer like any other agent PR. Its taxonomy and
