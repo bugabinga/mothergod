@@ -77,6 +77,16 @@ All notable changes to this project are documented here. Format follows
   with real data-derived cumulative-frequency ranges. The flag/length/
   offset stages of the entropy coder will each be one `Model` instance;
   the six-expert `Lit` literal mixer remains a separate, larger slice.
+- Codec port, second entropy-model slice (`research/JOURNAL.md` S2-A12):
+  a new `literal` module with `Literal`, the six-expert context-mixing
+  literal model ported from the archive's `Lit`. Blends a two-rate
+  order-1 pair, order-0, order-2, an alignment hash, and a word hash
+  under gradient-derived mixing weights. Not yet wired to a `Method`
+  variant; carries a known open question (`research/JOURNAL.md` S2-D3)
+  about the archive's continued use of `f64` in weight adaptation versus
+  the integer-only path `JOURNAL` S1-A5 records as accepted, to resolve
+  before the Method-wiring PR that will need an ADR and `FORMAT_VERSION`
+  bump anyway.
 
 ### Removed
 

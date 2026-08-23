@@ -429,16 +429,82 @@ record.
   "patch"` with null bpb deltas. Remaining M1 scope: see S2-D2 (now the
   six-expert `Lit` literal mixer, wiring the flag/length/offset models
   as `Model` instances, and `Method` wiring only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A11 filter,
-  trial-selection, LZ, coder, and order-0 model slices: the six-expert
-  `Lit` literal mixer (context-sensitive gradient-derived MIX weights,
-  `JOURNAL` S1-A4); wiring the flag/length/offset stages as `model::Model`
-  instances against real LZ tokens; and wiring all of it (including
-  `select::pick`, `lz::parse_optimal`, `model::Model`, and `coder`) behind
-  a new `Method` variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md
-  hard rule 5). Source: `research/imports/session-1/mothergod.rs` (526
-  lines, golfed — port behavior, not code, per ADR-0006). One PR per
-  module per the M1 checklist.
+- S2-A12 | ACCEPTED | Eleventh slice of M1, and the second entropy-model
+  slice: the six-expert context-mixing literal model ported to a new
+  `src/literal.rs` (`Literal`, `Context`), the entropy stage for every
+  byte an LZ parse (`lz`) leaves as a literal. Behavior ported from the
+  archive's `Lit` (`research/imports/session-1/mothergod.rs`), not the
+  code (ADR-0006): the same six context banks (two-rate fast/slow order-1
+  keyed on the previous byte plus an after-copy bit, order-0, a 12-bit
+  order-2 hash, a position/nibble "alignment" hash, and a 12-bit
+  alnum-only rolling word hash), the same `(prev-byte nibble, after-copy)`
+  key selecting one of 32 mixing-weight vectors, the same fixed-point
+  blend (`>>16` after a `u64` per-expert scale factor) feeding the coder,
+  and the same exponentiated-gradient weight update (Mahoney 2005) with
+  the archive's exact learning rate and clamp. One behavior-preserving
+  deviation: the archive recomputes `(b1, b2)` on every token by indexing
+  `fd[pos-1]`/`fd[pos-2]` into the shared output buffer; this port
+  instead carries a `Context` value forward explicitly
+  (`Context::after_literal`/`after_copy`), so an encode pass and a decode
+  pass reuse one update rule instead of two independent re-derivations
+  that could drift apart (`rust-craft` skill, single-source-of-truth for
+  state transitions the two coding directions must agree on bit-for-bit).
+  | 13 unit tests: empty input, a single byte, a skewed repeat, the full
+  256-value alphabet cycled, ASCII text, a 5000-byte xorshift32
+  pseudo-random fixture (crosses every bank's rescale threshold,
+  including the fast expert's 6144 ceiling, repeatedly), a fixture
+  interleaving literal runs with simulated copy tokens (the shape
+  Method-wiring will actually drive this with), four `Context`
+  transition unit tests (`after_literal`, `after_copy` at 0/1/2+ bytes),
+  a word-hash extend/reset check, and a truncated-stream decode asserting
+  no panic; `cargo fmt`/`clippy --all-targets -- --deny warnings`/`test
+  --all-targets`/`test --doc`/`doc --no-deps` all clean (one
+  private-intra-doc-link warning against `Self::mix`, fixed by dropping
+  the doc link, not by suppressing the lint, same class as
+  S2-A8/S2-A10/S2-A11). | No bpb measurement, same reason as S2-A2
+  through S2-A11: not yet wired to a `Method` variant, no champion to
+  diff against; `progress.jsonl` records this as `kind: "patch"` with
+  null bpb deltas. **Open question, not resolved here, see S2-D3**: this
+  port keeps the archive's `f64` weight-update arithmetic verbatim, which
+  `JOURNAL` S1-A5 records as superseded by an integer-only path for
+  cross-platform determinism; that refactor postdates the archive (no
+  artifact to port from). Carries no live risk yet: nothing in `src/`
+  calls this module. Remaining M1 scope: see S2-D2 (now wiring the
+  flag/length/offset stages and `Literal` against real LZ tokens, plus
+  `Method` wiring, blocked on S2-D3's resolution).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A12 filter,
+  trial-selection, LZ, coder, order-0 model, and literal-mixer slices:
+  wiring the flag/length/offset stages as `model::Model` instances and
+  the literal stage as `literal::Literal` against real LZ tokens; and
+  wiring all of it (including `select::pick`, `lz::parse_optimal`,
+  `model::Model`, `literal::Literal`, and `coder`) behind a new `Method`
+  variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5).
+  Source: `research/imports/session-1/mothergod.rs` (526 lines, golfed,
+  port behavior, not code, per ADR-0006). Blocked on S2-D3: the
+  Method-wiring PR is where `f64` vs. fixed-point in `Literal`'s weight
+  update must be decided, since that PR is the first one a real
+  bitstream depends on. One PR per module per the M1 checklist.
+- S2-D3 | DEBT | `literal::Literal` (S2-A12) ports the archive's
+  exponentiated-gradient mixing-weight update verbatim, including
+  `f64::exp()`. `JOURNAL` S1-A5 records "integer-only probability path
+  ... retired the cross-platform f64 determinism hazard" as accepted
+  architecture, but that refactor is transcript-only (postdates
+  `research/imports/session-1/mothergod.rs`, per that directory's
+  README "Provenance" note): no artifact exists to port the integer
+  version from. `f64::exp()` is not guaranteed bit-identical across
+  libm implementations, so an encoder and decoder built with different
+  platforms/toolchains could compute different mixing weights at the
+  same step and desync, corrupting output: a lossless violation (hard
+  rule 1) if this ever backs a real frame. Mechanism recorded here per
+  `research/imports/session-1/README.md`'s "where archive and journal
+  disagree, say so" instruction, rather than silently picking a side.
+  Fix, before the S2-D2 Method-wiring PR: either (a) reconstruct a
+  fixed-point exponentiated-gradient update and verify it against the
+  archive as a differential oracle (`docs/TESTING.md`), or (b) an ADR
+  accepting `f64` for this specific path with a stated cross-platform
+  mitigation (e.g. a vendored correctly-rounded `exp`, or restricting
+  supported decode platforms). Either resolution needs its own
+  experiment record, not a default.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,

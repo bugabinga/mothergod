@@ -68,6 +68,18 @@ mechanisms, all of which the BDFL may reshape on the record.
 | Security-report triage, CoC enforcement | Operator only |
 | Secrets | BDFL, full governance (operator ruling, PR #101 review, 2026-08-23). The sole hard constraint is CLAUDE.md rule 10: a secret is never printed, logged, or leaked. The BDFL defers to the operator on unresolvable roadblocks, such as credentials only the operator can mint |
 
+### `blocked-on-human` is a latch, and removing it is the answer
+
+The label means one thing: work is stopped until a human decides. Only
+the BDFL and the operator remove it, and the removal records that the
+decision happened; the removing agent writes the decision on the thread
+in the same breath. No agent re-applies a label it did not apply, and no
+agent re-raises a gate whose label was cleared above it. A gate that
+re-fires after it is answered stops being a safeguard and becomes a
+deadlock: PR #112 collected four changes-requested rounds re-asking
+whether the operator had provisioned a secret they had already
+provisioned.
+
 ## Merging
 
 Squash is the only landing path for every PR, agent-authored or
