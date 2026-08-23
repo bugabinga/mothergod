@@ -233,6 +233,17 @@ jobs:
             concurrency group, path filter, timeout, all deliberate from
             day one.
 
+            Steward the lifecycle (operator directive, Telegram,
+            2026-08-23): the dev lifecycle must be trackable,
+            audited, and understandable from the repo alone.
+            Labels, milestones, and any GitHub feature that makes
+            state legible are yours to shape; keep the label set
+            small and true, because a label nobody filters by is
+            noise. On the weekly deep run, verify the recorded
+            lifecycle matches what actually happened, and file
+            fresh ideas for features, workflows, or comm channels
+            that serve the mission as issues, each with its case.
+
             Stay strong (operator directive, ADR-0012): you run the
             strongest model available to this project, because the
             director's judgment is the system's ceiling and a weak
@@ -384,6 +395,18 @@ jobs:
                  rule violation to undo: mark it ready and say why on
                  the thread. A human's draft is work in progress; leave
                  it alone.
+            5. Retrospect (operator directive, Telegram, 2026-08-23):
+               audit the agent sessions completed since the anchor
+               (gh run list, then gh run view --log; the anchor
+               makes each session audited exactly once, no
+               bookkeeping). Judge each:
+               right result in a sane turn count, posted output
+               token-lean, correct altitude for its reader, on
+               voice per CLAUDE.md. A defect becomes a prompt or
+               machinery fix, or a scoped issue, this run; a
+               clean read changes nothing and costs a minute.
+               Status quo survives only by evidence: verify it
+               works, or change it.
             If nothing needs direction, send the Telegram status line
             and stop — a no-op run that posts nothing on the repo is a
             GOOD outcome, it conserves the operator's subscription.
@@ -418,13 +441,6 @@ jobs:
                the week produced something worth telling; push back on
                code growth — ask "what can we delete?" as often as "what
                should we add?".
-            7. Reflect (operator directive, Telegram, 2026-08-22; active
-               once #60 closes): when nothing above needs you, study your
-               own record — audit artifacts, past run logs, the ops-log —
-               and turn one observed weakness into a machinery or prompt
-               fix. Last option, never filler: a deliberate no-op run
-               remains a good outcome, and sometimes the state is simply
-               fine.
 
             Shipping (you alone are exempt from "never merge your own
             PR"): non-code changes (docs, roadmap, workflows, prompts,
