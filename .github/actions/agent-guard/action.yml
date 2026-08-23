@@ -17,6 +17,11 @@ description: >-
      skips, because the last rung is the floor and dropping below it is
      not permitted (ADR-0012).
 
+  The same file carries each role's effort level (ADR-0021), emitted as
+  `effort_flag`. Empty means the session default. An unrecognized value is
+  dropped with a log line rather than failing the run: a typo in a data
+  file must not take an agent offline.
+
   The log line always says which of the two fired. A model-scoped limit
   never stops the other agents: that is the whole point of the ledger and
   the reason a per-model limit is not a global pause.
@@ -37,6 +42,9 @@ outputs:
   model_flag:
     description: "'--model <id>' for the first available rung, or '' for the action default"
     value: ${{ steps.check.outputs.model_flag }}
+  effort_flag:
+    description: "'--effort <level>' for this role, or '' for the session default"
+    value: ${{ steps.check.outputs.effort_flag }}
 runs:
   using: composite
   steps:
@@ -49,6 +57,7 @@ runs:
         set -euo pipefail
         paused=false
         model_flag=''
+        effort_flag=''
 
         issue_json="$(gh issue list --repo "$GITHUB_REPOSITORY" --label agents-paused --state open --json number,body --limit 1)"
         number="$(jq -r '.[0].number // empty' <<<"$issue_json")"
@@ -83,16 +92,24 @@ runs:
 
         role = os.environ["ROLE"]
         try:
-            ladders = json.load(open("agents/models.json"))["ladders"]
+            roles = json.load(open("agents/models.json"))["roles"]
         except (OSError, ValueError, KeyError) as exc:
-            # A missing or broken ladder file must not stop the fleet: fall
-            # back to the action default, which is the pre-ADR-0018 behavior.
-            print(f"ok||models.json unreadable ({exc}); using action default")
+            # A missing or broken file must not stop the fleet: fall back to
+            # the action defaults, which is the pre-ADR-0018 behavior.
+            print(f"ok|||models.json unreadable ({exc}); using action defaults")
             sys.exit()
 
-        ladder = ladders.get(role, [])
+        entry = roles.get(role) or {}
+        ladder = entry.get("ladder") or []
+        # Levels per the Claude Code CLI --effort flag. An unknown value is
+        # dropped, not fatal: a typo here must not take an agent offline.
+        effort = entry.get("effort") or ""
+        if effort and effort not in ("low", "medium", "high", "xhigh", "max", "ultracode"):
+            print(f"ok|||unknown effort {effort!r} for {role}; ignoring it", file=sys.stderr)
+            effort = ""
+
         if not ladder:
-            print("ok||no ladder for this role; using action default")
+            print(f"ok||{effort}|no ladder for this role; using action default model")
             sys.exit()
 
         # The ledger is a fenced JSON object mapping model id -> epoch
@@ -114,21 +131,24 @@ runs:
                 note = f"{model} (ladder: {' > '.join(ladder)})"
                 if blocked:
                     note += f"; limited: {', '.join(sorted(blocked))}"
-                print(f"ok|{model}|{note}")
+                print(f"ok|{model}|{effort}|{note}")
                 sys.exit()
 
         resets = min(blocked[m] for m in ladder if m in blocked)
-        print(f"exhausted||every rung limited ({' > '.join(ladder)}); earliest reset {resets}")
+        print(f"exhausted|||every rung limited ({' > '.join(ladder)}); earliest reset {resets}")
         PY
         )"
-          IFS='|' read -r status model note <<<"$resolved"
+          IFS='|' read -r status model effort note <<<"$resolved"
           echo "model: $note"
           if [ "$status" = exhausted ]; then
             paused=true
-          elif [ -n "$model" ]; then
-            model_flag="--model $model"
+          else
+            [ -n "$model" ] && model_flag="--model $model"
+            [ -n "$effort" ] && effort_flag="--effort $effort"
           fi
+          echo "effort: ${effort:-session default}"
         fi
 
         echo "paused=$paused" >> "$GITHUB_OUTPUT"
         echo "model_flag=$model_flag" >> "$GITHUB_OUTPUT"
+        echo "effort_flag=$effort_flag" >> "$GITHUB_OUTPUT"
