@@ -89,12 +89,11 @@ jobs:
             1. Your own open PRs whose latest reviewer verdict requests
                changes with no push after it, or whose checks are red.
                Oldest first: check out the branch, fix it, run every
-               CLAUDE.md quality gate locally, push, then close/reopen
-               the PR with gh. The push rides github.token, so its
-               synchronize runs hold at the approval gate as
-               github-actions[bot]; the reopened event is
-               claude[bot]-attributed and its runs start unheld
-               (GOVERNANCE.md "Push identity"). The reviewer posts its
+               CLAUDE.md quality gate locally, push, then run
+               `.github/scripts/settle-push <pr>`: it proves the push's
+               runs are running and re-attributes them if GitHub held
+               them at the approval gate (issue #57). Trust its exit
+               code, not the push's. The reviewer posts its
                verdict as an issue comment starting "**Review verdict:",
                because the shared claude[bot] identity cannot formally
                review its own PRs.

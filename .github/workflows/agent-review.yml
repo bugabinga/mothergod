@@ -246,10 +246,10 @@ jobs:
           Next step depends on which case this is:
 
           1. **The branch is stale.** A reviewer-workflow change landed on
-             `main` after this branch was cut. Merge `main` in and push with
-             a deliberate identity (`agents/GOVERNANCE.md`, Push identity);
-             the synchronize event re-triggers review and this check clears
-             itself.
+             `main` after this branch was cut. Merge `main` in, push with a
+             deliberate identity (`agents/GOVERNANCE.md`, Push identity),
+             then run `.github/scripts/settle-push <pr>`; the re-triggered
+             review clears this check.
           2. **This PR edits `agent-review.yml`.** No agent review is
              possible, now or on any future push. The BDFL lands it by
              discretion once the four quality gates are green (ADR-0008),
