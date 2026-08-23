@@ -7,8 +7,9 @@
 //! bottom-half fixed, straddling the middle with carry deferred via
 //! `pending`), same byte-oriented bit packer. This slice is the coder
 //! alone, driven directly by caller-supplied cumulative-frequency ranges;
-//! the adaptive frequency tables that will supply those ranges (the
-//! archive's `Model` and the six-expert `Lit` mixer) are the next slice.
+//! [`crate::model::Model`] is the order-0 adaptive frequency table that
+//! supplies those ranges from real data. The six-expert `Lit` literal mixer
+//! is a separate, larger slice still to come.
 //! [`Decoder`] already treats a stream shorter than the coder expects as
 //! implicit trailing zero bits rather than panicking (hard rule 2,
 //! `CLAUDE.md`): the archive's own decoder relied on the same behavior.
