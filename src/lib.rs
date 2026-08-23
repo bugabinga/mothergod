@@ -10,6 +10,7 @@
 //! breaking old frames.
 
 pub mod filters;
+pub mod lz;
 
 /// First bytes of every mothergod frame.
 pub const MAGIC: [u8; 4] = *b"MGDC";
