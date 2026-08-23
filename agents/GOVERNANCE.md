@@ -224,6 +224,31 @@ to the cron lands. Rule: cron-line changes land admin-PAT-attributed
 (direct push, or `GH_TOKEN="$GH_ADMIN_TOKEN" gh pr merge`), never via
 an app merge.
 
+## Tool envelopes
+
+The BDFL sets every agent's `--allowedTools` (ADR-0008). One rule, learned
+twice from telemetry:
+
+**A Bash allowlist of binary names is not a security boundary.** It costs
+turns and buys nothing. Every agent that has it also has `Edit`/`Write`, so
+it may already author arbitrary file content; denying it `ls` while granting
+it `Write` is theatre. The real boundary is upstream and unchanged: these
+jobs run only on same-repo branches, so every author is our own machinery
+or the operator.
+
+The cost is measured, not argued. The reviewer burned 11-13 denials per run
+detouring around missing file tools (runs 32615950907..32628126725) and 12
+median after that fix, until Bash was granted unrestricted. The maintainer
+still sat at 11 median denials per run, on Bash, in 6 of its 6 most recent
+runs, when the first cross-role telemetry read was taken (2026-08-23, 129
+audit artifacts). A denial is a wasted turn plus a re-plan around a wall the
+agent cannot see the shape of.
+
+So: grant Bash unrestricted to any agent that already holds `Edit`/`Write`.
+Withhold a tool only where withholding states a real role boundary — the
+reviewer gets no `Edit`/`Write` because it judges and does not modify, and
+that denial is the design working.
+
 ## Humans other than the operator
 
 Human contributions are welcome and go through the same pipeline: file issues,
