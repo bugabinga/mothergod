@@ -94,6 +94,8 @@ jobs:
       checks: read
     env:
       GH_TOKEN: ${{ github.token }}
+    outputs:
+      wake: ${{ steps.verdict.outputs.wake }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -338,3 +340,63 @@ jobs:
           EOF
           echo "::error::The reviewer never ran; see the comment on PR #$PR."
           exit 1
+
+      # Does this verdict owe the maintainer a wake? Read from the label,
+      # never from the review prose: typing the verdict is what made it
+      # machine-readable in the first place (#181).
+      - id: verdict
+        if: always() && steps.guard.outputs.paused != 'true'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          # The deslopper fixes its own returned PRs on its next run
+          # (ADR-0016). Waking the maintainer for one buys a session that
+          # reads the PR, skips it, and goes hunting for other work.
+          case "$HEAD_REF" in
+            claude/deslop-*)
+              echo "deslop branch: the deslopper's to fix, not the maintainer's"
+              exit 0 ;;
+          esac
+          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
+            --json labels --jq '[.labels[].name] | join(" ")')
+          case " $labels " in
+            *" changes-requested "*)
+              echo "wake=yes" >> "$GITHUB_OUTPUT"
+              echo "changes requested on #$PR; waking the maintainer" ;;
+            *)
+              echo "verdict on #$PR is not changes-requested; nobody to wake" ;;
+          esac
+
+  # Ring the maintainer the moment a request-changes verdict lands, rather
+  # than making it wait up to 30 minutes for its own cron (operator
+  # request, Telegram, 2026-08-23). The loop already works; this is only
+  # its latency. The maintainer's duty 1 is already exactly "open PRs
+  # labeled changes-requested", so a wake is the whole fix: no new duty,
+  # no second copy of the verdict, nothing to keep in sync.
+  #
+  # Why not `pull_request: types: [labeled]`, the obvious shape: the
+  # reviewer leaves an already-present label alone, so a PR's second
+  # request-changes emits no label event at all. #178 is the proof, one
+  # `labeled` event at 17:44 for two request-changes rounds, and a
+  # label-triggered maintainer would have slept through every round after
+  # the first. The review ending is the event that actually happens every
+  # time.
+  #
+  # Its own job so that `actions: write` is not granted to the job that
+  # runs a model over PR-authored code (#106). workflow_dispatch is the
+  # documented exception to "GITHUB_TOKEN events do not create runs", so
+  # this needs no PAT and stays bot-attributed rather than waking the
+  # BDFL as the operator (issue #50).
+  wake-maintainer:
+    needs: review
+    if: needs.review.outputs.wake == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run agent-heartbeat.yml --repo "$GITHUB_REPOSITORY"
