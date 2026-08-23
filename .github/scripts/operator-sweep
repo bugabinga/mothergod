@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""Report every operator input since the previous run, as one timeline.
+
+Extensionless and executable because agents type it as a command mid-session,
+like push-branch and settle-push.
+
+The BDFL's operator sweep is time-based, not state-based: it anchors on the
+previous successful run's start and asks what the operator did since, because
+comments land on closed issues and merged PRs too (issue #36). It was carried
+as prose naming two endpoints, and prose cannot notice that it is incomplete.
+It was incomplete. `issues/comments` returns conversation comments,
+`pulls/comments` returns inline review comments, and a REVIEW BODY is in
+neither: it lives in `pulls/{n}/reviews`, which nothing in this repository
+fetched (issue #147). That was the one operator channel with no second copy,
+and it fails silently, because a lost review body looks exactly like a review
+that was read and judged not to need action.
+
+Channels, all bounded by the same anchor, merged into one chronological list:
+
+    conversation comments   repos/{r}/issues/comments?since=
+    inline review comments  repos/{r}/pulls/comments?since=
+    review bodies           repos/{r}/pulls/{n}/reviews, over the PRs touched
+                            since the anchor
+    threads opened          repos/{r}/issues?since=, authored by the operator
+    state changes           repos/{r}/issues/events: reopened, closed, labeled
+
+The review channel needs a candidate list because GitHub exposes no repo-wide
+reviews endpoint. Candidates are the PRs whose `updated_at` is at or after the
+anchor, which is complete because submitting a review bumps `updated_at`:
+cli/cli#14095 closed 2026-08-07T13:07:02Z with no later comment of either kind,
+took a COMMENTED review at 2026-08-19T23:11:40Z, and its `updated_at` reads
+2026-08-19T23:11:41Z. Verified by observation, not by documentation, because
+believing a description is this sweep's entire failure mode.
+
+What this does NOT cover, said plainly so nothing claims a completeness it
+lacks: pushes and merges, which are not input; Telegram, which the inbox drain
+owns and which persists in KV until deleted; anything off GitHub.
+
+Liveness: the last line always prints per-channel counts and the operator login
+it swept for, so a sweep that returns nothing forever is distinguishable from a
+quiet week, and a wrong login is visible on the run it is wrong (#147, item 4).
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+# The workflow whose previous success anchors the sweep. Hardcoded rather than
+# a flag: this is the BDFL's sweep, and --since overrides the whole derivation.
+ANCHOR_WORKFLOW = "agent-bdfl.yml"
+
+# State changes worth waking for. Label churn from bots is filtered by actor;
+# these are the kinds where the operator is saying something without text.
+EVENT_KINDS = frozenset(
+    {"reopened", "closed", "labeled", "unlabeled", "renamed", "milestoned"}
+)
+
+# Walks that GitHub gives no `since` for stop at the anchor, or at this many
+# pages of 100, whichever comes first. Hitting the cap is reported, never
+# silently truncated.
+PAGE_CAP = 5
+
+# One body longer than this is cut, with the URL to read the rest. A sweep that
+# floods the reader's context is a sweep the reader skims.
+BODY_CAP = 4000
+
+# GitHub's timestamp shape, shared by every endpoint here, which is what makes
+# string comparison chronological.
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+# A label applied this close to a thread's creation was applied while opening
+# it, not as a later act.
+BIRTH_WINDOW = 60
+
+
+def die(message):
+    """Exit non-zero. Reserved for this tool failing, never for a quiet sweep."""
+    print(f"operator-sweep: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def gh(*args):
+    """Run gh and return stdout. gh carries the token; nothing here sees one."""
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        die(f"`gh {' '.join(args)}` failed: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def api(path, jq=".[] | @json"):
+    """Paginated GET. --jq runs per page, so this streams one value per line."""
+    return [json.loads(line) for line in gh("api", "--paginate", "--jq", jq, path).splitlines() if line.strip()]
+
+
+def api_page(path):
+    """One page, for the walks that stop at the anchor instead of at the end."""
+    return json.loads(gh("api", path))
+
+
+def iso(value):
+    """Canonicalize to GitHub's own timestamp shape.
+
+    Every API time shares this shape, so string comparison is chronological.
+    That invariant is what lets the descending walks below stop early.
+    """
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        die(f"{value!r} is not a timestamp. Write it as 2026-08-23T16:44:04Z.")
+    return parsed.astimezone(timezone.utc).strftime(STAMP)
+
+
+def apart(one, other):
+    """Seconds between two canonical stamps. Only used to spot coincidence."""
+    return abs((datetime.strptime(one, STAMP) - datetime.strptime(other, STAMP)).total_seconds())
+
+
+def anchor_from_last_run(repo, this_run):
+    """Start of the previous successful ANCHOR_WORKFLOW run, excluding this one."""
+    runs = json.loads(
+        gh(
+            "run", "list", "--repo", repo, "--workflow", ANCHOR_WORKFLOW,
+            "--status", "success", "--limit", "10",
+            "--json", "databaseId,startedAt,createdAt",
+        )
+    )
+    for run in runs:
+        if this_run and str(run["databaseId"]) == str(this_run):
+            continue
+        return iso(run["startedAt"] or run["createdAt"]), run["databaseId"]
+    die(
+        f"no successful {ANCHOR_WORKFLOW} run to anchor on. "
+        "Pass --since <ISO8601> with the window you mean to sweep."
+    )
+
+
+def signal(when, kind, subject, url, body="", note="", number=None):
+    return {"when": when, "kind": kind, "subject": subject, "url": url, "body": body, "note": note, "number": number}
+
+
+def comments(repo, anchor, operator, path, kind):
+    """Conversation or inline review comments. Both endpoints filter on
+    updated_at, so an edited old comment surfaces at its edit time."""
+    found = []
+    for c in api(f"repos/{repo}/{path}?since={anchor}&per_page=100"):
+        if c["user"]["login"] != operator:
+            continue
+        when = iso(c["updated_at"])
+        note = f"edited, written {iso(c['created_at'])}" if c["created_at"] != c["updated_at"] else ""
+        found.append(signal(when, kind, thread_of(c["html_url"]), c["html_url"], c["body"], note))
+    return found
+
+
+def thread_of(html_url):
+    """`.../pull/176#discussion_r1` -> `pull/176`. The number is what an agent
+    types next, so the subject line carries it rather than the raw URL."""
+    tail = html_url.split("/issues/") if "/issues/" in html_url else html_url.split("/pull/")
+    if len(tail) < 2:
+        return html_url
+    kind = "issue" if "/issues/" in html_url else "pull"
+    return f"{kind} #{tail[1].split('#')[0].split('/')[0]}"
+
+
+def touched_pulls(repo, anchor):
+    """PRs whose updated_at is at or after the anchor, newest first.
+
+    Complete for reviews: see the module docstring's cli/cli#14095 observation.
+    """
+    numbers, truncated = [], False
+    for page in range(1, PAGE_CAP + 1):
+        batch = api_page(
+            f"repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100&page={page}"
+        )
+        if not batch:
+            break
+        for pr in batch:
+            if iso(pr["updated_at"]) < anchor:
+                return numbers, truncated
+            numbers.append((pr["number"], pr["title"]))
+        if len(batch) < 100:
+            break
+        truncated = page == PAGE_CAP
+    return numbers, truncated
+
+
+def reviews(repo, anchor, operator, pulls):
+    """The channel nothing read before: the top-level body of a review."""
+    found = []
+    for number, title in pulls:
+        for r in api(f"repos/{repo}/pulls/{number}/reviews?per_page=100"):
+            if r["user"]["login"] != operator or not r.get("submitted_at"):
+                continue
+            when = iso(r["submitted_at"])
+            if when < anchor:
+                continue
+            found.append(
+                signal(when, f"review {r['state']}", f"pull #{number} {title}", r["html_url"], r["body"] or "")
+            )
+    return found
+
+
+def opened(repo, anchor, operator):
+    """Threads the operator started. `issues?since=` returns PRs too."""
+    found = []
+    for item in api(f"repos/{repo}/issues?since={anchor}&state=all&per_page=100"):
+        if item["user"]["login"] != operator or iso(item["created_at"]) < anchor:
+            continue
+        kind = "pr opened" if "pull_request" in item else "issue opened"
+        found.append(
+            signal(
+                iso(item["created_at"]), kind, f"#{item['number']} {item['title']}",
+                item["html_url"], item.get("body") or "", number=item["number"],
+            )
+        )
+    return found
+
+
+def state_changes(repo, anchor, operator, opened_at):
+    """What the operator said without text: reopened, closed, labeled.
+
+    Two coincidences are dropped, because a line nobody acts on trains the
+    reader to skim the ones they should:
+
+    - labels applied while opening a thread, which the `opened` entry already
+      carries. Coincident means within a minute of the thread's own creation.
+    - the `closed` that rides a `merged`. A merge is an outcome, not input, and
+      the state check sees it; the operator abandoning a PR still reports.
+
+    Caveat this cannot fix: GH_ADMIN_TOKEN writes are attributed to the
+    operator personally (issue #50), so a BDFL merge or close made with it
+    appears here as operator action. Reads as an echo of your own predecessor.
+    """
+    found, merged, truncated = [], set(), False
+    for page in range(1, PAGE_CAP + 1):
+        batch = api_page(f"repos/{repo}/issues/events?per_page=100&page={page}")
+        if not batch:
+            break
+        for event in batch:
+            when = iso(event["created_at"])
+            if when < anchor:
+                return prune(found, merged, opened_at), truncated
+            actor = (event.get("actor") or {}).get("login")
+            if actor != operator:
+                continue
+            number = event["issue"]["number"]
+            if event["event"] == "merged":
+                merged.add(number)
+            if event["event"] not in EVENT_KINDS:
+                continue
+            detail = (event.get("label") or {}).get("name") or (event.get("milestone") or {}).get("title") or ""
+            issue = event["issue"]
+            found.append(
+                signal(
+                    when,
+                    f"{event['event']}{f' {detail}' if detail else ''}",
+                    f"#{number} {issue['title']}",
+                    issue["html_url"],
+                    number=number,
+                )
+            )
+        if len(batch) < 100:
+            break
+        truncated = page == PAGE_CAP
+    return prune(found, merged, opened_at), truncated
+
+
+def prune(found, merged, opened_at):
+    """Drop the two coincidences state_changes documents."""
+    kept = []
+    for entry in found:
+        kind = entry["kind"].split()[0]
+        if kind == "closed" and entry["number"] in merged:
+            continue
+        birth = opened_at.get(entry["number"])
+        if kind in ("labeled", "unlabeled", "milestoned") and birth and apart(entry["when"], birth) <= BIRTH_WINDOW:
+            continue
+        kept.append(entry)
+    return kept
+
+
+def displaced(repo, anchor):
+    """Wakes that died queued. Informational now that the channels above
+    recover the content directly; kept because a cancelled wake still names a
+    subject, and a run nobody notices is how a signal used to be lost."""
+    limit = 30
+    runs = json.loads(
+        gh(
+            "run", "list", "--repo", repo, "--workflow", ANCHOR_WORKFLOW,
+            "--status", "cancelled", "--limit", str(limit),
+            "--json", "databaseId,createdAt,event,displayTitle,url",
+        )
+    )
+    kept = [r for r in runs if iso(r["createdAt"]) >= anchor]
+    return kept, len(kept) == limit
+
+
+def render(entries, dead_wakes, anchor, operator, scanned, warnings):
+    for entry in sorted(entries, key=lambda e: e["when"]):
+        note = f"  ({entry['note']})" if entry["note"] else ""
+        print(f"\n{entry['when']}  {entry['kind']}  {entry['subject']}{note}")
+        print(f"    {entry['url']}")
+        body = entry["body"].strip()
+        if not body:
+            print("    (no body)")
+            continue
+        if len(body) > BODY_CAP:
+            body = f"{body[:BODY_CAP]}\n[cut, {len(entry['body']) - BODY_CAP} more characters; read the URL above]"
+        for line in body.splitlines():
+            print(f"    {line}")
+
+    if dead_wakes:
+        print("\ndisplaced wakes (cancelled, subject only):")
+        for run in dead_wakes:
+            print(f"    {run['createdAt']}  {run['event']}  {run['displayTitle']}  {run['url']}")
+
+    for warning in warnings:
+        print(f"\nINCOMPLETE: {warning}")
+
+    counts = {}
+    for entry in entries:
+        counts[entry["kind"].split()[0]] = counts.get(entry["kind"].split()[0], 0) + 1
+    tally = " | ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nothing"
+    print(
+        f"\nsweep: {tally} | displaced {len(dead_wakes)} "
+        f"| prs-scanned {scanned} | operator {operator} | since {anchor}"
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Every operator input since the previous BDFL run, as one timeline.",
+        epilog="Exit is 0 for a quiet sweep. Non-zero means this tool failed, not that nothing happened.",
+    )
+    parser.add_argument("--since", help="ISO8601 anchor; default is the previous successful agent-bdfl run's start")
+    parser.add_argument("--operator", help="login to sweep for; default is the repository owner")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"), help="owner/name; default $GITHUB_REPOSITORY")
+    args = parser.parse_args()
+
+    repo = args.repo or json.loads(gh("repo", "view", "--json", "nameWithOwner"))["nameWithOwner"]
+    operator = args.operator or repo.split("/")[0]
+    if args.since:
+        anchor, source = iso(args.since), "given"
+    else:
+        anchor, run_id = anchor_from_last_run(repo, os.environ.get("GITHUB_RUN_ID"))
+        source = f"start of run {run_id}"
+
+    print(f"anchor {anchor} ({source})")
+
+    warnings = []
+    entries = comments(repo, anchor, operator, "issues/comments", "comment")
+    entries += comments(repo, anchor, operator, "pulls/comments", "inline comment")
+    pulls, pulls_truncated = touched_pulls(repo, anchor)
+    if pulls_truncated:
+        warnings.append(f"more than {PAGE_CAP * 100} PRs touched since the anchor; reviews swept over the newest only")
+    entries += reviews(repo, anchor, operator, pulls)
+    starts = opened(repo, anchor, operator)
+    entries += starts
+    changes, events_truncated = state_changes(
+        repo, anchor, operator, {e["number"]: e["when"] for e in starts}
+    )
+    if events_truncated:
+        warnings.append(f"issue events did not reach the anchor within {PAGE_CAP} pages; state changes may be missing")
+    entries += changes
+    dead_wakes, wakes_truncated = displaced(repo, anchor)
+    if wakes_truncated:
+        warnings.append("every cancelled run listed is inside the window; older displaced wakes are not shown")
+
+    render(entries, dead_wakes, anchor, operator, len(pulls), warnings)
+
+
+if __name__ == "__main__":
+    main()
