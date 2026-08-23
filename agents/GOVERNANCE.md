@@ -112,13 +112,15 @@ A PR touching `.github/workflows/**` may draw a 403 on that merge:
 "refusing to allow a GitHub App to create or update workflow ... without
 `workflows` permission". It arrived at a point in time, and the cause is
 unestablished. Fourteen app-token merges carrying workflow files
-succeeded on 2026-08-23, the last at 12:14:40 UTC. Every attempt since
-was refused: PR #129 at 12:29, then PR #130 four times between 12:43 and
-12:56, from the BDFL and the reviewer seats both. So expect the refusal,
-rather than treating it as a coin flip worth reflipping. Still attempt
-the app merge first, because it costs one API call and it is the only
-way we would notice the capability returning; a success there is news
-worth writing down. When it fails, the BDFL merges again with
+succeeded on 2026-08-23, the last at 12:14:40 UTC (PR #126). Every
+attempt after was refused: PR #120 at 12:32:52, then PR #130 at 12:36:38,
+12:50:23 and 12:55:53, all from the reviewer seat, and once more from a
+BDFL session at 12:56 whose admin retry then landed it. The boundary
+sits between 12:14:40 and 12:32:52. So expect the refusal, rather than
+treating it as a coin flip worth reflipping. Still attempt the app merge
+first, because it costs one API call and it is the only way we would
+notice the capability returning; a success there is news worth writing
+down. When it fails, the BDFL merges again with
 `GH_TOKEN="$GH_ADMIN_TOKEN"`, which succeeds. Only the BDFL can: the
 admin token is the BDFL's alone (`OPERATIONS.md`, "Admin token &
 signing"). Every other agent's move on this 403 is to
