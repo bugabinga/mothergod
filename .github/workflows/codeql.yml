@@ -1,0 +1,166 @@
+# Code scanning, moved from GitHub's default setup into the repository
+# (issue #163). Default setup is configured in repo settings, so it inherited
+# none of the thinking `ci.yml` already encodes: no path filter, no
+# concurrency group, and five language configs for three languages. It
+# analyzed every docs-only push, which was 55 of 71 pushes in the window #163
+# measured, and cost 4.8x what the four required gates cost.
+#
+# Advanced setup is the only way to control triggers, paths and concurrency,
+# and it puts the config in the repo where it evolves by PR like everything
+# else (ADR-0010).
+#
+# Not a required check. The `gate` ruleset requires exactly `fmt`, `clippy`,
+# `test` and `doc`, verified against the live ruleset before this landed, so
+# nothing here can deadlock a merge.
+#
+# This is a reduction in scan FREQUENCY, never in coverage: every query still
+# runs on every change to code it can analyze, and the weekly cron below
+# sweeps everything with no filter, so nothing hides behind a path rule
+# permanently.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly full sweep, no filter, so the `changes` job below can never hide
+    # a finding permanently. This is the safety property default setup was
+    # buying and it survives the move. Sunday 04:07 UTC, ahead of the BDFL's
+    # Sunday deep run, so a fresh scan is on the record before the survey
+    # reads it.
+    - cron: '7 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push obsoletes the previous scan's verdict, exactly as in `ci.yml`.
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The filter lives here and nowhere else, deliberately.
+  #
+  # The obvious alternative is `on.push.paths`, which skips the run outright
+  # and costs zero. It was rejected: `paths` is workflow-wide, so it cannot
+  # answer per language, and keeping it as well would mean two copies of the
+  # same rules in one file. GitHub Actions does not support YAML anchors, so
+  # the copies could not be collapsed, and a duplicated rule set is a
+  # synchronization debt that gets paid in drift. One source of truth costs
+  # this job's ~20 seconds on a prose-only push and saves the 2 minutes of
+  # analysis behind it.
+  #
+  # Fail-safe by inversion, the rule review settled on #79: the matrix is
+  # narrowed only when this job POSITIVELY names a smaller set. Every
+  # unexpected path (a compare that fails, a force push, a branch with no
+  # `before`, a schedule or dispatch) falls through to all three languages.
+  # A broken filter costs runner minutes; a vacuous green costs trust.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read
+    outputs:
+      languages: ${{ steps.filter.outputs.languages }}
+    steps:
+      - name: Detect which languages the change can affect
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          all='["actions","javascript-typescript","rust"]'
+
+          files=""
+          case "$EVENT" in
+            pull_request)
+              files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate \
+                --jq '.[] | .filename, (.previous_filename // empty)')" || files=""
+              ;;
+            push)
+              # An all-zero `before` is a branch that did not exist, and a
+              # force push can leave a base this compare cannot reach. Both
+              # leave `files` empty and take the full-matrix path below.
+              if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+                files="$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --paginate \
+                  --jq '.files[]? | .filename, (.previous_filename // empty)')" || files=""
+              fi
+              ;;
+          esac
+
+          if [ -z "$files" ]; then
+            echo "languages=$all" >> "$GITHUB_OUTPUT"
+            echo "no file list for event '$EVENT'; analyzing everything"
+            exit 0
+          fi
+
+          # A change to this file re-scans everything, so the filter is always
+          # exercised against the full matrix by the diff that edits it.
+          if echo "$files" | grep -qE '^\.github/workflows/codeql\.yml$'; then
+            echo "languages=$all" >> "$GITHUB_OUTPUT"
+            echo "codeql.yml changed; analyzing everything"
+            exit 0
+          fi
+
+          # Tool-INPUT file types, never tree paths, the same rule `ci.yml`
+          # follows: globs stay correct when directories move, so this list
+          # drifts only when a toolchain changes.
+          langs=""
+          add() { langs="${langs:+$langs,}\"$1\""; }
+          if echo "$files" | grep -qE '^\.github/(workflows/.*\.ya?ml$|actions/)'; then
+            add actions
+          fi
+          if echo "$files" | grep -qE '\.[cm]?[jt]sx?$'; then
+            add javascript-typescript
+          fi
+          if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|(^|/)rustfmt\.toml$|(^|/)clippy\.toml$'; then
+            add rust
+          fi
+
+          echo "languages=[$langs]" >> "$GITHUB_OUTPUT"
+          echo "analyzing: [$langs]"
+
+  analyze:
+    needs: changes
+    # `fromJSON('[]')` is a matrix with no legs, which GitHub rejects as a
+    # workflow error rather than skipping, so this guard is what makes a
+    # positive empty narrow a clean no-op. It tests for exactly `[]` and
+    # nothing else: an EMPTY output means the filter job did not conclude
+    # positively, and that case must analyze everything, which the matrix
+    # default below does. `always()` for the same reason `ci.yml` uses it,
+    # so a failed or cancelled filter still runs the analysis.
+    if: ${{ always() && needs.changes.outputs.languages != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # The fail-safe default: an empty output (filter failed, timed out,
+        # or was cancelled) falls back to all three languages rather than to
+        # `fromJSON('')`, which is an expression error.
+        language: ${{ fromJSON(needs.changes.outputs.languages || '["actions","javascript-typescript","rust"]') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # No `queries:` override. Default setup ran the `default` suite, so this
+      # move changes when the analysis runs and nothing about which queries
+      # execute. Changing the suite is a separate decision with its own
+      # evidence.
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
