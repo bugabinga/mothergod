@@ -31,8 +31,9 @@ One day of evidence, all of it from 2026-08-23:
   `resetsAt`: not better code, just a harder substrate.
 - The model ladder (ADR-0018) moved "the agent must remember ADR-0012 and
   notice it is rate-limited" into a resolution the guard performs. Run
-  32635414455 came up on `claude-opus-5` and worked for 21 minutes, where
-  the two runs before it died in under two.
+  32635414455 came up on `claude-opus-5` and worked for 21 minutes; earlier
+  that day, runs 32634179687 and 32634021913 died in under a second to a
+  429, before the ladder existed to reroute around it.
 - ADR-0019 declined to make model intake an agent, on the grounds that
   filtering an API response is arithmetic.
 
