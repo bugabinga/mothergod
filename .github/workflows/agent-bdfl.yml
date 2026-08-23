@@ -173,22 +173,15 @@ jobs:
           keys=$(curl -s --max-time 15 -H "Authorization: Bearer ${CF_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${KV_ACCOUNT}/storage/kv/namespaces/${KV_NAMESPACE}/keys") \
             || keys=''
-          # Parsed, not substring-matched. Grepping for '"name":"u:' would
-          # answer "empty" rather than "unreadable" if Cloudflare ever
-          # ordered a key object's fields differently, and reporting an
-          # empty inbox when it cannot read one is precisely the silent
-          # wrong answer this gate exists to stop giving.
-          verdict=$(printf '%s' "$keys" | python3 -c '
-          import json, sys
-          try:
-              body = json.load(sys.stdin)
-          except ValueError:
-              print("unreadable"); raise SystemExit
-          if not body.get("success"):
-              print("unreadable"); raise SystemExit
-          keys = body.get("result") or []
-          print("waiting" if any(k.get("name", "").startswith("u:") for k in keys) else "empty")
-          ')
+          # Parsed, not substring-matched: grepping for '"name":"u:' answers
+          # "empty" rather than "unreadable" if Cloudflare ever orders a key
+          # object's fields differently, and an empty answer from a gate that
+          # could not read the inbox is the silent wrong answer this exists to
+          # stop giving. The classifier is a file, never inlined here
+          # (CLAUDE.md, style), and never fails: `|| verdict=unreadable` covers
+          # the interpreter itself going missing.
+          verdict=$(printf '%s' "$keys" | python3 .github/scripts/inbox-state.py) \
+            || verdict=unreadable
           case "$verdict" in
             waiting) echo 'operator is waiting: starting the typing indicator' ;;
             empty) echo 'inbox empty: nobody is waiting, no indicator'; exit 0 ;;
