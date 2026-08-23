@@ -274,7 +274,8 @@ jobs:
             via BotFather is recorded in the IDENTITIES.md Telegram row.
 
             Telegram (the project status bot; token in
-            TELEGRAM_BOT_TOKEN):
+            TELEGRAM_BOT_TOKEN, operator chat id in
+            OPERATOR_TELEGRAM_CHAT_ID):
             - Inbox (webhook mode, issue #5): the bot's webhook is the
               Cloudflare Worker in infra/telegram-worker/ — it verifies
               Telegram's secret token, drops every chat but the
