@@ -102,6 +102,27 @@ jobs:
         with:
           token: ${{ github.token }}
 
+      # Chat progress (operator request, 2026-08-23): a dispatch wake is
+      # a chat wake, and the operator stares at a silent screen for the
+      # minutes between webhook and reply. Telegram's native "typing..."
+      # indicator, refreshed every 5s, is the progress bar. The loop is
+      # disowned so it survives this step; the session kills it via
+      # /tmp/typing.pid right before its last Telegram message (else the
+      # 60 min cap or job end stops it). The script never expands the
+      # token into a command line, only the child shell reads it.
+      - if: steps.guard.outputs.paused != 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+        run: |
+          nohup bash -c 'for _ in $(seq 720); do
+            curl -s -o /dev/null --max-time 4 \
+              "https://api.telegram.org/bot${BOT_TOKEN}/sendChatAction" \
+              -d chat_id="${CHAT_ID}" -d action=typing
+            sleep 5
+          done' >/dev/null 2>&1 &
+          echo $! > /tmp/typing.pid
+
       - uses: dtolnay/rust-toolchain@stable
         if: steps.guard.outputs.paused != 'true'
         with:
@@ -171,10 +192,14 @@ jobs:
               like a person in a chat: answer each message as a
               Telegram reply to it (sendMessage with
               reply_parameters.message_id), acknowledge a directive
-              you are about to work on with a reaction
-              (setMessageReaction, e.g. eyes) instead of a filler
-              sentence, match the operator's register, never
-              re-explain what the thread already shows. The status
+              you are about to work on by switching its reaction
+              from the webhook's 👀 (stored) to ✍ (setMessageReaction,
+              working) instead of a filler sentence, match the
+              operator's register, never re-explain what the thread
+              already shows. Before your last Telegram message:
+              re-list the inbox and drain anything that arrived
+              mid-run, then kill the typing loop
+              (kill "$(cat /tmp/typing.pid)" 2>/dev/null). The status
               line still rides your last message.
             - DELTA — any other wake. The run economy below, in
               order; a no-op is a good outcome.
@@ -327,6 +352,15 @@ jobs:
               message stays in KV only if you crashed; the confirmation
               is the receipt. Never call getUpdates; webhook mode owns
               the stream.
+            - Chat memory (operator request, 2026-08-23): runs are
+              amnesiac, the log is the continuity. Key `chatlog` in
+              the same namespace holds a JSON array of the last 40
+              entries {from, message_id, date, text}. On a chat wake
+              read it before answering; after the drain append each
+              processed message and a one-line summary of each reply
+              you sent, trim to 40, write it back. Message edits
+              never reach the system by design (webhook subscribes
+              to new messages only); a correction is a new message.
             - Outbound, status line (operator directive, Telegram,
               2026-08-22): end EVERY run, scheduled and silent no-ops
               included, with one terse Telegram message: wake reason,

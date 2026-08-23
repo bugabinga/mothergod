@@ -1,7 +1,8 @@
 # Telegram webhook worker (issue #5). Deployed by
 # .github/workflows/deploy-telegram-worker.yml on push to main.
-# Secrets WEBHOOK_SECRET and GITHUB_PAT are pushed by that workflow
-# from repo secrets TELEGRAM_WEBHOOK_SECRET / TELEGRAM_GITHUB_PAT.
+# Secrets WEBHOOK_SECRET, GITHUB_PAT and BOT_TOKEN are pushed by that
+# workflow from repo secrets TELEGRAM_WEBHOOK_SECRET /
+# TELEGRAM_GITHUB_PAT / MOTHERGOD_STATUS_BOT_TOKEN.
 name = "mothergod-telegram"
 main = "worker.js"
 compatibility_date = "2026-08-01"
