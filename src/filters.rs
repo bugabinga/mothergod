@@ -752,6 +752,10 @@ pub mod select {
     /// (`JOURNAL` S1-L3: histogram entropy is not compressibility, but a
     /// *conditional* entropy proxy still separates structured candidates
     /// from noise well enough to shortlist).
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
+    )]
     fn order1_entropy(data: &[u8]) -> f64 {
         let mut pair_counts = vec![0u32; 256 * 256];
         let mut byte_counts = [0u32; 256];
@@ -787,6 +791,10 @@ pub mod select {
     /// are each internally predictable, even though the raw byte stream
     /// (whose immediate predecessor is usually a *different* column) looks
     /// unpredictable.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
+    )]
     fn column_entropy(data: &[u8], columns: usize) -> f64 {
         let mut bits = 0f64;
         let mut transitions = 0usize;

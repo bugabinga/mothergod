@@ -1,0 +1,9 @@
+# Overrides the root clippy.toml for this crate (clippy takes the
+# nearest clippy.toml, it does not merge). The root file's
+# `disallowed-methods` enforces ADR-0024: nothing on the codec's decode
+# path may call a libm transcendental. `bench/` never touches a
+# bitstream — it generates synthetic corpora (Box-Muller gaussians,
+# entropy-proxy scoring) for the harness in ROADMAP M2 — so that
+# constraint does not apply here, and forcing `#[allow]` onto its
+# `ln`/`cos`/`log2` sites would misattribute a decode-path rule to
+# unrelated code.

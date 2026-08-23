@@ -1,0 +1,22 @@
+# ADR-0024: nothing on the decode path may call a libm transcendental
+# function. libm implementations disagree in the last ulp, so a value
+# both the encoder and the decoder must compute (e.g. a mixing weight)
+# could desync between platforms, corrupting output: a hard rule 1
+# violation. IEEE-754 basic operations (+ - * / and sqrt) are correctly
+# rounded and stay off this list; only the transcendental family is
+# checked.
+#
+# An encoder-only call site (no bitstream depends on it) clears this
+# with a justified allow:
+# #[allow(clippy::disallowed_methods, reason = "encoder-only: ...")]
+disallowed-methods = [
+    "f64::exp", "f32::exp",
+    "f64::ln", "f32::ln",
+    "f64::log2", "f32::log2",
+    "f64::log10", "f32::log10",
+    "f64::powf", "f32::powf",
+    "f64::powi", "f32::powi",
+    "f64::sin", "f32::sin",
+    "f64::cos", "f32::cos",
+    "f64::tan", "f32::tan",
+]

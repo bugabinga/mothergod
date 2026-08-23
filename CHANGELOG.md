@@ -110,6 +110,13 @@ All notable changes to this project are documented here. Format follows
   (Box-Muller, mean 50, stddev 15) and an `active` field true 80% of the
   time; generates records until the requested byte length is reached,
   same deviation as `access_log`.
+- `clippy.toml` with `disallowed-methods` covering the float transcendental
+  family (`exp`, `ln`, `log2`, `log10`, `powf`, `powi`, `sin`, `cos`,
+  `tan`, `f32`/`f64`), enforcing ADR-0024: nothing on the decode path may
+  call a libm function, since implementations can disagree in the last
+  ulp and desync an encoder and decoder mid-frame. Scoped to `src/` only
+  (`bench/clippy.toml` overrides it back off for the corpus-generation
+  crate, which never touches a bitstream).
 
 ### Removed
 
@@ -134,6 +141,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `literal::Literal`'s exponentiated-gradient mixing-weight update
+  (`research/JOURNAL.md` S2-D3, resolved by ADR-0024) called
+  `f64::exp()` on both the encode and decode path; replaced with a
+  crate-local `exp` built from IEEE-754 basic operations only (range
+  reduction plus a polynomial, `2^k` by exact repeated doubling), so
+  encoder and decoder compute a bit-identical mixing weight on every
+  platform. Verified against a kept `f64::exp` reference: bit-identical
+  encoded output on a 25,524-byte named corpus (well within the 1%
+  budget ADR-0024 sets). Unblocks M1's remaining `Method`-wiring slice
+  (issue #161).
 - The reviewer agent approved PRs but sometimes skipped merging them
   (issue #21), leaving the operator to merge by hand (PRs #15, #19). Root
   cause: the PASS procedure told the reviewer to run
