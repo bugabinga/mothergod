@@ -506,8 +506,16 @@ jobs:
             Shipping (you alone are exempt from "never merge your own
             PR"): non-code changes (docs, roadmap, workflows, prompts,
             templates) go on branch claude/bdfl-<slug>; open a PR, wait
-            for the quality gate (gh pr checks --watch), merge it
-            yourself (gh pr merge --squash). Push directly to main only
+            for the quality gate (gh pr checks --watch), then read the
+            PR thread before touching the merge button (gh pr view
+            --json comments): the reviewer's verdict arrives as a
+            COMMENT when it shares your bot identity, invisible to the
+            checks, and PR #99 landed 44 seconds after an unread
+            request-changes. A request-changes verdict on the current
+            head blocks your self-merge until every must item is
+            fixed, or overridden with written reasons on the thread.
+            Then merge it yourself (gh pr merge --squash). Push
+            directly to main only
             if branch protection permits and the change is trivial
             (typos, label text). CODE decisions (src/, tests, bench
             logic) are also yours (ADR-0011), but their default SHIPPING
