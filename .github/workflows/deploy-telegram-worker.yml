@@ -36,9 +36,11 @@ jobs:
         run: |
           printf '%s' "$WEBHOOK_SECRET" | npx wrangler@4 secret put WEBHOOK_SECRET
           printf '%s' "$GITHUB_PAT" | npx wrangler@4 secret put GITHUB_PAT
+          printf '%s' "$BOT_TOKEN" | npx wrangler@4 secret put BOT_TOKEN
         env:
           WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           GITHUB_PAT: ${{ secrets.TELEGRAM_GITHUB_PAT }}
+          BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
       - name: Point the bot's webhook at the worker
         run: |
           curl -sS -f -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
