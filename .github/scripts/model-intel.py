@@ -173,15 +173,33 @@ if findings:
 else:
     lines.append("No model outside a ladder scores above that ladder's top rung.")
 lines.append("")
-lines.append("## Top 10 by intelligence index")
+# This project authenticates against a Claude subscription (ADR-0004), so
+# a leaderboard of models it cannot call is noise. The Claude family is the
+# actionable list; the overall top few stay only as a "is Claude keeping up"
+# signal, which is a real strategic question for the BDFL.
+claude = [m for m in models if "claude" in m["id"].lower()]
+lines.append("## Claude family, the only models this project can call")
 lines.append("")
 lines.append("| Model | Intelligence | Coding | Agentic |")
 lines.append("|---|---|---|---|")
-for m in models[:10]:
+for m in claude:
     lines.append(f"| `{m['id']}` | {m['score']} | {m['coding'] if m['coding'] is not None else '-'} "
                  f"| {m['agentic'] if m['agentic'] is not None else '-'} |")
 lines.append("")
-lines.append(f"{len(models)} models carried an intelligence index in this snapshot.")
+lines.append("Their catalogue lists effort tiers as separate entries with separate "
+             "scores, so a rung of ours may appear here several times or not at all. "
+             "That is what makes a **no match** above a naming question rather than "
+             "an availability one.")
+lines.append("")
+lines.append("## Overall top 5, for context only")
+lines.append("")
+lines.append("| Model | Intelligence |")
+lines.append("|---|---|")
+for m in models[:5]:
+    lines.append(f"| `{m['id']}` | {m['score']} |")
+lines.append("")
+lines.append(f"{len(models)} models carried an intelligence index in this snapshot, "
+             f"{len(claude)} of them Claude.")
 lines.append("")
 lines.append(f"<!-- fingerprint: {fingerprint} -->")
 lines.append("")
