@@ -117,7 +117,7 @@ measure directly on the workload we actually care about.
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
 - 2026-08-23: our own audit artifacts, adopted as the second half of model
-  intel (ADR-0022, operator issue #118). The best token-efficiency source
+  intel (ADR-0023, operator issue #118). The best token-efficiency source
   for a model/effort decision is the workload we actually run, and it was
   already being written and never read. No new store: the collector reports
   two windows per run and the issue's edit history is the trend, so the

@@ -1,4 +1,4 @@
-# ADR-0022: Run economics joins model intel, and the report is its own store
+# ADR-0023: Run economics joins model intel, and the report is its own store
 
 Status: accepted · Date: 2026-08-23 · Serves ADR-0012, ADR-0021 · Extends ADR-0019
 

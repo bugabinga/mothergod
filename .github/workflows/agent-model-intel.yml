@@ -1,9 +1,9 @@
 # Model intelligence watch. Deliberately NOT an agent: no Claude step, no
 # tokens, no context window (ADR-0019). The `agent-` prefix is inaccurate
 # and kept anyway: renaming splits the run history and touches four call
-# sites to buy nothing (ADR-0022).
+# sites to buy nothing (ADR-0023).
 #
-# Two collectors, one assembly, one channel (ADR-0022). Capability comes
+# Two collectors, one assembly, one channel (ADR-0023). Capability comes
 # from Artificial Analysis: what the market thinks a model can do. Run
 # economics comes from our own audit artifacts: what our roles actually
 # cost on the workload we actually run. ADR-0012 (model) and ADR-0021
@@ -88,7 +88,7 @@ jobs:
           echo "Fetched $(wc -c < "$RUNNER_TEMP/aa.json") bytes."
           echo "ok=true" >> "$GITHUB_OUTPUT"
 
-      # The second collector (ADR-0022). Independent of the first by
+      # The second collector (ADR-0023). Independent of the first by
       # design: it reads our own audit artifacts, so it still reports when
       # Artificial Analysis is down or unconfigured.
       - id: telemetry
@@ -143,7 +143,7 @@ jobs:
             --color 1D76DB --description "Model and effort evidence for ADR-0012/0021 decisions" 2>/dev/null || true
           gh label create triage --repo "$GITHUB_REPOSITORY" --color FBCA04 2>/dev/null || true
 
-          # State versus event (ADR-0022). Run economics is STATE: the body
+          # State versus event (ADR-0023). Run economics is STATE: the body
           # is rewritten every week and the issue's own edit history is the
           # trend line, which is why no database was built for one. A
           # capability delta is an EVENT: it additionally comments, which

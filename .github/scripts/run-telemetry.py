@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate agent run economics from audit artifacts (ADR-0022).
+"""Aggregate agent run economics from audit artifacts (ADR-0023).
 
 The capability half of model intel says what the market thinks a model can
 do. This half says what our roles actually cost on our actual workload,
