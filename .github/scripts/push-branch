@@ -72,33 +72,22 @@ def note(line):
     print(f"push-branch: {line}", file=sys.stderr)
 
 
-def gh(*args, token=None, stdin=None):
-    """Run gh with an explicit credential. The token stays in the environment,
-    never in argv (hard rule 10)."""
+def gh(args, token=None, stdin=None):
+    """Run gh on an explicit credential. The token rides the environment, never
+    argv (hard rule 10)."""
     env = dict(os.environ)
     if token:
         env["GH_TOKEN"] = token
-    proc = subprocess.run(
-        ("gh",) + args, capture_output=True, text=True, env=env, input=stdin
+    return subprocess.run(
+        ("gh",) + tuple(args), capture_output=True, text=True, env=env, input=stdin
     )
-    if proc.returncode != 0:
-        die(f"`gh {' '.join(args)}` failed: {proc.stderr.strip()}")
-    return proc.stdout
 
 
 def api(method, path, token, body=None, allow_missing=False):
     args = ["api", "-X", method, f"repos/{REPO}/{path}"]
     if body is not None:
         args += ["--input", "-"]
-    env = dict(os.environ)
-    env["GH_TOKEN"] = token
-    proc = subprocess.run(
-        ("gh",) + tuple(args),
-        capture_output=True,
-        text=True,
-        env=env,
-        input=json.dumps(body) if body is not None else None,
-    )
+    proc = gh(args, token, json.dumps(body) if body is not None else None)
     if proc.returncode != 0:
         if allow_missing and "404" in proc.stderr:
             return None
@@ -143,7 +132,9 @@ def guard_not_stale(branch, base_sha, paths):
         note(f"base {base_sha[:7]} is not in this checkout; staleness unverified")
         return
     stale = git("diff", "--quiet", base_sha, "HEAD", "--", *paths)
-    if stale.returncode == 1:
+    if stale.returncode not in (0, 1):
+        note(f"git diff against {base_sha[:7]} failed; staleness unverified")
+    elif stale.returncode == 1:
         moved = git("diff", "--name-only", base_sha, "HEAD", "--", *paths).stdout
         die(
             "these paths differ between your checkout and the branch base:",
@@ -156,7 +147,7 @@ def guard_not_stale(branch, base_sha, paths):
 def main() -> int:
     argv = sys.argv[1:]
     if len(argv) < 2:
-        die("usage: push-branch <branch> <path>... < commit message")
+        die("usage: push-branch <branch|pr-number> <path>... < commit message")
     if not REPO:
         die("GITHUB_REPOSITORY is unset; this runs inside the repo's workflows")
     target, paths = argv[0], argv[1:]
@@ -184,7 +175,7 @@ def main() -> int:
             )
         identity = "admin PAT"
     else:
-        token = os.environ.get("GH_TOKEN") or gh("auth", "token").strip()
+        token = os.environ.get("GH_TOKEN") or gh(["auth", "token"]).stdout.strip()
         identity = "app token"
 
     branch = api("GET", f"pulls/{target}", token)["head"]["ref"] if target.isdigit() else target
