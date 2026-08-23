@@ -727,6 +727,71 @@ record.
   a configured ceiling" bound, chosen over "against remaining input"
   because the latter doesn't hold here. Provisional pending `ROADMAP.md`
   M4's streaming/block API.
+- S2-A18 | ACCEPTED | Issue #179: `lz::parse_optimal` hung on long runs of
+  a single repeated byte (200,000 bytes, over 60 seconds, killed).
+  Mechanism: `dp_round::relax_rep_candidates` calls `match_len` — a
+  linear scan capped at `MAX_MATCH_LEN` (65535) — once per rep-cache
+  slot at *every* position, with no carry-reuse equivalent to
+  `next_match_candidate`'s (which already skips a fresh hash-chain walk
+  when a long match found at the previous position is still valid one
+  byte shorter here). `parse_greedy` never hits this because it jumps
+  ahead by a whole token's length; `dp_round` must visit every position
+  to consider every possible token start, so on a run past
+  `MAX_MATCH_LEN` the per-position scan cost stayed near the cap at
+  every position: `O(run_length × MAX_MATCH_LEN)`. Fix: `rep_match_len`
+  (`src/lz.rs`), a per-distance carry mirroring `next_match_candidate`'s
+  — `match_len(data, i, d) == len` implies `match_len(data, i + 1, d) >=
+  len - 1` (the same run of matched byte-equalities, shifted by one
+  index), so once a scan finds a run at or past `CARRY_MIN_LEN` a later
+  position on the same distance decrements instead of re-scanning. Two
+  bugs surfaced and were fixed while building this: (1) a first version
+  keyed the carry by rep-cache *slot index*; `RepCache::promote`/
+  `push_front` reorder slots on ties, which are common once a run
+  passes `MAX_MATCH_LEN` and every slot's scan caps at the same length,
+  so a slot-index-keyed carry went stale on every reorder and
+  reproduced the same quadratic cost one level up (confirmed by
+  instrumenting `match_len` call/step counts: fresh full-length scans
+  jumped from ~3 to ~10,600 out of ~117,000 total calls between
+  100,000- and 50,000-byte runs). Fixed by searching every carry entry
+  for a matching *distance* instead of a matching array position. (2)
+  that distance-keyed version then let a carry entry go stale in a
+  different way: a distance can drop out of every rep slot for a
+  stretch of positions and later reappear (e.g. a match's distance
+  cycling back into the cache), and reusing its old length without
+  accounting for the elapsed positions overestimates the true match
+  length — caught by a debug-mode `attempt to subtract with overflow`
+  panic during manual timing verification, then by an index-out-of-
+  bounds panic in `dp_round` once the panic itself was fixed blind.
+  Fixed by storing the position each entry was last measured at and
+  computing `len.saturating_sub(i - measured_at)` at lookup time, a
+  lower bound valid for any elapsed gap by induction, not just a
+  single step. | Verified by execution, not just the round-trip suite:
+  a 200,000-byte single-repeated-byte input (matching the issue's own
+  repro) now completes in under 1s in an unoptimized debug build,
+  versus over 60s before: `lz::tests::
+  optimal_roundtrip_long_run_of_one_repeated_byte_stays_linear` pins
+  this with a 15s wall-clock regression bound (generous margin over a
+  slower CI runner) alongside the existing round-trip assertion.
+  Scaling checked directly, not assumed: 50k/100k/200k/400k/800k-byte
+  same-byte runs measured at ~0.14s/0.36s/0.93s/2.0s/4.3s, consistent
+  with linear, not quadratic, growth (the unfixed code could not
+  complete even the smaller sizes in this suite within a 30s timeout).
+  Also checked non-uniform inputs (a period-137 byte pattern, a cyclic
+  0..=255 sequence) for the same class of hang; both complete, though
+  the period-137 case is still slow (~5.8s for 300,000 bytes) from a
+  separate, pre-existing mechanism (`next_match_candidate`'s own
+  hash-chain search, `MAX_CHAIN_TRIES_OPTIMAL` candidates each costing
+  a full `match_len` scan on a refresh) that this fix does not touch —
+  out of scope for issue #179, which named the rep-candidate scan
+  specifically; worth its own lead if it matters in practice. `cargo
+  fmt --check`, `clippy --all-targets -- --deny warnings`, `test
+  --all-targets`, `test --doc`, `RUSTDOCFLAGS=--deny warnings cargo doc
+  --no-deps` all clean. | S2-A17 landed on `main` while this fix was in
+  progress: `lz::parse_optimal` is no longer test-only, `Method::Lz`
+  (`compress`'s public path) calls it on every input, so the hang this
+  entry fixes was reachable from the crate's real API, not a dormant
+  cost in unwired code. Still no bpb delta here: this changes encode-
+  side cost and robustness, not the bits a fixed input encodes to.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

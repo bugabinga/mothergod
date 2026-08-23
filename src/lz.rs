@@ -715,10 +715,11 @@ impl DpState {
         i: usize,
         base: f64,
         reps: RepCache,
+        rep_carry: &mut [Option<(Distance, usize, usize)>; REP_SLOTS],
     ) {
         for slot in RepSlot::ALL {
             let distance = reps.get(slot);
-            let rep_len = match_len(data, i, distance);
+            let rep_len = rep_match_len(data, i, distance, rep_carry, slot.index());
             if rep_len < MIN_REP_LEN {
                 continue;
             }
@@ -839,6 +840,12 @@ fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
     // (len, distance) of a long match found at the previous position,
     // still long enough at this position to skip a fresh hash-chain walk.
     let mut carry: Option<(usize, Distance)> = None;
+    // Per-slot echo of `carry`, for `relax_rep_candidates`' match_len scan
+    // (issue #179): unlike parse_greedy, which jumps ahead by a chosen
+    // token's length, this loop visits every position, so a long run's
+    // rep-length scan needs the same reuse the hash-chain search already
+    // gets or it costs O(MAX_MATCH_LEN) per position.
+    let mut rep_carry: [Option<(Distance, usize, usize)>; REP_SLOTS] = [None; REP_SLOTS];
 
     for i in 0..n {
         finder.insert(i);
@@ -861,7 +868,7 @@ fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
             base + prices.literal[context * 256 + usize::from(data[i])] + FLAG_BIT_PRICE;
         state.relax(literal_cost, i + 1, Move::Literal, reps);
 
-        state.relax_rep_candidates(prices, data, i, base, reps);
+        state.relax_rep_candidates(prices, data, i, base, reps, &mut rep_carry);
 
         let match_candidate = next_match_candidate(&mut finder, &mut carry, i);
         if let Some((match_len_here, distance_here)) = match_candidate {
@@ -893,6 +900,58 @@ fn next_match_candidate(
             found
         }
     }
+}
+
+/// [`match_len`] against `distance` at `i`, reusing a previous position's
+/// scan on the same distance the way [`next_match_candidate`]'s `carry`
+/// reuses the hash-chain search: `match_len(data, i, d)` of `len` implies
+/// `match_len(data, i + 1, d)` is at least `len - 1` (the same run of
+/// equalities, shifted by one index), so once a scan finds a run at or past
+/// [`CARRY_MIN_LEN`], later positions on the same distance decrement
+/// instead of re-walking it.
+///
+/// Searches every entry in `rep_carry`, not just `rep_carry[store_at]`:
+/// [`RepCache::promote`]/[`RepCache::push_front`] can move a distance to a
+/// different slot index between one position and the next (ties between
+/// equal-length candidates are common once a run passes [`MAX_MATCH_LEN`],
+/// every slot capping at the same length), and a carry keyed purely by slot
+/// index goes stale on every such reorder even though the distance itself,
+/// and thus the scan, did not change. A slot-index-only version of this
+/// cache regressed to a fresh [`MAX_MATCH_LEN`]-sized scan on most
+/// positions past the first reorder, reproducing this function's own bug
+/// (issue #179) one level up.
+///
+/// Each entry stores the position it was last measured at, not a
+/// pre-decremented length: a distance can drop out of every slot for a
+/// stretch of positions (evicted, then a later match happens to reintroduce
+/// the same value) and come back stale relative to a fixed per-step
+/// decrement, but `len - (i - measured_at)` is a valid lower bound on
+/// `match_len(data, i, distance)` for any `i >= measured_at`, by the same
+/// shifted-equalities argument extended from one step to `i - measured_at`
+/// steps. On a miss, the fresh scan is recorded at `store_at` (the
+/// caller's own slot index): eviction only needs to be cheap, not exact,
+/// since a wrongly evicted entry costs one extra scan, not a correctness
+/// bug.
+fn rep_match_len(
+    data: &[u8],
+    i: usize,
+    distance: Distance,
+    rep_carry: &mut [Option<(Distance, usize, usize)>; REP_SLOTS],
+    store_at: usize,
+) -> usize {
+    let hit = rep_carry.iter().enumerate().find_map(|(idx, entry)| {
+        let (carried_distance, len, measured_at) = (*entry)?;
+        (carried_distance == distance).then(|| (idx, len.saturating_sub(i - measured_at)))
+    });
+    if let Some((idx, remaining)) = hit
+        && remaining >= CARRY_MIN_LEN
+    {
+        rep_carry[idx] = Some((distance, remaining, i));
+        return remaining;
+    }
+    let len = match_len(data, i, distance);
+    rep_carry[store_at] = (len >= CARRY_MIN_LEN).then_some((distance, len, i));
+    len
 }
 
 /// Walks `parent` backward from `data.len()` to `0`, matching the archive's
@@ -1113,20 +1172,31 @@ mod tests {
     }
 
     #[test]
-    fn optimal_roundtrip_long_run_exercises_the_carry_reuse() {
-        // Well past CARRY_MIN_LEN (64): exercises dp_round's carry path (a
-        // long match reused, decremented, across consecutive positions).
-        // Deliberately not MAX_MATCH_LEN-sized (unlike parse_greedy's
-        // equivalent fixture): unlike parse_greedy, which jumps ahead by a
-        // whole match's length, dp_round visits every position (needed to
-        // consider every possible token start) and prices every rep-cache
-        // slot at each one via a linear match_len scan, the same
-        // unconditional per-position check the archive's lz_opt does. On a
-        // single-byte run that scan is ~the remaining length at every
-        // position, so cost grows with the *square* of the run length once
-        // it passes MAX_MATCH_LEN; a few thousand bytes already exercises
-        // several carry decrement/refresh cycles without paying that.
-        roundtrip_optimal(&vec![b'z'; 4000]);
+    fn optimal_roundtrip_long_run_of_one_repeated_byte_stays_linear() {
+        // Regression test for issue #179. dp_round visits every position
+        // (needed to consider every possible token start, unlike
+        // parse_greedy, which jumps ahead by a whole match's length), and
+        // used to price every rep-cache slot at each one via a fresh
+        // match_len scan with no carry-reuse equivalent to
+        // next_match_candidate's: on a single-byte run the scan cost stayed
+        // near MAX_MATCH_LEN at every position, making total cost quadratic
+        // in the run length once it passed MAX_MATCH_LEN. 200,000 bytes
+        // matches the issue's own repro (mirroring parse_greedy's own
+        // 200,000-byte same-byte-run test); before the fix this took over
+        // 60 seconds and was killed. The bound below is generous (the fixed
+        // version measures under 2s in an unoptimized debug build on
+        // ordinary hardware) so a slower CI runner doesn't flake, while
+        // still failing well before a regression to the old quadratic cost
+        // would let it run to completion.
+        let data = vec![b'z'; 200_000];
+        let start = std::time::Instant::now();
+        roundtrip_optimal(&data);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(15),
+            "parse_optimal on a 200,000-byte single-byte run took {elapsed:?}, expected well \
+             under 15s; likely a regression to issue #179's quadratic rep-candidate scan"
+        );
     }
 
     #[test]
