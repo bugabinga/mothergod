@@ -24,10 +24,18 @@ const TYPING_CAP_MS = 20 * 60 * 1000;
  * answers. The worker is awake at the exact moment the operator's
  * message arrives, which is the moment the indicator has to start.
  *
- * Two verbs, both idempotent: /start when a message lands, /stop when an
- * answer goes out (`.github/scripts/tg-send`). One instance for one
- * operator chat, so a second message during a long run just extends the
- * same indicator.
+ * One instance for one operator chat, so what it tracks is not on/off but
+ * `owed`: messages that arrived and have not been answered yet. A drain
+ * loop answering three queued messages must keep typing between replies
+ * one and three, which a boolean cannot express (PR #155 review).
+ *
+ * Three verbs: /start when a message lands (owed + 1), /stop when an
+ * answer goes out (owed - 1, `.github/scripts/tg-send`), /reset when the
+ * run ends owing nothing (agent-bdfl.yml's last step). The count is an
+ * estimate — a run may fold two answers into one message, or send an
+ * unprompted digest — so it is never trusted for long: /reset zeroes it
+ * at the end of every run, and the deadline zeroes it if a run dies
+ * without resetting. Drift lives one run at most.
  */
 export class Typing {
   constructor(state, env) {
@@ -36,9 +44,19 @@ export class Typing {
   }
 
   async fetch(request) {
-    if (new URL(request.url).pathname === "/start") {
-      await this.state.storage.put("deadline", Date.now() + TYPING_CAP_MS);
+    const { pathname } = new URL(request.url);
+    const owed = (await this.state.storage.get("owed")) ?? 0;
+    if (pathname === "/start") {
+      await this.state.storage.put({
+        owed: owed + 1,
+        deadline: Date.now() + TYPING_CAP_MS,
+      });
       await this.state.storage.setAlarm(Date.now());
+      return new Response(null, { status: 204 });
+    }
+    const left = pathname === "/stop" ? Math.max(0, owed - 1) : 0;
+    if (left > 0) {
+      await this.state.storage.put("owed", left);
     } else {
       await this.state.storage.deleteAlarm();
       await this.state.storage.deleteAll();
@@ -48,7 +66,7 @@ export class Typing {
 
   async alarm() {
     const deadline = await this.state.storage.get("deadline");
-    // No deadline means /stop won the race with a scheduled tick. Both
+    // No deadline means a stop won the race with a scheduled tick. Both
     // exits leave no alarm, so the loop ends by not rescheduling.
     if (!deadline || Date.now() >= deadline) {
       await this.state.storage.deleteAll();
@@ -90,16 +108,20 @@ export default {
     if (request.method !== "POST") {
       return new Response("mothergod telegram webhook", { status: 200 });
     }
-    // The answer landed: stop typing. Authenticated with WEBHOOK_SECRET
-    // under a header of its own, because the secret's role is "may talk
-    // to this worker" and both callers are ours. Telegram's header name
-    // is Telegram's; ours says who we are.
-    if (new URL(request.url).pathname === "/typing/stop") {
+    // `/typing/stop`: one answer went out (tg-send). `/typing/reset`: a
+    // run ended and owes nothing (agent-bdfl.yml's last step), which is
+    // also the health probe that the object is reachable at all.
+    // Authenticated with WEBHOOK_SECRET under a header of its own,
+    // because the secret's role is "may talk to this worker" and both
+    // callers are ours. Telegram's header name is Telegram's; ours says
+    // who we are.
+    const path = new URL(request.url).pathname;
+    if (path === "/typing/stop" || path === "/typing/reset") {
       if (request.headers.get("x-mothergod-secret") !== env.WEBHOOK_SECRET) {
         return new Response(null, { status: 401 });
       }
-      const stopped = await typing(env, "/stop");
-      return new Response(null, { status: stopped ? 204 : 502 });
+      const ok = await typing(env, path.replace("/typing", ""));
+      return new Response(null, { status: ok ? 204 : 502 });
     }
     // Telegram echoes the secret_token from setWebhook in this header;
     // a request without it is not Telegram.

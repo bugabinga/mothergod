@@ -18,9 +18,10 @@ silently when done wrong:
   printed, because urllib puts the request URL in its exceptions.
 - Silence is never success: a Telegram error is a non-zero exit with the
   API's own description, not a swallowed 400.
-- The bot's "typing..." indicator stops here, because this is the moment the
-  operator gets their answer. The worker starts it when their message lands
-  (infra/telegram-worker/); a sent message is the only honest end.
+- The bot's "typing..." indicator counts down here, because this is the moment
+  the operator gets an answer. The worker starts it when their message lands
+  and keeps it up while answers are still owed (infra/telegram-worker/); a
+  delivered message is the only honest way to decrement that.
 
 Reads the body from stdin, prints the sent message_id to stdout so the caller
 can log it or reply to it.
@@ -122,7 +123,11 @@ def main() -> int:
 
 
 def stop_typing() -> None:
-    """Drop the bot's "typing..." indicator: the answer just landed.
+    """Report one answer delivered, so the bot stops typing when none are owed.
+
+    Not an unconditional stop: a run draining three queued messages sends three
+    replies and must keep typing between them, so the worker counts and this
+    decrements.
 
     Best effort on purpose. The indicator is decoration and the worker caps it
     on its own, so a failure here costs a stale indicator that expires, never a
