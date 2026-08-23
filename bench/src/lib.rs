@@ -2,19 +2,23 @@
 //!
 //! This is the train/sealed-validation tier described in
 //! `research/corpus/POLICY.md`: seeded, in-repo, reproducible without
-//! redistributing third-party data. Two mandatory dataset families live
-//! here so far (`research/JOURNAL.md` S1-L3, corpus policy "Mandatory
-//! datasets"):
+//! redistributing third-party data. The two mandatory dataset families
+//! (`research/JOURNAL.md` S1-L3, corpus policy "Mandatory datasets") plus
+//! the first structured class live here so far:
 //!
 //! - [`entropy_ladder`]: iid byte sources at a chosen order-0 entropy.
 //! - [`markov_h8_2_trap`]: a uniform byte histogram with low (2 bit)
 //!   conditional entropy, the histogram-coder trap.
+//! - [`access_log`]: synthetic web-server access log lines, the
+//!   "jsonl/log records" structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
 //! Silesia/Canterbury fetch-and-cache, the remaining structured classes,
 //! and the sealed/train split plumbing are follow-up slices of
 //! `research/JOURNAL.md` S1-D2.
+
+use std::fmt::Write as _;
 
 /// A small, fast, deterministic PRNG (`SplitMix64`). Not cryptographic; only
 /// property this module needs is "same seed produces the same corpus".
@@ -39,6 +43,22 @@ impl Rng {
     )]
     fn next_byte(&mut self) -> u8 {
         (self.next_u64() & 0xFF) as u8
+    }
+
+    /// Uniform integer in `[0, bound)`. Not bias-free for values of `bound`
+    /// that don't divide `2^64`, but the residual skew is far below what a
+    /// synthetic corpus generator needs to matter.
+    fn next_range(&mut self, bound: u64) -> u64 {
+        self.next_u64() % bound
+    }
+
+    /// Uniform index in `[0, bound)`, for indexing a small fixed-size slice.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "bound is always a small in-repo constant slice length, well within usize"
+    )]
+    fn next_index(&mut self, bound: usize) -> usize {
+        self.next_range(bound as u64) as usize
     }
 
     /// Uniform float in `[0, 1)`, 53 bits of resolution.
@@ -160,6 +180,75 @@ pub fn markov_h8_2_trap(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Source IP pool size for [`access_log`]: enough repetition that the same
+/// address recurs across lines (real access logs are dominated by a small
+/// set of clients), matching the founding generator's pool of 80.
+const ACCESS_LOG_IP_POOL: usize = 80;
+
+/// Request paths cycled by [`access_log`], mirroring the founding
+/// generator's fixed small set.
+const ACCESS_LOG_PATHS: [&str; 6] = [
+    "/index.html",
+    "/api/v2/users",
+    "/api/v2/orders",
+    "/static/app.js",
+    "/favicon.ico",
+    "/login",
+];
+
+/// Status codes cycled by [`access_log`], weighted toward 200 by repeating
+/// it in the pool (three of five draws), matching the founding generator's
+/// `random.choice([200, 200, 200, 304, 404])`.
+const ACCESS_LOG_STATUSES: [u16; 5] = [200, 200, 200, 304, 404];
+
+/// Generates `len` bytes of synthetic web-server access log lines (Apache
+/// combined-log-style), the "jsonl/log records" structured class
+/// (`research/corpus/POLICY.md`). Truncated to exactly `len` bytes; the
+/// final line may be a partial one, matching how a real log tail is cut.
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['log']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// a pool of source IPs, a fixed small set of request paths, an
+/// incrementing per-line timestamp, and a status code skewed toward 200.
+#[must_use]
+pub fn access_log(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(seed);
+    let ips: Vec<String> = (0..ACCESS_LOG_IP_POOL)
+        .map(|_| {
+            format!(
+                "{}.{}.{}.{}",
+                1 + rng.next_range(254),
+                rng.next_range(255),
+                rng.next_range(255),
+                rng.next_range(255)
+            )
+        })
+        .collect();
+
+    let mut out = String::with_capacity(len);
+    let mut line = 0usize;
+    while out.len() < len {
+        let ip = &ips[rng.next_index(ACCESS_LOG_IP_POOL)];
+        let path = ACCESS_LOG_PATHS[rng.next_index(ACCESS_LOG_PATHS.len())];
+        let status = ACCESS_LOG_STATUSES[rng.next_index(ACCESS_LOG_STATUSES.len())];
+        let size = 200 + rng.next_range(49_800);
+        let minute = (line / 60) % 60;
+        let second = line % 60;
+        writeln!(
+            out,
+            "{ip} - - [19/Aug/2026:10:{minute:02}:{second:02} +0200] \
+             \"GET {path} HTTP/1.1\" {status} {size}"
+        )
+        .expect("writing to a String never fails");
+        line += 1;
+    }
+    out.truncate(len);
+    out.into_bytes()
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -221,7 +310,8 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        entropy_ladder, markov_h8_2_trap, order0_entropy_bits, order1_conditional_entropy_bits,
+        access_log, entropy_ladder, markov_h8_2_trap, order0_entropy_bits,
+        order1_conditional_entropy_bits,
     };
 
     const LEN: usize = 200_000;
@@ -294,8 +384,56 @@ mod tests {
     fn empty_inputs_are_handled() {
         assert_eq!(entropy_ladder(4, 0, SEED), Vec::<u8>::new());
         assert_eq!(markov_h8_2_trap(0, SEED), Vec::<u8>::new());
+        assert_eq!(access_log(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
+    }
+
+    #[test]
+    fn access_log_is_exactly_the_requested_length() {
+        for len in [1, 2, 47, 1000, LEN] {
+            assert_eq!(access_log(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn access_log_is_deterministic() {
+        assert_eq!(access_log(5_000, SEED), access_log(5_000, SEED));
+    }
+
+    #[test]
+    fn access_log_seeds_are_independent() {
+        assert_ne!(access_log(5_000, SEED), access_log(5_000, SEED + 1));
+    }
+
+    #[test]
+    fn access_log_looks_like_log_lines() {
+        let data = access_log(LEN, SEED);
+        let text = String::from_utf8(data).expect("generator only emits ASCII");
+        let full_lines: Vec<&str> = text.lines().filter(|l| l.len() > 40).collect();
+        assert!(full_lines.len() > 100, "expected many full log lines");
+        for line in &full_lines {
+            assert!(line.contains("GET"), "line missing request verb: {line}");
+            assert!(line.contains("HTTP/1.1"), "line missing protocol: {line}");
+        }
+    }
+
+    #[test]
+    fn access_log_repeats_a_small_ip_pool() {
+        // Real access logs are dominated by a handful of clients; a large
+        // corpus generated from a fixed 80-address pool must show far
+        // fewer distinct leading octets than lines, unlike iid random data.
+        let text = String::from_utf8(access_log(LEN, SEED)).expect("ASCII only");
+        let distinct_ips: std::collections::HashSet<&str> = text
+            .lines()
+            .filter_map(|l| l.split(' ').next())
+            .filter(|ip| !ip.is_empty())
+            .collect();
+        assert!(
+            distinct_ips.len() <= 80,
+            "expected at most the 80-address pool, got {}",
+            distinct_ips.len()
+        );
     }
 
     #[test]
@@ -304,6 +442,7 @@ mod tests {
             entropy_ladder(1, 5_000, SEED),
             entropy_ladder(8, 5_000, SEED),
             markov_h8_2_trap(5_000, SEED),
+            access_log(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
