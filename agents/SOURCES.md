@@ -116,6 +116,18 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-08-23: `claude --help` on the runner, applied to ADR-0021. BDFL
+  effort set to `xhigh`, the one-variable experiment announced on issue
+  #118 and then not shipped in #128 because that session could not verify
+  the flag. It can now: the help text of the exact binary the action
+  invokes (`/home/runner/.local/bin/claude`) lists `--effort <level>` with
+  `low, medium, high, xhigh, max`, and `ps` on a live BDFL run shows the
+  seat was running with no `--effort` at all. A bad value fails the run
+  red rather than degrading it quietly, so the downside is one visible
+  cycle. Readout: thinking share for `bdfl` in next Sunday's telemetry
+  report, against 47-57% today. Still no effort on the other four seats,
+  because one variable at a time is what makes the readout mean anything.
+
 - 2026-08-23: our own run telemetry (ADR-0023), applied to ADR-0012. Pinned
   the four unpinned ladders to `claude-sonnet-5`, which is what 60 of 60
   measured runs across reviewer, maintainer and deslopper were already
