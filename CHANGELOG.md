@@ -137,6 +137,13 @@ All notable changes to this project are documented here. Format follows
   Measured 2.318 bits/byte on
   `research/imports/session-1/mothergod.rs` (25,524 bytes), against
   `gzip -9`'s 2.392 bits/byte on the same file.
+- Benchmark harness, third structured-generator slice (`research/JOURNAL.md`
+  S2-A19): `base64_wrapped` in the `bench` crate, a base64-wrapped text
+  payload (the "base64-wrapped payloads" class in
+  `research/corpus/POLICY.md`), ported from the founding session's
+  `corpus.py`. Wraps `json_records` output in a new standalone
+  `base64_encode` helper (RFC 4648, zero-dependency) and truncates to the
+  requested length.
 
 ### Removed
 
