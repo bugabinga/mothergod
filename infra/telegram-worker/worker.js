@@ -1,9 +1,22 @@
 // Telegram webhook -> BDFL wake (issue #5). The bot's webhook points
 // here; deploy-telegram-worker.yml sets it. Four duties, nothing else:
-// authenticate Telegram, store the operator's update in KV, show the
+// authenticate Telegram, store the operator's update in KV (twice: the
+// inbox to work through, the chat log to remember), show the
 // "typing..." indicator until an answer goes out, fire a
 // workflow_dispatch so the BDFL reads it within seconds. Heavy work
 // never happens here; the BDFL run is the brain, this is the doorbell.
+
+// The chat log: one KV key holding the last KEEP turns of operator
+// conversation, the only memory that outlives a run. Both sides are
+// written by whoever knows the message happened, the operator's here and
+// the bot's in .github/scripts/tg-send, and neither by an agent by hand,
+// because bookkeeping an agent has to remember is bookkeeping it will
+// eventually forget (#183).
+const CHATLOG = "chatlog";
+const KEEP = 40;
+// Chars of an entry's text: 40 entries have to stay readable in one
+// screenful, and the full update is in the inbox until the run drains it.
+const SUMMARY = 200;
 
 // sendChatAction's status expires after 5s, so the refresh sits just
 // inside that.
@@ -124,6 +137,46 @@ async function typing(env, verb) {
   }
 }
 
+/**
+ * Append the operator's side of the conversation to the chat log.
+ *
+ * Read-modify-write on one key with exactly two writers, this and
+ * tg-send. They collide only if a message lands in the same moment a
+ * reply goes out, and the loss is one line of memory, never an update:
+ * the update is already under its own `u:` key. A third writer would
+ * need real serialization, so do not add one.
+ *
+ * Never throws, for the same reason the reaction does not: this is
+ * memory, and losing memory must not cost the message it is about.
+ */
+export async function remember(env, message) {
+  try {
+    const entries = parse(await env.INBOX.get(CHATLOG));
+    entries.push({
+      from: "operator",
+      message_id: message.message_id,
+      date: message.date,
+      text: (message.text ?? "").slice(0, SUMMARY),
+    });
+    await env.INBOX.put(CHATLOG, JSON.stringify(entries.slice(-KEEP)));
+  } catch (error) {
+    console.error("chatlog", error);
+  }
+}
+
+// A missing key and a corrupt one mean the same thing here: start a log.
+// Parsing sits outside `remember`'s catch on purpose, so that a value
+// somebody once hand-wrote to this key cannot be mistaken for KV being
+// down and stop the log forever.
+function parse(stored) {
+  try {
+    const log = JSON.parse(stored ?? "[]");
+    return Array.isArray(log) ? log : [];
+  } catch {
+    return [];
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
@@ -190,6 +243,11 @@ export default {
     // Eyes, then typing: the operator asked for the indicator to start
     // the moment the message is acknowledged.
     await typing(env, "/start");
+    // Remembered before the wake, not after: the run that is about to
+    // read this log should find it complete. Placed after the reaction
+    // and the indicator, which the operator is watching for, and before
+    // the dispatch, which nobody is.
+    await remember(env, update.message);
     // Wake the BDFL. The dispatch carries no message text (issue #36
     // principle): it says "wake up", the run reads KV for the prose.
     // Dispatch failure is tolerable: the update is already in KV and
