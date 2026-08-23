@@ -90,6 +90,13 @@ All notable changes to this project are documented here. Format follows
 - `#![forbid(unsafe_code)]` on the `mothergod` crate root (issue #76): no
   `unsafe` exists in `src/` today, so the gate costs nothing and closes
   that door permanently.
+- Adversarial decode seed corpus (ROADMAP M2, `docs/TESTING.md` layer 2):
+  a new `tests/adversarial/` directory of tiny fixtures built to be
+  invalid (header truncations at every byte boundary, bit-flipped magic,
+  a future format version, an unknown method) and `tests/adversarial.rs`,
+  which asserts every fixture decodes to a graceful `Err`, never a panic.
+  Runs on every PR; future fuzz-found crashers (M4) promote into this
+  directory as regression seeds.
 
 ### Removed
 

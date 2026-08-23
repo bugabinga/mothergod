@@ -127,7 +127,7 @@ agent processes. Done 2026-08-20.
       committed), deterministic in-repo generators (entropy ladder,
       markov-H8/2, structured classes), three-tier train/sealed/finals split
       per `research/corpus/POLICY.md`.
-- [ ] Adversarial decode seed corpus + suite (`tests/adversarial/`,
+- [x] Adversarial decode seed corpus + suite (`tests/adversarial/`,
       `docs/TESTING.md` layer 2).
 - [ ] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
       emitting bits) — recovers the archive's proxy-speed experiment loop
