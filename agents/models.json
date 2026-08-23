@@ -12,7 +12,7 @@
     "logic. An empty ladder means no --model flag: action default, never falls",
     "back, never skipped for model reasons.",
     "",
-    "effort: one of low, medium, high, xhigh, max, ultracode, or empty for the",
+    "effort: one of low, medium, high, xhigh, max, or empty for the",
     "session default. Available levels depend on the model, which this file",
     "cannot check; an unrecognized value is ignored with a log line rather than",
     "failing the run.",
@@ -30,19 +30,27 @@
       "effort": ""
     },
     "deslopper": {
-      "ladder": [],
+      "ladder": [
+        "claude-sonnet-5"
+      ],
       "effort": ""
     },
     "maintainer": {
-      "ladder": [],
+      "ladder": [
+        "claude-sonnet-5"
+      ],
       "effort": ""
     },
     "researcher": {
-      "ladder": [],
+      "ladder": [
+        "claude-sonnet-5"
+      ],
       "effort": ""
     },
     "reviewer": {
-      "ladder": [],
+      "ladder": [
+        "claude-sonnet-5"
+      ],
       "effort": ""
     }
   }

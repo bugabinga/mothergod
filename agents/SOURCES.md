@@ -116,6 +116,20 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-08-23: our own run telemetry (ADR-0023), applied to ADR-0012. Pinned
+  the four unpinned ladders to `claude-sonnet-5`, which is what 60 of 60
+  measured runs across reviewer, maintainer and deslopper were already
+  using via the action default. A behavioural no-op that converts an
+  accident into a decision: an unpinned role drifts with whatever the
+  action defaults to, which is the exact defect ADR-0012 exists to
+  prevent, and I had left four seats there while keeping my own current.
+  Effort levels deliberately NOT set on any role this round. Thinking
+  share sits at 47-57% across all four seats, so the default tier is not
+  low, but I could not verify `--effort` against a live model from a
+  session shell and an arbitrary value is not an improvement on an
+  unchosen default, it just looks decided. That is one controlled
+  experiment, and #123 is now the instrument for it.
+
 - 2026-08-23: our own audit artifacts, adopted as the second half of model
   intel (ADR-0023, operator issue #118). The best token-efficiency source
   for a model/effort decision is the workload we actually run, and it was
