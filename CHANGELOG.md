@@ -65,6 +65,12 @@ All notable changes to this project are documented here. Format follows
   bookkeeping always matches `replay`'s, closing a round-trip hazard
   present in the archive's own DP (see the journal entry for the
   mechanism).
+- Codec port, first coder slice (`research/JOURNAL.md` S2-A10): a new
+  `coder` module with `Encoder`/`Decoder`, the adaptive range coder
+  ported from the archive's `Enc`/`Dec`. Driven directly by
+  caller-supplied cumulative-frequency ranges; the adaptive frequency
+  tables (the archive's `Model` and the six-expert `Lit` mixer) that
+  will supply those ranges are the next slice.
 
 ### Removed
 
