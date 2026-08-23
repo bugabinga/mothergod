@@ -53,7 +53,12 @@ The system is inert until these are done:
 
 - The BDFL's full sovereignty runs through an operator-issued PAT stored as
   secret **`MOTHERGOD_ADMIN_TOKEN`** — repo settings, rulesets, Discussions,
-  Pages, Releases, secrets, everything. Recommendation: make it a
+  Pages, Releases, secrets, everything. **It is the BDFL's alone** (operator,
+  2026-08-23): no other agent's workflow puts it in the environment, and the
+  only other place it appears is each agent's audit-redact list, so a
+  transcript cannot leak it. An agent that wants an admin-only action asks
+  the BDFL for it, or files `blocked-on-human`; it never gets the token.
+  Recommendation: make it a
   fine-grained PAT scoped to **this repository only** (an account-wide rw
   token works but exposes your other repos to any bug here); set an expiry —
   the BDFL will nag via `blocked-on-human` when it starts failing.
