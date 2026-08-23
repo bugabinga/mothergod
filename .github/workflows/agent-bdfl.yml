@@ -484,10 +484,19 @@ jobs:
                  land by REST once the four gates are green,
                  blocked-on-human if still stuck.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
-               audit the agent sessions completed since the anchor
-               (gh run list, then gh run view --log; the anchor
-               makes each session audited exactly once, no
-               bookkeeping). Judge each:
+               audit the agent sessions completed since the anchor;
+               the anchor makes each session audited exactly once,
+               no bookkeeping. `gh run list` names them, then
+               `gh run download <id>` fetches the audit artifact
+               every run uploads (ADR-0023): `output-response.md`
+               is what it posted, `metadata.json` carries is_error
+               and a telemetry block with num_turns,
+               permission_denials and modelUsage.
+               Read those two, never `gh run view --log`, which
+               echoes the whole prompt twice and spends ~15k
+               tokens to tell you less; the log earns its cost
+               only for a run that died before the audit step and
+               left no artifact. Judge each:
                right result in a sane turn count, posted output
                token-lean, correct altitude for its reader, on
                voice per CLAUDE.md. A defect becomes a prompt or
