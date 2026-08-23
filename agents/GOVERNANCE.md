@@ -230,12 +230,21 @@ an app merge.
 The BDFL sets every agent's `--allowedTools` (ADR-0008). One rule, learned
 twice from telemetry:
 
-**A Bash allowlist of binary names is not a security boundary.** It costs
-turns and buys nothing. Every agent that has it also has `Edit`/`Write`, so
-it may already author arbitrary file content; denying it `ls` while granting
-it `Write` is theatre. The real boundary is upstream and unchanged: these
-jobs run only on same-repo branches, so every author is our own machinery
-or the operator.
+**A Bash allowlist of binary names is not the security boundary.** The real
+boundary is the trigger surface, and it does not move: these jobs run only
+on `schedule`, `workflow_dispatch`, or same-repo branches, so every author
+is our own machinery or the operator. No external content reaches them.
+
+Be exact about what the allowlist did buy, because the first draft of this
+section was not (reviewer, PR #121). It did not stop exfiltration:
+`git push <arbitrary-remote>` was reachable with `Bash(git:*)` alone, and
+every agent on the list also holds `Edit`/`Write`, so it could already
+author arbitrary file content. What it did was raise the cost of the easy
+version, blocking the single-command primitives (`curl`, `env`, `nc`) that
+make a prompt-injection exfil one step rather than several. That residual
+is real and was traded knowingly for 11 turns a run. Re-adding the list
+does not recover it: any list that lets these agents do their job contains
+`git`.
 
 The cost is measured, not argued. The reviewer burned 11-13 denials per run
 detouring around missing file tools (runs 32615950907..32628126725) and 12
