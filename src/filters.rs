@@ -229,6 +229,42 @@ pub mod transpose {
 /// they collide, which is what a downstream model actually matches
 /// against. `JOURNAL` S1-A2.
 pub mod bcj {
+    /// Byte length of an opcode plus its rel32 operand: the unit the scan
+    /// advances by on a match, and the position `encode`/`decode` measure
+    /// the call/jmp target's absolute address from.
+    const INSTRUCTION_LEN: usize = 5;
+
+    /// Walks `data`, rewriting each `0xE8`/`0xE9` opcode's operand through
+    /// `rewrite_operand`.
+    ///
+    /// Shared by [`encode`] and [`decode`], which differ only in whether
+    /// the operand is added to or subtracted from the post-instruction
+    /// address: the scan itself (which positions count as an instruction,
+    /// how far it advances) must stay identical between the two directions,
+    /// or `decode` would rediscover different positions than `encode`
+    /// wrote them at.
+    fn rewrite(data: &[u8], rewrite_operand: impl Fn(u32, u32) -> u32) -> Vec<u8> {
+        let mut out = data.to_vec();
+        let n = out.len();
+        let mut i = 0usize;
+        while i + INSTRUCTION_LEN <= n {
+            if out[i] == 0xE8 || out[i] == 0xE9 {
+                let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
+                // x86 rel32 addressing itself wraps at 2^32; truncating
+                // the position to u32 before adding matches that hardware
+                // semantic rather than losing information.
+                #[allow(clippy::cast_possible_truncation)]
+                let post_addr = (i as u32).wrapping_add(INSTRUCTION_LEN as u32);
+                let new_operand = rewrite_operand(operand, post_addr);
+                out[i + 1..i + INSTRUCTION_LEN].copy_from_slice(&new_operand.to_le_bytes());
+                i += INSTRUCTION_LEN;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
     /// Rewrites each `0xE8`/`0xE9` opcode's operand from relative to
     /// absolute.
     ///
@@ -239,46 +275,13 @@ pub mod bcj {
     /// exactly the same positions from the same untouched opcode bytes.
     #[must_use]
     pub fn encode(data: &[u8]) -> Vec<u8> {
-        let mut out = data.to_vec();
-        let n = out.len();
-        let mut i = 0usize;
-        while i + 5 <= n {
-            if out[i] == 0xE8 || out[i] == 0xE9 {
-                let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
-                // x86 rel32 addressing itself wraps at 2^32; truncating
-                // the position to u32 before adding matches that hardware
-                // semantic rather than losing information.
-                #[allow(clippy::cast_possible_truncation)]
-                let post_addr = (i as u32).wrapping_add(5);
-                let absolute = operand.wrapping_add(post_addr);
-                out[i + 1..i + 5].copy_from_slice(&absolute.to_le_bytes());
-                i += 5;
-            } else {
-                i += 1;
-            }
-        }
-        out
+        rewrite(data, u32::wrapping_add)
     }
 
     /// Inverts [`encode`].
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
-        let mut out = data.to_vec();
-        let n = out.len();
-        let mut i = 0usize;
-        while i + 5 <= n {
-            if out[i] == 0xE8 || out[i] == 0xE9 {
-                let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
-                #[allow(clippy::cast_possible_truncation)] // see encode's comment
-                let post_addr = (i as u32).wrapping_add(5);
-                let relative = operand.wrapping_sub(post_addr);
-                out[i + 1..i + 5].copy_from_slice(&relative.to_le_bytes());
-                i += 5;
-            } else {
-                i += 1;
-            }
-        }
-        out
+        rewrite(data, u32::wrapping_sub)
     }
 
     #[cfg(test)]
