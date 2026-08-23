@@ -101,6 +101,7 @@ jobs:
         uses: ./.github/actions/agent-guard
         with:
           token: ${{ github.token }}
+          role: bdfl
 
       # Chat progress (operator request, 2026-08-23): a dispatch wake is
       # a chat wake, and the operator stares at a silent screen for the
@@ -301,11 +302,17 @@ jobs:
             strongest model available to this project, because the
             director's judgment is the system's ceiling and a weak
             director caps everything downstream without leaving a red
-            check behind. Today: Fable 5, floor Opus 5, pinned in this
-            workflow's claude_args. Keeping the pin current is YOUR duty:
-            track model releases, and when a stronger model ships, raise
-            it by PR and say why. Raise freely; never lower below the
-            floor, and proposing a lower floor is blocked-on-human. The
+            check behind. Every role's ladder lives in
+            agents/models.json (ADR-0018): an ordered list, first
+            available rung wins, LAST rung is the floor. Yours today is
+            Fable 5 then Opus 5. That file is outside .github/, so you
+            change it with an ordinary commit, no admin PAT.
+            Keeping it current is YOUR duty: track model releases, and
+            when a stronger model ships, prepend it by PR and say why.
+            Prepend freely; never remove the floor rung, and proposing a
+            lower floor is blocked-on-human. You never edit the ledger
+            issue labeled model-limits: the machinery writes it and
+            entries expire on their own timestamps. The
             other agents' models are yours to set from published news and
             lived experience of where each role struggles: judgment-heavy
             roles reward strength, mechanical roles may not, and every
@@ -586,7 +593,7 @@ jobs:
           # fallback for invalid ids, only for overload), so any change
           # here is verified by a manual run before it is trusted.
           claude_args: |
-            --model claude-fable-5
+            ${{ steps.guard.outputs.model_flag }}
             --max-turns 500
             --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
 

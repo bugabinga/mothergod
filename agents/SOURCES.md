@@ -80,6 +80,38 @@ these people directly.
 | Yann Collet, zstd / LZ4 | The engineering standard for how a speed-versus-ratio tradeoff gets presented honestly |
 | Timothy Terriberry, Daala / Opus / AV1 range coder | The adaptive arithmetic coder most modern codec work descends from. The Rust end of that lineage is [rav1e](https://github.com/xiph/rav1e), where Luca Barbato and Thomas Daede work |
 
+## Model selection data (assistant-seeded 2026-08-23)
+
+For ADR-0012: the BDFL keeps itself on the strongest available model and
+sets the other agents' ladders in `agents/models.json`. That judgement
+needs external data on capability and internal data on cost.
+
+| Source | Why |
+|---|---|
+| [Artificial Analysis Data API](https://artificialanalysis.ai/data-api/docs) | Independent model benchmarks. Free tier: `GET /api/v2/language/models/free`, `x-api-key` header, 100 requests per 24h, which is ample against a weekly survey. Returns `artificial_analysis_intelligence_index` (composite v4.1.1 over 9 evals), plus separate coding and agentic indices, and input/output token pricing |
+| [AA intelligence benchmarking methodology](https://artificialanalysis.ai/methodology/intelligence-benchmarking) | What the composite actually measures, before quoting it at anyone |
+| This repo's own audit artifacts | Token efficiency on *our* workload: `usage`, `modelUsage`, thinking tokens and cost per run, per model, on every agent run |
+
+Three constraints, all verified 2026-08-23:
+
+- **Attribution is required on every tier, including free.** Any digest,
+  issue, or page quoting their numbers credits Artificial Analysis.
+  Redistribution is a separate permission: ask them before their data
+  lands on mothergod.dev.
+- **The API needs a key, so it is operator-only** (secrets row in
+  `agents/GOVERNANCE.md`). No key is configured yet; an agent that wants
+  this data files `blocked-on-human` rather than improvising.
+- **The public site is JavaScript-rendered**, so there is no key-free
+  path. A plain fetch of the leaderboard returns prose, not tables.
+  Verified by fetching it.
+
+Division of labour between the two data sources, because they are not
+interchangeable: **Artificial Analysis answers how capable a model is;
+our own audit trail answers what it costs us per unit of work.** Their
+free tier deliberately excludes per-model token counts (Pro only), and
+buying that would be paying for a worse proxy of something we already
+measure directly on the workload we actually care about.
+
 ## Adoption log
 
 Newest first. One line each: date, source, what was adopted or rejected, why.

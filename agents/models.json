@@ -1,0 +1,24 @@
+{
+  "$comment": [
+    "Model ladders, one per agent role. ADR-0018.",
+    "Ordered by preference: the guard runs the first rung that is not",
+    "rate-limited, per the ledger issue labeled model-limits.",
+    "The LAST rung is the floor. Nothing below it is reachable, so an",
+    "exhausted ladder means the agent skips this cycle rather than",
+    "silently dropping to a weaker model. ADR-0012's Opus 5 floor for the",
+    "BDFL is expressed that way and not as separate logic.",
+    "An empty ladder means: no --model flag, action default, never falls",
+    "back, never skipped for model reasons.",
+    "The BDFL owns this file (ADR-0012). It lives outside .github/ so",
+    "changing it is an ordinary app-token commit, not an admin-PAT",
+    "workflow push."
+  ],
+  "reviewed": "2026-08-23",
+  "ladders": {
+    "bdfl": ["claude-fable-5", "claude-opus-5"],
+    "maintainer": [],
+    "reviewer": [],
+    "deslopper": [],
+    "researcher": []
+  }
+}
