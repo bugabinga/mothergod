@@ -6,8 +6,7 @@
 //! to apply a filter; each submodule here only provides the reversible
 //! transform itself. The `pick_filters` trial-selection heuristic and
 //! wiring behind a [`crate::Method`] variant are follow-up slices
-//! (`JOURNAL` S2-D2). Remaining filter kinds (base64-unwrap, reverse): same
-//! DEBT entry.
+//! (`JOURNAL` S2-D2). Remaining filter kind (reverse): same DEBT entry.
 
 /// Fixed-stride delta filter.
 ///
@@ -346,6 +345,247 @@ pub mod bcj {
             // address wraps u32; must still round-trip losslessly.
             let data = vec![0xE8, 0xFF, 0xFF, 0xFF, 0xFF];
             assert_eq!(decode(&encode(&data)), data);
+        }
+    }
+}
+
+/// Standard-base64 unwrap.
+///
+/// Base64-encoded data (email attachments, embedded certs, JSON blobs with
+/// inline binary) inflates every 3 source bytes to 4 printable ones; a
+/// downstream model sees only the 4-symbol blow-up, never the binary
+/// structure underneath. Unwrapping it back to raw bytes before modeling
+/// was the single biggest ratio drop of the founding session (`JOURNAL`
+/// S1-A2). Unlike [`delta`]/[`transpose`]/[`bcj`], this filter's decision
+/// is data-dependent rather than a caller-supplied parameter, so it can't
+/// be a pure `data -> data` pair: whether `data` was in fact unwrapped has
+/// to survive into [`decode`](base64_unwrap::decode).
+/// [`encode`](base64_unwrap::encode) therefore always prepends one flag
+/// byte (`1` = unwrapped, `0` = passed through) ahead of its output, and
+/// [`decode`](base64_unwrap::decode) reads that byte back instead of
+/// taking a filter parameter.
+pub mod base64_unwrap {
+    /// Standard base64 alphabet (RFC 4648 with `+`/`/` and `=` padding),
+    /// indexed by 6-bit value.
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    /// Shortest input worth trying to unwrap. Below this, the one-byte
+    /// flag overhead can't be recouped even in the best case.
+    const MIN_LEN: usize = 8;
+
+    /// How much of the input the alphabet scan checks before giving up.
+    /// Matches the founding session's proxy: full-buffer decode is tried
+    /// only after this cheap prefix check passes, so a large non-base64
+    /// input costs a bounded scan, not a wasted full decode attempt.
+    const SCAN_LIMIT: usize = 4096;
+
+    fn decode_char(b: u8) -> Option<u8> {
+        match b {
+            b'A'..=b'Z' => Some(b - b'A'),
+            b'a'..=b'z' => Some(b - b'a' + 26),
+            b'0'..=b'9' => Some(b - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    fn is_base64_byte(b: u8) -> bool {
+        decode_char(b).is_some() || b == b'='
+    }
+
+    /// Strict standard-base64 decode: `=` padding is accepted only as the
+    /// last group's trailing 1 or 2 characters, never elsewhere. Returns
+    /// `None` on any invalid character or invalid padding placement;
+    /// non-canonical padding bits (set but insignificant) are caught by
+    /// the round-trip check in [`encode`], not here.
+    fn try_decode(data: &[u8]) -> Option<Vec<u8>> {
+        if data.is_empty() || !data.len().is_multiple_of(4) {
+            return None;
+        }
+        let (groups, _) = data.as_chunks::<4>();
+        let group_count = groups.len();
+        let mut out = Vec::with_capacity(group_count * 3);
+        for (idx, group) in groups.iter().enumerate() {
+            let pad = group.iter().rev().take_while(|&&b| b == b'=').count();
+            let is_last = idx + 1 == group_count;
+            if pad > 2 || (pad > 0 && !is_last) {
+                return None;
+            }
+            let digits = &group[..4 - pad];
+            if digits.contains(&b'=') {
+                return None;
+            }
+            let mut vals = [0u8; 4];
+            for (v, &b) in vals.iter_mut().zip(digits) {
+                *v = decode_char(b)?;
+            }
+            out.push((vals[0] << 2) | (vals[1] >> 4));
+            if pad < 2 {
+                out.push((vals[1] << 4) | (vals[2] >> 2));
+            }
+            if pad < 1 {
+                out.push((vals[2] << 6) | vals[3]);
+            }
+        }
+        Some(out)
+    }
+
+    fn b64_encode(data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+        for chunk in data.chunks(3) {
+            let b0 = chunk[0];
+            let b1 = chunk.get(1).copied();
+            let b2 = chunk.get(2).copied();
+            out.push(ALPHABET[(b0 >> 2) as usize]);
+            out.push(ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize]);
+            out.push(match b1 {
+                Some(b1) => ALPHABET[(((b1 & 0x0F) << 2) | (b2.unwrap_or(0) >> 6)) as usize],
+                None => b'=',
+            });
+            out.push(match b2 {
+                Some(b2) => ALPHABET[(b2 & 0x3F) as usize],
+                None => b'=',
+            });
+        }
+        out
+    }
+
+    /// Unwraps `data` to its decoded form when `data` is valid, canonical
+    /// standard base64 (checked by decoding it and re-encoding the result:
+    /// equal to `data` iff no information — non-canonical padding bits,
+    /// alternate alphabets — was thrown away). Otherwise passes `data`
+    /// through unchanged. Either way the result carries a one-byte prefix
+    /// (`1` unwrapped, `0` passed through) so [`decode`] knows which
+    /// happened; empty `data` is too short to be worth trying and is
+    /// always passed through.
+    #[must_use]
+    pub fn encode(data: &[u8]) -> Vec<u8> {
+        let looks_like_base64 = data.len() >= MIN_LEN
+            && data.len().is_multiple_of(4)
+            && data[..data.len().min(SCAN_LIMIT)]
+                .iter()
+                .all(|&b| is_base64_byte(b));
+        if looks_like_base64
+            && let Some(decoded) = try_decode(data)
+            && b64_encode(&decoded) == data
+        {
+            let mut out = Vec::with_capacity(1 + decoded.len());
+            out.push(1);
+            out.extend_from_slice(&decoded);
+            return out;
+        }
+        let mut out = Vec::with_capacity(1 + data.len());
+        out.push(0);
+        out.extend_from_slice(data);
+        out
+    }
+
+    /// Inverts [`encode`]. Reads the flag byte [`encode`] always writes
+    /// first; any value other than `1` is treated as "passed through" (the
+    /// same as `0`), and empty `data` — no flag byte at all — decodes to
+    /// empty, so this never panics regardless of what `data` holds.
+    #[must_use]
+    pub fn decode(data: &[u8]) -> Vec<u8> {
+        match data.split_first() {
+            Some((1, rest)) => b64_encode(rest),
+            Some((_, rest)) => rest.to_vec(),
+            None => Vec::new(),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn roundtrip_empty() {
+            assert_eq!(decode(&encode(&[])), Vec::<u8>::new());
+        }
+
+        #[test]
+        fn roundtrip_too_short_to_try() {
+            // Below MIN_LEN: always passed through, even though "YWJj" (7
+            // bytes short by one) would otherwise decode cleanly.
+            let data = b"YWJj".as_slice();
+            assert_eq!(&decode(&encode(data)), data);
+            assert_eq!(encode(data)[0], 0);
+        }
+
+        #[test]
+        fn encode_unwraps_valid_base64() {
+            // "aGVsbG8gd29ybGQ=" == base64("hello world")
+            let data = b"aGVsbG8gd29ybGQ=".as_slice();
+            let encoded = encode(data);
+            assert_eq!(encoded[0], 1);
+            assert_eq!(&encoded[1..], b"hello world");
+            assert_eq!(decode(&encoded), data);
+        }
+
+        #[test]
+        fn encode_passes_through_non_base64() {
+            let data = b"not base64 data!".as_slice();
+            let encoded = encode(data);
+            assert_eq!(encoded[0], 0);
+            assert_eq!(&encoded[1..], data);
+            assert_eq!(decode(&encoded), data);
+        }
+
+        #[test]
+        fn encode_passes_through_invalid_padding_placement() {
+            // '=' before the final group: alphabet-scan-eligible (same
+            // length class) but not valid base64.
+            let data = b"AB==CDEF".as_slice();
+            let encoded = encode(data);
+            assert_eq!(encoded[0], 0);
+            assert_eq!(decode(&encoded), data);
+        }
+
+        #[test]
+        fn encode_passes_through_non_canonical_padding_bits() {
+            // "aGVsbG9=" decodes to 5 bytes but its trailing group carries
+            // non-zero padding bits, so re-encoding would not reproduce
+            // this exact string: must pass through, not silently accept.
+            let data = b"aGVsbG9=".as_slice();
+            let decoded_roundtrips = try_decode(data).is_some_and(|d| b64_encode(&d) == data);
+            assert!(!decoded_roundtrips, "fixture must exercise the guard");
+            let encoded = encode(data);
+            assert_eq!(encoded[0], 0);
+            assert_eq!(decode(&encoded), data);
+        }
+
+        #[test]
+        fn roundtrip_all_padding_lengths() {
+            // Shorter messages wrap to fewer than MIN_LEN base64 bytes and
+            // are covered by `roundtrip_too_short_to_try` instead.
+            for msg in [
+                "abcd",
+                "abcde",
+                "abcdef",
+                "abcdefg",
+                "abcdefgh",
+                "abcdefghi",
+            ] {
+                let wrapped = b64_encode(msg.as_bytes());
+                let encoded = encode(&wrapped);
+                assert_eq!(encoded[0], 1, "message {msg:?} should unwrap");
+                assert_eq!(&encoded[1..], msg.as_bytes());
+                assert_eq!(decode(&encoded), wrapped, "message {msg:?}");
+            }
+        }
+
+        #[test]
+        fn decode_of_empty_is_empty() {
+            assert_eq!(decode(&[]), Vec::<u8>::new());
+        }
+
+        #[test]
+        fn roundtrip_binary_payload() {
+            let raw: Vec<u8> = (0..=255u8).cycle().take(300).collect();
+            let wrapped = b64_encode(&raw);
+            let encoded = encode(&wrapped);
+            assert_eq!(encoded[0], 1);
+            assert_eq!(decode(&encoded), wrapped);
         }
     }
 }

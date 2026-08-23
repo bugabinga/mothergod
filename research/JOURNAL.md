@@ -187,8 +187,40 @@ record.
   this as `kind: "patch"` with null bpb deltas. Remaining M1 scope: see
   S2-D2 (now base64-unwrap, reverse, `pick_filters`, LZ, models, coder,
   and `Method` wiring only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2/S2-A3/S2-A4 filter
-  slices: the other filter kinds (base64-unwrap, reverse) and the
+- S2-A5 | ACCEPTED | Fourth slice of M1: the base64-unwrap filter
+  (`JOURNAL` S1-A2, "single biggest drop of its session") ported to
+  `src/filters.rs` as a standalone reversible transform
+  (`base64_unwrap::encode`/`decode`). Behavior ported from the archive's
+  `filt`/`unfilt` pair (`research/imports/session-1/research_state.json`
+  `.filters.b64`; absent from `mothergod.rs`, confirmed by S2-A4's
+  cross-check), not the code (ADR-0006): unlike delta/transpose/bcj, this
+  filter's decision (unwrap or not) is data-dependent rather than a
+  caller-supplied parameter, so `encode` always prepends a one-byte flag
+  (`1` = unwrapped, `0` = passed through) and `decode` reads it back
+  instead of taking a filter parameter — the shape a self-describing
+  filter needs, distinct from the other three's pure `data -> data`
+  pairs. A standard base64 codec (encode/strict decode, zero
+  dependencies) was written to support it, since the crate has no base64
+  crate to call (ADR-0002); "canonical" is checked by re-encoding the
+  decoded bytes and comparing to the input, which catches non-canonical
+  padding bits the same way the archive's `b64encode(dec)==d` check did.
+  | 10 unit tests: round-trip on empty input and input too short to try
+  (`MIN_LEN`), unwrap of valid base64, pass-through of non-base64 data,
+  pass-through of invalid padding placement, pass-through of valid-looking
+  but non-canonical padding bits (an explicit guard-exercise assertion),
+  round-trip across all three padding-length classes, decode of empty
+  input, and round-trip of a 300-byte binary payload; `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/`test
+  --doc`/`doc --no-deps` (plain, `RUSTDOCFLAGS=--deny warnings` blocked
+  locally by the same sandbox permission gate noted in S2-A4; zero
+  warnings either way) all clean. | No bpb measurement, same reason as
+  S2-A2 through S2-A4: not yet wired to a `Method` variant, so there is
+  still no champion to diff against — `progress.jsonl` records this as
+  `kind: "patch"` with null bpb deltas. Remaining M1 scope: see S2-D2
+  (now `reverse`, `pick_filters`, LZ, models, coder, and `Method` wiring
+  only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2/S2-A3/S2-A4/S2-A5 filter
+  slices: the `reverse` filter kind and the
   `pick_filters` trial-selection heuristic; the optimal-parse LZ stage
   (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the context-mixing
   entropy models (`Lit` six-expert arena, flag/length/offset models); the
@@ -196,13 +228,11 @@ record.
   variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
   `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
   behavior, not code, per ADR-0006). One PR per module per the M1 checklist.
-  Note: base64-unwrap and reverse do not appear in the archived Rust codec
-  (`mothergod.rs` has only `sdelta`/`tpose`/`bcj`); their source lives
-  in-tree at `research/imports/session-1/research_state.json`
-  (`.filters.b64`, `.filters.rev`), the founding session's Python `filt`/
-  `unfilt` pair for each — confirmed accurate by cross-check: that same
-  file's `.filters.bcj` matches `mothergod.rs`'s `bcj` exactly, which is
-  what S2-A4 above ported.
+  Note: `reverse` does not appear in the archived Rust codec (`mothergod.rs`
+  has only `sdelta`/`tpose`/`bcj`); its source lives in-tree at
+  `research/imports/session-1/research_state.json` (`.filters.rev`), the
+  founding session's Python `filt`/`unfilt` pair — same cross-check basis
+  as S2-A5's `.filters.b64` port above.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,
