@@ -361,12 +361,51 @@ record.
   — `progress.jsonl` records this as `kind: "patch"` with null bpb
   deltas. Remaining M1 scope: see S2-D2 (now the context-mixing entropy
   models, the range coder, and `Method` wiring only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A9 filter,
-  trial-selection, and LZ slices: the context-mixing entropy models
-  (`Lit` six-expert arena, flag/length/offset models); the range coder
-  (`Enc`/`Dec`); and wiring all of it (including `select::pick` and
-  `lz::parse_optimal`) behind a new `Method` variant with a
-  `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
+- S2-A10 | ACCEPTED | Ninth slice of M1, and the first coder slice: the
+  adaptive range coder ported to a new `src/coder.rs` module
+  (`Encoder`/`Decoder`). Behavior ported from the archive's `Enc`/`Dec`
+  (`research/imports/session-1/mothergod.rs`), not the code (ADR-0006):
+  same 32-bit `[low, high]` interval in `u64` arithmetic, the same
+  three renormalization cases (top-half fixed, bottom-half fixed,
+  straddling the middle with a carry deferred via a pending-bit
+  counter), the same byte-oriented bit packer. Holds no model of its
+  own: `Encoder::encode`/`Decoder::decode` take a caller-supplied
+  `[cum_low, cum_high)` out of `total` on every call, so the coder is
+  usable by any frequency table, adaptive or fixed, once one exists.
+  One behavior-preserving deviation: the archive's decoder narrowing
+  loop has an empty first branch (`if hi<HALF{}`, meaning "no value
+  adjustment needed, just renormalize") — restructured here as a
+  `shift: bool` computed once per iteration instead of an
+  if/else-if/if/else chain with an empty arm, avoiding the empty-block
+  shape while keeping the exact same three cases and the exact same
+  bit-for-bit renormalization. | 9 unit tests: empty and single-symbol
+  streams, a skewed-frequency fixture that exercises the near-degenerate
+  intervals hardest, a full 256-symbol alphabet cycled 2000 times, a
+  5000-symbol xorshift32 pseudo-random fixture, raw-bit round-trip
+  across six widths from 0 to 32, an interleaved
+  adaptively-coded-symbol/fixed-probability-bits fixture (the exact
+  shape a length/offset model will need), and a truncated-stream decode
+  that asserts no panic rather than a specific output. Every symbol test
+  drives the coder through a small order-0 `FreqTable` test fixture (not
+  exported; the real adaptive model is S2-D2's remaining scope) so the
+  round-trip exercises actual cumulative-frequency updates, not just
+  fixed ranges. `cargo fmt`/`clippy --all-targets -- --deny warnings`/
+  `test --all-targets`/`test --doc`/`doc --no-deps` all clean (one
+  intra-doc-link warning against a private method, `Decoder::next_bit`,
+  fixed by dropping the doc link, not by suppressing the lint — same
+  class as S2-A8). | No bpb measurement, same reason as S2-A2 through
+  S2-A9: nothing yet drives this coder with real cumulative frequencies
+  from actual data, so there is still no champion to diff against —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
+  Remaining M1 scope: see S2-D2 (now the context-mixing entropy models
+  and `Method` wiring only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A10 filter,
+  trial-selection, LZ, and coder slices: the context-mixing entropy
+  models (`Lit` six-expert arena, flag/length/offset models, all as
+  order-0 `Model` frequency tables driving `coder::Encoder`/`Decoder`);
+  and wiring all of it (including `select::pick`, `lz::parse_optimal`,
+  and `coder`) behind a new `Method` variant with a `FORMAT_VERSION`
+  bump + ADR (CLAUDE.md hard rule 5). Source:
   `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
   behavior, not code, per ADR-0006). One PR per module per the M1
   checklist.

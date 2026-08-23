@@ -9,6 +9,7 @@
 //! exists so far; real codecs plug in as new method bytes without
 //! breaking old frames.
 
+pub mod coder;
 pub mod filters;
 pub mod lz;
 
