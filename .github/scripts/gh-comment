@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Post one issue comment, or close an issue with one, on the credential meant for it.
+
+Extensionless and executable because agents type it as a command mid-session,
+like tg-send and push-branch.
+
+This exists because "type the footer by hand" and "never post routine
+comments with the admin PAT" both failed the same way: issue #5 and #82 were
+closed with comments that carried neither the footer nor the app-token
+identity (2026-08-23 23:13), which meant the self-trigger guard
+(agent-bdfl.yml, matching `[Claude Code](https://claude.ai/code)` in the
+causing comment body per issue #142) had nothing to match, and the operator-
+attributed close woke a fresh BDFL run -- exactly the loop issue #50 already
+named and GOVERNANCE already forbids in prose. A rule an agent has to
+remember to apply, every time, forever, is a rule that will eventually not
+be applied; issue #138 proposed assembling the footer once instead of
+teaching five agents to type it. This is that assembly point for issue
+comments, and it closes the credential half too: it reads GH_WORKFLOW_TOKEN
+(the comments-only fallback already wired into agent-bdfl.yml, issue #81)
+and never consults GH_ADMIN_TOKEN or an ambient GH_TOKEN, so a shell that
+exported the admin PAT for an earlier workflow-file push cannot leak it into
+a routine comment by accident.
+
+Scope: issues only. A PR is also an issue node, but `gh issue comment` fails
+on a PR argument, and PR review threads have their own posting path; wire
+those in when the need shows up rather than guessing the shape now.
+
+Usage: gh-comment <issue-number> [--close] < body
+Prints the comment's URL on stdout.
+"""
+
+import os
+import subprocess
+import sys
+
+FOOTER = "\n\n---\n_{role} · [Claude Code](https://claude.ai/code)_"
+
+
+def die(*lines):
+    for line in lines:
+        print(f"gh-comment: {line}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    close = "--close" in argv
+    argv = [a for a in argv if a != "--close"]
+    if len(argv) != 1 or not argv[0].isdigit():
+        die("usage: gh-comment <issue-number> [--close] < body")
+    number = argv[0]
+
+    role = os.environ.get("ROLE", "")
+    if not role:
+        die("ROLE is not set; the calling workflow must export it")
+
+    body = sys.stdin.read().strip()
+    if not body:
+        die("empty body; refusing to post")
+    full_body = body + FOOTER.format(role=role)
+
+    token = os.environ.get("GH_WORKFLOW_TOKEN", "")
+    if not token:
+        die(
+            "GH_WORKFLOW_TOKEN is not set; this never falls back to GH_TOKEN "
+            "or GH_ADMIN_TOKEN, because an ambient admin token is exactly "
+            "the bug this script exists to close (issue #50)",
+        )
+    env = dict(os.environ)
+    env["GH_TOKEN"] = token
+    env.pop("GH_ADMIN_TOKEN", None)
+
+    args = ["issue", "close" if close else "comment", number]
+    args += ["--comment" if close else "--body", full_body]
+    result = subprocess.run(
+        ["gh"] + args, env=env, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        die(f"gh {' '.join(args[:2])} {number} failed: {result.stderr.strip()}")
+    print(result.stdout.strip())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
