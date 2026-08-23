@@ -65,14 +65,19 @@ mechanisms, all of which the BDFL may reshape on the record.
 | The Mission section of `ROADMAP.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011) |
 | Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |
 | Releases | Agent-prepared, operator-triggered until further notice |
-| Security, CoC, secrets, settings | Operator only |
+| Security-report triage, CoC enforcement | Operator only |
+| Secrets | BDFL, full governance (operator ruling, PR #101 review, 2026-08-23). The sole hard constraint is CLAUDE.md rule 10: a secret is never printed, logged, or leaked. The BDFL defers to the operator on unresolvable roadblocks, such as credentials only the operator can mint |
 
 ## Merging
 
 Squash is the only landing path for every PR, agent-authored or
 human, including the BDFL's own: merge commits and rebase merges are
 disabled at the repository level and `main` requires linear history
-(ADR-0013). The squash commit's subject is the PR title and its
+(ADR-0013). A self-merge reads the PR thread first: when reviewer and
+author share a bot identity, the verdict arrives as a comment the
+required checks never see, and a request-changes there blocks the
+merge until addressed on the record (PR #99 landed 44 seconds after
+an unread one). The squash commit's subject is the PR title and its
 message is the PR body, so write every PR body as the commit message
 the change deserves. Land with the REST call, not the porcelain:
 `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
