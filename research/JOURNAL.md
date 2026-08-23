@@ -536,6 +536,37 @@ record.
   records this as `kind: "patch"` with null bpb deltas. Remaining M2
   scope: S2-D1 (corpus fetch/generators), ideal-cost accounting mode,
   the CI benchmark regression gate, and progress-graph rendering.
+- S2-A14 | ACCEPTED | First structured-generator slice of M2's remaining
+  benchmark-harness debt (S2-D1): synthetic web-server access log lines
+  (`research/corpus/POLICY.md`'s "jsonl/log records" class) ported to
+  `bench/src/lib.rs` as `access_log`, mirroring `entropy_ladder`/
+  `markov_h8_2_trap`'s structure. Behavior ported from the founding
+  session's `corpus.py` (`c['log']`, `git show
+  1a3b1c8:research/imports/session-1/corpus.py`), not the code
+  (ADR-0006): an 80-address IP pool, a fixed six-path request set, and a
+  status code skewed toward 200 (three of five draws) via the same
+  `Rng` (`SplitMix64`) already in this module, plus a new `next_index`
+  helper for uniform slice indexing. One behavior-preserving deviation:
+  the archive emits a fixed 1400-line log then truncates to `N` bytes;
+  this port generates lines until `len` bytes are reached then truncates,
+  so it produces exactly `len` bytes for any requested length instead of
+  only for the one size the archive's fixed line count happened to cover.
+  | 6 unit tests: exact-length output across five requested lengths
+  (including a length shorter than one line), determinism, seed
+  independence, a structural check that most output lines contain `GET`
+  and `HTTP/1.1`, a check that a large sample's distinct leading IP
+  octets stay within the 80-address pool (unlike iid random data), and
+  empty input; wired into the existing frame-format round-trip test.
+  `cargo fmt`/`clippy --all-targets -- --deny warnings`/`test
+  --all-targets`/`test --doc`/`doc --no-deps` (`RUSTDOCFLAGS=--deny
+  warnings`) all clean. | No bpb measurement: this is corpus-generation
+  infra, not an experiment against a champion — `progress.jsonl` records
+  this as `kind: "patch"` with null bpb deltas, same as S2-A1 through
+  S2-A13. Remaining S2-D1 scope: Silesia + Canterbury fetch-and-cache,
+  the six remaining structured generator classes (json, base64-wrapped,
+  audio, image, sqlite-like, x86 binary), the three-tier train/sealed/
+  finals split plumbing, regret scoring, the CI baseline gate, and
+  progress-graph rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

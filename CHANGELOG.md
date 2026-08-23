@@ -97,6 +97,12 @@ All notable changes to this project are documented here. Format follows
   which asserts every fixture decodes to a graceful `Err`, never a panic.
   Runs on every PR; future fuzz-found crashers (M4) promote into this
   directory as regression seeds.
+- Benchmark harness, first structured-generator slice (`research/JOURNAL.md`
+  S2-A14): `access_log` in the `bench` crate, synthetic web-server access
+  log lines (the "jsonl/log records" class in
+  `research/corpus/POLICY.md`), ported from the founding session's
+  `corpus.py`. Produces exactly the requested byte length from a small
+  IP/path/status pool via the existing deterministic `Rng`.
 
 ### Removed
 
