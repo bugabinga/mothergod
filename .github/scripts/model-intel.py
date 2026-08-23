@@ -109,14 +109,23 @@ ladders = {r: (v or {}).get("ladder") or [] for r, v in roles.items()}
 def norm(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
+def same_model(a, b):
+    """Normalized containment in EITHER direction.
+
+    Our ids are Anthropic's, theirs are their own slugs, and neither side
+    is reliably the longer one: they publish `claude-opus-5-xhigh` for our
+    `claude-opus-5`, and a catalogue dropping the vendor prefix would
+    publish `opus-5` instead. Every comparison goes through here so
+    resolution and exclusion can never disagree. They did once: checking
+    one direction only reported a ladder's own floor rung as a brand-new
+    model beating its top rung (PR #112 review).
+    """
+    na, nb = norm(a), norm(b)
+    return na == nb or na in nb or nb in na
+
 def match(rung):
-    # Our ids are Anthropic's; theirs are their own slugs. Match on
-    # normalized containment either way, and report what resolved so a
-    # human can confirm the mapping before anything depends on it.
-    n = norm(rung)
     for m in models:
-        mn = norm(m["id"])
-        if n == mn or n in mn or mn in n:
+        if same_model(rung, m["id"]):
             return m
     return None
 
@@ -129,10 +138,15 @@ for role, ladder in sorted(ladders.items()):
     mapping.append((role, top, hit["id"] if hit else None, hit["score"] if hit else None))
     if not hit:
         continue
-    on_ladder = {norm(r) for r in ladder}
+    # Findings drive an issue post, so they are restricted to models this
+    # project can actually call: authentication is a Claude subscription
+    # (ADR-0004). Without this the job fires most weeks on a competitor
+    # release the BDFL cannot act on, which is the alert fatigue ADR-0019
+    # exists to avoid.
     better = [m for m in models
               if m["score"] > hit["score"]
-              and not any(norm(m["id"]) == r or r in norm(m["id"]) for r in on_ladder)]
+              and "claude" in m["id"].lower()
+              and not any(same_model(m["id"], r) for r in ladder)]
     for m in better:
         findings.append((role, top, hit["score"], m["id"], m["score"]))
 

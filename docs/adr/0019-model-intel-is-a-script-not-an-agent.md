@@ -93,6 +93,22 @@ The judgement stays with the BDFL. This job never edits
 `agents/models.json`; it puts evidence on the table and files it where
 the BDFL already looks.
 
+**Expected fire frequency, so steady state is not mistaken for a bug.**
+Findings are restricted to models whose id contains `claude`, because
+authentication is a Claude subscription (ADR-0004) and a candidate this
+project cannot call is not a candidate. Without that filter the job would
+have fired most weeks on a competitor release, which is the alert fatigue
+this design exists to avoid. With it, firing should be rare: roughly as
+often as Anthropic ships a model above a ladder's top rung.
+
+**Dedup spans only the open issue.** The fingerprint is compared against
+the most recent *open* `model-intel` issue. Once the BDFL closes one,
+whether it bumped the ladder or declined, the same delta opens a fresh
+issue on the next run. That is intended: a decline is not a decision to
+stop being told, and the ladder either changed or it did not. If it
+becomes nagging, compare against the most recently closed issue of the
+same label instead.
+
 **The gap it does not close.** If the comparison never fires, the BDFL
 never hears, and a stale ladder stays stale. ADR-0018's gap is moved
 rather than eliminated. The improvement is only that an issue which never
