@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Send one Telegram message to the operator, with repo refs already linked.
+
+Extensionless and executable because agents type it as a command mid-session,
+like settle-push.
+
+It owns four things every agent otherwise redoes by hand, three of which fail
+silently when done wrong:
+
+- `#142` becomes a link (operator request, 2026-08-23). GitHub's `/issues/<n>`
+  URL redirects to the PR when the number is a PR, so one form covers both and
+  the sender never has to know which it is.
+- HTML escaping, which `parse_mode=HTML` makes mandatory. Unescaped `<` makes
+  Telegram reject the message or eat the rest of it, and the agent that wrote
+  it has already moved on.
+- The token stays out of argv (hard rule 10). It is read from the environment,
+  spent inside this process, and scrubbed from any error text before it is
+  printed, because urllib puts the request URL in its exceptions.
+- Silence is never success: a Telegram error is a non-zero exit with the
+  API's own description, not a swallowed 400.
+
+Reads the body from stdin, prints the sent message_id to stdout so the caller
+can log it or reply to it.
+
+Usage: tg-send [--reply-to <message_id>] < body
+"""
+
+import html
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+API = "https://api.telegram.org/bot{}/sendMessage"
+LIMIT = 4096  # Telegram's hard cap on message text
+
+# A ref is `#<digits>`. Not preceded by a word character, `/` or `#`, so
+# `abc#1`, a URL fragment and `##1` are left alone.
+REF = re.compile(r"(?<![\w/#])#(\d{1,6})\b")
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    reply_to = None
+    if args[:1] == ["--reply-to"]:
+        if len(args) < 2:
+            print("tg-send: --reply-to needs a message id", file=sys.stderr)
+            return 2
+        reply_to, args = int(args[1]), args[2:]
+    if args:
+        print(f"tg-send: unexpected argument {args[0]!r}; body comes from stdin",
+              file=sys.stderr)
+        return 2
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("OPERATOR_TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        print("tg-send: TELEGRAM_BOT_TOKEN and OPERATOR_TELEGRAM_CHAT_ID must be set",
+              file=sys.stderr)
+        return 2
+
+    body = sys.stdin.read().strip()
+    if not body:
+        print("tg-send: empty body; refusing to send", file=sys.stderr)
+        return 2
+
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    text = REF.sub(
+        lambda m: f'<a href="https://github.com/{repo}/issues/{m[1]}">#{m[1]}</a>',
+        html.escape(body, quote=False),
+    )
+    # Escaping only touches & < >, so the refs survive it unchanged and the
+    # order above is safe. Length is checked after linking, because the anchor
+    # markup is what actually travels.
+    if len(text) > LIMIT:
+        print(f"tg-send: {len(text)} chars after linking, over Telegram's {LIMIT}; "
+              "split it rather than let the API truncate", file=sys.stderr)
+        return 2
+
+    payload = {
+        "chat_id": chat,
+        "text": text,
+        "parse_mode": "HTML",
+        # Refs are navigation, not content. A preview card per link would bury
+        # the message that carries them.
+        "link_preview_options": {"is_disabled": True},
+    }
+    if reply_to is not None:
+        payload["reply_parameters"] = {"message_id": reply_to}
+
+    request = urllib.request.Request(
+        API.format(token),
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            sent = json.load(response)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        try:
+            detail = json.loads(detail).get("description", detail)
+        except json.JSONDecodeError:
+            pass
+        print(f"tg-send: HTTP {error.code}: {scrub(detail, token)}", file=sys.stderr)
+        return 1
+    except OSError as error:
+        print(f"tg-send: {scrub(str(error), token)}", file=sys.stderr)
+        return 1
+
+    print(sent["result"]["message_id"])
+    return 0
+
+
+def scrub(message: str, token: str) -> str:
+    """Never print a secret (hard rule 10), whoever built the string."""
+    return message.replace(token, "<redacted>")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
