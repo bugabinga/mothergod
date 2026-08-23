@@ -212,6 +212,14 @@ keeps moving (issue #57). Pick deliberately:
   push must clear it
   (`git -c http.https://github.com/.extraheader= push ...`), or the
   remote silently sees the app and applies its rules.
+  **The PAT pushes; it never opens the PR.** Creating a PR is not a
+  push, so `gh pr create` runs on the app token even when the commits
+  it carries needed the PAT — PR #127 opened as `claude[bot]` while
+  touching `agent-heartbeat.yml`, so this costs nothing. Skip it and
+  the PR is operator-attributed, which wakes a full BDFL run on its
+  own PR: five BDFL PRs did that in 70 minutes on 2026-08-23 (#111,
+  #112, #113, #114, #122), burning 22 runner-minutes and the lane
+  (issue #141). Same rule for `gh issue create`.
 
 Token lifetime (issue #81): the claude app token expires about an hour
 into a session; past that, every `gh` call riding the default
