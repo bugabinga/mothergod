@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Push files to a branch through the git data API, on the credential the paths require.
+
+Extensionless and executable because agents type it as a command mid-session,
+like settle-push and tg-send.
+
+Four calls -- blob, tree, commit, ref -- replace `git push` for every branch an
+agent creates. That is not a preference. `git push` from a runner is a
+credential fight the agent loses, usually silently:
+
+- The runner injects its own credential as `http.https://github.com/.extraheader`.
+  GOVERNANCE told agents to clear it with `-c http.https://github.com/.extraheader=`.
+  That does not work: `extraheader` is multi-valued, so `-c key=` appends an
+  empty header beside the populated one instead of replacing it. The push then
+  authenticates as the app and the remote refuses the workflow file, which is
+  how branch `claude/bdfl-context-on-trigger` failed on 2026-08-23 while
+  following the documented recipe verbatim (issue #151). The API carries no
+  ambient credential, so there is nothing to lose the fight to.
+- `mcp__github_file_ops__commit_files` reaches only the branch its run started
+  on. On review- and comment-triggered runs that is the PR's merge ref, where
+  it creates a literal `<n>/merge` branch off main and misses the PR branch
+  entirely (observed on #78; issue #133).
+
+The credential is derived, never chosen: any path under `.github/workflows/`
+needs the admin PAT, because the app token cannot write workflow files
+(issue #24). Everything else rides the session's own token. That single
+decision is the one agents kept making by hand and kept getting wrong, and it
+fails on the remote rather than here, one turn later, in a 403 that reads like
+a permissions bug.
+
+Commit identity follows the credential, which follows the paths: app token
+commits as `claude[bot]`, admin PAT commits as the operator. Nothing to
+configure, and `git commit` never runs, so the runner's missing git ident
+cannot fail the step.
+
+What this does NOT do, deliberately: open the PR. Creating a PR is not a push,
+so `gh pr create` rides the app token even when the commits needed the PAT, and
+a PAT-opened PR is operator-attributed and wakes a full BDFL run on its own PR
+(issue #141). Open it yourself, on the default credential.
+
+Prints the new commit SHA on stdout, which is the argument `settle-push <pr>
+--sha <that>` wants.
+
+Usage: push-branch <branch|pr-number> <path>... < commit message
+
+A number is read as a PR and resolved to its head ref, so a session pushing to
+a PR it did not open never has to name that branch and get it wrong (#133).
+
+"""
+
+import base64
+import json
+import os
+import subprocess
+import sys
+
+# The one path prefix the app token cannot write (issue #24).
+ADMIN_PREFIX = ".github/workflows/"
+REPO = os.environ.get("GITHUB_REPOSITORY", "")
+# What this run has already pushed, per branch. Appending to your own commit
+# from the same checkout is not the staleness the guard below is looking for.
+OWN_PUSHES = ".git/push-branch-refs.json"
+
+
+def die(*lines):
+    for line in lines:
+        print(f"push-branch: {line}", file=sys.stderr)
+    sys.exit(1)
+
+
+def note(line):
+    print(f"push-branch: {line}", file=sys.stderr)
+
+
+def gh(args, token=None, stdin=None):
+    """Run gh on an explicit credential. The token rides the environment, never
+    argv (hard rule 10)."""
+    env = dict(os.environ)
+    if token:
+        env["GH_TOKEN"] = token
+    return subprocess.run(
+        ("gh",) + tuple(args), capture_output=True, text=True, env=env, input=stdin
+    )
+
+
+def api(method, path, token, body=None, allow_missing=False):
+    args = ["api", "-X", method, f"repos/{REPO}/{path}"]
+    if body is not None:
+        args += ["--input", "-"]
+    proc = gh(args, token, json.dumps(body) if body is not None else None)
+    if proc.returncode != 0:
+        if allow_missing and "404" in proc.stderr:
+            return None
+        die(f"{method} {path} failed: {proc.stderr.strip()}")
+    return json.loads(proc.stdout) if proc.stdout.strip() else {}
+
+
+def git(*args):
+    return subprocess.run(("git",) + args, capture_output=True, text=True)
+
+
+def own_pushes():
+    try:
+        with open(OWN_PUSHES) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def record_push(branch, sha):
+    pushed = own_pushes()
+    pushed[branch] = sha
+    try:
+        with open(OWN_PUSHES, "w") as fh:
+            json.dump(pushed, fh)
+    except OSError:
+        pass  # The record only suppresses a false alarm; losing it costs nothing.
+
+
+def guard_not_stale(branch, base_sha, paths):
+    """Refuse a push that would silently revert someone else's commit.
+
+    The working tree is the source of these files, so a checkout older than the
+    base rewrites any of these paths that moved in between, and the diff looks
+    deliberate in review. This compares committed states only, so the caller's
+    own uncommitted edits are invisible to it, which is the point."""
+    if own_pushes().get(branch) == base_sha:
+        return  # We are the base. There is nobody else's work to revert.
+    if git("cat-file", "-e", f"{base_sha}^{{commit}}").returncode != 0:
+        git("fetch", "-q", "origin")
+    if git("cat-file", "-e", f"{base_sha}^{{commit}}").returncode != 0:
+        note(f"base {base_sha[:7]} is not in this checkout; staleness unverified")
+        return
+    stale = git("diff", "--quiet", base_sha, "HEAD", "--", *paths)
+    if stale.returncode not in (0, 1):
+        note(f"git diff against {base_sha[:7]} failed; staleness unverified")
+    elif stale.returncode == 1:
+        moved = git("diff", "--name-only", base_sha, "HEAD", "--", *paths).stdout
+        die(
+            "these paths differ between your checkout and the branch base:",
+            "  " + " ".join(moved.split()),
+            "pushing them would revert the base's version.",
+            f"run `git fetch origin && git reset --hard {base_sha}`, redo the edit, retry.",
+        )
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if len(argv) < 2:
+        die("usage: push-branch <branch|pr-number> <path>... < commit message")
+    if not REPO:
+        die("GITHUB_REPOSITORY is unset; this runs inside the repo's workflows")
+    target, paths = argv[0], argv[1:]
+
+    for p in paths:
+        if not os.path.isfile(p):
+            die(
+                f"{p} is not a file in this checkout.",
+                "paths are repo-relative and must exist; this pushes content, "
+                "it does not delete or move.",
+            )
+
+    message = sys.stdin.read().strip()
+    if not message:
+        die("the commit message comes from stdin and it is empty")
+
+    needs_admin = [p for p in paths if p.startswith(ADMIN_PREFIX)]
+    if needs_admin:
+        token = os.environ.get("GH_ADMIN_TOKEN", "")
+        if not token:
+            die(
+                f"{needs_admin[0]} is a workflow file, so this needs GH_ADMIN_TOKEN,",
+                "which is not in the environment. The app token cannot write "
+                "workflow files (issue #24).",
+            )
+        identity = "admin PAT"
+    else:
+        token = os.environ.get("GH_TOKEN") or gh(["auth", "token"]).stdout.strip()
+        identity = "app token"
+
+    branch = api("GET", f"pulls/{target}", token)["head"]["ref"] if target.isdigit() else target
+
+    ref = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
+    if ref:
+        base_sha, action = ref["object"]["sha"], "update"
+    elif target.isdigit():
+        die(f"PR {target} names branch {branch}, which does not exist")
+    else:
+        base_sha, action = api("GET", "git/ref/heads/main", token)["object"]["sha"], "create"
+
+    guard_not_stale(branch, base_sha, paths)
+
+    base_tree = api("GET", f"git/commits/{base_sha}", token)["tree"]["sha"]
+    tree = []
+    for p in paths:
+        with open(p, "rb") as fh:
+            content = base64.b64encode(fh.read()).decode()
+        blob = api("POST", "git/blobs", token, {"content": content, "encoding": "base64"})
+        # The executable bit is content here: a script pushed 100644 lands
+        # unrunnable and fails at its first call site, not at this one.
+        mode = "100755" if os.access(p, os.X_OK) else "100644"
+        tree.append({"path": p, "mode": mode, "type": "blob", "sha": blob["sha"]})
+
+    new_tree = api("POST", "git/trees", token, {"base_tree": base_tree, "tree": tree})
+    commit = api(
+        "POST",
+        "git/commits",
+        token,
+        {"message": message, "tree": new_tree["sha"], "parents": [base_sha]},
+    )
+    sha = commit["sha"]
+
+    if action == "create":
+        api("POST", "git/refs", token, {"ref": f"refs/heads/{branch}", "sha": sha})
+    else:
+        api("PATCH", f"git/refs/heads/{branch}", token, {"sha": sha})
+
+    # The failure this replaces is a branch that silently does not move, so the
+    # write's own answer is not evidence: read the ref back (issue #133).
+    landed = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
+    if not landed or landed["object"]["sha"] != sha:
+        die(
+            f"{branch} reads back as {landed['object']['sha'][:7] if landed else 'absent'}, "
+            f"not the {sha[:7]} just written.",
+            "the commit exists; nothing points at it. Retry, and if it repeats, "
+            "say so on the thread rather than pushing again.",
+        )
+    record_push(branch, sha)
+
+    note(
+        f"{action} {branch} {sha[:7]} on the {identity}, "
+        f"{len(paths)} file{'s' if len(paths) != 1 else ''}, base {base_sha[:7]}"
+    )
+    print(sha)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
