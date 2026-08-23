@@ -120,8 +120,8 @@ jobs:
       # Gated on an unanswered message sitting in the inbox, not on the
       # event name (operator report, 2026-08-23: "it used to show up
       # sometimes, now not"). The Worker stores the update in KV before
-      # it dispatches, so the key is there whatever wakes the run — and
-      # the run that answers is frequently NOT the dispatch. With the
+      # it dispatches, so the key is there whatever wakes the run. The
+      # run that answers is frequently NOT the dispatch: with the
       # lane busy the dispatch queues behind a running issue or comment
       # wake, and that running session drains the inbox first. Gating on
       # workflow_dispatch therefore showed the indicator on the run that
