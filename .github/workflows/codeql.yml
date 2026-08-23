@@ -21,7 +21,10 @@ name: CodeQL
 
 on:
   push:
-    branches: [main]
+    # TEMPORARY, removed before merge: exercises the push path on a real push
+    # so the `contents: read` fix is verified by a run and not by reading the
+    # permissions table (review [must] on #182).
+    branches: [main, claude/bdfl-codeql-advanced-setup]
   pull_request:
   schedule:
     # Weekly full sweep, no filter, so the `changes` job below can never hide
@@ -60,7 +63,23 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    # Job-level `permissions:` REPLACES the workflow-level block rather than
+    # extending it: anything unlisted here is `none`, including the
+    # `contents: read` declared at the top of this file. Both scopes are
+    # load-bearing and they serve different calls. `pull-requests: read` is
+    # for `pulls/{n}/files` on the PR path; `contents: read` is for
+    # `compare/{base}...{head}` on the push path, which is a contents API and
+    # 403s without it (review [must] on #182).
+    #
+    # This is the divergence from `ci.yml`, which skips the diff on non-PR
+    # events entirely, and it is deliberate. `ci.yml`'s four jobs ARE the
+    # required checks, so a filter that wrongly skips on `main` produces a
+    # vacuous green the ruleset accepts. Nothing here is required, so a
+    # filtered push risks no such thing, and the push path is where most of
+    # the saving is: 34 of the last 60 pushes to `main` are workflow-YAML
+    # only, and every squash merge lands as one.
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       languages: ${{ steps.filter.outputs.languages }}
