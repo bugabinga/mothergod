@@ -388,15 +388,10 @@ mod tests {
 
     #[test]
     fn pseudo_random_symbols_round_trip() {
-        // xorshift32: deterministic, no external RNG dependency.
-        let mut state = 0x1234_5678u32;
-        let mut symbols = Vec::with_capacity(5000);
-        for _ in 0..5000 {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            symbols.push((state % 32) as usize);
-        }
+        let symbols: Vec<usize> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| (state % 32) as usize)
+            .collect();
         roundtrip_symbols(&symbols, 32);
     }
 
