@@ -3,10 +3,10 @@
 //! Filters trade the input for a differently-shaped byte stream that a
 //! downstream model can predict more cheaply — never a smaller one on their
 //! own. Trial selection (`JOURNAL` S1-A1), not a static rule, decides when
-//! to apply a filter; each submodule here only provides the reversible
-//! transform itself. The `pick_filters` trial-selection heuristic and
-//! wiring behind a [`crate::Method`] variant are follow-up slices
-//! (`JOURNAL` S2-D2).
+//! to apply a filter: each submodule here provides the reversible
+//! transform itself, [`select`] shortlists which candidates are worth a
+//! full trial encode, and `crate::codec` (`JOURNAL` S2-D2, ADR-0027) trials
+//! them against real [`crate::Method::Lz`] output and keeps the smallest.
 
 /// Fixed-stride delta filter.
 ///
@@ -745,6 +745,63 @@ pub mod select {
         Transpose(NonZeroUsize),
     }
 
+    impl Candidate {
+        /// Serializes this candidate into the 2-byte filter-selector
+        /// prefix `Method::Lz`'s payload carries ahead of its declared-
+        /// length header (`docs/format/SPEC.md`): `[kind, param]`.
+        /// `param` is the delta stride or transpose column count, zero
+        /// for the two filters that take none ([`Self::Identity`],
+        /// [`Self::Bcj`]). [`pick`] never returns a stride past
+        /// `MAX_DELTA_STRIDE` (96) or a column count past this
+        /// module's widest `TRANSPOSE_COLUMNS` entry (96), both well
+        /// under 256, so `param` never truncates a value this module
+        /// actually produces.
+        ///
+        /// # Panics
+        ///
+        /// Does not panic on any `Candidate` this module's [`pick`] can
+        /// build: the two internal `.expect()`s guard exactly the
+        /// stride/column bound argued above, never adversarial input —
+        /// this side of the format only ever runs on the encoder's own
+        /// choices, never a decoded payload.
+        #[must_use]
+        pub fn to_header_bytes(self) -> [u8; 2] {
+            match self {
+                Self::Identity => [0, 0],
+                Self::Delta(stride) => [
+                    1,
+                    u8::try_from(stride.get())
+                        .expect("pick() bounds delta strides to MAX_DELTA_STRIDE (96), fits u8"),
+                ],
+                Self::Bcj => [2, 0],
+                Self::Transpose(columns) => [
+                    3,
+                    u8::try_from(columns.get()).expect(
+                        "pick() only selects TRANSPOSE_COLUMNS entries, all under 100, fits u8",
+                    ),
+                ],
+            }
+        }
+
+        /// Inverse of [`to_header_bytes`](Self::to_header_bytes). Returns
+        /// `None` for any byte pair that method never produces: an
+        /// unknown `kind`, a nonzero `param` on a kind that takes none,
+        /// or a zero `param` on [`Self::Delta`]/[`Self::Transpose`]
+        /// (both require a [`NonZeroUsize`]). This prefix comes off an
+        /// untrusted payload on the decode path, so `codec::decode`
+        /// turns `None` into `Error::Corrupt` rather than guessing.
+        #[must_use]
+        pub fn from_header_bytes(bytes: [u8; 2]) -> Option<Self> {
+            match bytes {
+                [0, 0] => Some(Self::Identity),
+                [1, param] => NonZeroUsize::new(usize::from(param)).map(Self::Delta),
+                [2, 0] => Some(Self::Bcj),
+                [3, param] => NonZeroUsize::new(usize::from(param)).map(Self::Transpose),
+                _ => None,
+            }
+        }
+    }
+
     /// Order-1 entropy in bits per byte: `data`, conditioned on each byte's
     /// immediate predecessor, estimated from `data`'s own pair frequencies.
     /// The proxy [`pick`] ranks delta candidates by — never a
@@ -984,6 +1041,43 @@ pub mod select {
                     .any(|c| matches!(c, Candidate::Transpose(_))),
                 "no transpose candidate; got {candidates:?}"
             );
+        }
+
+        #[test]
+        fn header_bytes_round_trip_every_candidate_kind() {
+            for candidate in [
+                Candidate::Identity,
+                Candidate::Delta(NonZeroUsize::new(1).unwrap()),
+                Candidate::Delta(NonZeroUsize::new(96).unwrap()),
+                Candidate::Bcj,
+                Candidate::Transpose(NonZeroUsize::new(2).unwrap()),
+                Candidate::Transpose(NonZeroUsize::new(96).unwrap()),
+            ] {
+                let bytes = candidate.to_header_bytes();
+                assert_eq!(
+                    Candidate::from_header_bytes(bytes),
+                    Some(candidate),
+                    "round trip failed for {candidate:?} via {bytes:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn header_bytes_reject_unknown_kind() {
+            assert_eq!(Candidate::from_header_bytes([4, 0]), None);
+            assert_eq!(Candidate::from_header_bytes([255, 255]), None);
+        }
+
+        #[test]
+        fn header_bytes_reject_zero_param_for_parameterized_kinds() {
+            assert_eq!(Candidate::from_header_bytes([1, 0]), None);
+            assert_eq!(Candidate::from_header_bytes([3, 0]), None);
+        }
+
+        #[test]
+        fn header_bytes_reject_nonzero_param_for_parameterless_kinds() {
+            assert_eq!(Candidate::from_header_bytes([0, 1]), None);
+            assert_eq!(Candidate::from_header_bytes([2, 1]), None);
         }
     }
 }
