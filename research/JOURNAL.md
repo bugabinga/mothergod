@@ -471,7 +471,8 @@ record.
   artifact to port from). Carries no live risk yet: nothing in `src/`
   calls this module. Remaining M1 scope: see S2-D2 (now wiring the
   flag/length/offset stages and `Literal` against real LZ tokens, plus
-  `Method` wiring, blocked on S2-D3's resolution).
+  `Method` wiring). S2-D3 was resolved on 2026-08-23 by ADR-0024; read
+  it there, not here.
 - S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A12 filter,
   trial-selection, LZ, coder, order-0 model, and literal-mixer slices:
   wiring the flag/length/offset stages as `model::Model` instances and
@@ -480,31 +481,40 @@ record.
   `model::Model`, `literal::Literal`, and `coder`) behind a new `Method`
   variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5).
   Source: `research/imports/session-1/mothergod.rs` (526 lines, golfed,
-  port behavior, not code, per ADR-0006). Blocked on S2-D3: the
-  Method-wiring PR is where `f64` vs. fixed-point in `Literal`'s weight
-  update must be decided, since that PR is the first one a real
-  bitstream depends on. One PR per module per the M1 checklist.
-- S2-D3 | DEBT | `literal::Literal` (S2-A12) ports the archive's
-  exponentiated-gradient mixing-weight update verbatim, including
-  `f64::exp()`. `JOURNAL` S1-A5 records "integer-only probability path
-  ... retired the cross-platform f64 determinism hazard" as accepted
-  architecture, but that refactor is transcript-only (postdates
-  `research/imports/session-1/mothergod.rs`, per that directory's
-  README "Provenance" note): no artifact exists to port the integer
-  version from. `f64::exp()` is not guaranteed bit-identical across
-  libm implementations, so an encoder and decoder built with different
-  platforms/toolchains could compute different mixing weights at the
-  same step and desync, corrupting output: a lossless violation (hard
-  rule 1) if this ever backs a real frame. Mechanism recorded here per
-  `research/imports/session-1/README.md`'s "where archive and journal
-  disagree, say so" instruction, rather than silently picking a side.
-  Fix, before the S2-D2 Method-wiring PR: either (a) reconstruct a
-  fixed-point exponentiated-gradient update and verify it against the
-  archive as a differential oracle (`docs/TESTING.md`), or (b) an ADR
-  accepting `f64` for this specific path with a stated cross-platform
-  mitigation (e.g. a vendored correctly-rounded `exp`, or restricting
-  supported decode platforms). Either resolution needs its own
-  experiment record, not a default.
+  port behavior, not code, per ADR-0006). No longer blocked: S2-D3 is
+  resolved by ADR-0024, which leaves one implementable prerequisite (a
+  decode-path `exp` that does not call libm) rather than an open
+  question. One PR per module per the M1 checklist.
+- S2-D3 | RESOLVED by ADR-0024 | `literal::Literal` (S2-A12) ports the
+  archive's exponentiated-gradient mixing-weight update verbatim,
+  including `f64::exp()`. `JOURNAL` S1-A5 records "integer-only
+  probability path ... retired the cross-platform f64 determinism
+  hazard" as accepted architecture, but that refactor is
+  transcript-only (postdates `research/imports/session-1/mothergod.rs`,
+  per that directory's README "Provenance" note): no artifact exists to
+  port the integer version from. `f64::exp()` is not guaranteed
+  bit-identical across libm implementations, so an encoder and decoder
+  built with different platforms/toolchains could compute different
+  mixing weights at the same step and desync, corrupting output: a
+  lossless violation (hard rule 1) if this ever backs a real frame.
+  Mechanism recorded here per `research/imports/session-1/README.md`'s
+  "where archive and journal disagree, say so" instruction, rather than
+  silently picking a side. **Resolution (ADR-0024, 2026-08-23):** the
+  hazard is the libm call, not the float type. IEEE-754 `+ - * /` are
+  correctly rounded and reproducible; transcendentals are not. So the
+  decode path may use basic float operations and may not call a
+  transcendental, `exp()` at `literal.rs:293` is the only decode-path
+  violation in the crate, and the fix is a vendored `exp` built from
+  basic operations, enforced crate-wide by
+  `clippy.toml`'s `disallowed-methods`. Encoder-only `log2` at
+  `filters.rs:773`/`807` and `lz.rs:520` stays, under `#[allow]` with a
+  written reason. The full integer mixer is no longer a prerequisite for
+  S2-D2; it is an M5 speed lead, because S1-A5's other claim (1.5-4x,
+  autovectorizing) is unmeasured here. Acceptance for the replacement is
+  exact round-trip plus bits/byte within 1% of the `f64` mixer on a
+  named corpus, not bit-identity with the archive: quantizing the update
+  changes predictions by construction. Implementation is issue #161, and
+  it carries its own experiment record.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,
