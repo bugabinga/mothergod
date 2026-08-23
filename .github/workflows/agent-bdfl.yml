@@ -131,6 +131,12 @@ jobs:
       discussions: write
       pages: write
     steps:
+      # When this run began, in epoch ms, for the typing indicator's
+      # cutoff in the last step. Messages older than this are this run's
+      # to settle; anything that lands later belongs to the run the
+      # concurrency lane has already queued behind it.
+      - run: echo "TYPING_SINCE=$(date +%s)000" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -658,13 +664,18 @@ jobs:
 
       # No live run, no "typing..." (PR #155 review). The worker starts
       # the indicator when the operator's message lands and counts down
-      # as tg-send delivers answers; this zeroes it when the run is over,
-      # answered or not. Unconditional on purpose, because the cases
-      # where it matters are exactly the ones a condition would miss: the
-      # pause guard skipped the session whole, the session died, the job
-      # was cancelled, the count drifted. The invariant is one sentence —
-      # the bot types while a BDFL run is alive and owes an answer, never
-      # after.
+      # as tg-send delivers answers; this settles whatever is left over
+      # from before this run started, answered or not. Unconditional on
+      # purpose, because the cases where it matters are exactly the ones
+      # a condition would miss: the pause guard skipped the session
+      # whole, the session died, the job was cancelled, the count
+      # drifted. The invariant is one sentence — the bot types while a
+      # BDFL run is alive and owes an answer, never after.
+      #
+      # `since` is what keeps that from being a blunt zero: a message
+      # that arrived mid-run is the queued run's to answer, and killing
+      # its indicator here would restore the silent screen this whole
+      # change removes.
       #
       # It doubles as the indicator's health check, which is why it logs
       # the status code: 204 reachable, 502 the Durable Object is not,
@@ -680,8 +691,8 @@ jobs:
         env:
           WORKER_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         run: |
-          printf 'url = "https://bot.mothergod.dev/typing/reset"\nheader = "x-mothergod-secret: %s"\n' \
-            "${WORKER_SECRET}" |
+          printf 'url = "https://bot.mothergod.dev/typing/reset?since=%s"\nheader = "x-mothergod-secret: %s"\n' \
+            "${TYPING_SINCE}" "${WORKER_SECRET}" |
             curl -sS -X POST --max-time 10 --config - -o /dev/null -w 'typing/reset: %{http_code}\n'
 
       # Audit trail (operator directive): prompt and metadata in, final
