@@ -455,12 +455,6 @@ jobs:
                  clean needs only the REST squash merge. Either way
                  land by REST once the four gates are green,
                  blocked-on-human if still stuck.
-               - A draft PR with green gates and a verdict older than
-                 the latest push (issue #70). Agents never draft
-                 (CLAUDE.md rule 11), so an agent-authored one is a
-                 rule violation to undo: mark it ready and say why on
-                 the thread. A human's draft is work in progress; leave
-                 it alone.
             5. Retrospect (operator directive, Telegram, 2026-08-23):
                audit the agent sessions completed since the anchor
                (gh run list, then gh run view --log; the anchor

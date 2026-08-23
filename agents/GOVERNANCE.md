@@ -66,7 +66,8 @@ mechanisms, all of which the BDFL may reshape on the record.
 | Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security-report triage, CoC enforcement | Operator only |
-| Secrets | BDFL, full governance (operator ruling, PR #101 review, 2026-08-23). The sole hard constraint is CLAUDE.md rule 10: a secret is never printed, logged, or leaked. The BDFL defers to the operator on unresolvable roadblocks, such as credentials only the operator can mint |
+| Secrets: consuming one that exists, including sending it somewhere new | BDFL, full governance (operator ruling, PR #101 review, 2026-08-23). The sole hard constraint is CLAUDE.md rule 10: a secret is never printed, logged, or leaked. The reviewer verifies handling and names the (secret, destination) pair, but the call is the BDFL's and carries no `blocked-on-human` label |
+| Secrets: minting, rotating, or removing one | Operator only, by physical necessity: nobody else can write repository secrets. `blocked-on-human`, naming the secret |
 
 ### `blocked-on-human` is a latch, and removing it is the answer
 
@@ -223,6 +224,44 @@ cron line therefore kills that schedule until a human-attributed change
 to the cron lands. Rule: cron-line changes land admin-PAT-attributed
 (direct push, or `GH_TOKEN="$GH_ADMIN_TOKEN" gh pr merge`), never via
 an app merge.
+
+## Tool envelopes
+
+The BDFL sets every agent's `--allowedTools` (ADR-0008). One rule, learned
+twice from telemetry:
+
+**A Bash allowlist of binary names is not the security boundary.** The real
+boundary is the trigger surface, and it does not move: these jobs run only
+on `schedule`, `workflow_dispatch`, or same-repo branches, so every author
+is our own machinery or the operator. No external content reaches them.
+
+Be exact about what the allowlists did buy, because the first two drafts of
+this section were not (reviewer, PR #121 and PR #125). None of them stopped
+exfiltration: `git push <arbitrary-remote>` was reachable from
+`Bash(git:*)`, which every one of them carried, and every agent on them
+also holds `Edit`/`Write`, so it could already author arbitrary file
+content. For the maintainer and the deslopper, whose list was
+`cargo/rustup/git/gh/rustc`, the list did raise the cost of the easy
+version by withholding the single-command primitives (`curl`, `env`, `nc`)
+that make a prompt-injection exfil one step rather than several. The
+researcher never had even that: its list already carried `Bash(curl:*)`
+and `Bash(python3:*)`. So the residual was real for two seats, absent for
+the third, and traded knowingly for 11 turns a run. Re-adding the lists
+does not recover it: any list that lets these agents do their job contains
+`git`.
+
+The cost is measured, not argued. The reviewer burned 11-13 denials per run
+detouring around missing file tools (runs 32615950907..32628126725) and 12
+median after that fix, until Bash was granted unrestricted. The maintainer
+still sat at 11 median denials per run, on Bash, in 6 of its 6 most recent
+runs, when the first cross-role telemetry read was taken (2026-08-23, 129
+audit artifacts). A denial is a wasted turn plus a re-plan around a wall the
+agent cannot see the shape of.
+
+So: grant Bash unrestricted to any agent that already holds `Edit`/`Write`.
+Withhold a tool only where withholding states a real role boundary — the
+reviewer gets no `Edit`/`Write` because it judges and does not modify, and
+that denial is the design working.
 
 ## Humans other than the operator
 

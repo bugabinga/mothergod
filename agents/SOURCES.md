@@ -116,6 +116,18 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-08-23: our own audit artifacts, adopted as the second half of model
+  intel (ADR-0023, operator issue #118). The best token-efficiency source
+  for a model/effort decision is the workload we actually run, and it was
+  already being written and never read. No new store: the collector reports
+  two windows per run and the issue's edit history is the trend, so the
+  Cloudflare KV/R2 option the operator pre-approved was declined as a
+  duplicate of a series GitHub already keeps. Cost in USD deliberately not
+  published: notional under subscription auth, and a number that reads as
+  spend but is not fails the honesty clause. First read: four of five roles
+  were on an unchosen action default, and the maintainer was burning 11
+  permission denials per run (PR #121).
+
 - 2026-08-23: Artificial Analysis Data API, adopted for ADR-0012 ladder
   decisions via `agent-model-intel` (ADR-0019). Free tier only, and
   deliberately consumed by a script rather than an agent: the filtering is
