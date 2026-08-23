@@ -57,6 +57,14 @@ All notable changes to this project are documented here. Format follows
   coder that will eventually consume it. The archive's DP-priced
   optimal parse (`lz_opt`) is a follow-up slice; it runs this parser
   internally as its price-seeding first pass.
+- Codec port, LZ slice two (`research/JOURNAL.md` S2-A9): `lz::parse_optimal`,
+  the archive's DP-priced optimal parse, seeded by `parse_greedy` and
+  costed against a lightweight frequency-table price model (no real
+  entropy coder exists yet to price against). One deliberate correctness
+  fix over the archive: this parse's internal repeat-offset-cache
+  bookkeeping always matches `replay`'s, closing a round-trip hazard
+  present in the archive's own DP (see the journal entry for the
+  mechanism).
 
 ### Removed
 

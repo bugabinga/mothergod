@@ -3,14 +3,18 @@
 //!
 //! Ported from the archive's `lz` (`research/imports/session-1/
 //! mothergod.rs`), not `lz_opt`: the archive's optimal-parse DP prices
-//! candidates against the entropy models' own frequency tables, which
-//! don't exist in this crate yet (`filters` is ported, the coder is not).
-//! `lz_opt` also runs `lz` internally as its price-seeding first pass, so
-//! this greedy/lazy parser is not a detour, it is a real prerequisite.
-//! [`parse_greedy`] alone is already a usable LZ front end (a real
-//! encoder could ship on it today) and [`replay`] proves it losslessly
-//! reversible at the token level without needing the entropy coder to
-//! exist. The DP-priced optimal parse is a follow-up slice.
+//! candidates against its own lightweight frequency tables (not the real
+//! entropy models, which still don't exist in this crate — `filters` is
+//! ported, the coder is not). `lz_opt` also runs `lz` internally as its
+//! price-seeding first pass, so this greedy/lazy parser is not a detour,
+//! it is a real prerequisite. [`parse_greedy`] alone is already a usable
+//! LZ front end (a real encoder could ship on it today) and [`replay`]
+//! proves it losslessly reversible at the token level without needing
+//! the entropy coder to exist.
+//!
+//! [`parse_optimal`] is the follow-up slice: the archive's `lz_opt`, a
+//! two-round DP-priced optimal parse seeded by [`parse_greedy`]. See its
+//! docs for one deliberate correctness fix over the archive's own DP.
 //!
 //! Behavior ported, not code, per ADR-0006: the archive's single `find`
 //! closure captured by both the rep-cache scan and the hash-chain search
@@ -36,6 +40,13 @@ const MIN_MATCH_LEN: usize = 4;
 /// cache slot.
 const MIN_REP_LEN: usize = 2;
 
+/// [`MIN_REP_LEN`] as a `u32`, for [`dp_round`]'s price-table indexing
+/// (lengths are priced as `u32` throughout, matching [`Token`]'s own
+/// fields). A compile-time literal (2): always fits, so the truncation
+/// lint below has nothing to actually catch.
+#[allow(clippy::cast_possible_truncation)]
+const MIN_REP_LEN_U32: u32 = MIN_REP_LEN as u32;
+
 /// Longest run a single token can cover; longer repeats are split into
 /// several tokens. Matches the archive's cap.
 const MAX_MATCH_LEN: usize = 65535;
@@ -45,9 +56,16 @@ const MAX_MATCH_LEN: usize = 65535;
 /// one-token delay of checking whether the next position does better.
 const LAZY_MAX_LEN: usize = 256;
 
-/// Hash-chain positions [`MatchFinder::find_best`] walks before giving up.
-/// Bounds worst-case parse time on pathological (highly repetitive) input.
+/// Hash-chain positions [`MatchFinder::find_best`] walks before giving up,
+/// for [`parse_greedy`]'s once-per-token search. Bounds worst-case parse
+/// time on pathological (highly repetitive) input.
 const MAX_CHAIN_TRIES: usize = 128;
+
+/// Hash-chain positions [`MatchFinder::find_best`] walks for
+/// [`parse_optimal`]'s once-per-position search: deeper than
+/// [`MAX_CHAIN_TRIES`] because the DP amortizes the cost via the `carry`
+/// reuse in [`dp_round`] rather than searching once per emitted token.
+const MAX_CHAIN_TRIES_OPTIMAL: usize = 640;
 
 /// `log2` of the match-finder hash table's bucket count (a 3-byte prefix
 /// hash).
@@ -258,16 +276,17 @@ impl<'d> MatchFinder<'d> {
     }
 
     /// Best match ending at `i`, found by walking the hash chain for `i`'s
-    /// 3-byte prefix, bounded by [`WINDOW`] and [`MAX_CHAIN_TRIES`]. Does
-    /// not require `i` itself to have been [`insert`](Self::insert)ed;
+    /// 3-byte prefix, bounded by [`WINDOW`] and `max_tries` (callers pass
+    /// [`MAX_CHAIN_TRIES`] or [`MAX_CHAIN_TRIES_OPTIMAL`]). Does not
+    /// require `i` itself to have been [`insert`](Self::insert)ed;
     /// [`parse_greedy`]'s one-step lazy-matching probe relies on that to
     /// look ahead without mutating the chain.
-    fn find_best(&self, i: usize) -> Option<(usize, Distance)> {
+    fn find_best(&self, i: usize, max_tries: usize) -> Option<(usize, Distance)> {
         let mut best_len = 0usize;
         let mut best_distance = None;
         let mut j = self.head[self.hash(i)];
         let mut tries = 0;
-        while j != NO_POSITION && tries < MAX_CHAIN_TRIES {
+        while j != NO_POSITION && tries < max_tries {
             let j_pos = j as usize;
             let offset = i - j_pos; // j was inserted at an earlier position: i > j_pos always.
             if offset > WINDOW {
@@ -316,14 +335,16 @@ pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
     while i < n {
         finder.insert(i);
         let (rep_len, rep_slot) = best_rep(data, reps, i);
-        let found = finder.find_best(i);
+        let found = finder.find_best(i, MAX_CHAIN_TRIES);
         let match_len = found.map_or(0, |(len, _)| len);
 
         if (MIN_MATCH_LEN..LAZY_MAX_LEN).contains(&match_len)
             && rep_len + 1 < match_len
             && i + 1 < n
         {
-            let next_len = finder.find_best(i + 1).map_or(0, |(len, _)| len);
+            let next_len = finder
+                .find_best(i + 1, MAX_CHAIN_TRIES)
+                .map_or(0, |(len, _)| len);
             if next_len > match_len {
                 tokens.push(Token::Literal(data[i]));
                 i += 1;
@@ -411,6 +432,502 @@ pub fn replay(tokens: &[Token]) -> Vec<u8> {
         }
     }
     out
+}
+
+// ---- optimal parse: DP-priced, in-DP rep cache, 2-round price iteration ----
+
+/// Below this input length [`parse_optimal`] falls back to [`parse_greedy`]:
+/// matches the archive's `n<64` short-circuit in `lz_opt` — the DP's fixed
+/// setup cost (two full passes, hash-chain rebuild) isn't worth paying on
+/// an input this small.
+const OPTIMAL_MIN_LEN: usize = 64;
+
+/// Match length at and above which [`dp_round`]'s normal-match search
+/// reuses the previous position's result instead of re-walking the hash
+/// chain (the archive's `carry`): a run this long at position `i` is
+/// `len - 1` bytes long at `i + 1` too, at the same distance, since it is
+/// the same underlying repeat.
+const CARRY_MIN_LEN: usize = 64;
+
+/// Match length [`dp_round`] additionally prices as a candidate when the
+/// source distance is close (below [`SHORT_MATCH_MAX_DISTANCE`]): one
+/// byte under [`MIN_MATCH_LEN`], cheap enough at a close distance to beat
+/// a literal even though [`parse_greedy`] never considers it.
+const SHORT_MATCH_LEN: u32 = 3;
+
+/// Distance ceiling for the [`SHORT_MATCH_LEN`] candidate: beyond this an
+/// offset field costs more than the length-3 match saves.
+const SHORT_MATCH_MAX_DISTANCE: u32 = 4096;
+
+/// Length candidates [`dp_round`] prices at each position instead of every
+/// length up to the longest available match (the archive's `BOUND`):
+/// log2-ish spaced breakpoints, cheap to price exhaustively, plus the
+/// longest available length itself so a long match is never left
+/// unpriced merely for falling between two breakpoints.
+const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63];
+
+/// Previous-byte high-nibble contexts the literal price table conditions
+/// on, matching the archive's `lh` (16 contexts of 256 symbols each).
+const LITERAL_CONTEXTS: usize = 16;
+
+/// [`bucket`] values a match/rep length ever falls into: `bucket(1)` is 0,
+/// `bucket(MAX_MATCH_LEN)` (65535) is 15, one slot of headroom kept as in
+/// the archive's `lb`.
+const LENGTH_BUCKETS: usize = 17;
+
+/// [`bucket`] values a match distance ever falls into: `bucket(WINDOW)`
+/// (2^20) is 20, matching the archive's `ob`.
+const OFFSET_BUCKETS: usize = 21;
+
+/// Flat price approximation for the flag bit selecting a literal over a
+/// match/rep at this pre-coder stage (the archive's literal `+1.0`): cheap
+/// enough not to warrant its own frequency model yet.
+const FLAG_BIT_PRICE: f64 = 1.0;
+
+/// Flat price approximation for the extra header bits a rep-slot choice
+/// or a fresh match distance costs beyond its modeled price (the
+/// archive's `+1.6`, used for both).
+const EXTRA_HEADER_BITS_PRICE: f64 = 1.6;
+
+/// `floor(log2(v))`: the price table's bucket index for a match length or
+/// distance, matching the archive's `bkt`. `v` is always a real length
+/// (>= [`MIN_REP_LEN`], the smallest length ever priced) or a real
+/// [`Distance`] (never zero by construction), so `v.leading_zeros()` is
+/// always < 32 and the subtraction below never underflows.
+fn bucket(v: u32) -> usize {
+    debug_assert!(
+        v > 0,
+        "bucket() is only ever called on a length or a distance, never zero"
+    );
+    (u32::BITS - v.leading_zeros() - 1) as usize
+}
+
+/// `bucket_index` as a price, in bits: a value inside `bucket_index` needs
+/// that many raw bits on top of the coder's own modeled price to pin down
+/// which value in that log2-wide bucket it actually was.
+fn extra_bits(bucket_index: usize) -> f64 {
+    // bucket_index is always < OFFSET_BUCKETS (21), far below f64's exact
+    // integer range (2^53): no precision loss.
+    #[allow(clippy::cast_precision_loss)]
+    {
+        bucket_index as f64
+    }
+}
+
+/// `-log2(freq / total)`: the Shannon price, in bits, of a symbol seen
+/// `freq` times out of `total`.
+fn price(freq: u32, total: u32) -> f64 {
+    -(f64::from(freq) / f64::from(total)).log2()
+}
+
+/// Converts a flat frequency table (already Laplace-smoothed, every entry
+/// >= 1) into its per-entry price table.
+fn to_prices(counts: &[u32]) -> Vec<f64> {
+    let total: u32 = counts.iter().sum();
+    counts.iter().map(|&freq| price(freq, total)).collect()
+}
+
+/// Per-symbol coding price estimate (bits, via `-log2(p)`) [`dp_round`]
+/// ranks candidate parses by. These numbers are never emitted; only the
+/// [`Token`]s the DP chose between are ([`parse_optimal`]'s result).
+struct PriceTable {
+    /// Literal price by `(previous byte's high nibble, byte)`:
+    /// [`LITERAL_CONTEXTS`] contexts of 256 symbols each.
+    literal: Vec<f64>,
+    /// Match/rep length price by [`bucket`], [`LENGTH_BUCKETS`] entries.
+    length: Vec<f64>,
+    /// Match distance price by [`bucket`], [`OFFSET_BUCKETS`] entries.
+    offset: Vec<f64>,
+    /// Flat price of choosing a rep over a normal match, independent of
+    /// slot or length (the archive's `rp`, a single scalar).
+    rep: f64,
+}
+
+/// Raw frequency counts [`PriceTable`] is derived from, tallied from a
+/// token sequence (the archive's `lh`/`lb`/`ob`/`nrep`). Every entry
+/// starts at 1 (Laplace smoothing): an unseen symbol still gets a finite,
+/// merely expensive, price instead of `-log2(0) = infinity`.
+struct PriceCounts {
+    literal: Vec<u32>,
+    length: Vec<u32>,
+    offset: Vec<u32>,
+    rep: u32,
+}
+
+impl PriceCounts {
+    fn new() -> Self {
+        Self {
+            literal: vec![1; LITERAL_CONTEXTS * 256],
+            length: vec![1; LENGTH_BUCKETS],
+            offset: vec![1; OFFSET_BUCKETS],
+            rep: 1,
+        }
+    }
+
+    /// Tallies `tokens` (produced by replaying them over `data`, only to
+    /// recover each literal's preceding-byte context; a token's own
+    /// length/distance/slot need no data lookup).
+    fn tally(tokens: &[Token], data: &[u8]) -> Self {
+        let mut counts = Self::new();
+        let mut pos = 0usize;
+        for token in tokens {
+            match *token {
+                Token::Literal(byte) => {
+                    let context = if pos > 0 {
+                        usize::from(data[pos - 1] >> 4)
+                    } else {
+                        0
+                    };
+                    counts.literal[context * 256 + usize::from(byte)] += 1;
+                    pos += 1;
+                }
+                Token::Match { len, distance } => {
+                    counts.length[bucket(len)] += 1;
+                    counts.offset[bucket(distance.get())] += 1;
+                    pos += len as usize;
+                }
+                Token::Rep { len, .. } => {
+                    counts.length[bucket(len)] += 1;
+                    counts.rep += 1;
+                    pos += len as usize;
+                }
+            }
+        }
+        counts
+    }
+
+    /// Derives a [`PriceTable`] from these counts. `total_tokens` prices
+    /// the rep flag against the full token count (the archive's
+    /// `toks.len() + 2`, a small Laplace pad matching the `+1` already
+    /// folded into every frequency entry).
+    fn prices(&self, total_tokens: usize) -> PriceTable {
+        let mut literal = vec![0.0; LITERAL_CONTEXTS * 256];
+        for context in 0..LITERAL_CONTEXTS {
+            let row = &self.literal[context * 256..context * 256 + 256];
+            let total: u32 = row.iter().sum();
+            for (symbol, &freq) in row.iter().enumerate() {
+                literal[context * 256 + symbol] = price(freq, total);
+            }
+        }
+        let total_tokens = u32::try_from(total_tokens).expect(
+            "token count bounded by input length, already checked to fit u32 by parse_greedy",
+        );
+        PriceTable {
+            literal,
+            length: to_prices(&self.length),
+            offset: to_prices(&self.offset),
+            rep: price(self.rep, total_tokens + 2) + EXTRA_HEADER_BITS_PRICE,
+        }
+    }
+}
+
+/// Which move [`dp_round`]'s DP used to reach a position: [`Token`]'s own
+/// fields, packed for backtracking rather than emission order.
+#[derive(Debug, Clone, Copy)]
+enum Move {
+    Literal,
+    Match { len: u32, distance: Distance },
+    Rep { len: u32, slot: RepSlot },
+}
+
+/// [`dp_round`]'s working state: cheapest price to reach each position
+/// (`dp`), the move that achieved it (`parent`), and the repeat-offset
+/// cache that move leaves behind (`cache`) — carried alongside `dp`/
+/// `parent` because later positions' rep candidates need to know it
+/// without re-deriving it from the whole path so far.
+struct DpState {
+    dp: Vec<f64>,
+    parent: Vec<Option<Move>>,
+    cache: Vec<RepCache>,
+}
+
+impl DpState {
+    fn new(n: usize) -> Self {
+        let mut dp = vec![f64::INFINITY; n + 1];
+        dp[0] = 0.0;
+        Self {
+            dp,
+            parent: vec![None; n + 1],
+            cache: vec![RepCache::initial(); n + 1],
+        }
+    }
+
+    /// Records reaching `target` via `mv` with total price `cost`, if
+    /// that beats the best price already known for `target`.
+    fn relax(&mut self, cost: f64, target: usize, mv: Move, new_cache: RepCache) {
+        if cost < self.dp[target] {
+            self.dp[target] = cost;
+            self.parent[target] = Some(mv);
+            self.cache[target] = new_cache;
+        }
+    }
+
+    /// [`Self::relax`] for a [`Token::Rep`] candidate of `len` at `slot`,
+    /// starting from position `i` with base price `base` (`self.dp[i]`,
+    /// passed in rather than re-read so callers can loop over several
+    /// candidate lengths without re-borrowing `self` immutably each time).
+    fn relax_rep(
+        &mut self,
+        prices: &PriceTable,
+        base: f64,
+        i: usize,
+        len: u32,
+        slot: RepSlot,
+        new_cache: RepCache,
+    ) {
+        let cost = base + prices.length[bucket(len)] + extra_bits(bucket(len)) + prices.rep;
+        self.relax(cost, i + len as usize, Move::Rep { len, slot }, new_cache);
+    }
+
+    /// Prices every [`Token::Rep`] candidate at position `i`: for each of
+    /// the three cached distances that actually matches here, a length-2
+    /// candidate (always tried, matching the archive's unconditional
+    /// `relax(2.min(lr))` once a rep of any length exists), each
+    /// [`LENGTH_STEPS`] breakpoint at or under the real match length, and
+    /// the real match length itself if it isn't already a breakpoint.
+    fn relax_rep_candidates(
+        &mut self,
+        prices: &PriceTable,
+        data: &[u8],
+        i: usize,
+        base: f64,
+        reps: RepCache,
+    ) {
+        for slot in RepSlot::ALL {
+            let distance = reps.get(slot);
+            let rep_len = match_len(data, i, distance);
+            if rep_len < MIN_REP_LEN {
+                continue;
+            }
+            let mut new_cache = reps;
+            new_cache.promote(slot);
+            let rep_len = match_len_as_u32(rep_len);
+            self.relax_rep(prices, base, i, MIN_REP_LEN_U32, slot, new_cache);
+            for &len in &LENGTH_STEPS {
+                if len > rep_len {
+                    break;
+                }
+                self.relax_rep(prices, base, i, len, slot, new_cache);
+            }
+            if !LENGTH_STEPS.contains(&rep_len) && rep_len > MIN_REP_LEN_U32 {
+                self.relax_rep(prices, base, i, rep_len, slot, new_cache);
+            }
+        }
+    }
+
+    /// Prices the normal-match candidate found at position `i`
+    /// ([`next_match_candidate`]): a length-[`SHORT_MATCH_LEN`] candidate
+    /// when the distance is close enough, and — for a real
+    /// [`MIN_MATCH_LEN`]-or-longer match — each [`LENGTH_STEPS`]
+    /// breakpoint under [`CARRY_MIN_LEN`] plus the real match length
+    /// itself, matching the archive's `l1>=4` branch.
+    fn relax_match_candidate(
+        &mut self,
+        prices: &PriceTable,
+        i: usize,
+        base: f64,
+        reps: RepCache,
+        match_len_here: usize,
+        distance_here: Distance,
+    ) {
+        let mut new_cache = reps;
+        new_cache.push_front(distance_here);
+        let offset_cost = prices.offset[bucket(distance_here.get())]
+            + extra_bits(bucket(distance_here.get()))
+            + EXTRA_HEADER_BITS_PRICE;
+
+        if match_len_here == SHORT_MATCH_LEN as usize
+            && distance_here.get() < SHORT_MATCH_MAX_DISTANCE
+        {
+            let cost = base
+                + prices.length[bucket(SHORT_MATCH_LEN)]
+                + extra_bits(bucket(SHORT_MATCH_LEN))
+                + offset_cost;
+            self.relax(
+                cost,
+                i + SHORT_MATCH_LEN as usize,
+                Move::Match {
+                    len: SHORT_MATCH_LEN,
+                    distance: distance_here,
+                },
+                new_cache,
+            );
+        }
+
+        if match_len_here < MIN_MATCH_LEN {
+            return;
+        }
+        let full_len = match_len_as_u32(match_len_here);
+        if (full_len as usize) < CARRY_MIN_LEN {
+            for &len in &LENGTH_STEPS {
+                if len > full_len {
+                    break;
+                }
+                let cost =
+                    base + prices.length[bucket(len)] + extra_bits(bucket(len)) + offset_cost;
+                self.relax(
+                    cost,
+                    i + len as usize,
+                    Move::Match {
+                        len,
+                        distance: distance_here,
+                    },
+                    new_cache,
+                );
+            }
+        }
+        let cost =
+            base + prices.length[bucket(full_len)] + extra_bits(bucket(full_len)) + offset_cost;
+        self.relax(
+            cost,
+            i + full_len as usize,
+            Move::Match {
+                len: full_len,
+                distance: distance_here,
+            },
+            new_cache,
+        );
+    }
+}
+
+/// One DP pass: the cheapest token sequence for `data` under `prices`,
+/// using [`parse_greedy`]'s hash-chain match finder and the same
+/// rep-cache transition rules [`replay`] uses ([`RepCache::push_front`]
+/// on a fresh [`Token::Match`], [`RepCache::promote`] on a
+/// [`Token::Rep`]) so the chosen tokens replay exactly as this DP
+/// costed them.
+///
+/// This is *not* a full port of the archive's `lz_opt` DP: on a fresh
+/// match, the archive's own price simulation updates its rep cache by
+/// deduplicating the new distance against the existing three slots
+/// (dropping whichever slot already held it, instead of always dropping
+/// the oldest). The archive's actual decoder (`decode`, not `lz_opt`)
+/// never does this: it always shifts blindly, the same rule [`replay`]
+/// already implements via [`RepCache::push_front`]. Porting the dedup
+/// rule into this DP would let it choose a later `Token::Rep` slot based
+/// on a cache state [`replay`] never reaches, corrupting round-trip
+/// exactly when a fresh match's distance happens to coincide with an
+/// already-cached one. Hard rule 1 makes that not a judgment call: this
+/// DP's cache bookkeeping matches [`replay`] unconditionally instead.
+fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
+    let n = data.len();
+    let mut state = DpState::new(n);
+    let mut finder = MatchFinder::new(data);
+    // (len, distance) of a long match found at the previous position,
+    // still long enough at this position to skip a fresh hash-chain walk.
+    let mut carry: Option<(usize, Distance)> = None;
+
+    for i in 0..n {
+        finder.insert(i);
+        if !state.dp[i].is_finite() {
+            // Never actually reached: dp[0] = 0 and the literal transition
+            // below always advances dp[i] -> dp[i+1] when dp[i] is finite,
+            // so every position is reachable by induction. Kept as a
+            // defensive guard matching the archive's identical check.
+            continue;
+        }
+        let base = state.dp[i];
+        let reps = state.cache[i];
+
+        let context = if i > 0 {
+            usize::from(data[i - 1] >> 4)
+        } else {
+            0
+        };
+        let literal_cost =
+            base + prices.literal[context * 256 + usize::from(data[i])] + FLAG_BIT_PRICE;
+        state.relax(literal_cost, i + 1, Move::Literal, reps);
+
+        state.relax_rep_candidates(prices, data, i, base, reps);
+
+        let match_candidate = next_match_candidate(&mut finder, &mut carry, i);
+        if let Some((match_len_here, distance_here)) = match_candidate {
+            state.relax_match_candidate(prices, i, base, reps, match_len_here, distance_here);
+        }
+    }
+
+    reconstruct(data, &state.parent)
+}
+
+/// The normal-match candidate at position `i`: either the archive's
+/// `carry` reuse (a long match found at `i - 1`, one byte shorter here,
+/// same distance) or a fresh hash-chain search, which refreshes `carry`
+/// for the next position when it finds another long match.
+fn next_match_candidate(
+    finder: &mut MatchFinder<'_>,
+    carry: &mut Option<(usize, Distance)>,
+    i: usize,
+) -> Option<(usize, Distance)> {
+    match *carry {
+        Some((len, distance)) if len >= CARRY_MIN_LEN => {
+            *carry = (len > CARRY_MIN_LEN).then_some((len - 1, distance));
+            Some((len, distance))
+        }
+        _ => {
+            let found = finder.find_best(i, MAX_CHAIN_TRIES_OPTIMAL);
+            *carry = found
+                .and_then(|(len, distance)| (len >= CARRY_MIN_LEN).then_some((len - 1, distance)));
+            found
+        }
+    }
+}
+
+/// Walks `parent` backward from `data.len()` to `0`, matching the archive's
+/// reconstruction loop: at each step, the recorded move's length says how
+/// far back its start was, and (for a literal) `data` at that start says
+/// which byte it was.
+fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut i = data.len();
+    while i > 0 {
+        let mv = parent[i].expect(
+            "every position on the DP path was reached by a recorded relax; dp_round never \
+             leaves a gap between 0 and data.len()",
+        );
+        let len = match mv {
+            Move::Literal => 1,
+            Move::Match { len, .. } | Move::Rep { len, .. } => len as usize,
+        };
+        i -= len;
+        tokens.push(match mv {
+            Move::Literal => Token::Literal(data[i]),
+            Move::Match { len, distance } => Token::Match { len, distance },
+            Move::Rep { len, slot } => Token::Rep { len, slot },
+        });
+    }
+    tokens.reverse();
+    tokens
+}
+
+/// Two-round DP-priced optimal parse (`JOURNAL` S1-A3, S2-D2's `lz_opt`
+/// slice): a first pass with [`parse_greedy`] seeds a price table; two
+/// rounds of `dp_round` each find the min-price path under the current
+/// table, and round 0's resulting tokens reseed a sharper table for round
+/// 1 (the archive re-derives its price tables from its own DP output
+/// exactly once, not iterating to convergence). Below `OPTIMAL_MIN_LEN`
+/// (64 bytes) the DP's fixed setup cost isn't worth paying: falls back to
+/// [`parse_greedy`] directly, matching the archive.
+///
+/// See `dp_round`'s docs for one deliberate correctness fix over the
+/// archive's own `lz_opt`: this DP's internal rep-cache bookkeeping always
+/// matches what [`replay`] will actually do, even where the archive's own
+/// price simulation diverges from its real decoder.
+///
+/// # Panics
+///
+/// Panics if `data` is longer than `u32::MAX` bytes, the same bound
+/// [`parse_greedy`] enforces (this function always calls it first, as its
+/// price-seeding first pass).
+#[must_use]
+pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
+    if data.len() < OPTIMAL_MIN_LEN {
+        return parse_greedy(data);
+    }
+    let seed = parse_greedy(data);
+    let prices = PriceCounts::tally(&seed, data).prices(seed.len());
+    let first_round = dp_round(data, &prices);
+    let prices = PriceCounts::tally(&first_round, data).prices(first_round.len());
+    dp_round(data, &prices)
 }
 
 #[cfg(test)]
@@ -511,5 +1028,143 @@ mod tests {
             .map(|i| u8::try_from(i % 251).unwrap())
             .collect();
         roundtrip(&data);
+    }
+
+    fn roundtrip_optimal(data: &[u8]) {
+        let tokens = parse_optimal(data);
+        assert_eq!(replay(&tokens), data, "optimal-parse roundtrip mismatch");
+        for token in &tokens {
+            if let Token::Match { len, .. } | Token::Rep { len, .. } = *token {
+                assert!(
+                    (len as usize) <= MAX_MATCH_LEN,
+                    "token length {len} exceeds MAX_MATCH_LEN"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn optimal_roundtrip_empty() {
+        roundtrip_optimal(b"");
+    }
+
+    #[test]
+    fn optimal_roundtrip_single_byte() {
+        roundtrip_optimal(b"x");
+    }
+
+    #[test]
+    fn optimal_below_min_len_matches_greedy() {
+        // Below OPTIMAL_MIN_LEN, parse_optimal short-circuits straight to
+        // parse_greedy: same input, same tokens.
+        let data = b"the quick brown fox";
+        assert!(data.len() < OPTIMAL_MIN_LEN);
+        assert_eq!(parse_optimal(data), parse_greedy(data));
+    }
+
+    #[test]
+    fn optimal_roundtrip_all_literals_no_repeats() {
+        let data = b"the quick brown fox jumps over a lazy dog, then jumps back again";
+        assert!(data.len() >= OPTIMAL_MIN_LEN);
+        roundtrip_optimal(data);
+    }
+
+    #[test]
+    fn optimal_roundtrip_simple_repeat_produces_a_match_or_rep() {
+        let data = b"abcdefgh".repeat(10);
+        let tokens = parse_optimal(&data);
+        assert_eq!(replay(&tokens), data);
+        assert!(
+            tokens
+                .iter()
+                .any(|t| matches!(t, Token::Match { .. } | Token::Rep { .. })),
+            "a 10x repeat of an 8-byte pattern should produce at least one match or rep token"
+        );
+    }
+
+    #[test]
+    fn optimal_roundtrip_run_length_exercises_overlapping_distance() {
+        // distance 1, shorter than the match length: copy_match must read
+        // bytes it just wrote.
+        roundtrip_optimal(&vec![b'a'; 1000]);
+    }
+
+    #[test]
+    fn optimal_roundtrip_long_run_exercises_the_carry_reuse() {
+        // Well past CARRY_MIN_LEN (64): exercises dp_round's carry path (a
+        // long match reused, decremented, across consecutive positions).
+        // Deliberately not MAX_MATCH_LEN-sized (unlike parse_greedy's
+        // equivalent fixture): unlike parse_greedy, which jumps ahead by a
+        // whole match's length, dp_round visits every position (needed to
+        // consider every possible token start) and prices every rep-cache
+        // slot at each one via a linear match_len scan, the same
+        // unconditional per-position check the archive's lz_opt does. On a
+        // single-byte run that scan is ~the remaining length at every
+        // position, so cost grows with the *square* of the run length once
+        // it passes MAX_MATCH_LEN; a few thousand bytes already exercises
+        // several carry decrement/refresh cycles without paying that.
+        roundtrip_optimal(&vec![b'z'; 4000]);
+    }
+
+    #[test]
+    fn optimal_roundtrip_alternating_pattern_exercises_rep_cache() {
+        let mut data = b"AB".repeat(50);
+        data.extend(b"CD".repeat(50));
+        let tokens = parse_optimal(&data);
+        assert_eq!(replay(&tokens), data);
+        assert!(tokens.iter().any(|t| matches!(t, Token::Rep { .. })));
+    }
+
+    #[test]
+    fn optimal_roundtrip_cyclic_data() {
+        let data: Vec<u8> = (0..=255u8).cycle().take(5000).collect();
+        roundtrip_optimal(&data);
+    }
+
+    #[test]
+    fn optimal_roundtrip_structured_repeats_at_varying_distances() {
+        let base: Vec<u8> = (b'a'..=b'z').collect();
+        let mut data = base.clone();
+        data.push(b'-');
+        data.extend_from_slice(&base[1..]);
+        data.push(b'+');
+        data.extend_from_slice(&base);
+        data.push(b'~');
+        data.extend_from_slice(&base);
+        assert!(data.len() >= OPTIMAL_MIN_LEN);
+        roundtrip_optimal(&data);
+    }
+
+    #[test]
+    fn optimal_roundtrip_binary_data_with_zero_bytes() {
+        let data: Vec<u8> = (0..1000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        roundtrip_optimal(&data);
+    }
+
+    #[test]
+    fn optimal_roundtrip_short_close_repeats() {
+        // Dense 3-byte repeats at a distance under SHORT_MATCH_MAX_DISTANCE:
+        // exercises dp_round's length-3 short-match candidate.
+        let data = b"xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz".to_vec();
+        assert!(data.len() >= OPTIMAL_MIN_LEN);
+        roundtrip_optimal(&data);
+    }
+
+    #[test]
+    fn optimal_roundtrip_random_like_binary_never_worse_than_stored() {
+        // A pseudo-random byte stream (no real structure): the DP must
+        // still round-trip even when literals dominate.
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let data: Vec<u8> = (0..500)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                u8::try_from(state & 0xff).unwrap()
+            })
+            .collect();
+        roundtrip_optimal(&data);
     }
 }
