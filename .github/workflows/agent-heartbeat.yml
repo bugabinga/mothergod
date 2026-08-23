@@ -62,6 +62,15 @@ jobs:
           GH_WORKFLOW_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The reviewer wakes this seat when a verdict lands (PR #186),
+          # via `gh workflow run` on GITHUB_TOKEN, so that dispatch is
+          # attributed to `github-actions` and the action refuses
+          # non-human actors by default. Run 32660844700 died on exactly
+          # that, twenty minutes after #186 merged.
+          # Named, never `*`: this repository is public, and `*` would let
+          # any App that can reach the dispatch choose the prompt.
+          # `github-actions` is only ever this repository's own workflows.
+          allowed_bots: github-actions
           use_commit_signing: true
           prompt: |
             You are on duty for today's heartbeat.
