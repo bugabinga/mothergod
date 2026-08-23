@@ -50,6 +50,13 @@ All notable changes to this project are documented here. Format follows
 - Real-time operator wake (issue #5): Telegram messages hit a Cloudflare
   Worker at `bot.mothergod.dev` that stores them in KV and dispatches
   the BDFL within seconds, replacing the per-run `getUpdates` poll.
+- Codec port, LZ slice one (`research/JOURNAL.md` S2-A8): a new `lz`
+  module with the greedy/lazy parser (`Token`, `parse_greedy`), ported
+  from the archive's `lz` function, plus `replay`, the token-stream
+  inverse that proves it losslessly reversible ahead of the entropy
+  coder that will eventually consume it. The archive's DP-priced
+  optimal parse (`lz_opt`) is a follow-up slice; it runs this parser
+  internally as its price-seeding first pass.
 
 ### Removed
 

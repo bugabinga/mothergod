@@ -269,15 +269,62 @@ record.
   stages this shortlist is meant to gate, still to come. `progress.jsonl`
   records this as `kind: "patch"` with null bpb deltas. Remaining M1
   scope: see S2-D2 (now LZ, models, coder, and `Method` wiring only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A7 filter and
-  trial-selection slices: the optimal-parse LZ stage (`lz`/`lz_opt`,
-  3-slot repeat-offset cache, priced DP); the context-mixing entropy
-  models (`Lit` six-expert arena, flag/length/offset models); the range
-  coder (`Enc`/`Dec`); and wiring all of it (including `select::pick`)
-  behind a new `Method` variant with a `FORMAT_VERSION` bump + ADR
-  (CLAUDE.md hard rule 5). Source: `research/imports/session-1/
-  mothergod.rs` (526 lines, golfed — port behavior, not code, per
-  ADR-0006). One PR per module per the M1 checklist.
+- S2-A8 | ACCEPTED | Seventh slice of M1, and the first LZ slice: the
+  greedy/lazy parser ported to a new `src/lz.rs` module (`Token`,
+  `parse_greedy`), plus `replay`, its inverse. Behavior ported from the
+  archive's `lz` (`research/imports/session-1/mothergod.rs`), not
+  `lz_opt`, not the code (ADR-0006): `lz_opt`'s DP prices candidates
+  against the entropy models' own frequency tables, which don't exist
+  in this crate yet, and `lz_opt` runs `lz` internally as its
+  price-seeding first pass — this parser is a real prerequisite, not a
+  detour. One behavior-preserving deviation: the archive's single
+  `find` closure (shared by the rep-cache scan and the hash-chain
+  search) becomes two named functions (`match_len`,
+  `MatchFinder::find_best`), and its raw `(usize, usize)` `(0, 0)`
+  "no match" sentinel pair becomes `Option<(usize, Distance)>` —
+  `Distance` a `NonZeroU32` newtype, so a match can no longer be
+  represented with a zero distance, closing the exact confusion class
+  the session-1 port bug came from (`rust-craft` skill,
+  type-precision: a rep-symbol/offset-bucket collision that existed
+  because an invariant lived only in one implementation's window
+  size). `RepSlot` is an enum (`First`/`Second`/`Third`), not a raw
+  index, for the same reason. | 11 unit tests: empty input, a single
+  byte, an all-literals fixture with no repeats, a simple 5x repeat
+  (exercises `Token::Match`), a 1000-byte run-length fixture (distance
+  1, shorter than the eventual match length — proves `copy_match`
+  handles overlapping source and destination), a 200,000-byte run
+  (spans multiple tokens past `MAX_MATCH_LEN` = 65535), an alternating
+  two-pattern fixture (exercises `Token::Rep` and cache reuse), 5000
+  bytes of cyclic 0..=255 data, a structured fixture with near-duplicate
+  26-byte blocks at non-initial distances (exercises the one-step
+  lazy-matching check), and a 1000-byte fixture with zero bytes present;
+  every test asserts `replay(parse_greedy(data)) == data` plus (where
+  matches are expected) that at least one `Match`/`Rep` token was
+  emitted, and that no token's length exceeds `MAX_MATCH_LEN`. `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test
+  --all-targets`/`test --doc`/`doc --no-deps` all clean (two
+  intra-doc-link warnings against private items, `match_len`,
+  `MatchFinder::find_best`, `REP_SLOTS`, fixed by dropping the doc
+  links, not by suppressing the lint). | No bpb measurement, same
+  reason as S2-A2 through S2-A7: no `Method` variant to wire this
+  behind yet, and no entropy coder to measure a real bitstream through
+  — `progress.jsonl` records this as `kind: "patch"` with null bpb
+  deltas. `WINDOW` (1 MiB, `JOURNAL` S1-A3) is exposed as `pub`; a
+  future streaming/block API and the entropy models' offset-bucket
+  encoding will both need to agree on it. Remaining M1 scope: see
+  S2-D2 (now `lz_opt`'s DP price tables, the context-mixing entropy
+  models, the range coder, and `Method` wiring).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A8 filter,
+  trial-selection, and greedy-LZ slices: `lz_opt`'s DP-priced optimal
+  parse (2-round price iteration over the entropy models' own frequency
+  tables, using `lz::parse_greedy`'s hash-chain match finder and rep
+  cache); the context-mixing entropy models (`Lit` six-expert arena,
+  flag/length/offset models); the range coder (`Enc`/`Dec`); and wiring
+  all of it (including `select::pick`) behind a new `Method` variant
+  with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
+  `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
+  behavior, not code, per ADR-0006). One PR per module per the M1
+  checklist.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,
