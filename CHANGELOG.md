@@ -161,6 +161,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `compress()` hung on long runs of a single repeated byte (issue #179,
+  found while landing `Method::Lz`, S2-A17): a 200,000-byte input took
+  over 60 seconds and had to be killed. `lz::parse_optimal`'s
+  rep-candidate match-length scan re-walked the whole run at every
+  position, with no carry-reuse equivalent to the existing hash-chain
+  search's carry. Fixed with a per-distance carry
+  (`research/JOURNAL.md` S2-A18); the same 200,000-byte input now
+  compresses in under a second, verified against the public API
+  directly and pinned by a new wall-clock-bounded regression test.
 - `literal::Literal`'s exponentiated-gradient mixing-weight update
   (`research/JOURNAL.md` S2-D3, resolved by ADR-0024) called
   `f64::exp()` on both the encode and decode path; replaced with a
