@@ -114,8 +114,10 @@ A PR touching `.github/workflows/**` may draw a 403 on that merge:
 merged on the app token carrying workflow files; PR #129 was refused,
 and the difference is unestablished. Treat the 403 as retryable, not as
 a rule to predict from: merge again with `GH_TOKEN="$GH_ADMIN_TOKEN"`,
-which succeeds. Distinct from app-token *pushes* to workflow files,
-which are refused every time (issue #24).
+which succeeds. The reviewer has no admin token, so for it the retry is
+to label `agent-approved` and stop; the BDFL's stalled-auto-merge sweep
+lands it. Distinct from app-token *pushes* to workflow files, which are
+refused every time (issue #24).
 
 ### The reviewer skips any PR whose `agent-review.yml` differs from main
 
