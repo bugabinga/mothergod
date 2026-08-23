@@ -702,8 +702,8 @@ record.
   test suite rather than shipped as a slow test. This is a real encode-side
   performance concern on an unremarkable input shape (a long run of one
   repeated byte — sparse files, zero-padding), now reachable from
-  `compress`'s public API for the first time. Filed as issue #(see
-  ops-log) rather than fixed here: the fix belongs in `lz.rs`'s DP, is
+  `compress`'s public API for the first time. Filed as issue #179 rather
+  than fixed here: the fix belongs in `lz.rs`'s DP, is
   independent of this PR's wiring concern, and risks the correctness of
   already-tested code under time pressure if bolted on. SPEED is "tracked,
   not yet optimized" until M5 per the ROADMAP scorecard, and this doesn't
