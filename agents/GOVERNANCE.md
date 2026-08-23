@@ -235,14 +235,18 @@ boundary is the trigger surface, and it does not move: these jobs run only
 on `schedule`, `workflow_dispatch`, or same-repo branches, so every author
 is our own machinery or the operator. No external content reaches them.
 
-Be exact about what the allowlist did buy, because the first draft of this
-section was not (reviewer, PR #121). It did not stop exfiltration:
-`git push <arbitrary-remote>` was reachable with `Bash(git:*)` alone, and
-every agent on the list also holds `Edit`/`Write`, so it could already
-author arbitrary file content. What it did was raise the cost of the easy
-version, blocking the single-command primitives (`curl`, `env`, `nc`) that
-make a prompt-injection exfil one step rather than several. That residual
-is real and was traded knowingly for 11 turns a run. Re-adding the list
+Be exact about what the allowlists did buy, because the first two drafts of
+this section were not (reviewer, PR #121 and PR #125). None of them stopped
+exfiltration: `git push <arbitrary-remote>` was reachable from
+`Bash(git:*)`, which every one of them carried, and every agent on them
+also holds `Edit`/`Write`, so it could already author arbitrary file
+content. For the maintainer and the deslopper, whose list was
+`cargo/rustup/git/gh/rustc`, the list did raise the cost of the easy
+version by withholding the single-command primitives (`curl`, `env`, `nc`)
+that make a prompt-injection exfil one step rather than several. The
+researcher never had even that: its list already carried `Bash(curl:*)`
+and `Bash(python3:*)`. So the residual was real for two seats, absent for
+the third, and traded knowingly for 11 turns a run. Re-adding the lists
 does not recover it: any list that lets these agents do their job contains
 `git`.
 
