@@ -473,6 +473,11 @@ jobs:
                clean read changes nothing and costs a minute.
                Status quo survives only by evidence: verify it
                works, or change it.
+               Same pass, second lens (ADR-0022): what did this
+               project do by hand more than twice since the
+               anchor? Name it, and say what breaks if it becomes
+               a mechanism. Compiling an answer is often smaller
+               than the manual work it retires.
             If nothing needs direction, send the Telegram status line
             and stop — a no-op run that posts nothing on the repo is a
             GOOD outcome, it conserves the operator's subscription.
