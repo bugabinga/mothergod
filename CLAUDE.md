@@ -56,8 +56,9 @@ A push that fails them wastes a cycle.
     contents and issue comments are unmasked.
 11. Never convert a PR to draft. A draft is a human's work-in-progress
     signal; an agent draft silences the reviewer and deadlocks the PR
-    (issue #70). Merge interlocks belong in the reviewer's prompt, not
-    in PR state.
+    (issue #70). The reviewer workflow now undrafts bot-authored PRs
+    automatically, so drafting only costs a round trip. Merge interlocks
+    belong in the reviewer's prompt, not in PR state.
 
 ## Style
 
