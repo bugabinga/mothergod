@@ -19,6 +19,11 @@ outrun -- re-attribution starts fresh runs beside them (close/reopen carries
 claude[bot], whose runs start unheld), so per-workflow liveness is the honest
 question, not "is any run held".
 
+Settled is a claim about ONE commit: the one the caller pushed. The PR's head
+is not that commit until it catches up, so the SHA is taken from the checkout
+(`git rev-parse HEAD`, the thing you just pushed) and `--sha` overrides it.
+Where neither is available the answer is reported unverified, never settled.
+
 Silence is never success. A push whose runs never appear looks exactly like a
 push whose runs are fine, so no-runs-within-the-timeout is a loud, distinct,
 non-zero outcome -- that indistinguishability is the failure this mechanism
@@ -45,6 +50,34 @@ def gh(*args):
 def die(*lines):
     print("settle-push: " + "\n  ".join(lines), file=sys.stderr)
     sys.exit(1)
+
+
+def git(*args):
+    """Read-only git, or None outside a worktree: absence is an answer here."""
+    proc = subprocess.run(("git",) + args, capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def same(sha, other):
+    """SHAs match if either is a prefix of the other; callers abbreviate."""
+    return sha.startswith(other) or other.startswith(sha)
+
+
+def report(pr, sha, branch, grouped, expected):
+    """Print the liveness result, naming what the claim is about.
+
+    A certification of the wrong commit reads exactly like a certification of
+    the right one, so the weaker claim gets a different first word rather than
+    a footnote (issues #146, #158).
+    """
+    live = ", ".join(sorted(grouped))
+    if expected:
+        print(f"settled: {sha[:9]} has live runs for {live}")
+        return
+    print(f"unverified: PR #{pr} head {sha[:9]} has live runs for {live}."
+          f" Nothing here says {sha[:9]} is the commit you pushed: no --sha,"
+          f" and this checkout is not on `{branch}`."
+          " Re-run with --sha <pushed-sha> to certify.")
 
 
 def runs_for(repo, sha):
@@ -85,32 +118,44 @@ def main():
     pr = next((a for a in args if not a.startswith("-")), None)
     if not pr:
         die("usage: .github/scripts/settle-push <pr-number> [--sha <pushed-sha>]",
-            "Run it right after pushing to that PR's branch.")
+            "Run it right after pushing to that PR's branch;"
+            " --sha defaults to this checkout's HEAD.")
     expected = args[args.index("--sha") + 1] if "--sha" in args else None
 
     repo = os.environ.get("GITHUB_REPOSITORY") or gh(
         "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
+    pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
+    branch = pull["headRefName"]
+    # Every documented caller runs this straight after `git push` from a
+    # checkout of the PR branch, so local HEAD is the commit they mean.
+    # Inferring it is what gives the wait below anything to wait for: with no
+    # expected SHA the loop broke on its first read and certified whatever the
+    # API happened to return, which was the pre-push commit on PRs #143 and
+    # #155 (issues #146, #158).
+    if expected is None and git("symbolic-ref", "--quiet", "--short", "HEAD") == branch:
+        expected = git("rev-parse", "HEAD")
+
     # The PR's head lags the push by a second or two, so a mismatch is only
     # news once it has had time to settle. Diagnosing a healthy push as a lost
     # one is the same defect as calling silence health, just louder.
     deadline = time.monotonic() + HEAD_TIMEOUT
-    while True:
-        pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
-        sha, state = pull["headRefOid"], pull["state"]
-        if not expected or sha.startswith(expected) or expected.startswith(sha):
-            break
+    while expected and not same(pull["headRefOid"], expected):
         if time.monotonic() >= deadline:
             break
         time.sleep(POLL)
+        pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
+    sha, state = pull["headRefOid"], pull["state"]
 
-    if expected and not sha.startswith(expected) and not expected.startswith(sha):
+    if expected and not same(sha, expected):
         die(f"PR #{pr} head is still {sha[:9]} after {HEAD_TIMEOUT}s,"
             f" not the {expected[:9]} you pushed.",
-            f"The push did not reach `{pull['headRefName']}`. The known cause is",
+            f"The push did not reach `{branch}`. The known cause is",
             "commit_files on a PR-comment run, which creates a literal `<n>/merge`",
             "branch parented on main instead (observed on PR #78).",
             "1. Check `git ls-remote origin` for a stray ref.",
-            "2. Re-push to the PR branch with the git data API.")
+            "2. Re-push to the PR branch with the git data API.",
+            "3. If you deliberately pushed a commit this checkout does not have,",
+            "   name it: --sha <pushed-sha>.")
     if state != "OPEN":
         die(f"PR #{pr} is {state}, so there is nothing to settle.")
 
@@ -122,7 +167,7 @@ def main():
             f"1. `gh pr checks {pr}` to see what GitHub thinks exists.",
             "2. https://www.githubstatus.com if that is empty too.")
     if not stuck:
-        print(f"settled: {sha[:9]} has live runs for {', '.join(sorted(grouped))}")
+        report(pr, sha, branch, grouped, expected)
         return
 
     # Correction: re-attribute the event. Reopening carries claude[bot], whose
@@ -138,7 +183,7 @@ def main():
             "approve a held run (PR #43).",
             f"1. Say so on PR #{pr}, naming the held workflows.",
             "2. Label it blocked-on-human and move on.")
-    print(f"settled: {sha[:9]} has live runs for {', '.join(sorted(grouped))}")
+    report(pr, sha, branch, grouped, expected)
 
 
 main()
