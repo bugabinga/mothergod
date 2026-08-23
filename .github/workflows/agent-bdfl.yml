@@ -484,26 +484,30 @@ jobs:
                  land by REST once the four gates are green,
                  blocked-on-human if still stuck.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
-               audit the agent sessions completed since the anchor;
-               the anchor makes each session audited exactly once,
-               no bookkeeping. `gh run list` names them, then
-               `gh run download <id>` fetches the audit artifact
-               every run uploads (ADR-0023): `output-response.md`
-               is what it posted, `metadata.json` carries is_error
-               and a telemetry block with num_turns,
-               permission_denials and modelUsage.
-               Read those two, never `gh run view --log`, which
-               echoes the whole prompt twice and spends ~15k
-               tokens to tell you less; the log earns its cost
-               only for a run that died before the audit step and
-               left no artifact. Judge each:
-               right result in a sane turn count, posted output
-               token-lean, correct altitude for its reader, on
-               voice per CLAUDE.md. A defect becomes a prompt or
+               run `.github/scripts/retrospect`. It shares the
+               sweep's anchor, reads the audit artifact every
+               session uploads (ADR-0023), and prints each one as
+               the numbers you judge plus the text it posted. Judge
+               each: right result in a sane turn count, posted
+               output token-lean, correct altitude for its reader,
+               on voice per CLAUDE.md. A defect becomes a prompt or
                machinery fix, or a scoped issue, this run; a
                clean read changes nothing and costs a minute.
                Status quo survives only by evidence: verify it
-               works, or change it.
+               works, or change it. `gh run view --log` is for the
+               runs it lists as having no artifact, and nothing
+               else: on a BDFL run that log echoes your own prompt
+               twice to tell you less.
+               Its budget footer is the one number that can stop
+               this project cold. The seven-day allowance is
+               shared by every agent, and the pause machinery only
+               fires once it is gone, which is a week of silence
+               announced with no warning. When the footer says
+               SLOW DOWN, treat the remaining headroom as the
+               run's real constraint: ship the one thing that
+               matters, drop discretionary work, and say the
+               number in the status line so the operator learns
+               it from you rather than from a dead factory.
                Same pass, second lens (ADR-0022): what did this
                project do by hand more than twice since the
                anchor? Name it, and say what breaks if it becomes
