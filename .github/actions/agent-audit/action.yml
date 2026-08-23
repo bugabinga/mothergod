@@ -12,7 +12,7 @@
 # This step must never fail an agent run: observability does not get to break
 # the thing it observes.
 name: agent-audit
-description: Publish an agent run's prompt, metadata and final response as an artifact
+description: Publish an agent run's prompt, metadata and final response as an artifact and a step summary
 inputs:
   role:
     description: Which agent produced this run (bdfl, maintainer, reviewer, researcher)
@@ -197,13 +197,64 @@ runs:
 
         secrets = [v.strip() for v in os.environ.get("REDACT", "").splitlines() if len(v.strip()) >= 8]
         redactions = 0
+        scrubbed = {}
         for name, body in files.items():
             for value in secrets:
                 if value in body:
                     body = body.replace(value, "***REDACTED***")
                     redactions += 1
+            scrubbed[name] = body
             with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
                 fh.write(body)
+
+        # Human view (operator report, 2026-08-23): the artifact is a zip
+        # download, unreadable in the browser. Render the same scrubbed
+        # text on the run page via the step summary; the artifact stays
+        # the full-fidelity 90-day record. Only scrubbed bodies reach
+        # here. Clips guard GitHub's 1 MiB summary cap, which is
+        # byte-based, so clip counts UTF-8 bytes, not codepoints
+        # (PR #105 review).
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            def clip(text, limit):
+                encoded = text.encode("utf-8")
+                if len(encoded) <= limit:
+                    return text
+                kept = encoded[:limit].decode("utf-8", errors="ignore")
+                return kept + f"\n\n(clipped at {limit} of {len(encoded)} bytes; full text in the artifact)"
+
+            number = os.environ.get("NUMBER", "")
+            trigger = os.environ.get("EVENT", "") + (f" #{number}" if number else "")
+            summary = "\n".join([
+                f"## Audit: {os.environ.get('ROLE', '?')}",
+                "",
+                f"trigger {trigger}, is_error={is_error}, "
+                f"turns={telemetry.get('num_turns', '?')}, "
+                f"denials={telemetry.get('permission_denials', {}).get('count', 0)}",
+                "",
+                "### Response",
+                "",
+                clip(scrubbed["output-response.md"], 200_000),
+                "",
+                "<details><summary>Prompt</summary>",
+                "",
+                clip(scrubbed["input-prompt.md"], 150_000),
+                "",
+                "</details>",
+                "",
+                "<details><summary>Metadata</summary>",
+                "",
+                # Four-backtick fence: survives a triple backtick inside
+                # the JSON string values (PR #105 review).
+                "````json",
+                clip(scrubbed["metadata.json"], 30_000),
+                "````",
+                "",
+                "</details>",
+                "",
+            ])
+            with open(summary_path, "a", encoding="utf-8") as fh:
+                fh.write(summary)
 
         print(f"audit: {len(entries)} entries, prompt={bool(prompt)}, "
               f"response={bool(response)}, redactions={redactions}")
