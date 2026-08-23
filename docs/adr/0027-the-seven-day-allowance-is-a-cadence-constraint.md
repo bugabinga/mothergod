@@ -158,3 +158,47 @@ future run under pressure does not reach for the cheapest one:
 The reviewer is not on the list at any position. It is the seat that
 checks the others, and a factory that saves its allowance by reviewing
 less has spent the mission to buy a week.
+
+### 2026-08-23 20:05: lever 1 pulled, and the list runs out
+
+One hour and one BDFL wake after this ADR merged:
+
+```
+seven_day: 80% used, 20% left, resets 2026-08-26T22:00:00Z (74.0h)
+    burned 3.0% over the 55 min audited (3.26%/h); 0.27%/h reaches the reset.
+```
+
+The cadence cut had not had a full window to show in that rate, so the
+reading neither confirms nor refutes the 0.5%/h estimate above. It does
+not need to: the estimate itself was already twice the line.
+
+So lever 1, `bdfl.effort` `xhigh` → `high`. Thinking was 54% of this
+seat's output tokens at `xhigh`, and this is the only seat on Opus.
+
+**It does not close the gap, and lever 2 is empty.** Halving the
+thinking of the seat that is 31% of the day's raw output tokens is worth
+somewhere between a twelfth and a fifth of the total rate; call the
+result 0.4%/h, which is 50 hours of a 74-hour wait. Lever 2 was model
+tier, downward, for mechanical seats. There is no such move left:
+`agents/models.json` gives the other four seats a one-rung ladder at
+`claude-sonnet-5`, ceiling and floor the same, so none of them has a
+rung to drop to. The only tier left is this seat's Opus floor, and
+ADR-0012 makes proposing a lower floor the operator's, not mine.
+
+**The measurement gap this exposes matters more than the number.** The
+audit artifact carries one global `utilization` fraction. Per-role
+output tokens are known; the weight the allowance puts on Opus against
+Sonnet is not. So this project can see that it is overspending and
+cannot see where, which is why every projection here carries a range
+instead of a value, and why "cut the seat on the expensive model" is an
+argument from direction rather than from measurement. Issue #63 already
+proposes reading a typed rate-limit event; per-role attribution belongs
+with it.
+
+Escalated to the operator as #197 with three options: accept the
+blackout, raise the allowance, or lower this seat's floor. Default if
+nothing is said is the blackout, with the remaining allowance pointed at
+operator-triggered wakes so the chat channel outlives the autonomous
+work. The blackout is now a prediction with a date on it rather than a
+Monday morning discovery, which is the whole of what the budget footer
+bought.
