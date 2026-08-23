@@ -1,0 +1,116 @@
+# Model intelligence watch. Deliberately NOT an agent: no Claude step, no
+# tokens, no context window (ADR-0019).
+#
+# Filtering an API response is arithmetic, and a script does it
+# deterministically and for free. It also cannot be talked into anything:
+# Artificial Analysis' JSON is third-party data, and a fixed-schema
+# extractor pulling named numeric fields has no injection surface that an
+# agent reading the raw payload would have.
+#
+# Output is delta-only (ADR-0007 run economy). Nothing changed, nothing
+# posted. When something ladder-relevant moves it opens or updates ONE
+# issue labeled model-intel, which the BDFL picks up through the issue
+# triage it already performs every run. That is the whole point: a file
+# committed to the repo would never be read, because nothing in the BDFL's
+# prompt would tell it to, and agents/PERSONALITY.md already records that
+# a pointer to a file demonstrably does not shape behavior.
+#
+# The judgement stays the BDFL's (ADR-0012). This job puts evidence on the
+# table and never edits agents/models.json itself.
+name: agent-model-intel
+
+on:
+  schedule:
+    # Sundays 05:07 UTC, ahead of the BDFL's Sunday deep survey so the
+    # issue is already waiting when it runs.
+    - cron: '7 5 * * 0'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agent-model-intel
+  cancel-in-progress: false
+
+jobs:
+  intel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: guard
+        uses: ./.github/actions/agent-guard
+        with:
+          token: ${{ github.token }}
+
+      - id: fetch
+        if: steps.guard.outputs.paused != 'true'
+        shell: bash
+        env:
+          AA_TOKEN: ${{ secrets.ARTIFICIALANALYSIS_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AA_TOKEN:-}" ]; then
+            echo "No ARTIFICIALANALYSIS_API_TOKEN configured; nothing to fetch."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Token stays in the variable and out of the echoed command
+          # (CLAUDE.md hard rule 10). The raw response is written to the
+          # runner temp dir, never into the repo.
+          code="$(curl -sS -o "$RUNNER_TEMP/aa.json" -w '%{http_code}' \
+            -H "x-api-key: $AA_TOKEN" \
+            'https://artificialanalysis.ai/api/v2/language/models/free' || echo 000)"
+          if [ "$code" != 200 ]; then
+            echo "Artificial Analysis returned HTTP $code; skipping this run."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Fetched $(wc -c < "$RUNNER_TEMP/aa.json") bytes."
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - id: report
+        if: steps.guard.outputs.paused != 'true' && steps.fetch.outputs.ok == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prior="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-intel --state open --json number,body --limit 1)"
+          PRIOR="$prior" python3 .github/scripts/model-intel.py "$RUNNER_TEMP/aa.json" "$RUNNER_TEMP/out"
+          cat "$RUNNER_TEMP/out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          verdict="$(cat "$RUNNER_TEMP/out/verdict")"
+          echo "verdict: $verdict"
+          if [ "$verdict" != changed ]; then
+            echo "No ladder-relevant delta; not posting."
+            exit 0
+          fi
+          gh label create model-intel --repo "$GITHUB_REPOSITORY" \
+            --color 1D76DB --description "Model capability data for ADR-0012 ladder decisions" 2>/dev/null || true
+          gh label create triage --repo "$GITHUB_REPOSITORY" --color FBCA04 2>/dev/null || true
+          n="$(jq -r '.[0].number // empty' <<<"$prior")"
+          if [ -n "$n" ]; then
+            gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/out/issue.md"
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" \
+              --body "Refreshed from a new Artificial Analysis snapshot. Body above is current; see the diff in this issue's edit history."
+            echo "Updated issue #$n."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "📊 Model capability: ladder review suggested" \
+              --label model-intel --label triage \
+              --body-file "$RUNNER_TEMP/out/issue.md"
+            echo "Opened a new model-intel issue."
+          fi
+
+      - if: always() && steps.fetch.outputs.ok == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-intel-${{ github.run_id }}
+          path: ${{ runner.temp }}/out
+          retention-days: 90
+          if-no-files-found: ignore
