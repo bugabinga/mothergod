@@ -24,6 +24,13 @@ All notable changes to this project are documented here. Format follows
 - Codec port, third filter slice (`research/JOURNAL.md` S2-A4): the x86
   call/jmp (BCJ) filter, ported from the founding session's archived
   codec as a `bcj` submodule of `filters`.
+- Codec port, fourth filter slice (`research/JOURNAL.md` S2-A5): the
+  base64-unwrap filter, ported from the founding session's archived
+  codec as a `base64_unwrap` submodule of `filters`. Unlike the earlier
+  filters, unwrapping is a data-dependent decision rather than a
+  caller-supplied parameter, so `encode` prefixes a one-byte flag that
+  `decode` reads back; supported by a new zero-dependency standard
+  base64 encode/strict-decode pair (no base64 crate, per ADR-0002).
 - Deslopper agent (ADR-0016): a fifth agent seat that removes slop from
   `src/` twice daily without changing observable behaviour, one scope per
   PR, approved by the reviewer like any other agent PR. Its taxonomy and
