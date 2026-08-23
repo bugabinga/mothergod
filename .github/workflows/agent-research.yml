@@ -59,7 +59,9 @@ jobs:
             One experiment this session, run to the loop contract below.
             Read first: research/JOURNAL.md (laws, rejections, standing
             leads), research/README.md (progress.jsonl schema),
-            research/corpus/POLICY.md, ROADMAP.md, CLAUDE.md.
+            research/corpus/POLICY.md, ROADMAP.md. The journal is your
+            instrument, so yours is the one seat that reads it whole
+            every session (ADR-0025).
 
             Prerequisite check: if the benchmark harness (ROADMAP M2) or the
             codec itself (M1) is not yet capable of measuring an experiment,

@@ -3,6 +3,10 @@
 Audience: Claude agents (CI sessions, heartbeat, reviewer, researcher, BDFL).
 Humans: read README.md and CONTRIBUTING.md instead.
 
+The harness injects this file into every agent session as project
+instructions. No prompt orders it read; a prompt that does buys a second
+copy of what is already in front of the model (ADR-0025).
+
 ## What this project is
 
 General-purpose lossless compressor in Rust. Architecture target: filter bank →
