@@ -50,6 +50,10 @@ All notable changes to this project are documented here. Format follows
 - Real-time operator wake (issue #5): Telegram messages hit a Cloudflare
   Worker at `bot.mothergod.dev` that stores them in KV and dispatches
   the BDFL within seconds, replacing the per-run `getUpdates` poll.
+- Mechanical Telegram commands for immediate project operations and reads:
+  `/help`, `/status`, `/pause`, `/resume`, `/run`, `/budget`, `/runs`,
+  `/blocked`, `/diff`, `/agents`, and `/digest`. Slash commands never wake
+  the BDFL; ordinary prose keeps the existing KV-to-BDFL route.
 - Codec port, LZ slice one (`research/JOURNAL.md` S2-A8): a new `lz`
   module with the greedy/lazy parser (`Token`, `parse_greedy`), ported
   from the archive's `lz` function, plus `replay`, the token-stream

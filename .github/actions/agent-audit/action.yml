@@ -46,7 +46,7 @@ runs:
         out="${RUNNER_TEMP}/agent-audit"
         mkdir -p "$out"
         python3 - "$out" <<'PY' || echo "::warning::audit extraction incomplete"
-        import hashlib, json, os, sys
+        import hashlib, json, math, os, sys
 
         out = sys.argv[1]
         path = os.environ.get("EXEC_FILE", "")
@@ -195,6 +195,32 @@ runs:
                        if isinstance(e, dict) and e.get("type") == "rate_limit_event"
                        and e.get("rate_limit_info") is not None]
 
+        # Compact allowance observation for list-only consumers such as the
+        # Telegram worker's /budget command. GitHub exposes artifact names and
+        # creation times without downloading their ZIPs, so a suffix carrying
+        # utilization basis points and reset epoch makes two observations
+        # enough to derive burn and runway. The full rate_limit_events payload
+        # below remains authoritative; this is a rounded, lossy index only.
+        allowance_index = ""
+        for info in rate_limits:
+            if not isinstance(info, dict):
+                continue
+            kind = info.get("rateLimitType")
+            utilization = info.get("utilization")
+            reset = info.get("resetsAt")
+            if (kind != "seven_day"
+                    or not isinstance(utilization, (int, float))
+                    or isinstance(utilization, bool)
+                    or not math.isfinite(utilization)
+                    or not 0 <= utilization <= 1
+                    or not isinstance(reset, int) or isinstance(reset, bool)
+                    or reset <= 0):
+                continue
+            basis_points = int(utilization * 10_000 + 0.5)
+            allowance_index = f"-u{basis_points}-r{reset}"
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+            fh.write(f"allowance_index={allowance_index}\n")
+
         shape = {}
         for e in entries:
             if isinstance(e, dict):
@@ -312,7 +338,7 @@ runs:
     - if: inputs.execution_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: audit-${{ inputs.role }}-${{ github.run_id }}-${{ github.run_attempt }}
+        name: audit-${{ inputs.role }}-${{ github.run_id }}-${{ github.run_attempt }}${{ steps.extract.outputs.allowance_index }}
         path: ${{ runner.temp }}/agent-audit
         retention-days: 90
         if-no-files-found: warn

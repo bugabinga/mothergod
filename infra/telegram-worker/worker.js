@@ -1,10 +1,10 @@
-// Telegram webhook -> BDFL wake (issue #5). The bot's webhook points
-// here; deploy-telegram-worker.yml sets it. Four duties, nothing else:
-// authenticate Telegram, store the operator's update in KV (twice: the
-// inbox to work through, the chat log to remember), show the
-// "typing..." indicator until an answer goes out, fire a
-// workflow_dispatch so the BDFL reads it within seconds. Heavy work
-// never happens here; the BDFL run is the brain, this is the doorbell.
+// Telegram webhook -> mechanical command or BDFL wake (issue #5). The
+// bot's webhook points here; deploy-telegram-worker.yml sets it. Slash
+// commands read or mutate existing GitHub state and answer immediately.
+// Everything else follows the original path: authenticate Telegram,
+// store the operator's update in KV (twice: the inbox to work through,
+// the chat log to remember), show the "typing..." indicator until an
+// answer goes out, then dispatch the BDFL. No model runs in this worker.
 
 // The chat log: one KV key holding the last KEEP turns of operator
 // conversation, the only memory that outlives a run. Both sides are
@@ -66,10 +66,40 @@ export class Typing {
   constructor(state, env) {
     this.state = state;
     this.env = env;
+    this.commandTail = Promise.resolve();
   }
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === "/command") {
+      let payload;
+      try {
+        payload = await request.json();
+      } catch {
+        return new Response(null, { status: 400 });
+      }
+      if (
+        !Number.isSafeInteger(payload?.updateId) ||
+        typeof payload?.parsed?.name !== "string" ||
+        typeof payload.parsed.args !== "string"
+      ) {
+        return new Response(null, { status: 400 });
+      }
+      const pending = this.commandTail.then(async () => {
+        const key = `command:${payload.updateId}`;
+        const stored = await this.state.storage.get(key);
+        if (typeof stored === "string") return new Response(stored);
+        const body = await command(this.env, payload.parsed);
+        await this.state.storage.put(key, body);
+        return new Response(body);
+      });
+      this.commandTail = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      return pending;
+    }
+
     const arrivals = (await this.state.storage.get("arrivals")) ?? [];
     if (url.pathname === "/start") {
       arrivals.push(Date.now());
@@ -177,6 +207,551 @@ function parse(stored) {
   }
 }
 
+const GITHUB_API = "https://api.github.com";
+const TELEGRAM_API = "https://api.telegram.org";
+const TELEGRAM_LIMIT = 4096;
+
+// Roles are the keys in agents/models.json. Workflow names are their
+// committed `name:` values; dispatchability comes from each workflow's
+// trigger, not from wishful routing here. The reviewer needs a PR event and
+// therefore cannot be manually dispatched.
+const AGENTS = {
+  bdfl: { workflow: "agent-bdfl.yml", name: "agent-bdfl", dispatch: true },
+  maintainer: {
+    workflow: "agent-heartbeat.yml",
+    name: "agent-heartbeat",
+    dispatch: true,
+  },
+  reviewer: {
+    workflow: "agent-review.yml",
+    name: "agent-review",
+    dispatch: false,
+  },
+  researcher: {
+    workflow: "agent-research.yml",
+    name: "agent-research",
+    dispatch: true,
+  },
+  deslopper: {
+    workflow: "agent-deslop.yml",
+    name: "agent-deslop",
+    dispatch: true,
+  },
+};
+
+const HELP = [
+  "mothergod commands",
+  "/help: show this list",
+  "/status: repository and fleet status",
+  "/pause <hours>: pause all agents for 1–168 hours",
+  "/resume: close the global pause",
+  "/run <agent>: run bdfl, maintainer, researcher, or deslopper",
+  "/budget: allowance use, burn rate, and projection",
+  "/runs [agent]: recent agent runs",
+  "/blocked: blocked-on-human items",
+  "/diff <pr>: pull request diff summary",
+  "/agents: each agent's latest run",
+  "/digest: latest operations digest",
+].join("\n");
+
+class UpstreamError extends Error {
+  constructor(status = null) {
+    super(status === null ? "GitHub response was malformed" : `GitHub HTTP ${status}`);
+  }
+}
+
+function parseCommand(text) {
+  if (typeof text !== "string" || !text.startsWith("/")) return null;
+  const match = text.match(/^\/([a-z][a-z0-9_]*)(?:@[a-z0-9_]+)?(?:\s+([\s\S]*))?\s*$/i);
+  if (!match) return { name: "unknown", args: "" };
+  return { name: match[1].toLowerCase(), args: (match[2] ?? "").trim() };
+}
+
+function githubHeaders(env, json) {
+  return {
+    authorization: `Bearer ${env.GITHUB_PAT}`,
+    accept: "application/vnd.github+json",
+    "user-agent": "mothergod-telegram-worker",
+    ...(json ? { "content-type": "application/json" } : {}),
+  };
+}
+
+async function github(env, path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${GITHUB_API}/repos/${env.GITHUB_REPO}${path}`, {
+      method: options.method ?? "GET",
+      headers: githubHeaders(env, options.body !== undefined),
+      ...(options.body !== undefined
+        ? { body: JSON.stringify(options.body) }
+        : {}),
+    });
+  } catch {
+    throw new UpstreamError();
+  }
+  if (!response.ok) throw new UpstreamError(response.status);
+  if (options.json === false) return { response, data: null };
+  try {
+    return { response, data: await response.json() };
+  } catch {
+    throw new UpstreamError();
+  }
+}
+
+function escapeHtml(text) {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+// Same visible contract as .github/scripts/tg-send: escape arbitrary API
+// text, link #refs through the repository, disable previews, and reply to the
+// message that asked. This worker cannot call a repository-side executable,
+// so the boundary is repeated here rather than approximated with form data.
+function telegramText(body, repo) {
+  const render = (source) =>
+    escapeHtml(source).replace(
+      /(^|[^\w/#])#(\d{1,6})\b/g,
+      (_, prefix, number) =>
+        `${prefix}<a href="https://github.com/${repo}/issues/${number}">#${number}</a>`,
+    );
+  let source = body.trim();
+  let rendered = render(source);
+  if (rendered.length <= TELEGRAM_LIMIT) return rendered;
+
+  // API-authored titles, filenames, or a digest can be unexpectedly large.
+  // Find the longest prefix that fits after escaping and link expansion.
+  let low = 0;
+  let high = source.length;
+  const suffix = "\n…";
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (render(source.slice(0, middle) + suffix).length <= TELEGRAM_LIMIT) low = middle;
+    else high = middle - 1;
+  }
+  return render(source.slice(0, low) + suffix);
+}
+
+async function reply(env, message, body) {
+  let response;
+  try {
+    response = await fetch(`${TELEGRAM_API}/bot${env.BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: message.chat.id,
+        text: telegramText(body, env.GITHUB_REPO),
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...(message.message_id
+          ? { reply_parameters: { message_id: message.message_id } }
+          : {}),
+      }),
+    });
+  } catch {
+    console.error("telegram command reply failed");
+    return;
+  }
+  if (!response.ok) console.error("telegram command reply failed", response.status);
+}
+
+function noArgs(command, args) {
+  return args ? `Usage: /${command}` : null;
+}
+
+function array(value) {
+  if (!Array.isArray(value)) throw new UpstreamError();
+  return value;
+}
+
+function workflowRuns(value) {
+  if (!value || !Array.isArray(value.workflow_runs)) throw new UpstreamError();
+  return value.workflow_runs;
+}
+
+function formatTime(value) {
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "unknown time";
+  return date.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+function runState(run) {
+  if (!run || typeof run !== "object") throw new UpstreamError();
+  if (run.status !== "completed") return `⏳ ${run.status || "unknown"}`;
+  if (run.conclusion === "success") return "✅ success";
+  if (run.conclusion === "cancelled" || run.conclusion === "skipped") {
+    return `○ ${run.conclusion}`;
+  }
+  return `❌ ${run.conclusion || "unknown"}`;
+}
+
+function runLine(run, role = null) {
+  const who = role ?? Object.entries(AGENTS).find(([, agent]) => agent.name === run.name)?.[0] ?? run.name;
+  const number = Number.isInteger(run.run_number) ? ` run ${run.run_number}` : "";
+  return `${who}${number}: ${runState(run)}, ${formatTime(run.created_at)}`;
+}
+
+async function fleetRuns(env, perPage) {
+  const batches = await Promise.all(
+    Object.entries(AGENTS).map(async ([role, agent]) => {
+      const { data } = await github(
+        env,
+        `/actions/workflows/${agent.workflow}/runs?per_page=${perPage}`,
+      );
+      return workflowRuns(data).map((run) => ({ role, run }));
+    }),
+  );
+  return batches
+    .flat()
+    .sort((left, right) => Date.parse(right.run.created_at) - Date.parse(left.run.created_at));
+}
+
+function ciState(value) {
+  const latest = workflowRuns(value)[0];
+  if (!latest) return "CI: ○ absent";
+  if (typeof latest.status !== "string") throw new UpstreamError();
+  if (latest.status !== "completed") return `CI: ⏳ pending (${latest.status})`;
+  if (typeof latest.conclusion !== "string") throw new UpstreamError();
+  return latest.conclusion === "success"
+    ? "CI: ✅ green"
+    : `CI: ❌ failing (${latest.conclusion})`;
+}
+
+async function status(env, args) {
+  const usage = noArgs("status", args);
+  if (usage) return usage;
+  const [
+    { data: pauses },
+    { data: pulls },
+    { data: issues },
+    { data: ci },
+    agentRuns,
+  ] = await Promise.all([
+    github(env, "/issues?state=open&labels=agents-paused&per_page=1"),
+    github(env, "/pulls?state=open&per_page=100"),
+    github(env, "/issues?state=open&per_page=100"),
+    github(env, "/actions/workflows/ci.yml/runs?per_page=1"),
+    fleetRuns(env, 1),
+  ]);
+  const paused = array(pauses)[0];
+  const openPulls = array(pulls);
+  const openIssues = array(issues).filter((issue) => !issue?.pull_request);
+  const active = agentRuns.filter(({ run }) => run.status !== "completed");
+  if (paused && !Number.isInteger(paused.number)) throw new UpstreamError();
+  const headline = paused
+    ? `⏸️ Agents paused by #${paused.number}`
+    : "✅ Agents active";
+  const activity = active.length
+    ? `Running: ${active.map(({ run }) => run.name).join(", ")}`
+    : agentRuns[0]
+      ? `Latest: ${runLine(agentRuns[0].run, agentRuns[0].role)}`
+      : "Latest: no agent runs found";
+  return `${headline}\n${ciState(ci)}\nOpen: ${openIssues.length} issues, ${openPulls.length} PRs\n${activity}`;
+}
+
+function parseHours(args) {
+  if (!/^\d+$/.test(args)) return null;
+  const hours = Number(args);
+  return Number.isSafeInteger(hours) && hours >= 1 && hours <= 168 ? hours : null;
+}
+
+async function pause(env, args) {
+  const hours = parseHours(args);
+  if (hours === null) return "Usage: /pause <hours>, where hours is 1–168";
+  const { data: pauses } = await github(
+    env,
+    "/issues?state=open&labels=agents-paused&per_page=1",
+  );
+  const existing = array(pauses)[0];
+  if (existing && !Number.isInteger(existing.number)) throw new UpstreamError();
+  if (existing) return `Already paused by #${existing.number}.`;
+
+  const resumeAt = new Date(Date.now() + hours * 60 * 60 * 1000)
+    .toISOString()
+    .replace(".000", "");
+  const { data: issue } = await github(env, "/issues", {
+    method: "POST",
+    body: {
+      title: "⏸️ Agents paused by operator",
+      labels: ["agents-paused"],
+      body: [
+        "Paused by the operator through Telegram.",
+        "",
+        `RESUME-AT: ${resumeAt}`,
+        "",
+        "Close this issue to resume earlier.",
+      ].join("\n"),
+    },
+  });
+  if (!Number.isInteger(issue?.number)) throw new UpstreamError();
+  return `⏸️ Agents paused for ${hours}h by #${issue.number}, until ${formatTime(resumeAt)}.`;
+}
+
+async function resume(env, args) {
+  const usage = noArgs("resume", args);
+  if (usage) return usage;
+  const { data: pauses } = await github(
+    env,
+    "/issues?state=open&labels=agents-paused&per_page=1",
+  );
+  const issue = array(pauses)[0];
+  if (!issue) return "✅ Agents are already active.";
+  if (!Number.isInteger(issue.number)) throw new UpstreamError();
+  await github(env, `/issues/${issue.number}`, {
+    method: "PATCH",
+    body: { state: "closed", state_reason: "completed" },
+  });
+  return `▶️ Resumed agents by closing #${issue.number}.`;
+}
+
+async function runAgent(env, args) {
+  const parts = args.split(/\s+/).filter(Boolean);
+  if (parts.length !== 1 || !AGENTS[parts[0]]) {
+    return "Usage: /run <agent>\nAgents: bdfl, maintainer, researcher, deslopper";
+  }
+  const role = parts[0];
+  const agent = AGENTS[role];
+  if (!agent.dispatch) return "Reviewer is event-driven and runs only for a pull request.";
+  await github(env, `/actions/workflows/${agent.workflow}/dispatches`, {
+    method: "POST",
+    body: { ref: "main" },
+    json: false,
+  });
+  return `▶️ Dispatched ${role}.`;
+}
+
+function allowanceSamples(artifacts) {
+  const samples = [];
+  for (const artifact of array(artifacts)) {
+    if (!artifact || artifact.expired || typeof artifact.name !== "string") continue;
+    const match = artifact.name.match(/-u(\d{1,5})-r(\d{9,12})$/);
+    if (!match || !artifact.name.startsWith("audit-")) continue;
+    const used = Number(match[1]);
+    const reset = Number(match[2]);
+    const at = new Date(artifact.created_at).getTime();
+    if (used > 10000 || reset <= 0 || !Number.isFinite(at)) continue;
+    samples.push({ used, reset, at });
+  }
+  return samples.sort((a, b) => a.at - b.at);
+}
+
+function percent(basisPoints) {
+  return `${(basisPoints / 100).toFixed(2)}%`;
+}
+
+async function budget(env, args) {
+  const usage = noArgs("budget", args);
+  if (usage) return usage;
+  const { data } = await github(env, "/actions/artifacts?per_page=100");
+  if (!data || !Array.isArray(data.artifacts)) throw new UpstreamError();
+  const samples = allowanceSamples(data.artifacts);
+  if (!samples.length) return "Budget unavailable: no indexed allowance observations.";
+
+  const latest = samples.at(-1);
+  const previous = samples.findLast(
+    (sample) => sample.reset === latest.reset && sample.at < latest.at && sample.used <= latest.used,
+  );
+  const lines = [
+    `Allowance: ${percent(latest.used)} used, ${percent(10000 - latest.used)} remaining`,
+    `Reset: ${formatTime(latest.reset)}`,
+  ];
+  if (!previous || latest.used === previous.used) {
+    lines.push("Recent burn: no measurable indexed movement");
+    lines.push("Projected exhaustion: unavailable");
+    return lines.join("\n");
+  }
+
+  const elapsedHours = (latest.at - previous.at) / 3_600_000;
+  const burn = (latest.used - previous.used) / elapsedHours;
+  if (!(burn > 0) || !Number.isFinite(burn)) {
+    lines.push("Recent burn: unavailable");
+    lines.push("Projected exhaustion: unavailable");
+    return lines.join("\n");
+  }
+  const exhaustion = latest.at + ((10000 - latest.used) / burn) * 3_600_000;
+  lines.push(`Recent burn: ${percent(burn)}/h over ${elapsedHours.toFixed(1)}h`);
+  lines.push(
+    `Projected exhaustion: ${formatTime(new Date(exhaustion).toISOString())} (${exhaustion < latest.reset * 1000 ? "before" : "after"} reset)`,
+  );
+  return lines.join("\n");
+}
+
+function validateAgentArg(command, args, optional) {
+  const parts = args.split(/\s+/).filter(Boolean);
+  if ((optional && parts.length === 0) || (parts.length === 1 && AGENTS[parts[0]])) {
+    return parts[0] ?? null;
+  }
+  return `Usage: /${command}${optional ? " [agent]" : " <agent>"}\nAgents: ${Object.keys(AGENTS).join(", ")}`;
+}
+
+async function runs(env, args) {
+  const role = validateAgentArg("runs", args, true);
+  if (typeof role === "string" && role.startsWith("Usage:")) return role;
+  let found;
+  if (role) {
+    const { data } = await github(
+      env,
+      `/actions/workflows/${AGENTS[role].workflow}/runs?per_page=5`,
+    );
+    found = workflowRuns(data).map((run) => ({ role, run }));
+  } else {
+    found = (await fleetRuns(env, 5)).slice(0, 5);
+  }
+  if (!found.length) return role ? `No runs found for ${role}.` : "No agent runs found.";
+  return [
+    role ? `Recent ${role} runs:` : "Recent agent runs:",
+    ...found.map((entry) => runLine(entry.run, entry.role)),
+  ].join("\n");
+}
+
+async function blocked(env, args) {
+  const usage = noArgs("blocked", args);
+  if (usage) return usage;
+  const { data } = await github(
+    env,
+    "/issues?state=open&labels=blocked-on-human&per_page=11",
+  );
+  const issues = array(data);
+  if (!issues.length) return "✅ No blocked-on-human items.";
+  const shown = issues.slice(0, 10);
+  return [
+    `Blocked on human (${shown.length}${issues.length > shown.length ? "+" : ""}):`,
+    ...shown.map((issue) => {
+      if (!Number.isInteger(issue?.number) || typeof issue.title !== "string") throw new UpstreamError();
+      return `#${issue.number} ${issue.title}`;
+    }),
+  ].join("\n");
+}
+
+function parsePr(args) {
+  if (!/^\d+$/.test(args)) return null;
+  const number = Number(args);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+async function diff(env, args) {
+  const number = parsePr(args);
+  if (number === null) return "Usage: /diff <pr>";
+  const [{ data: pull }, { data: changed }] = await Promise.all([
+    github(env, `/pulls/${number}`),
+    github(env, `/pulls/${number}/files?per_page=100`),
+  ]);
+  if (
+    !pull ||
+    typeof pull.title !== "string" ||
+    !Number.isInteger(pull.changed_files) ||
+    !Number.isInteger(pull.additions) ||
+    !Number.isInteger(pull.deletions)
+  ) {
+    throw new UpstreamError();
+  }
+  const files = array(changed);
+  const shown = files.slice(0, 12).map((file) => {
+    if (
+      typeof file?.filename !== "string" ||
+      !Number.isInteger(file.additions) ||
+      !Number.isInteger(file.deletions)
+    ) {
+      throw new UpstreamError();
+    }
+    return `${file.status?.slice(0, 1)?.toUpperCase() || "M"} ${file.filename} +${file.additions} −${file.deletions}`;
+  });
+  const more = pull.changed_files > shown.length ? [`… ${pull.changed_files - shown.length} more files`] : [];
+  return [
+    `PR #${number}: ${pull.title}`,
+    `+${pull.additions} −${pull.deletions} across ${pull.changed_files} files`,
+    ...shown,
+    ...more,
+  ].join("\n");
+}
+
+async function agents(env, args) {
+  const usage = noArgs("agents", args);
+  if (usage) return usage;
+  const found = await fleetRuns(env, 1);
+  return [
+    "Agents:",
+    ...Object.entries(AGENTS).map(([role, agent]) => {
+      const latest = found.find((entry) => entry.role === role)?.run;
+      return latest
+        ? runLine(latest, role)
+        : `${role}: no run found${agent.dispatch ? "" : " (event-driven)"}`;
+    }),
+  ].join("\n");
+}
+
+function lastPage(link) {
+  if (!link) return null;
+  const match = link.match(/[?&]page=(\d+)[^>]*>;\s*rel="last"/);
+  const page = match ? Number(match[1]) : null;
+  return Number.isSafeInteger(page) && page > 1 ? page : null;
+}
+
+function digestBody(body) {
+  if (typeof body !== "string") throw new UpstreamError();
+  return body.split(/\n---\n/)[0].trim();
+}
+
+async function digest(env, args) {
+  const usage = noArgs("digest", args);
+  if (usage) return usage;
+  const { data: logs } = await github(env, "/issues?state=open&labels=ops-log&per_page=1");
+  const issue = array(logs)[0];
+  if (!issue) return "No open operations log.";
+  if (!Number.isInteger(issue.number)) throw new UpstreamError();
+  const path = `/issues/${issue.number}/comments?per_page=100`;
+  let { response, data } = await github(env, path);
+  let comments = array(data);
+  const page = lastPage(response.headers.get("link"));
+  if (page) {
+    ({ data } = await github(env, `${path}&page=${page}`));
+    comments = array(data);
+  }
+  const latest = comments.at(-1);
+  if (!latest) return `No digest has been posted to #${issue.number}.`;
+  const body = digestBody(latest.body);
+  return `Latest digest (#${issue.number}, ${formatTime(latest.created_at)}):\n${body || "(empty)"}`;
+}
+
+const COMMANDS = {
+  help: async (_env, args) => noArgs("help", args) ?? HELP,
+  status,
+  pause,
+  resume,
+  run: runAgent,
+  budget,
+  runs,
+  blocked,
+  diff,
+  agents,
+  digest,
+};
+
+async function command(env, parsed) {
+  const handler = COMMANDS[parsed.name];
+  try {
+    return handler ? await handler(env, parsed.args) : HELP;
+  } catch (error) {
+    console.error(
+      "telegram command failed",
+      parsed.name,
+      error instanceof UpstreamError ? error.message : "unexpected failure",
+    );
+    return `⚠️ /${handler ? parsed.name : "help"} unavailable: GitHub did not return usable data.`;
+  }
+}
+
+async function commandResult(env, updateId, parsed) {
+  const response = await env.TYPING.get(env.TYPING.idFromName("commands")).fetch(
+    "https://typing.invalid/command",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ updateId, parsed }),
+    },
+  );
+  if (!response.ok) throw new Error(`command object failed: ${response.status}`);
+  return response.text();
+}
+
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
@@ -213,8 +788,18 @@ export default {
     // Non-operator chats: no action, no reply (issue #5 acceptance).
     if (
       String(chat) !== env.OPERATOR_CHAT_ID ||
-      typeof update.update_id !== "number"
+      !Number.isSafeInteger(update.update_id)
     ) {
+      return new Response(null, { status: 200 });
+    }
+    // Commands are deliberately outside KV and the BDFL lane. Unknown slash
+    // commands are help, not prose: a typo must not spend an agent run. The
+    // command object serializes side effects and replays persisted results when
+    // Telegram redelivers an update.
+    const parsed = parseCommand(update.message?.text);
+    if (parsed) {
+      const body = await commandResult(env, update.update_id, parsed);
+      await reply(env, update.message, body);
       return new Response(null, { status: 200 });
     }
     // Zero-padded key so KV's lexicographic list order is arrival order.

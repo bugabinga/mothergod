@@ -73,7 +73,7 @@ jobs:
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/workflows/ci\.yml$'; then
+          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/actions/agent-audit/action\.yml$|^\.github/workflows/ci\.yml$'; then
             echo "js=true" >> "$GITHUB_OUTPUT"
           else
             echo "js=false" >> "$GITHUB_OUTPUT"
@@ -133,9 +133,10 @@ jobs:
   # it runs on Cloudflare's edge (ADR-0006 covers what produces published
   # numbers; this produces none). Its typing state machine cost three
   # rounds of hand-tracing in PR #155 review, so it has tests, and tests
-  # nobody runs are decoration. Node's built-in runner, no dependencies,
-  # no lockfile. Not a required check: it gates nothing on a red day for
-  # the crate, and the ruleset's four names stay exactly as they are.
+  # nobody runs are decoration. The same dependency-free Node runner exercises
+  # agent-audit's allowance index against its real extraction block. Not a
+  # required check: it gates nothing on a red day for the crate, and the
+  # ruleset's four names stay exactly as they are.
   worker:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -144,3 +145,4 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: node --test infra/telegram-worker/*.test.mjs
+      - run: node --test .github/actions/agent-audit/*.test.mjs

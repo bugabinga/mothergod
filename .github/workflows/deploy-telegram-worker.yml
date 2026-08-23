@@ -41,13 +41,27 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           GITHUB_PAT: ${{ secrets.TELEGRAM_GITHUB_PAT }}
           BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
-      - name: Point the bot's webhook at the worker
+      - name: Register commands and point the bot's webhook at the worker
         run: |
+          curl -sS -f -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setMyCommands" \
+            --data-urlencode 'commands=[
+              {"command":"help","description":"Show command help"},
+              {"command":"status","description":"Show repository and fleet status"},
+              {"command":"pause","description":"Pause agents for N hours"},
+              {"command":"resume","description":"Resume paused agents"},
+              {"command":"run","description":"Run an agent now"},
+              {"command":"budget","description":"Show allowance and burn rate"},
+              {"command":"runs","description":"Show recent agent runs"},
+              {"command":"blocked","description":"List blocked-on-human items"},
+              {"command":"diff","description":"Summarize a pull request diff"},
+              {"command":"agents","description":"Show latest run for each agent"},
+              {"command":"digest","description":"Show latest operations digest"}
+            ]' > /dev/null
           curl -sS -f -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
             -d url=https://bot.mothergod.dev/ \
             -d secret_token="${WEBHOOK_SECRET}" \
             -d 'allowed_updates=["message"]' > /dev/null
-          echo "webhook set"
+          echo "commands registered; webhook set"
         env:
           BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
