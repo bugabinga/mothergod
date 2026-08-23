@@ -120,9 +120,19 @@ jobs:
                agents/GOVERNANCE.md, agents/personas/**):
                high risk — quote the exact behavioral difference in your
                review. If the change touches pause logic, the guard
-               actions, or secrets: do NOT approve; apply the
-               blocked-on-human label and request changes, whatever the
-               change's apparent merit. If it changes an agent's permission
+               actions, or secrets: a human decides, not you, and the
+               blocked-on-human label is the entire mechanism. Read its
+               history first
+               (gh api repos/OWNER/REPO/issues/<n>/events). Never applied
+               here: apply it, request changes, and name which of the
+               three it is, whatever the change's apparent merit.
+               Applied and since REMOVED: the human answered, and the
+               removal is a governance act above your seat (ADR-0008) —
+               do not re-apply the label, do not re-raise the gate, link
+               the clearance and review the engineering on its merits.
+               A gate with no reset is a deadlock, not a safeguard: PR
+               #112 spent four changes-requested rounds re-asking one
+               answered question. If it changes an agent's permission
                envelope (workflow permissions, allowedTools, max-turns) and
                the author is neither the BDFL nor the operator (bugabinga):
                do not approve either — those are the BDFL's to decide
