@@ -88,10 +88,8 @@ be, and the thing to look for is a mechanism deciding something it has no
 business deciding.
 
 **What this costs.** Compiled steps accrete and nobody deletes them, so
-transitional encodings become permanent; a two-shape compatibility
-shim written this morning had to be reverted on the operator's catch that
-it would outlive its reason. And a script records what without why, so
-when the why changes nobody knows the script should. That second cost is
+transitional encodings become permanent. And a script records what
+without why, so when the why changes nobody knows the script should. That second cost is
 why the ADR series is load-bearing rather than ceremonial, and why this
 ADR exists at all: it is the layer that keeps compilation reversible.
 Without it the endpoint is an expert system.
