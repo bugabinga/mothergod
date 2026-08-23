@@ -86,20 +86,22 @@ jobs:
 
             Then work in strict priority order and STOP after ONE substantial
             unit of work:
-            1. Open PRs that are red (failing checks) or have changes
-               requested: pick the oldest, check out its branch, fix it, run
+            1. Open PRs that are red (failing checks) or labeled
+               changes-requested: pick the oldest, check out its branch, fix it, run
                all quality gates from CLAUDE.md locally, push, then run
                `.github/scripts/settle-push <pr>`: it proves the push's
                runs are running and re-attributes them if GitHub held
                them at the approval gate (issue #57). Trust its exit
                code, not the push's.
-               "Changes requested" never shows in the formal review state
-               on agent PRs, because the shared claude[bot] identity cannot
-               review its own PRs; the reviewer posts verdicts as issue
-               comments starting "**Review verdict:". A PR whose latest
-               verdict comment requests changes, with no push after it,
-               is yours to fix. First hit: PR #44 sat deadlocked, maintainer
-               and reviewer each waiting for the other.
+               Changes requested never shows in the formal review state on
+               agent PRs, because the shared claude[bot] identity cannot
+               review its own PRs. The reviewer carries the verdict in the
+               changes-requested label instead, and the items to fix are in
+               its comment on the thread. A labeled PR with no push after
+               that comment is yours to fix. Your push does not clear the
+               label; the reviewer's next PASS does. First hit: PR #44 sat
+               deadlocked, maintainer and reviewer each waiting for the
+               other.
                Exception: PRs from branches named claude/deslop-* belong
                to the deslopper, which fixes its own returned PRs on its
                next run (ADR-0016). Skip them; two agents on one branch

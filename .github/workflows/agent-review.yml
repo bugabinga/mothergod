@@ -216,7 +216,8 @@ jobs:
               0`) — an approval was never load-bearing for merge, only your
               verdict is. Skip straight to posting your verification as a
               plain PR comment instead of a review, then proceed exactly as
-              below. Either way, add the agent-approved label, then merge as
+              below. Either way, add the agent-approved label and remove
+              changes-requested if an earlier round left it, then merge as
               your last action, unconditionally:
               `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
               merge_method=squash`. The REST call, not the `gh pr merge`
@@ -248,9 +249,18 @@ jobs:
               REST call itself fails, leave a comment stating you approved
               but the merge did not go through, so the heartbeat will fix
               it.
-            - FAIL: gh pr review --request-changes with specific, actionable
-              items, each tagged [must] or [nit]. Be courteous and
-              explanatory, especially to human authors.
+            - FAIL: add the changes-requested label, remove agent-approved if
+              it is there, and give specific, actionable items, each tagged
+              [must] or [nit]. Be courteous and explanatory, especially to
+              human authors. The label is the machine channel and the only
+              one: the maintainer picks up returned PRs by filtering it,
+              because a verdict phrased in prose is a sentence every session
+              writes differently, which is how PR #178 sat returned and
+              unnoticed (#137). Deliver the items with gh pr review
+              --request-changes; when that fails with "Can not request
+              changes on your own pull request", the same shared identity as
+              the approve path above, post them as a plain PR comment
+              instead. The label carries the verdict either way.
 
             Never approve or merge if you have any doubt about losslessness
             or decoder safety — doubt means FAIL with questions. End

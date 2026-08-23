@@ -177,7 +177,10 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 
 - Branches: `claude/<short-slug>`. Conventional-ish commit subjects, imperative.
 - Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
-  `blocked-on-human`, `agents-paused`, `ops-log`, `agent-approved`.
+  `blocked-on-human`, `agents-paused`, `ops-log`, `agent-approved`,
+  `changes-requested`. The last two are the reviewer's verdict, typed:
+  exactly one of them, never both, and the maintainer filters on them
+  rather than reading prose.
 - Every issue carries exactly one realm label, and whoever opens it applies
   it: `product` for what a user of the compressor gets (codec, docs, site,
   releases), `agent-system` for the factory (agents, workflows, prompts,
