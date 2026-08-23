@@ -4,15 +4,19 @@ name: agent-heartbeat
 
 on:
   schedule:
-    # Every 30 minutes for the stabilization sprint (operator directive,
-    # Telegram, 2026-08-23: issues keep piling up, raise the cadence
-    # again; revert to 2-hourly when #60 closes). Off the hour, off
-    # :11/:31/:51 and off :37 on purpose, so it collides with neither the
-    # BDFL's cadence nor the deslopper's. Cron edits must land
-    # admin-PAT-attributed: an app-merged cron edit flips the schedule
-    # actor to claude[bot], the token exchange rejects bot actors, and
-    # every scheduled run dies (GOVERNANCE.md "Push identity", PR #30).
-    - cron: '22,52 * * * *'
+    # Two-hourly, which is this seat's documented normal and the cadence
+    # #60 always named as the sprint's revert target. ADR-0027 makes the
+    # revert now rather than at #60's exit criterion, because the
+    # seven-day allowance ran out of room first. #186 wakes this seat
+    # whenever a verdict lands, so the cron only has to cover the case
+    # where nothing happened at all.
+    # Off the hour, off :11 and off :37 on purpose, so it collides with
+    # neither the BDFL's cadence nor the deslopper's. Cron edits must
+    # land admin-PAT-attributed: an app-merged cron edit flips the
+    # schedule actor to claude[bot], the token exchange rejects bot
+    # actors, and every scheduled run dies (GOVERNANCE.md "Push
+    # identity", PR #30).
+    - cron: '22 */2 * * *'
   workflow_dispatch:
 
 permissions: {}
