@@ -1,18 +1,42 @@
 name: agent-guard
 description: >-
-  Pause gate for all agent workflows (ADR-0004). The pause state is an open
-  issue labeled `agents-paused` whose body may contain `RESUME-AT: <ISO-8601
-  UTC>`. While such an issue is open and RESUME-AT is in the future (or
-  absent), agent jobs must skip. Once RESUME-AT has passed, this guard closes
-  the issue and lets the run proceed (auto-resume).
+  Run gate for all agent workflows. Two independent reasons an agent must
+  not run this cycle, both reported through the single `paused` output
+  because both mean the same thing to a workflow step: do not run.
+
+  1. Global pause (ADR-0004): an open issue labeled `agents-paused` whose
+     body may contain `RESUME-AT: <ISO-8601 UTC>`. While such an issue is
+     open and RESUME-AT is in the future (or absent), every agent skips.
+     Once RESUME-AT has passed this guard closes the issue and the run
+     proceeds (auto-resume).
+
+  2. Exhausted model ladder (ADR-0018): the agent's ladder in
+     `agents/models.json` resolved against the ledger issue labeled
+     `model-limits`. The guard emits `model_flag` for the first rung that
+     is not currently rate-limited. If every rung is limited the agent
+     skips, because the last rung is the floor and dropping below it is
+     not permitted (ADR-0012).
+
+  The log line always says which of the two fired. A model-scoped limit
+  never stops the other agents: that is the whole point of the ledger and
+  the reason a per-model limit is not a global pause.
 inputs:
   token:
     description: GitHub token with issues read/write
     required: true
+  role:
+    description: >-
+      Agent role, keying into agents/models.json. Omit to skip ladder
+      resolution entirely (emits an empty model_flag).
+    required: false
+    default: ''
 outputs:
   paused:
-    description: "'true' while the agent system is paused"
+    description: "'true' when this agent must not run: global pause, or no model left"
     value: ${{ steps.check.outputs.paused }}
+  model_flag:
+    description: "'--model <id>' for the first available rung, or '' for the action default"
+    value: ${{ steps.check.outputs.model_flag }}
 runs:
   using: composite
   steps:
@@ -20,9 +44,12 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
+        ROLE: ${{ inputs.role }}
       run: |
         set -euo pipefail
         paused=false
+        model_flag=''
+
         issue_json="$(gh issue list --repo "$GITHUB_REPOSITORY" --label agents-paused --state open --json number,body --limit 1)"
         number="$(jq -r '.[0].number // empty' <<<"$issue_json")"
         if [ -n "$number" ]; then
@@ -34,15 +61,74 @@ runs:
             resume_epoch="$(date -u -d "$resume_at" +%s 2>/dev/null || echo '')"
             if [ -z "$resume_epoch" ]; then
               paused=true
-              echo "Paused by issue #$number; RESUME-AT '$resume_at' is unparseable — staying paused. Fix or close the issue to resume."
+              echo "Paused by issue #$number; RESUME-AT '$resume_at' is unparseable, staying paused. Fix or close the issue to resume."
             elif [ "$(date -u +%s)" -lt "$resume_epoch" ]; then
               paused=true
               echo "Paused until $resume_at by issue #$number."
             else
               gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
-                --comment "RESUME-AT ($resume_at) has passed — agent operations resume with this run." || true
+                --comment "RESUME-AT ($resume_at) has passed, agent operations resume with this run." || true
               echo "Pause expired; closed issue #$number, resuming."
             fi
           fi
         fi
+
+        # Ladder resolution runs only when the global pause did not fire:
+        # a paused fleet has nothing to resolve, and reading the ledger
+        # would be wasted API calls.
+        if [ "$paused" = false ] && [ -n "$ROLE" ]; then
+          ledger_body="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-limits --state open --json body --limit 1 --jq '.[0].body // ""')"
+          resolved="$(ROLE="$ROLE" LEDGER="$ledger_body" python3 - <<'PY'
+        import json, os, re, sys, time
+
+        role = os.environ["ROLE"]
+        try:
+            ladders = json.load(open("agents/models.json"))["ladders"]
+        except (OSError, ValueError, KeyError) as exc:
+            # A missing or broken ladder file must not stop the fleet: fall
+            # back to the action default, which is the pre-ADR-0018 behavior.
+            print(f"ok||models.json unreadable ({exc}); using action default")
+            sys.exit()
+
+        ladder = ladders.get(role, [])
+        if not ladder:
+            print("ok||no ladder for this role; using action default")
+            sys.exit()
+
+        # The ledger is a fenced JSON object mapping model id -> epoch
+        # seconds at which the limit resets. Anything unparseable is
+        # treated as an empty ledger: failing open costs one 429, failing
+        # closed idles an agent for days.
+        limits = {}
+        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("LEDGER", ""), re.S)
+        if m:
+            try:
+                limits = {k: int(v) for k, v in json.loads(m.group(1)).items()}
+            except (ValueError, TypeError, AttributeError):
+                limits = {}
+
+        now = int(time.time())
+        blocked = {k: v for k, v in limits.items() if v > now}
+        for model in ladder:
+            if model not in blocked:
+                note = f"{model} (ladder: {' > '.join(ladder)})"
+                if blocked:
+                    note += f"; limited: {', '.join(sorted(blocked))}"
+                print(f"ok|{model}|{note}")
+                sys.exit()
+
+        resets = min(blocked[m] for m in ladder if m in blocked)
+        print(f"exhausted||every rung limited ({' > '.join(ladder)}); earliest reset {resets}")
+        PY
+        )"
+          IFS='|' read -r status model note <<<"$resolved"
+          echo "model: $note"
+          if [ "$status" = exhausted ]; then
+            paused=true
+          elif [ -n "$model" ]; then
+            model_flag="--model $model"
+          fi
+        fi
+
         echo "paused=$paused" >> "$GITHUB_OUTPUT"
+        echo "model_flag=$model_flag" >> "$GITHUB_OUTPUT"

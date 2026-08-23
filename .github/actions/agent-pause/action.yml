@@ -1,23 +1,35 @@
 name: agent-pause
 description: >-
-  Usage-limit detector (ADR-0004). Inspects the claude-code-action execution
-  log's STRUCTURED RESULT entries for a genuine usage-limit failure and, on
-  hit, opens the `agents-paused` issue with a RESUME-AT timestamp: the reset
-  time the error message advertises ("resets 5:50pm (UTC)") when present,
-  else +6h for rolling-window limits, +24h for weekly limits. Idempotent:
-  does nothing if a pause issue is already open.
+  Limit handler (ADR-0004, ADR-0018). Inspects the claude-code-action
+  execution log and routes a failure to one of two places.
 
-  Marker list (run 32588022230 post-mortem, 2026-08-22): the limit message's
-  wording is Anthropic's, not ours, and it changes; "You've hit your session
-  limit" slipped past a list that only knew "usage limit". When a limit
-  failure gets through unpaused, add its marker here.
+  MODEL-SCOPED LIMIT -> the ledger, not a global pause. A rejected
+  rate_limit_event or an HTTP 429, attributed to the model this run used,
+  records `model -> resetsAt` in the issue labeled `model-limits`. Other
+  agents on other models keep running. Run 32632168726 is why: Fable 5
+  exhausted while four agents on other models were healthy, and a global
+  pause would have idled all five for three days over one agent's model.
 
-  Invariant (issue #11 post-mortem, 2026-08-21): only error result objects
-  are scanned, never the conversation transcript. This repo's prompts and
-  docs legitimately contain phrases like "usage limit" because they describe
-  this very machinery; grepping the full transcript pauses the system on its
-  own documentation. A successful run must never pause, whatever its text
-  mentions.
+  ACCOUNT-SCOPED FAILURE -> the global pause. HTTP 401/403 is
+  unambiguous and stops everything until a human looks.
+
+  Deliberately no classification of limit types. The payload said
+  `rateLimitType: seven_day_overage_included` while the message said
+  "your Fable 5 limit", so account-wide and model-scoped are not reliably
+  distinguishable. Always ledger the model that was in use: if the limit
+  really is account-wide, each agent ledgers its own model as it fails and
+  the fleet converges on stopped without a single line of taxonomy.
+
+  Text-marker fallback: kept only for a limit that yields no attributable
+  model. The wording is Anthropic's and it changes ("You've reached your
+  Fable 5 limit" matched none of the five markers this list carried on
+  2026-08-23), which is exactly why it is no longer the primary path.
+
+  Invariant (issue #11 post-mortem): only error result objects are
+  scanned, never the conversation transcript. This repo's prompts and docs
+  legitimately contain phrases like "usage limit" because they describe
+  this machinery; grepping the transcript pauses the system on its own
+  documentation. A successful run must never pause, whatever its text says.
 inputs:
   token:
     description: GitHub token with issues read/write
@@ -46,7 +58,7 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "$EXEC_FILE" ] || [ ! -f "$EXEC_FILE" ]; then
-          echo "No execution file to scan; skipping usage-limit check."
+          echo "No execution file to scan; nothing to route."
           exit 0
         fi
         verdict="$(python3 - "$EXEC_FILE" <<'PY'
@@ -66,25 +78,57 @@ runs:
                     except json.JSONDecodeError:
                         pass
 
-        # Only failed result objects count — see the invariant in the
-        # action description.
-        text = " ".join(
-            json.dumps(e).lower()
-            for e in entries
-            if isinstance(e, dict) and e.get("type") == "result" and e.get("is_error")
-        )
+        def typed(t):
+            return [e for e in entries if isinstance(e, dict) and e.get("type") == t]
+
+        failures = [e for e in typed("result") if e.get("is_error")]
+        if not failures:
+            print("none|||")
+            sys.exit()
+
+        # The model this run actually used, as the runtime reported it. No
+        # aliasing and no families: an exact string is the ledger key, so a
+        # renamed or brand-new model simply becomes a new key.
+        model = ""
+        for e in typed("system"):
+            if e.get("subtype") == "init" and e.get("model"):
+                model = e["model"]
+
+        status = None
+        for e in failures:
+            if isinstance(e.get("api_error_status"), int):
+                status = e["api_error_status"]
+
+        rejected = [
+            e["rate_limit_info"] for e in typed("rate_limit_event")
+            if isinstance(e.get("rate_limit_info"), dict)
+            and e["rate_limit_info"].get("status") == "rejected"
+        ]
+
+        if status in (401, 403):
+            print(f"auth||{status}|")
+            sys.exit()
+
+        if (rejected or status == 429) and model:
+            # Latest advertised reset among the rejections, so a run never
+            # retries before the window that actually blocked it. A missing
+            # resetsAt falls back to one hour: short, because a wrong-long
+            # guess idles an agent for days and a wrong-short one costs one
+            # 429.
+            import time
+            resets = [r.get("resetsAt") for r in rejected if isinstance(r.get("resetsAt"), int)]
+            print(f"ledger|{model}|{max(resets) if resets else int(time.time()) + 3600}|")
+            sys.exit()
+
+        # Fallback only: a limit with no model to attribute it to.
+        text = " ".join(json.dumps(e).lower() for e in failures)
         m = re.search(
-            r"usage[ _]limit|weekly limit|5-hour limit|session limit|out of extra usage",
+            r"usage[ _]limit|weekly limit|5-hour limit|session limit|out of extra usage|reached your .{0,40}limit",
             text,
         )
         if not m:
-            print("none")
+            print("none|||")
             sys.exit()
-
-        # Honor an advertised reset time ("resets 5:50pm (utc)") over the
-        # blanket fallback; the 17:32 hit reset 11 minutes later, +6h would
-        # have idled the fleet for the difference. UTC-labeled only: a reset
-        # in an unknown timezone is worse than the fallback.
         resume = ""
         r = re.search(r"resets (\d{1,2}):(\d{2})\s*(am|pm)\s*\(utc\)", text)
         if r:
@@ -96,15 +140,85 @@ runs:
                 t += timedelta(days=1)
             resume = t.strftime("%Y-%m-%dT%H:%M:%SZ")
         kind = "weekly" if "weekly limit" in text else "rolling"
-        print(f"{kind}|{m.group(0)}|{resume}")
+        print(f"pause|{kind}|{m.group(0)}|{resume}")
         PY
         )"
-        if [ "$verdict" = "none" ]; then
-          echo "No usage-limit error in the session result; not pausing."
+        IFS='|' read -r route a b c <<<"$verdict"
+        run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+        case "$route" in
+        none)
+          echo "No limit or auth failure in the session result; nothing to do."
           exit 0
-        fi
-        IFS='|' read -r kind hit resume_at <<<"$verdict"
-        if [ -z "$resume_at" ]; then
+          ;;
+        ledger)
+          model="$a"; resets="$b"
+          gh label create model-limits --repo "$GITHUB_REPOSITORY" \
+            --color FBCA04 --description "Per-model rate-limit ledger (ADR-0018)" 2>/dev/null || true
+          n="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-limits --state open --json number --jq '.[0].number // empty')"
+          old=''
+          [ -n "$n" ] && old="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          body="$(MODEL="$model" RESETS="$resets" OLD="$old" RUN="$run_url" python3 - <<'PY'
+        import json, os, re, time
+        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("OLD", ""), re.S)
+        try:
+            limits = {k: int(v) for k, v in json.loads(m.group(1)).items()} if m else {}
+        except (ValueError, TypeError, AttributeError):
+            limits = {}
+        now = int(time.time())
+        limits = {k: v for k, v in limits.items() if v > now}   # self-expiring
+        limits[os.environ["MODEL"]] = int(os.environ["RESETS"])
+        rows = "\n".join(
+            f"| `{k}` | {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(v))} | {v} |"
+            for k, v in sorted(limits.items())
+        )
+        print("\n".join([
+            "Models currently rate-limited. The guard reads this before every agent",
+            "run and picks the first rung of that agent's ladder"
+            " (`agents/models.json`) that is not listed here. Entries expire on their",
+            "own timestamp; nothing needs closing.",
+            "",
+            "| Model | Available again | Epoch |",
+            "|---|---|---|",
+            rows,
+            "",
+            "```json",
+            json.dumps(limits, indent=2, sort_keys=True),
+            "```",
+            "",
+            f"Last written by {os.environ['RUN']}",
+            "",
+            "---",
+            "_Generated by [Claude Code](https://claude.ai/code)_",
+        ]))
+        PY
+        )"
+          if [ -n "$n" ]; then
+            gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --body "$body"
+            echo "Ledgered $model until $resets (issue #$n). Other agents unaffected."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "🔒 Model availability ledger" --label model-limits --body "$body"
+            echo "Ledgered $model until $resets (new issue). Other agents unaffected."
+          fi
+          if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+            until_h="$(date -u -d "@$resets" +%Y-%m-%dT%H:%MZ)"
+            curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TG_CHAT}" \
+              --data-urlencode "text=🔒 mothergod: ${model} rate-limited until ${until_h}. Agents on other models keep running; any agent whose ladder still has a rung falls back automatically." \
+              >/dev/null && echo "Telegram alert sent." || echo "Telegram alert failed (non-fatal)."
+          fi
+          exit 0
+          ;;
+        auth)
+          kind=auth; hit="HTTP $b"; resume_at=''
+          ;;
+        pause)
+          kind="$a"; hit="$b"; resume_at="$c"
+          ;;
+        esac
+
+        if [ -z "$resume_at" ] && [ "$kind" != auth ]; then
           hours=6
           [ "$kind" = weekly ] && hours=24
           resume_at="$(date -u -d "+${hours} hours" +%Y-%m-%dT%H:%M:%SZ)"
@@ -116,15 +230,18 @@ runs:
         fi
         gh label create agents-paused --repo "$GITHUB_REPOSITORY" \
           --color D93F0B --description "Agent system is paused (ADR-0004)" 2>/dev/null || true
-        body="$(printf 'The agent system hit a Claude subscription usage limit (marker: `%s`, run: %s).\n\nRESUME-AT: %s\n\nAll agent workflows skip while this issue is open; the first scheduled run after RESUME-AT closes it and resumes automatically. Close it manually to resume earlier, or delete the RESUME-AT line to pause indefinitely.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' "$hit" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" "$resume_at")"
-        gh issue create --repo "$GITHUB_REPOSITORY" \
-          --title "⏸️ Agents paused: Claude usage limit reached" \
-          --label agents-paused \
-          --body "$body"
-        echo "Agent system paused until $resume_at."
+        if [ "$kind" = auth ]; then
+          body="$(printf 'Claude authentication failed (%s, run: %s).\n\nNo RESUME-AT: this does not heal on a timer. The operator must check the subscription and the CLAUDE_CODE_OAUTH_TOKEN secret, then close this issue.\n\nAll agent workflows skip while this issue is open.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' "$hit" "$run_url")"
+          title="⏸️ Agents paused: Claude authentication failed"
+        else
+          body="$(printf 'The agent system hit a Claude subscription usage limit with no model to attribute it to (marker: `%s`, run: %s).\n\nRESUME-AT: %s\n\nAll agent workflows skip while this issue is open; the first scheduled run after RESUME-AT closes it and resumes automatically. Close it manually to resume earlier, or delete the RESUME-AT line to pause indefinitely.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' "$hit" "$run_url" "$resume_at")"
+          title="⏸️ Agents paused: Claude usage limit reached"
+        fi
+        gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label agents-paused --body "$body"
+        echo "Agent system paused (${kind})."
         if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
           curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" \
-            --data-urlencode "text=⏸️ mothergod agents paused (Claude usage limit, marker: ${hit}). Auto-resume at ${resume_at} UTC. Close the agents-paused issue to resume earlier." \
+            --data-urlencode "text=⏸️ mothergod agents paused (${kind}, marker: ${hit}). ${resume_at:+Auto-resume at ${resume_at} UTC. }Close the agents-paused issue to resume earlier." \
             >/dev/null && echo "Telegram pause alert sent." || echo "Telegram alert failed (non-fatal)."
         fi
