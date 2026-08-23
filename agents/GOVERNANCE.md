@@ -108,6 +108,15 @@ unsigned branch commit is never, by itself, a reason to stop or to
 label `blocked-on-human` — attempt the REST merge before predicting
 it will fail (issue #24, PR #22 postmortem).
 
+A PR touching `.github/workflows/**` may draw a 403 on that merge:
+"refusing to allow a GitHub App to create or update workflow ... without
+`workflows` permission". It is not deterministic. PRs #121 and #126
+merged on the app token carrying workflow files; PR #129 was refused,
+and the difference is unestablished. Treat the 403 as retryable, not as
+a rule to predict from: merge again with `GH_TOKEN="$GH_ADMIN_TOKEN"`,
+which succeeds. Distinct from app-token *pushes* to workflow files,
+which are refused every time (issue #24).
+
 ### The reviewer skips any PR whose `agent-review.yml` differs from main
 
 `claude-code-action` refuses to start when the branch's copy of the
