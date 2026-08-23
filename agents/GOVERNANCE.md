@@ -197,11 +197,13 @@ naming it, label `blocked-on-human`, move on.
 Three credentials can push, and the pusher decides whether the pipeline
 keeps moving (issue #57).
 
-**Pushing files to a branch is `.github/scripts/push-branch <branch>
-<path>...`, commit message on stdin.** It derives the credential from
-the paths, goes through the git data API so no ambient credential can
-win the push silently, keeps the executable bit, and refuses a push
-that would revert the base. Nothing below is yours to apply by hand;
+**Pushing files to a branch is `.github/scripts/push-branch
+<branch|pr-number> <path>...`, commit message on stdin.** It derives the
+credential from the paths, goes through the git data API so no ambient
+credential can win the push silently, keeps the executable bit, reads
+the ref back, and refuses a push that would revert the base. A number
+resolves to that PR's head ref, so a session pushing to a PR it did not
+open never names the branch. Nothing below is yours to apply by hand;
 it is why the script exists and what it protects.
 
 - `github.token` (actor `github-actions[bot]`): pull_request runs it
