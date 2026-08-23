@@ -57,9 +57,27 @@ def ident(row):
             return v
     return ""
 
+def dig(row, name):
+    """Find a numeric metric by exact key, at the top level or one nesting in.
+
+    Their live payload puts the indices under `evaluations` rather than on the
+    entry, while carrying a top-level `..._index_cost` that is a different
+    number entirely (run 32635384862). Matching the key exactly, and only
+    then descending, means a sibling metric can never be mistaken for the
+    score. Structural rather than a guess at their layout.
+    """
+    v = row.get(name)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    for nested in row.values():
+        if isinstance(nested, dict):
+            v = nested.get(name)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return float(v)
+    return None
+
 def score(row):
-    v = row.get(INDEX)
-    return float(v) if isinstance(v, (int, float)) else None
+    return dig(row, INDEX)
 
 models = []
 for row in rows:
@@ -68,12 +86,16 @@ for row in rows:
     name, s = ident(row), score(row)
     if name and s is not None:
         models.append({"id": name, "score": s,
-                       "coding": row.get("artificial_analysis_coding_index"),
-                       "agentic": row.get("artificial_analysis_agentic_index")})
+                       "coding": dig(row, "artificial_analysis_coding_index"),
+                       "agentic": dig(row, "artificial_analysis_agentic_index")})
 if not models:
     sample = rows[0] if isinstance(rows[0], dict) else {}
-    bail(f"No entry carried both an identifier and `{INDEX}`.",
-         f"Keys on the first entry: `{', '.join(sorted(sample)) or 'none'}`.")
+    detail = [f"Keys on the first entry: `{', '.join(sorted(sample)) or 'none'}`."]
+    for k, v in sorted(sample.items()):
+        if isinstance(v, dict) and v:
+            detail.append(f"Keys under `{k}`: `{', '.join(sorted(v))}`.")
+    bail(f"No entry carried both an identifier and `{INDEX}`, "
+         "at the top level or one nesting in.", "\n\n".join(detail))
 
 models.sort(key=lambda m: -m["score"])
 
