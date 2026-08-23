@@ -489,8 +489,9 @@ jobs:
                no bookkeeping. `gh run list` names them, then
                `gh run download <id>` fetches the audit artifact
                every run uploads (ADR-0023): `output-response.md`
-               is what it posted, `metadata.json` carries
-               num_turns, is_error, permission_denials and model.
+               is what it posted, `metadata.json` carries is_error
+               and a telemetry block with num_turns,
+               permission_denials and modelUsage.
                Read those two, never `gh run view --log`, which
                echoes the whole prompt twice and spends ~15k
                tokens to tell you less; the log earns its cost
