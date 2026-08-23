@@ -661,3 +661,321 @@ pub mod reverse {
         }
     }
 }
+
+/// Trial-selection shortlist: which filters are worth a full trial encode.
+///
+/// `JOURNAL` S1-A1: the filter bank is never applied by a static rule, only
+/// kept when a trial encode measurably wins. Trialing every filter this
+/// crate knows against every input would be correct but wasteful;
+/// [`select::pick`] narrows the menu to a cheap shortlist using an order-1
+/// entropy proxy on a bounded probe, so the expensive trial encode in the
+/// caller only runs on candidates worth the cost. Ported from the archive's
+/// `pick_filters`
+/// (`research/imports/session-1/mothergod.rs`), not the code (ADR-0006):
+/// only [`delta`] and [`bcj`] and [`transpose`] are shortlisted here,
+/// because those are the only filters `pick_filters` covers in that file —
+/// [`base64_unwrap`] and [`reverse`] are selected by a different path in the
+/// archive (`JOURNAL` S2-A5, S2-A6) that this slice does not port.
+pub mod select {
+    use super::delta;
+    use std::collections::HashMap;
+    use std::num::NonZeroUsize;
+
+    /// How much of `data` [`pick`] examines when scoring delta strides and
+    /// transpose column counts. Bounds the cost of trial-selection itself:
+    /// a multi-gigabyte input still only pays for an entropy scan of this
+    /// many bytes.
+    const PROBE_LEN: usize = 16384;
+
+    /// Largest fixed stride [`pick`] scores for [`delta`]. Matches the
+    /// archive's scan range (`sdelta` tried for `k` in `1..=96`).
+    const MAX_DELTA_STRIDE: u8 = 96;
+
+    /// How much of `data` [`pick`] scans for x86 call/jmp opcode density.
+    /// Unlike the delta/transpose probes this is measured from the full
+    /// input, not [`PROBE_LEN`], matching the archive.
+    const BCJ_SCAN_LEN: usize = 65536;
+
+    /// [`Candidate::Bcj`] is shortlisted when opcode hits exceed one in
+    /// this many scanned bytes.
+    const BCJ_DENSITY_DIVISOR: usize = 400;
+
+    /// Below this input length, [`pick`] never scores [`transpose`]: too
+    /// few rows for a column count to mean anything.
+    const MIN_TRANSPOSE_LEN: usize = 4096;
+
+    /// Column counts [`pick`] scores for [`transpose`]. Common fixed-width
+    /// record sizes (small integer types, alignment-padded structs), not
+    /// an exhaustive scan. `NonZeroUsize` so [`pick`] never needs a
+    /// fallible conversion back from a plain `usize` at call time; the
+    /// `unwrap()`s below run over literals at compile time, never at
+    /// runtime.
+    const TRANSPOSE_COLUMNS: [NonZeroUsize; 14] = [
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::new(3).unwrap(),
+        NonZeroUsize::new(4).unwrap(),
+        NonZeroUsize::new(7).unwrap(),
+        NonZeroUsize::new(8).unwrap(),
+        NonZeroUsize::new(12).unwrap(),
+        NonZeroUsize::new(14).unwrap(),
+        NonZeroUsize::new(16).unwrap(),
+        NonZeroUsize::new(24).unwrap(),
+        NonZeroUsize::new(28).unwrap(),
+        NonZeroUsize::new(32).unwrap(),
+        NonZeroUsize::new(56).unwrap(),
+        NonZeroUsize::new(64).unwrap(),
+        NonZeroUsize::new(96).unwrap(),
+    ];
+
+    /// [`Candidate::Transpose`] is shortlisted only when its column entropy
+    /// beats the untransposed baseline by at least this many bits per byte
+    /// — small entropy deltas are noise on a [`PROBE_LEN`]-sized sample.
+    const TRANSPOSE_ENTROPY_MARGIN: f64 = 0.35;
+
+    /// A filter worth a full trial encode, as shortlisted by [`pick`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Candidate {
+        /// No filter: try `data` unmodified.
+        Identity,
+        /// [`delta::encode`] with this stride.
+        Delta(NonZeroUsize),
+        /// [`super::bcj::encode`].
+        Bcj,
+        /// [`super::transpose::encode`] with this many columns.
+        Transpose(NonZeroUsize),
+    }
+
+    /// Order-1 entropy in bits per byte: `data`, conditioned on each byte's
+    /// immediate predecessor, estimated from `data`'s own pair frequencies.
+    /// The proxy [`pick`] ranks delta candidates by — never a
+    /// compressibility measurement itself, only a cheap stand-in for one
+    /// (`JOURNAL` S1-L3: histogram entropy is not compressibility, but a
+    /// *conditional* entropy proxy still separates structured candidates
+    /// from noise well enough to shortlist).
+    fn order1_entropy(data: &[u8]) -> f64 {
+        let mut pair_counts = vec![0u32; 256 * 256];
+        let mut byte_counts = [0u32; 256];
+        for window in data.windows(2) {
+            let (a, b) = (usize::from(window[0]), usize::from(window[1]));
+            pair_counts[(a << 8) | b] += 1;
+            byte_counts[a] += 1;
+        }
+        let mut bits = 0f64;
+        for a in 0..256 {
+            let total = byte_counts[a];
+            if total == 0 {
+                continue;
+            }
+            for b in 0..256 {
+                let count = pair_counts[(a << 8) | b];
+                if count > 0 {
+                    let p = f64::from(count) / f64::from(total);
+                    bits -= f64::from(count) * p.log2();
+                }
+            }
+        }
+        // data.len() is bounded by PROBE_LEN (16384): exact in f64.
+        #[allow(clippy::cast_precision_loss)]
+        let transitions = (data.len().max(2) - 1) as f64;
+        bits / transitions
+    }
+
+    /// Order-1 entropy of `data` reinterpreted as `columns` interleaved
+    /// streams (column `j` is `data[j], data[j + columns], ...`), weighted
+    /// by each column's own transition count. The scoring proxy for
+    /// [`Candidate::Transpose`]: low when a fixed-width record's columns
+    /// are each internally predictable, even though the raw byte stream
+    /// (whose immediate predecessor is usually a *different* column) looks
+    /// unpredictable.
+    fn column_entropy(data: &[u8], columns: usize) -> f64 {
+        let mut bits = 0f64;
+        let mut transitions = 0usize;
+        for start in 0..columns {
+            let column: Vec<u8> = data[start..].iter().copied().step_by(columns).collect();
+            if column.len() < 2 {
+                continue;
+            }
+            let mut pair_counts: HashMap<(u8, u8), u32> = HashMap::new();
+            let mut byte_counts: HashMap<u8, u32> = HashMap::new();
+            for window in column.windows(2) {
+                *pair_counts.entry((window[0], window[1])).or_insert(0) += 1;
+                *byte_counts.entry(window[0]).or_insert(0) += 1;
+            }
+            for (&(from, _), &count) in &pair_counts {
+                let total = byte_counts[&from];
+                let p = f64::from(count) / f64::from(total);
+                bits -= f64::from(count) * p.log2();
+            }
+            transitions += column.len() - 1;
+        }
+        // transitions <= PROBE_LEN (16384): exact in f64.
+        #[allow(clippy::cast_precision_loss)]
+        let transitions = transitions.max(1) as f64;
+        bits / transitions
+    }
+
+    /// Shortlists filters worth a full trial encode against `data`.
+    ///
+    /// [`Candidate::Identity`] is always included, either as the top-scored
+    /// candidate or alongside it, so a caller trialing every returned
+    /// candidate never trials filters alone without a baseline to beat.
+    #[must_use]
+    pub fn pick(data: &[u8]) -> Vec<Candidate> {
+        let probe = &data[..data.len().min(PROBE_LEN)];
+
+        let mut scored: Vec<(f64, Candidate)> =
+            Vec::with_capacity(usize::from(MAX_DELTA_STRIDE) + 1);
+        scored.push((order1_entropy(probe), Candidate::Identity));
+        for stride in 1..=MAX_DELTA_STRIDE {
+            let stride = NonZeroUsize::new(usize::from(stride)).unwrap_or(NonZeroUsize::MIN);
+            scored.push((
+                order1_entropy(&delta::encode(probe, stride)),
+                Candidate::Delta(stride),
+            ));
+        }
+        scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        let mut candidates = vec![scored[0].1];
+        candidates.push(if scored[0].1 == Candidate::Identity {
+            scored[1].1
+        } else {
+            Candidate::Identity
+        });
+
+        let bcj_window = &data[..data.len().min(BCJ_SCAN_LEN)];
+        let bcj_hits = bcj_window
+            .iter()
+            .filter(|&&b| b == 0xE8 || b == 0xE9)
+            .count();
+        if bcj_hits * BCJ_DENSITY_DIVISOR > bcj_window.len() {
+            candidates.push(Candidate::Bcj);
+        }
+
+        if data.len() >= MIN_TRANSPOSE_LEN {
+            let baseline = column_entropy(probe, 1);
+            let best = TRANSPOSE_COLUMNS
+                .iter()
+                .map(|&columns| (columns, column_entropy(probe, columns.get())))
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            if let Some((columns, entropy)) = best
+                && entropy < baseline - TRANSPOSE_ENTROPY_MARGIN
+            {
+                candidates.push(Candidate::Transpose(columns));
+            }
+        }
+
+        candidates
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Small-step lookup for an xorshift-free LCG-driven random walk:
+        /// wrapping-u8 equivalents of -2..=2, indexed by `seed % 5`. Table
+        /// form sidesteps signed/unsigned cast lints entirely, instead of
+        /// converting a signed step through `as`.
+        const WALK_STEPS: [u8; 5] = [0u8.wrapping_sub(2), 0u8.wrapping_sub(1), 0, 1, 2];
+
+        /// Advances `seed` (an LCG state) and returns the next
+        /// [`WALK_STEPS`] entry it selects.
+        fn next_step(seed: &mut u32) -> u8 {
+            *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let index = usize::try_from((*seed >> 24) % 5).unwrap_or(0);
+            WALK_STEPS[index]
+        }
+
+        #[test]
+        fn pick_always_includes_identity() {
+            for data in [&b""[..], b"x", b"abababababababab", &[0u8; 5000]] {
+                assert!(
+                    pick(data).contains(&Candidate::Identity),
+                    "no identity candidate for {data:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn pick_selects_delta_for_columnar_drift() {
+            // 4 independent small random walks, one per column, interleaved
+            // row-major: consecutive same-column values (stride 4) differ
+            // by a small step, but consecutive raw bytes belong to
+            // unrelated walks and look noisy.
+            let mut seeds = [0x1234_5678u32, 0x9abc_def0, 0x0f0f_f0f0, 0x1357_9bdf];
+            let mut walk = [64u8, 96, 160, 200];
+            let rows = 2000usize;
+            let mut data = Vec::with_capacity(rows * 4);
+            for _ in 0..rows {
+                for col in 0..4 {
+                    walk[col] = walk[col].wrapping_add(next_step(&mut seeds[col]));
+                    data.push(walk[col]);
+                }
+            }
+            let candidates = pick(&data);
+            assert_eq!(
+                candidates[0],
+                Candidate::Delta(NonZeroUsize::new(4).unwrap())
+            );
+        }
+
+        #[test]
+        fn pick_shortlists_bcj_for_opcode_dense_data() {
+            let mut data = vec![0x90u8; 1000];
+            for chunk in data.chunks_mut(20) {
+                chunk[0] = 0xE8;
+            }
+            assert!(pick(&data).contains(&Candidate::Bcj));
+        }
+
+        #[test]
+        fn pick_does_not_shortlist_bcj_for_sparse_opcodes() {
+            let data = vec![0x90u8; 100_000];
+            assert!(!pick(&data).contains(&Candidate::Bcj));
+        }
+
+        #[test]
+        fn pick_skips_transpose_below_minimum_length() {
+            let mut data = vec![0u8; MIN_TRANSPOSE_LEN - 1];
+            for (i, b) in data.iter_mut().enumerate() {
+                *b = u8::from(i % 4 == 0) * 200;
+            }
+            assert!(
+                !pick(&data)
+                    .iter()
+                    .any(|c| matches!(c, Candidate::Transpose(_)))
+            );
+        }
+
+        #[test]
+        fn pick_shortlists_transpose_for_column_structured_data() {
+            // 8 independent small random walks, one per column, interleaved
+            // row-major: the value at a given position stays close to the
+            // same column's previous-row value, but jumps arbitrarily
+            // relative to its raw immediate predecessor (a different
+            // column's unrelated walk).
+            let columns = 8usize;
+            let mut seeds: Vec<u32> = (0..columns)
+                .map(|c| {
+                    let c = u32::try_from(c).unwrap_or(0);
+                    0x9e37_79b9u32.wrapping_mul(c + 1)
+                })
+                .collect();
+            let mut walk = vec![128u8; columns];
+            let rows = 2000usize;
+            let mut data = vec![0u8; columns * rows];
+            for row in 0..rows {
+                for col in 0..columns {
+                    walk[col] = walk[col].wrapping_add(next_step(&mut seeds[col]));
+                    data[row * columns + col] = walk[col];
+                }
+            }
+            let candidates = pick(&data);
+            assert!(
+                candidates
+                    .iter()
+                    .any(|c| matches!(c, Candidate::Transpose(_))),
+                "no transpose candidate; got {candidates:?}"
+            );
+        }
+    }
+}
