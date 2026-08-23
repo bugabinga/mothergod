@@ -16,20 +16,18 @@
 //! `(prev-byte nibble, after-copy)` key, so the mixer favors different
 //! experts after a match than after a run of literals (`JOURNAL` S1-A4).
 //!
-//! **Known deviation, not yet resolved (`JOURNAL` S2-D3).** `JOURNAL`
-//! S1-A5 records an "integer-only probability path" as accepted
-//! architecture, specifically to retire the cross-platform determinism
-//! hazard of `f64::exp()` (not guaranteed bit-identical across libm
-//! implementations). That refactor postdates this archive (it is
-//! transcript-only, per `research/imports/session-1/README.md`), so no
-//! artifact of it exists to port from. This module keeps the archive's
-//! `f64` weight update verbatim rather than inventing a fixed-point
-//! replacement from scratch. It carries no live risk yet: nothing in
-//! `src/` calls this module (same as every other S2-D2 slice), so no
-//! bitstream depends on it. The eventual `Method`-wiring PR needs an ADR
-//! and a `FORMAT_VERSION` bump anyway (hard rule 5, `CLAUDE.md`);
-//! resolving `f64` vs. fixed-point belongs there, before any real frame
-//! depends on bit-identical adaptive state across platforms.
+//! **Decode-path determinism (`JOURNAL` S2-D3, resolved by ADR-0024).**
+//! The exponentiated-gradient weight update runs on both the encode and
+//! decode path, so anything it calls must produce a bit-identical result
+//! on every platform, or an encoder and a decoder desync mid-frame (hard
+//! rule 1). `f64::exp()` is libm's and not guaranteed bit-identical
+//! across implementations; `exp` replaces it with an `e^x` built from
+//! IEEE-754 basic operations only (range reduction plus a polynomial,
+//! `2^k` by exact repeated doubling), enforced crate-wide by
+//! `clippy.toml`'s `disallowed-methods`. `JOURNAL` S1-A5's full
+//! integer-only mixer is no longer a prerequisite here; ADR-0024
+//! demotes it to an M5 speed lead, since its speed claim is unmeasured
+//! in this codebase.
 
 use crate::coder::{Decoder, Encoder};
 
@@ -87,6 +85,66 @@ const MAX_WEIGHT: f64 = 1e4;
 /// never divides by (near) zero. Ported unchanged from the archive's
 /// inline `1e-9`.
 const MIN_DENOMINATOR: f64 = 1e-9;
+
+/// Beyond this magnitude, `weights[expert] * exp(gradient)` already
+/// saturates the `[MIN_WEIGHT, MAX_WEIGHT]` clamp every caller applies
+/// next, regardless of which weight it started from: `MAX_WEIGHT /
+/// MIN_WEIGHT` is `1e8`, and `exp(20) > 1e8`. `30` keeps a wide margin,
+/// so `exp`'s approximation error can never flip which side of that
+/// clamp a borderline gradient lands on.
+const EXP_ARG_LIMIT: f64 = 30.0;
+
+/// `e^x`, built from IEEE-754 basic operations only (`+ - * /`,
+/// comparisons, and [`f64::round`]): no libm transcendental call, so
+/// [`Literal::update`] computes the identical mixing weight on every
+/// platform whether it runs on the encode or the decode path
+/// (ADR-0024, `JOURNAL` S2-D3).
+///
+/// Not a general-purpose `exp`: the argument is clamped to
+/// `[-EXP_ARG_LIMIT, EXP_ARG_LIMIT]` first (see that constant's doc for
+/// why the clamp never changes the caller's outcome). Classic range
+/// reduction from there: `x = k*ln(2) + r` with `|r| <= ln(2)/2`, so the
+/// polynomial only ever evaluates near zero, where a degree-7 Taylor
+/// series is accurate to within `~2.5e-8`; `2^k` is exact repeated
+/// doubling (`pow2`), never a `powi` call.
+fn exp(x: f64) -> f64 {
+    let x = x.clamp(-EXP_ARG_LIMIT, EXP_ARG_LIMIT);
+    let k = (x / std::f64::consts::LN_2).round();
+    let r = x - k * std::f64::consts::LN_2;
+    let poly = 1.0
+        + r * (1.0
+            + r * (1.0 / 2.0
+                + r * (1.0 / 6.0
+                    + r * (1.0 / 24.0
+                        + r * (1.0 / 120.0 + r * (1.0 / 720.0 + r * (1.0 / 5040.0)))))));
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "k = round(x / ln2) with |x| <= EXP_ARG_LIMIT (30), so |k| <= 44: always fits i32"
+    )]
+    let k = k as i32;
+    poly * pow2(k)
+}
+
+/// `2^k` for integer `k`, by exact repeated doubling (multiplying by
+/// exactly `2.0`, which has no rounding error) instead of a `powi` call.
+/// `exp` only ever passes `|k| <= 44`, far below where this would
+/// overflow.
+fn pow2(k: i32) -> f64 {
+    if k < 0 {
+        return 1.0 / pow2(-k);
+    }
+    let mut result = 1.0;
+    let mut base = 2.0;
+    let mut remaining = k;
+    while remaining > 0 {
+        if remaining & 1 == 1 {
+            result *= base;
+        }
+        base *= base;
+        remaining >>= 1;
+    }
+    result
+}
 
 /// `1 << 32` as a float, the fixed-point scale [`Literal::mix`] blends
 /// expert probabilities under. Spelled as a literal instead of a cast so
@@ -274,8 +332,18 @@ impl Literal {
     /// best (exponentiated gradient, Mahoney 2005), then updates every
     /// expert's own frequency table the same way
     /// [`crate::model::Model::encode`]/`decode` do. Ported unchanged
-    /// from the archive's `Lit::upd`.
-    fn update(&mut self, bank_indices: &[usize; EXPERTS], weight_index: usize, symbol: usize) {
+    /// from the archive's `Lit::upd`, except the weight update's `exp`
+    /// call is parameterized: production callers pass `exp`, and the
+    /// test suite's accuracy check (ADR-0024) passes `f64::exp` as an
+    /// independent reference to diff against without duplicating the
+    /// rest of this method.
+    fn update(
+        &mut self,
+        bank_indices: &[usize; EXPERTS],
+        weight_index: usize,
+        symbol: usize,
+        exp_fn: fn(f64) -> f64,
+    ) {
         let mut estimate = [0f64; EXPERTS];
         for (expert, bank) in bank_indices.iter().enumerate() {
             estimate[expert] =
@@ -290,7 +358,7 @@ impl Literal {
         let denominator = mixed.max(MIN_DENOMINATOR);
         for expert in 0..EXPERTS {
             let gradient = LEARNING_RATE * (estimate[expert] - mixed) / denominator;
-            weights[expert] = (weights[expert] * gradient.exp()).clamp(MIN_WEIGHT, MAX_WEIGHT);
+            weights[expert] = (weights[expert] * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT);
         }
         for (expert, &bank) in bank_indices.iter().enumerate() {
             let (increment, limit) = if expert == 0 {
@@ -318,7 +386,7 @@ impl Literal {
         let cum = self.mix(&bank_indices, weight_index);
         let symbol = usize::from(byte);
         encoder.encode(cum[symbol], cum[symbol + 1], cum[ALPHABET]);
-        self.update(&bank_indices, weight_index, symbol);
+        self.update(&bank_indices, weight_index, symbol, exp);
     }
 
     /// Decodes one byte from `decoder` under `context`, then updates the
@@ -342,7 +410,7 @@ impl Literal {
             symbol += 1;
         }
         decoder.decode(cum[symbol], cum[symbol + 1], total);
-        self.update(&bank_indices, weight_index, symbol);
+        self.update(&bank_indices, weight_index, symbol, exp);
         #[allow(
             clippy::cast_possible_truncation,
             reason = "symbol is a scan index bounded by ALPHABET (256), always fits u8"
@@ -531,5 +599,56 @@ mod tests {
         // No panic is the assertion: decoded bytes past the real data are
         // whatever implicit-zero bits produce, never treated as ground
         // truth here.
+    }
+
+    /// `f64::exp`, the pre-ADR-0024 reference this test diffs `exp`
+    /// against. `#[cfg(test)]`-gated, so it never reaches the decode
+    /// path this crate ships.
+    fn reference_exp(x: f64) -> f64 {
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "test-only oracle for ADR-0024's 1% accuracy claim (issue #161); #[cfg(test)] keeps it off the decode path"
+        )]
+        {
+            x.exp()
+        }
+    }
+
+    #[test]
+    fn vendored_exp_keeps_bits_per_byte_within_one_percent_of_f64_exp() {
+        // Named corpus (CLAUDE.md hard rule 4): the founding session's
+        // archived codec, real structured Rust source, 25,524 bytes.
+        let corpus: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+
+        let encoded_len = |exp_fn: fn(f64) -> f64| -> usize {
+            let mut model = Literal::new();
+            let mut context = Context::default();
+            let mut enc = Encoder::new();
+            for &b in corpus {
+                let (bank_indices, weight_index) = banks(context);
+                let cum = model.mix(&bank_indices, weight_index);
+                let symbol = usize::from(b);
+                enc.encode(cum[symbol], cum[symbol + 1], cum[ALPHABET]);
+                model.update(&bank_indices, weight_index, symbol, exp_fn);
+                context = context.after_literal(b);
+            }
+            enc.finish().len()
+        };
+
+        let vendored_bytes = encoded_len(exp);
+        let reference_bytes = encoded_len(reference_exp);
+
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "encoded length is far below f64's exact integer range (2^53)"
+        )]
+        let relative_diff =
+            (vendored_bytes as f64 - reference_bytes as f64).abs() / reference_bytes as f64;
+
+        assert!(
+            relative_diff <= 0.01,
+            "vendored exp: {vendored_bytes} bytes vs f64::exp reference: {reference_bytes} \
+             bytes, {relative_diff:.4} relative difference exceeds the 1% budget (ADR-0024)"
+        );
     }
 }

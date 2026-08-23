@@ -516,6 +516,10 @@ fn extra_bits(bucket_index: usize) -> f64 {
 
 /// `-log2(freq / total)`: the Shannon price, in bits, of a symbol seen
 /// `freq` times out of `total`.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "encoder-only: DP price table (ADR-0024 decision 3), a different but still-valid frame costs reproducibility, not correctness"
+)]
 fn price(freq: u32, total: u32) -> f64 {
     -(f64::from(freq) / f64::from(total)).log2()
 }

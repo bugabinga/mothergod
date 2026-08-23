@@ -481,10 +481,9 @@ record.
   `model::Model`, `literal::Literal`, and `coder`) behind a new `Method`
   variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5).
   Source: `research/imports/session-1/mothergod.rs` (526 lines, golfed,
-  port behavior, not code, per ADR-0006). No longer blocked: S2-D3 is
-  resolved by ADR-0024, which leaves one implementable prerequisite (a
-  decode-path `exp` that does not call libm) rather than an open
-  question. One PR per module per the M1 checklist.
+  port behavior, not code, per ADR-0006). No longer blocked: S2-D3's
+  sole prerequisite (a decode-path `exp` that does not call libm) is
+  done (S2-A16). One PR per module per the M1 checklist.
 - S2-D3 | RESOLVED by ADR-0024 | `literal::Literal` (S2-A12) ports the
   archive's exponentiated-gradient mixing-weight update verbatim,
   including `f64::exp()`. `JOURNAL` S1-A5 records "integer-only
@@ -611,6 +610,56 @@ record.
   image, sqlite-like, x86 binary), the three-tier train/sealed/finals
   split plumbing, regret scoring, the CI baseline gate, and progress-graph
   rendering.
+- S2-A16 | ACCEPTED | ADR-0024's implementable task (issue #161), and the
+  resolution of S2-D3: `literal::Literal`'s exponentiated-gradient
+  mixing-weight update called `gradient.exp()` (libm, not guaranteed
+  bit-identical across platforms) on both the encode and decode path.
+  Replaced with a crate-local `exp` (`src/literal.rs`), built from
+  IEEE-754 basic operations only: classic range reduction (`x = k*ln2 +
+  r`, `|r| <= ln2/2`) into a degree-7 Taylor polynomial for `e^r`
+  (accurate to `~2.5e-8` there), times `2^k` computed by exact repeated
+  doubling (a local `pow2`, never a `powi` call). The argument is
+  clamped to `[-30, 30]` first: `update`'s caller always clamps the
+  *result* (`weight * exp(gradient)`) into `[MIN_WEIGHT, MAX_WEIGHT]`, a
+  span of `1e8`, and `exp(20)` already exceeds that ratio, so the clamp
+  changes no caller-visible outcome, only bounds `exp`'s own domain to
+  where the polynomial needs to be accurate. `update` now takes the
+  `exp` function as a parameter (`fn(f64) -> f64`) instead of calling
+  `f64::exp` inline, so the test suite can pass `f64::exp` back in as an
+  independent reference without duplicating the rest of the method
+  (`rust-craft` skill: one function computes the mixer, encode/decode/
+  test all drive the same code path, only the transcendental call
+  varies). `clippy.toml` (new, workspace root) enforces the ADR crate-
+  wide via `disallowed-methods` on the full `f32`/`f64` transcendental
+  family; the three pre-existing encoder-only `log2` sites
+  (`filters.rs` x2, `lz.rs` x1 — DP pricing and filter-selection
+  entropy, ADR-0024 decision 3) carry a justified
+  `#[allow(clippy::disallowed_methods)]` each. `bench/` gets its own
+  `clippy.toml` overriding the list back to empty: its corpus generators
+  (Box-Muller gaussian, entropy-proxy scoring) never touch a bitstream,
+  so the decode-path rule does not apply and forcing `#[allow]` onto
+  them would misattribute it. | Acceptance per ADR-0024: exact round-
+  trip (existing suite, unchanged, still green — `update`'s signature
+  changed but not its behavior on the production path) plus bits/byte
+  within 1% of the kept `f64::exp` reference on a named corpus. Measured
+  on `research/imports/session-1/mothergod.rs` (25,524 bytes, real
+  structured Rust source, the founding archive): 10,381 bytes encoded
+  through `Literal` either way — bit-identical output, 0% relative
+  difference, far inside the 1% budget. `cargo fmt`/`clippy --all-
+  targets -- --deny warnings`/`test --all-targets`/`test --doc`/`doc
+  --no-deps` (`RUSTDOCFLAGS=--deny warnings`) all clean (intra-doc
+  links to the new private `exp`/`pow2` dropped to plain code spans,
+  same class as S2-A8/S2-A10/S2-A11/S2-A12, not suppressed). | No
+  champion to diff against yet (same as every S2-A* slice since S2-A2):
+  `progress.jsonl` records this with `kind: "patch"` and null bpb
+  deltas despite the real accuracy measurement above, because that
+  measurement is against a reference *within this change*, not a
+  before/after ratio delta on a wired codec. S2-D2's remaining scope
+  (wiring `select::pick`, `lz::parse_optimal`, `model::Model`,
+  `literal::Literal`, and `coder` behind a new `Method` variant,
+  `FORMAT_VERSION` bump + ADR) is no longer blocked by anything in
+  S2-D3/ADR-0024; it is the next M1 slice and the first one that can
+  produce a real bpb number.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
