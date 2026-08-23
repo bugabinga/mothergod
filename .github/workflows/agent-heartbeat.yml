@@ -4,15 +4,15 @@ name: agent-heartbeat
 
 on:
   schedule:
-    # Every 2 hours (operator directive, Telegram, 2026-08-22: increase
-    # heartbeat cadence; the earlier 6h step was itself an increase from
-    # one run per day, the maintainer being the slowest link in shipping
-    # code). Off the hour and off :11/:31/:51 on purpose, so it does not
-    # collide with the BDFL's cadence. Cron edits must land
-    # admin-PAT-attributed: an app-merged cron edit flips the schedule
-    # actor to claude[bot], the token exchange rejects bot actors, and
-    # every scheduled run dies (GOVERNANCE.md "Push identity", PR #30).
-    - cron: '52 */2 * * *'
+    # Hourly for the stabilization sprint (operator directive, Telegram,
+    # 2026-08-23: increase heartbeat cadence until #60 is done; revert to
+    # 2-hourly when #60 closes). Off the hour and off :11/:31/:51 on
+    # purpose, so it does not collide with the BDFL's cadence. Cron edits
+    # must land admin-PAT-attributed: an app-merged cron edit flips the
+    # schedule actor to claude[bot], the token exchange rejects bot
+    # actors, and every scheduled run dies (GOVERNANCE.md "Push
+    # identity", PR #30).
+    - cron: '52 * * * *'
   workflow_dispatch:
 
 permissions: {}
