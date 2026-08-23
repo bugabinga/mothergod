@@ -65,11 +65,14 @@ jobs:
           # The reviewer wakes this seat when a verdict lands (PR #186),
           # via `gh workflow run` on GITHUB_TOKEN, so that dispatch is
           # attributed to `github-actions` and the action refuses
-          # non-human actors by default. Run 32660844700 died on exactly
-          # that, twenty minutes after #186 merged.
+          # non-human actors by default. The feature's first live wake
+          # was its own: #186 merged at 19:18:35, its review conclusion
+          # fired the dispatch 26 seconds later, and run 32660844700
+          # died before the model started.
           # Named, never `*`: this repository is public, and `*` would let
           # any App that can reach the dispatch choose the prompt.
-          # `github-actions` is only ever this repository's own workflows.
+          # `github-actions` is only ever this repository's own workflows,
+          # and agent-review.yml has been running that same value green.
           allowed_bots: github-actions
           use_commit_signing: true
           prompt: |
