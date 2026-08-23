@@ -173,16 +173,20 @@ jobs:
           keys=$(curl -s --max-time 15 -H "Authorization: Bearer ${CF_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${KV_ACCOUNT}/storage/kv/namespaces/${KV_NAMESPACE}/keys") \
             || keys=''
-          case "$keys" in
-            *'"name":"u:'*)
-              echo 'operator is waiting: starting the typing indicator' ;;
-            *'"success":true'*)
-              echo 'inbox empty: nobody is waiting, no indicator'; exit 0 ;;
-            *)
-              # Never a silent skip: an unreadable inbox looks exactly
-              # like an empty one, and that is the bug this step just had.
-              printf 'inbox unreadable, skipping indicator: %.200s\n' "${keys:-no response}"
-              exit 0 ;;
+          # Parsed, not substring-matched: grepping for '"name":"u:' answers
+          # "empty" rather than "unreadable" if Cloudflare ever orders a key
+          # object's fields differently, and an empty answer from a gate that
+          # could not read the inbox is the silent wrong answer this exists to
+          # stop giving. The classifier is a file, never inlined here
+          # (CLAUDE.md, style), and never fails: `|| verdict=unreadable` covers
+          # the interpreter itself going missing.
+          verdict=$(printf '%s' "$keys" | python3 .github/scripts/inbox-state.py) \
+            || verdict=unreadable
+          case "$verdict" in
+            waiting) echo 'operator is waiting: starting the typing indicator' ;;
+            empty) echo 'inbox empty: nobody is waiting, no indicator'; exit 0 ;;
+            *) printf 'inbox unreadable, skipping indicator: %.200s\n' "${keys:-no response}"
+               exit 0 ;;
           esac
           nohup bash -c 'for _ in $(seq 720); do
             printf "url=\"https://api.telegram.org/bot%s/sendChatAction\"\n" "${BOT_TOKEN}" |
