@@ -173,16 +173,27 @@ jobs:
           keys=$(curl -s --max-time 15 -H "Authorization: Bearer ${CF_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${KV_ACCOUNT}/storage/kv/namespaces/${KV_NAMESPACE}/keys") \
             || keys=''
-          case "$keys" in
-            *'"name":"u:'*)
-              echo 'operator is waiting: starting the typing indicator' ;;
-            *'"success":true'*)
-              echo 'inbox empty: nobody is waiting, no indicator'; exit 0 ;;
-            *)
-              # Never a silent skip: an unreadable inbox looks exactly
-              # like an empty one, and that is the bug this step just had.
-              printf 'inbox unreadable, skipping indicator: %.200s\n' "${keys:-no response}"
-              exit 0 ;;
+          # Parsed, not substring-matched. Grepping for '"name":"u:' would
+          # answer "empty" rather than "unreadable" if Cloudflare ever
+          # ordered a key object's fields differently, and reporting an
+          # empty inbox when it cannot read one is precisely the silent
+          # wrong answer this gate exists to stop giving.
+          verdict=$(printf '%s' "$keys" | python3 -c '
+          import json, sys
+          try:
+              body = json.load(sys.stdin)
+          except ValueError:
+              print("unreadable"); raise SystemExit
+          if not body.get("success"):
+              print("unreadable"); raise SystemExit
+          keys = body.get("result") or []
+          print("waiting" if any(k.get("name", "").startswith("u:") for k in keys) else "empty")
+          ')
+          case "$verdict" in
+            waiting) echo 'operator is waiting: starting the typing indicator' ;;
+            empty) echo 'inbox empty: nobody is waiting, no indicator'; exit 0 ;;
+            *) printf 'inbox unreadable, skipping indicator: %.200s\n' "${keys:-no response}"
+               exit 0 ;;
           esac
           nohup bash -c 'for _ in $(seq 720); do
             printf "url=\"https://api.telegram.org/bot%s/sendChatAction\"\n" "${BOT_TOKEN}" |
