@@ -13,12 +13,14 @@
 //!   "jsonl/log records" structured class.
 //! - [`json_records`]: a synthetic JSON API response, the "json"
 //!   structured class.
+//! - [`base64_wrapped`]: a base64-wrapped text payload, the
+//!   "base64-wrapped payloads" structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
-//! Silesia/Canterbury fetch-and-cache, the remaining structured classes,
-//! and the sealed/train split plumbing are follow-up slices of
-//! `research/JOURNAL.md` S1-D2.
+//! Silesia/Canterbury fetch-and-cache, the remaining structured classes
+//! (audio, image, sqlite-like, x86 binary), and the sealed/train split
+//! plumbing are follow-up slices of `research/JOURNAL.md` S1-D2.
 
 use std::fmt::Write as _;
 
@@ -309,6 +311,66 @@ pub fn json_records(len: usize, seed: u64) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// Standard base64 alphabet (RFC 4648, `+`/`/`, `=` padding). A second,
+/// from-scratch copy of the table `src/filters.rs`'s `base64_unwrap` filter
+/// also carries: that one is private to a codec transform's own round trip,
+/// this crate never reaches into `src/` internals for corpus generation
+/// (every generator here, `entropy_ladder` through `json_records`, is
+/// self-contained), and RFC 4648's alphabet is a fixed public standard, not
+/// project logic, so the duplication carries no drift risk.
+const BASE64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Encodes `data` as standard base64 with `=` padding (RFC 4648).
+fn base64_encode(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied();
+        let b2 = chunk.get(2).copied();
+        out.push(BASE64_ALPHABET[(b0 >> 2) as usize]);
+        out.push(BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize]);
+        out.push(match b1 {
+            Some(b1) => BASE64_ALPHABET[(((b1 & 0x0F) << 2) | (b2.unwrap_or(0) >> 6)) as usize],
+            None => b'=',
+        });
+        out.push(match b2 {
+            Some(b2) => BASE64_ALPHABET[(b2 & 0x3F) as usize],
+            None => b'=',
+        });
+    }
+    out
+}
+
+/// Generates `len` bytes of a base64-wrapped text payload, the
+/// "base64-wrapped payloads" structured class (`research/corpus/POLICY.md`).
+/// Truncated to exactly `len` bytes.
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['b64-text']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// base64-encode a text-like payload and truncate to length. The archive
+/// draws its text from `/usr/share/doc/*/copyright` on the host
+/// filesystem, neither deterministic nor available in every environment;
+/// this port substitutes [`json_records`], this module's own synthetic
+/// text source, keeping the same "compressible source pushed through
+/// base64's 6-bit encoding" shape. The archive's second variant,
+/// `b64-random` (base64 of `os.urandom`), is not ported: `entropy_ladder`
+/// already covers a maximum-entropy source, and wrapping it in base64
+/// changes only the alphabet, not the coverage.
+#[must_use]
+pub fn base64_wrapped(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    // base64 expands n input bytes to 4*ceil(n/3) output bytes, which is
+    // >= n for every n >= 1, so requesting `len` underlying bytes always
+    // yields at least `len` encoded bytes; the excess is truncated below.
+    let underlying = json_records(len, seed);
+    let mut encoded = base64_encode(&underlying);
+    encoded.truncate(len);
+    encoded
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -370,8 +432,8 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        access_log, entropy_ladder, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits,
+        access_log, base64_encode, base64_wrapped, entropy_ladder, json_records, markov_h8_2_trap,
+        order0_entropy_bits, order1_conditional_entropy_bits,
     };
 
     const LEN: usize = 200_000;
@@ -446,6 +508,7 @@ mod tests {
         assert_eq!(markov_h8_2_trap(0, SEED), Vec::<u8>::new());
         assert_eq!(access_log(0, SEED), Vec::<u8>::new());
         assert_eq!(json_records(0, SEED), Vec::<u8>::new());
+        assert_eq!(base64_wrapped(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
     }
@@ -542,6 +605,45 @@ mod tests {
     }
 
     #[test]
+    fn base64_encode_matches_rfc_4648_test_vectors() {
+        // https://www.rfc-editor.org/rfc/rfc4648#section-10
+        assert_eq!(base64_encode(b""), b"");
+        assert_eq!(base64_encode(b"f"), b"Zg==");
+        assert_eq!(base64_encode(b"fo"), b"Zm8=");
+        assert_eq!(base64_encode(b"foo"), b"Zm9v");
+        assert_eq!(base64_encode(b"foob"), b"Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), b"Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), b"Zm9vYmFy");
+    }
+
+    #[test]
+    fn base64_wrapped_is_exactly_the_requested_length() {
+        for len in [1, 2, 47, 1000, LEN] {
+            assert_eq!(base64_wrapped(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn base64_wrapped_is_deterministic() {
+        assert_eq!(base64_wrapped(5_000, SEED), base64_wrapped(5_000, SEED));
+    }
+
+    #[test]
+    fn base64_wrapped_seeds_are_independent() {
+        assert_ne!(base64_wrapped(5_000, SEED), base64_wrapped(5_000, SEED + 1));
+    }
+
+    #[test]
+    fn base64_wrapped_is_all_base64_alphabet_bytes() {
+        let data = base64_wrapped(LEN, SEED);
+        assert!(
+            data.iter()
+                .all(|&b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'='),
+            "expected only standard base64 alphabet bytes"
+        );
+    }
+
+    #[test]
     fn generators_round_trip_through_the_frame_format() {
         for data in [
             entropy_ladder(1, 5_000, SEED),
@@ -549,6 +651,7 @@ mod tests {
             markov_h8_2_trap(5_000, SEED),
             access_log(5_000, SEED),
             json_records(5_000, SEED),
+            base64_wrapped(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }

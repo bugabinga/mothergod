@@ -840,6 +840,46 @@ record.
   Silesia/Canterbury fetch (S2-D1), not this file. The wiring itself is
   proven correct independent of this corpus's null result, by the
   synthetic columnar-drift round-trip test above.
+- S2-A20 | ACCEPTED | Third structured-generator slice of M2's remaining
+  benchmark-harness debt (S2-D1): a base64-wrapped text payload
+  (`research/corpus/POLICY.md`'s "base64-wrapped payloads" class) ported
+  to `bench/src/lib.rs` as `base64_wrapped`, mirroring `access_log`/
+  `json_records`'s structure. Behavior ported from the founding session's
+  `corpus.py` (`c['b64-text']`, `git show
+  1a3b1c8:research/imports/session-1/corpus.py`), not the code
+  (ADR-0006): base64-encode a text-like payload and truncate to length.
+  The archive draws its text from `/usr/share/doc/*/copyright` on the
+  host filesystem, neither deterministic nor available in every
+  environment; this port substitutes `json_records`, this module's own
+  synthetic text source, keeping the same "compressible source pushed
+  through base64's 6-bit encoding" shape. The archive's second variant,
+  `b64-random` (base64 of `os.urandom`), is not ported: `entropy_ladder`
+  already covers a maximum-entropy source, and wrapping it in base64
+  changes only the alphabet, not the coverage. New standalone
+  `base64_encode` helper (standard RFC 4648 alphabet, `=` padding): a
+  second, from-scratch copy of the table `src/filters.rs`'s
+  `base64_unwrap` filter also carries, kept separate rather than reused
+  because `bench` never reaches into `src/` internals for corpus
+  generation (every generator here is self-contained) and the alphabet
+  is a fixed public standard, not project logic, so the duplication
+  carries no drift risk. | 5 new unit tests: an RFC 4648 test-vector
+  check on `base64_encode` itself, exact-length output across five
+  requested lengths, determinism, seed independence, and an
+  alphabet-membership check (every output byte is base64-alphabet or
+  `=`); wired into the existing frame-format round-trip test. `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/
+  `test --doc`/`doc --no-deps` (`RUSTDOCFLAGS=--deny warnings`) all
+  clean. | No bpb measurement: this is corpus-generation infra, not an
+  experiment against a champion — `progress.jsonl` records this as
+  `kind: "patch"` with null bpb deltas, same as S2-A1 through S2-A15.
+  Remaining S2-D1 scope: Silesia + Canterbury fetch-and-cache, the four
+  remaining structured generator classes (audio, image, sqlite-like, x86
+  binary), the three-tier train/sealed/finals split plumbing, regret
+  scoring, the CI baseline gate, and progress-graph rendering. This
+  entry's S2 number was renumbered from S2-A19 to S2-A20 (and
+  `progress.jsonl`'s from it60 to it61) after PR #194 landed S2-A19/it60
+  first, the same collision-and-renumber this journal already records for
+  S2-A17/S2-A18.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
