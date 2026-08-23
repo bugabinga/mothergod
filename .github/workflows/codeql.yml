@@ -21,10 +21,7 @@ name: CodeQL
 
 on:
   push:
-    # TEMPORARY, removed before merge: exercises the push path on a real push
-    # so the `contents: read` fix is verified by a run and not by reading the
-    # permissions table (review [must] on #182).
-    branches: [main, claude/bdfl-codeql-advanced-setup]
+    branches: [main]
   pull_request:
   schedule:
     # Weekly full sweep, no filter, so the `changes` job below can never hide
