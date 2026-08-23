@@ -169,22 +169,26 @@ def record(sent: dict, reply_to: int | None, body: str) -> None:
               "run already spoke", file=sys.stderr)
         return
 
-    entry = {
-        "from": "bdfl",
-        "message_id": sent["message_id"],
-        "date": sent["date"],
-        "text": summarize(body),
-        "run_id": os.environ.get("GITHUB_RUN_ID"),
-    }
-    if reply_to is not None:
-        entry["reply_to"] = reply_to
-
     url = KV.format(account, namespace, CHATLOG)
+    # Building the entry sits inside the guard with the network calls, and
+    # KeyError with them, because "never fatal" has to hold for every way this
+    # can fail and not just the ones that seem likely. Telegram always returns
+    # message_id and date on success; a day it does not is still not a day this
+    # process fails a delivered message (PR #184 review).
     try:
+        entry = {
+            "from": "bdfl",
+            "message_id": sent["message_id"],
+            "date": sent["date"],
+            "text": summarize(body),
+            "run_id": os.environ.get("GITHUB_RUN_ID"),
+        }
+        if reply_to is not None:
+            entry["reply_to"] = reply_to
         log = kv_read(url, token)
         log.append(entry)
         kv_write(url, token, log[-KEEP:])
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, KeyError) as error:
         print(f"tg-send: sent, but the chat log was not updated: "
               f"{scrub(str(error), token)}", file=sys.stderr)
 
