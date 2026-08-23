@@ -59,7 +59,7 @@ ADMIN_PREFIX = ".github/workflows/"
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 # What this run has already pushed, per branch. Appending to your own commit
 # from the same checkout is not the staleness the guard below is looking for.
-OWN_PUSHES = ".git/push-branch-refs.json"
+OWN_PUSHES = "push-branch-refs.json"
 
 
 def die(*lines):
@@ -99,9 +99,17 @@ def git(*args):
     return subprocess.run(("git",) + args, capture_output=True, text=True)
 
 
+def own_pushes_path():
+    """Ask git where per-checkout state goes. `.git` is a file, not a directory,
+    in a linked worktree, so a literal `.git/...` write throws there (PR #176
+    review)."""
+    proc = git("rev-parse", "--git-path", OWN_PUSHES)
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
 def own_pushes():
     try:
-        with open(OWN_PUSHES) as fh:
+        with open(own_pushes_path()) as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -111,10 +119,13 @@ def record_push(branch, sha):
     pushed = own_pushes()
     pushed[branch] = sha
     try:
-        with open(OWN_PUSHES, "w") as fh:
+        with open(own_pushes_path(), "w") as fh:
             json.dump(pushed, fh)
-    except OSError:
-        pass  # The record only suppresses a false alarm; losing it costs nothing.
+    except OSError as err:
+        # Never silent: an unrecorded push makes the next one report staleness
+        # against itself, and the recovery line then says to discard your work.
+        note(f"could not record this push ({err}); a second push to {branch} "
+             "this run may report false staleness. Its recovery line would be wrong.")
 
 
 def guard_not_stale(branch, base_sha, paths):
