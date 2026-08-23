@@ -137,6 +137,23 @@ All notable changes to this project are documented here. Format follows
   Measured 2.318 bits/byte on
   `research/imports/session-1/mothergod.rs` (25,524 bytes), against
   `gzip -9`'s 2.392 bits/byte on the same file.
+- Filter selection wired into `Method::Lz` (`research/JOURNAL.md` S2-D2,
+  in full; ADR-0027, `FORMAT_VERSION` 1 → 2): `compress` now trials every
+  candidate filter `filters::select::pick` shortlists (delta, BCJ,
+  transpose, or none) against the real LZ + context-mixing pipeline and
+  keeps whichever produces the smallest frame, closing M1's last open
+  checklist item. The winning filter is a 2-byte selector prefixed onto
+  the payload (`[kind, param]`); an unrecognized selector, or a zero
+  `param` on a filter that requires one, decodes to `Error::Corrupt`
+  rather than being parsed. A version-1 frame's `Method::Lz` payload used
+  a layout this build no longer understands (no filter prefix), so
+  `decompress` rejects that combination as `Error::UnsupportedVersion`
+  explicitly (`codec::LZ_MIN_VERSION`) rather than misreading it.
+  Measured 2.3184 bits/byte on the same named corpus as the entry above
+  (unchanged from 2.318: this file is structured text, and `Candidate::
+  Identity` wins — `JOURNAL` S1-R1 already predicted delta loses on
+  text); a synthetic columnar-drift round-trip test proves the wiring
+  picks and correctly reverses a non-identity filter end to end.
 
 ### Removed
 

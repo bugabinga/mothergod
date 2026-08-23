@@ -1,25 +1,31 @@
 //! `Method::Lz` wiring (`research/JOURNAL.md` S2-D2, ROADMAP M1's last
-//! `Method`-wiring slice): the optimal-parse LZ parser ([`crate::lz`]),
-//! the flag/length/offset/rep-slot adaptive tables ([`crate::model`]),
-//! the six-expert literal mixer ([`crate::literal`]), and the range coder
-//! ([`crate::coder`]), driven together as one entropy-coded payload.
-//! Ported from the archive's `encode_body`/`decode`
+//! `Method`-wiring slice): [`crate::filters::select::pick`] shortlists
+//! candidate filters, each is trial-encoded through the optimal-parse LZ
+//! parser ([`crate::lz`]), the flag/length/offset/rep-slot adaptive
+//! tables ([`crate::model`]), the six-expert literal mixer
+//! ([`crate::literal`]), and the range coder ([`crate::coder`]), and
+//! whichever candidate produces the smallest payload wins. Ported from
+//! the archive's `encode`/`encode_body`/`decode`
 //! (`research/imports/session-1/mothergod.rs`), not the code, per
 //! ADR-0006.
-//!
-//! Not ported yet: the archive's outer `encode`/`decode` also trial-runs
-//! [`crate::filters`] and picks whichever shrinks the output most.
-//! [`encode`] here always runs on the raw input; filter selection is
-//! `research/JOURNAL.md` S2-D2's remaining scope, a follow-up slice.
 //!
 //! # Payload layout
 //!
 //! ```text
 //! offset  size  field
-//! 0       4     declared output length, u32 LE
-//! 4       4     token count, u32 LE
-//! 8       ...   range-coded stream (crate::coder)
+//! 0       2     filter selector: [kind, param] (`filters::select::Candidate`)
+//! 2       4     declared output length, u32 LE
+//! 6       4     token count, u32 LE
+//! 10      ...   range-coded stream (crate::coder), of the FILTERED bytes
 //! ```
+//!
+//! `docs/adr/0027-wire-filter-selection.md` added the 2-byte filter
+//! selector ahead of the layout ADR-0026 shipped; decoding a frame that
+//! named `FORMAT_VERSION` 1 under this layout would misread those two
+//! bytes as part of the declared length, so [`crate::decompress`] rejects
+//! any `Method::Lz` frame naming a version below `LZ_MIN_VERSION`
+//! before calling [`decode`] at all, rather than relying on this parser's
+//! own adversarial-input defenses to fail safely by coincidence.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -34,9 +40,15 @@ use std::num::NonZeroU32;
 
 use crate::Error;
 use crate::coder::{Decoder, Encoder};
+use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
+
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload this build can
+/// decode: see the module docs' "Payload layout" section for the layout
+/// change that moved this from 1 to 2.
+pub(crate) const LZ_MIN_VERSION: u8 = 2;
 
 /// Largest declared output length [`decode`] accepts, checked before any
 /// allocation or decode work: `rust-craft`'s allocation-discipline
@@ -151,8 +163,33 @@ fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
     (1u32 << bits) | ac.decode_bits(bits)
 }
 
-/// Encodes `data` through the LZ + context-mixing pipeline (no filters;
-/// see the module docs).
+/// Applies `candidate`'s filter to `data`, or returns a copy of it
+/// unchanged for [`Candidate::Identity`]. Every filter here preserves
+/// length, so the result is always `data.len()` bytes.
+fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
+    match candidate {
+        Candidate::Identity => data.to_vec(),
+        Candidate::Delta(stride) => filters::delta::encode(data, stride),
+        Candidate::Bcj => filters::bcj::encode(data),
+        Candidate::Transpose(columns) => filters::transpose::encode(data, columns),
+    }
+}
+
+/// Inverse of [`apply_filter`]: reconstructs the original bytes from
+/// `data` (the filtered bytes [`decode`] just reassembled) and the
+/// `candidate` its payload named.
+fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Vec<u8> {
+    match candidate {
+        Candidate::Identity => data,
+        Candidate::Delta(stride) => filters::delta::decode(&data, stride),
+        Candidate::Bcj => filters::bcj::decode(&data),
+        Candidate::Transpose(columns) => filters::transpose::decode(&data, columns),
+    }
+}
+
+/// Encodes already-filtered `data` through the LZ + context-mixing
+/// pipeline: [`encode`]'s per-candidate trial body, and the whole of what
+/// this function used to be before filter trial-selection wrapped it.
 ///
 /// # Panics
 ///
@@ -160,8 +197,7 @@ fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
 /// header field is a `u32`, the same bound [`lz::parse_greedy`] already
 /// enforces. [`crate::compress`] checks this before calling in, so
 /// nothing reachable from the public API hits it today.
-#[must_use]
-pub fn encode(data: &[u8]) -> Vec<u8> {
+fn encode_tokens(data: &[u8]) -> Vec<u8> {
     let declared_len = u32::try_from(data.len())
         .expect("codec::encode: input longer than u32::MAX is not supported yet");
 
@@ -206,6 +242,39 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&declared_len.to_le_bytes());
     out.extend_from_slice(&token_count.to_le_bytes());
     out.extend(ac.finish());
+    out
+}
+
+/// Encodes `data` into a `Method::Lz` payload: trials every candidate
+/// filter [`filters::select::pick`] shortlists, keeps whichever produces
+/// the smallest `encode_tokens` body, and prefixes that body with the
+/// winning candidate's 2-byte selector (see the module docs' "Payload
+/// layout"). Filters are trialed against the raw input directly (never
+/// stacked), matching the archive's `encode`.
+///
+/// # Panics
+///
+/// Panics if `data.len()` exceeds `u32::MAX`; see `encode_tokens`'s
+/// docs, which this delegates to per candidate.
+#[must_use]
+pub fn encode(data: &[u8]) -> Vec<u8> {
+    let mut best: Option<(Candidate, Vec<u8>)> = None;
+    for candidate in filters::select::pick(data) {
+        let filtered = apply_filter(candidate, data);
+        let body = encode_tokens(&filtered);
+        if best
+            .as_ref()
+            .is_none_or(|(_, existing)| body.len() < existing.len())
+        {
+            best = Some((candidate, body));
+        }
+    }
+    let (candidate, body) =
+        best.expect("filters::select::pick always returns at least Candidate::Identity");
+
+    let mut out = Vec::with_capacity(2 + body.len());
+    out.extend_from_slice(&candidate.to_header_bytes());
+    out.extend(body);
     out
 }
 
@@ -283,15 +352,17 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 ///
 /// # Errors
 ///
-/// Returns [`Error::Truncated`] if `payload` is shorter than the 8-byte
-/// declared-length/token-count header. Returns [`Error::TooLarge`] if the
-/// declared length exceeds [`MAX_DECODED_LEN`], checked before any
-/// allocation or decode work. Returns [`Error::Corrupt`] if a match or rep
-/// token's distance reaches before the start of decoded output, if a
-/// token would grow decoded output past the declared length, or if the
-/// final decoded length does not equal it: all adversarial or malformed
-/// input, never a bug in this decoder (`rust-craft` skill,
-/// panic-discipline).
+/// Returns [`Error::Truncated`] if `payload` is shorter than the 2-byte
+/// filter selector plus the 8-byte declared-length/token-count header.
+/// Returns [`Error::Corrupt`] if the filter selector is not one
+/// [`Candidate::from_header_bytes`] recognizes. Returns
+/// [`Error::TooLarge`] if the declared length exceeds
+/// [`MAX_DECODED_LEN`], checked before any allocation or decode work.
+/// Returns [`Error::Corrupt`] if a match or rep token's distance reaches
+/// before the start of decoded output, if a token would grow decoded
+/// output past the declared length, or if the final decoded length does
+/// not equal it: all adversarial or malformed input, never a bug in this
+/// decoder (`rust-craft` skill, panic-discipline).
 ///
 /// # Panics
 ///
@@ -303,6 +374,9 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// MAX_DECODED_LEN` (a `u32`) back down from the `usize` `read_header`
 /// widened it to.
 pub fn decode(payload: &[u8]) -> Result<Vec<u8>, Error> {
+    let (filter_bytes, payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
+    let candidate =
+        Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
     let (declared_len, token_count, ac_bytes) = read_header(payload)?;
     if declared_len > MAX_DECODED_LEN as usize {
         // declared_len was cast up from the header's u32 field (read_header),
@@ -358,7 +432,7 @@ pub fn decode(payload: &[u8]) -> Result<Vec<u8>, Error> {
     if output.len() != declared_len {
         return Err(Error::Corrupt);
     }
-    Ok(output)
+    Ok(undo_filter(candidate, output))
 }
 
 #[cfg(test)]
@@ -446,9 +520,54 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_columnar_drift_data_uses_a_non_identity_filter() {
+        // Four independent small-step random walks, one per column, laid
+        // out row-major with a 4-byte stride: consecutive same-column
+        // bytes drift by a small step (filters::select::pick ranks
+        // Candidate::Delta(4) top for exactly this shape — mirrors its
+        // own pick_selects_delta_for_columnar_drift test), but
+        // consecutive raw bytes belong to different, unrelated walks.
+        // Proves encode() actually wires a trial-selected filter into the
+        // frame, not just plumbs pick() through unused, and that decode()
+        // correctly reverses it.
+        const STEPS: [u8; 5] = [0u8.wrapping_sub(2), 0u8.wrapping_sub(1), 0, 1, 2];
+        let mut rng = crate::test_support::Xorshift32::new(0x1234_5678);
+        let mut walk = [64u8, 96, 160, 200];
+        let rows = 2000usize;
+        let mut data = Vec::with_capacity(rows * walk.len());
+        for _ in 0..rows {
+            for col in &mut walk {
+                let state = rng.next().expect("Xorshift32 never terminates");
+                let step = STEPS[usize::try_from(state % 5).unwrap_or(0)];
+                *col = col.wrapping_add(step);
+                data.push(*col);
+            }
+        }
+
+        let encoded = encode(&data);
+        assert_ne!(
+            encoded[0], 0,
+            "columnar drift data should select a non-identity filter, got kind byte {}",
+            encoded[0]
+        );
+        assert_eq!(decode(&encoded).as_deref(), Ok(data.as_slice()));
+    }
+
+    #[test]
     fn truncated_header_is_rejected() {
         assert_eq!(decode(&[0u8; 4]), Err(Error::Truncated));
         assert_eq!(decode(&[]), Err(Error::Truncated));
+    }
+
+    #[test]
+    fn unknown_filter_selector_is_rejected_not_panicking() {
+        // Kind byte 5 names no Candidate::from_header_bytes ever produces
+        // (0=Identity, 1=Delta, 2=Bcj, 3=Transpose): an adversarial or
+        // future-format payload, never a bug in this decoder.
+        let mut payload = vec![5u8, 0u8];
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        assert_eq!(decode(&payload), Err(Error::Corrupt));
     }
 
     #[test]
@@ -461,7 +580,8 @@ mod tests {
         // this actually now hits the TooLarge fast-reject path below
         // before token_count is even consulted; kept as Corrupt's own
         // regression case too since it predates that check.
-        let mut payload = u32::MAX.to_le_bytes().to_vec();
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&u32::MAX.to_le_bytes());
         payload.extend_from_slice(&0u32.to_le_bytes());
         assert_eq!(decode(&payload), Err(Error::TooLarge(u32::MAX)));
     }
@@ -475,7 +595,8 @@ mod tests {
         // length-bounds-work argument (true, but declared_len itself was
         // unbounded); now rejected in zero loop iterations.
         let over = MAX_DECODED_LEN + 1;
-        let mut payload = over.to_le_bytes().to_vec();
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&over.to_le_bytes());
         payload.extend_from_slice(&over.to_le_bytes());
         assert_eq!(decode(&payload), Err(Error::TooLarge(over)));
     }
@@ -495,7 +616,8 @@ mod tests {
         let _ = context;
         let ac_bytes = ac.finish();
 
-        let mut payload = 4u32.to_le_bytes().to_vec(); // declared_len
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&4u32.to_le_bytes()); // declared_len
         payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
         payload.extend(ac_bytes);
 

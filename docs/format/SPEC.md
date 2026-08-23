@@ -1,4 +1,4 @@
-# mothergod bitstream format — DRAFT (FORMAT_VERSION 1)
+# mothergod bitstream format — DRAFT (FORMAT_VERSION 2)
 
 Status: **unstable**. Anything may change until version 1 is frozen (ROADMAP
 M4). This document is normative for the current code; code and spec must
@@ -9,14 +9,18 @@ change in the same PR.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 1)
+4       1     format version (currently 2)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
 
 A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
 (`BadMagic`), version greater than it supports (`UnsupportedVersion`),
-unknown method (`UnknownMethod`).
+unknown method (`UnknownMethod`). A `Method::Lz` payload additionally
+requires format version >= 2 (`codec::LZ_MIN_VERSION`): version 1 named a
+different, incompatible `Lz` payload layout (ADR-0026, superseded by
+ADR-0027), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
+rather than parsed under the current layout.
 
 ## Methods
 
@@ -25,20 +29,33 @@ unknown method (`UnknownMethod`).
 | 0x00 | Stored | the original data, verbatim |
 | 0x01 | Lz     | see below |
 
-### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2)
+### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0027)
 
-Optimal-parse LZ tokens (`src/lz.rs`), entropy-coded by adaptive flag/
-length/offset/rep-slot tables (`src/model.rs`) and a six-expert
-context-mixing literal model (`src/literal.rs`), over an adaptive range
-coder (`src/coder.rs`). No filter pass yet (`src/filters.rs` is ported but
-not wired in): the payload always covers the raw frame data.
+A trial-selected filter (`src/filters.rs`: none, delta, BCJ, or
+transpose — `filters::select::pick` shortlists candidates,
+`codec::encode` keeps whichever produces the smallest payload) applied to
+the frame data, then optimal-parse LZ tokens (`src/lz.rs`), entropy-coded
+by adaptive flag/length/offset/rep-slot tables (`src/model.rs`) and a
+six-expert context-mixing literal model (`src/literal.rs`), over an
+adaptive range coder (`src/coder.rs`).
 
 ```
 offset  size  field
-0       4     declared output length, u32 LE
-4       4     token count, u32 LE
-8       ...   range-coded stream
+0       2     filter selector: [kind, param]
+2       4     declared output length, u32 LE
+6       4     token count, u32 LE
+10      ...   range-coded stream, of the FILTERED bytes
 ```
+
+Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
+`param` is the delta stride or transpose column count, `1..=255`; zero for
+kinds that take none (0, 2). A decoder MUST reject any other `[kind, param]`
+pair as `Corrupt` (`filters::select::Candidate::from_header_bytes`) — an
+unrecognized kind, or a zero `param` on a kind that requires one. Every
+filter this format defines preserves length, so "declared output length"
+above is also the length of the *filtered* bytes: a decoder reconstructs
+those first, checks their length against this field, and only then reverses
+the filter to recover the original frame data.
 
 Offset-bucket/rep-code disjointness (see the invariant below): a
 `Token::Match`'s distance is coded as a bucket symbol plus residual bits

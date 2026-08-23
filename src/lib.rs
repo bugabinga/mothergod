@@ -22,12 +22,20 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 
 /// Container format version written into frames produced by this crate.
 ///
-/// Bumped to 1 when [`Method::Lz`] was added (`docs/adr/0026-wire-the-lz-context-mixing-method.md`):
-/// a new method byte is a bitstream format change (CLAUDE.md hard rule 5).
-/// A version-0 frame only ever contains [`Method::Stored`], which decodes
-/// identically under this build, so no separate version-0 decode path is
-/// needed: [`decompress`] already accepts any `version <= FORMAT_VERSION`.
-pub const FORMAT_VERSION: u8 = 1;
+/// Bumped to 1 when [`Method::Lz`] was added
+/// (`docs/adr/0026-wire-the-lz-context-mixing-method.md`), and to 2 when
+/// filter selection was wired into its payload
+/// (`docs/adr/0027-wire-filter-selection.md`): both are bitstream format
+/// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
+/// [`Method::Stored`], which decodes identically under this build, so no
+/// separate version-0 decode path is needed. A version-1 frame can
+/// contain a `Method::Lz` payload in a layout this build no longer
+/// parses (see [`codec`]'s module docs); [`decompress`] rejects that
+/// combination explicitly (`codec::LZ_MIN_VERSION`) rather than silently
+/// misreading it, so hard rule 5's "decode support for all previous
+/// versions, unless an ADR drops one" is satisfied by an explicit
+/// rejection, not by parsing it.
+pub const FORMAT_VERSION: u8 = 2;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +45,9 @@ pub enum Method {
     Stored = 0,
     /// Optimal-parse LZ tokens, entropy-coded by adaptive flag/length/
     /// offset/rep-slot models and a six-expert context-mixing literal
-    /// model, over an adaptive range coder. See [`codec`] for the payload
-    /// layout. Filters are not wired in yet.
+    /// model, over an adaptive range coder, behind whichever filter
+    /// (delta, BCJ, transpose, or none) trial-selection found smallest.
+    /// See [`codec`] for the payload layout.
     Lz = 1,
 }
 
@@ -150,6 +159,7 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     let method = Method::try_from(header[METHOD_OFFSET])?;
     match method {
         Method::Stored => Ok(payload.to_vec()),
+        Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
         Method::Lz => codec::decode(payload),
     }
 }
@@ -210,6 +220,22 @@ mod tests {
             frame.len()
         );
         assert_eq!(decompress(&frame), Ok(input));
+    }
+
+    #[test]
+    fn old_version_lz_frame_is_rejected_not_misparsed() {
+        // A frame naming FORMAT_VERSION 1 with Method::Lz predates the
+        // 2-byte filter selector codec.rs's payload now starts with
+        // (docs/adr/0027-wire-filter-selection.md). Decoding its payload
+        // under the new layout would misread those bytes as part of the
+        // declared length rather than a filter selector; decompress must
+        // reject the version/method combination outright instead
+        // (codec::LZ_MIN_VERSION).
+        let input = b"the quick brown fox jumps over the lazy dog".repeat(100);
+        let mut frame = compress(&input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+        frame[MAGIC.len()] = 1;
+        assert_eq!(decompress(&frame), Err(Error::UnsupportedVersion(1)));
     }
 
     #[test]
@@ -278,6 +304,7 @@ mod tests {
             FORMAT_VERSION,
             Method::Lz as u8,
         ];
+        frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
         assert_eq!(decompress(&frame), Err(Error::TooLarge(over)));
