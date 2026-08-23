@@ -1,13 +1,101 @@
 // Telegram webhook -> BDFL wake (issue #5). The bot's webhook points
-// here; deploy-telegram-worker.yml sets it. Three duties, nothing else:
-// authenticate Telegram, store the operator's update in KV, fire a
+// here; deploy-telegram-worker.yml sets it. Four duties, nothing else:
+// authenticate Telegram, store the operator's update in KV, show the
+// "typing..." indicator until an answer goes out, fire a
 // workflow_dispatch so the BDFL reads it within seconds. Heavy work
 // never happens here; the BDFL run is the brain, this is the doorbell.
+
+// sendChatAction's status expires after 5s, so the refresh sits just
+// inside that.
+const TYPING_TICK_MS = 4000;
+// A run that dies without answering must not leave the operator watching
+// a bot type forever. Past this, the indicator gives up; the reply, when
+// it comes, arrives on a quiet screen instead of a lying one.
+const TYPING_CAP_MS = 20 * 60 * 1000;
+
+/**
+ * The "typing..." indicator, as a self-refreshing alarm loop.
+ *
+ * It lives here rather than in the answering GitHub Actions run because
+ * the run is structurally unable to get it right (operator report,
+ * 2026-08-23, third attempt): the run starts seconds to minutes after
+ * the message it answers, so it cannot type during the wait that matters
+ * most, and when the lane is busy the run that types is not the run that
+ * answers. The worker is awake at the exact moment the operator's
+ * message arrives, which is the moment the indicator has to start.
+ *
+ * Two verbs, both idempotent: /start when a message lands, /stop when an
+ * answer goes out (`.github/scripts/tg-send`). One instance for one
+ * operator chat, so a second message during a long run just extends the
+ * same indicator.
+ */
+export class Typing {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request) {
+    if (new URL(request.url).pathname === "/start") {
+      await this.state.storage.put("deadline", Date.now() + TYPING_CAP_MS);
+      await this.state.storage.setAlarm(Date.now());
+    } else {
+      await this.state.storage.deleteAlarm();
+      await this.state.storage.deleteAll();
+    }
+    return new Response(null, { status: 204 });
+  }
+
+  async alarm() {
+    const deadline = await this.state.storage.get("deadline");
+    // No deadline means /stop won the race with a scheduled tick. Both
+    // exits leave no alarm, so the loop ends by not rescheduling.
+    if (!deadline || Date.now() >= deadline) {
+      await this.state.storage.deleteAll();
+      return;
+    }
+    await fetch(
+      `https://api.telegram.org/bot${this.env.BOT_TOKEN}/sendChatAction`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: this.env.OPERATOR_CHAT_ID,
+          action: "typing",
+        }),
+      },
+    ).catch(() => {});
+    await this.state.storage.setAlarm(Date.now() + TYPING_TICK_MS);
+  }
+}
+
+// Non-fatal by construction: a failed indicator loses decoration, never
+// data, so it must not abort the webhook that carries the message.
+async function typing(env, verb) {
+  try {
+    await env.TYPING.get(env.TYPING.idFromName("operator")).fetch(
+      `https://typing.invalid${verb}`,
+    );
+  } catch (error) {
+    console.error("typing", verb, error);
+  }
+}
 
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
       return new Response("mothergod telegram webhook", { status: 200 });
+    }
+    // The answer landed: stop typing. Authenticated with WEBHOOK_SECRET
+    // under a header of its own, because the secret's role is "may talk
+    // to this worker" and both callers are ours. Telegram's header name
+    // is Telegram's; ours says who we are.
+    if (new URL(request.url).pathname === "/typing/stop") {
+      if (request.headers.get("x-mothergod-secret") !== env.WEBHOOK_SECRET) {
+        return new Response(null, { status: 401 });
+      }
+      await typing(env, "/stop");
+      return new Response(null, { status: 204 });
     }
     // Telegram echoes the secret_token from setWebhook in this header;
     // a request without it is not Telegram.
@@ -52,6 +140,9 @@ export default {
         },
       ).catch(() => {});
     }
+    // Eyes, then typing: the operator asked for the indicator to start
+    // the moment the message is acknowledged.
+    await typing(env, "/start");
     // Wake the BDFL. The dispatch carries no message text (issue #36
     // principle): it says "wake up", the run reads KV for the prose.
     // Dispatch failure is tolerable: the update is already in KV and
