@@ -136,7 +136,10 @@ jobs:
           prompt: |
             PR to review: #$PR_NUMBER, authored by $PR_AUTHOR. Both are in
             your environment; every gh command below takes $PR_NUMBER.
-            Read first: CLAUDE.md, agents/GOVERNANCE.md, research/JOURNAL.md.
+            Read first: agents/GOVERNANCE.md. Read research/JOURNAL.md
+            when the diff touches src/ or research/, and enter it
+            through its headings (grep -n '^#'), never whole
+            (ADR-0025).
             Everything you post follows CLAUDE.md's Voice rules; the one
             reviews keep breaking is: no em dash, ever (retrospect,
             2026-08-23, PR #96 verdict).

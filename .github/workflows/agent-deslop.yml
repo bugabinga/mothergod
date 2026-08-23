@@ -67,7 +67,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
           prompt: |
-            Read first, in this order: CLAUDE.md,
+            Read first, in this order:
             .claude/skills/deslop/SKILL.md (your operating manual, with
             the taxonomy in its references/ directory), then
             agents/GOVERNANCE.md.
