@@ -673,12 +673,12 @@ record.
   as `Error::Corrupt` rather than panicking (`rust-craft` skill,
   allocation- and panic-discipline) — the first code in this crate to
   face an attacker-controlled length or distance field, since `decompress`
-  had only ever handled `Method::Stored` before this. | 20 new `codec`
+  had only ever handled `Method::Stored` before this. | 12 new `codec`
   unit tests (round-trip across empty/single-byte/cyclic/pseudo-random/
   binary-with-zeros/a real 25,524-byte source file, plus three
   adversarial-decode cases: truncated header, a declared-length lie with
   zero tokens, and a match distance reaching before output start), 3 new
-  `tests/adversarial/` seed fixtures, 4 new `lib.rs`-level tests
+  `tests/adversarial/` seed fixtures, 3 new `lib.rs`-level tests
   (Method::Lz selection, Stored fallback for tiny and incompressible
   input); `cargo fmt`/`clippy --all-targets -- --deny
   warnings`/`test --all-targets`/`test --doc`/`doc --no-deps` all clean.
