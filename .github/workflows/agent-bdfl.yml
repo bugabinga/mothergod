@@ -293,7 +293,13 @@ jobs:
             - Outbound, status line (operator directive, Telegram,
               2026-08-22): end EVERY run, scheduled and silent no-ops
               included, with one terse Telegram message: wake reason,
-              what you did or "no-op". One line, two at most.
+              what you did or "no-op". One line, two at most. The
+              status line rides the run's LAST Telegram message: a
+              run that already owes the operator a reply (inbox
+              answer, digest summary, alert) folds the status line
+              into that final reply instead of sending it separately,
+              because two messages describing one wake read as two
+              runs (operator report, 2026-08-23).
             - Outbound, everything else (no noise): pause alerts are
               automatic in the workflows; beyond the status line you
               send only dire situations that need the operator now, the
