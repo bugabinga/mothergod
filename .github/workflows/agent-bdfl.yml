@@ -386,18 +386,22 @@ jobs:
               is the receipt. Never call getUpdates; webhook mode owns
               the stream.
             - Chat memory (operator request, 2026-08-23): runs are
-              amnesiac, the log is the continuity. Key `chatlog` in
-              the same namespace holds a JSON array of the last 40
-              entries {from, message_id, date, text}. On a chat wake
-              read it before answering; after the drain append each
-              processed message and a one-line summary of each reply
-              you sent, trim to 40, write it back. Message edits
+              amnesiac, key `chatlog` in the same namespace is the
+              continuity. It holds the last 40 entries
+              {from, message_id, date, text, run_id} and it writes
+              itself: the worker appends the operator's message when
+              it arrives, tg-send appends every reply it delivers.
+              Never append by hand. Read it on a chat wake before
+              answering, and read it whenever you cannot account for
+              what this run already did: an entry carrying this run's
+              id is proof you already spoke, which is the difference
+              between one status line and two (#183). Message edits
               never reach the system by design (webhook subscribes
               to new messages only); a correction is a new message.
-              Retention: the log is operator conversation persisted
-              beyond the run; 40 entries is the whole policy, nothing
-              else accumulates there, and if the operator asks for it
-              to be trimmed or deleted, that happens the same run.
+              Retention: 40 entries is the whole policy, trimmed by
+              those same two writers, nothing else accumulates there,
+              and an operator request to trim or delete the log
+              happens the same run.
             - Outbound, how: send with
               `.github/scripts/tg-send [--reply-to <message_id>]`,
               body on stdin, message_id on stdout. It links every

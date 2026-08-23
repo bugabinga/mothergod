@@ -4,7 +4,7 @@
 Extensionless and executable because agents type it as a command mid-session,
 like settle-push.
 
-It owns five things every agent otherwise redoes by hand, three of which fail
+It owns six things every agent otherwise redoes by hand, three of which fail
 silently when done wrong:
 
 - `#142` becomes a link (operator request, 2026-08-23). GitHub's `/issues/<n>`
@@ -22,6 +22,8 @@ silently when done wrong:
   the operator gets an answer. The worker starts it when their message lands
   and keeps it up while answers are still owed (infra/telegram-worker/); a
   delivered message is the only honest way to decrement that.
+- The delivery is recorded in the KV chat log, because this process is the
+  only party that knows the send succeeded (#183).
 
 Reads the body from stdin, prints the sent message_id to stdout so the caller
 can log it or reply to it.
@@ -46,6 +48,14 @@ LIMIT = 4096  # Telegram's hard cap on message text
 # The webhook worker, whose custom domain is set in
 # infra/telegram-worker/wrangler.toml.
 STOP_TYPING = "https://bot.mothergod.dev/typing/stop"
+# The chat log: one KV key holding the last KEEP turns of operator
+# conversation, the only memory that outlives a run. Same key the webhook
+# worker appends the operator's side to (infra/telegram-worker/worker.js).
+KV = ("https://api.cloudflare.com/client/v4/accounts/{}"
+      "/storage/kv/namespaces/{}/values/{}")
+CHATLOG = "chatlog"
+KEEP = 40  # entries retained; this number is the whole retention policy
+SUMMARY = 200  # chars of an entry's text; 40 entries must stay one screenful
 
 # A ref is `#<digits>`. Not preceded by a word character, `/` or `#`, so
 # `abc#1`, a URL fragment and `##1` are left alone.
@@ -122,8 +132,119 @@ def main() -> int:
         return 1
 
     stop_typing()
+    record(sent["result"], reply_to, body)
     print(sent["result"]["message_id"])
     return 0
+
+
+def record(sent: dict, reply_to: int | None, body: str) -> None:
+    """Append this delivery to the KV chat log, so the next context knows.
+
+    Runs are amnesiac and the chat log is the continuity. Every other channel
+    this project writes to leaves its receipt in the repository; Telegram was
+    the only write-only one, so a run that crossed a context boundary could not
+    tell whether it had already sent the operator's status line, and both
+    available answers were wrong: send again and one wake reads as two runs,
+    stay quiet and a 40-minute run ends silent (#183, observed in run
+    32656616847, which stayed quiet).
+
+    The receipt belongs here rather than in a prompt instruction because this
+    process is the only party that knows the send succeeded, and bookkeeping an
+    agent has to remember is bookkeeping it will eventually forget (ADR-0022).
+    `run_id` is what turns "have I already spoken?" from a coin flip into a
+    lookup.
+
+    Never fatal. The message is already delivered, so a non-zero exit here
+    would report a failure that did not happen and the caller would resend it.
+    A lost receipt costs the next context its certainty, which is exactly the
+    state this function replaces, and it says so on stderr rather than
+    pretending.
+    """
+    account = os.environ.get("KV_ACCOUNT")
+    namespace = os.environ.get("KV_NAMESPACE")
+    token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    if not (account and namespace and token):
+        print("tg-send: sent, but no Cloudflare credentials in the environment,"
+              " so nothing recorded it; a later context cannot tell that this "
+              "run already spoke", file=sys.stderr)
+        return
+
+    entry = {
+        "from": "bdfl",
+        "message_id": sent["message_id"],
+        "date": sent["date"],
+        "text": summarize(body),
+        "run_id": os.environ.get("GITHUB_RUN_ID"),
+    }
+    if reply_to is not None:
+        entry["reply_to"] = reply_to
+
+    url = KV.format(account, namespace, CHATLOG)
+    try:
+        log = kv_read(url, token)
+        log.append(entry)
+        kv_write(url, token, log[-KEEP:])
+    except (OSError, ValueError) as error:
+        print(f"tg-send: sent, but the chat log was not updated: "
+              f"{scrub(str(error), token)}", file=sys.stderr)
+
+
+def summarize(body: str) -> str:
+    """One scannable line of what was said, not a copy of it.
+
+    The log is memory, not an archive: 40 entries have to be readable in one
+    screenful, and the message itself is already in the operator's client.
+    """
+    line = " ".join(body.split())
+    return line if len(line) <= SUMMARY else line[: SUMMARY - 1] + "…"
+
+
+def kv_read(url: str, token: str) -> list:
+    """The chat log as it stands, or an empty one.
+
+    A missing key is an empty log, not a failure: that is the state before the
+    first message ever sent. Anything else that is not a JSON array is
+    corruption, and overwriting it costs less than a sender that refuses to
+    record because someone once wrote a string there.
+    """
+    request = urllib.request.Request(url, headers=kv_headers(token))
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            log = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return []
+        raise
+    except json.JSONDecodeError:
+        return []
+    return log if isinstance(log, list) else []
+
+
+def kv_write(url: str, token: str, log: list) -> None:
+    """Replace the chat log.
+
+    Cloudflare's write endpoint takes multipart/form-data with a `value` part.
+    A raw body gets a 400 whose message does not mention multipart, so the
+    shape is spelled out here once instead of being rediscovered.
+    """
+    boundary = "----mothergod-chatlog"
+    body = (f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="value"\r\n\r\n'
+            f"{json.dumps(log)}\r\n"
+            f"--{boundary}--\r\n").encode()
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="PUT",
+        headers={**kv_headers(token),
+                 "Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    urllib.request.urlopen(request, timeout=20).close()
+
+
+def kv_headers(token: str) -> dict:
+    """Cloudflare's edge answers 403 to urllib's default User-Agent."""
+    return {"Authorization": f"Bearer {token}", "User-Agent": UA}
 
 
 def stop_typing() -> None:
