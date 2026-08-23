@@ -314,14 +314,59 @@ record.
   encoding will both need to agree on it. Remaining M1 scope: see
   S2-D2 (now `lz_opt`'s DP price tables, the context-mixing entropy
   models, the range coder, and `Method` wiring).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A8 filter,
-  trial-selection, and greedy-LZ slices: `lz_opt`'s DP-priced optimal
-  parse (2-round price iteration over the entropy models' own frequency
-  tables, using `lz::parse_greedy`'s hash-chain match finder and rep
-  cache); the context-mixing entropy models (`Lit` six-expert arena,
-  flag/length/offset models); the range coder (`Enc`/`Dec`); and wiring
-  all of it (including `select::pick`) behind a new `Method` variant
-  with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
+- S2-A9 | ACCEPTED | Eighth slice of M1, and the second LZ slice: the
+  DP-priced optimal parse ported to `src/lz.rs` as `parse_optimal`,
+  backed by a new `dp_round` (one DP pass) and `PriceCounts`/`PriceTable`
+  (the archive's frequency-table price model). Behavior ported from the
+  archive's `lz_opt` (`research/imports/session-1/mothergod.rs`), not the
+  code (ADR-0006): a first pass with `parse_greedy` seeds a price table
+  (16-context nibble literal histogram, length/offset bucket histograms,
+  a scalar rep price), two DP rounds each find the min-price path under
+  the current table, and round 0's resulting tokens reseed a sharper
+  table for round 1 — the archive's own 2-round structure, not iterated
+  to convergence. Below `OPTIMAL_MIN_LEN` (64 bytes) falls back straight
+  to `parse_greedy`, matching the archive's `n<64` short-circuit; the
+  archive's `carry` reuse (a long match found at one position is one byte
+  shorter at the next, same distance, so a match ≥64 bytes doesn't repeat
+  a fresh 640-try hash-chain search at every position it spans) is
+  ported unchanged. | One deliberate correctness fix over the archive's
+  own DP, not a port of its behavior: on a fresh (non-repeat) match, the
+  archive's `lz_opt` updates its internal price-simulation rep cache by
+  deduplicating the new distance against the existing three slots
+  (dropping whichever slot already held it), but the archive's actual
+  decoder (`decode`, not `lz_opt`) always shifts blindly — the same rule
+  this crate's `replay` already implements via `RepCache::push_front`.
+  Porting the dedup rule would let the DP choose a later `Token::Rep`
+  slot based on a cache state `replay` never reaches, corrupting
+  round-trip exactly when a fresh match's distance happens to coincide
+  with an already-cached one (`rust-craft` skill, invariant-mismatch:
+  the DP's internal bookkeeping and the actual replay/decode bookkeeping
+  must be the same function, or a later token silently references the
+  wrong state). Hard rule 1 makes that not a judgment call: `dp_round`'s
+  cache updates always match `replay`'s (`RepCache::push_front` on
+  `Token::Match`, `RepCache::promote` on `Token::Rep`), so this class of
+  bug cannot occur here regardless of input. | 11 new unit tests mirroring
+  `parse_greedy`'s suite (empty, single byte, below-`OPTIMAL_MIN_LEN`
+  falls back to `parse_greedy` exactly, all-literals, a simple repeat, an
+  overlapping run-length fixture, a 200,000-byte run exercising the carry
+  path, an alternating rep-cache fixture, cyclic data, a structured
+  near-duplicate fixture, zero-byte binary data, dense 3-byte-distance
+  repeats exercising the length-3 short-match candidate, and a
+  xorshift-based pseudo-random fixture), every one asserting
+  `replay(parse_optimal(data)) == data` plus the `MAX_MATCH_LEN` bound;
+  `cargo fmt`/`clippy --all-targets -- --deny warnings`/`test
+  --all-targets`/`test --doc`/`doc --no-deps` all clean. | No bpb
+  measurement, same reason as S2-A2 through S2-A8: not yet wired to a
+  `Method` variant, no entropy coder to measure a real bitstream through
+  — `progress.jsonl` records this as `kind: "patch"` with null bpb
+  deltas. Remaining M1 scope: see S2-D2 (now the context-mixing entropy
+  models, the range coder, and `Method` wiring only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A9 filter,
+  trial-selection, and LZ slices: the context-mixing entropy models
+  (`Lit` six-expert arena, flag/length/offset models); the range coder
+  (`Enc`/`Dec`); and wiring all of it (including `select::pick` and
+  `lz::parse_optimal`) behind a new `Method` variant with a
+  `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
   `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
   behavior, not code, per ADR-0006). One PR per module per the M1
   checklist.
