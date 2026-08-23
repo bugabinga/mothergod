@@ -455,14 +455,6 @@ jobs:
                  clean needs only the REST squash merge. Either way
                  land by REST once the four gates are green,
                  blocked-on-human if still stuck.
-               - An open non-draft PR, gates green, no reviewer verdict
-                 on the current head — the review check passed
-                 vacuously via the action's anti-tamper skip because
-                 the branch's agent-review.yml predates a merged change
-                 (GOVERNANCE.md "The reviewer skips any PR", first hit
-                 PR #71). Rescue: merge main into the branch with a
-                 deliberate push identity; synchronize re-triggers
-                 review.
                - A draft PR with green gates and a verdict older than
                  the latest push (issue #70). Agents never draft
                  (CLAUDE.md rule 11), so an agent-authored one is a
