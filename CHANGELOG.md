@@ -87,6 +87,9 @@ All notable changes to this project are documented here. Format follows
   the integer-only path `JOURNAL` S1-A5 records as accepted, to resolve
   before the Method-wiring PR that will need an ADR and `FORMAT_VERSION`
   bump anyway.
+- `#![forbid(unsafe_code)]` on the `mothergod` crate root (issue #76): no
+  `unsafe` exists in `src/` today, so the gate costs nothing and closes
+  that door permanently.
 
 ### Removed
 
