@@ -99,22 +99,34 @@ it will fail (issue #24, PR #22 postmortem).
 
 `claude-code-action` refuses to start when the branch's copy of the
 running workflow file differs from `main`'s, its anti-tamper
-validation. The skip exits 0, so the required `review` check passes
-vacuously: green `review` alone is not evidence of review. Two ways in,
-both observed on 2026-08-22:
+validation. The refusal exits 0, so the job would go green having
+reviewed nothing. Two ways in, both observed on 2026-08-22:
 
 - The PR edits `agent-review.yml` itself (PR #69). No agent review is
-  possible; the PR lands by BDFL discretion once the four quality
-  gates are green, the envelope authority (ADR-0008) acting as
-  reviewer of last resort for its own machinery.
+  possible, now or on any future push; the PR lands by BDFL discretion
+  once the four quality gates are green, the envelope authority
+  (ADR-0008) acting as reviewer of last resort for its own machinery.
 - The PR branched before a reviewer-workflow change merged, so its
   copy went stale (PR #68's re-review, 32-second run). Every open PR
   is unreviewable from the moment such a change lands until its
-  branch merges `main` back in. The failure mode is a silent stall,
-  never an unreviewed merge, because only the reviewer merges; the
-  rescue is mechanical: merge `main` into the branch, push with a
-  deliberate identity (see Push identity), and the synchronize event
-  re-triggers review.
+  branch merges `main` back in. The rescue is mechanical: merge
+  `main` into the branch, push with a deliberate identity (see Push
+  identity), and the synchronize event re-triggers review.
+
+This section used to claim the second case could only stall, never
+produce an unreviewed merge, "because only the reviewer merges."
+**That was false, and PR #111 is the counterexample:** it edited
+`agent-review.yml`, the reviewer skipped, the check went green in 26
+seconds, and the BDFL merged it four minutes later under the same
+carve-out the first bullet grants. Both cases reach an unreviewed
+merge; the two bullets differ only in whether a rescue exists.
+
+So the skip is now loud instead of green. The reviewer job fails when
+the action produced no execution file, and posts which case it is and
+what to do next. A vacuous pass is unreachable: green `review` is
+evidence of review again. `review` is not a required check, so the red
+blocks nothing, which is the point. It removes a false signal rather
+than adding a gate.
 
 ### Stalled auto-merge
 
