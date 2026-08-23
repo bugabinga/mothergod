@@ -103,6 +103,13 @@ All notable changes to this project are documented here. Format follows
   `research/corpus/POLICY.md`), ported from the founding session's
   `corpus.py`. Produces exactly the requested byte length from a small
   IP/path/status pool via the existing deterministic `Rng`.
+- Benchmark harness, second structured-generator slice (`research/JOURNAL.md`
+  S2-A15): `json_records` in the `bench` crate, a synthetic JSON API
+  response (the "json" class in `research/corpus/POLICY.md`), ported from
+  the founding session's `corpus.py`. Records carry a gaussian `score`
+  (Box-Muller, mean 50, stddev 15) and an `active` field true 80% of the
+  time; generates records until the requested byte length is reached,
+  same deviation as `access_log`.
 
 ### Removed
 
