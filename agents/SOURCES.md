@@ -98,9 +98,11 @@ Three constraints, all verified 2026-08-23:
   issue, or page quoting their numbers credits Artificial Analysis.
   Redistribution is a separate permission: ask them before their data
   lands on mothergod.dev.
-- **The API needs a key, so it is operator-only** (secrets row in
-  `agents/GOVERNANCE.md`). No key is configured yet; an agent that wants
-  this data files `blocked-on-human` rather than improvising.
+- **The API needs a key, and `ARTIFICIALANALYSIS_API_TOKEN` holds one.**
+  Provisioned by the operator and working: run `32649982042` fetched 197
+  models in 51 seconds. `agent-model-intel.yml` exits early with
+  `nothing to fetch` when the secret is absent, and that branch has never
+  fired. Do not file `blocked-on-human` for this key.
 - **The public site is JavaScript-rendered**, so there is no key-free
   path. A plain fetch of the leaderboard returns prose, not tables.
   Verified by fetching it.

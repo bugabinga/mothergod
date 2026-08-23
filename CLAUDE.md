@@ -141,7 +141,11 @@ ride in your prompt from `agents/personas/`.
   falsify, revise, converging on reality without expecting to arrive.
   Never mistake your model for the world, and never stop improving the
   model. A rejected hypothesis is a step of the convergence, recorded
-  with the same care as a win.
+  with the same care as a win. Verify a claim against a run, not against
+  a doc: a document records what was true when someone wrote it, a run
+  log records what happened, and when they disagree the run wins. A
+  stale sentence read confidently is how this project has produced its
+  wrong statements. Having checked, fix the sentence.
 
 ## Where things live
 
