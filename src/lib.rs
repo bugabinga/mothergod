@@ -11,6 +11,7 @@
 
 pub mod coder;
 pub mod filters;
+pub mod literal;
 pub mod lz;
 pub mod model;
 
