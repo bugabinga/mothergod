@@ -38,6 +38,10 @@ import urllib.error
 import urllib.request
 
 API = "https://api.telegram.org/bot{}/sendMessage"
+# Cloudflare's edge answers 403 to urllib's default User-Agent, so every
+# stop_typing() call was refused before reaching our own worker and the
+# indicator ran on until the worker capped it. Our tooling says who it is.
+UA = "mothergod-tg-send"
 LIMIT = 4096  # Telegram's hard cap on message text
 # The webhook worker, whose custom domain is set in
 # infra/telegram-worker/wrangler.toml.
@@ -100,7 +104,7 @@ def main() -> int:
     request = urllib.request.Request(
         API.format(token),
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": UA},
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -138,7 +142,10 @@ def stop_typing() -> None:
     if not secret:
         return
     request = urllib.request.Request(
-        STOP_TYPING, data=b"", headers={"x-mothergod-secret": secret}, method="POST"
+        STOP_TYPING,
+        data=b"",
+        headers={"x-mothergod-secret": secret, "User-Agent": UA},
+        method="POST",
     )
     try:
         urllib.request.urlopen(request, timeout=5).close()
