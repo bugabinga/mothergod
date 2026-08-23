@@ -57,6 +57,16 @@ founding port bug this section's invariant exists to rule out.
   declared output size for any input. For `Lz`, "declared output size" is
   the payload's own length field: the decoder never preallocates from it,
   only grows toward it, and rejects a token the instant it would exceed it.
+  That field is itself capped (`codec::MAX_DECODED_LEN`, currently 256
+  MiB): a ratio check against the payload's own byte count cannot bound
+  this format's amplification, because its adaptive models saturate fast
+  enough that a legitimate maximal-ratio frame and a forged header become
+  indistinguishable by size alone (measured: a real encode already reaches
+  a ~3,158:1 ratio at 60,000 input bytes, with the encoded size barely
+  moving as input grows past that). The ceiling is a decoder policy, not a
+  wire-format field, so raising it is not a `FORMAT_VERSION` bump; it is
+  provisional pending `ROADMAP.md` M4's streaming/block API, the intended
+  real fix for bounded-memory decode without a single hardcoded ceiling.
 - Bit-identical output across platforms for the same input and version:
   IEEE-754 basic float operations (`+ - * /`) are correctly rounded and
   reproducible, but libm transcendentals are not, so nothing on the decode

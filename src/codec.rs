@@ -25,7 +25,10 @@
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
 //! hostile payload can claim any token count or any match/rep length, but
 //! [`decode`] never grows its output buffer past this field, and never
-//! preallocates a capacity derived from it either. See [`decode`]'s docs.
+//! preallocates a capacity derived from it either. That field is itself
+//! capped at [`MAX_DECODED_LEN`], so a tiny payload cannot declare an
+//! unbounded length and force unbounded decode work; see
+//! [`MAX_DECODED_LEN`]'s docs for why, and [`decode`]'s docs for the rest.
 
 use std::num::NonZeroU32;
 
@@ -34,6 +37,35 @@ use crate::coder::{Decoder, Encoder};
 use crate::literal::{Context, Literal};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
+
+/// Largest declared output length [`decode`] accepts, checked before any
+/// allocation or decode work: `rust-craft`'s allocation-discipline
+/// reference calls this the "against a configured ceiling" bound, needed
+/// because general-purpose compression has no bound on output size
+/// derivable from the input alone.
+///
+/// A ratio-relative bound (declared length vs. remaining payload bytes)
+/// cannot substitute for this: measured directly (a release-mode
+/// `compress` run on a 60,000-byte single-repeated-byte input, the
+/// degenerate case this format's adaptive models handle best), a
+/// legitimate frame already reaches a ~3,158:1 ratio at a 19-byte payload,
+/// with the ratio still climbing as input grows and the payload barely
+/// moving — this format's models saturate fast enough that a real
+/// encoder's output and a forged header become indistinguishable by size
+/// alone. An explicit ceiling on the declared length itself is the only
+/// bound left, and it caps total decode work too: every token contributes
+/// at least one byte toward `declared_len` before `ensure_room` rejects
+/// it, so bounding the declared length bounds loop iterations as well as
+/// allocation.
+///
+/// 256 MiB, chosen to clear the largest single file in the M2 benchmark
+/// corpus (Silesia's `mozilla`, ~51 MB) with headroom, while keeping a
+/// worst-case adversarial decode (an all-padding, all-literal stream, the
+/// cheapest branch per iteration) bounded to low single-digit minutes
+/// rather than unbounded. Provisional: `ROADMAP.md` M4's streaming/block
+/// API is the real fix (bounded-memory decode without a single hardcoded
+/// file-size ceiling), and should widen or remove this once it lands.
+pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Flag symbols coded before every token, selecting which of the three
 /// kinds follows. Matches the archive's `flag.enc(ac, {0,1,2})`.
@@ -237,33 +269,48 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 
 /// Decodes a payload produced by [`encode`] back into the original bytes.
 ///
-/// Bounds decode work and allocation to the frame's declared output size
-/// (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline):
-/// `output` starts empty and grows one token at a time, never
-/// preallocated from the header's declared length, and every token is
-/// rejected the moment it would grow `output` past that length — so a
-/// payload lying about either the declared length or the token count
-/// cannot make this function do more work, or allocate more memory, than
-/// the length it declared allows.
+/// Bounds decode work and allocation to the frame's declared output size,
+/// itself bounded by [`MAX_DECODED_LEN`] (`docs/format/SPEC.md`,
+/// `rust-craft` skill's allocation-discipline): `output` starts empty and
+/// grows one token at a time, never preallocated from the header's
+/// declared length, and every token is rejected the moment it would grow
+/// `output` past that length — so a payload lying about either the
+/// declared length or the token count cannot make this function do more
+/// work, or allocate more memory, than the length it declared allows, and
+/// [`MAX_DECODED_LEN`] bounds what it is allowed to declare in the first
+/// place. See [`MAX_DECODED_LEN`]'s docs for why a fixed ceiling, not a
+/// ratio check against the payload's own size, is the sound bound here.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the 8-byte
-/// declared-length/token-count header. Returns [`Error::Corrupt`] if a
-/// match or rep token's distance reaches before the start of decoded
-/// output, if a token would grow decoded output past the declared length,
-/// or if the final decoded length does not equal it: all adversarial or
-/// malformed input, never a bug in this decoder (`rust-craft` skill,
+/// declared-length/token-count header. Returns [`Error::TooLarge`] if the
+/// declared length exceeds [`MAX_DECODED_LEN`], checked before any
+/// allocation or decode work. Returns [`Error::Corrupt`] if a match or rep
+/// token's distance reaches before the start of decoded output, if a
+/// token would grow decoded output past the declared length, or if the
+/// final decoded length does not equal it: all adversarial or malformed
+/// input, never a bug in this decoder (`rust-craft` skill,
 /// panic-discipline).
 ///
 /// # Panics
 ///
-/// Does not panic on adversarial `payload`. The one internal `.expect()`
-/// (turning a decoded match distance into a [`NonZeroU32`]) guards a
-/// mathematical invariant of `decode_bucketed`, not a property of
-/// `payload`: see that function's docs.
+/// Does not panic on adversarial `payload`. Two internal `.expect()`s
+/// guard invariants of this function's own math, never a property of
+/// `payload`: turning a decoded match distance into a [`NonZeroU32`]
+/// (a mathematical invariant of `decode_bucketed`, see that function's
+/// docs), and casting a declared length already found `<=
+/// MAX_DECODED_LEN` (a `u32`) back down from the `usize` `read_header`
+/// widened it to.
 pub fn decode(payload: &[u8]) -> Result<Vec<u8>, Error> {
     let (declared_len, token_count, ac_bytes) = read_header(payload)?;
+    if declared_len > MAX_DECODED_LEN as usize {
+        // declared_len was cast up from the header's u32 field (read_header),
+        // so casting back down here is always exact.
+        return Err(Error::TooLarge(u32::try_from(declared_len).expect(
+            "declared_len came from a u32 header field, so it always fits back into one",
+        )));
+    }
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::new();
@@ -410,13 +457,27 @@ mod tests {
         // a token count of 0: decode must reject the mismatch, and must
         // do so in zero loop iterations rather than trying to honor the
         // claim by preallocating or looping toward it (rust-craft skill,
-        // allocation-discipline). Deliberately not paired with a large
-        // token count too: that combination is a legal, if slow, maximal
-        // frame under this format's declared-length bound (ADR-0026), not
-        // a fast-reject case a unit test should exercise.
+        // allocation-discipline). u32::MAX exceeds MAX_DECODED_LEN, so
+        // this actually now hits the TooLarge fast-reject path below
+        // before token_count is even consulted; kept as Corrupt's own
+        // regression case too since it predates that check.
         let mut payload = u32::MAX.to_le_bytes().to_vec();
         payload.extend_from_slice(&0u32.to_le_bytes());
-        assert_eq!(decode(&payload), Err(Error::Corrupt));
+        assert_eq!(decode(&payload), Err(Error::TooLarge(u32::MAX)));
+    }
+
+    #[test]
+    fn declared_length_over_the_max_is_rejected_before_any_work() {
+        // The amplification hazard a ratio check cannot rule out (see
+        // MAX_DECODED_LEN's docs): declared_len and token_count agree with
+        // each other, both far past MAX_DECODED_LEN, with an empty coded
+        // stream. Previously legal-but-slow under ADR-0026's declared-
+        // length-bounds-work argument (true, but declared_len itself was
+        // unbounded); now rejected in zero loop iterations.
+        let over = MAX_DECODED_LEN + 1;
+        let mut payload = over.to_le_bytes().to_vec();
+        payload.extend_from_slice(&over.to_le_bytes());
+        assert_eq!(decode(&payload), Err(Error::TooLarge(over)));
     }
 
     #[test]

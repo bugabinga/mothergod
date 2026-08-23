@@ -710,6 +710,23 @@ record.
   touch decode or correctness, so it does not block this slice — it does
   block shipping `compress()` as trustworthy on arbitrary real-world input
   without a fix, which is why it is a `bug`, not a `LEAD`.
+  (3) Review caught a decode-side amplification bomb the fixed-token-count
+  argument above didn't cover: a 14-byte payload with `declared_len ==
+  token_count` (both large, no real coded bytes behind them) decodes
+  successfully, since `ensure_room` never fires when the two fields agree
+  with each other regardless of what the actual payload bytes support —
+  2,000,000 bytes in 2.35s measured, `u32::MAX` extrapolated to roughly 84
+  minutes and ~4 GiB, from the same 14 bytes. A ratio check against the
+  payload's own byte count can't fix this: measured directly, this
+  format's adaptive models saturate fast enough that a legitimate 60,000-
+  byte same-byte input already reaches a ~3,158:1 ratio at a 19-byte
+  frame, so a real maximal-ratio frame and a forged header are
+  indistinguishable by size alone. Fixed with `codec::MAX_DECODED_LEN`
+  (256 MiB), an explicit ceiling on the declared length checked before any
+  decode work — `rust-craft`'s allocation-discipline reference's "against
+  a configured ceiling" bound, chosen over "against remaining input"
+  because the latter doesn't hold here. Provisional pending `ROADMAP.md`
+  M4's streaming/block API.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

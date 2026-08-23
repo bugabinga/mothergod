@@ -126,9 +126,15 @@ All notable changes to this project are documented here. Format follows
   `Method::Stored` whenever that is not smaller. Decode bounds allocation
   and loop iterations to the payload's own declared output length rather
   than trusting it, and rejects a corrupt match/rep distance or a
-  declared-length mismatch as an error rather than panicking. Filter
-  selection is not wired in yet (`Method::Lz` always runs on raw input);
-  that remains open M1 scope. Measured 2.318 bits/byte on
+  declared-length mismatch as an error rather than panicking. The declared
+  output length itself is capped at 256 MiB (`codec::MAX_DECODED_LEN`,
+  new `Error::TooLarge`), checked before any decode work: without it, a
+  payload where the declared length and token count agree with each
+  other (both attacker-chosen, unrelated to the bytes actually sent)
+  could force multi-minute, multi-gigabyte decode work from a
+  double-digit-byte input. Filter selection is not wired in yet
+  (`Method::Lz` always runs on raw input); that remains open M1 scope.
+  Measured 2.318 bits/byte on
   `research/imports/session-1/mothergod.rs` (25,524 bytes), against
   `gzip -9`'s 2.392 bits/byte on the same file.
 

@@ -70,6 +70,14 @@ pub enum Error {
     /// reaching before the start of decoded output, or similar):
     /// adversarial or corrupted input, never a bug in this decoder.
     Corrupt,
+    /// Payload declares an output length larger than this decoder accepts
+    /// (`codec::MAX_DECODED_LEN`). A declared length alone is not bounded
+    /// by the bytes that encode it: this format's adaptive models can make
+    /// a handful of real payload bytes and a few million padding-decoded
+    /// bytes indistinguishable by size, so the only sound bound is an
+    /// explicit ceiling, checked before any allocation or decode work
+    /// happens (`rust-craft` skill, allocation-discipline).
+    TooLarge(u32),
 }
 
 impl core::fmt::Display for Error {
@@ -80,6 +88,11 @@ impl core::fmt::Display for Error {
             Self::UnsupportedVersion(v) => write!(f, "unsupported format version {v}"),
             Self::UnknownMethod(m) => write!(f, "unknown compression method {m}"),
             Self::Corrupt => write!(f, "compressed payload is corrupt"),
+            Self::TooLarge(len) => write!(
+                f,
+                "declared output length {len} exceeds this decoder's maximum ({} bytes)",
+                codec::MAX_DECODED_LEN
+            ),
         }
     }
 }
@@ -246,5 +259,27 @@ mod tests {
         let mut frame = compress(b"x");
         frame[MAGIC.len() + 1] = 0xFF;
         assert_eq!(decompress(&frame), Err(Error::UnknownMethod(0xFF)));
+    }
+
+    #[test]
+    fn lz_declared_length_over_the_max_is_rejected() {
+        // A tiny frame declaring an output far past codec::MAX_DECODED_LEN
+        // (and a matching token count, so the loop-iterations argument in
+        // codec::decode's docs doesn't save it either): must reject before
+        // doing any decode work, not just eventually. Public-API-level
+        // regression for the amplification hazard codec.rs's unit tests
+        // cover directly.
+        let over = codec::MAX_DECODED_LEN + 1;
+        let mut frame = vec![
+            MAGIC[0],
+            MAGIC[1],
+            MAGIC[2],
+            MAGIC[3],
+            FORMAT_VERSION,
+            Method::Lz as u8,
+        ];
+        frame.extend_from_slice(&over.to_le_bytes());
+        frame.extend_from_slice(&over.to_le_bytes());
+        assert_eq!(decompress(&frame), Err(Error::TooLarge(over)));
     }
 }
