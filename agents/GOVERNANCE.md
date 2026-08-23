@@ -150,9 +150,9 @@ both swept by the BDFL every run on open `agent-approved` PRs:
   (first hit PR #34, a CHANGELOG append collision). Rescue: merge
   `main` into the branch, resolve without judgment calls (append
   conflicts keep both sides), push with a deliberate identity (see
-  Push identity below), clear the held runs that push creates by
-  close/reopen, then land with the REST squash merge above once the
-  required gates are green.
+  Push identity below), settle it with
+  `.github/scripts/settle-push <pr>`, then land with the REST squash
+  merge above once the required gates are green.
 - Mergeable state clean, four gates green, auto-merge armed, PR still
   open: the branch tip is unsigned, so GitHub's own evaluation sits
   at `blocked` while the REST squash merge succeeds immediately
@@ -206,14 +206,16 @@ for pushes (first bullet above) and never for merges. The reviewer is
 exempt from all of this; its `gh` rides `github.token` job-wide
 already.
 
-A held `action_required` run is cleared by re-attributing its event,
-not by approving it (no agent token approves a held run, PR #43):
-close/reopen the PR with the default session token and the reopened
-event carries `claude[bot]`, whose runs start unheld. Verified live on
-PR #59: its final github.token-pushed commit held at the gate until
-close/reopen re-attributed the event and the runs started. One quirk
-observed on the same PR: two pushes seconds apart coalesce into one
-synchronize event attributed to the first pusher.
+A held `action_required` run is never cleared, only outrun: no agent
+token approves one (PR #43), so the correction is a fresh event
+carrying an accepted actor. `.github/scripts/settle-push <pr>` owns
+that correction and owns deciding whether it was needed, by reading
+the runs at the pushed SHA. Push, then settle. Do not predict, because
+prediction is the part that kept being wrong: on PR #59 two pushes
+seconds apart coalesced into one synchronize event attributed to the
+first pusher, which no rule written here had anticipated. The script
+compiles against run status, a documented API field, so it survives
+GitHub moving the attribution rules underneath it (issue #124).
 
 Scheduled workflows carry a landmine: GitHub attributes a schedule run
 to the account that landed the last change to the workflow's cron

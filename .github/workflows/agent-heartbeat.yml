@@ -85,12 +85,11 @@ jobs:
             unit of work:
             1. Open PRs that are red (failing checks) or have changes
                requested: pick the oldest, check out its branch, fix it, run
-               all quality gates from CLAUDE.md locally, push, then
-               close/reopen the PR with gh. The push rides github.token,
-               so its synchronize runs hold at the approval gate as
-               github-actions[bot]; the reopened event is
-               claude[bot]-attributed and its runs start unheld
-               (issue #57, GOVERNANCE.md "Push identity").
+               all quality gates from CLAUDE.md locally, push, then run
+               `.github/scripts/settle-push <pr>`: it proves the push's
+               runs are running and re-attributes them if GitHub held
+               them at the approval gate (issue #57). Trust its exit
+               code, not the push's.
                "Changes requested" never shows in the formal review state
                on agent PRs, because the shared claude[bot] identity cannot
                review its own PRs; the reviewer posts verdicts as issue
