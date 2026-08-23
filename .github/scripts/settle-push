@@ -27,7 +27,8 @@ exists not to rebuild.
 import json, os, subprocess, sys, time
 
 TIMEOUT = 120  # seconds to wait for runs to appear; they normally show in <10
-POLL = 10
+HEAD_TIMEOUT = 30  # seconds for the PR's head to catch up with the push
+POLL = 5
 
 
 def gh(*args):
@@ -77,11 +78,22 @@ def main():
 
     repo = os.environ.get("GITHUB_REPOSITORY") or gh(
         "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
-    pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
-    sha, state = pull["headRefOid"], pull["state"]
+    # The PR's head lags the push by a second or two, so a mismatch is only
+    # news once it has had time to settle. Diagnosing a healthy push as a lost
+    # one is the same defect as calling silence health, just louder.
+    deadline = time.monotonic() + HEAD_TIMEOUT
+    while True:
+        pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
+        sha, state = pull["headRefOid"], pull["state"]
+        if not expected or sha.startswith(expected) or expected.startswith(sha):
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(POLL)
 
     if expected and not sha.startswith(expected) and not expected.startswith(sha):
-        die(f"PR #{pr} head is {sha[:9]}, not the {expected[:9]} you pushed.",
+        die(f"PR #{pr} head is still {sha[:9]} after {HEAD_TIMEOUT}s,"
+            f" not the {expected[:9]} you pushed.",
             f"The push did not reach `{pull['headRefName']}`. The known cause is",
             "commit_files on a PR-comment run, which creates a literal `<n>/merge`",
             "branch parented on main instead (observed on PR #78).",
