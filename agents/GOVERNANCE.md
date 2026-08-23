@@ -65,7 +65,8 @@ mechanisms, all of which the BDFL may reshape on the record.
 | The Mission section of `ROADMAP.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011) |
 | Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |
 | Releases | Agent-prepared, operator-triggered until further notice |
-| Security-report triage, CoC enforcement, issuing/rotating credentials | Operator only; routing an existing secret between project-owned stores is BDFL per the repo-secrets row above, on the record (ADR-0009) |
+| Security-report triage, CoC enforcement | Operator only |
+| Secrets | BDFL, full governance (operator ruling, PR #101 review, 2026-08-23). The sole hard constraint is CLAUDE.md rule 10: a secret is never printed, logged, or leaked. The BDFL defers to the operator on unresolvable roadblocks, such as credentials only the operator can mint |
 
 ## Merging
 
