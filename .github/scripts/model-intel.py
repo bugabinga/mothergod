@@ -78,9 +78,22 @@ if not models:
 models.sort(key=lambda m: -m["score"])
 
 try:
-    ladders = json.load(open("agents/models.json"))["ladders"]
-except (OSError, ValueError, KeyError) as exc:
+    cfg = json.load(open("agents/models.json"))
+except (OSError, ValueError) as exc:
     bail(f"agents/models.json unreadable ({exc}).")
+
+# Two shapes are accepted on purpose. ADR-0018 shipped `ladders: {role: []}`
+# and ADR-0021 replaced it with `roles: {role: {ladder: [], effort: ""}}`.
+# Reading both means this script cannot be broken by the merge order of the
+# two PRs that introduced them, and failing open here would be the silent
+# degradation this whole job exists to prevent.
+if isinstance(cfg.get("roles"), dict):
+    ladders = {r: (v or {}).get("ladder") or [] for r, v in cfg["roles"].items()}
+elif isinstance(cfg.get("ladders"), dict):
+    ladders = cfg["ladders"]
+else:
+    bail("agents/models.json has neither a `roles` nor a `ladders` object.",
+         f"Top-level keys seen: `{', '.join(sorted(cfg))}`.")
 
 def norm(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
