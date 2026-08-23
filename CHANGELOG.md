@@ -31,6 +31,12 @@ All notable changes to this project are documented here. Format follows
   caller-supplied parameter, so `encode` prefixes a one-byte flag that
   `decode` reads back; supported by a new zero-dependency standard
   base64 encode/strict-decode pair (no base64 crate, per ADR-0002).
+- Codec port, fifth filter slice (`research/JOURNAL.md` S2-A6): a
+  byte-order reversal filter, ported from the founding session's
+  archived codec as a `reverse` submodule of `filters`. Self-inverse
+  (`encode` and `decode` are the same operation), covering M1's
+  filter-bank checklist in full: `pick_filters`, the LZ, model, and
+  coder modules remain.
 - Deslopper agent (ADR-0016): a fifth agent seat that removes slop from
   `src/` twice daily without changing observable behaviour, one scope per
   PR, approved by the reviewer like any other agent PR. Its taxonomy and

@@ -6,7 +6,7 @@
 //! to apply a filter; each submodule here only provides the reversible
 //! transform itself. The `pick_filters` trial-selection heuristic and
 //! wiring behind a [`crate::Method`] variant are follow-up slices
-//! (`JOURNAL` S2-D2). Remaining filter kind (reverse): same DEBT entry.
+//! (`JOURNAL` S2-D2).
 
 /// Fixed-stride delta filter.
 ///
@@ -586,6 +586,78 @@ pub mod base64_unwrap {
             let encoded = encode(&wrapped);
             assert_eq!(encoded[0], 1);
             assert_eq!(decode(&encoded), wrapped);
+        }
+    }
+}
+
+/// Byte-order reversal.
+///
+/// Wins when structure is right-anchored (a fixed suffix, a length-prefixed
+/// tail, records better predicted from their end than their start):
+/// reversing turns that right anchor into a left one, where the downstream
+/// LZ/model's recency bias and forward context actually reach it (`JOURNAL`
+/// S1-A2). Its own inverse: reversing twice reproduces the input, so
+/// [`decode`](reverse::decode) is [`encode`](reverse::encode) under a
+/// different name, kept as two functions to match this module's
+/// established encode/decode-pair shape.
+pub mod reverse {
+    /// Reverses `data`.
+    ///
+    /// Self-inverse: applying this function to its own output reproduces
+    /// the original `data`, so [`decode`] is this same operation.
+    #[must_use]
+    pub fn encode(data: &[u8]) -> Vec<u8> {
+        let mut out = data.to_vec();
+        out.reverse();
+        out
+    }
+
+    /// Inverts [`encode`]. Identical to [`encode`] because byte-order
+    /// reversal is its own inverse.
+    #[must_use]
+    pub fn decode(data: &[u8]) -> Vec<u8> {
+        encode(data)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn roundtrip_empty() {
+            assert_eq!(decode(&encode(&[])), Vec::<u8>::new());
+        }
+
+        #[test]
+        fn roundtrip_single_byte() {
+            assert_eq!(decode(&encode(&[42])), vec![42]);
+        }
+
+        #[test]
+        fn encode_reverses_byte_order() {
+            let data = vec![1, 2, 3, 4, 5];
+            assert_eq!(encode(&data), vec![5, 4, 3, 2, 1]);
+        }
+
+        #[test]
+        fn encode_twice_is_identity() {
+            let data = vec![1, 2, 3, 4, 5];
+            assert_eq!(encode(&encode(&data)), data);
+        }
+
+        #[test]
+        fn roundtrip_various_lengths() {
+            let data: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+            for len in [0usize, 1, 2, 3, 7, 255, 256, 1000] {
+                let slice = &data[..len];
+                assert_eq!(decode(&encode(slice)), slice, "len {len}");
+            }
+        }
+
+        #[test]
+        fn palindrome_is_a_fixed_point() {
+            let data = vec![1, 2, 3, 2, 1];
+            assert_eq!(encode(&data), data);
         }
     }
 }

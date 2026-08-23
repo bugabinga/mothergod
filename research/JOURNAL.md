@@ -219,20 +219,38 @@ record.
   `kind: "patch"` with null bpb deltas. Remaining M1 scope: see S2-D2
   (now `reverse`, `pick_filters`, LZ, models, coder, and `Method` wiring
   only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2/S2-A3/S2-A4/S2-A5 filter
-  slices: the `reverse` filter kind and the
-  `pick_filters` trial-selection heuristic; the optimal-parse LZ stage
-  (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the context-mixing
-  entropy models (`Lit` six-expert arena, flag/length/offset models); the
-  range coder (`Enc`/`Dec`); and wiring all of it behind a new `Method`
-  variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5). Source:
-  `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
-  behavior, not code, per ADR-0006). One PR per module per the M1 checklist.
-  Note: `reverse` does not appear in the archived Rust codec (`mothergod.rs`
-  has only `sdelta`/`tpose`/`bcj`); its source lives in-tree at
-  `research/imports/session-1/research_state.json` (`.filters.rev`), the
-  founding session's Python `filt`/`unfilt` pair — same cross-check basis
-  as S2-A5's `.filters.b64` port above.
+- S2-A6 | ACCEPTED | Fifth and final filter slice of M1: byte-order
+  reversal (`JOURNAL` S1-A2, "right-anchored structure is real") ported
+  to `src/filters.rs` as a standalone reversible transform
+  (`reverse::encode`/`decode`). Behavior ported from the archive's
+  `filt`/`unfilt` pair (`research/imports/session-1/research_state.json`
+  `.filters.rev`; absent from `mothergod.rs`, same basis as S2-A5's
+  `.filters.b64` port), not the code (ADR-0006): `filt`/`unfilt` are both
+  `d[::-1]`, so this filter is its own inverse — `decode` is `encode`
+  under a different name, kept as two functions to match the other four
+  filters' encode/decode-pair shape rather than exposing a single
+  `reverse` function callers would have to know is symmetric. | 6 unit
+  tests: round-trip on empty input and a single byte, an explicit
+  byte-order check, an explicit "encoding twice is the identity" check,
+  round-trip across 8 lengths between 0 and 1000 on 1000-byte cyclic
+  data, and a palindrome as a fixed point of `encode`; `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/
+  `test --doc`/`doc --no-deps` all clean. | No bpb measurement, same
+  reason as S2-A2 through S2-A5: not yet wired to a `Method` variant, so
+  there is still no champion to diff against — `progress.jsonl` records
+  this as `kind: "patch"` with null bpb deltas. Completes M1's filter-bank
+  checklist (all five kinds from S1-A2 now in `src/filters.rs`); remaining
+  M1 scope: see S2-D2 (now `pick_filters`, LZ, models, coder, and `Method`
+  wiring only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A6 filter
+  slices: the `pick_filters` trial-selection heuristic; the optimal-parse
+  LZ stage (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the
+  context-mixing entropy models (`Lit` six-expert arena, flag/length/offset
+  models); the range coder (`Enc`/`Dec`); and wiring all of it behind a
+  new `Method` variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard
+  rule 5). Source: `research/imports/session-1/mothergod.rs` (526 lines,
+  golfed — port behavior, not code, per ADR-0006). One PR per module per
+  the M1 checklist.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,
