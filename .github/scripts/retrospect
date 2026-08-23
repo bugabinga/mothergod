@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+"""Judge every agent session since the previous run, and say what budget is left.
+
+Extensionless and executable because agents type it as a command mid-session,
+like operator-sweep, push-branch and settle-push.
+
+The BDFL's retrospect duty judges each finished session on four things: right
+result, sane turn count, token-lean output, correct altitude and voice. Three
+of those are numbers in the audit artifact every run uploads (ADR-0023) and
+the fourth is the response text beside them, so the reading is mechanical and
+was being hand-assembled every wake: list runs, download N artifacts, parse
+JSON, tabulate. That is hot work on a hard substrate, which is the ADR-0022
+test for compiling it.
+
+It also produced a wrong reading on its first outing. `permission_denials` is
+`{"count": N, "tools": [...]}`, not a list; taking its length by hand reports
+2 denials for every session that had none, and "every agent is being denied
+something" is exactly the kind of false alarm a retrospect exists to avoid.
+The parse lives here now, once, where it can be wrong at most once.
+
+BUDGET is the second half, and it rides free. Every artifact carries the
+session's `rate_limit_events`, each with a `utilization` fraction and the
+instant the allowance resets. Nothing in this project read them: the pause
+machinery keys on `status == "rejected"` (ADR-0018), which fires when the
+factory has ALREADY stopped for up to a week. Between "fine" and "stopped"
+there was no signal at all. These artifacts are downloaded for the audit
+regardless, so the number costs nothing extra and appears on every wake.
+
+What this does NOT cover, said plainly so nothing claims a completeness it
+lacks:
+
+  - runs still in flight, which have uploaded nothing to judge yet. They are
+    listed as pending, not silently dropped, and land in a later window.
+  - a run that died before its audit step, which has no artifact. Reported by
+    name with its URL, because that is the one case where `gh run view --log`
+    still earns its cost.
+  - non-agent workflows (ci, CodeQL, the worker tests). Those are graded by
+    passing or failing, not by judgement.
+  - dollars. `total_cost_usd_notional` is a subscription's shadow price, not
+    a bill, and is reported for comparison between roles only.
+
+Windowing: sessions that COMPLETED at or after the anchor, where the anchor is
+the previous BDFL run's start (anchor.py). A session that finished during that
+run's long tail can therefore be judged twice. That is deliberate. Anchoring
+on the predecessor's finish instead would leave every session that completed
+while it was working covered by nobody, and a second read costs a minute where
+a gap costs the finding.
+
+Liveness: the last line always prints how many sessions were read, how many
+had no artifact, and the anchor, so a retrospect that returns nothing forever
+is distinguishable from a quiet hour.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+from datetime import datetime, timezone
+
+from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
+
+# Only these produce a judgeable session. Everything else in the repository is
+# graded by exit code.
+AGENT_PREFIX = "agent-"
+
+# Conclusions with no session behind them: the workflow's own guards decided
+# not to run an agent at all.
+NOT_A_SESSION = frozenset({"skipped", "cancelled", "neutral"})
+
+# Runs pulled from the API before filtering to the window. A BDFL cadence of
+# three per hour against every push triggering ci, CodeQL and a review keeps
+# the window well inside this; a breach is REPORTED, never silently truncated.
+RUN_SCAN = 100
+
+# One response longer than this is cut. The auditor judges altitude and voice,
+# and both are legible in the opening; a retrospect that floods the reader's
+# context is a retrospect the reader skims.
+RESPONSE_CAP = 2500
+
+
+def run_list(repo):
+    """Recent runs, newest first, with the fields the window and table need."""
+    return json.loads(
+        gh(
+            "run", "list", "--repo", repo, "--limit", str(RUN_SCAN),
+            "--json", "databaseId,name,event,status,conclusion,"
+                      "createdAt,startedAt,updatedAt,url,displayTitle",
+        )
+    )
+
+
+def in_window(run, anchor):
+    """A session is judgeable once it is over, so the window is on completion."""
+    return run["status"] == "completed" and iso(run["updatedAt"]) >= anchor
+
+
+def download(run_id, into):
+    """Fetch one run's audit artifact. Returns its directory, or None.
+
+    None is the honest answer for a run that died before uploading; gh's own
+    stderr is the diagnosis and the caller prints the URL to go read.
+    """
+    target = os.path.join(into, str(run_id))
+    proc = subprocess.run(
+        ["gh", "run", "download", str(run_id), "-D", target],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    for root, _, files in os.walk(target):
+        if "metadata.json" in files:
+            return root
+    return None
+
+
+def read_session(directory):
+    """The two files the duty judges, parsed. Missing fields stay None."""
+    with open(os.path.join(directory, "metadata.json"), encoding="utf-8") as fh:
+        meta = json.load(fh)
+    response_path = os.path.join(directory, "output-response.md")
+    response = ""
+    if os.path.exists(response_path):
+        with open(response_path, encoding="utf-8") as fh:
+            response = fh.read()
+    return meta, response
+
+
+def denials(telemetry):
+    """`permission_denials` is a summary object, not a list. See the docstring."""
+    raw = telemetry.get("permission_denials")
+    if isinstance(raw, dict):
+        return raw.get("count", 0), [
+            t.get("tool_name", t) if isinstance(t, dict) else t
+            for t in (raw.get("tools") or [])
+        ]
+    if isinstance(raw, list):  # older artifacts, before the shape settled
+        return len(raw), raw
+    return 0, []
+
+
+def short_model(name):
+    """`claude-haiku-4-5-20251001` -> `haiku-4-5`. The date is never the point."""
+    trimmed = name.removeprefix("claude-")
+    parts = trimmed.split("-")
+    if parts and parts[-1].isdigit() and len(parts[-1]) == 8:
+        parts = parts[:-1]
+    return "-".join(parts)
+
+
+def describe(run, meta, response):
+    """One session as the auditor's four judgements, then what it posted."""
+    telemetry = meta.get("telemetry") or {}
+    usage = telemetry.get("usage") or {}
+    count, tools = denials(telemetry)
+    models = "+".join(sorted(short_model(m) for m in (telemetry.get("modelUsage") or {})))
+    seconds = round((telemetry.get("duration_ms") or 0) / 1000)
+    role = meta.get("role") or "?"
+    event = (meta.get("trigger") or {}).get("event") or run["event"]
+
+    flags = []
+    if meta.get("is_error"):
+        flags.append("ERROR")
+    if telemetry.get("api_error_status"):
+        flags.append(f"api {telemetry['api_error_status']}")
+    if (telemetry.get("stop_reason") or "end_turn") != "end_turn":
+        flags.append(f"stop {telemetry['stop_reason']}")
+    if count:
+        flags.append(f"denied {count} ({', '.join(str(t) for t in tools[:3])})")
+    if run["conclusion"] != "success":
+        flags.append(run["conclusion"])
+
+    print(
+        f"\n{iso(run['updatedAt'])}  {role}  {event}  "
+        f"turns {telemetry.get('num_turns')}  {seconds}s  "
+        f"out {usage.get('output_tokens', 0):,} tok  posted {len(response):,} B  {models}"
+        + (f"  [{'; '.join(flags)}]" if flags else "")
+    )
+    print(f"    {run['url']}")
+    body = response.strip() or "(posted nothing)"
+    if len(body) > RESPONSE_CAP:
+        body = f"{body[:RESPONSE_CAP]}\n[cut, {len(response) - RESPONSE_CAP} more characters]"
+    for line in body.splitlines():
+        print(f"    {line}")
+
+
+def budget(samples, anchor):
+    """What the subscription has left, from the rate-limit events just read.
+
+    `samples` is (when, rate_limit_info) in session order. Each info carries a
+    utilization fraction of one allowance window and the instant it resets, so
+    the remaining headroom and the pace being set against it are both readable
+    without storing anything.
+    """
+    print("\nbudget:")
+    if not samples:
+        print("    no rate-limit events in the window. Either nothing ran long "
+              "enough to report one, or the artifact shape changed; check "
+              "`.github/actions/agent-audit` before assuming the former.")
+        return
+
+    by_type = {}
+    for when, info in samples:
+        by_type.setdefault(info.get("rateLimitType", "unknown"), []).append((when, info))
+
+    for kind, series in sorted(by_type.items()):
+        series.sort(key=lambda pair: pair[0])
+        first_when, first = series[0]
+        last_when, last = series[-1]
+        used = last.get("utilization")
+        if used is None:
+            print(f"    {kind}: events carry no utilization; nothing to project.")
+            continue
+        left = max(0.0, 1.0 - used)
+        line = f"    {kind}: {used:.0%} used, {left:.0%} left"
+
+        resets_at = last.get("resetsAt")
+        if not resets_at:
+            print(line + " (no reset time reported)")
+            continue
+
+        reset = datetime.fromtimestamp(resets_at, timezone.utc)
+        now = stamp_to_dt(last_when)
+        hours = (reset - now).total_seconds() / 3600
+        print(f"{line}, resets {reset.strftime(STAMP)} ({hours:.1f}h)")
+
+        if hours <= 0:
+            continue
+        affordable = left / hours
+        elapsed = (stamp_to_dt(last_when) - stamp_to_dt(first_when)).total_seconds() / 3600
+        burned = used - (first.get("utilization") or used)
+        if elapsed > 0 and burned > 0:
+            observed = burned / elapsed
+            runway = left / observed
+            verdict = (
+                f"exhausts in {runway:.1f}h, {runway - hours:+.1f}h against the reset"
+                if runway < hours
+                else f"lasts {runway:.1f}h, past the reset"
+            )
+            print(
+                f"        burned {burned:.1%} over the {elapsed * 60:.0f} min audited "
+                f"({observed:.2%}/h); {affordable:.2%}/h reaches the reset. At this pace, {verdict}."
+            )
+            if runway < hours:
+                print("        SLOW DOWN: cut discretionary work, or the pause "
+                      "machinery stops the factory before the reset.")
+        else:
+            print(f"        no measurable burn in the window; {affordable:.2%}/h reaches the reset.")
+
+        if last.get("isUsingOverage"):
+            print("        on overage: past the included allowance already.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Every agent session since the previous BDFL run, judged, plus what budget is left.",
+        epilog="Exit is 0 for a quiet window. Non-zero means this tool failed, not that nothing ran.",
+    )
+    parser.add_argument("--since", help="ISO8601 anchor; default is the previous successful agent-bdfl run's start")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"), help="owner/name; default $GITHUB_REPOSITORY")
+    args = parser.parse_args()
+
+    repo = args.repo or json.loads(gh("repo", "view", "--json", "nameWithOwner"))["nameWithOwner"]
+    if args.since:
+        anchor, source = iso(args.since), "given"
+    else:
+        anchor, run_id = previous_run_start(repo, os.environ.get("GITHUB_RUN_ID"))
+        source = f"start of run {run_id}"
+
+    print(f"anchor {anchor} ({source})")
+
+    runs = run_list(repo)
+    if len(runs) == RUN_SCAN and iso(runs[-1]["updatedAt"]) >= anchor:
+        print(f"\nINCOMPLETE: more than {RUN_SCAN} runs since the anchor; the oldest are not listed.")
+
+    agent_runs = [r for r in runs if r["name"].startswith(AGENT_PREFIX)]
+    pending = [r for r in agent_runs if r["status"] != "completed"]
+    window = [
+        r for r in agent_runs
+        if in_window(r, anchor) and (r["conclusion"] or "") not in NOT_A_SESSION
+    ]
+    window.sort(key=lambda r: r["updatedAt"])
+
+    workspace = tempfile.mkdtemp(prefix="retrospect-")
+    read, orphans, samples = 0, [], []
+    try:
+        for run in window:
+            directory = download(run["databaseId"], workspace)
+            if directory is None:
+                orphans.append(run)
+                continue
+            meta, response = read_session(directory)
+            describe(run, meta, response)
+            read += 1
+            when = iso(run["updatedAt"])
+            for info in meta.get("rate_limit_events") or []:
+                if isinstance(info, dict):
+                    samples.append((when, info))
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+    if orphans:
+        print("\nno artifact (died before the audit step; the log is the only story here):")
+        for run in orphans:
+            print(f"    {iso(run['updatedAt'])}  {run['name']}  {run['conclusion']}  {run['url']}")
+
+    if pending:
+        print("\nstill running (judged in a later window, not dropped):")
+        for run in pending:
+            print(f"    {run['name']}  {run['displayTitle']}  {run['url']}")
+
+    budget(samples, anchor)
+    print(
+        f"\nretrospect: sessions {read} | no-artifact {len(orphans)} "
+        f"| pending {len(pending)} | since {anchor}"
+    )
+
+
+if __name__ == "__main__":
+    main()

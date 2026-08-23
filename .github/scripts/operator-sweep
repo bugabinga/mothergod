@@ -44,13 +44,11 @@ quiet week, and a wrong login is visible on the run it is wrong (#147, item 4).
 import argparse
 import json
 import os
-import subprocess
-import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
-# The workflow whose previous success anchors the sweep. Hardcoded rather than
-# a flag: this is the BDFL's sweep, and --since overrides the whole derivation.
-ANCHOR_WORKFLOW = "agent-bdfl.yml"
+# The anchor, and the gh/timestamp plumbing it needs, are shared with
+# retrospect so both duties cover the same window by construction.
+from anchor import ANCHOR_WORKFLOW, STAMP, die, gh, iso, previous_run_start
 
 # State changes worth waking for. Label churn from bots is filtered by actor;
 # these are the kinds where the operator is saying something without text.
@@ -76,20 +74,6 @@ STAMP = "%Y-%m-%dT%H:%M:%SZ"
 BIRTH_WINDOW = 60
 
 
-def die(message):
-    """Exit non-zero. Reserved for this tool failing, never for a quiet sweep."""
-    print(f"operator-sweep: {message}", file=sys.stderr)
-    sys.exit(1)
-
-
-def gh(*args):
-    """Run gh and return stdout. gh carries the token; nothing here sees one."""
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if proc.returncode != 0:
-        die(f"`gh {' '.join(args)}` failed: {proc.stderr.strip()}")
-    return proc.stdout
-
-
 def api(path, jq=".[] | @json"):
     """Paginated GET. --jq runs per page, so this streams one value per line."""
     return [json.loads(line) for line in gh("api", "--paginate", "--jq", jq, path).splitlines() if line.strip()]
@@ -100,41 +84,9 @@ def api_page(path):
     return json.loads(gh("api", path))
 
 
-def iso(value):
-    """Canonicalize to GitHub's own timestamp shape.
-
-    Every API time shares this shape, so string comparison is chronological.
-    That invariant is what lets the descending walks below stop early.
-    """
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        die(f"{value!r} is not a timestamp. Write it as 2026-08-23T16:44:04Z.")
-    return parsed.astimezone(timezone.utc).strftime(STAMP)
-
-
 def apart(one, other):
     """Seconds between two canonical stamps. Only used to spot coincidence."""
     return abs((datetime.strptime(one, STAMP) - datetime.strptime(other, STAMP)).total_seconds())
-
-
-def anchor_from_last_run(repo, this_run):
-    """Start of the previous successful ANCHOR_WORKFLOW run, excluding this one."""
-    runs = json.loads(
-        gh(
-            "run", "list", "--repo", repo, "--workflow", ANCHOR_WORKFLOW,
-            "--status", "success", "--limit", "10",
-            "--json", "databaseId,startedAt,createdAt",
-        )
-    )
-    for run in runs:
-        if this_run and str(run["databaseId"]) == str(this_run):
-            continue
-        return iso(run["startedAt"] or run["createdAt"]), run["databaseId"]
-    die(
-        f"no successful {ANCHOR_WORKFLOW} run to anchor on. "
-        "Pass --since <ISO8601> with the window you mean to sweep."
-    )
 
 
 def signal(when, kind, subject, url, body="", note="", number=None):
@@ -344,7 +296,7 @@ def main():
     if args.since:
         anchor, source = iso(args.since), "given"
     else:
-        anchor, run_id = anchor_from_last_run(repo, os.environ.get("GITHUB_RUN_ID"))
+        anchor, run_id = previous_run_start(repo, os.environ.get("GITHUB_RUN_ID"))
         source = f"start of run {run_id}"
 
     print(f"anchor {anchor} ({source})")
