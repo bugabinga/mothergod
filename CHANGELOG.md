@@ -71,6 +71,12 @@ All notable changes to this project are documented here. Format follows
   caller-supplied cumulative-frequency ranges; the adaptive frequency
   tables (the archive's `Model` and the six-expert `Lit` mixer) that
   will supply those ranges are the next slice.
+- Codec port, first entropy-model slice (`research/JOURNAL.md` S2-A11):
+  a new `model` module with `Model`, the order-0 adaptive frequency
+  table ported from the archive, driving `coder::Encoder`/`Decoder`
+  with real data-derived cumulative-frequency ranges. The flag/length/
+  offset stages of the entropy coder will each be one `Model` instance;
+  the six-expert `Lit` literal mixer remains a separate, larger slice.
 
 ### Removed
 

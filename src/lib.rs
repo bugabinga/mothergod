@@ -12,6 +12,7 @@
 pub mod coder;
 pub mod filters;
 pub mod lz;
+pub mod model;
 
 /// First bytes of every mothergod frame.
 pub const MAGIC: [u8; 4] = *b"MGDC";

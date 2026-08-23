@@ -399,16 +399,46 @@ record.
   `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
   Remaining M1 scope: see S2-D2 (now the context-mixing entropy models
   and `Method` wiring only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A10 filter,
-  trial-selection, LZ, and coder slices: the context-mixing entropy
-  models (`Lit` six-expert arena, flag/length/offset models, all as
-  order-0 `Model` frequency tables driving `coder::Encoder`/`Decoder`);
-  and wiring all of it (including `select::pick`, `lz::parse_optimal`,
-  and `coder`) behind a new `Method` variant with a `FORMAT_VERSION`
-  bump + ADR (CLAUDE.md hard rule 5). Source:
-  `research/imports/session-1/mothergod.rs` (526 lines, golfed — port
-  behavior, not code, per ADR-0006). One PR per module per the M1
-  checklist.
+- S2-A11 | ACCEPTED | Tenth slice of M1, and the first entropy-model
+  slice: the order-0 adaptive frequency table ported to a new
+  `src/model.rs` (`Model`), the type the flag/length/offset stages of
+  S2-D2 will each instantiate directly. Behavior ported from the
+  archive's `Model` (`research/imports/session-1/mothergod.rs`), not the
+  code (ADR-0006): same increment-then-halve update rule (`INC` = 12,
+  `LIM` = 65536), same linear cumulative-frequency scan, now driving
+  `coder::Encoder`/`Decoder` (S2-A10) with real data-derived ranges
+  instead of that module's own test-only `FreqTable` stand-in. `decode`
+  never panics on adversarial `Decoder` state: `Decoder::target` is
+  mathematically bounded to `[0, total)`, and `total` always equals the
+  sum of `freq` by construction, so the cumulative scan always finds a
+  symbol before running past the table regardless of what bytes
+  produced the decoder's value (`rust-craft` skill,
+  panic-discipline). | 8 unit tests: empty and single-symbol streams, a
+  skewed-frequency fixture, a full 256-symbol alphabet, a 5000-symbol
+  pseudo-random fixture, an explicit rescale-triggering fixture (10,000
+  codes over a 2-symbol alphabet crosses `LIM` several times), two
+  independent `Model` instances interleaving on one coder stream (the
+  flag+length shape S2-D2 still needs), and a truncated-stream decode
+  asserting no panic; `cargo fmt`/`clippy --all-targets -- --deny
+  warnings`/`test --all-targets`/`test --doc`/`doc --no-deps` all clean
+  (one private-intra-doc-link warning against the module's own private
+  constants, fixed by dropping the doc links, not by suppressing the
+  lint — same class as S2-A8/S2-A10). | No bpb measurement, same reason
+  as S2-A2 through S2-A10: not yet wired to a `Method` variant, no
+  champion to diff against — `progress.jsonl` records this as `kind:
+  "patch"` with null bpb deltas. Remaining M1 scope: see S2-D2 (now the
+  six-expert `Lit` literal mixer, wiring the flag/length/offset models
+  as `Model` instances, and `Method` wiring only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A11 filter,
+  trial-selection, LZ, coder, and order-0 model slices: the six-expert
+  `Lit` literal mixer (context-sensitive gradient-derived MIX weights,
+  `JOURNAL` S1-A4); wiring the flag/length/offset stages as `model::Model`
+  instances against real LZ tokens; and wiring all of it (including
+  `select::pick`, `lz::parse_optimal`, `model::Model`, and `coder`) behind
+  a new `Method` variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md
+  hard rule 5). Source: `research/imports/session-1/mothergod.rs` (526
+  lines, golfed — port behavior, not code, per ADR-0006). One PR per
+  module per the M1 checklist.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,
