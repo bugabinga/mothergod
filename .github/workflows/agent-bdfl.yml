@@ -76,7 +76,7 @@ jobs:
     # events they trigger, so they need no guard. `issue` and
     # `pull_request` ride along on comment and review events too, so
     # matching them unconditionally would silence every operator comment
-    # on an agent-authored thread — the most valuable wake we have.
+    # on an agent-authored thread, the most valuable wake we have.
     #
     # Matched on the attribution LINK, not the sentence around it: the
     # URL is the invariant, the wording is prose free to change (issue
@@ -86,7 +86,7 @@ jobs:
     # operator sweep recovers at the cost of latency only: an operator
     # comment quoting an agent footer is skipped, and a review with an
     # EMPTY body has no text to match, so a PAT-posted review would wake
-    # a run. The second is closed by rule, not by expression — the admin
+    # a run. The second is closed by rule, not by expression: the admin
     # PAT pushes, it never opens or reviews threads (agents/GOVERNANCE.md,
     # "Push identity").
     if: (github.event_name == 'schedule' ||
