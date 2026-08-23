@@ -20,9 +20,8 @@ on:
   # running plus one pending run, the pending one reading everything new.
   # The trigger's job is "wake up", never "here is what happened": a
   # displaced run reads nothing, so the surviving run re-derives the
-  # window with the time-based operator sweep and the displaced-run
-  # sweep in the prompt (issue #36). Event payloads are hints; the
-  # sweeps are the truth.
+  # window with .github/scripts/operator-sweep, which is time-based
+  # (issue #36). Event payloads are hints; the sweep is the truth.
   issues:
     types: [opened, reopened]
   issue_comment:
@@ -430,9 +429,9 @@ jobs:
             gh before anything else, act on it first; operator input
             outranks all queued and scheduled work. The trigger is a
             hint, not the record: bursts debounce to one surviving run
-            (ADR-0014) and the displaced run reads nothing, so the sweeps
-            below are what guarantee no operator action is lost. Run them
-            every wake.
+            (ADR-0014) and the displaced run reads nothing, so the sweep
+            and drain below are what guarantee no operator action is
+            lost. Run them every wake.
 
             Communication economy (operator directive): this repo may
             live for years, and its written record must not drown in
@@ -455,25 +454,18 @@ jobs:
 
             Run economy — the delta core, every run, in order (CHAT
             reorders: inbox first, then sweeps as budget allows):
-            1. Operator sweep, time-based not state-based, because
-               comments land on closed issues and merged PRs too
-               (issue #36): anchor on the previous successful agent-bdfl
-               run's start time (gh run list), then
-                 gh api "repos/$GITHUB_REPOSITORY/issues/comments?since=<anchor>"
-                 gh api "repos/$GITHUB_REPOSITORY/pulls/comments?since=<anchor>"
-               filtered to the operator's login; act on anything not yet
-               acted on.
-            2. Displaced-run sweep (operator request, Telegram,
-               2026-08-22): a cancelled wake's signal is a todo, not a
-               loss. List this workflow's cancelled runs since the anchor
-               (gh run list --workflow agent-bdfl.yml --status cancelled)
-               and re-derive each trigger from the run's event and
-               display title. Comment-shaped signal is already in sweep 1
-               and Telegram dispatches persist in KV until deleted; this
-               catches the rest: reviews without comments, issues and PRs
-               opened or reopened.
-            3. Inbox drain (above).
-            4. State check: ops-log tail, gh run list, open PRs/issues,
+            1. Operator sweep: run `.github/scripts/operator-sweep`.
+               It anchors on the previous successful run's start and
+               prints everything the operator wrote or changed since,
+               as one timeline, plus the wakes that died queued. Act on
+               anything not yet acted on. Time-based, not state-based,
+               because comments land on closed issues and merged PRs
+               too (#36); its docstring names exactly what it covers
+               and what it does not, which the prose recipe it replaces
+               could not, and that is how review bodies went unread by
+               anything (#147).
+            2. Inbox drain (above).
+            3. State check: ops-log tail, gh run list, open PRs/issues,
                recent commits. Known stalls to sweep for, each silent
                by construction:
                - An open PR labeled agent-approved that auto-merge is
@@ -487,7 +479,7 @@ jobs:
                  clean needs only the REST squash merge. Either way
                  land by REST once the four gates are green,
                  blocked-on-human if still stuck.
-            5. Retrospect (operator directive, Telegram, 2026-08-23):
+            4. Retrospect (operator directive, Telegram, 2026-08-23):
                audit the agent sessions completed since the anchor
                (gh run list, then gh run view --log; the anchor
                makes each session audited exactly once, no
@@ -504,7 +496,7 @@ jobs:
                anchor? Name it, and say what breaks if it becomes
                a mechanism. Compiling an answer is often smaller
                than the manual work it retires.
-            6. Agent-system queue (operator directive, Telegram,
+            5. Agent-system queue (operator directive, Telegram,
                2026-08-23): issues labeled agent-system are yours to
                fix. The maintainer's one queue was carrying the whole
                factory and could not keep up, so the realm labels
