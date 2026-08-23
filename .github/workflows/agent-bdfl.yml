@@ -550,7 +550,23 @@ jobs:
                anchor? Name it, and say what breaks if it becomes
                a mechanism. Compiling an answer is often smaller
                than the manual work it retires.
-            If nothing needs direction, send the Telegram status line
+            6. Agent-system queue (operator directive, Telegram,
+               2026-08-23): issues labeled agent-system are yours to
+               fix. The maintainer's one queue was carrying the whole
+               factory and could not keep up, so the realm labels
+               route the pile: product to the maintainer,
+               agent-system to you. When the steps above found
+               nothing needing direction, do not stop at a no-op,
+               take the top unclaimed agent-system issue and ship it.
+               Urgency first: bug before enhancement, a blocker
+               before what it blocks. Claim check first, because
+               agents run concurrently (ADR-0014) and an open PR or
+               claude/* branch means taken. One per run; the cadence
+               does the rest. An issue carrying neither realm label
+               is unrouted, and routing is yours before it is anyone
+               else's work: label it, then queue it or hand it over.
+            If the delta core found nothing and the agent-system queue
+            is empty, send the Telegram status line
             and stop — a no-op run that posts nothing on the repo is a
             GOOD outcome, it conserves the operator's subscription.
             SURVEY adds, after the delta core, reading everything:

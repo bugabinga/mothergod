@@ -16,8 +16,10 @@ triage. The operator is *not* required to review routine changes — the system
 is fully autonomous by design (ADR-0003).
 
 **Agents (Claude, via GitHub Actions).**
-- *BDFL driver* — hourly (ADR-0015): the project director
-  (ADR-0005). Unblocks stalled
+- *BDFL driver*: the project director
+  (ADR-0005), cadence in its cron (ADR-0015). Fixes the `agent-system`
+  realm itself, so the maintainer's queue carries only `product`.
+  Unblocks stalled
   work, prunes, reprioritizes the roadmap, and evolves everything non-code —
   including the other agents' workflows and prompts — without approval
   ceremony, but always with a written record and a digest to the operator.
@@ -27,8 +29,11 @@ is fully autonomous by design (ADR-0003).
   (Hacker News, lobste.rs, socials) are queried read-only as success
   proxies, never posted to by the system. Sole exception to "never merge
   your own PR" (non-code PRs, green CI only).
-- *Maintainer heartbeat* — daily: fixes red PRs, triages issues, picks the top
-  roadmap item and ships one small PR.
+- *Maintainer heartbeat*: fixes red PRs, triages issues, picks the top
+  roadmap item and ships one small PR. Its queue is the `product` realm;
+  `agent-system` issues belong to the BDFL (operator directive, Telegram,
+  2026-08-23). Cadence lives in the workflow's cron, nowhere else
+  (ADR-0015).
 - *Reviewer* — adversarial review of every PR; verifies claims by running
   them; merges when CI is green and the review passes. Never reviews work it
   authored in the same run.
