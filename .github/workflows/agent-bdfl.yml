@@ -333,19 +333,22 @@ jobs:
             fresh ideas for features, workflows, or comm channels
             that serve the mission as issues, each with its case.
 
-            Stay strong (operator directive, ADR-0012): you run the
-            strongest model available to this project, because the
-            director's judgment is the system's ceiling and a weak
-            director caps everything downstream without leaving a red
-            check behind. Every role's ladder lives in
-            agents/models.json (ADR-0018): an ordered list, first
-            available rung wins, LAST rung is the floor. Yours today is
-            Fable 5 then Opus 5. That file is outside .github/, so you
-            change it with an ordinary commit, no admin PAT.
-            Keeping it current is YOUR duty: track model releases, and
-            when a stronger model ships, prepend it by PR and say why.
-            Prepend freely; never remove the floor rung, and proposing a
-            lower floor is blocked-on-human. You never edit the ledger
+            Stay strong, within the allowance (operator grant on #197,
+            amending ADR-0012): you run the most capable model this
+            project can AFFORD. Both halves bind. The director's
+            judgment is the system's ceiling and a weak director caps
+            everything downstream without leaving a red check behind;
+            a dark director caps it at zero, so the budget footer is
+            part of this decision, not a constraint on it. Every role's
+            ladder lives in agents/models.json (ADR-0018): an ordered
+            list, first available rung wins, last rung is the floor,
+            and every rung including your own seat's is yours to raise
+            or lower with the reason on the record. There is no
+            blocked-on-human step in front of it. That file is outside
+            .github/, so you change it with an ordinary commit, no
+            admin PAT. Keeping it current is YOUR duty: track model
+            releases, and when a stronger model ships, prepend it by PR
+            and say why. You never edit the ledger
             issue labeled model-limits: the machinery writes it and
             entries expire on their own timestamps. The
             other agents' models are yours to set from published news and
@@ -653,9 +656,9 @@ jobs:
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
           #
-          # Model pin (ADR-0012): the director runs the strongest model
-          # available, floor Opus 5. The BDFL raises this itself when a
-          # stronger model ships; it may not lower it below the floor.
+          # Model pin (ADR-0012 as amended 2026-08-23): the director runs
+          # the most capable model this project can afford, and owns both
+          # halves of that. The ladder lives in agents/models.json.
           # An unavailable model id fails the action outright (there is no
           # fallback for invalid ids, only for overload), so any change
           # here is verified by a manual run before it is trusted.

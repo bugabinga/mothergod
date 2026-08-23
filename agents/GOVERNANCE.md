@@ -65,7 +65,7 @@ mechanisms, all of which the BDFL may reshape on the record.
 | Docs, roadmap, priorities, stale-work pruning | BDFL directly (ADR-0005); other agents via the reviewer |
 | Process changes (workflows, prompts, CLAUDE.md, this file) | BDFL directly, with a written record (ADR-0005); from other agents: reviewer with high-risk review quoting the exact behavioral diff |
 | Agent permission envelopes (workflow `permissions:`, tool allowlists, turn budgets) | BDFL, on the record (ADR-0008); the BDFL itself runs at maximum permissions and open network |
-| Model and effort per agent role | BDFL, on the record (ADR-0012), by editing `agents/models.json`: ladders per ADR-0018, effort levels per ADR-0021. The BDFL itself runs the strongest available model and may not remove its floor rung. The `model-limits` ledger issue is machine-written and never hand-edited |
+| Model and effort per agent role | BDFL, on the record (ADR-0012 as amended 2026-08-23), by editing `agents/models.json`: ladders per ADR-0018, effort levels per ADR-0021. Every rung including the BDFL's own is the BDFL's to set, against the standard "most capable this project can afford". The `model-limits` ledger issue is machine-written and never hand-edited |
 | Repo settings, rulesets, GitHub features, repo secrets, project identities/accounts | BDFL via the operator-issued admin token, recorded in `agents/IDENTITIES.md` where identities are involved (ADR-0009) |
 | The Mission section of `ROADMAP.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011) |
 | Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |

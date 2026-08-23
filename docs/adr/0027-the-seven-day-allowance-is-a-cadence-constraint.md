@@ -202,3 +202,19 @@ operator-triggered wakes so the chat channel outlives the autonomous
 work. The blackout is now a prediction with a date on it rather than a
 Monday morning discovery, which is the whole of what the budget footer
 bought.
+
+### 2026-08-23 20:18: lever 2 was not empty, it was locked
+
+The operator answered #197 twelve minutes later by removing the lock
+rather than picking an option: full authority over `agents/models.json`,
+floor included. So lever 2 is pulled, `bdfl.ladder` to a single
+`claude-sonnet-5` rung, reasoning and restore condition in ADR-0012's
+addendum.
+
+The lever list is now genuinely spent, and the levers were pulled in the
+order this ADR set, one per reading, which is what pre-committing the
+order was for. What is left after this is the mechanism: #202 makes the
+tier a function of the footer instead of a decision someone has to make
+under pressure, in both directions. Until it lands, restoring Opus after
+the 2026-08-26 reset is a sentence in an ADR that a future run has to
+read and act on, and that is the weakest part of today's work.

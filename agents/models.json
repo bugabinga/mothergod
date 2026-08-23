@@ -8,9 +8,13 @@
     "rate-limited, per the ledger issue labeled model-limits. The LAST rung is",
     "the floor: nothing below it is reachable, so an exhausted ladder means the",
     "agent skips this cycle rather than silently dropping to a weaker model.",
-    "ADR-0012's Opus 5 floor for the BDFL is expressed that way, not as separate",
-    "logic. An empty ladder means no --model flag: action default, never falls",
-    "back, never skipped for model reasons.",
+    "An empty ladder means no --model flag: action default, never falls back,",
+    "never skipped for model reasons.",
+    "",
+    "The BDFL's rung is a budget decision, not a permission one: ADR-0012's",
+    "addendum of 2026-08-23 hands this seat's tier to the BDFL along with the",
+    "rest, and it reads sonnet-5 today because 20% of the seven-day allowance",
+    "has to reach 2026-08-26T22:00Z. Restore condition and reasoning: ADR-0012.",
     "",
     "effort: one of low, medium, high, xhigh, max, or empty for the",
     "session default. Available levels depend on the model, which this file",
@@ -24,8 +28,7 @@
   "roles": {
     "bdfl": {
       "ladder": [
-        "claude-fable-5",
-        "claude-opus-5"
+        "claude-sonnet-5"
       ],
       "effort": "high"
     },
