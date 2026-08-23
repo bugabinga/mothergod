@@ -195,32 +195,35 @@ naming it, label `blocked-on-human`, move on.
 ## Push identity
 
 Three credentials can push, and the pusher decides whether the pipeline
-keeps moving (issue #57). Pick deliberately:
+keeps moving (issue #57).
+
+**Pushing files to a branch is `.github/scripts/push-branch <branch>
+<path>...`, commit message on stdin.** It derives the credential from
+the paths, goes through the git data API so no ambient credential can
+win the push silently, keeps the executable bit, and refuses a push
+that would revert the base. Nothing below is yours to apply by hand;
+it is why the script exists and what it protects.
 
 - `github.token` (actor `github-actions[bot]`): pull_request runs it
   triggers hold at GitHub's approval gate, and the review action refuses
   the actor even after an operator approves the run. Never push to a PR
   branch with it.
-- The claude app (actor `claude[bot]`): any `gh api` write with the
-  default session token. Triggered runs start unheld and the reviewer
-  accepts the actor (`allowed_bots`). Two limits: the app token cannot
-  touch `.github/workflows/**` (issue #24), and
-  `mcp__github_file_ops__commit_files` only reaches the branch its run
-  started on (`BRANCH_NAME` is pinned at action start), so it cannot
-  push to another PR's branch. Worse on runs triggered by PR review or
-  comment events: `BRANCH_NAME` pins to the PR's merge ref, and
-  `commit_files` then CREATES a literal branch named `<n>/merge`
-  parented on main, silently missing the PR branch (observed on #78).
-  On such runs, push with the git data API instead: create blob, tree,
-  commit, then PATCH the real branch ref; same `claude[bot]` identity.
+- The claude app (actor `claude[bot]`): the default session token, and
+  what `push-branch` uses for every path outside `.github/workflows/`.
+  Triggered runs start unheld and the reviewer accepts the actor
+  (`allowed_bots`). Do not substitute
+  `mcp__github_file_ops__commit_files`: it reaches only the branch its
+  run started on, which on review- and comment-triggered runs is the
+  PR's merge ref, where it creates a literal `<n>/merge` branch off
+  main and misses the PR branch entirely (observed on #78).
 - The admin PAT (actor `bugabinga`): operator-attributed, and
   operator-attributed events wake the BDFL (issue #50). Reserved for
-  what the app cannot do: workflow-file pushes and cron-line changes.
-  A token in the push URL is not enough: the runner injects the app
-  credential as `http.extraheader`, which overrides URL auth, so a PAT
-  push must clear it
-  (`git -c http.https://github.com/.extraheader= push ...`), or the
-  remote silently sees the app and applies its rules.
+  what the app cannot do: workflow-file pushes (issue #24) and cron-line
+  changes. `push-branch` selects it from the paths. Never push these
+  with git: the runner injects its own credential as a multi-valued
+  `http.extraheader`, it wins, and the recipe this file carried for
+  clearing it appended an empty header instead of replacing the real
+  one, so it never worked (issue #151).
   **The PAT pushes; it never opens the PR.** Creating a PR is not a
   push, so `gh pr create` runs on the app token even when the commits
   it carries needed the PAT. PR #127 opened as `claude[bot]` while
