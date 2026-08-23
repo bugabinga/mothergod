@@ -80,7 +80,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          prior="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-intel --state open --json number,body --limit 1)"
+          # Any state, not just open (BDFL ruling on PR #112). A closed
+          # model-intel issue means the BDFL already ruled on that delta;
+          # reopening the same fingerprint next Sunday re-asks an answered
+          # question forever. New evidence still fires, because new
+          # evidence is a new fingerprint.
+          prior="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-intel --state all --json number,state,body --limit 1)"
           PRIOR="$prior" python3 .github/scripts/model-intel.py "$RUNNER_TEMP/aa.json" "$RUNNER_TEMP/out"
           cat "$RUNNER_TEMP/out/summary.md" >> "$GITHUB_STEP_SUMMARY"
           verdict="$(cat "$RUNNER_TEMP/out/verdict")"
@@ -92,7 +97,11 @@ jobs:
           gh label create model-intel --repo "$GITHUB_REPOSITORY" \
             --color 1D76DB --description "Model capability data for ADR-0012 ladder decisions" 2>/dev/null || true
           gh label create triage --repo "$GITHUB_REPOSITORY" --color FBCA04 2>/dev/null || true
-          n="$(jq -r '.[0].number // empty' <<<"$prior")"
+          # Edit in place only while the issue is still open. A closed one
+          # was ruled on: its fingerprint suppressed this run above, and if
+          # we got here the fingerprint differs, so this is new evidence and
+          # deserves a new issue rather than resurrecting a closed ruling.
+          n="$(jq -r '.[0] | select(.state == "OPEN") | .number // empty' <<<"$prior")"
           if [ -n "$n" ]; then
             gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/out/issue.md"
             gh issue comment "$n" --repo "$GITHUB_REPOSITORY" \

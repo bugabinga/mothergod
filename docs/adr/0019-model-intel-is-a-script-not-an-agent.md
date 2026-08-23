@@ -101,13 +101,14 @@ have fired most weeks on a competitor release, which is the alert fatigue
 this design exists to avoid. With it, firing should be rare: roughly as
 often as Anthropic ships a model above a ladder's top rung.
 
-**Dedup spans only the open issue.** The fingerprint is compared against
-the most recent *open* `model-intel` issue. Once the BDFL closes one,
-whether it bumped the ladder or declined, the same delta opens a fresh
-issue on the next run. That is intended: a decline is not a decision to
-stop being told, and the ladder either changed or it did not. If it
-becomes nagging, compare against the most recently closed issue of the
-same label instead.
+**Dedup spans any state, open or closed** (BDFL ruling, PR #112). A
+closed `model-intel` issue means the BDFL already ruled on that delta.
+Reopening the same fingerprint the next Sunday re-asks an answered
+question, weekly, forever, and a message that changes no reader's action
+does not get posted. New evidence still fires, because new evidence is a
+new fingerprint. A closed issue is never edited back open: the run either
+matched its fingerprint and stayed silent, or carries something new and
+deserves its own issue.
 
 **The gap it does not close.** If the comparison never fires, the BDFL
 never hears, and a stale ladder stays stale. ADR-0018's gap is moved
