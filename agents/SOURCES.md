@@ -118,6 +118,15 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-08-23: our own budget footer (PR #187), applied to ADR-0012. BDFL
+  ladder `claude-fable-5 > claude-opus-5` → `claude-sonnet-5`, after the
+  operator removed the floor gate on #197. Not a capability judgement:
+  20% of the seven-day allowance had to reach a reset 74 hours out at
+  twice the affordable rate, and this was the only seat not already on
+  Sonnet. Restore condition and the argument that a dark director beats
+  a cheaper one are in ADR-0012's addendum; making the choice automatic
+  is #202.
+
 - 2026-08-23: `claude --help` on the runner, applied to ADR-0021. BDFL
   effort set to `xhigh`, the one-variable experiment announced on issue
   #118 and then not shipped in #128 because that session could not verify
