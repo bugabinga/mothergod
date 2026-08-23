@@ -100,9 +100,11 @@ if not models:
 models.sort(key=lambda m: -m["score"])
 
 try:
-    ladders = json.load(open("agents/models.json"))["ladders"]
+    roles = json.load(open("agents/models.json"))["roles"]
 except (OSError, ValueError, KeyError) as exc:
     bail(f"agents/models.json unreadable ({exc}).")
+
+ladders = {r: (v or {}).get("ladder") or [] for r, v in roles.items()}
 
 def norm(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
