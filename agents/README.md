@@ -24,8 +24,10 @@ Two agent-system pieces cannot live here, by platform requirement:
   from the repository root.
 - **`/.claude/skills/`**: skills. `deslop` is the deslopper's operating
   manual (ADR-0016); `rust-craft` is the Rust standard for codec code,
-  consulted by whoever is writing or judging it (ADR-0017). The Claude
-  Code harness only discovers skills there.
+  consulted by whoever is writing or judging it (ADR-0017);
+  `compile-judgement` decides whether recurring work should become a
+  mechanism (ADR-0022). The Claude Code harness only discovers skills
+  there.
 
 Everything else in the repository — `src/`, `docs/`, `research/`,
 `assets/`, the community files at root — is the classical open-source
