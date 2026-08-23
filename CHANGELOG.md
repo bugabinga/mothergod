@@ -37,6 +37,12 @@ All notable changes to this project are documented here. Format follows
   (`encode` and `decode` are the same operation), covering M1's
   filter-bank checklist in full: `pick_filters`, the LZ, model, and
   coder modules remain.
+- Codec port, trial-selection slice (`research/JOURNAL.md` S2-A7): a
+  `filters::select` submodule with a `pick` function that shortlists
+  which filters (delta, BCJ, transpose) are worth a full trial encode
+  against a given input, using an order-1 entropy proxy on a bounded
+  probe. Ported from the archive's `pick_filters`. Not yet called by
+  anything — the LZ, model, and coder modules it will feed remain.
 - Deslopper agent (ADR-0016): a fifth agent seat that removes slop from
   `src/` twice daily without changing observable behaviour, one scope per
   PR, approved by the reviewer like any other agent PR. Its taxonomy and

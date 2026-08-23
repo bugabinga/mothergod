@@ -242,15 +242,42 @@ record.
   checklist (all five kinds from S1-A2 now in `src/filters.rs`); remaining
   M1 scope: see S2-D2 (now `pick_filters`, LZ, models, coder, and `Method`
   wiring only).
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A6 filter
-  slices: the `pick_filters` trial-selection heuristic; the optimal-parse
-  LZ stage (`lz`/`lz_opt`, 3-slot repeat-offset cache, priced DP); the
-  context-mixing entropy models (`Lit` six-expert arena, flag/length/offset
-  models); the range coder (`Enc`/`Dec`); and wiring all of it behind a
-  new `Method` variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard
-  rule 5). Source: `research/imports/session-1/mothergod.rs` (526 lines,
-  golfed — port behavior, not code, per ADR-0006). One PR per module per
-  the M1 checklist.
+- S2-A7 | ACCEPTED | Sixth slice of M1: the `pick_filters` trial-selection
+  heuristic ported to `src/filters.rs` as a `select` submodule
+  (`select::pick`, `select::Candidate`), mirroring the other filter
+  submodules' structure. Behavior ported from the archive's
+  `pick_filters` (`research/imports/session-1/mothergod.rs`), not the
+  code (ADR-0006): only the filters `pick_filters` itself covers —
+  delta, BCJ, transpose — are shortlisted; `base64_unwrap` and `reverse`
+  are absent from that function in the archive too (same basis as
+  S2-A5/S2-A6). One behavior-preserving deviation from the archive's raw
+  `u8` candidate ids (0=identity, 1..=96=delta stride, 97=BCJ,
+  100+i=transpose): a `Candidate` enum, so a caller can't mix up a delta
+  stride with a transpose column count — both are plain integers in the
+  archive's id space. `NonZeroUsize` for stride/column count, matching
+  `delta`/`transpose`'s existing parameter types. | 6 unit tests:
+  identity always present (including on empty input), a synthetic
+  small-random-walk fixture where the winning candidate is the delta
+  stride matching the walk's column count, an opcode-dense fixture that
+  shortlists BCJ and a sparse one that doesn't, a transpose-structured
+  fixture that shortlists a transpose candidate, and a length check that
+  transpose is never shortlisted below `MIN_TRANSPOSE_LEN`; `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/
+  `test --doc`/`doc --no-deps` all clean. | No bpb measurement, same
+  reason as S2-A2 through S2-A6: `pick` is not yet called by anything —
+  wiring it into an actual trial-encode loop needs the LZ/model/coder
+  stages this shortlist is meant to gate, still to come. `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas. Remaining M1
+  scope: see S2-D2 (now LZ, models, coder, and `Method` wiring only).
+- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A7 filter and
+  trial-selection slices: the optimal-parse LZ stage (`lz`/`lz_opt`,
+  3-slot repeat-offset cache, priced DP); the context-mixing entropy
+  models (`Lit` six-expert arena, flag/length/offset models); the range
+  coder (`Enc`/`Dec`); and wiring all of it (including `select::pick`)
+  behind a new `Method` variant with a `FORMAT_VERSION` bump + ADR
+  (CLAUDE.md hard rule 5). Source: `research/imports/session-1/
+  mothergod.rs` (526 lines, golfed — port behavior, not code, per
+  ADR-0006). One PR per module per the M1 checklist.
 - S2-D1 | DEBT | Remainder of S1-D2 after the S2-A1 generators slice:
   Silesia + Canterbury fetch-and-cache (`bench/corpus.toml`, pinned
   URL+SHA-256), the structured generator classes (jsonl/log, json,
