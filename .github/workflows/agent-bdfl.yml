@@ -152,12 +152,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - id: persona
-        if: steps.guard.outputs.paused != 'true'
-        uses: ./.github/actions/agent-persona
-        with:
-          role: bdfl
-
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@v1
@@ -198,15 +192,12 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
-          # The persona arrives via --append-system-prompt-file below, NOT
-          # interpolated here. A prompt block containing even one ${{ }}
-          # is evaluated as an expression and capped at 21,000 characters;
-          # this block is ~26,000 and GitHub rejected the whole file on
-          # every push from 2026-08-23 13:38 ("Exceeded max expression
-          # length 21000", line 246). With no expression in it the block
-          # is a literal string and has no such ceiling. Keep it that way:
-          # do not add ${{ }} to this block. Dynamic values go in env: or
-          # claude_args.
+          # No ${{ }} in this block, here or in any agent workflow. One
+          # expression makes the whole block an expression, capped at
+          # 21,000 characters; this one is ~26,000 and GitHub rejected the
+          # file on every push from 2026-08-23 13:38 ("Exceeded max
+          # expression length 21000"). Personas arrive via
+          # --append-system-prompt-file, other dynamic values via env:.
           prompt: |
 
             Your persona above is single-sourced from agents/personas/;
