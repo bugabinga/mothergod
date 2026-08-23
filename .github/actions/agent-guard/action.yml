@@ -101,10 +101,14 @@ runs:
 
         entry = roles.get(role) or {}
         ladder = entry.get("ladder") or []
-        # Levels per the Claude Code CLI --effort flag. An unknown value is
-        # dropped, not fatal: a typo here must not take an agent offline.
+        # Levels per the Claude Code CLI --effort flag, verified against
+        # `claude --help` on 2026-08-23: low, medium, high, xhigh, max.
+        # "ultracode" was on this list and is NOT a --effort value, so the
+        # guard would have passed it through for the CLI to reject, which
+        # is exactly the "typo takes an agent offline" case the next line
+        # exists to prevent.
         effort = entry.get("effort") or ""
-        if effort and effort not in ("low", "medium", "high", "xhigh", "max", "ultracode"):
+        if effort and effort not in ("low", "medium", "high", "xhigh", "max"):
             print(f"ok|||unknown effort {effort!r} for {role}; ignoring it", file=sys.stderr)
             effort = ""
 
