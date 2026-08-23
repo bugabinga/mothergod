@@ -243,8 +243,16 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
+          # The persona arrives via --append-system-prompt-file below, NOT
+          # interpolated here. A prompt block containing even one ${{ }}
+          # is evaluated as an expression and capped at 21,000 characters;
+          # this block is ~26,000 and GitHub rejected the whole file on
+          # every push from 2026-08-23 13:38 ("Exceeded max expression
+          # length 21000", line 246). With no expression in it the block
+          # is a literal string and has no such ceiling. Keep it that way:
+          # do not add ${{ }} to this block. Dynamic values go in env: or
+          # claude_args.
           prompt: |
-            ${{ steps.persona.outputs.text }}
 
             Your persona above is single-sourced from agents/personas/;
             the shared house voice is the Voice section of CLAUDE.md.
@@ -685,6 +693,7 @@ jobs:
           # fallback for invalid ids, only for overload), so any change
           # here is verified by a manual run before it is trusted.
           claude_args: |
+            --append-system-prompt-file agents/personas/bdfl.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 500
