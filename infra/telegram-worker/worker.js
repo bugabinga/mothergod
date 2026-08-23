@@ -32,6 +32,26 @@ export default {
     // Zero-padded key so KV's lexicographic list order is arrival order.
     const key = "u:" + String(update.update_id).padStart(12, "0");
     await env.INBOX.put(key, JSON.stringify(update));
+    // Instant receipt (operator request, 2026-08-23): the 👀 reaction
+    // says "stored in KV, cannot be lost", so it fires right after the
+    // KV write, before the GitHub dispatch, whose API latency must not
+    // delay it (PR #99 review). The BDFL switches it to ✍ on pickup;
+    // its reply is the completion. Non-fatal: a failed reaction loses
+    // decoration, never data.
+    if (update.message.message_id) {
+      await fetch(
+        `https://api.telegram.org/bot${env.BOT_TOKEN}/setMessageReaction`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chat_id: update.message.chat.id,
+            message_id: update.message.message_id,
+            reaction: [{ type: "emoji", emoji: "👀" }],
+          }),
+        },
+      ).catch(() => {});
+    }
     // Wake the BDFL. The dispatch carries no message text (issue #36
     // principle): it says "wake up", the run reads KV for the prose.
     // Dispatch failure is tolerable: the update is already in KV and
@@ -51,25 +71,6 @@ export default {
     );
     if (!res.ok) {
       console.error("dispatch failed", res.status, await res.text());
-    }
-    // Instant receipt (operator request, 2026-08-23): the 👀 reaction
-    // says "stored in KV, cannot be lost" within a second, minutes
-    // before the BDFL run boots. The BDFL switches it to ✍ on pickup;
-    // its reply is the completion. Non-fatal: a failed reaction loses
-    // decoration, never data.
-    if (update.message.message_id) {
-      await fetch(
-        `https://api.telegram.org/bot${env.BOT_TOKEN}/setMessageReaction`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            chat_id: update.message.chat.id,
-            message_id: update.message.message_id,
-            reaction: [{ type: "emoji", emoji: "👀" }],
-          }),
-        },
-      ).catch(() => {});
     }
     return new Response(null, { status: 200 });
   },
