@@ -113,9 +113,11 @@ A PR touching `.github/workflows/**` may draw a 403 on that merge:
 `workflows` permission". It is not deterministic. PRs #121 and #126
 merged on the app token carrying workflow files; PR #129 was refused,
 and the difference is unestablished. Treat the 403 as retryable, not as
-a rule to predict from: merge again with `GH_TOKEN="$GH_ADMIN_TOKEN"`,
-which succeeds. The reviewer has no admin token, so for it the retry is
-to label `agent-approved` and stop; the BDFL's stalled-auto-merge sweep
+a rule to predict from: the BDFL merges again with
+`GH_TOKEN="$GH_ADMIN_TOKEN"`, which succeeds. That retry is the BDFL's
+and only the BDFL's, because the admin token is (`OPERATIONS.md`,
+"Admin token & signing"). Every other agent's move on this 403 is to
+label `agent-approved` and stop; the BDFL's stalled-auto-merge sweep
 lands it. Distinct from app-token *pushes* to workflow files, which are
 refused every time (issue #24).
 
