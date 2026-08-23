@@ -656,6 +656,29 @@ jobs:
           telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
 
+      # No live run, no "typing..." (PR #155 review). The worker starts
+      # the indicator when the operator's message lands, and tg-send
+      # ends it when a reply goes out; this ends it when no reply is
+      # coming. Unconditional on purpose, because the cases where it
+      # matters are exactly the ones a condition would miss: the pause
+      # guard skipped the session whole, the session died, the job was
+      # cancelled. The invariant is one sentence — the bot types while a
+      # BDFL run is alive and owes an answer, never after. Idempotent,
+      # so the normal path (tg-send already stopped it) costs one 204.
+      #
+      # The secret reaches curl as a --config file on stdin, so it never
+      # enters any argv (hard rule 10). Failure is a log line: a stale
+      # indicator expires on the worker's own cap, and this must not be
+      # the step that reddens a good run.
+      - if: always()
+        continue-on-error: true
+        env:
+          WORKER_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: |
+          printf 'url = "https://bot.mothergod.dev/typing/stop"\nheader = "x-mothergod-secret: %s"\n' \
+            "${WORKER_SECRET}" |
+            curl -sS -X POST --max-time 10 --config - -o /dev/null -w 'typing/stop: %{http_code}\n'
+
       # Audit trail (operator directive): prompt and metadata in, final
       # response out. Never the transcript, which records command lines and
       # can carry credentials. Must not fail the run.

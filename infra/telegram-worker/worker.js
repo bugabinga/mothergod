@@ -69,15 +69,19 @@ export class Typing {
   }
 }
 
-// Non-fatal by construction: a failed indicator loses decoration, never
-// data, so it must not abort the webhook that carries the message.
+// Never throws: a failed indicator loses decoration, never data, so it
+// must not abort the webhook that carries the message. It does report,
+// because the caller that ends the indicator is also our only probe
+// that the object is reachable at all.
 async function typing(env, verb) {
   try {
     await env.TYPING.get(env.TYPING.idFromName("operator")).fetch(
       `https://typing.invalid${verb}`,
     );
+    return true;
   } catch (error) {
     console.error("typing", verb, error);
+    return false;
   }
 }
 
@@ -94,8 +98,8 @@ export default {
       if (request.headers.get("x-mothergod-secret") !== env.WEBHOOK_SECRET) {
         return new Response(null, { status: 401 });
       }
-      await typing(env, "/stop");
-      return new Response(null, { status: 204 });
+      const stopped = await typing(env, "/stop");
+      return new Response(null, { status: stopped ? 204 : 502 });
     }
     // Telegram echoes the secret_token from setWebhook in this header;
     // a request without it is not Telegram.
