@@ -11,9 +11,10 @@
 # and `cargo test` on the PR branch already executes arbitrary PR code,
 # so an allowlist of binary names was friction without a boundary — it
 # stalled the #105 review on python3/mkdir approvals no human was
-# present to grant. The security boundary is what it always was: fork
-# PRs never reach this job, and secrets stay out of the env of
-# anything the PR's own code can reach.
+# present to grant. The security boundary is what it always was: only
+# same-repo branches reach this job, so every author is our own
+# machinery or the operator. Token exposure to executed PR code
+# predates this change and is tracked in issue #106.
 #
 # Identity note: gh runs with the workflow's GITHUB_TOKEN (github-actions
 # bot), a different identity from the claude[bot] app that authors agent
