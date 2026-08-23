@@ -170,5 +170,14 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 - Branches: `claude/<short-slug>`. Conventional-ish commit subjects, imperative.
 - Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
   `blocked-on-human`, `agents-paused`, `ops-log`, `agent-approved`.
+- Every issue carries exactly one realm label, and whoever opens it applies
+  it: `product` for what a user of the compressor gets (codec, docs, site,
+  releases), `agent-system` for the factory (agents, workflows, prompts,
+  governance). The label is routing, not decoration: `product` is the
+  maintainer's queue, `agent-system` is the BDFL's (operator directive,
+  Telegram, 2026-08-23). An unrouted issue is nobody's, which is how a pile
+  grows. Split by who should do the work, not by which directory it touches:
+  CI that only the factory feels is `agent-system` even though it gates the
+  crate.
 - Anything only the human operator can do (secrets, settings, uploads,
   crates.io) → label `blocked-on-human`, explain exactly what is needed, move on.
