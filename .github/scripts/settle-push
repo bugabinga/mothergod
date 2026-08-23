@@ -48,24 +48,36 @@ def die(*lines):
 
 
 def runs_for(repo, sha):
-    """Runs at this SHA, grouped by workflow name -> list of held? booleans."""
+    """Runs at this SHA as (id, workflow name, held at the approval gate?)."""
     payload = json.loads(gh("api", f"repos/{repo}/actions/runs?head_sha={sha}&per_page=100"))
-    grouped = {}
-    for run in payload.get("workflow_runs", []):
-        held = "action_required" in (run.get("status"), run.get("conclusion"))
-        grouped.setdefault(run["name"], []).append(held)
-    return grouped
+    return [(run["id"], run["name"],
+             "action_required" in (run.get("status"), run.get("conclusion")))
+            for run in payload.get("workflow_runs", [])]
 
 
 def observe(repo, sha, deadline):
-    """Wait for runs to appear, then report which workflows have none live."""
+    """Poll until the run set stops changing, then report the held workflows.
+
+    A set that is still growing is not evidence: on PR #131 the CodeQL run
+    existed while ci and agent-review did not yet, and reading once would have
+    called that settled. Identity is the run id, not the workflow name --
+    after a re-attribution the names repeat, and only the ids say the fresh
+    runs actually arrived.
+    """
+    previous, runs = None, []
     while True:
-        grouped = runs_for(repo, sha)
-        if grouped:
-            return grouped, [name for name, held in grouped.items() if all(held)]
-        if time.monotonic() >= deadline:
-            return {}, None
+        runs = runs_for(repo, sha)
+        ids = {run_id for run_id, _, _ in runs}
+        if (runs and ids == previous) or time.monotonic() >= deadline:
+            break
+        previous = ids
         time.sleep(POLL)
+    if not runs:
+        return {}, None
+    grouped = {}
+    for _, name, held in runs:
+        grouped.setdefault(name, []).append(held)
+    return grouped, [name for name, held in grouped.items() if all(held)]
 
 
 def main():
