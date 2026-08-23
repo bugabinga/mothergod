@@ -48,15 +48,19 @@ sweep, a drain, a state check and a retrospect: 17k output tokens,
 Scheduled cadence is set against the allowance, not against impatience.
 
 - `agent-bdfl`: `11,31,51 * * * *` → `11 * * * *`. Three wakes an hour
-  to one.
-- `agent-heartbeat`: `22,52 * * * *` → `22 * * * *`. Two to one.
+  to one, which ADR-0015 already names as this seat's normal.
+- `agent-heartbeat`: `22,52 * * * *` → `22 */2 * * *`. Two an hour to
+  one every two hours, which is the revert target #60 itself names.
+
+Neither number is invented. Both seats return to the cadence their own
+records call normal; the sprint's exit criterion is what changes.
 
 This ends the stabilization sprint's cadence (issue #60, operator
 directive, Telegram 2026-08-22) before its stated exit criterion. That
 criterion is 24 consecutive hours with every scheduled agent run green
 and no manual intervention. It has not held: `agent-heartbeat` run
-`32660844700` died on 2026-08-23 at 19:19 and PR #190 was hand-landed
-to fix it. Waiting for the criterion is not a way to preserve the
+`32660844700` died on 2026-08-23 at 19:19, 26 seconds after the feature
+that dispatched it merged, and PR #190 is the fix. Waiting for the criterion is not a way to preserve the
 sprint's cadence, it is a way to spend the allowance before the
 criterion can ever hold. The sprint's goal survives; only its poll rate
 changes.
@@ -87,7 +91,7 @@ The constraint was never how often the factory was allowed to start.
 
 **The maintainer is now demand-woken too.** PR #186 wakes that seat
 when a review verdict lands, which is when it has something to do.
-Halving its cron removes idle wakes without touching the responsive
+Quartering its cron removes idle wakes without touching the responsive
 path, and that path is why the cron was raised to every 30 minutes on
 2026-08-23: the operator saw issues piling up faster than one seat
 could clear them. What actually cleared that pile was the realm split
@@ -108,6 +112,27 @@ wakes open fewer PRs. The largest line in the table shrinks by leaving
 it alone, which is the only way to shrink it without cutting into
 verification.
 
+**The cadence already exceeded the service rate, so most of those wakes
+died anyway.** A BDFL run that does real work takes 30 to 90 minutes;
+the previous one ran 36. At one wake every 20 minutes into a lane that
+holds one running plus one pending, the third wake is cancelled before
+it reads anything. Two were cancelled during the run that wrote this
+ADR, at 19:29:52 and earlier at 18:55:53. The old cadence was not
+buying three chances an hour to notice something. It was buying one
+long run and two funerals.
+
+**This does not by itself bring the rate under the line, and saying so
+is the point.** Scheduled wakes were 76 of the day's 160 agent runs;
+this removes about 46 of them, and the reviewer runs they no longer
+generate remove more. Call it a third off the window's 0.834%/h
+average, landing near 0.5%/h against the 0.28%/h that reaches the
+reset. That is a longer fuse, not a defused one: the allowance still
+runs out around Tuesday. It is the first lever because it is the only
+one that costs nothing real, removing wakes that had nothing to do and
+nothing else. The honest position is that the project may still hit the
+pause, and the pause machinery exists precisely because the operator
+accepted that outcome when they chose subscription-only auth.
+
 **Throughput drops, deliberately.** Roughly a third of the previous
 autonomous BDFL capacity and half the maintainer's. On 2026-08-23 the
 project merged seven PRs in two hours; the constraint on this project
@@ -118,6 +143,18 @@ Monday evening ships nothing Tuesday.
 
 The budget footer on every BDFL wake. If it reports the allowance
 running slack against the reset for a full window, raise the cadence
-and record the new reading here. If it says SLOW DOWN again at this
-cadence, the next lever is per-role effort (ADR-0021), not the
-reviewer.
+and record the new reading here.
+
+It will keep saying SLOW DOWN at this cadence, because the arithmetic
+above says so. The order of the next levers is set here so that a
+future run under pressure does not reach for the cheapest one:
+
+1. per-role effort (ADR-0021), starting with this seat, which spent
+   40,956 of its previous run's 75,807 output tokens thinking;
+2. model tier (ADR-0012), and only downward for seats whose work is
+   mechanical;
+3. nothing else.
+
+The reviewer is not on the list at any position. It is the seat that
+checks the others, and a factory that saves its allowance by reviewing
+less has spent the mission to buy a week.
