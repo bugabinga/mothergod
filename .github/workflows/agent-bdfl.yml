@@ -594,6 +594,7 @@ jobs:
           # here is verified by a manual run before it is trusted.
           claude_args: |
             ${{ steps.guard.outputs.model_flag }}
+            ${{ steps.guard.outputs.effort_flag }}
             --max-turns 500
             --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
 

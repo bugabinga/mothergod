@@ -10,7 +10,7 @@ here — kept strictly apart from the classical software project (ADR-0010).
 | `PERSONALITY.md` | temperament concept doc |
 | `personas/` | per-agent personas (identity, voice, values): single source, loaded into prompts at run time; shared voice rules live in CLAUDE.md |
 | `SOURCES.md` | trusted reading list + adoption log (stay-current duty) |
-| `models.json` | per-role model ladders, first available rung wins, last rung is the floor (ADR-0018) |
+| `models.json` | per-role model ladder and effort level; first available rung wins, last rung is the floor (ADR-0018, ADR-0021) |
 | `IDENTITIES.md` | registry of accounts/domains the project owns |
 
 Two agent-system pieces cannot live here, by platform requirement:
