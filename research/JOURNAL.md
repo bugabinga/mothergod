@@ -513,6 +513,29 @@ record.
   scoring, the CI baseline gate, and progress-graph rendering. Ideal-cost
   accounting mode (M2) additionally needs real model code (M1) to hang off
   of.
+- S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
+  (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
+  fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
+  fixtures built to be invalid by construction (empty input, truncation
+  at every header-boundary byte offset from 0 to 5, wrong magic, a
+  single-byte-flipped magic, a future `FORMAT_VERSION`, an unknown
+  method with and without a trailing payload, and two all-`0x00`/all-
+  `0xFF` blocks plus a fixed non-matching-magic blob standing in for
+  arbitrary noise) and `tests/adversarial.rs`, which reads every file in
+  that directory and asserts `decompress` returns `Err`, never a panic
+  (CLAUDE.md hard rule 2). Runs on every PR via `cargo test
+  --all-targets`, not scheduled: this is layer 2, distinct from the
+  scheduled cargo-fuzz layer 3 (M4, issue #53) it will eventually feed —
+  a fuzz-found crasher promotes into this same directory as a regression
+  seed once fuzzing exists. | 13/13 fixtures assert `Err` (verified each
+  by hand against `decompress`'s header-parsing order: length check,
+  then magic, then version, then method); `cargo
+  fmt`/`clippy --all-targets -- --deny warnings`/`test --all-targets`/
+  `test --doc`/`doc --no-deps` all clean. | No bpb measurement: this is
+  a decoder-safety suite, not a ratio experiment; `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas. Remaining M2
+  scope: S2-D1 (corpus fetch/generators), ideal-cost accounting mode,
+  the CI benchmark regression gate, and progress-graph rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
