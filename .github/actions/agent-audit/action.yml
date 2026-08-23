@@ -12,7 +12,7 @@
 # This step must never fail an agent run: observability does not get to break
 # the thing it observes.
 name: agent-audit
-description: Publish an agent run's prompt, metadata and final response as an artifact and a step summary
+description: Publish an agent run's persona, prompt, metadata and final response as an artifact and a step summary
 inputs:
   role:
     description: Which agent produced this run (bdfl, maintainer, reviewer, researcher)
@@ -46,7 +46,7 @@ runs:
         out="${RUNNER_TEMP}/agent-audit"
         mkdir -p "$out"
         python3 - "$out" <<'PY' || echo "::warning::audit extraction incomplete"
-        import json, os, sys
+        import hashlib, json, os, sys
 
         out = sys.argv[1]
         path = os.environ.get("EXEC_FILE", "")
@@ -108,6 +108,41 @@ runs:
                     candidate = text_of(msg.get("content"))
                     if len(candidate) > len(prompt):
                         prompt = candidate
+
+        # Persona (issue #168). It reaches the model as
+        # --append-system-prompt-file agents/personas/<role>.md, a CLI flag,
+        # so it appears in neither the captured user prompt nor the action's
+        # own options log, which records only "systemPrompt": preset. Without
+        # this block, "text in" is a half-truth.
+        #
+        # The path is derived from role because that mapping IS the
+        # convention all five workflows follow, so the path stays stated
+        # once. A workflow that deviates reports exists=false, which is the
+        # visible zero, not a silent pass.
+        #
+        # An ABSENT file is already loud without us: the CLI refuses to start
+        # ("Error: Append system prompt file not found: <path>", exit 1,
+        # verified against 2.1.241), so that case reddens the claude step
+        # before this action runs. What is left to catch is the quiet one, a
+        # file that exists and is empty or is not the text anyone meant, and
+        # that is what bytes and sha256 answer.
+        persona_path = f"agents/personas/{os.environ.get('ROLE', '')}.md"
+        persona, persona_found = "", False
+        try:
+            with open(os.path.join(os.environ.get("GITHUB_WORKSPACE", ""), persona_path),
+                      encoding="utf-8", errors="replace") as fh:
+                persona = fh.read()
+            persona_found = True
+        except OSError as exc:
+            print(f"::warning::persona not readable at {persona_path}: {exc}")
+        if persona_found and not persona.strip():
+            print(f"::warning::persona at {persona_path} is empty: this run had no persona")
+        persona_meta = {
+            "path": persona_path,
+            "exists": persona_found,
+            "bytes": len(persona.encode("utf-8")),
+            "sha256": hashlib.sha256(persona.encode("utf-8")).hexdigest() if persona_found else None,
+        }
 
         # Output: the last result entry carries the agent's final response.
         # Telemetry (issue #64): run economics lifted from the result entry
@@ -184,12 +219,14 @@ runs:
             "telemetry": telemetry,
             "rate_limit_events": rate_limits,
             "entries_parsed": len(entries),
+            "persona": persona_meta,
             "prompt_extracted": bool(prompt),
             "response_extracted": bool(response),
             "entry_shape": shape,
         }
 
         files = {
+            "input-persona.md": persona if persona_found else f"(no persona file at {persona_path})",
             "input-prompt.md": prompt or "(prompt not found in execution file)",
             "output-response.md": response or "(final response not found in execution file)",
             "metadata.json": json.dumps(meta, indent=2),
@@ -230,11 +267,21 @@ runs:
                 "",
                 f"trigger {trigger}, is_error={is_error}, "
                 f"turns={telemetry.get('num_turns', '?')}, "
-                f"denials={telemetry.get('permission_denials', {}).get('count', 0)}",
+                f"denials={telemetry.get('permission_denials', {}).get('count', 0)}, "
+                f"persona={persona_meta['bytes']}B",
                 "",
                 "### Response",
                 "",
                 clip(scrubbed["output-response.md"], 200_000),
+                "",
+                "<details><summary>Persona</summary>",
+                "",
+                f"`{persona_path}`, {persona_meta['bytes']} bytes, "
+                f"sha256 {persona_meta['sha256'] or 'none, file not found'}",
+                "",
+                clip(scrubbed["input-persona.md"], 30_000),
+                "",
+                "</details>",
                 "",
                 "<details><summary>Prompt</summary>",
                 "",
@@ -256,7 +303,9 @@ runs:
             with open(summary_path, "a", encoding="utf-8") as fh:
                 fh.write(summary)
 
-        print(f"audit: {len(entries)} entries, prompt={bool(prompt)}, "
+        print(f"audit: {len(entries)} entries, "
+              f"persona={persona_path} {persona_meta['bytes']}B, "
+              f"prompt={bool(prompt)}, "
               f"response={bool(response)}, redactions={redactions}")
         PY
 
