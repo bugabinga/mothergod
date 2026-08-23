@@ -225,16 +225,15 @@ jobs:
               Only if the REST call reports required gates still pending,
               arm `gh pr merge <n> --squash --auto` and stop; the BDFL
               sweep rescues it if it stalls. One carve-out outranks
-              "unconditionally", merge identity: if the diff adds or edits
-              a cron expression inside any workflow's `on: schedule:`
-              block, do NOT merge. GitHub attributes schedule runs to the
-              account that landed the last cron change and the token
-              exchange rejects bot actors, so your merge would kill that
-              schedule (GOVERNANCE.md "Push identity", PR #30). Prompt text
-              merely mentioning cron does not trigger this. In that case
-              post your verdict and the label as usual, state the merge is
-              the BDFL's under the cron carve-out, and stop; the BDFL lands
-              it admin-PAT-attributed. Do not watch checks first
+              "unconditionally", merge identity: if the diff touches any
+              file under `.github/workflows/`, do NOT merge, whatever
+              your verdict. Those PRs are the BDFL's to land by operator
+              ruling (issue #136): your token is refused there, and a
+              bot-landed cron line kills that schedule (GOVERNANCE.md
+              "Merging"). Reviewing them is still your job and it is the
+              only review they get. Post your verdict and the label as
+              usual, say the merge is the BDFL's under the workflow
+              carve-out, and stop. Do not watch checks first
               (`gh pr checks <n> --watch` includes this very review job in
               the watch list, which cannot complete while you are watching
               it, so it hangs). A single non-watching `gh pr checks <n>` for
