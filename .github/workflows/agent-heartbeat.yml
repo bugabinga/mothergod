@@ -15,7 +15,11 @@ on:
     # land admin-PAT-attributed: an app-merged cron edit flips the
     # schedule actor to claude[bot], the token exchange rejects bot
     # actors, and every scheduled run dies (GOVERNANCE.md "Push
-    # identity", PR #30).
+    # identity", PR #30). That rule covers the branch commit, which
+    # `push-branch` puts on the PAT; the squash merge then writes a new
+    # commit on main authored by whoever merged, which for a BDFL
+    # workflow PR is `claude[bot]`. ADR-0027 landed that way as 5c259c4,
+    # so this commit re-attributes the line.
     - cron: '22 */2 * * *'
   workflow_dispatch:
 

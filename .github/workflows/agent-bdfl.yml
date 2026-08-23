@@ -14,6 +14,15 @@ on:
     # buys autonomous work only: operator activity and Telegram both
     # wake this seat through their own triggers, within seconds, at any
     # cadence. 06:11 UTC Sunday stays the deep run.
+    #
+    # This line's last commit must be operator-attributed. `push-branch`
+    # picks the admin PAT for the branch commit, but a squash merge
+    # writes a NEW commit on main authored by whoever merged, and the
+    # BDFL merges its own workflow PRs as `claude[bot]`. ADR-0027 landed
+    # as 5c259c4 that way; this commit re-attributes the line. Prompt-only
+    # edits to this file have landed bot-authored all week with scheduled
+    # runs still firing as `bugabinga`, so the hazard is specific to the
+    # cron line, which is exactly the distinction GOVERNANCE draws.
     - cron: '11 * * * *'
   workflow_dispatch:
   # Operator-priority wake: any personal repo activity by the operator
