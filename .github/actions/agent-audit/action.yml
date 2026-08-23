@@ -211,13 +211,17 @@ runs:
         # download, unreadable in the browser. Render the same scrubbed
         # text on the run page via the step summary; the artifact stays
         # the full-fidelity 90-day record. Only scrubbed bodies reach
-        # here. Clips guard GitHub's 1 MiB summary cap.
+        # here. Clips guard GitHub's 1 MiB summary cap, which is
+        # byte-based, so clip counts UTF-8 bytes, not codepoints
+        # (PR #105 review).
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary_path:
             def clip(text, limit):
-                if len(text) <= limit:
+                encoded = text.encode("utf-8")
+                if len(encoded) <= limit:
                     return text
-                return text[:limit] + f"\n\n(clipped at {limit} of {len(text)} chars; full text in the artifact)"
+                kept = encoded[:limit].decode("utf-8", errors="ignore")
+                return kept + f"\n\n(clipped at {limit} of {len(encoded)} bytes; full text in the artifact)"
 
             number = os.environ.get("NUMBER", "")
             trigger = os.environ.get("EVENT", "") + (f" #{number}" if number else "")
@@ -240,9 +244,11 @@ runs:
                 "",
                 "<details><summary>Metadata</summary>",
                 "",
-                "```json",
+                # Four-backtick fence: survives a triple backtick inside
+                # the JSON string values (PR #105 review).
+                "````json",
                 clip(scrubbed["metadata.json"], 30_000),
-                "```",
+                "````",
                 "",
                 "</details>",
                 "",
