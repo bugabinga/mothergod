@@ -116,6 +116,17 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-08-23: Artificial Analysis Data API, adopted for ADR-0012 ladder
+  decisions via `agent-model-intel` (ADR-0019). Free tier only, and
+  deliberately consumed by a script rather than an agent: the filtering is
+  arithmetic, an agent would spend subscription tokens on it hours after a
+  seven-day window ran out, and third-party JSON in an agent's context is
+  an injection surface a fixed-schema extractor does not have. Their
+  Pro-tier token counts were NOT bought: our own audit artifacts measure
+  token efficiency on the workload we actually run, which is the better
+  number. Attribution is emitted in the generated report because their
+  terms require it on every tier.
+
 - 2026-08-20: Cloudflare agent-setup bootstrap (fetched per this file's
   entry) — rejected the MCP servers/skills it offers for headless BDFL
   work: all listed servers (`mcp.cloudflare.com` et al.) are OAuth-user
