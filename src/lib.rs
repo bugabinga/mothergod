@@ -6,10 +6,11 @@
 //!
 //! The library speaks a tiny framed container format. Every frame starts
 //! with a magic number, a format version, and a method byte identifying
-//! how the payload is encoded. Only the `Stored` method (no compression)
-//! exists so far; real codecs plug in as new method bytes without
-//! breaking old frames.
+//! how the payload is encoded: `Stored` (no compression) or `Lz`
+//! (optimal-parse LZ over an adaptive range coder, `research/JOURNAL.md`
+//! S2-D2). [`compress`] always picks whichever produces the smaller frame.
 
+pub mod codec;
 pub mod coder;
 pub mod filters;
 pub mod literal;
@@ -20,7 +21,13 @@ pub mod model;
 pub const MAGIC: [u8; 4] = *b"MGDC";
 
 /// Container format version written into frames produced by this crate.
-pub const FORMAT_VERSION: u8 = 0;
+///
+/// Bumped to 1 when [`Method::Lz`] was added (`docs/adr/0026-wire-the-lz-context-mixing-method.md`):
+/// a new method byte is a bitstream format change (CLAUDE.md hard rule 5).
+/// A version-0 frame only ever contains [`Method::Stored`], which decodes
+/// identically under this build, so no separate version-0 decode path is
+/// needed: [`decompress`] already accepts any `version <= FORMAT_VERSION`.
+pub const FORMAT_VERSION: u8 = 1;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +35,11 @@ pub const FORMAT_VERSION: u8 = 0;
 pub enum Method {
     /// Payload is stored verbatim, no compression.
     Stored = 0,
+    /// Optimal-parse LZ tokens, entropy-coded by adaptive flag/length/
+    /// offset/rep-slot models and a six-expert context-mixing literal
+    /// model, over an adaptive range coder. See [`codec`] for the payload
+    /// layout. Filters are not wired in yet.
+    Lz = 1,
 }
 
 impl TryFrom<u8> for Method {
@@ -36,6 +48,7 @@ impl TryFrom<u8> for Method {
     fn try_from(byte: u8) -> Result<Self, Error> {
         match byte {
             0 => Ok(Self::Stored),
+            1 => Ok(Self::Lz),
             other => Err(Error::UnknownMethod(other)),
         }
     }
@@ -52,6 +65,19 @@ pub enum Error {
     UnsupportedVersion(u8),
     /// Method byte does not name a known [`Method`].
     UnknownMethod(u8),
+    /// Payload does not decode to a value consistent with itself (a
+    /// declared length its content does not match, a match/rep distance
+    /// reaching before the start of decoded output, or similar):
+    /// adversarial or corrupted input, never a bug in this decoder.
+    Corrupt,
+    /// Payload declares an output length larger than this decoder accepts
+    /// (`codec::MAX_DECODED_LEN`). A declared length alone is not bounded
+    /// by the bytes that encode it: this format's adaptive models can make
+    /// a handful of real payload bytes and a few million padding-decoded
+    /// bytes indistinguishable by size, so the only sound bound is an
+    /// explicit ceiling, checked before any allocation or decode work
+    /// happens (`rust-craft` skill, allocation-discipline).
+    TooLarge(u32),
 }
 
 impl core::fmt::Display for Error {
@@ -61,6 +87,12 @@ impl core::fmt::Display for Error {
             Self::BadMagic => write!(f, "input is not a mothergod frame (bad magic)"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported format version {v}"),
             Self::UnknownMethod(m) => write!(f, "unknown compression method {m}"),
+            Self::Corrupt => write!(f, "compressed payload is corrupt"),
+            Self::TooLarge(len) => write!(
+                f,
+                "declared output length {len} exceeds this decoder's maximum ({} bytes)",
+                codec::MAX_DECODED_LEN
+            ),
         }
     }
 }
@@ -71,18 +103,32 @@ const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
-/// Compresses `input` into a self-describing frame.
-///
-/// Until a real codec lands this always uses [`Method::Stored`], so the
-/// output is `HEADER_LEN` bytes larger than the input.
-#[must_use]
-pub fn compress(input: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(HEADER_LEN + input.len());
+/// Assembles a complete frame from `method` and its `payload`.
+fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(HEADER_LEN + payload.len());
     frame.extend_from_slice(&MAGIC);
     frame.push(FORMAT_VERSION);
-    frame.push(Method::Stored as u8);
-    frame.extend_from_slice(input);
+    frame.push(method as u8);
+    frame.extend_from_slice(payload);
     frame
+}
+
+/// Compresses `input` into a self-describing frame.
+///
+/// Tries [`Method::Lz`] and falls back to [`Method::Stored`] whenever that
+/// does not produce a smaller frame (`docs/format/SPEC.md`'s Stored-floor
+/// invariant): tiny, incompressible, or already-compressed input, and any
+/// input longer than `u32::MAX` bytes, which [`codec::encode`] does not
+/// support yet.
+#[must_use]
+pub fn compress(input: &[u8]) -> Vec<u8> {
+    if u32::try_from(input.len()).is_ok() {
+        let body = codec::encode(input);
+        if body.len() < input.len() {
+            return build_frame(Method::Lz, &body);
+        }
+    }
+    build_frame(Method::Stored, input)
 }
 
 /// Decodes a frame produced by [`compress`] back into the original bytes.
@@ -90,7 +136,8 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 /// # Errors
 ///
 /// Returns an [`Error`] when `input` is truncated, is not a mothergod
-/// frame, or uses a version or method this build does not understand.
+/// frame, uses a version or method this build does not understand, or (for
+/// [`Method::Lz`]) is not internally consistent — see [`codec::decode`].
 pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
     if header[..MAGIC.len()] != MAGIC {
@@ -103,6 +150,7 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     let method = Method::try_from(header[METHOD_OFFSET])?;
     match method {
         Method::Stored => Ok(payload.to_vec()),
+        Method::Lz => codec::decode(payload),
     }
 }
 
@@ -151,6 +199,42 @@ mod tests {
     }
 
     #[test]
+    fn compressible_input_picks_method_lz() {
+        let input = b"the quick brown fox jumps over the lazy dog".repeat(100);
+        let frame = compress(&input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+        assert!(
+            frame.len() < input.len(),
+            "a 100x repeat should compress smaller than the input: {} -> {}",
+            input.len(),
+            frame.len()
+        );
+        assert_eq!(decompress(&frame), Ok(input));
+    }
+
+    #[test]
+    fn tiny_input_falls_back_to_stored() {
+        // A handful of bytes: Method::Lz's 8-byte header alone already
+        // exceeds this, so compress must pick Stored (the "Stored floor"
+        // invariant, docs/format/SPEC.md).
+        let input = b"hi";
+        let frame = compress(input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+        assert_eq!(decompress(&frame), Ok(input.to_vec()));
+    }
+
+    #[test]
+    fn incompressible_input_falls_back_to_stored_and_roundtrips() {
+        let input: Vec<u8> = test_support::Xorshift32::new(0x9E37_79B9)
+            .take(2000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+        let frame = compress(&input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+        assert_eq!(decompress(&frame), Ok(input));
+    }
+
+    #[test]
     fn truncated_input_is_rejected() {
         assert_eq!(decompress(b"MGDC"), Err(Error::Truncated));
     }
@@ -175,5 +259,27 @@ mod tests {
         let mut frame = compress(b"x");
         frame[MAGIC.len() + 1] = 0xFF;
         assert_eq!(decompress(&frame), Err(Error::UnknownMethod(0xFF)));
+    }
+
+    #[test]
+    fn lz_declared_length_over_the_max_is_rejected() {
+        // A tiny frame declaring an output far past codec::MAX_DECODED_LEN
+        // (and a matching token count, so the loop-iterations argument in
+        // codec::decode's docs doesn't save it either): must reject before
+        // doing any decode work, not just eventually. Public-API-level
+        // regression for the amplification hazard codec.rs's unit tests
+        // cover directly.
+        let over = codec::MAX_DECODED_LEN + 1;
+        let mut frame = vec![
+            MAGIC[0],
+            MAGIC[1],
+            MAGIC[2],
+            MAGIC[3],
+            FORMAT_VERSION,
+            Method::Lz as u8,
+        ];
+        frame.extend_from_slice(&over.to_le_bytes());
+        frame.extend_from_slice(&over.to_le_bytes());
+        assert_eq!(decompress(&frame), Err(Error::TooLarge(over)));
     }
 }
