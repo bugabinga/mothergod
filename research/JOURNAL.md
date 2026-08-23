@@ -567,6 +567,40 @@ record.
   audio, image, sqlite-like, x86 binary), the three-tier train/sealed/
   finals split plumbing, regret scoring, the CI baseline gate, and
   progress-graph rendering.
+- S2-A15 | ACCEPTED | Second structured-generator slice of M2's remaining
+  benchmark-harness debt (S2-D1): a synthetic JSON API response
+  (`research/corpus/POLICY.md`'s "json" class) ported to `bench/src/lib.rs`
+  as `json_records`, mirroring `access_log`'s structure. Behavior ported
+  from the founding session's `corpus.py` (`c['json']`, `git show
+  1a3b1c8:research/imports/session-1/corpus.py`), not the code
+  (ADR-0006): a `{"status": "ok", "results": [...]}` envelope around
+  `user_id`/`name`/`email`/`active`/`score` records, `active` true 80% of
+  the time, `score` gaussian (mean 50, stddev 15). The archive draws its
+  gaussian from Python's `random.gauss`; this port adds a `standard_normal`
+  helper (Box-Muller transform over the existing `Rng`'s `next_unit`) since
+  the crate has no gaussian sampler yet and takes no new dependency
+  (ADR-0002). One behavior-preserving deviation, the same shape as
+  S2-A14's: the archive fixes the response at 500 records then truncates
+  to `N` bytes; this port generates records until `len` bytes are reached
+  then truncates, so it produces exactly `len` bytes for any requested
+  length instead of only for the one size the archive's fixed record count
+  happened to cover — truncation is not repaired to valid JSON, matching
+  the archive's own raw-truncation behavior. | 5 unit tests: exact-length
+  output across five requested lengths, determinism, seed independence, a
+  structural check that the output starts with the response envelope and
+  contains many `"user_id"` records, and an `active`-field true-fraction
+  check (70-90% band, integer arithmetic to avoid a precision-loss cast)
+  confirming the 80% skew; wired into the existing frame-format round-trip
+  test. `cargo fmt`/`clippy --all-targets -- --deny warnings`/`test
+  --all-targets`/`test --doc`/`doc --no-deps` (`RUSTDOCFLAGS=--deny
+  warnings`) all clean. | No bpb measurement: this is corpus-generation
+  infra, not an experiment against a champion — `progress.jsonl` records
+  this as `kind: "patch"` with null bpb deltas, same as S2-A1 through
+  S2-A14. Remaining S2-D1 scope: Silesia + Canterbury fetch-and-cache, the
+  five remaining structured generator classes (base64-wrapped, audio,
+  image, sqlite-like, x86 binary), the three-tier train/sealed/finals
+  split plumbing, regret scoring, the CI baseline gate, and progress-graph
+  rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

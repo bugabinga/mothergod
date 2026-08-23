@@ -11,6 +11,8 @@
 //!   conditional entropy, the histogram-coder trap.
 //! - [`access_log`]: synthetic web-server access log lines, the
 //!   "jsonl/log records" structured class.
+//! - [`json_records`]: a synthetic JSON API response, the "json"
+//!   structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
@@ -249,6 +251,64 @@ pub fn access_log(len: usize, seed: u64) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// Probability [`json_records`] sets a record's `active` field to `true`,
+/// matching the founding generator's `random.random() < 0.8`.
+const JSON_ACTIVE_PROBABILITY: f64 = 0.8;
+
+/// Draws one standard-normal (mean 0, stddev 1) sample via the Box-Muller
+/// transform. `rng.next_unit()` returns `[0, 1)`; shifting one draw to `(0,
+/// 1]` keeps the log finite.
+fn standard_normal(rng: &mut Rng) -> f64 {
+    let u1 = 1.0 - rng.next_unit();
+    let u2 = rng.next_unit();
+    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+}
+
+/// Generates `len` bytes of a synthetic JSON API response, the "json"
+/// structured class (`research/corpus/POLICY.md`): a `{"status": "ok",
+/// "results": [...]}` envelope around user records (`user_id`, `name`,
+/// `email`, `active`, `score`). Truncated to exactly `len` bytes; mid-record
+/// truncation is not repaired, matching how the archive's own
+/// `json.dumps(resp).encode()[:N]` truncation works (the result is not
+/// guaranteed to be valid JSON when `len` cuts inside the document).
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['json']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// records with a gaussian `score` (mean 50, stddev 15) and `active` true
+/// 80% of the time. One behavior-preserving deviation, matching
+/// [`access_log`]'s: the archive fixes the response at 500 records then
+/// truncates to `N` bytes; this generates records until `len` bytes are
+/// reached, so it produces exactly `len` bytes for any requested length
+/// instead of only for the one size the archive's fixed record count
+/// happened to cover.
+#[must_use]
+pub fn json_records(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(seed);
+    let mut out = String::with_capacity(len);
+    out.push_str(r#"{"status": "ok", "results": ["#);
+    let mut i = 0usize;
+    while out.len() < len {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        let user_id = 1000 + i;
+        let active = rng.next_unit() < JSON_ACTIVE_PROBABILITY;
+        let score = 50.0 + 15.0 * standard_normal(&mut rng);
+        write!(
+            out,
+            r#"{{"user_id": {user_id}, "name": "user_{i}", "email": "user_{i}@example.com", "active": {active}, "score": {score:.1}}}"#
+        )
+        .expect("writing to a String never fails");
+        i += 1;
+    }
+    out.push_str("]}");
+    out.truncate(len);
+    out.into_bytes()
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -310,7 +370,7 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        access_log, entropy_ladder, markov_h8_2_trap, order0_entropy_bits,
+        access_log, entropy_ladder, json_records, markov_h8_2_trap, order0_entropy_bits,
         order1_conditional_entropy_bits,
     };
 
@@ -385,6 +445,7 @@ mod tests {
         assert_eq!(entropy_ladder(4, 0, SEED), Vec::<u8>::new());
         assert_eq!(markov_h8_2_trap(0, SEED), Vec::<u8>::new());
         assert_eq!(access_log(0, SEED), Vec::<u8>::new());
+        assert_eq!(json_records(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
     }
@@ -437,12 +498,57 @@ mod tests {
     }
 
     #[test]
+    fn json_records_is_exactly_the_requested_length() {
+        for len in [1, 2, 47, 1000, LEN] {
+            assert_eq!(json_records(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn json_records_is_deterministic() {
+        assert_eq!(json_records(5_000, SEED), json_records(5_000, SEED));
+    }
+
+    #[test]
+    fn json_records_seeds_are_independent() {
+        assert_ne!(json_records(5_000, SEED), json_records(5_000, SEED + 1));
+    }
+
+    #[test]
+    fn json_records_looks_like_json_records() {
+        let data = json_records(LEN, SEED);
+        let text = String::from_utf8(data).expect("generator only emits ASCII");
+        assert!(text.starts_with(r#"{"status": "ok", "results": ["#));
+        let record_count = text.matches("\"user_id\"").count();
+        assert!(
+            record_count > 100,
+            "expected many records, got {record_count}"
+        );
+    }
+
+    #[test]
+    fn json_records_active_field_is_skewed_true() {
+        let text = String::from_utf8(json_records(LEN, SEED)).expect("ASCII only");
+        let true_count = text.matches("\"active\": true").count();
+        let false_count = text.matches("\"active\": false").count();
+        let total = true_count + false_count;
+        assert!(total > 100, "expected many records");
+        // ~80% true; a 70-90% band avoids a flaky exact-match assertion,
+        // checked with integer arithmetic to sidestep a precision-loss cast.
+        assert!(
+            true_count * 10 > total * 7 && true_count * 10 < total * 9,
+            "expected ~80% active=true, got {true_count}/{total}"
+        );
+    }
+
+    #[test]
     fn generators_round_trip_through_the_frame_format() {
         for data in [
             entropy_ladder(1, 5_000, SEED),
             entropy_ladder(8, 5_000, SEED),
             markov_h8_2_trap(5_000, SEED),
             access_log(5_000, SEED),
+            json_records(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
