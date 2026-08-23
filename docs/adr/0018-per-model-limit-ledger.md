@@ -72,10 +72,12 @@ Anthropic rule change can falsify.
 resolves it against the ledger and emits `model_flag` for the first rung
 not currently limited.
 
-**The last rung is the floor.** Nothing below it is reachable, so
-ADR-0012's "never below Opus 5" needs no separate mechanism: an exhausted
-ladder means that agent skips the cycle, which is a legitimate terminal
-state. An empty ladder means today's behaviour exactly: no `--model`,
+**The last rung is the floor.** Nothing below it is reachable: an
+exhausted ladder means that agent skips the cycle, which is a legitimate
+terminal state. When this ADR shipped, that mechanism also carried
+ADR-0012's "never below Opus 5"; the 2026-08-23 addendum repealed that
+constraint, and the floor here is now only the guard's rule, not a
+permission. An empty ladder means today's behaviour exactly: no `--model`,
 action default, never falls back, never skipped for model reasons. Four
 of five agents ship with an empty ladder and are unaffected.
 
