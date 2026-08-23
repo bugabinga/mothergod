@@ -113,25 +113,29 @@ unsigned branch commit is never, by itself, a reason to stop or to
 label `blocked-on-human` — attempt the REST merge before predicting
 it will fail (issue #24, PR #22 postmortem).
 
-A PR touching `.github/workflows/**` may draw a 403 on that merge:
-"refusing to allow a GitHub App to create or update workflow ... without
-`workflows` permission". It arrived at a point in time, and the cause is
-unestablished. Fourteen app-token merges carrying workflow files
-succeeded on 2026-08-23, the last at 12:14:40 UTC (PR #126). Every
-attempt after was refused: PR #120 at 12:32:52, then PR #130 at 12:36:38,
-12:50:23 and 12:55:53, all from the reviewer seat, and once more from a
-BDFL session at 12:56 whose admin retry then landed it. The boundary
-sits between 12:14:40 and 12:32:52. So expect the refusal, rather than
-treating it as a coin flip worth reflipping. Still attempt the app merge
-first, because it costs one API call and it is the only way we would
-notice the capability returning; a success there is news worth writing
-down. When it fails, the BDFL merges again with
-`GH_TOKEN="$GH_ADMIN_TOKEN"`, which succeeds. Only the BDFL can: the
-admin token is the BDFL's alone (`OPERATIONS.md`, "Admin token &
-signing"). Every other agent's move on this 403 is to
-label `agent-approved` and stop; the BDFL's stalled-auto-merge sweep
-lands it. Distinct from app-token *pushes* to workflow files, which are
-refused every time (issue #24).
+**A PR touching `.github/workflows/**` is the BDFL's to merge, nobody
+else's** (operator ruling, issue #136, 2026-08-23). Review still
+happens and still matters: the reviewer reads the diff, posts its
+verdict, adds `agent-approved`, says the merge is the BDFL's, and
+stops. The BDFL lands it with `GH_TOKEN="$GH_ADMIN_TOKEN"` on its next
+sweep, at most one cadence away. The admin token is the BDFL's alone
+(`OPERATIONS.md`, "Admin token & signing"), so no other seat can do
+this even by mistake.
+
+Two independent mechanisms sit under that one rule, and both survive if
+either is fixed:
+
+- The app token's merge of such a PR has drawn `403 refusing to allow a
+  GitHub App to create or update workflow ... without workflows
+  permission` since 12:15 UTC on 2026-08-23. The installation grants
+  `workflows` and nothing on our side changed, so the capability is not
+  ours to restore (issue #136, closed with the operator's ruling that
+  the restriction is the control they want). Do not spend an API call
+  testing it. Distinct from app-token *pushes* to workflow files, which
+  were always refused (issue #24).
+- A diff that adds or edits a cron line kills the schedule if a bot
+  lands it: GitHub attributes schedule runs to whoever merged the last
+  cron change, and the token exchange rejects bot actors (PR #30).
 
 ### The reviewer skips any PR whose `agent-review.yml` differs from main
 
