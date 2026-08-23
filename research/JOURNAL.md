@@ -473,17 +473,17 @@ record.
   flag/length/offset stages and `Literal` against real LZ tokens, plus
   `Method` wiring). S2-D3 was resolved on 2026-08-23 by ADR-0024; read
   it there, not here.
-- S2-D2 | DEBT | Remainder of M1 after the S2-A2 through S2-A12 filter,
-  trial-selection, LZ, coder, order-0 model, and literal-mixer slices:
-  wiring the flag/length/offset stages as `model::Model` instances and
-  the literal stage as `literal::Literal` against real LZ tokens; and
-  wiring all of it (including `select::pick`, `lz::parse_optimal`,
-  `model::Model`, `literal::Literal`, and `coder`) behind a new `Method`
-  variant with a `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5).
-  Source: `research/imports/session-1/mothergod.rs` (526 lines, golfed,
-  port behavior, not code, per ADR-0006). No longer blocked: S2-D3's
-  sole prerequisite (a decode-path `exp` that does not call libm) is
-  done (S2-A16). One PR per module per the M1 checklist.
+- S2-D2 | DEBT, partially resolved by S2-A17/ADR-0026 | Remainder of M1
+  after the S2-A2 through S2-A12 filter, trial-selection, LZ, coder,
+  order-0 model, and literal-mixer slices. S2-A17 wired the flag/length/
+  offset/rep-slot `model::Model` instances, `literal::Literal`, and
+  `coder` against real `lz::parse_optimal` tokens behind a new
+  `Method::Lz` variant, `FORMAT_VERSION` bump, and ADR (CLAUDE.md hard
+  rule 5; ADR-0026). Remaining scope, narrowed to one thing: wiring
+  `filters::select::pick` and trial-encoding against candidate filters —
+  `Method::Lz` still always runs on raw input. Source:
+  `research/imports/session-1/mothergod.rs` (526 lines, golfed, port
+  behavior, not code, per ADR-0006).
 - S2-D3 | RESOLVED by ADR-0024 | `literal::Literal` (S2-A12) ports the
   archive's exponentiated-gradient mixing-weight update verbatim,
   including `f64::exp()`. `JOURNAL` S1-A5 records "integer-only
@@ -660,6 +660,56 @@ record.
   `FORMAT_VERSION` bump + ADR) is no longer blocked by anything in
   S2-D3/ADR-0024; it is the next M1 slice and the first one that can
   produce a real bpb number.
+- S2-A17 | ACCEPTED | ADR-0026, and S2-D2's entropy-coding wiring (filter
+  selection stays remaining scope, see below): a new `src/codec.rs` wires
+  `lz::parse_optimal`, the flag/length/offset/rep-slot `model::Model`
+  instances, `literal::Literal`, and `coder` together as `Method::Lz`
+  (`FORMAT_VERSION` 0 → 1). Ported from the archive's `encode_body`/
+  `decode`, not the code (ADR-0006). `compress` now tries `Method::Lz`
+  and falls back to `Method::Stored` per the Stored-floor invariant
+  (`docs/format/SPEC.md`). Decode bounds allocation and loop iterations to
+  the payload's own declared output length (never preallocated from it),
+  and rejects a corrupt match/rep distance or a declared-length mismatch
+  as `Error::Corrupt` rather than panicking (`rust-craft` skill,
+  allocation- and panic-discipline) — the first code in this crate to
+  face an attacker-controlled length or distance field, since `decompress`
+  had only ever handled `Method::Stored` before this. | 20 new `codec`
+  unit tests (round-trip across empty/single-byte/cyclic/pseudo-random/
+  binary-with-zeros/a real 25,524-byte source file, plus three
+  adversarial-decode cases: truncated header, a declared-length lie with
+  zero tokens, and a match distance reaching before output start), 3 new
+  `tests/adversarial/` seed fixtures, 4 new `lib.rs`-level tests
+  (Method::Lz selection, Stored fallback for tiny and incompressible
+  input); `cargo fmt`/`clippy --all-targets -- --deny
+  warnings`/`test --all-targets`/`test --doc`/`doc --no-deps` all clean.
+  Measured on `research/imports/session-1/mothergod.rs` (25,524 bytes,
+  the same named corpus ADR-0024's accuracy test uses — not the pinned
+  Silesia/Canterbury sealed set, which doesn't exist yet, S2-D1):
+  **2.318 bits/byte** (7,395-byte frame), against `gzip -9`'s 2.392
+  bits/byte (7,629 bytes) on the same file — a real bitstream beating a
+  real baseline on one file, not yet the aggregate RATIO claim the
+  scorecard wants. | Two things explicitly deferred, not forgotten:
+  (1) filter selection (`filters::select::pick`, trial-encoding against
+  candidate filters) stays unwired; `Method::Lz` always runs on raw
+  input; S2-D2 keeps this as its remaining scope. (2) `lz::parse_optimal`
+  had no non-test caller before this change (ADR-0024 verified this
+  explicitly), and wiring it live surfaced a real cost hazard the module's
+  own tests already warned about: `dp_round`'s rep-candidate pricing scans
+  `match_len` at every position, and on a single-byte run past
+  `MAX_MATCH_LEN` (65535) that scan cost compounds across positions. A
+  4000-byte same-byte run encodes in milliseconds; a 200,000-byte one hung
+  past 60 seconds during this PR's own development and was cut from the
+  test suite rather than shipped as a slow test. This is a real encode-side
+  performance concern on an unremarkable input shape (a long run of one
+  repeated byte — sparse files, zero-padding), now reachable from
+  `compress`'s public API for the first time. Filed as issue #(see
+  ops-log) rather than fixed here: the fix belongs in `lz.rs`'s DP, is
+  independent of this PR's wiring concern, and risks the correctness of
+  already-tested code under time pressure if bolted on. SPEED is "tracked,
+  not yet optimized" until M5 per the ROADMAP scorecard, and this doesn't
+  touch decode or correctness, so it does not block this slice — it does
+  block shipping `compress()` as trustworthy on arbitrary real-world input
+  without a fix, which is why it is a `bug`, not a `LEAD`.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

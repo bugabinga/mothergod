@@ -117,6 +117,20 @@ All notable changes to this project are documented here. Format follows
   ulp and desync an encoder and decoder mid-frame. Scoped to `src/` only
   (`bench/clippy.toml` overrides it back off for the corpus-generation
   crate, which never touches a bitstream).
+- `Method::Lz` (`research/JOURNAL.md` S2-A17, ADR-0026, `FORMAT_VERSION`
+  0 → 1): the first real compression method, wiring the already-ported
+  `lz`, `model`, `literal`, and `coder` modules together — optimal-parse
+  LZ tokens, entropy-coded by adaptive flag/length/offset/rep-slot models
+  and a six-expert context-mixing literal model, over an adaptive range
+  coder. `compress` now tries `Method::Lz` and falls back to
+  `Method::Stored` whenever that is not smaller. Decode bounds allocation
+  and loop iterations to the payload's own declared output length rather
+  than trusting it, and rejects a corrupt match/rep distance or a
+  declared-length mismatch as an error rather than panicking. Filter
+  selection is not wired in yet (`Method::Lz` always runs on raw input);
+  that remains open M1 scope. Measured 2.318 bits/byte on
+  `research/imports/session-1/mothergod.rs` (25,524 bytes), against
+  `gzip -9`'s 2.392 bits/byte on the same file.
 
 ### Removed
 

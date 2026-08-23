@@ -152,13 +152,19 @@ fn match_len_as_u32(len: usize) -> u32 {
 /// distances and must reorder them identically on every hit or the two
 /// fall out of sync.
 #[derive(Debug, Clone, Copy)]
-struct RepCache([Distance; REP_SLOTS]);
+pub(crate) struct RepCache([Distance; REP_SLOTS]);
 
 impl RepCache {
     /// Starting cache before any real match has been seen. Matches the
     /// archive's initial `[1, 4, 8]`: plausible small distances, never
     /// read unless a rep candidate actually matches at one of them.
-    fn initial() -> Self {
+    ///
+    /// Shared with [`crate::codec`]'s decode path (`JOURNAL` S2-D2): the
+    /// rep cache's update rules are exactly the S1-A3 port bug's former
+    /// hazard, so decode reuses this type instead of a second
+    /// hand-written copy that could drift out of sync with what
+    /// [`replay`] actually does.
+    pub(crate) fn initial() -> Self {
         const ONE: Distance = NonZeroU32::new(1).unwrap();
         const FOUR: Distance = NonZeroU32::new(4).unwrap();
         const EIGHT: Distance = NonZeroU32::new(8).unwrap();
@@ -166,14 +172,14 @@ impl RepCache {
     }
 
     /// The distance currently cached at `slot`.
-    fn get(&self, slot: RepSlot) -> Distance {
+    pub(crate) fn get(&self, slot: RepSlot) -> Distance {
         self.0[slot.index()]
     }
 
     /// Moves `distance` to the front, used after a [`Token::Match`] on a
     /// distance not already the most-recently-used one; the two previous
     /// front slots slide back, and the third (oldest) is dropped.
-    fn push_front(&mut self, distance: Distance) {
+    pub(crate) fn push_front(&mut self, distance: Distance) {
         self.0[2] = self.0[1];
         self.0[1] = self.0[0];
         self.0[0] = distance;
@@ -182,7 +188,7 @@ impl RepCache {
     /// Moves the distance at `slot` to the front, used after a
     /// [`Token::Rep`]; the slots ahead of it slide back by one, the slots
     /// behind it are untouched.
-    fn promote(&mut self, slot: RepSlot) {
+    pub(crate) fn promote(&mut self, slot: RepSlot) {
         let distance = self.get(slot);
         let idx = slot.index();
         for i in (1..=idx).rev() {
@@ -473,11 +479,19 @@ const LITERAL_CONTEXTS: usize = 16;
 /// [`bucket`] values a match/rep length ever falls into: `bucket(1)` is 0,
 /// `bucket(MAX_MATCH_LEN)` (65535) is 15, one slot of headroom kept as in
 /// the archive's `lb`.
-const LENGTH_BUCKETS: usize = 17;
+///
+/// Shared with [`crate::codec`] (`JOURNAL` S2-D2): the length [`Model`]
+/// `Method::Lz` drives has exactly this many symbols, so its alphabet
+/// size has one source of truth instead of a copy that could drift.
+///
+/// [`Model`]: crate::model::Model
+pub(crate) const LENGTH_BUCKETS: usize = 17;
 
 /// [`bucket`] values a match distance ever falls into: `bucket(WINDOW)`
 /// (2^20) is 20, matching the archive's `ob`.
-const OFFSET_BUCKETS: usize = 21;
+///
+/// Shared with [`crate::codec`], same reason as [`LENGTH_BUCKETS`].
+pub(crate) const OFFSET_BUCKETS: usize = 21;
 
 /// Flat price approximation for the flag bit selecting a literal over a
 /// match/rep at this pre-coder stage (the archive's literal `+1.0`): cheap
@@ -494,7 +508,12 @@ const EXTRA_HEADER_BITS_PRICE: f64 = 1.6;
 /// (>= [`MIN_REP_LEN`], the smallest length ever priced) or a real
 /// [`Distance`] (never zero by construction), so `v.leading_zeros()` is
 /// always < 32 and the subtraction below never underflows.
-fn bucket(v: u32) -> usize {
+///
+/// Shared with [`crate::codec`] (`JOURNAL` S2-D2), which buckets the same
+/// two quantities the same way on both the encode and decode path: a
+/// second implementation here is exactly the kind of drift the S1-A3
+/// rep-symbol/offset-bucket collision came from.
+pub(crate) fn bucket(v: u32) -> usize {
     debug_assert!(
         v > 0,
         "bucket() is only ever called on a length or a distance, never zero"
