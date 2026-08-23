@@ -106,6 +106,35 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     }
 }
 
+/// Shared deterministic pseudo-random fixture generator for round-trip
+/// tests in `coder`, `model`, and `literal`: those three modules' test
+/// suites each need a long, deterministic-but-unstructured symbol stream
+/// with no external RNG dependency, and had each hand-rolled the same
+/// xorshift32 step to get one.
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// xorshift32 generator: `next()` advances the state and returns it,
+    /// so the seed itself is never yielded, only states derived from it.
+    pub(crate) struct Xorshift32(u32);
+
+    impl Xorshift32 {
+        pub(crate) fn new(seed: u32) -> Self {
+            Self(seed)
+        }
+    }
+
+    impl Iterator for Xorshift32 {
+        type Item = u32;
+
+        fn next(&mut self) -> Option<u32> {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 17;
+            self.0 ^= self.0 << 5;
+            Some(self.0)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

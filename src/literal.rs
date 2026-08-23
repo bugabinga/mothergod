@@ -408,17 +408,12 @@ mod tests {
 
     #[test]
     fn pseudo_random_bytes_round_trip() {
-        // xorshift32: deterministic, no external RNG dependency. 5000
-        // bytes crosses every bank's rescale threshold repeatedly,
+        // 5000 bytes crosses every bank's rescale threshold repeatedly,
         // including the fast expert's low 6144 ceiling.
-        let mut state = 0x1234_5678u32;
-        let mut bytes = Vec::with_capacity(5000);
-        for _ in 0..5000 {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            bytes.push(u8::try_from(state % 256).unwrap());
-        }
+        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
         roundtrip_bytes(&bytes);
     }
 
