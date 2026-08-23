@@ -4,7 +4,7 @@
 Extensionless and executable because agents type it as a command mid-session,
 like settle-push.
 
-It owns four things every agent otherwise redoes by hand, three of which fail
+It owns five things every agent otherwise redoes by hand, three of which fail
 silently when done wrong:
 
 - `#142` becomes a link (operator request, 2026-08-23). GitHub's `/issues/<n>`
@@ -18,6 +18,10 @@ silently when done wrong:
   printed, because urllib puts the request URL in its exceptions.
 - Silence is never success: a Telegram error is a non-zero exit with the
   API's own description, not a swallowed 400.
+- The bot's "typing..." indicator counts down here, because this is the moment
+  the operator gets an answer. The worker starts it when their message lands
+  and keeps it up while answers are still owed (infra/telegram-worker/); a
+  delivered message is the only honest way to decrement that.
 
 Reads the body from stdin, prints the sent message_id to stdout so the caller
 can log it or reply to it.
@@ -35,6 +39,9 @@ import urllib.request
 
 API = "https://api.telegram.org/bot{}/sendMessage"
 LIMIT = 4096  # Telegram's hard cap on message text
+# The webhook worker, whose custom domain is set in
+# infra/telegram-worker/wrangler.toml.
+STOP_TYPING = "https://bot.mothergod.dev/typing/stop"
 
 # A ref is `#<digits>`. Not preceded by a word character, `/` or `#`, so
 # `abc#1`, a URL fragment and `##1` are left alone.
@@ -110,8 +117,34 @@ def main() -> int:
         print(f"tg-send: {scrub(str(error), token)}", file=sys.stderr)
         return 1
 
+    stop_typing()
     print(sent["result"]["message_id"])
     return 0
+
+
+def stop_typing() -> None:
+    """Report one answer delivered, so the bot stops typing when none are owed.
+
+    Not an unconditional stop: a run draining three queued messages sends three
+    replies and must keep typing between them, so the worker counts and this
+    decrements.
+
+    Best effort on purpose. The indicator is decoration and the worker caps it
+    on its own, so a failure here costs a stale indicator that expires, never a
+    message. A missing secret means the caller is a job that was not given the
+    worker's key; that is a valid configuration, not an error.
+    """
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if not secret:
+        return
+    request = urllib.request.Request(
+        STOP_TYPING, data=b"", headers={"x-mothergod-secret": secret}, method="POST"
+    )
+    try:
+        urllib.request.urlopen(request, timeout=5).close()
+    except OSError as error:  # HTTPError included; it subclasses OSError.
+        print(f"tg-send: could not stop the typing indicator: "
+              f"{scrub(str(error), secret)}", file=sys.stderr)
 
 
 def scrub(message: str, token: str) -> str:

@@ -101,10 +101,9 @@ jobs:
       '[Claude Code](https://claude.ai/code)')
     runs-on: ubuntu-latest
     timeout-minutes: 300
-    # The inbox's address, once, for the two consumers that need it: the
-    # typing-indicator gate below and the agent's own drain. Ids, not
-    # secrets; the bearer token is the secret. Job-level so the agent
-    # session inherits them and the prompt can name variables instead of
+    # The inbox's address for the agent's own drain. Ids, not secrets;
+    # the bearer token is the secret. Job-level so the agent session
+    # inherits them and the prompt can name variables instead of
     # carrying a second copy of the path.
     env:
       KV_ACCOUNT: c9526445475a4d62fd6e330810573ef0
@@ -132,6 +131,12 @@ jobs:
       discussions: write
       pages: write
     steps:
+      # When this run began, in epoch ms, for the typing indicator's
+      # cutoff in the last step. Messages older than this are this run's
+      # to settle; anything that lands later belongs to the run the
+      # concurrency lane has already queued behind it.
+      - run: echo "TYPING_SINCE=$(date +%s)000" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -141,60 +146,6 @@ jobs:
         with:
           token: ${{ github.token }}
           role: bdfl
-
-      # Chat progress (operator request, 2026-08-23): a chat wake leaves
-      # the operator staring at a silent screen for the minutes between
-      # webhook and reply. Telegram's native "typing..." indicator,
-      # refreshed every 5s, is the progress bar.
-      #
-      # Gated on an unanswered message sitting in the inbox, not on the
-      # event name (operator report, 2026-08-23: "it used to show up
-      # sometimes, now not"). The Worker stores the update in KV before
-      # it dispatches, so the key is there whatever wakes the run. The
-      # run that answers is frequently NOT the dispatch: with the
-      # lane busy the dispatch queues behind a running issue or comment
-      # wake, and that running session drains the inbox first. Gating on
-      # workflow_dispatch therefore showed the indicator on the run that
-      # was still waiting and hid it on the run that was working, and the
-      # busier the repo got, the more often it picked wrong.
-      #
-      # The loop is disowned so it survives this step; the session kills
-      # it via /tmp/typing.pid right before its last Telegram message
-      # (else the 60 min cap or job end stops it). The token reaches curl
-      # as --config on stdin, fed by a builtin printf through a pipe: it
-      # never enters any argv, so the process table stays clean for the
-      # loop's whole life (hard rule 10; PR #99 review).
-      - if: steps.guard.outputs.paused != 'true'
-        env:
-          BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
-          CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          keys=$(curl -s --max-time 15 -H "Authorization: Bearer ${CF_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${KV_ACCOUNT}/storage/kv/namespaces/${KV_NAMESPACE}/keys") \
-            || keys=''
-          # Parsed, not substring-matched: grepping for '"name":"u:' answers
-          # "empty" rather than "unreadable" if Cloudflare ever orders a key
-          # object's fields differently, and an empty answer from a gate that
-          # could not read the inbox is the silent wrong answer this exists to
-          # stop giving. The classifier is a file, never inlined here
-          # (CLAUDE.md, style), and never fails: `|| verdict=unreadable` covers
-          # the interpreter itself going missing.
-          verdict=$(printf '%s' "$keys" | python3 .github/scripts/inbox-state.py) \
-            || verdict=unreadable
-          case "$verdict" in
-            waiting) echo 'operator is waiting: starting the typing indicator' ;;
-            empty) echo 'inbox empty: nobody is waiting, no indicator'; exit 0 ;;
-            *) printf 'inbox unreadable, skipping indicator: %.200s\n' "${keys:-no response}"
-               exit 0 ;;
-          esac
-          nohup bash -c 'for _ in $(seq 720); do
-            printf "url=\"https://api.telegram.org/bot%s/sendChatAction\"\n" "${BOT_TOKEN}" |
-              curl -s -o /dev/null --max-time 4 --config - \
-                -d chat_id="${CHAT_ID}" -d action=typing
-            sleep 5
-          done' >/dev/null 2>&1 &
-          echo $! > /tmp/typing.pid
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.guard.outputs.paused != 'true'
@@ -220,6 +171,10 @@ jobs:
           # (issue #5), not getUpdates.
           TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+          # Admits tg-send to the webhook worker's own surface, which is
+          # how a sent message ends the "typing..." indicator the worker
+          # started. Not a Telegram credential.
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           # Cloudflare token (ADR-0009): all zone groups on mothergod.dev
           # plus account-scoped free-tier groups. wrangler reads this env
           # var natively.
@@ -277,11 +232,11 @@ jobs:
               from the webhook's 👀 (stored) to ✍ (setMessageReaction,
               working) instead of a filler sentence, match the
               operator's register, never re-explain what the thread
-              already shows. Before your last Telegram message:
+              already shows. The bot types while the operator waits
+              and stops when tg-send lands your reply, so progress
+              costs you nothing. Before your last Telegram message:
               re-list the inbox and drain anything that arrived
-              mid-run, then kill the typing loop
-              (kill "$(cat /tmp/typing.pid)" 2>/dev/null). The status
-              line still rides your last message.
+              mid-run. The status line rides that last message.
             - DELTA — any other wake. The run economy below, in
               order; a no-op is a good outcome.
             - SURVEY — a scheduled Sunday wake where the ops-log has
@@ -706,6 +661,39 @@ jobs:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+
+      # No live run, no "typing..." (PR #155 review). The worker starts
+      # the indicator when the operator's message lands and counts down
+      # as tg-send delivers answers; this settles whatever is left over
+      # from before this run started, answered or not. Unconditional on
+      # purpose, because the cases where it matters are exactly the ones
+      # a condition would miss: the pause guard skipped the session
+      # whole, the session died, the job was cancelled, the count
+      # drifted. The invariant is one sentence — the bot types while a
+      # BDFL run is alive and owes an answer, never after.
+      #
+      # `since` is what keeps that from being a blunt zero: a message
+      # that arrived mid-run is the queued run's to answer, and killing
+      # its indicator here would restore the silent screen this whole
+      # change removes.
+      #
+      # It doubles as the indicator's health check, which is why it logs
+      # the status code: 204 reachable, 502 the Durable Object is not,
+      # 401 the secret is wrong. Two attempts at this indicator failed by
+      # being unobservable.
+      #
+      # The secret reaches curl as a --config file on stdin, so it never
+      # enters any argv (hard rule 10). continue-on-error because a stale
+      # indicator expires on the worker's own cap, and decoration must
+      # not redden a good run.
+      - if: always()
+        continue-on-error: true
+        env:
+          WORKER_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+        run: |
+          printf 'url = "https://bot.mothergod.dev/typing/reset?since=%s"\nheader = "x-mothergod-secret: %s"\n' \
+            "${TYPING_SINCE}" "${WORKER_SECRET}" |
+            curl -sS -X POST --max-time 10 --config - -o /dev/null -w 'typing/reset: %{http_code}\n'
 
       # Audit trail (operator directive): prompt and metadata in, final
       # response out. Never the transcript, which records command lines and

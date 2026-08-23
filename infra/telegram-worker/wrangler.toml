@@ -18,6 +18,17 @@ kv_namespaces = [
   { binding = "INBOX", id = "06ae14f739f14d55b5d3c72c6b7e815f" },
 ]
 
+# The "typing..." indicator needs a timer that outlives the request that
+# starts it, and a Durable Object alarm is the only Workers primitive
+# that provides one. SQLite-backed, which is what the free plan offers.
+[[durable_objects.bindings]]
+name = "TYPING"
+class_name = "Typing"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Typing"]
+
 [vars]
 # Not secrets: chat ids and repo slugs are identifiers, not credentials.
 OPERATOR_CHAT_ID = "66834832"

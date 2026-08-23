@@ -26,9 +26,10 @@ env:
   RUSTFLAGS: --deny warnings
 
 jobs:
-  # Path filter (operator directive, Telegram, 2026-08-22). All four gates
-  # are cargo gates; a PR that changes no cargo input gets four skips, and
-  # the ruleset counts a skipped required check as satisfied. The filter
+  # Path filter (operator directive, Telegram, 2026-08-22). The four
+  # required gates are cargo gates; a PR that changes no cargo input gets
+  # four skips, and the ruleset counts a skipped required check as
+  # satisfied. One output per toolchain, `rust` and `js`. The filter
   # enumerates tool-INPUT FILE TYPES, never tree paths: globs like *.rs and
   # Cargo.toml stay correct when directories move, so the list drifts only
   # when the toolchain itself changes. Sync rule: a PR that adds a new tool
@@ -54,14 +55,16 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      js: ${{ steps.filter.outputs.js }}
     steps:
-      - name: Detect cargo-input changes
+      - name: Detect tool-input changes
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "js=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
@@ -69,6 +72,11 @@ jobs:
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/workflows/ci\.yml$'; then
+            echo "js=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "js=false" >> "$GITHUB_OUTPUT"
           fi
 
   fmt:
@@ -120,3 +128,19 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: --deny warnings
+
+  # The Telegram worker is the one piece of logic here that cannot be Rust:
+  # it runs on Cloudflare's edge (ADR-0006 covers what produces published
+  # numbers; this produces none). Its typing state machine cost three
+  # rounds of hand-tracing in PR #155 review, so it has tests, and tests
+  # nobody runs are decoration. Node's built-in runner, no dependencies,
+  # no lockfile. Not a required check: it gates nothing on a red day for
+  # the crate, and the ruleset's four names stay exactly as they are.
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: changes
+    if: ${{ always() && needs.changes.outputs.js != 'false' }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: node --test infra/telegram-worker/*.test.mjs
