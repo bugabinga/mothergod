@@ -473,17 +473,16 @@ record.
   flag/length/offset stages and `Literal` against real LZ tokens, plus
   `Method` wiring). S2-D3 was resolved on 2026-08-23 by ADR-0024; read
   it there, not here.
-- S2-D2 | DEBT, partially resolved by S2-A17/ADR-0026 | Remainder of M1
-  after the S2-A2 through S2-A12 filter, trial-selection, LZ, coder,
+- S2-D2 | RESOLVED by S2-A17/ADR-0026 and S2-A19/ADR-0027 | Remainder of
+  M1 after the S2-A2 through S2-A12 filter, trial-selection, LZ, coder,
   order-0 model, and literal-mixer slices. S2-A17 wired the flag/length/
   offset/rep-slot `model::Model` instances, `literal::Literal`, and
   `coder` against real `lz::parse_optimal` tokens behind a new
   `Method::Lz` variant, `FORMAT_VERSION` bump, and ADR (CLAUDE.md hard
-  rule 5; ADR-0026). Remaining scope, narrowed to one thing: wiring
-  `filters::select::pick` and trial-encoding against candidate filters —
-  `Method::Lz` still always runs on raw input. Source:
-  `research/imports/session-1/mothergod.rs` (526 lines, golfed, port
-  behavior, not code, per ADR-0006).
+  rule 5; ADR-0026). S2-A19 closed the last remaining piece: wiring
+  `filters::select::pick` and trial-encoding against candidate filters.
+  Source: `research/imports/session-1/mothergod.rs` (526 lines, golfed,
+  port behavior, not code, per ADR-0006).
 - S2-D3 | RESOLVED by ADR-0024 | `literal::Literal` (S2-A12) ports the
   archive's exponentiated-gradient mixing-weight update verbatim,
   including `f64::exp()`. `JOURNAL` S1-A5 records "integer-only
@@ -792,7 +791,56 @@ record.
   entry fixes was reachable from the crate's real API, not a dormant
   cost in unwired code. Still no bpb delta here: this changes encode-
   side cost and robustness, not the bits a fixed input encodes to.
-- S2-A19 | ACCEPTED | Third structured-generator slice of M2's remaining
+- S2-A19 | ACCEPTED | ADR-0027, S2-D2's remaining scope, in full: wires
+  `filters::select::pick`'s trial selection into `Method::Lz`.
+  `codec::encode` now trials every candidate `pick` shortlists (identity,
+  delta, BCJ, transpose), running each through the same LZ +
+  context-mixing pipeline S2-A17 wired, and keeps whichever candidate's
+  encoded body is smallest. The winner is a 2-byte selector
+  (`[kind, param]`, `filters::select::Candidate::to_header_bytes`)
+  prefixed onto the payload, an explicit tag rather than the archive's
+  packed single-byte scheme (`0..=96`=delta stride, `97`=BCJ,
+  `100..=113`=transpose column index): the archive's packing needs a
+  private lookup table (`TRANSPOSE_COLUMNS`) shared between the module
+  that picks candidates and the module that (de)serializes them, and this
+  port keeps that mapping in exactly one place instead. `FORMAT_VERSION`
+  1 → 2 (CLAUDE.md hard rule 5): a version-1 `Method::Lz` payload used the
+  layout without the filter prefix, so `codec::LZ_MIN_VERSION` makes
+  `decompress` reject that version/method combination as
+  `Error::UnsupportedVersion` explicitly, rather than relying on
+  `codec::decode`'s adversarial-input defenses to fail safely on the
+  misread by coincidence. All four filters preserve length, so the
+  existing declared-output-length field needs no format change — it
+  already means "length of the filtered bytes," and the filter is
+  reversed only after that length is confirmed. | 4 new `filters.rs`
+  tests (`Candidate` header-byte round trip across every kind, reject
+  unknown kind, reject zero param on a parameterized kind, reject nonzero
+  param on a parameterless kind), 3 new `codec.rs` tests (a synthetic
+  columnar-drift round trip that asserts a non-identity filter was
+  actually selected and correctly reversed — not just plumbed through
+  unused; an unknown-filter-selector decode rejection; a version-gating
+  regression at the `lib.rs` public-API level), 3 existing `codec.rs`
+  hand-crafted-payload tests updated for the 2-byte prefix, 4 existing
+  `tests/adversarial/lz-*` seed fixtures regenerated under the new
+  layout (kept exercising `codec::decode`'s own bomb/mismatch/truncation
+  handling — without regenerating them they would have started passing
+  for the wrong reason, short-circuited by the new version gate instead
+  of the hazard checks they were built to test) plus one new fixture for
+  the unrecognized-filter-selector case; `cargo fmt`/`clippy --all-targets
+  -- --deny warnings`/`test --all-targets`/`test --doc`/`doc --no-deps`
+  all clean. | Measured on `research/imports/session-1/mothergod.rs`
+  (25,524 bytes, same named corpus as S2-A17): **2.3184 bits/byte**
+  (7,397-byte frame), `Candidate::Identity` selected — unchanged from
+  S2-A17's 2.318 within rounding. Expected, not a bug: this file is
+  structured Rust source text, and S1-R1 already found delta loses on
+  text (numeric differences of letters are more scattered than the
+  letters themselves); transpose needs fixed-width records this file
+  doesn't have. A real ratio win from this slice needs a corpus with
+  that shape — `bench/`'s structured generators or the eventual
+  Silesia/Canterbury fetch (S2-D1), not this file. The wiring itself is
+  proven correct independent of this corpus's null result, by the
+  synthetic columnar-drift round-trip test above.
+- S2-A20 | ACCEPTED | Third structured-generator slice of M2's remaining
   benchmark-harness debt (S2-D1): a base64-wrapped text payload
   (`research/corpus/POLICY.md`'s "base64-wrapped payloads" class) ported
   to `bench/src/lib.rs` as `base64_wrapped`, mirroring `access_log`/
