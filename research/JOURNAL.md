@@ -948,6 +948,41 @@ record.
   (sqlite-like, x86 binary), the three-tier train/sealed/finals split
   plumbing, regret scoring, the CI baseline gate, and progress-graph
   rendering.
+- S2-A23 | ACCEPTED | Sixth structured-generator slice of M2's remaining
+  benchmark-harness debt (S2-D1): fixed-width binary rows over a
+  timestamp/category/measurement schema (`research/corpus/POLICY.md`'s
+  "sqlite-like records" class) ported to `bench/src/lib.rs` as
+  `sqlite_like_records`. Behavior ported from the founding session's
+  `corpus.py` (`c['sqlite']`, `git show
+  1a3b1c8:research/imports/session-1/corpus.py`), not the code (ADR-0006):
+  the archive opened a real `sqlite3` connection, created `table
+  m(ts int, s text, v real)`, and inserted rows of a linearly increasing
+  timestamp (`1700000000 + i*60`), a category drawn from `{temp, hum,
+  pres}`, and a gaussian measurement (mean 20, stddev 3), then read the
+  resulting file's raw bytes. Unlike the audio/image classes, there is no
+  formula to port for the byte layout itself: the archive's on-disk bytes
+  were whatever the installed `sqlite3` library's page format, freelist
+  state, and per-value varint serial-type encoding happened to produce, not
+  a design choice recorded anywhere, and reproducing them exactly would
+  mean re-implementing SQLite's storage engine — out of scope for a
+  zero-dependency corpus generator (ADR-0002) and not what "sqlite-like"
+  asks for. This port instead captures the schema's shape directly: each
+  row is a fixed 20-byte little-endian record (8-byte timestamp, 4-byte
+  null-padded category, 8-byte measurement), which exercises the same
+  repeated-structure/mixed-type compression opportunity the class exists
+  to probe. | 5 new unit tests: exact-length output across six requested
+  lengths including odd ones, determinism, seed independence, a check that
+  every full row's category field is one of the three fixed values, and a
+  check that timestamps strictly increase row over row; wired into the
+  existing frame-format round-trip test. `cargo fmt`/`clippy --all-targets
+  -- --deny warnings`/`test --all-targets`/`test --doc`/`doc --no-deps`
+  (`RUSTDOCFLAGS=--deny warnings`) all clean. | No bpb measurement: this is
+  corpus-generation infra, not an experiment against a champion —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
+  same as S2-A1 through S2-A22. Remaining S2-D1 scope: Silesia + Canterbury
+  fetch-and-cache, the one remaining structured generator class (x86
+  binary), the three-tier train/sealed/finals split plumbing, regret
+  scoring, the CI baseline gate, and progress-graph rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
