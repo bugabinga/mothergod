@@ -38,6 +38,8 @@
 //! is the second slice: deriving a sealed-validation seed, distinct from
 //! its train seed, for the same generator. [`DatasetKind`] is the third:
 //! which generator kinds are sealed-only, never appearing in train.
+//! [`regret`] scores a candidate corpus addition once those three exist to
+//! feed it real numbers.
 
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
@@ -917,12 +919,34 @@ impl DatasetKind {
     }
 }
 
+/// Regret score for a candidate corpus addition
+/// (`research/corpus/POLICY.md`, "Growing the corpus": "regret = (our
+/// bits/byte) − (reference compressor bits/byte) on the same data.
+/// Additions need positive regret — data we are *relatively* bad at.").
+///
+/// `ours_bpb` is mothergod's bits/byte on the candidate data; `zstd_bpb`
+/// and `xz_bpb` are the two pinned reference compressors' bits/byte
+/// (`zstd -19`, `xz -9e`) on the same data. Regret is measured against
+/// whichever reference does better here, so a data class only counts as
+/// "we're relatively bad at this" when we lose to the stronger of the
+/// two, not just the weaker one.
+///
+/// Positive regret is the accept criterion. Policy also auto-rejects pure
+/// noise, which needs no separate case here: noise is equally
+/// incompressible for every compressor, so `ours_bpb`, `zstd_bpb`, and
+/// `xz_bpb` all sit near 8 bits/byte and regret comes out near zero,
+/// already failing the positive-regret test.
+#[must_use]
+pub fn regret(ours_bpb: f64, zstd_bpb: f64, xz_bpb: f64) -> f64 {
+    ours_bpb - zstd_bpb.min(xz_bpb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         DatasetKind, SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
         gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits, sealed_seed, sqlite_like_records, train_window,
+        order1_conditional_entropy_bits, regret, sealed_seed, sqlite_like_records, train_window,
         x86_dense_code,
     };
 
@@ -1461,6 +1485,40 @@ mod tests {
         assert!(
             sealed_only.len() < DatasetKind::ALL.len(),
             "every kind is sealed-only, so train has nothing to tune against"
+        );
+    }
+
+    #[test]
+    fn regret_is_zero_when_ours_matches_the_stronger_reference() {
+        assert!((regret(2.0, 2.0, 2.5) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn regret_is_positive_when_ours_loses_to_both_references() {
+        assert!((regret(3.0, 2.0, 2.5) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn regret_is_negative_when_ours_beats_both_references() {
+        assert!((regret(1.0, 2.0, 2.5) - -1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn regret_is_symmetric_in_which_reference_arg_is_stronger() {
+        assert!((regret(3.0, 2.0, 2.5) - regret(3.0, 2.5, 2.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn regret_is_near_zero_on_pure_noise() {
+        // All three compressors sit near the incompressible floor: no one
+        // wins, so regret should not mistake this for a data class we are
+        // relatively bad at.
+        let ours = 8.0;
+        let zstd = 8.02;
+        let xz = 8.01;
+        assert!(
+            regret(ours, zstd, xz).abs() < 0.1,
+            "pure noise should score near-zero regret"
         );
     }
 }

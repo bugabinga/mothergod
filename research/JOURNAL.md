@@ -524,9 +524,10 @@ record.
   S2-A14 through S2-A24); fetch-and-cache done as of S2-A26; decompression
   done as of S2-A28; split plumbing's rotating-window piece done as of
   S2-A29; the sealed-validation split's seed derivation done as of
-  S2-A32; its dataset-kind separation done as of S2-A33; remaining:
-  regret scoring, CI baseline gate, progress-graph rendering, and a
-  scheduled workflow exercising `--features corpus-fetch` (issue #231).
+  S2-A32; its dataset-kind separation done as of S2-A33; regret scoring
+  done as of S2-A34; remaining: CI baseline gate, progress-graph
+  rendering, and a scheduled workflow exercising `--features
+  corpus-fetch` (issue #231).
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1313,6 +1314,31 @@ record.
   `kind: "patch"` with null bpb deltas. Remaining S2-D1 scope: regret
   scoring, the CI baseline gate, progress-graph rendering, and the
   scheduled `corpus-fetch` workflow (issue #231).
+- S2-A34 | ACCEPTED | Regret scoring, next slice of the remaining S2-D1
+  debt after S2-A33's `DatasetKind` (`research/corpus/POLICY.md`,
+  "Growing the corpus"): `bench::regret(ours_bpb, zstd_bpb, xz_bpb)`
+  scores a candidate corpus addition as our bits/byte minus the
+  stronger (lower) of the two pinned reference compressors' bits/byte on
+  the same data — POLICY.md names `zstd -19` and `xz -9e` as the two
+  references, and scoring against whichever does better keeps a data
+  class from counting as "we're relatively bad at this" when we only
+  lose to the weaker one. Positive regret is the accept criterion.
+  POLICY.md also auto-rejects pure noise as a named special case ("has
+  zero regret, and is auto-rejected"); this needed no separate branch,
+  because noise is equally incompressible for every compressor, so all
+  three inputs sit near 8 bits/byte and the subtraction already lands
+  near zero, failing the positive-regret test on its own. | 5 unit
+  tests: zero regret when ours matches the stronger reference, positive
+  when ours loses to both, negative when ours beats both, symmetric
+  under swapping which reference argument is stronger, and near-zero on
+  a synthetic pure-noise triple (all three inputs ~8 bits/byte). All
+  five root CLAUDE.md gates clean. | No bpb measurement, same reason as
+  S2-A33: scoring infra, not an experiment against a champion —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
+  Not yet called by anything — it exists for the CI baseline gate (still
+  S2-D1 debt) to consult once it exists. Remaining S2-D1 scope: the CI
+  baseline gate, progress-graph rendering, and the scheduled
+  `corpus-fetch` workflow (issue #231).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
