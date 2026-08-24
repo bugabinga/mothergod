@@ -1,7 +1,6 @@
 ---
 name: adr
 description: "Use when creating, superseding, correcting, or reviewing architecture decision records under docs/adr/."
-compatibility: "mothergod repository; Claude Code Agent Skills"
 user-invocable: true
 ---
 
