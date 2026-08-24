@@ -19,12 +19,15 @@
 //!   "audio" structured class.
 //! - [`gradient_image`]: a synthetic grayscale gradient image, the
 //!   "gradient image" structured class.
+//! - [`sqlite_like_records`]: fixed-width binary rows over a
+//!   timestamp/category/measurement schema, the "sqlite-like records"
+//!   structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
-//! Silesia/Canterbury fetch-and-cache, the remaining structured classes
-//! (sqlite-like, x86 binary), and the sealed/train split plumbing are
-//! follow-up slices of `research/JOURNAL.md` S1-D2.
+//! Silesia/Canterbury fetch-and-cache, the remaining structured class
+//! (x86 binary), and the sealed/train split plumbing are follow-up slices
+//! of `research/JOURNAL.md` S1-D2.
 
 use std::fmt::Write as _;
 
@@ -534,6 +537,77 @@ pub fn gradient_image(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Starting timestamp (Unix seconds) of [`sqlite_like_records`], matching
+/// the founding generator's `1700000000 + i*60`.
+const SQLITE_TS_START: i64 = 1_700_000_000;
+
+/// Per-row timestamp increment (seconds) of [`sqlite_like_records`],
+/// matching the founding generator's `i*60`.
+const SQLITE_TS_STEP: i64 = 60;
+
+/// Fixed-width (null-padded) category values [`sqlite_like_records`] cycles
+/// through, matching the founding generator's
+/// `random.choice(['temp', 'hum', 'pres'])`. Each entry is exactly
+/// [`SQLITE_CATEGORY_WIDTH`] bytes so every row is the same byte width.
+const SQLITE_CATEGORIES: [[u8; SQLITE_CATEGORY_WIDTH]; 3] = [*b"temp", *b"hum\0", *b"pres"];
+
+/// Byte width of [`sqlite_like_records`]'s category field.
+const SQLITE_CATEGORY_WIDTH: usize = 4;
+
+/// Mean of [`sqlite_like_records`]'s measurement field, matching the
+/// founding generator's `random.gauss(20, 3)`.
+const SQLITE_VALUE_MEAN: f64 = 20.0;
+
+/// Standard deviation of [`sqlite_like_records`]'s measurement field,
+/// matching the founding generator's `random.gauss(20, 3)`.
+const SQLITE_VALUE_STDDEV: f64 = 3.0;
+
+/// Byte width of one [`sqlite_like_records`] row: an 8-byte little-endian
+/// timestamp, a 4-byte category, and an 8-byte little-endian measurement.
+const SQLITE_ROW_WIDTH: usize = 8 + SQLITE_CATEGORY_WIDTH + 8;
+
+/// Generates `len` bytes of fixed-width binary rows over a
+/// timestamp/category/measurement schema, the "sqlite-like records"
+/// structured class (`research/corpus/POLICY.md`). Truncated to exactly
+/// `len` bytes; a `len` not a multiple of the row width ends mid-row.
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['sqlite']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// the archive opened a real `sqlite3` connection, created `table
+/// m(ts int, s text, v real)`, inserted rows of a linearly increasing
+/// timestamp (`1700000000 + i*60`), a category drawn from `{temp, hum,
+/// pres}`, and a gaussian measurement (mean 20, stddev 3), then read the
+/// resulting database file's raw bytes. That file's exact byte layout
+/// (page size, freelist state, B-tree structure, per-value varint serial
+/// types) was never a design choice in the archive, only whatever the
+/// installed `sqlite3` library happened to emit, and reproducing it exactly
+/// would mean re-implementing SQLite's on-disk format — out of scope for a
+/// zero-dependency corpus generator (ADR-0002) and not what "sqlite-like"
+/// asks for. This port instead captures the schema's shape directly: fixed-
+/// width rows (8-byte timestamp, 4-byte null-padded category, 8-byte
+/// measurement, all little-endian), which exercises the same repeated-
+/// structure/mixed-type compression opportunity the class exists to probe.
+#[must_use]
+pub fn sqlite_like_records(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::with_capacity(len + SQLITE_ROW_WIDTH);
+    let mut i: i64 = 0;
+    while out.len() < len {
+        let ts = SQLITE_TS_START + i * SQLITE_TS_STEP;
+        let category = SQLITE_CATEGORIES[rng.next_index(SQLITE_CATEGORIES.len())];
+        let value = SQLITE_VALUE_MEAN + SQLITE_VALUE_STDDEV * standard_normal(&mut rng);
+        out.extend_from_slice(&ts.to_le_bytes());
+        out.extend_from_slice(&category);
+        out.extend_from_slice(&value.to_le_bytes());
+        i += 1;
+    }
+    out.truncate(len);
+    out
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -595,9 +669,9 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        access_log, base64_encode, base64_wrapped, entropy_ladder, gradient_image,
-        interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits,
+        SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
+        gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
+        order1_conditional_entropy_bits, sqlite_like_records,
     };
 
     const LEN: usize = 200_000;
@@ -675,6 +749,7 @@ mod tests {
         assert_eq!(base64_wrapped(0, SEED), Vec::<u8>::new());
         assert_eq!(interleaved_audio16(0, SEED), Vec::<u8>::new());
         assert_eq!(gradient_image(0, SEED), Vec::<u8>::new());
+        assert_eq!(sqlite_like_records(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
     }
@@ -890,6 +965,62 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_like_records_is_exactly_the_requested_length() {
+        for len in [1, 2, 3, 47, 1000, LEN] {
+            assert_eq!(sqlite_like_records(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn sqlite_like_records_is_deterministic() {
+        assert_eq!(
+            sqlite_like_records(5_000, SEED),
+            sqlite_like_records(5_000, SEED)
+        );
+    }
+
+    #[test]
+    fn sqlite_like_records_seeds_are_independent() {
+        assert_ne!(
+            sqlite_like_records(5_000, SEED),
+            sqlite_like_records(5_000, SEED + 1)
+        );
+    }
+
+    #[test]
+    fn sqlite_like_records_uses_only_the_fixed_category_set() {
+        // Every row's category field (bytes 8..12) must be one of the three
+        // fixed values; a category field is 4-byte-aligned data with far
+        // fewer distinct values than an iid source would produce.
+        let data = sqlite_like_records(LEN, SEED);
+        let allowed: [&[u8]; 3] = [b"temp", b"hum\0", b"pres"];
+        let full_rows = data.len() / SQLITE_ROW_WIDTH;
+        for row in 0..full_rows {
+            let base = row * SQLITE_ROW_WIDTH;
+            let category = &data[base + 8..base + 12];
+            assert!(
+                allowed.contains(&category),
+                "row {row} has an unexpected category field: {category:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sqlite_like_records_timestamps_increase_monotonically() {
+        let data = sqlite_like_records(LEN, SEED);
+        let full_rows = data.len() / SQLITE_ROW_WIDTH;
+        let mut prev: Option<i64> = None;
+        for row in 0..full_rows {
+            let base = row * SQLITE_ROW_WIDTH;
+            let ts = i64::from_le_bytes(data[base..base + 8].try_into().unwrap());
+            if let Some(p) = prev {
+                assert!(ts > p, "row {row} timestamp {ts} did not increase past {p}");
+            }
+            prev = Some(ts);
+        }
+    }
+
+    #[test]
     fn generators_round_trip_through_the_frame_format() {
         for data in [
             entropy_ladder(1, 5_000, SEED),
@@ -900,6 +1031,7 @@ mod tests {
             base64_wrapped(5_000, SEED),
             interleaved_audio16(5_000, SEED),
             gradient_image(5_000, SEED),
+            sqlite_like_records(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }

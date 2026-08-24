@@ -178,6 +178,14 @@ All notable changes to this project are documented here. Format follows
   `corpus.py`. Row-major pixels over 200-pixel-wide rows, each a baseline
   plus a horizontal and a vertical sine wave plus gaussian noise, truncated
   toward zero and wrapped to a byte, matching Python's `int(...) & 0xff`.
+- Benchmark harness, sixth structured-generator slice (`research/JOURNAL.md`
+  S2-A23): `sqlite_like_records` in the `bench` crate, fixed-width binary
+  rows over a timestamp/category/measurement schema (the "sqlite-like
+  records" class in `research/corpus/POLICY.md`), ported from the founding
+  session's `corpus.py`. Unlike the earlier structured classes, the
+  archive's byte layout came from a real `sqlite3` file, not a formula, so
+  this port captures the schema's shape as fixed 20-byte little-endian rows
+  instead of reimplementing SQLite's on-disk format.
 
 ### Removed
 
