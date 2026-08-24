@@ -134,7 +134,7 @@ pub(crate) fn kind(path: &Path) -> Option<FileKind> {
     }
 }
 
-fn repository_root(cwd: &Path) -> Result<PathBuf, String> {
+pub(crate) fn repository_root(cwd: &Path) -> Result<PathBuf, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
