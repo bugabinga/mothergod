@@ -31,8 +31,12 @@
 //! The `corpus` module (behind the opt-in `corpus-fetch` feature, so it
 //! isn't in scope for this doc build's default features) fetches and
 //! caches the held-out-final corpora (Silesia, Canterbury) pinned in
-//! `bench/corpus.toml`. The sealed/train split plumbing is a follow-up
-//! slice of `research/JOURNAL.md` S1-D2.
+//! `bench/corpus.toml`. [`train_window`] is the first slice of the
+//! train/sealed split plumbing (`research/JOURNAL.md` S1-D2): a rotating
+//! window over a generator's output, so repeated experiment iterations
+//! see a different offset instead of memorizing one. The sealed
+//! validation set (held-out seeds and dataset kinds, never tuned
+//! against) is a follow-up slice.
 
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
@@ -780,12 +784,45 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
         .sum::<f64>()
 }
 
+/// Returns a rotating window of `data`, `window_len` bytes long, whose
+/// start offset changes with `iteration` (`research/corpus/POLICY.md`,
+/// "Train slices — rotating windows over each dataset; a different
+/// window every iteration so offsets can't be memorized"). The window
+/// wraps circularly around `data`, so every `iteration` yields exactly
+/// `window_len` bytes and the sequence of windows cycles back to the
+/// start once `iteration` has advanced past `data.len()`.
+///
+/// # Panics
+///
+/// Panics if `window_len` is `0` or exceeds `data.len()`: there is no
+/// well-defined window to take.
+#[must_use]
+pub fn train_window(data: &[u8], window_len: usize, iteration: u64) -> Vec<u8> {
+    assert!(window_len > 0, "train_window: window_len must be nonzero");
+    assert!(
+        window_len <= data.len(),
+        "train_window: window_len exceeds data.len()"
+    );
+
+    let len = data.len() as u64;
+    let start = usize::try_from(iteration % len).expect("modulo data.len() fits in usize");
+    let end = start + window_len;
+    if end <= data.len() {
+        data[start..end].to_vec()
+    } else {
+        let mut window = Vec::with_capacity(window_len);
+        window.extend_from_slice(&data[start..]);
+        window.extend_from_slice(&data[..end - data.len()]);
+        window
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
         gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits, sqlite_like_records, x86_dense_code,
+        order1_conditional_entropy_bits, sqlite_like_records, train_window, x86_dense_code,
     };
 
     const LEN: usize = 200_000;
@@ -1191,5 +1228,78 @@ mod tests {
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
+    }
+
+    #[test]
+    fn train_window_is_exactly_the_requested_length() {
+        let data: Vec<u8> = (0..100u8).collect();
+        for window_len in [1, 7, 50, 99, 100] {
+            for iteration in [0, 1, 50, 100, 1_000, u64::MAX] {
+                assert_eq!(train_window(&data, window_len, iteration).len(), window_len);
+            }
+        }
+    }
+
+    #[test]
+    fn train_window_at_iteration_zero_starts_at_the_front() {
+        let data: Vec<u8> = (0..100u8).collect();
+        assert_eq!(train_window(&data, 10, 0), data[0..10].to_vec());
+    }
+
+    #[test]
+    fn train_window_slides_without_wrapping_when_it_fits() {
+        let data: Vec<u8> = (0..100u8).collect();
+        assert_eq!(train_window(&data, 10, 5), data[5..15].to_vec());
+    }
+
+    #[test]
+    fn train_window_wraps_circularly_past_the_end() {
+        let data: Vec<u8> = (0..100u8).collect();
+        // Starting at offset 95 with a 10-byte window runs off the end at
+        // 105; the last 5 bytes must wrap back to the front.
+        let window = train_window(&data, 10, 95);
+        assert_eq!(window, [95, 96, 97, 98, 99, 0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn train_window_repeats_after_one_full_cycle_of_data_len() {
+        let data: Vec<u8> = (0..100u8).collect();
+        for iteration in [0, 1, 37, 99] {
+            assert_eq!(
+                train_window(&data, 10, iteration),
+                train_window(&data, 10, iteration + data.len() as u64)
+            );
+        }
+    }
+
+    #[test]
+    fn train_window_consecutive_iterations_differ_when_rotation_is_possible() {
+        let data: Vec<u8> = (0..100u8).collect();
+        assert_ne!(train_window(&data, 10, 0), train_window(&data, 10, 1));
+    }
+
+    #[test]
+    fn train_window_whole_buffer_still_rotates_by_iteration() {
+        // A window as long as the whole buffer still rotates: iteration 0
+        // is the buffer as-is, iteration 1 is rotated left by one byte.
+        let data: Vec<u8> = (0..100u8).collect();
+        assert_eq!(train_window(&data, 100, 0), data);
+        let mut rotated = data[1..].to_vec();
+        rotated.push(data[0]);
+        assert_eq!(train_window(&data, 100, 1), rotated);
+    }
+
+    #[test]
+    #[should_panic(expected = "window_len must be nonzero")]
+    fn train_window_rejects_a_zero_length_window() {
+        let data: Vec<u8> = (0..10u8).collect();
+        let _ = train_window(&data, 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "window_len exceeds data.len()")]
+    fn train_window_rejects_a_window_longer_than_the_data() {
+        let data: Vec<u8> = (0..10u8).collect();
+        let _ = train_window(&data, 11, 0);
     }
 }

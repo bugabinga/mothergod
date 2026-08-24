@@ -522,9 +522,10 @@ record.
   accounting mode (M2) additionally needs real model code (M1) to hang off
   of. Structured generator classes done as of S2-A24 (all seven ported,
   S2-A14 through S2-A24); fetch-and-cache done as of S2-A26; decompression
-  done as of S2-A28; remaining: split plumbing, regret scoring, CI
-  baseline gate, progress-graph rendering, and a scheduled workflow
-  exercising `--features corpus-fetch`.
+  done as of S2-A28; split plumbing's rotating-window piece done as of
+  S2-A29; remaining: sealed-validation seed/dataset-kind separation,
+  regret scoring, CI baseline gate, progress-graph rendering, and a
+  scheduled workflow exercising `--features corpus-fetch`.
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1166,6 +1167,36 @@ record.
   plumbing, regret scoring, the CI baseline gate, progress-graph
   rendering, and a scheduled workflow exercising `--features
   corpus-fetch` for real CI coverage (same gap S2-A25 and S2-A26 left).
+- S2-A29 | ACCEPTED | First slice of S1-D2/S2-D1's train/sealed/finals
+  split plumbing: `bench::train_window(data, window_len, iteration)`
+  (`research/corpus/POLICY.md`, "Train slices — rotating windows over
+  each dataset; a different window every iteration so offsets can't be
+  memorized"). Applies only to the in-repo generators (entropy ladder,
+  markov trap, structured classes) — Silesia/Canterbury are held-out
+  finals, run whole-file at milestones, never inside the experiment loop
+  (POLICY.md "Held-out finals"), so they don't participate in this split.
+  The window wraps circularly around `data`: `start = iteration mod
+  data.len()`, and the return value is `data[start..]` followed by
+  `data[..window_len - (data.len() - start)]` when the window would run
+  past the end. Circular wraparound, not clamping, so a window as long as
+  `data` itself still differs every iteration (a one-byte left rotation
+  per iteration) instead of freezing at iteration 0 — the policy's
+  "a different window every iteration" holds even in that degenerate
+  case. | 9 unit tests: exact-length output across a matrix of window
+  lengths (including the full buffer) and iteration counts up to
+  `u64::MAX`, iteration 0 starts at the front, a non-wrapping slide,
+  wraparound at the exact boundary, one full `data.len()`-cycle repeats
+  the same window, consecutive iterations differ, the whole-buffer case
+  rotates rather than staying fixed, and the two invalid-input panics
+  (zero-length window, window longer than `data`); all five root
+  CLAUDE.md gates clean. | No bpb measurement: split plumbing, not an
+  experiment against a champion — `progress.jsonl` records this as
+  `kind: "patch"` with null bpb deltas. Remaining S1-D2/S2-D1 scope: the
+  sealed validation set's held-out seed and dataset-kind separation
+  (this slice only rotates train windows; nothing yet designates which
+  seeds/generators are sealed-only), regret scoring, the CI baseline
+  gate, progress-graph rendering, and the scheduled `corpus-fetch`
+  workflow.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
