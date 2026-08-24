@@ -523,9 +523,11 @@ record.
   of. Structured generator classes done as of S2-A24 (all seven ported,
   S2-A14 through S2-A24); fetch-and-cache done as of S2-A26; decompression
   done as of S2-A28; split plumbing's rotating-window piece done as of
-  S2-A29; remaining: sealed-validation seed/dataset-kind separation,
-  regret scoring, CI baseline gate, progress-graph rendering, and a
-  scheduled workflow exercising `--features corpus-fetch`.
+  S2-A29; the sealed-validation split's seed derivation done as of
+  S2-A32; remaining: sealed-validation dataset-kind separation (which
+  generator kinds are sealed-only, never appearing in train), regret
+  scoring, CI baseline gate, progress-graph rendering, and a scheduled
+  workflow exercising `--features corpus-fetch` (issue #231).
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1251,6 +1253,29 @@ record.
   null bpb deltas. Remaining S2-D1 scope: nothing yet sums a
   whole-codec ideal-cost pass across `lz`'s flag/length/offset streams
   and `literal`'s bytes together.
+- S2-A32 | ACCEPTED | Seed half of S2-D1's remaining sealed-validation
+  split (`research/corpus/POLICY.md`, "Sealed validation set — different
+  seed AND different datasets from train"): `bench::sealed_seed(train_seed)`
+  derives a sealed-validation seed from a train seed by feeding it (XORed
+  with a fixed key) through the same `SplitMix64` step `bench::Rng` uses.
+  That step is a bijection on `u64`, so distinct train seeds always derive
+  distinct sealed seeds — but it does not prove a sealed seed can never
+  coincide with some unrelated seed picked directly for train; a provable
+  split would need a structural reservation (e.g. a fixed high bit), which
+  conflicts with seeds already in use elsewhere in this crate that set
+  every bit pattern (S2-A1's `0xC0FF_EE12_3456_789A`). Same caveat as `Rng`
+  itself: reproducible and distinct from its own input, not
+  cryptographically unpredictable — the property this needs. | 4 unit
+  tests: determinism, `sealed_seed(seed) != seed` across a spot-checked
+  set including `u64::MAX`, injectivity swept over 10,000 consecutive
+  seeds, and no collision between that same sealed range and the plain
+  train seeds `0..10_000`. All five root CLAUDE.md gates clean. | No bpb
+  measurement: split-plumbing infra, not an experiment against a champion
+  — `progress.jsonl` records this as `kind: "patch"` with null bpb
+  deltas. Remaining S2-D1 scope: which dataset kinds are sealed-only
+  (never appearing in train) is still undesignated, plus regret scoring,
+  the CI baseline gate, progress-graph rendering, and the scheduled
+  `corpus-fetch` workflow (issue #231).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
