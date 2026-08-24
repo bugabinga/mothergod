@@ -215,7 +215,13 @@ All notable changes to this project are documented here. Format follows
   zero-dependency rule (ADR-0002) but still a real cost to every PR's
   required `cargo test --all-targets` as an unconditional dependency of a
   default workspace member — out of the fast gate's build graph.
-  Decompression (bzip2, tar+gzip) is not wired yet; remaining S1-D2 scope.
+- Corpus decompression (`research/JOURNAL.md` S2-A28): `bench::corpus::decompress_silesia`
+  (bzip2, via the decode-only `bzip2-rs`) and `bench::corpus::extract_canterbury`
+  (gzip+tar, via `flate2`'s pure-Rust backend and `tar`) turn a fetched
+  entry's compressed bytes into the raw corpus file(s), folded into the
+  same opt-in `corpus-fetch` feature gate as the fetch-and-cache slice.
+  Remaining S1-D2 scope: the train/sealed/finals split plumbing, regret
+  scoring, the CI baseline gate, and progress-graph rendering.
 
 ### Removed
 

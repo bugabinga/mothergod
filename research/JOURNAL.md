@@ -521,8 +521,10 @@ record.
   scoring, the CI baseline gate, and progress-graph rendering. Ideal-cost
   accounting mode (M2) additionally needs real model code (M1) to hang off
   of. Structured generator classes done as of S2-A24 (all seven ported,
-  S2-A14 through S2-A24); remaining: fetch-and-cache, split plumbing,
-  regret scoring, CI baseline gate, progress-graph rendering.
+  S2-A14 through S2-A24); fetch-and-cache done as of S2-A26; decompression
+  done as of S2-A28; remaining: split plumbing, regret scoring, CI
+  baseline gate, progress-graph rendering, and a scheduled workflow
+  exercising `--features corpus-fetch`.
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1135,6 +1137,35 @@ record.
   input, not just an adversarial one — `Literal::mix`'s O(256×6)
   from-scratch rebuild per byte is the mechanism, real fix (incremental
   cumulative frequencies) is M5 scope, not this issue's.
+- S2-A28 | ACCEPTED | Next slice of the remaining S1-D2/S2-D1 scope after
+  S2-A26's fetch-and-cache: decompression. `bench::corpus::decompress_silesia`
+  unwraps one Silesia file's bzip2 stream (`bzip2-rs`, decode-only, pure
+  Rust, no system libbzip2 to discover in CI); `bench::corpus::extract_canterbury`
+  lists every file inside Canterbury's gzip-compressed tarball as
+  `(path, bytes)` pairs (`flate2`, default `rust_backend`/`miniz_oxide`
+  so no system zlib either, plus `tar` with its default `xattr` feature
+  turned off since nothing here extracts to disk). All three are new
+  optional dependencies folded into the existing `corpus-fetch` feature
+  gate (S2-A26's Cargo-doc-comment reasoning: `bench` is a root
+  workspace default-member, so the tree stays out of every PR's required
+  `cargo test --all-targets` unless the feature is on). | `bzip2-rs` has
+  no encoder, so its round-trip fixture is generated externally
+  (`bz2.compress` in Python, embedded as a byte literal) rather than
+  self-produced; `flate2`/`tar` write as well as read, so the Canterbury
+  tests build their own gzip+tar fixtures in-crate, including a
+  30-file/20,000-byte-each archive to exercise multi-block gzip/tar
+  streams, not just a single small one. Both functions also get a
+  malformed-input test (non-bzip2 bytes, non-gzip bytes) returning
+  `Err`, never a panic. All five root CLAUDE.md gates clean with default
+  features (the new dependencies never enter that build, same as
+  S2-A26); `clippy --all-targets --features corpus-fetch -- --deny
+  warnings` and `cargo doc --features corpus-fetch` also clean. | No bpb
+  measurement: decompression infrastructure, not an experiment against a
+  champion — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas. Remaining S1-D2/S2-D1 scope: the train/sealed/finals split
+  plumbing, regret scoring, the CI baseline gate, progress-graph
+  rendering, and a scheduled workflow exercising `--features
+  corpus-fetch` for real CI coverage (same gap S2-A25 and S2-A26 left).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
