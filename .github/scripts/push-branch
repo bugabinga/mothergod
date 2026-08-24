@@ -53,6 +53,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 # The one path prefix the app token cannot write (issue #24).
 ADMIN_PREFIX = ".github/workflows/"
@@ -227,14 +228,30 @@ def main() -> int:
         api("PATCH", f"git/refs/heads/{branch}", token, {"sha": sha})
 
     # The failure this replaces is a branch that silently does not move, so the
-    # write's own answer is not evidence: read the ref back (issue #133).
-    landed = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
-    if not landed or landed["object"]["sha"] != sha:
+    # write's own answer is not evidence: read the ref back (issue #133). Refs
+    # are eventually consistent, so a miss on the first read is often
+    # replication lag, not a lost update (issue #193): retry with a bounded
+    # backoff before treating a miss as proof.
+    landed = None
+    for delay in (0, 1, 2):
+        if delay:
+            time.sleep(delay)
+        landed = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
+        if landed and landed["object"]["sha"] == sha:
+            break
+    if not landed:
         die(
-            f"{branch} reads back as {landed['object']['sha'][:7] if landed else 'absent'}, "
+            f"{branch} still reads back as absent after retrying the read-back.",
+            "the commit exists; nothing points at it yet. Retry, and if it "
+            "repeats, say so on the thread rather than pushing again.",
+        )
+    if landed["object"]["sha"] != sha:
+        die(
+            f"{branch} reads back as {landed['object']['sha'][:7]}, "
             f"not the {sha[:7]} just written.",
-            "the commit exists; nothing points at it. Retry, and if it repeats, "
-            "say so on the thread rather than pushing again.",
+            "someone else moved this ref between your write and your read. "
+            "Retry, and if it repeats, say so on the thread rather than "
+            "pushing again.",
         )
     record_push(branch, sha)
 
