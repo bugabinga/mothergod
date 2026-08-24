@@ -24,7 +24,11 @@ impl Repository {
     }
 
     fn write(&self, path: &str, contents: &str) {
-        fs::write(self.0.join(path), contents).unwrap();
+        let target = self.0.join(path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(target, contents).unwrap();
     }
 
     fn track(&self) {
@@ -156,6 +160,53 @@ fn unscoped_discovery_ignores_deleted_tracked_files() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn test_runs_the_three_suites_in_order() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+
+    let output = repository.x(&["test"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("test: 3 suites passed"));
+}
+
+#[test]
+fn test_stops_at_the_first_failing_suite_and_names_the_rerun_command() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write(
+        "x/src/lib.rs",
+        "#[test]\nfn x_fails() { assert!(false); }\n",
+    );
+
+    let output = repository.x(&["test"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("test: x suite failed"));
+    assert!(stderr.contains("next: cargo test --manifest-path x/Cargo.toml"));
+}
+
+fn write_passing_fixture(repository: &Repository) {
+    repository.write(
+        "Cargo.toml",
+        "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+    );
+    repository.write(
+        "src/lib.rs",
+        "//! ```\n//! assert_eq!(1 + 1, 2);\n//! ```\n\n#[test]\nfn core_passes() {}\n",
+    );
+    repository.write(
+        "x/Cargo.toml",
+        "[package]\nname = \"fixture-x\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[workspace]\n\n[lib]\npath = \"src/lib.rs\"\n",
+    );
+    repository.write("x/src/lib.rs", "#[test]\nfn x_passes() {}\n");
 }
 
 #[cfg(unix)]

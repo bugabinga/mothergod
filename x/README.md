@@ -14,7 +14,14 @@ cargo x help lint
 ```text
 cargo x fmt [--check] [PATH...]
 cargo x lint [--fix] [PATH...]
+cargo x test
 ```
+
+`test` runs the fixed plan CLAUDE.md's Commands block names as the test
+suites: `cargo test --all-targets`, `cargo test --manifest-path
+x/Cargo.toml`, then `cargo test --doc`, in that order. It is not
+file-scoped; it stops at the first failing suite and names the command to
+re-run just that one.
 
 No paths selects every supported tracked file.
 A file selects itself.

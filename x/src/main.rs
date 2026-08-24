@@ -3,6 +3,7 @@
 mod files;
 mod format;
 mod lint;
+mod test;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,6 +32,11 @@ enum Task {
     Fmt(FormatArgs),
     /// Run Rust and Markdown linters, optionally applying safe Markdown fixes
     Lint(LintArgs),
+    /// Run the fixed test plan: core, x, then doc
+    #[command(
+        after_help = "Runs `cargo test --all-targets`, `cargo test --manifest-path x/Cargo.toml`, then `cargo test --doc`, in order.\n\nNot file-scoped: the plan is fixed. Stops at the first failing suite and names the command to re-run just that one.\n\nExamples:\n  cargo x test"
+    )]
+    Test,
 }
 
 #[derive(Args)]
@@ -70,6 +76,7 @@ fn main() -> ExitCode {
         Task::Lint(args) => execute(TaskKind::Lint, &args.paths, |selection| {
             lint::run(selection, args.fix)
         }),
+        Task::Test => run_test(),
     };
 
     match result {
@@ -90,4 +97,11 @@ fn execute(
 ) -> Result<bool, String> {
     let selection = files::select(paths, task)?;
     run(&selection)
+}
+
+fn run_test() -> Result<bool, String> {
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("cannot read the current directory: {error}"))?;
+    let root = files::repository_root(&cwd)?;
+    test::run(&root)
 }
