@@ -15,12 +15,14 @@
 //!   structured class.
 //! - [`base64_wrapped`]: a base64-wrapped text payload, the
 //!   "base64-wrapped payloads" structured class.
+//! - [`interleaved_audio16`]: interleaved 16-bit audio samples, the
+//!   "audio" structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
 //! Silesia/Canterbury fetch-and-cache, the remaining structured classes
-//! (audio, image, sqlite-like, x86 binary), and the sealed/train split
-//! plumbing are follow-up slices of `research/JOURNAL.md` S1-D2.
+//! (image, sqlite-like, x86 binary), and the sealed/train split plumbing
+//! are follow-up slices of `research/JOURNAL.md` S1-D2.
 
 use std::fmt::Write as _;
 
@@ -371,6 +373,79 @@ pub fn base64_wrapped(len: usize, seed: u64) -> Vec<u8> {
     encoded
 }
 
+/// Amplitude of [`interleaved_audio16`]'s slower sine component (period 37
+/// samples), matching the founding generator's `2500*sin(i/37)`.
+const AUDIO_AMP_SLOW: f64 = 2500.0;
+
+/// Period divisor of [`interleaved_audio16`]'s slower sine component.
+const AUDIO_PERIOD_SLOW: f64 = 37.0;
+
+/// Amplitude of [`interleaved_audio16`]'s faster sine component (period 11
+/// samples), matching the founding generator's `1500*sin(i/11)`.
+const AUDIO_AMP_FAST: f64 = 1500.0;
+
+/// Period divisor of [`interleaved_audio16`]'s faster sine component.
+const AUDIO_PERIOD_FAST: f64 = 11.0;
+
+/// Standard deviation of [`interleaved_audio16`]'s additive gaussian noise,
+/// matching the founding generator's `200*random.gauss(0, 1)`.
+const AUDIO_NOISE_STDDEV: f64 = 200.0;
+
+/// Generates `len` bytes of interleaved 16-bit audio samples (little-endian),
+/// the "audio" structured class (`research/corpus/POLICY.md`). Truncated to
+/// exactly `len` bytes; an odd `len` ends mid-sample, keeping only that
+/// sample's low byte.
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['audio16']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// each sample sums a slow sine (amplitude 2500, period 37 samples), a fast
+/// sine (amplitude 1500, period 11 samples), and gaussian noise (stddev
+/// 200), then truncates toward zero and keeps the low 16 bits. Python's
+/// `int(...)` truncates a float toward zero exactly like `as i64` does, and
+/// its `& 0xffff` on a (possibly negative) arbitrary-precision int keeps the
+/// low 16 bits in two's complement, exactly what `as u16` produces from that
+/// `i64`. One behavior-preserving deviation, the same shape as
+/// [`access_log`]'s: the archive fixes the sample count at `N / 2` then
+/// emits exactly that many bytes (so an odd `N` loses its last requested
+/// byte entirely); this generates samples until `len` bytes are reached then
+/// truncates, so it produces exactly `len` bytes for any requested length.
+#[must_use]
+pub fn interleaved_audio16(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::with_capacity(len + 1);
+    let mut sample_index = 0u64;
+    while out.len() < len {
+        // Sample indices stay far below 2^53 for any corpus this crate
+        // generates, so this conversion is exact.
+        #[allow(clippy::cast_precision_loss)]
+        let phase = sample_index as f64;
+        let noise = AUDIO_NOISE_STDDEV * standard_normal(&mut rng);
+        let sample = AUDIO_AMP_SLOW * (phase / AUDIO_PERIOD_SLOW).sin()
+            + AUDIO_AMP_FAST * (phase / AUDIO_PERIOD_FAST).sin()
+            + noise;
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "truncating toward zero, matching Python's int(), before the intentional u16 wraparound below"
+        )]
+        let truncated = sample.trunc() as i64;
+        #[allow(
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation,
+            reason = "wraps to the low 16 bits in two's complement, matching Python's `& 0xffff` on a signed int"
+        )]
+        let v = truncated as u16;
+        out.push((v & 0xff) as u8);
+        if out.len() < len {
+            out.push((v >> 8) as u8);
+        }
+        sample_index += 1;
+    }
+    out
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -432,8 +507,8 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        access_log, base64_encode, base64_wrapped, entropy_ladder, json_records, markov_h8_2_trap,
-        order0_entropy_bits, order1_conditional_entropy_bits,
+        access_log, base64_encode, base64_wrapped, entropy_ladder, interleaved_audio16,
+        json_records, markov_h8_2_trap, order0_entropy_bits, order1_conditional_entropy_bits,
     };
 
     const LEN: usize = 200_000;
@@ -509,6 +584,7 @@ mod tests {
         assert_eq!(access_log(0, SEED), Vec::<u8>::new());
         assert_eq!(json_records(0, SEED), Vec::<u8>::new());
         assert_eq!(base64_wrapped(0, SEED), Vec::<u8>::new());
+        assert_eq!(interleaved_audio16(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
     }
@@ -644,6 +720,53 @@ mod tests {
     }
 
     #[test]
+    fn interleaved_audio16_is_exactly_the_requested_length() {
+        for len in [1, 2, 3, 47, 1000, LEN] {
+            assert_eq!(interleaved_audio16(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn interleaved_audio16_is_deterministic() {
+        assert_eq!(
+            interleaved_audio16(5_000, SEED),
+            interleaved_audio16(5_000, SEED)
+        );
+    }
+
+    #[test]
+    fn interleaved_audio16_seeds_are_independent() {
+        assert_ne!(
+            interleaved_audio16(5_000, SEED),
+            interleaved_audio16(5_000, SEED + 1)
+        );
+    }
+
+    #[test]
+    fn interleaved_audio16_samples_move_smoothly() {
+        // A sine-plus-noise signal changes little from one 16-bit sample to
+        // the next, unlike iid random data: consecutive samples (as signed
+        // i16, little-endian) should mostly differ by far less than the
+        // full ~65536 range.
+        let data = interleaved_audio16(LEN, SEED);
+        let samples: Vec<i16> = data
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&pair| i16::from_le_bytes(pair))
+            .collect();
+        let small_steps = samples
+            .windows(2)
+            .filter(|pair| i32::from(pair[1]).abs_diff(i32::from(pair[0])) < 2000)
+            .count();
+        assert!(
+            small_steps * 10 > samples.len() * 9,
+            "expected >90% of consecutive samples to differ by under 2000, got {small_steps}/{}",
+            samples.len()
+        );
+    }
+
+    #[test]
     fn generators_round_trip_through_the_frame_format() {
         for data in [
             entropy_ladder(1, 5_000, SEED),
@@ -652,6 +775,7 @@ mod tests {
             access_log(5_000, SEED),
             json_records(5_000, SEED),
             base64_wrapped(5_000, SEED),
+            interleaved_audio16(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
