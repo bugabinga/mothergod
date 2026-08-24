@@ -1339,6 +1339,49 @@ record.
   S2-D1 debt) to consult once it exists. Remaining S2-D1 scope: the CI
   baseline gate, progress-graph rendering, and the scheduled
   `corpus-fetch` workflow (issue #231).
+- S2-A35 | ACCEPTED | The CI baseline gate's measurement half, next slice
+  of the remaining S2-D1 debt after S2-A34's `regret`: a new
+  `bench::baseline` module measures mothergod's real bits/byte (via
+  `mothergod::compress`, not the ideal-cost accounting mode) on eleven
+  fixed-seed (`CASE_SEED`), fixed-length (`CASE_LEN` = 50,000 bytes)
+  cases — one per entropy-ladder target (`research/corpus/POLICY.md`'s
+  five mandatory points) plus one per non-ladder `DatasetKind::ALL`
+  entry — and compares against a committed `bench/baseline.json`,
+  flagging any case whose bits/byte grew past `TOLERANCE_BITS` (0.02)
+  since the last commit. `DatasetKind::sealed_only` kinds (`AccessLog`,
+  `GradientImage`, S2-A33) are excluded by construction: a PR-time gate
+  an agent reacts to and fixes is a tuning loop, and running it against
+  the sealed set would smuggle sealed data into that loop through the
+  back door (`research/corpus/POLICY.md`, "no agent ever tunes against
+  it"). `bench/baseline.json` and `parse_baseline` are a hand-rolled
+  flat JSON object, not a general reader — same deliberate scope limit
+  `bench/corpus.toml`'s manual TOML reader takes, since this format only
+  ever needs to round-trip what `format_baseline` itself writes. A new
+  `baseline_gate` binary (`cargo run -p mothergod-bench --release --bin
+  baseline_gate -- check`, or `-- write` to update the committed numbers
+  after an accepted ratio change) is ready to wire into CI as a new
+  non-required job (same shape as the existing `worker`/`adr-numbers`
+  jobs, so the ruleset's four required check names stay untouched), but
+  the wiring itself is left for whoever holds `GH_ADMIN_TOKEN`: it is a
+  `.github/workflows/` push, and `agents/GOVERNANCE.md`'s "Push identity"
+  reserves that credential for what the app token cannot write, not
+  available to the session that measured this. That may be the reason
+  this bullet sat as "remaining S2-D1 scope" across S2-A32 through
+  S2-A34 despite everything it depends on being ready since S2-A33. |
+  22 unit tests: case coverage (every train-eligible kind and the full
+  ladder present, sealed-only kinds absent), determinism, exact case
+  length, `bits_per_byte` on a known ratio and on empty input,
+  format/parse round-trip including sort order and optional trailing
+  comma, a malformed-line parse error naming its line number, and
+  `regressions` on matching/within-tolerance/past-tolerance/improved/
+  missing-on-either-side inputs. All five root CLAUDE.md gates clean;
+  measured once on today's codec to seed `bench/baseline.json` (e.g.
+  `entropy_ladder_h1` 1.298080 bits/byte against a 1.0-bit target,
+  `markov_h8_2_trap` 2.447040 against a 2.0-bit floor — the real coder's
+  gap above each dataset's theoretical floor, not itself a claim this
+  entry investigates). Remaining S2-D1 scope: the CI wiring itself (needs
+  `GH_ADMIN_TOKEN`), progress-graph rendering, and the scheduled
+  `corpus-fetch` workflow (issue #231).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
