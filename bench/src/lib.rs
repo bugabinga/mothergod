@@ -36,8 +36,8 @@
 //! window over a generator's output, so repeated experiment iterations
 //! see a different offset instead of memorizing one. [`sealed_seed`]
 //! is the second slice: deriving a sealed-validation seed, distinct from
-//! its train seed, for the same generator. Which dataset kinds are
-//! sealed-only (never appearing in train) is still unaddressed.
+//! its train seed, for the same generator. [`DatasetKind`] is the third:
+//! which generator kinds are sealed-only, never appearing in train.
 
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
@@ -838,17 +838,79 @@ const SEALED_SEED_KEY: u64 = 0x5EA1_ED5E_A1ED_5EA1;
 /// from its own input, not cryptographically unpredictable.
 ///
 /// This is the seed half of "held-out seeds AND held-out dataset kinds"
-/// (POLICY.md). Which dataset kinds are sealed-only, never appearing in
-/// train, is unaddressed here — remaining `S2-D1` scope.
+/// (POLICY.md). [`DatasetKind::sealed_only`] is the dataset-kind half.
 #[must_use]
 pub fn sealed_seed(train_seed: u64) -> u64 {
     Rng::new(train_seed ^ SEALED_SEED_KEY).next_u64()
 }
 
+/// One of this crate's deterministic corpus generators, named so the
+/// train/sealed dataset-kind split (`research/corpus/POLICY.md`: "held-out
+/// seeds AND held-out dataset kinds") can designate some kinds sealed-only
+/// without every caller re-deriving that list from the generator functions
+/// themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DatasetKind {
+    /// [`entropy_ladder`]: the order-0 entropy floor check.
+    EntropyLadder,
+    /// [`markov_h8_2_trap`]: the histogram-coder trap.
+    MarkovH82Trap,
+    /// [`access_log`]: the jsonl/log-records structured class.
+    AccessLog,
+    /// [`json_records`]: the json structured class.
+    JsonRecords,
+    /// [`base64_wrapped`]: the base64-wrapped-payload structured class.
+    Base64Wrapped,
+    /// [`interleaved_audio16`]: the audio structured class.
+    InterleavedAudio16,
+    /// [`gradient_image`]: the gradient-image structured class.
+    GradientImage,
+    /// [`sqlite_like_records`]: the sqlite-like-records structured class.
+    SqliteLikeRecords,
+    /// [`x86_dense_code`]: the x86-dense-binaries structured class.
+    X86DenseCode,
+}
+
+impl DatasetKind {
+    /// Every generator kind, in the order this module defines them.
+    pub const ALL: [Self; 9] = [
+        Self::EntropyLadder,
+        Self::MarkovH82Trap,
+        Self::AccessLog,
+        Self::JsonRecords,
+        Self::Base64Wrapped,
+        Self::InterleavedAudio16,
+        Self::GradientImage,
+        Self::SqliteLikeRecords,
+        Self::X86DenseCode,
+    ];
+
+    /// Whether this kind is sealed-validation-only: train-slice code must
+    /// never request it (`research/corpus/POLICY.md`, "held-out dataset
+    /// kinds"; no agent ever tunes against the sealed set).
+    ///
+    /// [`Self::EntropyLadder`] and [`Self::MarkovH82Trap`] are POLICY's
+    /// mandatory datasets — they check the coder against the theoretical
+    /// floor and the histogram-coder trap on every train iteration, not
+    /// generalization, so both stay in train. Of the seven structured
+    /// classes, [`Self::GradientImage`] and [`Self::SqliteLikeRecords`] are
+    /// held sealed-only: no filter in `src/filters.rs` targets images or
+    /// fixed-width binary records, so these two measure whether the
+    /// parse/model/coder stages generalize on their own, undiluted by a
+    /// filter purpose-built for exactly this shape — unlike
+    /// [`Self::InterleavedAudio16`] (the delta filter), [`Self::X86DenseCode`]
+    /// (the BCJ filter), and [`Self::Base64Wrapped`] (the base64-unwrap
+    /// filter), which train slices actively exercise those filters against.
+    #[must_use]
+    pub const fn sealed_only(self) -> bool {
+        matches!(self, Self::GradientImage | Self::SqliteLikeRecords)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
+        DatasetKind, SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
         gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
         order1_conditional_entropy_bits, sealed_seed, sqlite_like_records, train_window,
         x86_dense_code,
@@ -1365,5 +1427,30 @@ mod tests {
                 "sealed_seed({seed}) collided with a plain train seed in [0, 10_000)"
             );
         }
+    }
+
+    #[test]
+    fn dataset_kind_all_has_no_duplicates() {
+        let seen: std::collections::HashSet<_> = DatasetKind::ALL.iter().collect();
+        assert_eq!(seen.len(), DatasetKind::ALL.len());
+    }
+
+    #[test]
+    fn dataset_kind_mandatory_kinds_stay_in_train() {
+        assert!(!DatasetKind::EntropyLadder.sealed_only());
+        assert!(!DatasetKind::MarkovH82Trap.sealed_only());
+    }
+
+    #[test]
+    fn dataset_kind_sealed_only_is_a_proper_nonempty_subset_of_all() {
+        let sealed_only: Vec<_> = DatasetKind::ALL
+            .into_iter()
+            .filter(|kind| kind.sealed_only())
+            .collect();
+        assert!(!sealed_only.is_empty(), "nothing is held out for sealed");
+        assert!(
+            sealed_only.len() < DatasetKind::ALL.len(),
+            "every kind is sealed-only, so train has nothing to tune against"
+        );
     }
 }
