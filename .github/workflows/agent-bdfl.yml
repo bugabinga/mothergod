@@ -6,25 +6,28 @@
 name: agent-bdfl
 
 on:
-  schedule:
-    # Hourly (ADR-0015). The stabilization sprint (operator directive,
-    # Telegram 2026-08-22) ran this at every 20 min until issue #60's
-    # exit criterion; ADR-0027 ends that early, because the sprint was
-    # premised on a budget the project turned out not to have. The cron
-    # buys autonomous work only: operator activity and Telegram both
-    # wake this seat through their own triggers, within seconds, at any
-    # cadence. 06:11 UTC Sunday stays the deep run.
-    #
-    # This line's last commit must be operator-attributed. `push-branch`
-    # picks the admin PAT for the branch commit, but a squash merge
-    # writes a NEW commit on main authored by whoever merged, and the
-    # BDFL merges its own workflow PRs as `claude[bot]`. ADR-0027 landed
-    # as 5c259c4 that way; this commit re-attributes the line. Prompt-only
-    # edits to this file have landed bot-authored all week with scheduled
-    # runs still firing as `bugabinga`, so the hazard is specific to the
-    # cron line, which is exactly the distinction GOVERNANCE draws.
-    - cron: '11 * * * *'
+  # Hourly (ADR-0015), 06:11 UTC Sunday is the deep run. The clock lives
+  # in agent-clock.yml, not here: a native `schedule:` trigger on this
+  # file ties the run's actor to whatever GitHub decides last touched
+  # the file, and a bot-authored PR merge flips that to `claude[bot]`,
+  # which the OIDC app-token exchange then hard-rejects
+  # ("does not have write access") before a single line of this prompt
+  # runs. Two "line-level re-attribution" patches (PR #30, and again
+  # 2026-08-23 20:00 UTC) both assumed only the cron line's blame
+  # mattered and both silently failed to hold: this file is bot-edited
+  # daily, so the fix had to stop depending on this file's git history
+  # at all. agent-clock.yml carries the only `schedule:` trigger left
+  # and wakes this seat with `gh workflow run` on the operator's PAT,
+  # which GitHub always attributes to the PAT's owner, never to a
+  # committer. See its header comment for the incident.
   workflow_dispatch:
+    inputs:
+      source:
+        description: >-
+          'cron' when agent-clock.yml's proxy dispatched this run;
+          left at the default for a human or the Telegram worker.
+        required: false
+        default: manual
   # Operator-priority wake: any personal repo activity by the operator
   # starts a BDFL run within seconds (the job condition filters to the
   # operator's account, so agent and bot events never match). Bursts
@@ -47,17 +50,17 @@ on:
 
 permissions: {}
 
-# Real wakes (schedule, operator-attributed activity — in person or via
-# the Telegram worker's operator-issued PAT) share one lane and
-# debounce (ADR-0014). Events the job condition would skip anyway get a
-# throwaway per-run group, because concurrency is evaluated before the
-# job-level actor filter: a shared group would let a guaranteed no-op
-# evict a queued operator wake (issue #46). The predicate here MUST
-# mirror jobs.bdfl.if; GitHub offers no way to single-source it
-# (`on:` cannot filter by actor, concurrency cannot read job state).
+# Real wakes (operator-attributed activity — in person, via the
+# Telegram worker's operator-issued PAT, or agent-clock.yml's hourly
+# dispatch on that same PAT) share one lane and debounce (ADR-0014).
+# Events the job condition would skip anyway get a throwaway per-run
+# group, because concurrency is evaluated before the job-level actor
+# filter: a shared group would let a guaranteed no-op evict a queued
+# operator wake (issue #46). The predicate here MUST mirror jobs.bdfl.if;
+# GitHub offers no way to single-source it (`on:` cannot filter by
+# actor, concurrency cannot read job state).
 concurrency:
-  group: ${{ (github.event_name == 'schedule'
-          || github.actor == 'bugabinga')
+  group: ${{ github.actor == 'bugabinga'
           && !contains(format('{0}{1}{2}{3}',
                github.event.comment.body,
                github.event.review.body,
@@ -75,9 +78,10 @@ jobs:
     # This condition MUST mirror the concurrency group predicate above;
     # change them together (issue #46). Two guards against self-trigger
     # (issue #50): workflow_dispatch is admitted only when attributed to
-    # the operator — that covers manual dispatch AND the Telegram
-    # worker, whose GITHUB_PAT is operator-issued, while a dispatch from
-    # an agent token carries a bot actor and is skipped. And the body
+    # the operator — that covers manual dispatch, the Telegram worker,
+    # and agent-clock.yml's cron proxy, all of which carry the
+    # operator-issued PAT, while a dispatch from an agent token carries a
+    # bot actor and is skipped. And the body
     # that CAUSED this event never wakes a run if it carries the agent
     # attribution link, whatever token posted it, because that text is
     # our own output.
@@ -100,8 +104,7 @@ jobs:
     # a run. The second is closed by rule, not by expression: the admin
     # PAT pushes, it never opens or reviews threads (agents/GOVERNANCE.md,
     # "Push identity").
-    if: (github.event_name == 'schedule' ||
-      github.actor == 'bugabinga') &&
+    if: github.actor == 'bugabinga' &&
       !contains(format('{0}{1}{2}{3}',
       github.event.comment.body,
       github.event.review.body,
@@ -188,9 +191,12 @@ jobs:
           # expires ~1h into a session (issue #81). Comments only, never
           # pushes or merges (GOVERNANCE.md "Push identity").
           GH_WORKFLOW_TOKEN: ${{ github.token }}
-          # Why this run woke: 'schedule', 'workflow_dispatch', or an
+          # Why this run woke: 'schedule' (agent-clock.yml's cron proxy,
+          # folded back from workflow_dispatch since that is the only
+          # trigger left that can carry it — see the `on:` comment),
+          # 'workflow_dispatch' (a human or the Telegram worker), or an
           # operator event (issues, issue_comment, pull_request, ...).
-          TRIGGER_EVENT: ${{ github.event_name }}
+          TRIGGER_EVENT: ${{ (github.event_name == 'workflow_dispatch' && inputs.source == 'cron') && 'schedule' || github.event_name }}
           TRIGGER_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || '' }}
           # What kind of action (opened, created, submitted, ...) and the
           # exact comment/review URL when there is one — TRIGGER_NUMBER
@@ -215,8 +221,8 @@ jobs:
             the shared house voice is the Voice section of CLAUDE.md.
             Both operator-seeded, yours to evolve on the record.
 
-            Cadence (ADR-0015): this workflow's cron is the single source
-            of truth for how often you run.
+            Cadence (ADR-0015): agent-clock.yml's cron is the single
+            source of truth for how often you run.
 
             Run modes (operator directive, Telegram, 2026-08-23): decide
             your mode first; it sets the priority order for everything

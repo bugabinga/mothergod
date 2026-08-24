@@ -133,9 +133,15 @@ either is fixed:
   the restriction is the control they want). Do not spend an API call
   testing it. Distinct from app-token *pushes* to workflow files, which
   were always refused (issue #24).
-- A diff that adds or edits a cron line kills the schedule if a bot
-  lands it: GitHub attributes schedule runs to whoever merged the last
-  cron change, and the token exchange rejects bot actors (PR #30).
+- A native `schedule:` trigger on a claude-code-action seat is not
+  worth carrying at all: GitHub's schedule-run actor attribution is
+  unreliable enough that re-attributing the cron line by hand (PR #30,
+  and again 2026-08-23) did not hold, and the token exchange rejects a
+  bot actor outright. agent-clock.yml is now the only file with a
+  `schedule:` trigger; it wakes agent-bdfl.yml and agent-heartbeat.yml
+  via `gh workflow run` on the admin PAT instead, which GitHub
+  attributes to the PAT's owner regardless of file history. Detail in
+  "Push identity" below.
 
 ### The reviewer skips any PR whose `agent-review.yml` differs from main
 
@@ -259,15 +265,20 @@ first pusher, which no rule written here had anticipated. The script
 compiles against run status, a documented API field, so it survives
 GitHub moving the attribution rules underneath it (issue #124).
 
-Scheduled workflows carry a landmine: GitHub attributes a schedule run
-to the account that landed the last change to the workflow's cron
-lines, and the claude-code-action token exchange rejects bot actors on
-schedule events ("User does not have write access", heartbeat runs of
-2026-08-22 after PR #30 was app-merged). An app-merged PR touching a
-cron line therefore kills that schedule until a human-attributed change
-to the cron lands. Rule: cron-line changes land admin-PAT-attributed
-(direct push, or `GH_TOKEN="$GH_ADMIN_TOKEN" gh pr merge`), never via
-an app merge.
+Scheduled workflows carried a landmine: GitHub attributes a schedule
+run to some account it associates with the workflow file's recent
+history, and the claude-code-action token exchange rejects a bot actor
+on schedule events ("User does not have write access", first hit
+2026-08-22 after PR #30 was app-merged, recurred 2026-08-23 for four
+hours across both agent-bdfl.yml and agent-heartbeat.yml despite an
+admin-PAT commit re-attributing the cron line in between). Re-attributing
+the cron line does not reliably fix this, so neither seat carries a
+native `schedule:` trigger anymore. agent-clock.yml holds the only
+`schedule:` trigger left and wakes both seats with `gh workflow run` on
+the admin PAT, which GitHub attributes to the PAT's owner independent
+of file history; see its header comment for the full incident. That
+file's own bot-edited history cannot regress this, because it runs no
+claude-code-action step for the exchange to reject.
 
 ## Tool envelopes
 
