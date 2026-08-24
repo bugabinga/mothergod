@@ -6,6 +6,29 @@ publish = false
 
 [dependencies]
 mothergod = { path = ".." }
+# Held-out-final fetch-and-cache (research/corpus/POLICY.md) needs an
+# HTTPS client and a checksum digest; ADR-0002's zero-runtime-dependency
+# rule binds the core `mothergod` crate, not this tooling crate (fuzz/
+# already carries its own dependency, libfuzzer-sys, on the same
+# reasoning). `ureq`'s rustls backend keeps this pure Rust, no system
+# OpenSSL to discover in CI. `sha2` is a well-audited digest
+# implementation; a self-rolled SHA-256 is the wrong place to save a
+# dependency when its only job is deciding whether a downloaded file is
+# trustworthy. Both are optional, gated behind the `corpus-fetch`
+# feature (off by default): `bench` is a root workspace default-member,
+# so an unconditional dependency here would tax every PR's required
+# `cargo test --all-targets` with ureq's transitive tree (rustls +
+# webpki-roots + the `url`/`idna`/ICU stack for URL parsing) even though
+# only the `corpus` module's fetch path needs it. CLAUDE.md's required
+# checks build default features only, so this keeps them at today's
+# cost; a scheduled workflow exercising `--features corpus-fetch` is
+# remaining scope (`research/JOURNAL.md` S1-D2), the same shape as
+# `fuzz/`'s targets, which aren't in the fast PR gate either.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[features]
+corpus-fetch = ["dep:ureq", "dep:sha2"]
 
 [lints]
 workspace = true

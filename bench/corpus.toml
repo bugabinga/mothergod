@@ -1,0 +1,93 @@
+# Held-out finals (research/corpus/POLICY.md, "Sourcing: borrowed and our
+# own" / "Sealing"): Silesia and Canterbury, never committed to this repo
+# (size and third-party copyright). Each entry pins one download by URL
+# and the SHA-256 of the bytes as fetched — the compressed archive, not
+# the decompressed corpus file. `bench::corpus::fetch_and_cache` refuses
+# to return a file whose downloaded bytes don't hash to its pin.
+#
+# Decompression (bzip2 for Silesia, tar+gzip for Canterbury) is not wired
+# yet — remaining `research/JOURNAL.md` S1-D2 scope alongside the
+# train/sealed/finals split plumbing, regret scoring, and the CI baseline
+# gate. Consumers that need raw corpus bytes decompress at the point of
+# use until that slice lands.
+#
+# Silesia corpus (12 files), source: https://sun.aei.polsl.pl/~sdeor/corpus/
+[[file]]
+name = "dickens"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/dickens.bz2"
+sha256 = "d4ed75f38f2e84e7ee61497cca0eb547937d8cc2991ee22e5775d6ad0b6fc85e"
+
+[[file]]
+name = "mozilla"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/mozilla.bz2"
+sha256 = "3f1375c1f9ec1a3d9cef9e9fe8dbdc3e8872c176590d8e06e14d507a6935b430"
+
+[[file]]
+name = "mr"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/mr.bz2"
+sha256 = "b5c65c53720a4b7d933e0d96d87fbc7fab29ebe0ba1247a5ed056875a72da4ee"
+
+[[file]]
+name = "nci"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/nci.bz2"
+sha256 = "5510d13d670be5bbcaf8e1c628a21a4913b3380a0de325cb1cf9010c562d2edb"
+
+[[file]]
+name = "ooffice"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/ooffice.bz2"
+sha256 = "cc3873fadefb2b0cf64318fa517ef8dd6265808c3f4a602320673754a3ffd176"
+
+[[file]]
+name = "osdb"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/osdb.bz2"
+sha256 = "1adaad6b614f0739f0a8401eaee34923af1284df70c1fe842dd3cab4cf334612"
+
+[[file]]
+name = "reymont"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/reymont.bz2"
+sha256 = "15b7f599293b09997f097321191dcc30a1f5e265ed3bfc455f2fb4ed661da966"
+
+[[file]]
+name = "samba"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/samba.bz2"
+sha256 = "aeb137a6cae5174963dc218498d4fa1adeb8b6081f5eee470dac72cad433edae"
+
+[[file]]
+name = "sao"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/sao.bz2"
+sha256 = "99eb682a310de9a0f1426e988bcc16b3ed024fa732100e3b6c727d45f6949075"
+
+[[file]]
+name = "webster"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/webster.bz2"
+sha256 = "4001d84df5964f584daf0551a5f6a8bb8150608ceca49ff4ccbfb4dceb8ee9d6"
+
+[[file]]
+name = "x-ray"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/x-ray.bz2"
+sha256 = "1233211ff0d01c923f1b2d0b86d883a35b7326f58982a34d399621d85921deb2"
+
+[[file]]
+name = "xml"
+corpus = "silesia"
+url = "https://sun.aei.polsl.pl/~sdeor/corpus/xml.bz2"
+sha256 = "0aabaf9f4690cba2e8e8bb922cc386fc202e93bb1980747530cd8408a6ee4215"
+
+# Canterbury corpus (single tarball), source:
+# https://corpus.canterbury.ac.nz/resources/cantrbry.tar.gz
+[[file]]
+name = "cantrbry"
+corpus = "canterbury"
+url = "https://corpus.canterbury.ac.nz/resources/cantrbry.tar.gz"
+sha256 = "f140e8a5b73d3f53198555a63bfb827889394a42f20825df33c810c3d5e3f8fb"

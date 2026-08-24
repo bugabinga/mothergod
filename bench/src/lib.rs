@@ -27,8 +27,15 @@
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
-//! Silesia/Canterbury fetch-and-cache and the sealed/train split plumbing
-//! are follow-up slices of `research/JOURNAL.md` S1-D2.
+//!
+//! The `corpus` module (behind the opt-in `corpus-fetch` feature, so it
+//! isn't in scope for this doc build's default features) fetches and
+//! caches the held-out-final corpora (Silesia, Canterbury) pinned in
+//! `bench/corpus.toml`. The sealed/train split plumbing is a follow-up
+//! slice of `research/JOURNAL.md` S1-D2.
+
+#[cfg(feature = "corpus-fetch")]
+pub mod corpus;
 
 use std::fmt::Write as _;
 
