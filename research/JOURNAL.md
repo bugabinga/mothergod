@@ -1368,7 +1368,7 @@ record.
   available to the session that measured this. That may be the reason
   this bullet sat as "remaining S2-D1 scope" across S2-A32 through
   S2-A34 despite everything it depends on being ready since S2-A33. |
-  22 unit tests: case coverage (every train-eligible kind and the full
+  15 unit tests: case coverage (every train-eligible kind and the full
   ladder present, sealed-only kinds absent), determinism, exact case
   length, `bits_per_byte` on a known ratio and on empty input,
   format/parse round-trip including sort order and optional trailing
