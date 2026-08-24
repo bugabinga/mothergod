@@ -249,6 +249,11 @@ All notable changes to this project are documented here. Format follows
   the same mixed distribution `Literal::encode` codes against without
   touching an `Encoder`. Both entropy stages now support ideal-cost
   accounting; a whole-codec pass summing them together remains.
+- Train/sealed split plumbing, seed half (`research/JOURNAL.md` S2-A32):
+  `bench::sealed_seed` derives a sealed-validation seed from a train seed
+  (`research/corpus/POLICY.md`, "different seed... from train"), distinct
+  from it and injective across the seed space. Which dataset kinds are
+  sealed-only remains.
 
 ### Removed
 

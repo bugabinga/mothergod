@@ -34,9 +34,10 @@
 //! `bench/corpus.toml`. [`train_window`] is the first slice of the
 //! train/sealed split plumbing (`research/JOURNAL.md` S1-D2): a rotating
 //! window over a generator's output, so repeated experiment iterations
-//! see a different offset instead of memorizing one. The sealed
-//! validation set (held-out seeds and dataset kinds, never tuned
-//! against) is a follow-up slice.
+//! see a different offset instead of memorizing one. [`sealed_seed`]
+//! is the second slice: deriving a sealed-validation seed, distinct from
+//! its train seed, for the same generator. Which dataset kinds are
+//! sealed-only (never appearing in train) is still unaddressed.
 
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
@@ -817,12 +818,40 @@ pub fn train_window(data: &[u8], window_len: usize, iteration: u64) -> Vec<u8> {
     }
 }
 
+/// Fixed key mixed into a train seed before deriving its sealed-validation
+/// counterpart, distinguishing "seed run through [`sealed_seed`]" from "seed
+/// picked directly for train".
+const SEALED_SEED_KEY: u64 = 0x5EA1_ED5E_A1ED_5EA1;
+
+/// Derives a sealed-validation seed from a train seed
+/// (`research/corpus/POLICY.md`, "Sealed validation set — different seed...
+/// from train"). Feeds `train_seed` (`XOR`ed with a fixed key) through the
+/// same `SplitMix64` step `Rng` uses. That step is a bijection on `u64`
+/// (the `wrapping_add` and the xorshift-multiply avalanche are each
+/// invertible), so distinct train seeds always derive distinct sealed
+/// seeds and every sealed seed traces back to exactly one train seed. It
+/// does not prove a sealed seed can never coincide with some unrelated
+/// seed chosen directly for train — that would need a structural split
+/// (e.g. a reserved bit), which conflicts with seeds already in use
+/// elsewhere in this crate that set every bit pattern (S2-A1's
+/// `0xC0FF_EE12_3456_789A`). Same caveat as `Rng`: reproducible and distinct
+/// from its own input, not cryptographically unpredictable.
+///
+/// This is the seed half of "held-out seeds AND held-out dataset kinds"
+/// (POLICY.md). Which dataset kinds are sealed-only, never appearing in
+/// train, is unaddressed here — remaining `S2-D1` scope.
+#[must_use]
+pub fn sealed_seed(train_seed: u64) -> u64 {
+    Rng::new(train_seed ^ SEALED_SEED_KEY).next_u64()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
         gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits, sqlite_like_records, train_window, x86_dense_code,
+        order1_conditional_entropy_bits, sealed_seed, sqlite_like_records, train_window,
+        x86_dense_code,
     };
 
     const LEN: usize = 200_000;
@@ -1301,5 +1330,40 @@ mod tests {
     fn train_window_rejects_a_window_longer_than_the_data() {
         let data: Vec<u8> = (0..10u8).collect();
         let _ = train_window(&data, 11, 0);
+    }
+
+    #[test]
+    fn sealed_seed_is_deterministic() {
+        assert_eq!(sealed_seed(0), sealed_seed(0));
+        assert_eq!(sealed_seed(0x00C0_FFEE), sealed_seed(0x00C0_FFEE));
+    }
+
+    #[test]
+    fn sealed_seed_differs_from_its_train_seed() {
+        for seed in [0, 1, 42, 0x00C0_FFEE, 0xC0FF_EE12_3456_789A_u64, u64::MAX] {
+            assert_ne!(sealed_seed(seed), seed);
+        }
+    }
+
+    #[test]
+    fn sealed_seed_is_injective_over_a_swept_range() {
+        let mut seen = std::collections::HashSet::new();
+        for seed in 0..10_000u64 {
+            assert!(seen.insert(sealed_seed(seed)), "collision at seed {seed}");
+        }
+    }
+
+    #[test]
+    fn sealed_seed_is_injective_over_train_and_sealed_seeds_together() {
+        let mut seen = std::collections::HashSet::new();
+        for seed in 0..10_000u64 {
+            seen.insert(seed);
+        }
+        for seed in 0..10_000u64 {
+            assert!(
+                seen.insert(sealed_seed(seed)),
+                "sealed_seed({seed}) collided with a plain train seed in [0, 10_000)"
+            );
+        }
     }
 }
