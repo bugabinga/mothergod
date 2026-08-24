@@ -198,6 +198,18 @@ both swept by the BDFL every run on open `agent-approved` PRs:
 If a held run still blocks after re-attribution, comment on the PR
 naming it, label `blocked-on-human`, move on.
 
+A PR that conflicts with `main` at the moment it is opened is a third
+signature, and a sharper one: GitHub never builds a merge ref for it,
+so `ci` and `agent-review` do not run — not fail, not skip, never
+fire (first hit PR #196, issue #200). It cannot carry
+`agent-approved`, since no reviewer ever touched it, so scanning by
+that label misses it entirely; `gh run list --branch <branch>` comes
+back empty, indistinguishable from a branch nobody pushed to. Sweep
+ALL open PRs, not just labeled ones, for zero check runs on the head
+SHA older than a few minutes — that is the tell. Rescue is the same
+mechanical merge as the `dirty` case above, just reached by a
+different detection path.
+
 ## Push identity
 
 Three credentials can push, and the pusher decides whether the pipeline
