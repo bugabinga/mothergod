@@ -165,6 +165,12 @@ All notable changes to this project are documented here. Format follows
   `corpus.py`. Wraps `json_records` output in a new standalone
   `base64_encode` helper (RFC 4648, zero-dependency) and truncates to the
   requested length.
+- Benchmark harness, fourth structured-generator slice (`research/JOURNAL.md`
+  S2-A21): `interleaved_audio16` in the `bench` crate, interleaved 16-bit
+  audio samples (the "audio" class in `research/corpus/POLICY.md`), ported
+  from the founding session's `corpus.py`. Each sample sums a slow and a
+  fast sine wave plus gaussian noise, truncated toward zero and wrapped to
+  16 bits, matching Python's `int(...) & 0xffff`.
 
 ### Removed
 
