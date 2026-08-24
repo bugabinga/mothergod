@@ -186,6 +186,17 @@ All notable changes to this project are documented here. Format follows
   archive's byte layout came from a real `sqlite3` file, not a formula, so
   this port captures the schema's shape as fixed 20-byte little-endian rows
   instead of reimplementing SQLite's on-disk format.
+- Benchmark harness, seventh and final structured-generator slice
+  (`research/JOURNAL.md` S2-A24): `x86_dense_code` in the `bench` crate, a
+  synthetic x86-64 instruction stream dense with `call`/`jmp rel32`
+  opcodes (the "x86-dense binaries" class in `research/corpus/POLICY.md`).
+  The archive's source (a slice of the host's `libc.so.6`) is neither
+  deterministic nor available in every environment, so this port
+  substitutes a synthetic instruction stream built to stress the `bcj`
+  filter (S2-A4) instead: short filler instructions interleaved with
+  `call`/`jmp` opcodes targeting a small pool of synthetic function starts.
+  Completes S2-D1's structured-generator list; Silesia/Canterbury
+  fetch-and-cache and the train/sealed split plumbing remain.
 
 ### Removed
 
