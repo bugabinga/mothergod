@@ -262,6 +262,15 @@ All notable changes to this project are documented here. Format follows
   purpose matches its shape, so they measure generalization undiluted by
   a filter tuned for exactly their shape. Regret scoring, the CI
   baseline gate, and progress-graph rendering remain.
+- Regret scoring (`research/JOURNAL.md` S2-A34): `bench::regret` scores a
+  candidate corpus addition (`research/corpus/POLICY.md`, "Growing the
+  corpus") as mothergod's bits/byte minus the stronger of the two pinned
+  reference compressors' (`zstd -19`, `xz -9e`) bits/byte on the same
+  data. Positive regret is the accept criterion; pure noise needs no
+  separate auto-reject case since every compressor is equally bad at it,
+  so regret already comes out near zero. Not yet called by anything — it
+  exists for the CI baseline gate to consult once it exists. The CI
+  baseline gate and progress-graph rendering remain.
 
 ### Removed
 
