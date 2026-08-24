@@ -3,24 +3,19 @@
 name: agent-heartbeat
 
 on:
-  schedule:
-    # Two-hourly, which is this seat's documented normal and the cadence
-    # #60 always named as the sprint's revert target. ADR-0027 makes the
-    # revert now rather than at #60's exit criterion, because the
-    # seven-day allowance ran out of room first. #186 wakes this seat
-    # whenever a verdict lands, so the cron only has to cover the case
-    # where nothing happened at all.
-    # Off the hour, off :11 and off :37 on purpose, so it collides with
-    # neither the BDFL's cadence nor the deslopper's. Cron edits must
-    # land admin-PAT-attributed: an app-merged cron edit flips the
-    # schedule actor to claude[bot], the token exchange rejects bot
-    # actors, and every scheduled run dies (GOVERNANCE.md "Push
-    # identity", PR #30). That rule covers the branch commit, which
-    # `push-branch` puts on the PAT; the squash merge then writes a new
-    # commit on main authored by whoever merged, which for a BDFL
-    # workflow PR is `claude[bot]`. ADR-0027 landed that way as 5c259c4,
-    # so this commit re-attributes the line.
-    - cron: '22 */2 * * *'
+  # Two-hourly (ADR-0015; ADR-0027 restated the revert target), off the
+  # hour and off :11/:37 so it collides with neither the BDFL's cadence
+  # nor the deslopper's. #186 wakes this seat whenever a review verdict
+  # lands, so the clock only has to cover the case where nothing
+  # happened at all. The clock itself lives in agent-clock.yml, not a
+  # native `schedule:` trigger here: a bot-authored commit to this file
+  # (which happens most days) flips the schedule-run's actor to
+  # `claude[bot]`, and the OIDC app-token exchange hard-rejects that
+  # actor before the job even starts (write-access check, PR #30). Two
+  # attempts to fix this by re-attributing just the cron line both
+  # silently failed to hold, because the failure does not depend on
+  # this file's history once the clock lives elsewhere. See
+  # agent-clock.yml's header for the incident and the fix.
   workflow_dispatch:
 
 permissions: {}

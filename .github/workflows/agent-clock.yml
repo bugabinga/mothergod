@@ -1,0 +1,65 @@
+# The only file allowed to carry a native `schedule:` trigger for the
+# claude-code-action seats. Everything it does is `gh workflow run` on
+# the operator's PAT; it never runs claude-code-action itself.
+#
+# Why this file exists (incident, 2026-08-23): agent-bdfl.yml and
+# agent-heartbeat.yml both carried their own `schedule:` cron. GitHub
+# attributes a schedule-triggered run to whoever it decides last
+# touched the workflow file, and both files are bot-edited most days
+# (the BDFL merges its own workflow PRs as `claude[bot]`). Once that
+# actor is a bot, the claude-code-action's OIDC-to-app-token exchange
+# rejects it outright — "User does not have write access on this
+# repository" — server-side, before a single line of the prompt runs.
+# `allowed_bots` cannot fix this: that check runs inside the action,
+# after the exchange the actor already failed. Two prior fixes
+# (PR #30, and again at 2026-08-23T20:00Z) re-attributed just the cron
+# line on the theory that only that line's git blame mattered; both
+# landed and both runs kept failing for hours afterward, so that theory
+# does not hold in practice, or GitHub does not repropagate the fix in
+# any useful time frame. Both scheduled seats went dark for roughly
+# four hours before this file replaced their triggers.
+#
+# The fix: never let the actor-sensitive step see a native `schedule`
+# event. `gh workflow run` triggered here with an explicit PAT is
+# attributed to the PAT's owner by GitHub's API semantics, not by git
+# history, so it does not matter who last committed to this file or to
+# the seats it wakes. Each seat's job `if:`/concurrency predicate
+# already admits `workflow_dispatch` when `github.actor == 'bugabinga'`
+# (that is how the Telegram worker's dispatches were already getting
+# through), so this needed no change on that side — only a `source`
+# input on agent-bdfl.yml so it can tell a cron wake from a human one
+# and keep reporting TRIGGER_EVENT=schedule downstream (agent-heartbeat
+# has no such distinction to preserve).
+#
+# This file itself may still get bot-edited and inherit a `claude[bot]`
+# schedule-actor someday. That is fine: it carries no claude-code-action
+# step, so the exchange this incident hinges on never runs here.
+name: agent-clock
+on:
+  schedule:
+    - cron: '11 * * * *' # agent-bdfl, hourly (ADR-0015)
+    - cron: '22 */2 * * *' # agent-heartbeat, two-hourly (ADR-0015/0027)
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agent-clock
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Wake agent-bdfl
+        if: github.event.schedule == '11 * * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+        run: gh workflow run agent-bdfl.yml --repo "$GITHUB_REPOSITORY" -f source=cron
+
+      - name: Wake agent-heartbeat
+        if: github.event.schedule == '22 */2 * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+        run: gh workflow run agent-heartbeat.yml --repo "$GITHUB_REPOSITORY"
