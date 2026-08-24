@@ -8,14 +8,14 @@ inputs:
   target:
     description: Rust target triple; empty means the toolchain host
     required: false
-    default: ''
+    default: ""
   checks:
     description: setup, fmt, clippy, test, doc, runtime, or canonical
     required: true
   cache:
     description: Enable the Cargo build cache
     required: false
-    default: 'true'
+    default: "true"
 runs:
   using: composite
   steps:
@@ -106,10 +106,28 @@ runs:
           echo "$key=$linker" >> "$GITHUB_ENV"
         fi
 
+    - name: Restore x binary
+      if: ${{ inputs.checks == 'fmt' || inputs.checks == 'clippy' || inputs.checks == 'canonical' }}
+      id: x-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          x/target/debug/cargo-x
+          x/target/debug/cargo-x.exe
+        key: cargo-x-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'x/Cargo.lock', 'x/Cargo.toml', 'x/src/**') }}
+
+    - name: Build x
+      if: ${{ (inputs.checks == 'fmt' || inputs.checks == 'clippy' || inputs.checks == 'canonical') && steps.x-cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: cargo build --manifest-path x/Cargo.toml
+
     - if: ${{ inputs.cache == 'true' && inputs.checks != 'fmt' }}
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       with:
         key: ${{ steps.resolve.outputs.toolchain }}-${{ inputs.target }}-${{ inputs.checks }}
+        workspaces: |
+          . -> target
+          x -> target
 
     - name: Run Rust checks
       if: ${{ inputs.checks != 'setup' }}

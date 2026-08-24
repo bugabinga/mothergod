@@ -3,8 +3,8 @@
 // through the same exported fetch handler Cloudflare invokes.
 //
 // Run: node --test infra/telegram-worker/*.test.mjs
-import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import { after, test } from "node:test";
 import worker, { Typing } from "./worker.js";
 
 const originalFetch = globalThis.fetch;
@@ -415,7 +415,7 @@ test("Telegram command and prose routes", async (t) => {
               created_at: "2026-08-24T00:00:00Z",
             },
           ],
-        }),
+        })
       ),
     );
     assert.match(sent(one.calls).text, /Recent burn: no measurable indexed movement/);
@@ -478,17 +478,13 @@ test("Telegram command and prose routes", async (t) => {
 
     const ten = await invoke(
       "/blocked",
-      harness(() =>
-        json(Array.from({ length: 10 }, (_, index) => ({ number: index + 1, title: "x" }))),
-      ),
+      harness(() => json(Array.from({ length: 10 }, (_, index) => ({ number: index + 1, title: "x" })))),
     );
     assert.match(sent(ten.calls).text, /Blocked on human \(10\):/);
 
     const eleven = await invoke(
       "/blocked",
-      harness(() =>
-        json(Array.from({ length: 11 }, (_, index) => ({ number: index + 1, title: "x" }))),
-      ),
+      harness(() => json(Array.from({ length: 11 }, (_, index) => ({ number: index + 1, title: "x" })))),
     );
     assert.match(sent(eleven.calls).text, /Blocked on human \(10\+\):/);
     assert.doesNotMatch(sent(eleven.calls).text, /issues\/11/);
@@ -547,7 +543,7 @@ test("Telegram command and prose routes", async (t) => {
             [{ body: "old", created_at: "2026-08-23T00:00:00Z" }],
             200,
             {
-              link: '<https://api.github.com/repos/owner/repo/issues/8/comments?per_page=100&page=2>; rel="last"',
+              link: "<https://api.github.com/repos/owner/repo/issues/8/comments?per_page=100&page=2>; rel=\"last\"",
             },
           );
         }
@@ -574,9 +570,10 @@ test("Telegram command and prose routes", async (t) => {
     const cases = [
       () => harness(() => json({ message: "down" }, 503)),
       () => harness(() => json({ not_workflow_runs: [] })),
-      () => harness(() => {
-        throw new Error("network down");
-      }),
+      () =>
+        harness(() => {
+          throw new Error("network down");
+        }),
     ];
     for (const makeSetup of cases) {
       const result = await invoke("/runs", makeSetup());

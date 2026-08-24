@@ -29,7 +29,7 @@ on:
     # buying and it survives the move. Sunday 04:07 UTC, ahead of the BDFL's
     # Sunday deep run, so a fresh scan is on the record before the survey
     # reads it.
-    - cron: '7 4 * * 0'
+    - cron: "7 4 * * 0"
   workflow_dispatch:
 
 permissions:

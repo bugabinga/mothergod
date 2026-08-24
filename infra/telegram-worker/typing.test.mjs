@@ -8,8 +8,8 @@
 // Run: node --test infra/telegram-worker/*.test.mjs
 // (the file glob, not the directory: node 22 tries to execute a directory
 // argument as a module and dies before discovering anything in it)
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { Typing } from "./worker.js";
 
 // Time is a parameter here, never the wall clock: the interesting cases are

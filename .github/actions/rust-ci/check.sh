@@ -8,16 +8,24 @@ if [ -n "$target" ]; then
   target_args=(--target "$target")
 fi
 
+x_binary=x/target/debug/cargo-x
+if [ -x "$x_binary.exe" ]; then
+  x_binary="$x_binary.exe"
+fi
+
 run_fmt() {
-  cargo fmt --check
+  "$x_binary" fmt --check
 }
 
 run_clippy() {
-  cargo clippy --all-targets "${target_args[@]}" -- --deny warnings
+  "$x_binary" lint
 }
 
 run_tests() {
   cargo test --all-targets "${target_args[@]}"
+  if [ -z "$target" ]; then
+    cargo test --manifest-path x/Cargo.toml
+  fi
 }
 
 run_doctests() {

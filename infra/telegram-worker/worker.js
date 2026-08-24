@@ -79,9 +79,9 @@ export class Typing {
         return new Response(null, { status: 400 });
       }
       if (
-        !Number.isSafeInteger(payload?.updateId) ||
-        typeof payload?.parsed?.name !== "string" ||
-        typeof payload.parsed.args !== "string"
+        !Number.isSafeInteger(payload?.updateId)
+        || typeof payload?.parsed?.name !== "string"
+        || typeof payload.parsed.args !== "string"
       ) {
         return new Response(null, { status: 400 });
       }
@@ -115,10 +115,9 @@ export class Typing {
     // at nobody.
     const since = Number(url.searchParams.get("since"));
     const cutoff = since > 0 ? since : Date.now();
-    const left =
-      url.pathname === "/stop"
-        ? arrivals.slice(1)
-        : arrivals.filter((at) => at >= cutoff);
+    const left = url.pathname === "/stop"
+      ? arrivals.slice(1)
+      : arrivals.filter((at) => at >= cutoff);
     if (left.length) {
       await this.state.storage.put("arrivals", left);
     } else {
@@ -310,8 +309,7 @@ function telegramText(body, repo) {
   const render = (source) =>
     escapeHtml(source).replace(
       /(^|[^\w/#])#(\d{1,6})\b/g,
-      (_, prefix, number) =>
-        `${prefix}<a href="https://github.com/${repo}/issues/${number}">#${number}</a>`,
+      (_, prefix, number) => `${prefix}<a href="https://github.com/${repo}/issues/${number}">#${number}</a>`,
     );
   let source = body.trim();
   let rendered = render(source);
@@ -442,8 +440,8 @@ async function status(env, args) {
   const activity = active.length
     ? `Running: ${active.map(({ run }) => run.name).join(", ")}`
     : agentRuns[0]
-      ? `Latest: ${runLine(agentRuns[0].run, agentRuns[0].role)}`
-      : "Latest: no agent runs found";
+    ? `Latest: ${runLine(agentRuns[0].run, agentRuns[0].role)}`
+    : "Latest: no agent runs found";
   return `${headline}\n${ciState(ci)}\nOpen: ${openIssues.length} issues, ${openPulls.length} PRs\n${activity}`;
 }
 
@@ -569,7 +567,9 @@ async function budget(env, args) {
   const exhaustion = latest.at + ((10000 - latest.used) / burn) * 3_600_000;
   lines.push(`Recent burn: ${percent(burn)}/h over ${elapsedHours.toFixed(1)}h`);
   lines.push(
-    `Projected exhaustion: ${formatTime(new Date(exhaustion).toISOString())} (${exhaustion < latest.reset * 1000 ? "before" : "after"} reset)`,
+    `Projected exhaustion: ${formatTime(new Date(exhaustion).toISOString())} (${
+      exhaustion < latest.reset * 1000 ? "before" : "after"
+    } reset)`,
   );
   return lines.join("\n");
 }
@@ -635,20 +635,20 @@ async function diff(env, args) {
     github(env, `/pulls/${number}/files?per_page=100`),
   ]);
   if (
-    !pull ||
-    typeof pull.title !== "string" ||
-    !Number.isInteger(pull.changed_files) ||
-    !Number.isInteger(pull.additions) ||
-    !Number.isInteger(pull.deletions)
+    !pull
+    || typeof pull.title !== "string"
+    || !Number.isInteger(pull.changed_files)
+    || !Number.isInteger(pull.additions)
+    || !Number.isInteger(pull.deletions)
   ) {
     throw new UpstreamError();
   }
   const files = array(changed);
   const shown = files.slice(0, 12).map((file) => {
     if (
-      typeof file?.filename !== "string" ||
-      !Number.isInteger(file.additions) ||
-      !Number.isInteger(file.deletions)
+      typeof file?.filename !== "string"
+      || !Number.isInteger(file.additions)
+      || !Number.isInteger(file.deletions)
     ) {
       throw new UpstreamError();
     }
@@ -787,8 +787,8 @@ export default {
     const chat = update?.message?.chat?.id;
     // Non-operator chats: no action, no reply (issue #5 acceptance).
     if (
-      String(chat) !== env.OPERATOR_CHAT_ID ||
-      !Number.isSafeInteger(update.update_id)
+      String(chat) !== env.OPERATOR_CHAT_ID
+      || !Number.isSafeInteger(update.update_id)
     ) {
       return new Response(null, { status: 200 });
     }

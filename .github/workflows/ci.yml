@@ -26,21 +26,19 @@ env:
   RUSTFLAGS: --deny warnings
 
 jobs:
-  # Path filter (operator directive, Telegram, 2026-08-22). The four
-  # required gates are cargo gates; a PR that changes no cargo input gets
-  # four skips, and the ruleset counts a skipped required check as
-  # satisfied. One output per toolchain, `rust` and `js`. The filter
-  # enumerates tool-INPUT FILE TYPES, never tree paths: globs like *.rs and
-  # Cargo.toml stay correct when directories move, so the list drifts only
-  # when the toolchain itself changes. Sync rule: a PR that adds a new tool
-  # input class (say, a Markdown formatter) extends this regex in the same
-  # diff that adds the tool, ten lines away. Non-PR events always run
-  # everything, so main's green is never vacuous.
+  # Path filter (operator directive, Telegram, 2026-08-22). A PR that
+  # changes no gate input gets four skips, and the ruleset counts a skipped
+  # required check as satisfied. Outputs describe x quality inputs, Rust
+  # build inputs, and JavaScript tests. The filter enumerates tool-input
+  # file types, never tree paths: globs like *.rs and Cargo.toml stay correct
+  # when directories move, so the list drifts only when a toolchain changes.
+  # Sync rule: a new x input class extends the quality regex in the same diff.
+  # Non-PR events always run everything, so main's green is never vacuous.
   #
-  # Fail-safe by inversion (review on #79, two rounds): the gates skip
-  # only when this job POSITIVELY outputs rust=false. Any other upstream
-  # conclusion (failure, timeout-as-cancelled, skip) leaves the output
-  # empty, the gates' `!= 'false'` condition holds, and they run.
+  # Fail-safe by inversion (review on #79, two rounds): each gate skips
+  # only when this job POSITIVELY marks its input class false. Any other
+  # upstream conclusion (failure, timeout-as-cancelled, skip) leaves the
+  # output empty, the gate's `!= 'false'` condition holds, and it runs.
   # `always()` and not `!cancelled()` on the gates: a timed-out needs job
   # concludes "cancelled", and whether job-level `cancelled()` reads the
   # run or the needs job is ambiguous in the docs, so the primitive that
@@ -54,6 +52,7 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
+      quality: ${{ steps.filter.outputs.quality }}
       rust: ${{ steps.filter.outputs.rust }}
       js: ${{ steps.filter.outputs.js }}
     steps:
@@ -63,11 +62,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "quality=true" >> "$GITHUB_OUTPUT"
             echo "rust=true" >> "$GITHUB_OUTPUT"
             echo "js=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
+          if echo "$files" | grep -qE '\.(rs|md|markdown|json|jsonl|toml|ya?ml|[cm]?js|[cm]?ts|html|svg)$|(^|/)Cargo\.lock$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
+            echo "quality=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "quality=false" >> "$GITHUB_OUTPUT"
+          fi
           if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -83,19 +88,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: changes
-    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ always() && needs.changes.outputs.quality != 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-ci
         with:
           checks: fmt
-          cache: 'false'
+          cache: "false"
 
   clippy:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changes
-    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ always() && needs.changes.outputs.quality != 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-ci

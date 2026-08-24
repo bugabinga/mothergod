@@ -37,15 +37,15 @@ inputs:
   execution_file:
     description: Path to the claude-code-action execution output file
     required: false
-    default: ''
+    default: ""
   telegram_bot_token:
     description: Telegram status-bot token (optional; alerts skip if empty)
     required: false
-    default: ''
+    default: ""
   telegram_chat_id:
     description: Operator's Telegram chat id (optional; alerts skip if empty)
     required: false
-    default: ''
+    default: ""
 runs:
   using: composite
   steps:

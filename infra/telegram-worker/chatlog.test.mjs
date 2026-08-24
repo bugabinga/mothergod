@@ -6,8 +6,8 @@
 // handler and has nothing to decide.
 //
 // Run: node --test infra/telegram-worker/*.test.mjs
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { remember } from "./worker.js";
 
 // KV, reduced to what `remember` uses. `get` returns the stored string or
@@ -53,7 +53,7 @@ test("retention keeps the newest 40, not the first 40", async () => {
 test("a corrupt log is replaced, not a reason to stop remembering", async () => {
   // Both shapes a hand-written key has actually taken: unparseable, and
   // valid JSON that is not an array.
-  for (const corrupt of ["not json at all", '{"from":"operator"}']) {
+  for (const corrupt of ["not json at all", "{\"from\":\"operator\"}"]) {
     const env = inbox(corrupt);
     await remember(env, message(7));
     assert.equal(env.read().length, 1);

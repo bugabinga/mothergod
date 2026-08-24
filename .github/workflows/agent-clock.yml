@@ -37,8 +37,8 @@
 name: agent-clock
 on:
   schedule:
-    - cron: '11 * * * *' # agent-bdfl, hourly (ADR-0015)
-    - cron: '22 */2 * * *' # agent-heartbeat, two-hourly (ADR-0015/0027)
+    - cron: "11 * * * *" # agent-bdfl, hourly (ADR-0015)
+    - cron: "22 */2 * * *" # agent-heartbeat, two-hourly (ADR-0015/0027)
   workflow_dispatch:
 
 permissions: {}

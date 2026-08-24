@@ -61,16 +61,16 @@ permissions: {}
 # actor, concurrency cannot read job state).
 concurrency:
   group: ${{ github.actor == 'bugabinga'
-          && !contains(format('{0}{1}{2}{3}',
-               github.event.comment.body,
-               github.event.review.body,
-               github.event_name == 'issues'
-               && github.event.issue.body || '',
-               github.event_name == 'pull_request'
-               && github.event.pull_request.body || ''),
-             '[Claude Code](https://claude.ai/code)')
-          && 'agent-bdfl'
-          || format('agent-bdfl-noop-{0}', github.run_id) }}
+    && !contains(format('{0}{1}{2}{3}',
+    github.event.comment.body,
+    github.event.review.body,
+    github.event_name == 'issues'
+    && github.event.issue.body || '',
+    github.event_name == 'pull_request'
+    && github.event.pull_request.body || ''),
+    '[Claude Code](https://claude.ai/code)')
+    && 'agent-bdfl'
+    || format('agent-bdfl-noop-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:

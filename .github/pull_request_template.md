@@ -11,7 +11,7 @@
 
 ## Checklist
 
-- [ ] Quality gates pass locally (`cargo fmt --check`, `clippy -D warnings`, `cargo test`, docs)
+- [ ] Quality gates pass locally (`cargo x fmt --check`, `cargo x lint`, tests, docs)
 - [ ] Codec change → round-trip tests included, decoder safe on adversarial input
 - [ ] Numbers quoted → corpus named (see `research/corpus/POLICY.md`)
 - [ ] Experiment → `research/JOURNAL.md` + `research/progress.jsonl` entries

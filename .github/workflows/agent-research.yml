@@ -4,7 +4,7 @@ name: agent-research
 
 on:
   schedule:
-    - cron: '23 6 * * 6' # Saturdays
+    - cron: "23 6 * * 6" # Saturdays
   workflow_dispatch:
 
 permissions: {}
