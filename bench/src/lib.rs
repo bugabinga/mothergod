@@ -892,18 +892,28 @@ impl DatasetKind {
     /// [`Self::EntropyLadder`] and [`Self::MarkovH82Trap`] are POLICY's
     /// mandatory datasets — they check the coder against the theoretical
     /// floor and the histogram-coder trap on every train iteration, not
-    /// generalization, so both stay in train. Of the seven structured
-    /// classes, [`Self::GradientImage`] and [`Self::SqliteLikeRecords`] are
-    /// held sealed-only: no filter in `src/filters.rs` targets images or
-    /// fixed-width binary records, so these two measure whether the
-    /// parse/model/coder stages generalize on their own, undiluted by a
-    /// filter purpose-built for exactly this shape — unlike
-    /// [`Self::InterleavedAudio16`] (the delta filter), [`Self::X86DenseCode`]
-    /// (the BCJ filter), and [`Self::Base64Wrapped`] (the base64-unwrap
-    /// filter), which train slices actively exercise those filters against.
+    /// generalization, so both stay in train. Of the remaining five,
+    /// [`Self::InterleavedAudio16`] (delta), [`Self::X86DenseCode`] (BCJ),
+    /// [`Self::Base64Wrapped`] (base64-unwrap), and
+    /// [`Self::SqliteLikeRecords`] (transpose — its own doc comment names
+    /// "a fixed record width" as the target shape, and at this
+    /// generator's true 20-byte row width transpose measurably lowers
+    /// order-1 entropy by 0.94 bits/byte, verified by running the actual
+    /// filter, not assumed from the doc) each have a filter in
+    /// `src/filters.rs` whose documented purpose matches their shape, so
+    /// train slices actively exercise that filter against them.
+    /// [`Self::AccessLog`] and [`Self::GradientImage`] are held
+    /// sealed-only instead: no filter's documented purpose matches
+    /// either shape, and scanning every delta stride (1..=96) and
+    /// transpose column count (2..=96) against each finds nothing
+    /// resembling the sqlite case — the best incidental win either shows
+    /// stays under 0.15 bits/byte, noise next to the four filter-covered
+    /// kinds' effects. These two measure whether the parse/model/coder
+    /// stages generalize on their own, undiluted by a filter tuned for
+    /// exactly their shape.
     #[must_use]
     pub const fn sealed_only(self) -> bool {
-        matches!(self, Self::GradientImage | Self::SqliteLikeRecords)
+        matches!(self, Self::AccessLog | Self::GradientImage)
     }
 }
 

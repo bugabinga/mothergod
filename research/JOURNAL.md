@@ -1279,19 +1279,28 @@ record.
   sealed-validation split (`research/corpus/POLICY.md`, "held-out seeds
   AND held-out dataset kinds"): `bench::DatasetKind` enumerates the nine
   generator kinds and `DatasetKind::sealed_only` designates two of the
-  seven structured classes, `GradientImage` and `SqliteLikeRecords`, as
+  seven structured classes, `AccessLog` and `GradientImage`, as
   sealed-only, train-slice code must never request them. Rationale for
   the split: `EntropyLadder` and `MarkovH82Trap` are POLICY's mandatory
   datasets, checking the coder against the theoretical floor and the
   histogram-coder trap on every train iteration rather than
   generalization, so both stay in train regardless. Of the remaining
-  five, `InterleavedAudio16`, `X86DenseCode`, and `Base64Wrapped` each
-  have a purpose-built filter already in `src/filters.rs` (delta, BCJ,
-  base64-unwrap) that train slices actively exercise; `GradientImage` and
-  `SqliteLikeRecords` have no filter targeting their shape, so holding
-  them sealed-only measures whether the parse/model/coder stages
-  generalize on their own instead of re-testing a filter tuned for
-  exactly this data. No structural mechanism enforces the split yet —
+  five, `InterleavedAudio16`, `X86DenseCode`, `Base64Wrapped`, and
+  `SqliteLikeRecords` each have a filter in `src/filters.rs` whose
+  documented purpose matches their shape (delta, BCJ, base64-unwrap,
+  transpose respectively) that train slices actively exercise; an
+  earlier draft of this entry held `SqliteLikeRecords` sealed-only on
+  the claim that no filter targets fixed-width binary records, which
+  review (PR #238) disproved by running `transpose::encode` against the
+  generator's actual 20-byte rows: -0.94 bits/byte order-1 entropy,
+  matching the win `transpose`'s own doc comment cites as its
+  justification (S1-A2). `AccessLog` and `GradientImage` have no filter
+  whose documented purpose matches their shape; scanning every delta
+  stride (1..=96) and transpose column count (2..=96) against each
+  finds nothing past 0.15 bits/byte, noise next to the sqlite case — so
+  holding these two sealed-only measures whether the parse/model/coder
+  stages generalize on their own instead of re-testing a filter tuned
+  for exactly this data. No structural mechanism enforces the split yet —
   the enum exists for the CI baseline gate and regret scoring (both
   still S2-D1 debt) to consult once they exist; nothing calls
   `DatasetKind` today. | 3 unit tests: `DatasetKind::ALL` has no
