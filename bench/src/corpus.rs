@@ -8,10 +8,14 @@
 //! [`parse_manifest`] reads `bench/corpus.toml`'s `[[file]]` entries;
 //! [`fetch_and_cache`] resolves one entry by name, serving it from a
 //! local on-disk cache keyed by its pinned hash when present and
-//! refusing to return bytes that don't match the pin. Decompression
-//! (bzip2 for Silesia, tar+gzip for Canterbury) is out of scope for this
-//! slice — see the module doc on `bench/corpus.toml` for the remaining
-//! `research/JOURNAL.md` S1-D2 scope.
+//! refusing to return bytes that don't match the pin. The pinned bytes
+//! are the compressed download, not the corpus file itself:
+//! [`decompress_silesia`] unwraps one Silesia file's bzip2 stream, and
+//! [`extract_canterbury`] lists every file inside Canterbury's
+//! gzip-compressed tarball. See the module doc on `bench/corpus.toml`
+//! for the remaining `research/JOURNAL.md` S1-D2 scope (the
+//! train/sealed/finals split, regret scoring, the CI baseline gate,
+//! progress-graph rendering).
 
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -205,9 +209,58 @@ fn http_get(url: &str) -> Result<Vec<u8>, FetchError> {
     Ok(bytes)
 }
 
+/// Decompresses one Silesia corpus file from its pinned bzip2 download
+/// (`bench/corpus.toml`'s `silesia` entries are the bzip2-compressed
+/// bytes as served, not the raw corpus file).
+///
+/// # Errors
+///
+/// Returns an error if `compressed` isn't a valid bzip2 stream.
+pub fn decompress_silesia(compressed: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    bzip2_rs::DecoderReader::new(compressed).read_to_end(&mut out)?;
+    Ok(out)
+}
+
+/// Extracts every file from Canterbury's pinned gzip-compressed tarball
+/// download (`bench/corpus.toml`'s `cantrbry` entry), as `(path, bytes)`
+/// pairs in tarball order. Directory entries are skipped; nothing is
+/// written to disk.
+///
+/// # Errors
+///
+/// Returns an error if `compressed` isn't a valid gzip stream, isn't a
+/// valid tar archive once decompressed, or contains an entry whose path
+/// isn't valid UTF-8.
+pub fn extract_canterbury(compressed: &[u8]) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+    let gunzipped = flate2::read::GzDecoder::new(compressed);
+    let mut archive = tar::Archive::new(gunzipped);
+    let mut files = Vec::new();
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let path = entry
+            .path()?
+            .to_str()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "non-UTF-8 tar entry path")
+            })?
+            .to_string();
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes)?;
+        files.push((path, bytes));
+    }
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{FetchError, ManifestEntry, fetch_and_cache, fetch_and_cache_with, parse_manifest};
+    use super::{
+        FetchError, ManifestEntry, decompress_silesia, extract_canterbury, fetch_and_cache,
+        fetch_and_cache_with, parse_manifest,
+    };
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
@@ -357,6 +410,87 @@ mod tests {
         for name in ["xml", "cantrbry"] {
             fetch_and_cache(&manifest, name, &cache_dir)
                 .unwrap_or_else(|err| panic!("fetching {name} failed: {err}"));
+        }
+    }
+
+    /// `bz2.compress(b"hello, mothergod bzip2 fixture, repeated repeated
+    /// repeated repeated", 9)`. `bzip2-rs` is decode-only, so this fixture
+    /// is generated externally rather than round-tripped through this
+    /// crate.
+    const BZIP2_FIXTURE: &[u8] = &[
+        0x42, 0x5a, 0x68, 0x39, 0x31, 0x41, 0x59, 0x26, 0x53, 0x59, 0xe0, 0x5c, 0x5a, 0xda, 0x00,
+        0x00, 0x12, 0x99, 0x80, 0x40, 0x04, 0x10, 0x00, 0x37, 0xe6, 0xd6, 0x50, 0x20, 0x00, 0x54,
+        0x44, 0x0c, 0x81, 0xa6, 0x4c, 0x04, 0xaa, 0x78, 0x8c, 0xa3, 0x47, 0xa9, 0x81, 0x56, 0x61,
+        0x7a, 0x98, 0xfd, 0x01, 0xd9, 0x42, 0xf4, 0x0c, 0x04, 0xb0, 0x23, 0xac, 0x53, 0x73, 0xde,
+        0x21, 0x2f, 0x9c, 0xd4, 0x34, 0xe0, 0xac, 0x00, 0xb0, 0x79, 0x89, 0x17, 0x72, 0x45, 0x38,
+        0x50, 0x90, 0xe0, 0x5c, 0x5a, 0xda,
+    ];
+
+    #[test]
+    fn decompress_silesia_recovers_the_original_bytes() {
+        let expected =
+            b"hello, mothergod bzip2 fixture, repeated repeated repeated repeated".to_vec();
+        assert_eq!(decompress_silesia(BZIP2_FIXTURE).unwrap(), expected);
+    }
+
+    #[test]
+    fn decompress_silesia_rejects_a_non_bzip2_stream() {
+        assert!(decompress_silesia(b"not a bzip2 stream at all").is_err());
+    }
+
+    /// Builds a gzip-compressed tarball in memory: `tar`/`flate2` write as
+    /// well as read, so the fixture and the assertion both exercise this
+    /// crate's own code, not an externally generated blob.
+    fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut builder = tar::Builder::new(gz);
+        for (name, data) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *data).unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn extract_canterbury_lists_every_file_with_its_bytes() {
+        let archive = build_tar_gz(&[("alice29.txt", b"a text file"), ("ptt5", b"a fax file")]);
+        let mut files = extract_canterbury(&archive).unwrap();
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            files,
+            vec![
+                ("alice29.txt".to_string(), b"a text file".to_vec()),
+                ("ptt5".to_string(), b"a fax file".to_vec()),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_canterbury_rejects_a_non_gzip_stream() {
+        assert!(extract_canterbury(b"not a gzip stream at all").is_err());
+    }
+
+    #[test]
+    fn extract_canterbury_smoke_tests_a_larger_archive() {
+        // Guards against an implementation that only handles single-block
+        // tarballs: enough entries and bytes to span multiple gzip/tar
+        // blocks.
+        let payload = vec![b'x'; 20_000];
+        let files: Vec<(String, Vec<u8>)> = (0..30)
+            .map(|i| (format!("file-{i}.bin"), payload.clone()))
+            .collect();
+        let refs: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_slice()))
+            .collect();
+        let archive = build_tar_gz(&refs);
+        let extracted = extract_canterbury(&archive).unwrap();
+        assert_eq!(extracted.len(), 30);
+        for (name, data) in &extracted {
+            assert_eq!(data.len(), 20_000, "{name} has the wrong length");
         }
     }
 }
