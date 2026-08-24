@@ -319,7 +319,7 @@ jobs:
             what measurably improves the machinery, prune what rotted,
             log every adoption or deliberate rejection in the SOURCES.md
             adoption log and the digest. Includes your own substrate:
-            action/CLI versions, model per role (ADR-0012, duty below),
+            action/CLI versions, model per role (ADR-0031, duty below),
             and Cloudflare tooling — their agent bootstrap (MCP servers
             and skills) lives at
             https://developers.cloudflare.com/agent-setup/prompt.md;
@@ -347,8 +347,8 @@ jobs:
             fresh ideas for features, workflows, or comm channels
             that serve the mission as issues, each with its case.
 
-            Stay strong, within the allowance (operator grant on #197,
-            amending ADR-0012): you run the most capable model this
+            Stay strong, within the allowance (ADR-0031): you run the
+            most capable model this
             project can AFFORD. Both halves bind. The director's
             judgment is the system's ceiling and a weak director caps
             everything downstream without leaving a red check behind;
@@ -683,7 +683,7 @@ jobs:
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
           #
-          # Model pin (ADR-0012 as amended 2026-08-23): the director runs
+          # Model pin (ADR-0031): the director runs
           # the most capable model this project can afford, and owns both
           # halves of that. The ladder lives in agents/models.json.
           # An unavailable model id fails the action outright (there is no

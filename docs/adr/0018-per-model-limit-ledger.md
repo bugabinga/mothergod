@@ -75,16 +75,16 @@ not currently limited.
 **The last rung is the floor.** Nothing below it is reachable: an
 exhausted ladder means that agent skips the cycle, which is a legitimate
 terminal state. When this ADR shipped, that mechanism also carried
-ADR-0012's "never below Opus 5"; the 2026-08-23 addendum repealed that
-constraint, and the floor here is now only the guard's rule, not a
-permission. An empty ladder means today's behaviour exactly: no `--model`,
+ADR-0012's "never below Opus 5"; ADR-0031 superseded that constraint,
+and the floor here is now only the guard's rule, not a permission.
+An empty ladder means today's behaviour exactly: no `--model`,
 action default, never falls back, never skipped for model reasons. Four
 of five agents ship with an empty ladder and are unaffected.
 
 The file sits outside `.github/` deliberately. The BDFL holds the admin
 PAT and *can* push workflow files, but that path requires clearing
 `http.extraheader` and lands operator-attributed. A file in `agents/` is
-an ordinary app-token commit, so the BDFL executes its ADR-0012 duty with
+an ordinary app-token commit, so the BDFL executes its ADR-0031 duty with
 less ceremony and fewer ways to fail.
 
 ### Failing open
