@@ -227,6 +227,12 @@ All notable changes to this project are documented here. Format follows
   same opt-in `corpus-fetch` feature gate as the fetch-and-cache slice.
   Remaining S1-D2 scope: the train/sealed/finals split plumbing, regret
   scoring, the CI baseline gate, and progress-graph rendering.
+- Train/sealed split plumbing, first slice (`research/JOURNAL.md` S2-A29):
+  `bench::train_window` takes a rotating, circularly-wrapping window of a
+  generator's output keyed by an iteration counter, so repeated experiment
+  iterations see a different offset instead of memorizing one
+  (`research/corpus/POLICY.md`, "Train slices"). Sealed-validation seed and
+  dataset-kind separation remain.
 
 ### Removed
 
