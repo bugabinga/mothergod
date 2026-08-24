@@ -14,8 +14,7 @@ description: >-
      `agents/models.json` resolved against the ledger issue labeled
      `model-limits`. The guard emits `model_flag` for the first rung that
      is not currently rate-limited. If every rung is limited the agent
-     skips, because the last rung is the floor and dropping below it is
-     not permitted (ADR-0012).
+     skips, because the last configured rung is the floor (ADR-0018).
 
   The same file carries each role's effort level (ADR-0021), emitted as
   `effort_flag`. Empty means the session default. An unrecognized value is

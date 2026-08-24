@@ -1,6 +1,6 @@
 # ADR-0001: Record architecture decisions
 
-Status: accepted · Date: 2026-08-20
+Status: superseded by ADR-0030 · Date: 2026-08-20
 
 ## Decision
 

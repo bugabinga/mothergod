@@ -184,7 +184,7 @@ if findings:
         lines.append(f"| {role} | `{top}` | {ts} | `{cand}` | {cs} |")
     lines.append("")
     lines.append("This is evidence, not a decision. Whether a ladder changes is the BDFL's "
-                 "call (ADR-0012), including whether this project can even reach these "
+                 "call (ADR-0031), including whether this project can even reach these "
                  "models on its subscription, which their index does not know.")
 else:
     lines.append("No model outside a ladder scores above that ladder's top rung.")

@@ -6,7 +6,7 @@
 # Two collectors, one assembly, one channel (ADR-0023). Capability comes
 # from Artificial Analysis: what the market thinks a model can do. Run
 # economics comes from our own audit artifacts: what our roles actually
-# cost on the workload we actually run. ADR-0012 (model) and ADR-0021
+# cost on the workload we actually run. ADR-0031 (model) and ADR-0021
 # (effort) need both, and joining them by hand every time is the thing
 # this avoids. The two never depend on each other: either half failing
 # still ships the other.
@@ -25,7 +25,7 @@
 # prompt would tell it to, and agents/PERSONALITY.md already records that
 # a pointer to a file demonstrably does not shape behavior.
 #
-# The judgement stays the BDFL's (ADR-0012). This job puts evidence on the
+# The judgement stays the BDFL's (ADR-0031). This job puts evidence on the
 # table and never edits agents/models.json itself.
 name: agent-model-intel
 
@@ -140,7 +140,7 @@ jobs:
           cat "$out/body.md" >> "$GITHUB_STEP_SUMMARY"
 
           gh label create model-intel --repo "$GITHUB_REPOSITORY" \
-            --color 1D76DB --description "Model and effort evidence for ADR-0012/0021 decisions" 2>/dev/null || true
+            --color 1D76DB --description "Model and effort evidence for ADR-0031/0021 decisions" 2>/dev/null || true
           gh label create triage --repo "$GITHUB_REPOSITORY" --color FBCA04 2>/dev/null || true
 
           # State versus event (ADR-0023). Run economics is STATE: the body

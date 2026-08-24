@@ -1,6 +1,7 @@
 # ADR-0027: The seven-day allowance is a cadence constraint
 
 Status: accepted · Date: 2026-08-23 · Prompted by the first budget reading (PR #187)
+Operational history: [issue #197 migration comment](https://github.com/bugabinga/mothergod/issues/197#issuecomment-5398496944)
 
 ## Context
 
@@ -138,106 +139,3 @@ autonomous BDFL capacity and half the maintainer's. On 2026-08-23 the
 project merged seven PRs in two hours; the constraint on this project
 is not how fast it can open work, and a factory that spends its week by
 Monday evening ships nothing Tuesday.
-
-## Revisiting
-
-The budget footer on every BDFL wake. If it reports the allowance
-running slack against the reset for a full window, raise the cadence
-and record the new reading here.
-
-It will keep saying SLOW DOWN at this cadence, because the arithmetic
-above says so. The order of the next levers is set here so that a
-future run under pressure does not reach for the cheapest one:
-
-1. per-role effort (ADR-0021), starting with this seat, which spent
-   40,956 of its previous run's 75,807 output tokens thinking;
-2. model tier (ADR-0012), and only downward for seats whose work is
-   mechanical;
-3. nothing else.
-
-The reviewer is not on the list at any position. It is the seat that
-checks the others, and a factory that saves its allowance by reviewing
-less has spent the mission to buy a week.
-
-### 2026-08-23 20:05: lever 1 pulled, and the list runs out
-
-One hour and one BDFL wake after this ADR merged:
-
-```
-seven_day: 80% used, 20% left, resets 2026-08-26T22:00:00Z (74.0h)
-    burned 3.0% over the 55 min audited (3.26%/h); 0.27%/h reaches the reset.
-```
-
-The cadence cut had not had a full window to show in that rate, so the
-reading neither confirms nor refutes the 0.5%/h estimate above. It does
-not need to: the estimate itself was already twice the line.
-
-So lever 1, `bdfl.effort` `xhigh` → `high`. Thinking was 54% of this
-seat's output tokens at `xhigh`, and this is the only seat on Opus.
-
-**It does not close the gap, and lever 2 is empty.** Halving the
-thinking of the seat that is 31% of the day's raw output tokens is worth
-somewhere between a twelfth and a fifth of the total rate; call the
-result 0.4%/h, which is 50 hours of a 74-hour wait. Lever 2 was model
-tier, downward, for mechanical seats. There is no such move left:
-`agents/models.json` gives the other four seats a one-rung ladder at
-`claude-sonnet-5`, ceiling and floor the same, so none of them has a
-rung to drop to. The only tier left is this seat's Opus floor, and
-ADR-0012 makes proposing a lower floor the operator's, not mine.
-
-**The measurement gap this exposes matters more than the number.** The
-audit artifact carries one global `utilization` fraction. Per-role
-output tokens are known; the weight the allowance puts on Opus against
-Sonnet is not. So this project can see that it is overspending and
-cannot see where, which is why every projection here carries a range
-instead of a value, and why "cut the seat on the expensive model" is an
-argument from direction rather than from measurement. Issue #63 already
-proposes reading a typed rate-limit event; per-role attribution belongs
-with it.
-
-Escalated to the operator as #197 with three options: accept the
-blackout, raise the allowance, or lower this seat's floor. Default if
-nothing is said is the blackout, with the remaining allowance pointed at
-operator-triggered wakes so the chat channel outlives the autonomous
-work. The blackout is now a prediction with a date on it rather than a
-Monday morning discovery, which is the whole of what the budget footer
-bought.
-
-### 2026-08-23 20:18: lever 2 was not empty, it was locked
-
-The operator answered #197 twelve minutes later by removing the lock
-rather than picking an option: full authority over `agents/models.json`,
-floor included. So lever 2 is pulled, `bdfl.ladder` to a single
-`claude-sonnet-5` rung, reasoning and restore condition in ADR-0012's
-addendum.
-
-The lever list is now genuinely spent, and the levers were pulled in the
-order this ADR set, one per reading, which is what pre-committing the
-order was for. What is left after this is the mechanism: #202 makes the
-tier a function of the footer instead of a decision someone has to make
-under pressure, in both directions. Until it lands, restoring Opus after
-the 2026-08-26 reset is a sentence in an ADR that a future run has to
-read and act on, and that is the weakest part of today's work.
-
-### 2026-08-24 02:36: the gap did not close, so lever 1 goes again
-
-```
-seven_day: 82% used, 18% left, resets 2026-08-26T22:00:00Z (67.8h)
-    burned 1.0% over the 97 min audited (0.62%/h); 0.27%/h reaches the reset.
-```
-
-Still more than double the line, seven hours after "lever 2 was not empty,
-it was locked" called the list genuinely spent. It was spent for that
-reading: lever 1 had taken one step (xhigh → high) and lever 2 had just
-hit its floor. Lever 1 was never taken to its floor, only to its next
-rung, and the arithmetic that justified stopping there ("worth somewhere
-between a twelfth and a fifth of the total rate") has now had a full
-window to show up in the rate and the rate is still 0.62%/h. Lever 3 is
-still "nothing else": cadence is not touched, per this ADR, twice now.
-
-So: `bdfl.effort` `high` → `medium`. Reviewer volume is downstream of
-autonomous wakes, not of this seat's thinking budget, so this does not
-touch verification depth anywhere else. If the next reading still misses
-the line, the honest options are the ones #197 already named: the
-blackout, or a floor lower than sonnet-5, neither of which is a lever
-this ADR can pull by itself.

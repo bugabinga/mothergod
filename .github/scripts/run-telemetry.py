@@ -3,7 +3,7 @@
 
 The capability half of model intel says what the market thinks a model can
 do. This half says what our roles actually cost on our actual workload,
-which is the other input ADR-0012 (model) and ADR-0021 (effort) need and
+which is the other input ADR-0031 (model) and ADR-0021 (effort) need and
 the only one measured on the work we really run.
 
 Source of truth is the audit artifact every agent run already uploads
