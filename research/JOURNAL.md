@@ -1225,6 +1225,32 @@ record.
   accounting method (larger slice, mirrors S2-A12's relationship to
   S2-A11), and nothing yet sums a whole-codec ideal-cost pass across
   `lz`'s flag/length/offset streams and `literal`'s bytes together.
+- S2-A31 | ACCEPTED | ROADMAP M2's ideal-cost accounting mode (ADR-0006),
+  second slice: `Literal::ideal_cost_bits`, S2-A30's flagged
+  counterpart for the six-expert mixer. Reuses `Literal::mix` to build
+  the same mixed cumulative-frequency table `encode` codes against,
+  prices the requested byte as `-log2((cum[symbol+1] - cum[symbol]) /
+  cum[ALPHABET])`, then calls the same `update` (with the vendored
+  `exp`, ADR-0024) `encode` does, so the model ends in the state a real
+  encode pass would have left it in. No `Encoder` touched, same
+  determinism argument as S2-A30: this never sits on the coding path,
+  so the `f64::log2` call needs only a justified
+  `clippy::disallowed_methods` allow, not a vendored implementation. |
+  3 unit tests: cost strictly decreases as a byte gets coded repeatedly
+  under a stabilized context; a model driven through `ideal_cost_bits`
+  alone ends in the same state as one driven through `encode` alone
+  (checked by coding one more byte on each and comparing cost, and by
+  comparing the two paths' `Context` values directly); summed ideal
+  cost over the archived codec source (`research/imports/session-1/
+  mothergod.rs`, 25,524 bytes, the same fixture `literal.rs`'s
+  vendored-`exp` accuracy test uses) tracks the real `Encoder`'s
+  bit-exact output within 1%. All five root CLAUDE.md gates clean. |
+  No bpb measurement, same reason as S2-A30: this is the accounting
+  tool an experiment would use, not itself an experiment against a
+  champion — `progress.jsonl` records this as `kind: "patch"` with
+  null bpb deltas. Remaining S2-D1 scope: nothing yet sums a
+  whole-codec ideal-cost pass across `lz`'s flag/length/offset streams
+  and `literal`'s bytes together.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

@@ -16,6 +16,12 @@
 //! `(prev-byte nibble, after-copy)` key, so the mixer favors different
 //! experts after a match than after a run of literals (`JOURNAL` S1-A4).
 //!
+//! [`Literal::ideal_cost_bits`] is [`crate::model::Model::ideal_cost_bits`]'s
+//! counterpart for this six-expert mixer, ROADMAP M2's ideal-cost
+//! accounting mode (`JOURNAL` S2-A31, completing S2-A30's remaining
+//! scope): sums `-log2(p)` against the mixed distribution instead of
+//! driving [`crate::coder::Encoder`].
+//!
 //! **Decode-path determinism (`JOURNAL` S2-D3, resolved by ADR-0024).**
 //! The exponentiated-gradient weight update runs on both the encode and
 //! decode path, so anything it calls must produce a bit-identical result
@@ -389,6 +395,31 @@ impl Literal {
         self.update(&bank_indices, weight_index, symbol, exp);
     }
 
+    /// Bits it would cost to code `byte` under `context`'s current mixed
+    /// distribution — `-log2((cum[symbol+1] - cum[symbol]) /
+    /// cum[ALPHABET])` — then updates the model the same way
+    /// [`Self::encode`] does. No [`Encoder`] involved: this is
+    /// [`crate::model::Model::ideal_cost_bits`]'s counterpart for the
+    /// six-expert mixer, the remaining scope `JOURNAL` S2-A30 flagged for
+    /// ROADMAP M2's ideal-cost accounting mode.
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits(&mut self, context: Context, byte: u8) -> f64 {
+        let (bank_indices, weight_index) = banks(context);
+        let cum = self.mix(&bank_indices, weight_index);
+        let symbol = usize::from(byte);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "cum entries are fixed-point sums bounded well under 2^53 (FIXED_POINT_SCALE is 2^32, ALPHABET is 256), so this loses no precision that matters"
+        )]
+        let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
+        self.update(&bank_indices, weight_index, symbol, exp);
+        -probability.log2()
+    }
+
     /// Decodes one byte from `decoder` under `context`, then updates the
     /// model the same way [`Self::encode`] did, keeping both sides in
     /// lockstep.
@@ -574,6 +605,95 @@ mod tests {
         assert_ne!(hash_ab, hash_a);
         assert_eq!(advance_word_hash(hash_ab, b' '), 0);
         assert_eq!(advance_word_hash(hash_ab, b'.'), 0);
+    }
+
+    #[test]
+    fn ideal_cost_drops_as_a_byte_gets_more_likely() {
+        // Coding the same byte repeatedly raises its own frequency across
+        // every expert bank it touches, so its ideal cost must strictly
+        // decrease call over call as the model adapts toward it. Context
+        // stabilizes after the first call (prev1 becomes 'a' and stays
+        // there), so this isolates the adaptation, not a context change.
+        let mut model = Literal::new();
+        let context = Context::default().after_literal(b'a');
+        let first = model.ideal_cost_bits(context, b'a');
+        let second = model.ideal_cost_bits(context, b'a');
+        let third = model.ideal_cost_bits(context, b'a');
+        assert!(second < first);
+        assert!(third < second);
+    }
+
+    #[test]
+    fn ideal_cost_updates_state_same_as_encode() {
+        // ideal_cost_bits must leave the model in the same state encode
+        // would have: fork two identical models, drive one through each
+        // path over the same bytes, then confirm they agree from here by
+        // coding one more byte on top of each and comparing cost.
+        let bytes = b"hello world hello again";
+        let mut via_encode = Literal::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in bytes {
+            via_encode.encode(&mut enc, context, b);
+            context = context.after_literal(b);
+        }
+        let mut via_ideal_cost = Literal::new();
+        let mut ideal_context = Context::default();
+        for &b in bytes {
+            let _ = via_ideal_cost.ideal_cost_bits(ideal_context, b);
+            ideal_context = ideal_context.after_literal(b);
+        }
+        assert_eq!(context, ideal_context);
+        assert!(
+            (via_encode.ideal_cost_bits(context, b'!')
+                - via_ideal_cost.ideal_cost_bits(context, b'!'))
+            .abs()
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn ideal_cost_sum_tracks_real_encoded_length() {
+        // Named corpus (CLAUDE.md hard rule 4): the founding session's
+        // archived codec, real structured Rust source, the same fixture
+        // vendored_exp_keeps_bits_per_byte_within_one_percent_of_f64_exp
+        // above uses. Summed ideal cost is an estimate, not the real
+        // coder's bit-exact output (integer cumulative-frequency division
+        // rounds; the coder also pays a handful of flush bits at the very
+        // end), so this checks closeness, not equality — the same
+        // tolerance shape as that test and model.rs's counterpart.
+        let corpus: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+
+        let mut ideal_cost_model = Literal::new();
+        let mut context = Context::default();
+        let ideal_bits: f64 = corpus
+            .iter()
+            .map(|&b| {
+                let cost = ideal_cost_model.ideal_cost_bits(context, b);
+                context = context.after_literal(b);
+                cost
+            })
+            .sum();
+
+        let mut real_model = Literal::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in corpus {
+            real_model.encode(&mut enc, context, b);
+            context = context.after_literal(b);
+        }
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "encoded length is far below f64's exact integer range (2^53)"
+        )]
+        let real_bits = (enc.finish().len() * 8) as f64;
+
+        let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
+        assert!(
+            relative_diff <= 0.01,
+            "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
+             {relative_diff:.4} relative difference exceeds the 1% budget"
+        );
     }
 
     #[test]

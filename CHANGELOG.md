@@ -243,6 +243,12 @@ All notable changes to this project are documented here. Format follows
   driving a real `Encoder`, the Rust-native replacement for the
   founding session's Python model-cost proxy. `Literal`'s six-expert
   mixer gets the same method in a follow-up slice.
+- Ideal-cost accounting mode, second slice (`research/JOURNAL.md`
+  S2-A31, ADR-0006): `Literal::ideal_cost_bits` is `Model::ideal_cost_bits`'s
+  counterpart for the six-expert literal mixer, pricing a byte against
+  the same mixed distribution `Literal::encode` codes against without
+  touching an `Encoder`. Both entropy stages now support ideal-cost
+  accounting; a whole-codec pass summing them together remains.
 
 ### Removed
 

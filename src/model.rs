@@ -11,11 +11,13 @@
 //! larger slice built on top of the same coder, not on top of this type.
 //!
 //! [`Model::ideal_cost_bits`] is ROADMAP M2's ideal-cost accounting mode
-//! (first slice, `JOURNAL` S2-D1): sums `-log2(p)` against this table's
+//! (first slice, `JOURNAL` S2-A30): sums `-log2(p)` against this table's
 //! adaptive state instead of driving [`crate::coder::Encoder`], so an
 //! experiment loop can price a distribution without paying for real
-//! arithmetic coding. [`crate::literal::Literal`]'s six-expert mixer is a
-//! separate, larger slice of the same mode still to come.
+//! arithmetic coding. [`crate::literal::Literal::ideal_cost_bits`]
+//! (`JOURNAL` S2-A31) is the same mode's counterpart for the six-expert
+//! mixer; a whole-codec ideal-cost pass summing both together is still
+//! S2-D1's remaining scope.
 
 use crate::coder::{Decoder, Encoder};
 
