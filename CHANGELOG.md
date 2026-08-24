@@ -237,6 +237,15 @@ All notable changes to this project are documented here. Format follows
 - Two-realm repository layout (ADR-0010): agent-system files moved to
   `agents/` (governance, operations, personas, sources, identities),
   strictly separated from the classical project tree.
+- `codec::MAX_DECODED_LEN`'s doc comment (`research/JOURNAL.md` S2-A27,
+  issue #219): states the measured worst-case decode time (~314s at the
+  256 MiB ceiling, a steady ~1170 ns/byte, confirmed linear from 1 MiB
+  to 256 MiB) instead of a guessed "low single-digit minutes", and
+  correctly names the all-literal decode path as the expensive branch
+  instead of the "cheapest branch" an earlier version of the comment
+  claimed. No behavior change: the ceiling and decode logic are
+  unchanged, only the documentation of their already-shipped
+  characteristics.
 
 ### Fixed
 

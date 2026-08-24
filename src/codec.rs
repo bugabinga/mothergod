@@ -72,11 +72,24 @@ pub(crate) const LZ_MIN_VERSION: u8 = 2;
 ///
 /// 256 MiB, chosen to clear the largest single file in the M2 benchmark
 /// corpus (Silesia's `mozilla`, ~51 MB) with headroom, while keeping a
-/// worst-case adversarial decode (an all-padding, all-literal stream, the
-/// cheapest branch per iteration) bounded to low single-digit minutes
-/// rather than unbounded. Provisional: `ROADMAP.md` M4's streaming/block
+/// worst-case adversarial decode bounded rather than unbounded. That
+/// worst case is an all-literal stream (`research/JOURNAL.md` S2-A27):
+/// every literal byte pays [`crate::literal::Literal::decode`]'s full
+/// six-expert mix over the 256-symbol alphabet, the most expensive of the
+/// three token kinds per output byte (a match or rep byte, by contrast,
+/// is a single unmodeled array copy in this module's `copy_checked`) —
+/// the opposite of "cheapest branch" an earlier version of this comment
+/// claimed.
+/// Measured directly (release build, this project's CI runner class): a
+/// declared length of 256 MiB decodes in ~314s at a steady ~1170 ns/byte,
+/// linear in declared length with no polynomial or worse blowup found
+/// from 1 MiB to 256 MiB. Provisional: `ROADMAP.md` M4's streaming/block
 /// API is the real fix (bounded-memory decode without a single hardcoded
-/// file-size ceiling), and should widen or remove this once it lands.
+/// file-size ceiling), and should widen or remove this once it lands;
+/// the ~1170 ns/byte constant itself is a `research/JOURNAL.md` S1-P6
+/// speed-tier target (`Literal::mix` rebuilds all 256 cumulative entries
+/// from scratch every byte instead of an incremental structure), not
+/// something to chase down here.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Flag symbols coded before every token, selecting which of the three

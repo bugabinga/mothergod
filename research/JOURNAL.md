@@ -1098,6 +1098,43 @@ record.
   scheduled workflow exercising `--features corpus-fetch` so the gated
   module gets real CI coverage instead of only local verification (same
   gap S2-A25 left for `fuzz/`).
+- S2-A27 | ACCEPTED | Issue #219: characterized the decode-time vs.
+  declared-length relationship the reviewer's S2-A25 fuzz run first
+  surfaced as a 12s slow-unit, later found by the same fuzzer at 151.8s
+  on a 16-byte input — "an order of magnitude past reported, amplification
+  factor under-sampled" was the concern. Mechanism confirmed, not new:
+  `codec::MAX_DECODED_LEN`'s worst case is an all-literal decode, since
+  every literal byte pays `literal::Literal::decode`'s full six-expert
+  mix over the 256-symbol alphabet (rebuilds all 256 cumulative entries
+  from scratch every call), while a match/rep byte is a single unmodeled
+  array copy — literal decode is the expensive branch, not (as the
+  pre-existing `MAX_DECODED_LEN` doc comment mislabeled it) the cheap
+  one. | Measured directly (release build, hand-crafted payload:
+  `Candidate::Identity` header, an empty coded stream so every flag/byte
+  decodes to its zero symbol, `token_count` far past `declared_len` so
+  `ensure_room` is what stops the loop): 1/4/16/64/256 MiB declared
+  lengths decoded in 1.23s/4.91s/19.63s/78.53s/313.95s, a steady ~1170
+  ns/byte at every size (no growth in the per-byte constant) — linear,
+  not polynomial or worse. This matches S2-A17's own extrapolation
+  (2.35s at 2,000,000 bytes ≈ 1175 ns/byte) almost exactly, so nothing
+  changed between then and now except sample size: 12s and 151.8s are
+  both ordinary points on the same line (≈10 MiB and ≈130 MiB
+  respectively), not evidence of unbounded blowup. | No time/work budget
+  added: the existing size ceiling already bounds this linearly, and a
+  separate time budget would need to be at least as generous as the
+  legitimate-decode case it must not reject, which collapses to the same
+  bound. Two things this changed: (1) `MAX_DECODED_LEN`'s doc comment
+  now states the measured ~314s/256 MiB ceiling and ~1170 ns/byte
+  constant instead of a guessed "low single-digit minutes", and
+  correctly labels the literal branch as the expensive one, not the
+  cheap one (`rust-craft`/Truth value — verify a claim against a run,
+  fix the sentence once checked). (2) the ~1170 ns/byte constant is now
+  a concrete number against S1-P6 (speed-tier lead): decoding an
+  all-literal 256 MiB stream at that rate is ~854 KB/s, under the
+  ROADMAP SPEED floor (≥1 MB/s decode) on a realistic literal-heavy
+  input, not just an adversarial one — `Literal::mix`'s O(256×6)
+  from-scratch rebuild per byte is the mechanism, real fix (incremental
+  cumulative frequencies) is M5 scope, not this issue's.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -1110,6 +1147,10 @@ record.
   OpenZL direction). Target: sao.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
+  Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
+  case measures ~1170 ns/byte (~854 KB/s), under the ROADMAP SPEED floor
+  (≥1 MB/s decode) — `Literal::mix` rebuilds all 256 cumulative entries
+  from scratch every byte instead of an incremental structure.
 - S1-P7 | LEAD | Production hardening: fuzzing (decoder-never-panics),
   streaming mode, frozen format spec v1.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
