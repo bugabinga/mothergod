@@ -1,0 +1,194 @@
+# Advisory depth sweep. Pull requests never trigger this workflow, and the
+# repository ruleset requires only ci.yml's fmt, clippy, test and doc jobs.
+name: monster
+
+on:
+  schedule:
+    # Saturday 03:17 UTC avoids the Sunday CodeQL and agent survey window.
+    # Cron-line commits must be pushed with operator/admin attribution.
+    - cron: '17 3 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serial runs prevent two failed reruns racing to create the tracking issue.
+  group: monster
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  test:
+    name: ${{ matrix.os }} | ${{ matrix.architecture }} | ${{ matrix.abi }} | ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - windows-2025
+          - windows-11-arm
+          - macos-26-intel
+          - macos-26
+        surface: [native, alternate]
+        toolchain: [stable, msrv]
+        # Darwin exposes one supported libc ABI per host architecture. There
+        # is no second executable Rust ABI to put in the alternate slots.
+        exclude:
+          - os: macos-26-intel
+            surface: alternate
+          - os: macos-26
+            surface: alternate
+        include:
+          - os: ubuntu-24.04
+            surface: native
+            architecture: x64
+            abi: glibc
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04
+            surface: alternate
+            architecture: x64
+            abi: musl
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            surface: native
+            architecture: ARM64
+            abi: glibc
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            surface: alternate
+            architecture: ARM64
+            abi: musl
+            target: aarch64-unknown-linux-musl
+          - os: windows-2025
+            surface: native
+            architecture: x64
+            abi: MSVC
+            target: x86_64-pc-windows-msvc
+          - os: windows-2025
+            surface: alternate
+            architecture: x64
+            abi: GNU
+            target: x86_64-pc-windows-gnu
+          - os: windows-11-arm
+            surface: native
+            architecture: ARM64
+            abi: MSVC
+            target: aarch64-pc-windows-msvc
+          - os: windows-11-arm
+            surface: alternate
+            architecture: ARM64
+            # aarch64-pc-windows-gnu does not exist. gnullvm is Rust's
+            # supported, executable GNU-family ABI for native Windows ARM64.
+            abi: GNU-LLVM
+            target: aarch64-pc-windows-gnullvm
+          - os: macos-26-intel
+            surface: native
+            architecture: Intel-x64
+            abi: Darwin-libc
+            target: x86_64-apple-darwin
+          - os: macos-26
+            surface: native
+            architecture: ARM64
+            abi: Darwin-libc
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          target: ${{ matrix.target }}
+          checks: ${{ matrix.os == 'ubuntu-24.04' && matrix.surface == 'native' && matrix.toolchain == 'stable' && 'canonical' || 'runtime' }}
+
+  android:
+    name: Android-15 | x86-64 | Bionic | ${{ matrix.toolchain }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, msrv]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: ./.github/actions/rust-ci
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          target: x86_64-linux-android
+          checks: setup
+      - name: Run tests in accelerated Android
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/android-test
+
+  report:
+    name: report
+    if: ${{ always() && (needs.test.result == 'failure' || needs.test.result == 'cancelled' || needs.android.result == 'failure' || needs.android.result == 'cancelled') }}
+    needs: [test, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build one actionable failure report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          jobs="$RUNNER_TEMP/jobs.json"
+          logs="$RUNNER_TEMP/job-logs"
+          body="$RUNNER_TEMP/issue.md"
+          mkdir -p "$logs"
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" > "$jobs"
+          failure_count="$(node .github/scripts/monster-report.mjs failures "$jobs")"
+          if [ "$failure_count" -eq 0 ]; then
+            echo 'No failed or timed-out matrix job; no issue update needed.'
+            exit 0
+          fi
+
+          jq -r '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .id' "$jobs" |
+            while read -r id; do
+              if ! gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" > "$logs/$id.log"; then
+                printf 'Failed to download completed job log %s.\n' "$id" > "$logs/$id.log"
+              fi
+            done
+
+          node .github/scripts/monster-report.mjs report "$jobs" "$logs" "$RUN_URL" "$body"
+          title="$(node .github/scripts/monster-report.mjs title)"
+          gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 1000 \
+            --json number,title,state,body,author > "$RUNNER_TEMP/issues.json"
+          node .github/scripts/monster-report.mjs select "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/selected.json"
+          number="$(jq -r '.number // empty' "$RUNNER_TEMP/selected.json")"
+          state="$(jq -r '.state // empty' "$RUNNER_TEMP/selected.json")"
+
+          if [ -n "$number" ]; then
+            if [ "$state" = CLOSED ]; then
+              gh issue reopen "$number" --repo "$GITHUB_REPOSITORY"
+            fi
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" \
+              --title "$title" --body-file "$body" \
+              --add-label bug --add-label agent-system
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "$title" --body-file "$body" \
+              --label bug --label agent-system
+          fi

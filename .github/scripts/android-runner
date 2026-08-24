@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+executable=${1:?test executable is required}
+shift
+remote="/data/local/tmp/mothergod-test-${RANDOM}-$$"
+
+cleanup() {
+  adb shell rm -f "$remote" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+adb push "$executable" "$remote" >/dev/null
+adb shell chmod 755 "$remote"
+adb shell "$remote" "$@"

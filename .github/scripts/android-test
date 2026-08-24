@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target=x86_64-linux-android
+api=35
+ndk=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
+if [ -z "$ndk" ]; then
+  echo 'error: ANDROID_NDK_HOME or ANDROID_NDK_ROOT is required' >&2
+  exit 2
+fi
+
+linker="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${target}${api}-clang"
+if [ ! -x "$linker" ]; then
+  echo "error: Android linker not found: $linker" >&2
+  exit 2
+fi
+
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$linker"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER="$GITHUB_WORKSPACE/.github/scripts/android-runner"
+
+bash "$GITHUB_WORKSPACE/.github/actions/rust-ci/check.sh" runtime "$target"

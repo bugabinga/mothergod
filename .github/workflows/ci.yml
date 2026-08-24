@@ -49,7 +49,7 @@ jobs:
   # costing seconds of runner time. A broken filter costs runner
   # minutes, never a vacuous green.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
       pull-requests: read
@@ -68,7 +68,7 @@ jobs:
             exit 0
           fi
           files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
-          if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$'; then
+          if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -80,54 +80,49 @@ jobs:
           fi
 
   fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: changes
     if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
         with:
-          components: rustfmt
-      - run: cargo fmt --check
+          checks: fmt
+          cache: 'false'
 
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changes
     if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- --deny warnings
+          checks: clippy
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changes
     if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-targets
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: test
 
   doc:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: changes
     if: ${{ always() && needs.changes.outputs.rust != 'false' }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --doc
-      - run: cargo doc --no-deps
-        env:
-          RUSTDOCFLAGS: --deny warnings
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: doc
 
   # The Telegram worker is the one piece of logic here that cannot be Rust:
   # it runs on Cloudflare's edge (ADR-0006 covers what produces published
@@ -138,11 +133,11 @@ jobs:
   # required check: it gates nothing on a red day for the crate, and the
   # ruleset's four names stay exactly as they are.
   worker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     needs: changes
     if: ${{ always() && needs.changes.outputs.js != 'false' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: node --test infra/telegram-worker/*.test.mjs
-      - run: node --test .github/actions/agent-audit/*.test.mjs
+      - run: node --test .github/actions/agent-audit/*.test.mjs .github/scripts/*.test.mjs

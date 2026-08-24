@@ -1,0 +1,120 @@
+name: rust-ci
+description: Install one declared Rust toolchain and run a repository quality-check set
+inputs:
+  toolchain:
+    description: stable, or msrv to read package.rust-version from Cargo.toml
+    required: false
+    default: stable
+  target:
+    description: Rust target triple; empty means the toolchain host
+    required: false
+    default: ''
+  checks:
+    description: setup, fmt, clippy, test, doc, runtime, or canonical
+    required: true
+  cache:
+    description: Enable the Cargo build cache
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        REQUESTED_TOOLCHAIN: ${{ inputs.toolchain }}
+        TARGET: ${{ inputs.target }}
+        CHECKS: ${{ inputs.checks }}
+      run: |
+        set -euo pipefail
+        REQUESTED_TOOLCHAIN=${REQUESTED_TOOLCHAIN:?}
+        TARGET=${TARGET:-}
+        CHECKS=${CHECKS:?}
+
+        case "$CHECKS" in
+          setup|fmt|clippy|test|doc|runtime|canonical) ;;
+          *) echo "unsupported check set: $CHECKS" >&2; exit 2 ;;
+        esac
+
+        case "$REQUESTED_TOOLCHAIN" in
+          stable)
+            version=stable
+            ;;
+          msrv)
+            declarations="$(
+              sed -n 's/^rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml
+            )"
+            count="$(printf '%s\n' "$declarations" | grep -c . || true)"
+            if [ "$count" -ne 1 ]; then
+              echo 'Cargo.toml must declare exactly one package rust-version' >&2
+              exit 2
+            fi
+            version="$declarations"
+            ;;
+          *)
+            echo "unsupported toolchain selector: $REQUESTED_TOOLCHAIN" >&2
+            exit 2
+            ;;
+        esac
+
+        toolchain="$version"
+        case "$TARGET" in
+          *-pc-windows-gnu|*-pc-windows-gnullvm)
+            # Native GNU-family host tools carry rust-mingw. This avoids
+            # pretending the MSVC host alone is a complete MinGW toolchain.
+            toolchain="${version}-${TARGET}"
+            ;;
+        esac
+
+        echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+        echo "RUSTUP_TOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
+
+    - name: Install Rust toolchain
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ steps.resolve.outputs.toolchain }}
+        TARGET: ${{ inputs.target }}
+        CHECKS: ${{ inputs.checks }}
+      run: |
+        set -euo pipefail
+        TOOLCHAIN=${TOOLCHAIN:?}
+        TARGET=${TARGET:-}
+        CHECKS=${CHECKS:?}
+        install=(toolchain install "$TOOLCHAIN" --profile minimal --no-self-update)
+
+        case "$CHECKS" in
+          fmt) install+=(--component rustfmt) ;;
+          clippy) install+=(--component clippy) ;;
+          canonical) install+=(--component rustfmt --component clippy) ;;
+        esac
+
+        case "$TOOLCHAIN" in
+          *-pc-windows-gnu|*-pc-windows-gnullvm)
+            install+=(--component rust-mingw)
+            ;;
+        esac
+
+        if [ -n "$TARGET" ] && [[ "$TOOLCHAIN" != *-"$TARGET" ]]; then
+          install+=(--target "$TARGET")
+        fi
+        rustup "${install[@]}"
+
+        if [[ "$TARGET" == *-pc-windows-gnullvm ]]; then
+          sysroot="$(RUSTUP_TOOLCHAIN="$TOOLCHAIN" rustc --print sysroot)"
+          linker="$sysroot/lib/rustlib/$TARGET/bin/rust-lld.exe"
+          key="CARGO_TARGET_$(tr '[:lower:]-' '[:upper:]_' <<<"$TARGET" | tr -d '\n')_LINKER"
+          echo "$key=$linker" >> "$GITHUB_ENV"
+        fi
+
+    - if: ${{ inputs.cache == 'true' && inputs.checks != 'fmt' }}
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      with:
+        key: ${{ steps.resolve.outputs.toolchain }}-${{ inputs.target }}-${{ inputs.checks }}
+
+    - name: Run Rust checks
+      if: ${{ inputs.checks != 'setup' }}
+      shell: bash
+      env:
+        CHECKS: ${{ inputs.checks }}
+        TARGET: ${{ inputs.target }}
+      run: bash "$GITHUB_ACTION_PATH/check.sh" "$CHECKS" "$TARGET"
