@@ -197,6 +197,14 @@ All notable changes to this project are documented here. Format follows
   `call`/`jmp` opcodes targeting a small pool of synthetic function starts.
   Completes S2-D1's structured-generator list; Silesia/Canterbury
   fetch-and-cache and the train/sealed split plumbing remain.
+- Fuzz targets (`research/JOURNAL.md` S2-A25, issue #53): a new `fuzz/`
+  crate (`cargo-fuzz`, dev-only, its own nightly toolchain — the
+  sanitizer-coverage instrumentation `cargo-fuzz` needs is nightly-only)
+  with two targets against the real codec: `decode_arbitrary` (hard rule
+  2 as an executable — `decompress` must not panic or overallocate on
+  arbitrary bytes) and `roundtrip` (hard rule 1 as an executable —
+  `decompress(compress(x)) == x`). Not wired into any required check;
+  a scheduled smoke run belongs in `monster.yml` (#42) as a follow-up.
 
 ### Removed
 

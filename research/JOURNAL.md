@@ -1024,6 +1024,41 @@ record.
   Canterbury fetch-and-cache, the three-tier train/sealed/finals split
   plumbing, regret scoring, the CI baseline gate, and progress-graph
   rendering.
+- S2-A25 | ACCEPTED | ROADMAP M4's first slice (issue #53, journal lead
+  S1-P7): a `fuzz/` crate (`cargo-fuzz`, dev-only tooling, ADR-0006
+  compliant) with two targets against the real codec, not the archive.
+  `decode_arbitrary` feeds arbitrary bytes to `mothergod::decompress` —
+  hard rule 2 ("the decoder never panics, never overallocates unbounded,
+  on ANY input") as an executable, exercising both `Method::Stored` and
+  `Method::Lz` now that S2-D2 wired the latter. `roundtrip` asserts
+  `decompress(compress(x)) == x` for arbitrary `x` — hard rule 1 as an
+  executable. `cargo-fuzz`'s libFuzzer engine needs sanitizer-coverage
+  compiler passes (`-Zsanitizer`, `-Cpasses=sancov-module`) that are
+  nightly-only, so `fuzz/` carries its own `rust-toolchain.toml` pinning
+  nightly and its own `[workspace]` (an empty table breaking it out of
+  the root workspace, matching upstream `cargo-fuzz` convention) so the
+  root's pinned-stable required checks (`fmt`/`clippy`/`test`/`doc`,
+  bare `cargo <cmd>`, default-members only) never touch it and never
+  need nightly. Smoke-verified locally, not in CI yet: 15s each,
+  `decode_arbitrary` (24k executions, no panic) and `roundtrip` (635
+  executions, no panic, no round-trip failure). `decode_arbitrary`'s run
+  flagged one "slow unit" (12s on a 113-byte input) via libFuzzer's own
+  outlier detection, not a crash: the input decodes toward
+  `codec::MAX_DECODED_LEN` (256 MiB), the known, already-bounded
+  compression-bomb amplification every LZ-family decoder has — bounded
+  is not zero-cost, and hard rule 2 asks for bounded, not fast. |
+  `cargo fmt --check`/`clippy --all-targets -- --deny warnings` clean on
+  the `fuzz/` crate itself (nightly toolchain, not a required check);
+  the five root CLAUDE.md gates (`fmt`, `clippy --all-targets`, `test
+  --all-targets`, `test --doc`, `doc --no-deps` under
+  `RUSTDOCFLAGS=--deny warnings`) all clean, confirming `fuzz/`'s
+  separate-workspace isolation holds. | No bpb measurement: this is
+  test infrastructure, not an experiment against a champion —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb
+  deltas. Remaining issue #53 scope: a scheduled smoke run wired into
+  `monster.yml`'s cross-OS matrix (#42) rather than the fast PR gate,
+  then the OSS-Fuzz application (`blocked-on-human`: needs a contact
+  email linked to a Google account).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
