@@ -271,6 +271,20 @@ All notable changes to this project are documented here. Format follows
   so regret already comes out near zero. Not yet called by anything — it
   exists for the CI baseline gate to consult once it exists. The CI
   baseline gate and progress-graph rendering remain.
+- CI baseline gate, measurement half (`research/JOURNAL.md` S2-A35,
+  ROADMAP M2): a new `bench::baseline` module measures mothergod's
+  bits/byte on eleven fixed-seed, fixed-length cases (the full entropy
+  ladder plus every train-eligible `DatasetKind`, sealed-only kinds
+  excluded so a PR-time gate never tunes against the sealed set) and
+  compares against the committed `bench/baseline.json`, initial values
+  measured on today's codec. `cargo run -p mothergod-bench --release
+  --bin baseline_gate -- check` (or `-- write` to update the committed
+  numbers after an accepted ratio change) is ready to wire into CI as a
+  new non-required job; the wiring itself needs a `.github/workflows/`
+  push, which needs `GH_ADMIN_TOKEN` (`agents/GOVERNANCE.md`, "Push
+  identity"), not available to the agent that measured this. Progress-graph
+  rendering, the CI wiring, and the scheduled `corpus-fetch` workflow
+  (issue #231) remain.
 
 ### Removed
 

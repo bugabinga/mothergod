@@ -41,6 +41,7 @@
 //! [`regret`] scores a candidate corpus addition once those three exist to
 //! feed it real numbers.
 
+pub mod baseline;
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
 
