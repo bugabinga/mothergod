@@ -141,3 +141,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: node --test infra/telegram-worker/*.test.mjs
       - run: node --test .github/actions/agent-audit/*.test.mjs .github/scripts/*.test.mjs
+
+  # ADRs are numbered by listing the directory at branch-cut time (#195):
+  # two PRs open at once can pick the same number and neither CI job
+  # notices, because nothing else reads the whole directory at once. Not
+  # a required check (the ruleset's four names stay exactly as they are);
+  # it still turns a silent collision into a red run on every PR.
+  adr-numbers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: |
+          dupes="$(ls docs/adr | grep -oE '^[0-9]{4}' | sort | uniq -d)"
+          if [ -n "$dupes" ]; then
+            echo "Duplicate ADR number(s), rename one: $dupes"
+            exit 1
+          fi
