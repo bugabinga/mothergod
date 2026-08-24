@@ -1059,6 +1059,45 @@ record.
   `monster.yml`'s cross-OS matrix (#42) rather than the fast PR gate,
   then the OSS-Fuzz application (`blocked-on-human`: needs a contact
   email linked to a Google account).
+- S2-A26 | ACCEPTED | Next slice of the remaining S1-D2/S2-D1 scope after
+  the seven structured generators (S2-A18..A24): `bench/corpus.toml`
+  pins Silesia's 12 files and the Canterbury tarball by URL + SHA-256
+  (`research/corpus/POLICY.md`, "Borrowed corpora are never committed
+  ... pins each file by URL + SHA-256"), and a new `bench::corpus`
+  module fetches, verifies, and disk-caches them by name, refusing a
+  checksum mismatch rather than returning wrong bytes. Pins are the
+  SHA-256 of the compressed download as served today (bz2 per Silesia
+  file, one tar.gz for Canterbury); decompression is not wired — a
+  consumer needing raw corpus bytes decompresses at the point of use
+  until that slice lands. Gated behind an opt-in `corpus-fetch` Cargo
+  feature (`ureq` for HTTPS, `sha2` for the digest — both optional):
+  `bench` is a root workspace default-member, so an unconditional
+  dependency here would tax every PR's required `cargo test
+  --all-targets` with `ureq`'s transitive tree (rustls, `url`/`idna`/ICU
+  for URL parsing) though only this one module needs it; CLAUDE.md's
+  required checks build default features only, so the gate keeps their
+  cost unchanged, same shape as `fuzz/`'s isolation in S2-A25. | The
+  manifest parser and the cache/checksum logic are unit-tested without
+  network (a fake fetch closure standing in for the real one): cache
+  miss fetches and verifies, a checksum mismatch is rejected and never
+  cached, a cache hit never calls fetch again, an unknown name errors.
+  Real pins verified against the live URLs in a `#[ignore]`d test, run
+  manually (`cargo test -p mothergod-bench --features corpus-fetch --
+  --ignored`): `xml` (Silesia, smallest file) and `cantrbry` (the whole
+  Canterbury tarball) both fetched and matched their pinned SHA-256. All
+  five root CLAUDE.md gates clean with default features (the new
+  dependencies never enter that build); `clippy --all-targets --features
+  corpus-fetch -- --deny warnings` and `cargo doc --features
+  corpus-fetch` also clean, confirming the gated module itself is not
+  secretly broken just because the fast gate can't see it. | No bpb
+  measurement: this is fetch infrastructure, not an experiment against a
+  champion — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas. Remaining S1-D2/S2-D1 scope: decompression wiring for both
+  formats, the three-tier train/sealed/finals split plumbing, regret
+  scoring, the CI baseline gate, progress-graph rendering, and a
+  scheduled workflow exercising `--features corpus-fetch` so the gated
+  module gets real CI coverage instead of only local verification (same
+  gap S2-A25 left for `fuzz/`).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

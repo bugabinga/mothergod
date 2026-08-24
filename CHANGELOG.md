@@ -205,6 +205,17 @@ All notable changes to this project are documented here. Format follows
   arbitrary bytes) and `roundtrip` (hard rule 1 as an executable —
   `decompress(compress(x)) == x`). Not wired into any required check;
   a scheduled smoke run belongs in `monster.yml` (#42) as a follow-up.
+- Silesia/Canterbury fetch-and-cache (`research/JOURNAL.md` S2-A26,
+  `research/corpus/POLICY.md`): `bench/corpus.toml` pins all 12 Silesia
+  files and the Canterbury tarball by URL + SHA-256, and a new
+  `bench::corpus` module (opt-in `corpus-fetch` Cargo feature, off by
+  default) fetches, verifies, and disk-caches them, refusing a checksum
+  mismatch. The feature gate keeps `ureq`/`sha2` — needed for the HTTPS
+  fetch and the integrity check, out of scope for core `mothergod`'s
+  zero-dependency rule (ADR-0002) but still a real cost to every PR's
+  required `cargo test --all-targets` as an unconditional dependency of a
+  default workspace member — out of the fast gate's build graph.
+  Decompression (bzip2, tar+gzip) is not wired yet; remaining S1-D2 scope.
 
 ### Removed
 
