@@ -1,8 +1,8 @@
 name: agent-guard
 description: >-
-  Run gate for all agent workflows. Two independent reasons an agent must
-  not run this cycle, both reported through the single `paused` output
-  because both mean the same thing to a workflow step: do not run.
+  Run gate for all agent workflows. Three independent reasons an agent must
+  not run this cycle, all reported through the single `paused` output
+  because all three mean the same thing to a workflow step: do not run.
 
   1. Global pause (ADR-0004): an open issue labeled `agents-paused` whose
      body may contain `RESUME-AT: <ISO-8601 UTC>`. While such an issue is
@@ -16,14 +16,21 @@ description: >-
      is not currently rate-limited. If every rung is limited the agent
      skips, because the last configured rung is the floor (ADR-0018).
 
+  3. Stale `issues: opened` wake (issue #175): a run queued behind another
+     agent-bdfl run on the same concurrency lane can start after the
+     issue that woke it was already closed by the run ahead of it in
+     line. Scoped to the `opened` action only, because that is the one
+     event where "closed" reliably means "already handled" rather than,
+     say, an operator closing in disagreement.
+
   The same file carries each role's effort level (ADR-0021), emitted as
   `effort_flag`. Empty means the session default. An unrecognized value is
   dropped with a log line rather than failing the run: a typo in a data
   file must not take an agent offline.
 
-  The log line always says which of the two fired. A model-scoped limit
-  never stops the other agents: that is the whole point of the ledger and
-  the reason a per-model limit is not a global pause.
+  The log line always says which reason fired. A model-scoped limit never
+  stops the other agents: that is the whole point of the ledger and the
+  reason a per-model limit is not a global pause.
 inputs:
   token:
     description: GitHub token with issues read/write
@@ -52,11 +59,22 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         ROLE: ${{ inputs.role }}
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_ACTION: ${{ github.event.action }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: |
         set -euo pipefail
         paused=false
         model_flag=''
         effort_flag=''
+
+        if [ "$EVENT_NAME" = issues ] && [ "$EVENT_ACTION" = opened ] && [ -n "$ISSUE_NUMBER" ]; then
+          state="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+          if [ "$state" = CLOSED ]; then
+            paused=true
+            echo "Issue #$ISSUE_NUMBER was already closed before this queued run started; skipping."
+          fi
+        fi
 
         issue_json="$(gh issue list --repo "$GITHUB_REPOSITORY" --label agents-paused --state open --json number,body --limit 1)"
         number="$(jq -r '.[0].number // empty' <<<"$issue_json")"
