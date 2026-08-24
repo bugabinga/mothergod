@@ -142,7 +142,7 @@ All notable changes to this project are documented here. Format follows
   `research/imports/session-1/mothergod.rs` (25,524 bytes), against
   `gzip -9`'s 2.392 bits/byte on the same file.
 - Filter selection wired into `Method::Lz` (`research/JOURNAL.md` S2-D2,
-  in full; ADR-0027, `FORMAT_VERSION` 1 → 2): `compress` now trials every
+  in full; ADR-0028, `FORMAT_VERSION` 1 → 2): `compress` now trials every
   candidate filter `filters::select::pick` shortlists (delta, BCJ,
   transpose, or none) against the real LZ + context-mixing pipeline and
   keeps whichever produces the smallest frame, closing M1's last open

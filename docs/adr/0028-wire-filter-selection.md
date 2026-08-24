@@ -1,4 +1,4 @@
-# ADR-0027: Wire filter selection into `Method::Lz`
+# ADR-0028: Wire filter selection into `Method::Lz`
 
 Status: accepted · Date: 2026-08-23 · Resolves `JOURNAL` S2-D2 (in full) · `FORMAT_VERSION` 1 → 2
 

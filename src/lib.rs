@@ -25,7 +25,7 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Bumped to 1 when [`Method::Lz`] was added
 /// (`docs/adr/0026-wire-the-lz-context-mixing-method.md`), and to 2 when
 /// filter selection was wired into its payload
-/// (`docs/adr/0027-wire-filter-selection.md`): both are bitstream format
+/// (`docs/adr/0028-wire-filter-selection.md`): both are bitstream format
 /// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
 /// separate version-0 decode path is needed. A version-1 frame can
@@ -226,7 +226,7 @@ mod tests {
     fn old_version_lz_frame_is_rejected_not_misparsed() {
         // A frame naming FORMAT_VERSION 1 with Method::Lz predates the
         // 2-byte filter selector codec.rs's payload now starts with
-        // (docs/adr/0027-wire-filter-selection.md). Decoding its payload
+        // (docs/adr/0028-wire-filter-selection.md). Decoding its payload
         // under the new layout would misread those bytes as part of the
         // declared length rather than a filter selector; decompress must
         // reject the version/method combination outright instead

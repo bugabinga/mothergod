@@ -473,7 +473,7 @@ record.
   flag/length/offset stages and `Literal` against real LZ tokens, plus
   `Method` wiring). S2-D3 was resolved on 2026-08-23 by ADR-0024; read
   it there, not here.
-- S2-D2 | RESOLVED by S2-A17/ADR-0026 and S2-A19/ADR-0027 | Remainder of
+- S2-D2 | RESOLVED by S2-A17/ADR-0026 and S2-A19/ADR-0028 | Remainder of
   M1 after the S2-A2 through S2-A12 filter, trial-selection, LZ, coder,
   order-0 model, and literal-mixer slices. S2-A17 wired the flag/length/
   offset/rep-slot `model::Model` instances, `literal::Literal`, and
@@ -791,7 +791,7 @@ record.
   entry fixes was reachable from the crate's real API, not a dormant
   cost in unwired code. Still no bpb delta here: this changes encode-
   side cost and robustness, not the bits a fixed input encodes to.
-- S2-A19 | ACCEPTED | ADR-0027, S2-D2's remaining scope, in full: wires
+- S2-A19 | ACCEPTED | ADR-0028, S2-D2's remaining scope, in full: wires
   `filters::select::pick`'s trial selection into `Method::Lz`.
   `codec::encode` now trials every candidate `pick` shortlists (identity,
   delta, BCJ, transpose), running each through the same LZ +

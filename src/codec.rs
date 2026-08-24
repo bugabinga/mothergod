@@ -19,7 +19,7 @@
 //! 10      ...   range-coded stream (crate::coder), of the FILTERED bytes
 //! ```
 //!
-//! `docs/adr/0027-wire-filter-selection.md` added the 2-byte filter
+//! `docs/adr/0028-wire-filter-selection.md` added the 2-byte filter
 //! selector ahead of the layout ADR-0026 shipped; decoding a frame that
 //! named `FORMAT_VERSION` 1 under this layout would misread those two
 //! bytes as part of the declared length, so [`crate::decompress`] rejects
