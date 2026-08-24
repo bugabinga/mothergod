@@ -504,6 +504,15 @@ jobs:
                  clean needs only the REST squash merge. Either way
                  land by REST once the four gates are green,
                  blocked-on-human if still stuck.
+               - An open PR, ANY label, with zero check runs on its
+                 head SHA and older than a few minutes: conflicted at
+                 birth, so no merge ref ever formed and `ci`/
+                 `agent-review` never fired (issue #200). It cannot
+                 carry `agent-approved`, so it will not show up in
+                 the bullet above; scan all open PRs for this
+                 signature, not just labeled ones. Rescue per
+                 agents/GOVERNANCE.md "Stalled auto-merge": same
+                 mechanical merge-and-push as the dirty case.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
                run `.github/scripts/retrospect`. It shares the
                sweep's anchor, reads the audit artifact every
