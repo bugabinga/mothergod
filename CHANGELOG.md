@@ -171,6 +171,13 @@ All notable changes to this project are documented here. Format follows
   from the founding session's `corpus.py`. Each sample sums a slow and a
   fast sine wave plus gaussian noise, truncated toward zero and wrapped to
   16 bits, matching Python's `int(...) & 0xffff`.
+- Benchmark harness, fifth structured-generator slice (`research/JOURNAL.md`
+  S2-A22): `gradient_image` in the `bench` crate, a synthetic grayscale
+  gradient image (the "gradient image" class in
+  `research/corpus/POLICY.md`), ported from the founding session's
+  `corpus.py`. Row-major pixels over 200-pixel-wide rows, each a baseline
+  plus a horizontal and a vertical sine wave plus gaussian noise, truncated
+  toward zero and wrapped to a byte, matching Python's `int(...) & 0xff`.
 
 ### Removed
 
