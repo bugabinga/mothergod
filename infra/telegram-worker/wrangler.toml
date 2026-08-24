@@ -8,9 +8,7 @@ main = "worker.js"
 compatibility_date = "2026-08-01"
 workers_dev = false
 
-routes = [
-  { pattern = "bot.mothergod.dev", custom_domain = true },
-]
+routes = [{ pattern = "bot.mothergod.dev", custom_domain = true }]
 
 kv_namespaces = [
   # mothergod-telegram-inbox: pending operator updates, deleted by the

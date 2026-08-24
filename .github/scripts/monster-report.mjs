@@ -17,9 +17,10 @@ function cleanLine(line) {
 }
 
 function useful(line) {
-  return /^(?:error(?:\[[A-Z]\d+\])?:|fatal:|thread ['"].+['"] panicked|test .+ \.\.\. FAILED|failures:|Caused by:)/i.test(
-    line.trimStart(),
-  );
+  return /^(?:error(?:\[[A-Z]\d+\])?:|fatal:|thread ['"].+['"] panicked|test .+ \.\.\. FAILED|failures:|Caused by:)/i
+    .test(
+      line.trimStart(),
+    );
 }
 
 function fallback(line) {
@@ -60,9 +61,7 @@ export function failedMatrixJobs(jobs) {
 }
 
 export function buildReport(jobs, logsById, runUrl) {
-  const failures = failedMatrixJobs(jobs).sort((left, right) =>
-    left.job.name.localeCompare(right.job.name),
-  );
+  const failures = failedMatrixJobs(jobs).sort((left, right) => left.job.name.localeCompare(right.job.name));
 
   if (failures.length === 0) {
     throw new Error("no failed monster matrix jobs found");
@@ -107,8 +106,8 @@ export function selectIssue(issues) {
   const candidates = issues
     .filter(
       (issue) =>
-        issue?.body?.includes(ISSUE_MARKER) &&
-        issue?.author?.login === "github-actions[bot]",
+        issue?.body?.includes(ISSUE_MARKER)
+        && issue?.author?.login === "github-actions[bot]",
     )
     .sort((left, right) => {
       const leftClosed = left.state === "OPEN" ? 0 : 1;

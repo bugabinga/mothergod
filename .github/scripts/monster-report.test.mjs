@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  ISSUE_MARKER,
-  buildReport,
-  failedMatrixJobs,
-  firstUsefulFailure,
-  selectIssue,
-} from "./monster-report.mjs";
+import { buildReport, failedMatrixJobs, firstUsefulFailure, ISSUE_MARKER, selectIssue } from "./monster-report.mjs";
 
 test("failure parsing skips runner noise and keeps the first useful diagnostic", () => {
   const log = [

@@ -20,11 +20,16 @@ governed by [`CLAUDE.md`](CLAUDE.md) instead.
 - Quality gates (CI runs exactly these):
 
   ```sh
-  cargo fmt --check
-  cargo clippy --all-targets -- --deny warnings
+  cargo x fmt --check
+  cargo x lint
   cargo test --all-targets
+  cargo test --manifest-path x/Cargo.toml
   cargo test --doc
+  RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps
   ```
+
+  Use path arguments for narrow iteration, for example `cargo x lint -- src`.
+  Run `cargo x help` for the supported file types, fixes, and scope rules.
 
 - Lossless is non-negotiable: codec changes ship with round-trip tests.
 - The decoder must never panic on any input — compressed data is adversarial.

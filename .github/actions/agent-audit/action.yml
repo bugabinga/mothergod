@@ -23,7 +23,7 @@ inputs:
   redact:
     description: Newline-separated secret values to scrub from the output
     required: false
-    default: ''
+    default: ""
 runs:
   using: composite
   steps:

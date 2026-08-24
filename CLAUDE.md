@@ -18,12 +18,19 @@ falsified experiments unless conditions changed (note which condition).
 ## Commands (run all before any push)
 
 ```
-cargo fmt --check
-cargo clippy --all-targets -- --deny warnings
+cargo x fmt --check
+cargo x lint
 cargo test --all-targets
+cargo test --manifest-path x/Cargo.toml
 cargo test --doc
 RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps
 ```
+
+Use `cargo x` rather than its constituent formatters or linters because x owns
+repository discovery and configuration. Invoke a constituent directly only to
+repair x when x cannot build. Scope iteration with path arguments; run both x
+tasks unscoped before pushing. `cargo x help` and task `--help` are the usage
+source of truth.
 
 CI runs exactly these as the required checks `fmt`, `clippy`, `test`, `doc`.
 A push that fails them wastes a cycle.

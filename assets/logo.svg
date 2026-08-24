@@ -1,34 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+>
   <!-- mothergod mark: chevrons compressing the golden byte inside a halo.
        Source of truth for the project logo and the (private) status bot
        avatar. Seeded by the operator 2026-08-20. -->
   <defs>
     <radialGradient id="bg" cx="50%" cy="42%" r="75%">
-      <stop offset="0%" stop-color="#332055"/>
-      <stop offset="55%" stop-color="#1c1136"/>
-      <stop offset="100%" stop-color="#0b0618"/>
+      <stop offset="0%" stop-color="#332055" />
+      <stop offset="55%" stop-color="#1c1136" />
+      <stop offset="100%" stop-color="#0b0618" />
     </radialGradient>
     <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffd76a"/>
-      <stop offset="100%" stop-color="#e0a12f"/>
+      <stop offset="0%" stop-color="#ffd76a" />
+      <stop offset="100%" stop-color="#e0a12f" />
     </linearGradient>
     <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ffd76a" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#ffd76a" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#ffd76a" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#ffd76a" stop-opacity="0" />
     </radialGradient>
   </defs>
-  <rect width="1024" height="1024" fill="url(#bg)"/>
-  <circle cx="512" cy="512" r="400" fill="none" stroke="url(#gold)" stroke-width="10" opacity="0.9"/>
-  <circle cx="512" cy="512" r="400" fill="none" stroke="#ffd76a" stroke-width="26" opacity="0.12"/>
-  <circle cx="512" cy="512" r="190" fill="url(#glow)"/>
-  <g stroke="#f2ecff" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M 190 380 L 330 512 L 190 644"/>
-    <path d="M 320 402 L 438 512 L 320 622" opacity="0.72"/>
-    <path d="M 834 380 L 694 512 L 834 644"/>
-    <path d="M 704 402 L 586 512 L 704 622" opacity="0.72"/>
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <circle
+    cx="512"
+    cy="512"
+    r="400"
+    fill="none"
+    stroke="url(#gold)"
+    stroke-width="10"
+    opacity="0.9"
+  />
+  <circle
+    cx="512"
+    cy="512"
+    r="400"
+    fill="none"
+    stroke="#ffd76a"
+    stroke-width="26"
+    opacity="0.12"
+  />
+  <circle cx="512" cy="512" r="190" fill="url(#glow)" />
+  <g
+    stroke="#f2ecff"
+    stroke-width="58"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  >
+    <path d="M 190 380 L 330 512 L 190 644" />
+    <path d="M 320 402 L 438 512 L 320 622" opacity="0.72" />
+    <path d="M 834 380 L 694 512 L 834 644" />
+    <path d="M 704 402 L 586 512 L 704 622" opacity="0.72" />
   </g>
   <g transform="rotate(45 512 512)">
-    <rect x="452" y="452" width="120" height="120" rx="18" fill="url(#gold)"/>
-    <rect x="452" y="452" width="120" height="120" rx="18" fill="none" stroke="#fff3cf" stroke-width="6" opacity="0.8"/>
+    <rect x="452" y="452" width="120" height="120" rx="18" fill="url(#gold)" />
+    <rect
+      x="452"
+      y="452"
+      width="120"
+      height="120"
+      rx="18"
+      fill="none"
+      stroke="#fff3cf"
+      stroke-width="6"
+      opacity="0.8"
+    />
   </g>
 </svg>

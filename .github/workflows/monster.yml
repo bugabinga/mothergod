@@ -6,7 +6,7 @@ on:
   schedule:
     # Saturday 03:17 UTC avoids the Sunday CodeQL and agent survey window.
     # Cron-line commits must be pushed with operator/admin attribution.
-    - cron: '17 3 * * 6'
+    - cron: "17 3 * * 6"
   workflow_dispatch:
 
 permissions:
@@ -105,6 +105,18 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           target: ${{ matrix.target }}
           checks: ${{ matrix.os == 'ubuntu-24.04' && matrix.surface == 'native' && matrix.toolchain == 'stable' && 'canonical' || 'runtime' }}
+
+  x-msrv:
+    name: x | MSRV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          toolchain: msrv
+          checks: setup
+      - run: cargo test --manifest-path x/Cargo.toml
 
   android:
     name: Android-15 | x86-64 | Bionic | ${{ matrix.toolchain }}

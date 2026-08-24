@@ -34,7 +34,7 @@ inputs:
       Agent role, keying into agents/models.json. Omit to skip ladder
       resolution entirely (emits an empty model_flag).
     required: false
-    default: ''
+    default: ""
 outputs:
   paused:
     description: "'true' when this agent must not run: global pause, or no model left"

@@ -33,7 +33,7 @@ on:
   schedule:
     # Sundays 05:07 UTC, ahead of the BDFL's Sunday deep survey so the
     # issue is already waiting when it runs.
-    - cron: '7 5 * * 0'
+    - cron: "7 5 * * 0"
   workflow_dispatch:
 
 permissions: {}

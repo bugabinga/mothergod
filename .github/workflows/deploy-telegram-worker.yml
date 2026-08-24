@@ -7,7 +7,10 @@ on:
   push:
     branches: [main]
     paths:
-      ["infra/telegram-worker/**", ".github/workflows/deploy-telegram-worker.yml"]
+      [
+        "infra/telegram-worker/**",
+        ".github/workflows/deploy-telegram-worker.yml",
+      ]
   workflow_dispatch:
 
 permissions:

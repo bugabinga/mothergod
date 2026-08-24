@@ -8,6 +8,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `cargo x`, an agent-facing repository quality command with embedded formatters
+  for Rust, JSON/JSONL, TOML, YAML, JavaScript/TypeScript, HTML, and SVG, plus
+  Clippy and Markdown linting. Tasks expose conventional help, path-scoped
+  checks, actionable diagnostics, safe Markdown fixes, stable exit codes, and
+  an independently cached CI binary.
 - Benchmark harness, first slice (`research/JOURNAL.md` S2-A1): a new
   `bench/` workspace crate with the two mandatory corpus generators from
   `research/corpus/POLICY.md` ported to Rust — `entropy_ladder` (iid bytes

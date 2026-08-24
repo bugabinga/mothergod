@@ -28,7 +28,9 @@ mothergod = { path = ".." }
 # workflow exercising `--features corpus-fetch` is remaining scope
 # (`research/JOURNAL.md` S1-D2), the same shape as `fuzz/`'s targets,
 # which aren't in the fast PR gate either.
-ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+ureq = { version = "2", default-features = false, features = [
+  "tls",
+], optional = true }
 sha2 = { version = "0.10", optional = true }
 bzip2-rs = { version = "0.1.2", optional = true }
 flate2 = { version = "1.1.9", optional = true }

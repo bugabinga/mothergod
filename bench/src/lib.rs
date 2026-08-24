@@ -589,7 +589,7 @@ const SQLITE_ROW_WIDTH: usize = 8 + SQLITE_CATEGORY_WIDTH + 8;
 /// (page size, freelist state, B-tree structure, per-value varint serial
 /// types) was never a design choice in the archive, only whatever the
 /// installed `sqlite3` library happened to emit, and reproducing it exactly
-/// would mean re-implementing SQLite's on-disk format — out of scope for a
+/// would mean re-implementing `SQLite`'s on-disk format — out of scope for a
 /// zero-dependency corpus generator (ADR-0002) and not what "sqlite-like"
 /// asks for. This port instead captures the schema's shape directly: fixed-
 /// width rows (8-byte timestamp, 4-byte null-padded category, 8-byte

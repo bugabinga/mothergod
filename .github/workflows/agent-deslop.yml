@@ -15,7 +15,7 @@ on:
     # cron edit flips the schedule actor to claude[bot], the token
     # exchange rejects bot actors, and every scheduled run dies
     # (GOVERNANCE.md "Push identity").
-    - cron: '37 */12 * * *'
+    - cron: "37 */12 * * *"
   workflow_dispatch:
 
 permissions: {}
