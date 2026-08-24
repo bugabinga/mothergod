@@ -153,10 +153,19 @@ jobs:
 
             Procedure:
             1. Read the full diff (gh pr diff) and the PR body.
-            2. Verify claims by executing them: check out the PR branch, run
-               every quality gate from CLAUDE.md, and run whatever
-               tests/benchmarks the PR's claims rest on. A claim you did not
-               execute is unverified — say so explicitly in the review.
+            2. Don't re-run what CI already ran: fmt, clippy, test, and doc
+               are required checks that already executed on this exact
+               commit (ci.yml). Re-running `cargo x fmt/lint/test/doc`
+               yourself recomputes an identical result at full runner cost
+               and adds no signal — check it with `gh pr checks $PR_NUMBER`
+               (no --watch; watching your own review job hangs it) instead
+               of re-executing. If a required check is red or still
+               pending, say so and treat unverified claims as such; branch
+               protection blocks the merge regardless of your verdict.
+               Spend your own Bash budget on what CI does not check: check
+               out the PR branch and run whatever tests/benchmarks the PR's
+               specific claims rest on. A claim you did not execute is
+               unverified — say so explicitly in the review.
             3. For codec changes additionally: round-trip on the relevant
                data classes plus adversarial inputs (truncated, bit-flipped);
                stored-block floor intact; no test, guard, benchmark, or
