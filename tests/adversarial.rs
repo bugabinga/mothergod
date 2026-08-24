@@ -7,11 +7,14 @@
 //! into this directory as regression seeds.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn seed_corpus_decodes_to_graceful_errors() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adversarial");
+    let dir = std::env::var_os("MOTHERGOD_ADVERSARIAL_DIR").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adversarial"),
+        PathBuf::from,
+    );
     let mut checked = 0;
     for entry in fs::read_dir(&dir).expect("tests/adversarial must exist") {
         let path = entry.expect("readable dir entry").path();
