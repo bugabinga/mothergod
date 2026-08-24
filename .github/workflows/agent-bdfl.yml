@@ -248,6 +248,11 @@ jobs:
               costs you nothing. Before your last Telegram message:
               re-list the inbox and drain anything that arrived
               mid-run. The status line rides that last message.
+              If the inbox turns out empty on the check (a manual
+              workflow_dispatch with nobody actually waiting),
+              there is no message to react to: fall through to
+              DELTA below. Do not ask a question with nobody
+              there to read it (run 32723091059, 2026-08-24).
             - DELTA — any other wake. The run economy below, in
               order; a no-op is a good outcome.
             - SURVEY — a scheduled Sunday wake where the ops-log has
