@@ -233,6 +233,12 @@ All notable changes to this project are documented here. Format follows
   iterations see a different offset instead of memorizing one
   (`research/corpus/POLICY.md`, "Train slices"). Sealed-validation seed and
   dataset-kind separation remain.
+- Ideal-cost accounting mode, first slice (`research/JOURNAL.md` S2-A30,
+  ADR-0006): `Model::ideal_cost_bits` sums `-log2(p)` against the
+  order-0 flag/length/offset model's live adaptive state instead of
+  driving a real `Encoder`, the Rust-native replacement for the
+  founding session's Python model-cost proxy. `Literal`'s six-expert
+  mixer gets the same method in a follow-up slice.
 
 ### Removed
 
