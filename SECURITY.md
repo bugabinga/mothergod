@@ -4,8 +4,14 @@
 
 Report vulnerabilities privately via
 [GitHub Security Advisories](../../security/advisories/new).
-Do **not** open a public issue. Reports are triaged by the human operator;
-agents are not in the loop for undisclosed vulnerabilities.
+Do **not** open a public issue. The human operator alone confirms a
+candidate is real, publishes an advisory, requests a CVE, and triggers
+the release. Under
+[ADR-0032](docs/adr/0032-private-defensive-security-lane.md), a
+BDFL-directed agent may privately draft a candidate advisory, and, once
+the operator confirms it, prepare a fix in the advisory's private fork.
+None of this is ever public: no candidate detail reaches an issue, PR,
+branch, commit, workflow log, or chat message before a release exists.
 
 ## Threat model (what counts as a vulnerability here)
 
