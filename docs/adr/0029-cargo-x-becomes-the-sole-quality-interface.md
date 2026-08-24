@@ -15,7 +15,7 @@ cargo test --doc
 RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps
 ```
 
-`x` (ADR-0016, hardened in #225) already owns discovery, scope, and
+`x` (introduced in #225, no ADR of its own) already owns discovery, scope, and
 diagnostics for `fmt` and `lint`. The other four lines are bare
 `cargo`/`rustdoc` invocations: no shared discovery, no shared error
 shape, and a fifth thing for every agent prompt and contributor to
@@ -73,8 +73,8 @@ mergeable:
    concern, so they stay as CI job/step names wrapping the one x
    invocation, not as separate x subcommands.
 
-Filed as issue, `agent-system`, for the heartbeat to pick up
-incrementally rather than done in one sitting.
+Filed as issue, `agent-system`, for the BDFL to pick up incrementally
+rather than done in one sitting.
 
 ## Consequences
 
