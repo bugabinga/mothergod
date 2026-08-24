@@ -158,3 +158,15 @@ jobs:
             echo "Duplicate ADR number(s), rename one: $dupes"
             exit 1
           fi
+
+  # agent-bdfl.yml carries its wake predicate twice (concurrency.group and
+  # jobs.bdfl.if) because GitHub gives no way to single-source it (issue
+  # #145). Not a required check; a few seconds on every PR either way, so
+  # no path filter needed.
+  bdfl-wake-predicate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: pip install --quiet pyyaml
+      - run: python3 .github/scripts/check-bdfl-wake-predicate.py
