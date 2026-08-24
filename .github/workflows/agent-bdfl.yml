@@ -473,16 +473,9 @@ jobs:
             recurring formats that drifted chatty, treat verbose output
             as a defect like any other (HEALTH).
 
-            Context economy (operator directive, Telegram, 2026-08-22):
-            skills and prompts are the levers that steer agents;
-            context is what they spend. Information has one right place
-            and one right time. Always-loaded text (CLAUDE.md, agent
-            prompts, skill descriptions) holds only what every session
-            needs; a skill body holds procedure, loaded on invocation;
-            a reference holds one signal, loaded on trigger; work items
-            live in issues, never in manuals. When touching any of
-            these, ask what the reader needs at that moment; move the
-            rest down a level or delete it.
+            When placing or reviewing agent guidance, procedures,
+            decisions, operational history, or work, use
+            `information-placement`; skip it when those homes are unchanged.
 
             Run economy — the delta core, every run, in order (CHAT
             reorders: inbox first, then sweeps as budget allows):
