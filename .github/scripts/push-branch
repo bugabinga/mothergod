@@ -239,9 +239,15 @@ def main() -> int:
         landed = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
         if landed and landed["object"]["sha"] == sha:
             break
-    if not landed:
+    # A lagging replica answers with whatever the ref held before this write:
+    # absent on a freshly created branch, base_sha on an update. Both are the
+    # same replication lag issue #193 describes, not evidence anyone raced
+    # this push, so only a third value earns the race diagnosis.
+    if not landed or landed["object"]["sha"] == base_sha:
         die(
-            f"{branch} still reads back as absent after retrying the read-back.",
+            f"{branch} still reads back as "
+            f"{landed['object']['sha'][:7] if landed else 'absent'} after "
+            "retrying the read-back.",
             "the commit exists; nothing points at it yet. Retry, and if it "
             "repeats, say so on the thread rather than pushing again.",
         )
