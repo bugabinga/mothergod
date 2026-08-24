@@ -917,6 +917,37 @@ record.
   sqlite-like, x86 binary), the three-tier train/sealed/finals split
   plumbing, regret scoring, the CI baseline gate, and progress-graph
   rendering.
+- S2-A22 | ACCEPTED | Fifth structured-generator slice of M2's remaining
+  benchmark-harness debt (S2-D1): a synthetic grayscale gradient image
+  (`research/corpus/POLICY.md`'s "gradient image" class) ported to
+  `bench/src/lib.rs` as `gradient_image`, mirroring `interleaved_audio16`'s
+  structure. Behavior ported from the founding session's `corpus.py`
+  (`c['image']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`),
+  not the code (ADR-0006): row-major pixels over 200-pixel-wide rows, each
+  the sum of a baseline (90), a horizontal sine (amplitude 70, period 31
+  pixels), a vertical sine (amplitude 50, period 23 rows), and gaussian
+  noise (stddev 8), truncated toward zero and kept to the low byte.
+  Python's `int(...)` truncates a float toward zero exactly like `as i32`
+  does, and its `& 0xff` on a (possibly negative) arbitrary-precision int
+  keeps the low byte in two's complement, exactly what `as u8` produces
+  from that `i32`. One behavior-preserving deviation, the same shape as
+  `interleaved_audio16`'s: the archive fixes the row count at `N / 200 + 1`
+  then truncates the flattened result to `N` bytes; this port generates
+  pixels until `len` bytes are reached then stops, so it produces exactly
+  `len` bytes for any requested length. | 4 new unit tests: exact-length
+  output across six requested lengths, determinism, seed independence, and
+  a structural check that consecutive pixels within a row mostly differ by
+  far less than the full byte range, unlike iid data; wired into the
+  existing frame-format round-trip test. `cargo fmt`/`clippy --all-targets
+  -- --deny warnings`/`test --all-targets`/`test --doc`/`doc --no-deps`
+  (`RUSTDOCFLAGS=--deny warnings`) all clean. | No bpb measurement: this is
+  corpus-generation infra, not an experiment against a champion —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
+  same as S2-A1 through S2-A21. Remaining S2-D1 scope: Silesia + Canterbury
+  fetch-and-cache, the two remaining structured generator classes
+  (sqlite-like, x86 binary), the three-tier train/sealed/finals split
+  plumbing, regret scoring, the CI baseline gate, and progress-graph
+  rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

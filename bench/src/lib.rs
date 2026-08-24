@@ -17,12 +17,14 @@
 //!   "base64-wrapped payloads" structured class.
 //! - [`interleaved_audio16`]: interleaved 16-bit audio samples, the
 //!   "audio" structured class.
+//! - [`gradient_image`]: a synthetic grayscale gradient image, the
+//!   "gradient image" structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
 //! Silesia/Canterbury fetch-and-cache, the remaining structured classes
-//! (image, sqlite-like, x86 binary), and the sealed/train split plumbing
-//! are follow-up slices of `research/JOURNAL.md` S1-D2.
+//! (sqlite-like, x86 binary), and the sealed/train split plumbing are
+//! follow-up slices of `research/JOURNAL.md` S1-D2.
 
 use std::fmt::Write as _;
 
@@ -446,6 +448,92 @@ pub fn interleaved_audio16(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Row width of [`gradient_image`]'s synthetic grayscale image (200 pixels
+/// per row), matching the founding generator's fixed row length.
+const IMAGE_WIDTH: usize = 200;
+
+/// Baseline pixel value of [`gradient_image`], matching the founding
+/// generator's `90 + ...`.
+const IMAGE_BASELINE: f64 = 90.0;
+
+/// Amplitude of [`gradient_image`]'s horizontal sine component (period 31
+/// pixels along a row), matching the founding generator's `70*sin(x/31)`.
+const IMAGE_AMP_X: f64 = 70.0;
+
+/// Period divisor of [`gradient_image`]'s horizontal sine component.
+const IMAGE_PERIOD_X: f64 = 31.0;
+
+/// Amplitude of [`gradient_image`]'s vertical sine component (period 23
+/// rows), matching the founding generator's `50*sin(y/23)`.
+const IMAGE_AMP_Y: f64 = 50.0;
+
+/// Period divisor of [`gradient_image`]'s vertical sine component.
+const IMAGE_PERIOD_Y: f64 = 23.0;
+
+/// Standard deviation of [`gradient_image`]'s additive gaussian noise,
+/// matching the founding generator's `8*random.gauss(0, 1)`.
+const IMAGE_NOISE_STDDEV: f64 = 8.0;
+
+/// Generates `len` bytes of a synthetic grayscale gradient image, the
+/// "gradient image" structured class (`research/corpus/POLICY.md`).
+/// Truncated to exactly `len` bytes; an odd `len` ends mid-row, keeping a
+/// partial final row, matching how a real image scan would be cut.
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['image']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// pixels in row-major order over 200-pixel-wide rows, each the sum of a
+/// baseline (90), a horizontal sine (amplitude 70, period 31 pixels), a
+/// vertical sine (amplitude 50, period 23 rows), and gaussian noise (stddev
+/// 8), truncated toward zero and kept to the low byte. Python's `int(...)`
+/// truncates toward zero exactly like `as i32` does, and its `& 0xff` on a
+/// (possibly negative) arbitrary-precision int keeps the low byte in two's
+/// complement, exactly what `as u8` produces from that `i32`. One
+/// behavior-preserving deviation, the same shape as [`interleaved_audio16`]'s:
+/// the archive fixes the row count at `N / 200 + 1` then truncates the
+/// flattened result to `N` bytes; this generates pixels until `len` bytes
+/// are reached then stops, so it produces exactly `len` bytes for any
+/// requested length instead of only for sizes the archive's fixed row count
+/// happened to cover.
+#[must_use]
+pub fn gradient_image(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::with_capacity(len);
+    let mut x = 0usize;
+    let mut y = 0usize;
+    while out.len() < len {
+        // Row/column indices stay far below 2^53 for any corpus this crate
+        // generates, so these conversions are exact.
+        #[allow(clippy::cast_precision_loss)]
+        let (xf, yf) = (x as f64, y as f64);
+        let noise = IMAGE_NOISE_STDDEV * standard_normal(&mut rng);
+        let value = IMAGE_BASELINE
+            + IMAGE_AMP_X * (xf / IMAGE_PERIOD_X).sin()
+            + IMAGE_AMP_Y * (yf / IMAGE_PERIOD_Y).sin()
+            + noise;
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "truncating toward zero, matching Python's int(), before the intentional u8 wraparound below"
+        )]
+        let truncated = value.trunc() as i32;
+        #[allow(
+            clippy::cast_sign_loss,
+            clippy::cast_possible_truncation,
+            reason = "wraps to the low byte in two's complement, matching Python's `& 0xff` on a signed int"
+        )]
+        let pixel = truncated as u8;
+        out.push(pixel);
+        x += 1;
+        if x == IMAGE_WIDTH {
+            x = 0;
+            y += 1;
+        }
+    }
+    out
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -507,8 +595,9 @@ pub fn order1_conditional_entropy_bits(data: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        access_log, base64_encode, base64_wrapped, entropy_ladder, interleaved_audio16,
-        json_records, markov_h8_2_trap, order0_entropy_bits, order1_conditional_entropy_bits,
+        access_log, base64_encode, base64_wrapped, entropy_ladder, gradient_image,
+        interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
+        order1_conditional_entropy_bits,
     };
 
     const LEN: usize = 200_000;
@@ -585,6 +674,7 @@ mod tests {
         assert_eq!(json_records(0, SEED), Vec::<u8>::new());
         assert_eq!(base64_wrapped(0, SEED), Vec::<u8>::new());
         assert_eq!(interleaved_audio16(0, SEED), Vec::<u8>::new());
+        assert_eq!(gradient_image(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
     }
@@ -767,6 +857,39 @@ mod tests {
     }
 
     #[test]
+    fn gradient_image_is_exactly_the_requested_length() {
+        for len in [1, 2, 3, 47, 1000, LEN] {
+            assert_eq!(gradient_image(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn gradient_image_is_deterministic() {
+        assert_eq!(gradient_image(5_000, SEED), gradient_image(5_000, SEED));
+    }
+
+    #[test]
+    fn gradient_image_seeds_are_independent() {
+        assert_ne!(gradient_image(5_000, SEED), gradient_image(5_000, SEED + 1));
+    }
+
+    #[test]
+    fn gradient_image_pixels_move_smoothly_along_a_row() {
+        // A sine-plus-noise gradient changes little from one pixel to the
+        // next within a row, unlike iid random data.
+        let data = gradient_image(LEN, SEED);
+        let small_steps = data
+            .windows(2)
+            .filter(|pair| i32::from(pair[1]).abs_diff(i32::from(pair[0])) < 40)
+            .count();
+        assert!(
+            small_steps * 10 > (data.len() - 1) * 9,
+            "expected >90% of consecutive pixels to differ by under 40, got {small_steps}/{}",
+            data.len() - 1
+        );
+    }
+
+    #[test]
     fn generators_round_trip_through_the_frame_format() {
         for data in [
             entropy_ladder(1, 5_000, SEED),
@@ -776,6 +899,7 @@ mod tests {
             json_records(5_000, SEED),
             base64_wrapped(5_000, SEED),
             interleaved_audio16(5_000, SEED),
+            gradient_image(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
