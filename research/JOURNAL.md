@@ -520,7 +520,9 @@ record.
   `corpus.py`), the three-tier train/sealed/finals split plumbing, regret
   scoring, the CI baseline gate, and progress-graph rendering. Ideal-cost
   accounting mode (M2) additionally needs real model code (M1) to hang off
-  of.
+  of. Structured generator classes done as of S2-A24 (all seven ported,
+  S2-A14 through S2-A24); remaining: fetch-and-cache, split plumbing,
+  regret scoring, CI baseline gate, progress-graph rendering.
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -983,6 +985,45 @@ record.
   fetch-and-cache, the one remaining structured generator class (x86
   binary), the three-tier train/sealed/finals split plumbing, regret
   scoring, the CI baseline gate, and progress-graph rendering.
+- S2-A24 | ACCEPTED | Seventh and final structured-generator slice of M2's
+  remaining benchmark-harness debt (S2-D1): a synthetic x86-64 instruction
+  stream dense with `call`/`jmp rel32` opcodes
+  (`research/corpus/POLICY.md`'s "x86-dense binaries" class) ported to
+  `bench/src/lib.rs` as `x86_dense_code`. Behavior ported from the founding
+  session's `corpus.py` (`c['elf']`, `git show
+  1a3b1c8:research/imports/session-1/corpus.py`), not the code (ADR-0006):
+  the archive read 40,000 bytes from an offset into the host's installed
+  `libc.so.6`, which is neither deterministic (varies by libc build) nor
+  available in every environment (nothing to read on a host without one).
+  Same deviation shape as S2-A23's `sqlite_like_records`: rather than real
+  machine code, the port captures the structural property the class exists
+  to probe — `src/filters.rs`'s `bcj` doc comment notes call targets
+  cluster on a small set of functions, which as relative offsets encode
+  differently per occurrence but as absolute addresses collide, which is
+  what a downstream model actually matches. `x86_dense_code` emits a stream
+  of short filler instructions (prologue/epilogue, register moves,
+  arithmetic, short conditional jumps, 15-entry pool) with a 25% per-step
+  chance of a `call`/`jmp rel32` targeting one of 48 synthetic function
+  starts spaced 64 bytes apart instead — deliberately denser in call/jmp
+  opcodes than real compiled code, since the class exists to stress the
+  `bcj` filter (S2-A4) rather than to resemble a realistic binary. | 5 new
+  unit tests: exact-length output across seven requested lengths including
+  ones shorter than one instruction, determinism, seed independence, a
+  floor check that call/jmp opcodes are >5% of bytes (real code is far
+  sparser; this is a "dense" corpus by design), and a direct round trip
+  through `filters::bcj::encode`/`decode` (independent of the frame-format
+  round trip every generator gets); wired into the existing frame-format
+  round-trip test. `cargo fmt`/`clippy --all-targets -- --deny
+  warnings`/`test --all-targets`/`test --doc`/`doc --no-deps`
+  (`RUSTDOCFLAGS=--deny warnings`) all clean. | No bpb measurement, same
+  reason as S2-A1 through S2-A23: corpus-generation infra, not an
+  experiment against a champion — `progress.jsonl` records this as `kind:
+  "patch"` with null bpb deltas. S2-D1's structured-generator list is now
+  complete (jsonl/log, json, base64-wrapped, audio, image, sqlite-like,
+  x86-dense — all seven classes ported); remaining S2-D1 scope: Silesia +
+  Canterbury fetch-and-cache, the three-tier train/sealed/finals split
+  plumbing, regret scoring, the CI baseline gate, and progress-graph
+  rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

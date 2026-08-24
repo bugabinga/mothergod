@@ -22,12 +22,13 @@
 //! - [`sqlite_like_records`]: fixed-width binary rows over a
 //!   timestamp/category/measurement schema, the "sqlite-like records"
 //!   structured class.
+//! - [`x86_dense_code`]: a synthetic instruction stream dense with
+//!   `call`/`jmp rel32` opcodes, the "x86-dense binaries" structured class.
 //!
 //! Ported by behavior (not code) from the founding session's Python
 //! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
-//! Silesia/Canterbury fetch-and-cache, the remaining structured class
-//! (x86 binary), and the sealed/train split plumbing are follow-up slices
-//! of `research/JOURNAL.md` S1-D2.
+//! Silesia/Canterbury fetch-and-cache and the sealed/train split plumbing
+//! are follow-up slices of `research/JOURNAL.md` S1-D2.
 
 use std::fmt::Write as _;
 
@@ -608,6 +609,112 @@ pub fn sqlite_like_records(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Number of distinct call/jmp targets [`x86_dense_code`] draws from,
+/// simulating a binary whose calls cluster on a handful of functions
+/// (`src/filters.rs`'s `bcj` doc comment: "many calls target the same
+/// handful of functions").
+const X86_FUNCTION_COUNT: usize = 48;
+
+/// Byte spacing between consecutive synthetic function starts in
+/// [`x86_dense_code`]'s target pool, matching typical compiled-function
+/// density closely enough to give `call`/`jmp` targets a realistic spread.
+const X86_FUNCTION_STRIDE: i64 = 64;
+
+/// Byte length of a `call rel32`/`jmp rel32` instruction: one opcode byte
+/// plus a 4-byte little-endian operand, matching `src/filters.rs`'s `bcj`
+/// filter's `INSTRUCTION_LEN`.
+const X86_CALL_LEN: usize = 5;
+
+/// Chance each emitted instruction is a `call`/`jmp rel32` rather than a
+/// filler instruction, tuned high on purpose: "dense" is the point of this
+/// class (`research/corpus/POLICY.md`'s "x86-dense binaries"), stressing
+/// the `bcj` filter (S2-A4) far harder than typical compiled code would.
+const X86_CALL_PROBABILITY: f64 = 0.25;
+
+/// A small pool of short, common x86-64 instruction encodings
+/// [`x86_dense_code`] cycles through as filler between `call`/`jmp`
+/// instructions: prologue/epilogue bytes, register moves, arithmetic,
+/// comparisons and short conditional jumps. Chosen for shape (short,
+/// repeated opcodes), not to encode any particular program.
+const X86_FILLER_INSTRUCTIONS: [&[u8]; 15] = [
+    &[0x55],                   // push rbp
+    &[0x5D],                   // pop rbp
+    &[0xC3],                   // ret
+    &[0x90],                   // nop
+    &[0x48, 0x89, 0xE5],       // mov rbp, rsp
+    &[0x48, 0x83, 0xEC, 0x18], // sub rsp, 0x18
+    &[0x48, 0x83, 0xC4, 0x18], // add rsp, 0x18
+    &[0x85, 0xC0],             // test eax, eax
+    &[0x31, 0xC0],             // xor eax, eax
+    &[0x89, 0xF8],             // mov eax, edi
+    &[0x39, 0xD8],             // cmp eax, ebx
+    &[0x74, 0x05],             // je +5
+    &[0x75, 0x05],             // jne +5
+    &[0x48, 0x8B, 0x45, 0xF8], // mov rax, [rbp-8]
+    &[0x48, 0x89, 0x45, 0xF8], // mov [rbp-8], rax
+];
+
+/// Generates `len` bytes of a synthetic x86-64 instruction stream dense
+/// with `call`/`jmp rel32` opcodes, the "x86-dense binaries" structured
+/// class (`research/corpus/POLICY.md`). Truncated to exactly `len` bytes;
+/// a `call`/`jmp` instruction split by truncation loses its trailing
+/// operand bytes, matching how a real binary tail is cut.
+///
+/// Ported by behavior (not code) from the founding session's `corpus.py`
+/// (`c['elf']`, `git show 1a3b1c8:research/imports/session-1/corpus.py`):
+/// the archive reads a slice of the host's installed `libc.so.6`, neither
+/// deterministic nor available in every environment (varies by libc
+/// version, and there is nothing to read on a host without one). This
+/// port substitutes a synthetic instruction stream, the same deviation
+/// shape as [`sqlite_like_records`]'s: rather than real machine code, it
+/// captures the structural property the class exists to probe (`bcj`'s
+/// doc comment on `src/filters.rs`) — `call`/`jmp rel32` operands that
+/// cluster in absolute-address space because calls target a small pool of
+/// functions repeatedly. Instructions are drawn from a small filler pool
+/// (prologue/epilogue, register moves, arithmetic, short conditional
+/// jumps) with a 25% chance of emitting a `call`/`jmp rel32` to one of 48
+/// synthetic function starts instead.
+#[must_use]
+pub fn x86_dense_code(len: usize, seed: u64) -> Vec<u8> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::with_capacity(len + X86_CALL_LEN);
+    while out.len() < len {
+        if rng.next_unit() < X86_CALL_PROBABILITY {
+            let opcode = if rng.next_unit() < 0.5 { 0xE8 } else { 0xE9 };
+            #[allow(
+                clippy::cast_possible_wrap,
+                reason = "X86_FUNCTION_COUNT is a small in-repo constant; the product stays far below i64::MAX"
+            )]
+            let target = rng.next_index(X86_FUNCTION_COUNT) as i64 * X86_FUNCTION_STRIDE;
+            // rel32 is measured from the address of the following
+            // instruction, i.e. this opcode's position plus the 5-byte
+            // instruction length; wraps like real rel32 addressing if the
+            // synthetic target pool were ever large enough to overflow it,
+            // which it never is here.
+            #[allow(
+                clippy::cast_possible_wrap,
+                reason = "out.len() stays far below i64::MAX for any corpus this crate generates"
+            )]
+            let pos_after = out.len() as i64 + X86_CALL_LEN as i64;
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "target and pos_after both stay within a few thousand bytes of each other, well within i32 range"
+            )]
+            let rel32 = (target - pos_after) as i32;
+            out.push(opcode);
+            out.extend_from_slice(&rel32.to_le_bytes());
+        } else {
+            let instr = X86_FILLER_INSTRUCTIONS[rng.next_index(X86_FILLER_INSTRUCTIONS.len())];
+            out.extend_from_slice(instr);
+        }
+    }
+    out.truncate(len);
+    out
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -671,7 +778,7 @@ mod tests {
     use super::{
         SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
         gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits, sqlite_like_records,
+        order1_conditional_entropy_bits, sqlite_like_records, x86_dense_code,
     };
 
     const LEN: usize = 200_000;
@@ -750,6 +857,7 @@ mod tests {
         assert_eq!(interleaved_audio16(0, SEED), Vec::<u8>::new());
         assert_eq!(gradient_image(0, SEED), Vec::<u8>::new());
         assert_eq!(sqlite_like_records(0, SEED), Vec::<u8>::new());
+        assert_eq!(x86_dense_code(0, SEED), Vec::<u8>::new());
         assert_eq!(order0_entropy_bits(&[]), 0.0);
         assert_eq!(order1_conditional_entropy_bits(&[]), 0.0);
     }
@@ -1021,6 +1129,46 @@ mod tests {
     }
 
     #[test]
+    fn x86_dense_code_is_exactly_the_requested_length() {
+        for len in [1, 2, 3, 4, 5, 6, 47, 1000, LEN] {
+            assert_eq!(x86_dense_code(len, SEED).len(), len);
+        }
+    }
+
+    #[test]
+    fn x86_dense_code_is_deterministic() {
+        assert_eq!(x86_dense_code(5_000, SEED), x86_dense_code(5_000, SEED));
+    }
+
+    #[test]
+    fn x86_dense_code_seeds_are_independent() {
+        assert_ne!(x86_dense_code(5_000, SEED), x86_dense_code(5_000, SEED + 1));
+    }
+
+    #[test]
+    fn x86_dense_code_is_dense_with_call_and_jmp_opcodes() {
+        // "Dense" is the point of this class: a real binary's call/jmp
+        // share is far lower than this, but the class exists to stress the
+        // bcj filter, so demand a healthy floor rather than a realistic one.
+        let data = x86_dense_code(LEN, SEED);
+        let opcode_bytes = data.iter().filter(|&&b| b == 0xE8 || b == 0xE9).count();
+        assert!(
+            opcode_bytes * 20 > data.len(),
+            "expected >5% of bytes to be call/jmp opcodes, got {opcode_bytes}/{}",
+            data.len()
+        );
+    }
+
+    #[test]
+    fn x86_dense_code_round_trips_through_the_bcj_filter() {
+        // The class exists to exercise `bcj` (S2-A4); confirm it actually
+        // does, independent of the frame-format round trip below.
+        let data = x86_dense_code(LEN, SEED);
+        let filtered = mothergod::filters::bcj::encode(&data);
+        assert_eq!(mothergod::filters::bcj::decode(&filtered), data);
+    }
+
+    #[test]
     fn generators_round_trip_through_the_frame_format() {
         for data in [
             entropy_ladder(1, 5_000, SEED),
@@ -1032,6 +1180,7 @@ mod tests {
             interleaved_audio16(5_000, SEED),
             gradient_image(5_000, SEED),
             sqlite_like_records(5_000, SEED),
+            x86_dense_code(5_000, SEED),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
