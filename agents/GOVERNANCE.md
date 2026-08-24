@@ -70,7 +70,7 @@ mechanisms, all of which the BDFL may reshape on the record.
 | The Mission section of `ROADMAP.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011) |
 | Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |
 | Releases | Agent-prepared, operator-triggered until further notice |
-| Security-report triage, CoC enforcement | Operator only |
+| Security-report triage, CoC enforcement | Operator only; confirm, publish, CVE, and release stay operator-only even under ADR-0032, which lets a BDFL-directed agent privately draft a candidate advisory and, post-confirmation, prepare a fix |
 | Secrets: consuming one that exists, including sending it somewhere new | BDFL, full governance (operator ruling, PR #101 review, 2026-08-23). The sole hard constraint is CLAUDE.md rule 10: a secret is never printed, logged, or leaked. The reviewer verifies handling and names the (secret, destination) pair, but the call is the BDFL's and carries no `blocked-on-human` label |
 | Secrets: minting, rotating, or removing one | Operator only, by physical necessity: nobody else can write repository secrets. `blocked-on-human`, naming the secret |
 
