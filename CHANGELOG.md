@@ -254,6 +254,14 @@ All notable changes to this project are documented here. Format follows
   (`research/corpus/POLICY.md`, "different seed... from train"), distinct
   from it and injective across the seed space. Which dataset kinds are
   sealed-only remains.
+- Train/sealed split plumbing, dataset-kind half (`research/JOURNAL.md`
+  S2-A33): `bench::DatasetKind` enumerates the nine corpus generators and
+  `DatasetKind::sealed_only` designates `AccessLog` and `GradientImage`
+  sealed-validation-only (`research/corpus/POLICY.md`, "held-out dataset
+  kinds") — neither has a filter in `src/filters.rs` whose documented
+  purpose matches its shape, so they measure generalization undiluted by
+  a filter tuned for exactly their shape. Regret scoring, the CI
+  baseline gate, and progress-graph rendering remain.
 
 ### Removed
 

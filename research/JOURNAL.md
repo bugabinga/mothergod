@@ -524,10 +524,9 @@ record.
   S2-A14 through S2-A24); fetch-and-cache done as of S2-A26; decompression
   done as of S2-A28; split plumbing's rotating-window piece done as of
   S2-A29; the sealed-validation split's seed derivation done as of
-  S2-A32; remaining: sealed-validation dataset-kind separation (which
-  generator kinds are sealed-only, never appearing in train), regret
-  scoring, CI baseline gate, progress-graph rendering, and a scheduled
-  workflow exercising `--features corpus-fetch` (issue #231).
+  S2-A32; its dataset-kind separation done as of S2-A33; remaining:
+  regret scoring, CI baseline gate, progress-graph rendering, and a
+  scheduled workflow exercising `--features corpus-fetch` (issue #231).
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1276,6 +1275,44 @@ record.
   (never appearing in train) is still undesignated, plus regret scoring,
   the CI baseline gate, progress-graph rendering, and the scheduled
   `corpus-fetch` workflow (issue #231).
+- S2-A33 | ACCEPTED | Dataset-kind half of S2-D1's remaining
+  sealed-validation split (`research/corpus/POLICY.md`, "held-out seeds
+  AND held-out dataset kinds"): `bench::DatasetKind` enumerates the nine
+  generator kinds and `DatasetKind::sealed_only` designates two of the
+  seven structured classes, `AccessLog` and `GradientImage`, as
+  sealed-only, train-slice code must never request them. Rationale for
+  the split: `EntropyLadder` and `MarkovH82Trap` are POLICY's mandatory
+  datasets, checking the coder against the theoretical floor and the
+  histogram-coder trap on every train iteration rather than
+  generalization, so both stay in train regardless. Of the remaining
+  five, `InterleavedAudio16`, `X86DenseCode`, `Base64Wrapped`, and
+  `SqliteLikeRecords` each have a filter in `src/filters.rs` whose
+  documented purpose matches their shape (delta, BCJ, base64-unwrap,
+  transpose respectively) that train slices actively exercise; an
+  earlier draft of this entry held `SqliteLikeRecords` sealed-only on
+  the claim that no filter targets fixed-width binary records, which
+  review (PR #238) disproved by running `transpose::encode` against the
+  generator's actual 20-byte rows: -0.94 bits/byte order-1 entropy,
+  matching the win `transpose`'s own doc comment cites as its
+  justification (S1-A2). `AccessLog` and `GradientImage` have no filter
+  whose documented purpose matches their shape; scanning every delta
+  stride (1..=96) and transpose column count (2..=96) against each
+  finds nothing past 0.15 bits/byte, noise next to the sqlite case — so
+  holding these two sealed-only measures whether the parse/model/coder
+  stages generalize on their own instead of re-testing a filter tuned
+  for exactly this data. No structural mechanism enforces the split yet —
+  the enum exists for the CI baseline gate and regret scoring (both
+  still S2-D1 debt) to consult once they exist; nothing calls
+  `DatasetKind` today. | 3 unit tests: `DatasetKind::ALL` has no
+  duplicates, the two mandatory kinds are never sealed-only, and the
+  sealed-only set is a nonempty proper subset of `ALL` (catches both "no
+  kind is held out" and "every kind is held out, leaving nothing to
+  train against"). All five root CLAUDE.md gates clean. | No bpb
+  measurement, same reason as S2-A32: split-plumbing infra, not an
+  experiment against a champion — `progress.jsonl` records this as
+  `kind: "patch"` with null bpb deltas. Remaining S2-D1 scope: regret
+  scoring, the CI baseline gate, progress-graph rendering, and the
+  scheduled `corpus-fetch` workflow (issue #231).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
