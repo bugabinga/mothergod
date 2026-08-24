@@ -19,7 +19,7 @@ A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
 unknown method (`UnknownMethod`). A `Method::Lz` payload additionally
 requires format version >= 2 (`codec::LZ_MIN_VERSION`): version 1 named a
 different, incompatible `Lz` payload layout (ADR-0026, superseded by
-ADR-0027), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
+ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
 rather than parsed under the current layout.
 
 ## Methods
@@ -29,7 +29,7 @@ rather than parsed under the current layout.
 | 0x00 | Stored | the original data, verbatim |
 | 0x01 | Lz     | see below |
 
-### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0027)
+### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028)
 
 A trial-selected filter (`src/filters.rs`: none, delta, BCJ, or
 transpose — `filters::select::pick` shortlists candidates,

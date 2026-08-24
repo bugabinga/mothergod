@@ -142,7 +142,7 @@ All notable changes to this project are documented here. Format follows
   `research/imports/session-1/mothergod.rs` (25,524 bytes), against
   `gzip -9`'s 2.392 bits/byte on the same file.
 - Filter selection wired into `Method::Lz` (`research/JOURNAL.md` S2-D2,
-  in full; ADR-0027, `FORMAT_VERSION` 1 → 2): `compress` now trials every
+  in full; ADR-0028, `FORMAT_VERSION` 1 → 2): `compress` now trials every
   candidate filter `filters::select::pick` shortlists (delta, BCJ,
   transpose, or none) against the real LZ + context-mixing pipeline and
   keeps whichever produces the smallest frame, closing M1's last open
@@ -165,12 +165,6 @@ All notable changes to this project are documented here. Format follows
   `corpus.py`. Wraps `json_records` output in a new standalone
   `base64_encode` helper (RFC 4648, zero-dependency) and truncates to the
   requested length.
-- Benchmark harness, fourth structured-generator slice (`research/JOURNAL.md`
-  S2-A21): `interleaved_audio16` in the `bench` crate, interleaved 16-bit
-  audio samples (the "audio" class in `research/corpus/POLICY.md`), ported
-  from the founding session's `corpus.py`. Each sample sums a slow and a
-  fast sine wave plus gaussian noise, truncated toward zero and wrapped to
-  16 bits, matching Python's `int(...) & 0xffff`.
 
 ### Removed
 

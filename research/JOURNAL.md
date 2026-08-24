@@ -473,7 +473,7 @@ record.
   flag/length/offset stages and `Literal` against real LZ tokens, plus
   `Method` wiring). S2-D3 was resolved on 2026-08-23 by ADR-0024; read
   it there, not here.
-- S2-D2 | RESOLVED by S2-A17/ADR-0026 and S2-A19/ADR-0027 | Remainder of
+- S2-D2 | RESOLVED by S2-A17/ADR-0026 and S2-A19/ADR-0028 | Remainder of
   M1 after the S2-A2 through S2-A12 filter, trial-selection, LZ, coder,
   order-0 model, and literal-mixer slices. S2-A17 wired the flag/length/
   offset/rep-slot `model::Model` instances, `literal::Literal`, and
@@ -791,7 +791,7 @@ record.
   entry fixes was reachable from the crate's real API, not a dormant
   cost in unwired code. Still no bpb delta here: this changes encode-
   side cost and robustness, not the bits a fixed input encodes to.
-- S2-A19 | ACCEPTED | ADR-0027, S2-D2's remaining scope, in full: wires
+- S2-A19 | ACCEPTED | ADR-0028, S2-D2's remaining scope, in full: wires
   `filters::select::pick`'s trial selection into `Method::Lz`.
   `codec::encode` now trials every candidate `pick` shortlists (identity,
   delta, BCJ, transpose), running each through the same LZ +
@@ -880,43 +880,6 @@ record.
   `progress.jsonl`'s from it60 to it61) after PR #194 landed S2-A19/it60
   first, the same collision-and-renumber this journal already records for
   S2-A17/S2-A18.
-- S2-A21 | ACCEPTED | Fourth structured-generator slice of M2's remaining
-  benchmark-harness debt (S2-D1): interleaved 16-bit audio samples
-  (`research/corpus/POLICY.md`'s "audio" class) ported to `bench/src/lib.rs`
-  as `interleaved_audio16`, mirroring `access_log`/`json_records`/
-  `base64_wrapped`'s structure. Behavior ported from the founding session's
-  `corpus.py` (`c['audio16']`, `git show
-  1a3b1c8:research/imports/session-1/corpus.py`), not the code (ADR-0006):
-  each sample sums a slow sine (amplitude 2500, period 37 samples), a fast
-  sine (amplitude 1500, period 11 samples), and gaussian noise (stddev
-  200), truncated toward zero and kept to the low 16 bits. Python's
-  `int(...)` truncates a float toward zero exactly like `as i64` does, and
-  its `& 0xffff` on a (possibly negative) arbitrary-precision int keeps the
-  low 16 bits in two's complement, exactly what `as u16` produces from that
-  `i64` — both cast steps carry a `#[allow]` with that reasoning rather
-  than a `try_from`, since the wraparound is intentional, not an error
-  case. One behavior-preserving deviation, the same shape as `access_log`'s:
-  the archive fixes the sample count at `N / 2` then emits exactly that
-  many bytes (so an odd `N` silently loses its last requested byte); this
-  port generates samples until `len` bytes are reached then truncates, so
-  it produces exactly `len` bytes for any requested length. `sin`/`cos` are
-  disallowed crate-wide by ADR-0024's `clippy.toml` (decode-path
-  cross-platform determinism), but `bench/`'s own `clippy.toml` already
-  overrides that back to empty (S2-A16) since corpus generation never
-  touches a bitstream. | 4 new unit tests: exact-length output across six
-  requested lengths including odd ones, determinism, seed independence, and
-  a structural check that consecutive 16-bit samples (little-endian) mostly
-  differ by far less than the full range, unlike iid data; wired into the
-  existing frame-format round-trip test. `cargo fmt`/`clippy --all-targets
-  -- --deny warnings`/`test --all-targets`/`test --doc`/`doc --no-deps`
-  (`RUSTDOCFLAGS=--deny warnings`) all clean. | No bpb measurement: this is
-  corpus-generation infra, not an experiment against a champion —
-  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
-  same as S2-A1 through S2-A20. Remaining S2-D1 scope: Silesia + Canterbury
-  fetch-and-cache, the three remaining structured generator classes (image,
-  sqlite-like, x86 binary), the three-tier train/sealed/finals split
-  plumbing, regret scoring, the CI baseline gate, and progress-graph
-  rendering.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

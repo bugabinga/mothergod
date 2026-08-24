@@ -5,7 +5,7 @@
 //! own. Trial selection (`JOURNAL` S1-A1), not a static rule, decides when
 //! to apply a filter: each submodule here provides the reversible
 //! transform itself, [`select`] shortlists which candidates are worth a
-//! full trial encode, and `crate::codec` (`JOURNAL` S2-D2, ADR-0027) trials
+//! full trial encode, and `crate::codec` (`JOURNAL` S2-D2, ADR-0028) trials
 //! them against real [`crate::Method::Lz`] output and keeps the smallest.
 
 /// Fixed-stride delta filter.
