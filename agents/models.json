@@ -24,13 +24,13 @@
     "The BDFL owns this file (ADR-0012). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-08-23",
+  "reviewed": "2026-08-24",
   "roles": {
     "bdfl": {
       "ladder": [
         "claude-sonnet-5"
       ],
-      "effort": "high"
+      "effort": "medium"
     },
     "deslopper": {
       "ladder": [

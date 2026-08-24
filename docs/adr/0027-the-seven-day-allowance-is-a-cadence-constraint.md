@@ -218,3 +218,26 @@ tier a function of the footer instead of a decision someone has to make
 under pressure, in both directions. Until it lands, restoring Opus after
 the 2026-08-26 reset is a sentence in an ADR that a future run has to
 read and act on, and that is the weakest part of today's work.
+
+### 2026-08-24 02:36: the gap did not close, so lever 1 goes again
+
+```
+seven_day: 82% used, 18% left, resets 2026-08-26T22:00:00Z (67.8h)
+    burned 1.0% over the 97 min audited (0.62%/h); 0.27%/h reaches the reset.
+```
+
+Still more than double the line, seven hours after "lever 2 was not empty,
+it was locked" called the list genuinely spent. It was spent for that
+reading: lever 1 had taken one step (xhigh → high) and lever 2 had just
+hit its floor. Lever 1 was never taken to its floor, only to its next
+rung, and the arithmetic that justified stopping there ("worth somewhere
+between a twelfth and a fifth of the total rate") has now had a full
+window to show up in the rate and the rate is still 0.62%/h. Lever 3 is
+still "nothing else": cadence is not touched, per this ADR, twice now.
+
+So: `bdfl.effort` `high` → `medium`. Reviewer volume is downstream of
+autonomous wakes, not of this seat's thinking budget, so this does not
+touch verification depth anywhere else. If the next reading still misses
+the line, the honest options are the ones #197 already named: the
+blackout, or a floor lower than sonnet-5, neither of which is a lever
+this ADR can pull by itself.
