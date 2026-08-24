@@ -9,6 +9,13 @@
 //! scan. This is the flag/length/offset stage of S2-D2 (each of those is one
 //! `Model` instance); the six-expert `Lit` literal mixer is a separate,
 //! larger slice built on top of the same coder, not on top of this type.
+//!
+//! [`Model::ideal_cost_bits`] is ROADMAP M2's ideal-cost accounting mode
+//! (first slice, `JOURNAL` S2-D1): sums `-log2(p)` against this table's
+//! adaptive state instead of driving [`crate::coder::Encoder`], so an
+//! experiment loop can price a distribution without paying for real
+//! arithmetic coding. [`crate::literal::Literal`]'s six-expert mixer is a
+//! separate, larger slice of the same mode still to come.
 
 use crate::coder::{Decoder, Encoder};
 
@@ -86,6 +93,29 @@ impl Model {
         let high = low + self.freq[symbol];
         encoder.encode(u64::from(low), u64::from(high), u64::from(self.total));
         self.update(symbol);
+    }
+
+    /// Bits it would cost to code `symbol` under this table's current
+    /// distribution — `-log2(freq[symbol] / total)` — then updates the
+    /// table the same way [`Self::encode`] does. No [`Encoder`] involved:
+    /// this is the ideal-cost accounting mode ROADMAP M2 and ADR-0006 call
+    /// for, the Rust-native replacement for the archive's Python model-cost
+    /// proxy (`sum -log2(p)` instead of emitting bits), for experiment
+    /// loops that want a distribution's cost without paying for real
+    /// arithmetic coding.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `symbol >= alphabet_len`, same bound as [`Self::encode`].
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits(&mut self, symbol: usize) -> f64 {
+        let probability = f64::from(self.freq[symbol]) / f64::from(self.total);
+        self.update(symbol);
+        -probability.log2()
     }
 
     /// Decodes one symbol from `decoder` under this table's current
@@ -200,6 +230,86 @@ mod tests {
             assert_eq!(flag_model.decode(&mut dec), flag);
             assert_eq!(length_model.decode(&mut dec), len);
         }
+    }
+
+    #[test]
+    fn ideal_cost_matches_fresh_table_uniform_distribution() {
+        // A fresh 4-symbol table starts uniform (every freq is 1, total 4),
+        // so every symbol's ideal cost is exactly -log2(1/4) = 2 bits.
+        let mut model = Model::new(4);
+        assert!((model.ideal_cost_bits(0) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ideal_cost_drops_as_a_symbol_gets_more_likely() {
+        // Coding the same symbol repeatedly raises its own frequency
+        // (INCREMENT), so its ideal cost must strictly decrease call over
+        // call as the table adapts toward it.
+        let mut model = Model::new(4);
+        let first = model.ideal_cost_bits(0);
+        let second = model.ideal_cost_bits(0);
+        let third = model.ideal_cost_bits(0);
+        assert!(second < first);
+        assert!(third < second);
+    }
+
+    #[test]
+    fn ideal_cost_updates_state_same_as_encode() {
+        // ideal_cost_bits must leave the table in the same state encode
+        // would have: fork two identical tables, drive one through each
+        // path over the same symbols, then confirm they agree from here by
+        // coding one more symbol on top of each and comparing cost.
+        let symbols = [0usize, 1, 0, 2, 0, 1, 3, 0];
+        let mut via_encode = Model::new(4);
+        let mut enc = Encoder::new();
+        for &s in &symbols {
+            via_encode.encode(&mut enc, s);
+        }
+        let mut via_ideal_cost = Model::new(4);
+        for &s in &symbols {
+            let _ = via_ideal_cost.ideal_cost_bits(s);
+        }
+        assert!((via_encode.ideal_cost_bits(2) - via_ideal_cost.ideal_cost_bits(2)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ideal_cost_sum_tracks_real_encoded_length() {
+        // Named corpus (CLAUDE.md hard rule 4): 5000 pseudo-random symbols
+        // over a 32-wide alphabet, the same fixture
+        // pseudo_random_symbols_round_trip above uses. Summed ideal cost is
+        // an estimate, not the real coder's bit-exact output (integer
+        // cumulative-frequency division rounds; the coder also pays a
+        // handful of flush bits at the very end), so this checks closeness,
+        // not equality — the same tolerance shape as literal.rs's vendored
+        // `exp` accuracy check (ADR-0024).
+        let symbols: Vec<usize> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| (state % 32) as usize)
+            .collect();
+
+        let mut ideal_cost_model = Model::new(32);
+        let ideal_bits: f64 = symbols
+            .iter()
+            .map(|&s| ideal_cost_model.ideal_cost_bits(s))
+            .sum();
+
+        let mut real_model = Model::new(32);
+        let mut enc = Encoder::new();
+        for &s in &symbols {
+            real_model.encode(&mut enc, s);
+        }
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "encoded length is far below f64's exact integer range (2^53)"
+        )]
+        let real_bits = (enc.finish().len() * 8) as f64;
+
+        let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
+        assert!(
+            relative_diff <= 0.01,
+            "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
+             {relative_diff:.4} relative difference exceeds the 1% budget"
+        );
     }
 
     #[test]

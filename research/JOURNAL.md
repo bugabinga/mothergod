@@ -1197,6 +1197,34 @@ record.
   seeds/generators are sealed-only), regret scoring, the CI baseline
   gate, progress-graph rendering, and the scheduled `corpus-fetch`
   workflow.
+- S2-A30 | ACCEPTED | ROADMAP M2's ideal-cost accounting mode (ADR-0006),
+  first slice: `Model::ideal_cost_bits` sums `-log2(freq[symbol] /
+  total)` against the same adaptive state `Model::encode` drives, then
+  applies the same `update` call, without touching an `Encoder` at all —
+  the Rust-native replacement ADR-0006 calls for the archive's Python
+  model-cost proxy, so an experiment loop can price a distribution
+  without paying for real arithmetic coding. Unlike `Literal::update`'s
+  `exp` (ADR-0024, S2-D3), this never sits on the coding path — no
+  bitstream depends on it, encoder or decoder — so it uses `f64::log2`
+  directly behind a justified `clippy::disallowed_methods` allow instead
+  of a vendored implementation; ADR-0024's cross-platform-determinism
+  requirement binds what an encoder and decoder must agree on, and this
+  method is neither. | 4 unit tests: a fresh table's uniform-distribution
+  cost is exactly 2 bits over a 4-symbol alphabet; cost strictly
+  decreases as a symbol gets coded repeatedly; a model driven through
+  `ideal_cost_bits` alone ends in the same state as one driven through
+  `encode` alone (checked by coding one more symbol on each and
+  comparing cost); summed ideal cost over 5,000 pseudo-random symbols
+  (32-wide alphabet) tracks the real `Encoder`'s bit-exact output within
+  1% (Xorshift32, seed `0x12345678`), the same tolerance shape as
+  `literal.rs`'s vendored-`exp` accuracy check. All five root CLAUDE.md
+  gates clean. | No bpb measurement: this is the accounting tool an
+  experiment would use, not itself an experiment against a champion —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
+  Remaining scope: `Literal`'s six-expert mixer needs the same
+  accounting method (larger slice, mirrors S2-A12's relationship to
+  S2-A11), and nothing yet sums a whole-codec ideal-cost pass across
+  `lz`'s flag/length/offset streams and `literal`'s bytes together.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
