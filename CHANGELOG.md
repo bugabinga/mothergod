@@ -404,8 +404,11 @@ All notable changes to this project are documented here. Format follows
   format's only method was `Stored`, though `Method::Lz` (optimal-parse LZ
   over the context-mixing range coder) has been wired since ADR-0026/0028
   (`FORMAT_VERSION` 2). Corrected both to name `Lz` and note that no
-  named-corpus bits/byte number exists yet for this Rust build — that is
-  `ROADMAP.md` milestone M2, not yet landed.
+  Silesia/Canterbury benchmark-suite number exists yet for this Rust build
+  — that is `ROADMAP.md` milestone M2, not yet landed. A single-file check
+  exists (2.318 bits/byte on the ported archive source vs `gzip -9`'s
+  2.392, `research/JOURNAL.md` S2-A17) but isn't the aggregate claim the
+  scorecard wants.
 
 ### Added
 

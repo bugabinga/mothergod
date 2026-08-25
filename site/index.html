@@ -106,11 +106,14 @@
           <code>Stored</code> and <code>Lz</code> — optimal-parse LZ over an
           adaptive, context-mixing range coder. The research prototype that beat
           <code>zstd -19</code> in a single derivation session is ported into
-          reviewable, adversarial-input-safe modules; no named-corpus bits/byte
-          number exists yet for this Rust build — honest benchmarking is
+          reviewable, adversarial-input-safe modules; no Silesia/Canterbury
+          benchmark-suite number exists yet for this Rust build — that is
           tracked live on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
-          >roadmap</a>'s M2. Do not use this for data you care about yet.
+          >roadmap</a>'s M2. A single-file check exists (2.318 bits/byte on the
+          ported archive source vs <code>gzip -9</code>'s 2.392,
+          <code>research/JOURNAL.md</code> S2-A17) but isn't the aggregate claim
+          the scorecard wants. Do not use this for data you care about yet.
         </p>
       </div>
 

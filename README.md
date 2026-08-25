@@ -32,10 +32,12 @@ The container format (`FORMAT_VERSION` 2) now supports `Stored` and `Lz`
 (optimal-parse LZ over an adaptive, context-mixing range coder —
 `research/JOURNAL.md` S2-D2/S2-D3): the founding-session prototype (codec
 v0.6) described above is ported into `src/`'s reviewable modules. No
-named-corpus bits/byte number exists yet for this Rust build — honest
-benchmarking is [`ROADMAP.md`](ROADMAP.md) milestone M2, not yet landed. The
-bitstream format itself is still unstable pre-1.0. Do not use this for data
-you care about yet.
+Silesia/Canterbury benchmark-suite number exists yet for this Rust build —
+that is [`ROADMAP.md`](ROADMAP.md) milestone M2, not yet landed. A
+single-file check exists (2.318 bits/byte on the ported archive source vs
+`gzip -9`'s 2.392, `research/JOURNAL.md` S2-A17) but isn't the aggregate
+claim the scorecard wants. The bitstream format itself is still unstable
+pre-1.0. Do not use this for data you care about yet.
 
 ## Try it
 
