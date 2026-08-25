@@ -28,10 +28,15 @@ mothergod is two experiments in one repository:
 
 ## Status: pre-alpha, format unstable
 
-The repository currently contains the project scaffolding and a v0 container
-format whose only method is `Stored`. The research prototype (codec v0.6) is
-being imported/reconstructed — progress is tracked in
-[`ROADMAP.md`](ROADMAP.md). Do not use this for data you care about yet.
+The container format (`FORMAT_VERSION` 2) now supports `Stored` and `Lz`
+(optimal-parse LZ over an adaptive, context-mixing range coder —
+`research/JOURNAL.md` S2-D2/S2-D3): the founding-session prototype (codec
+v0.6) described above is ported into `src/`'s reviewable modules. No
+Silesia/Canterbury benchmark-suite number exists yet for this Rust build —
+that is [`ROADMAP.md`](ROADMAP.md) milestone M2, not yet landed; see
+`research/JOURNAL.md` S2-A17 for a dev-time spot-check, not the aggregate
+claim the scorecard wants. The bitstream format itself is still unstable
+pre-1.0. Do not use this for data you care about yet.
 
 ## Try it
 
