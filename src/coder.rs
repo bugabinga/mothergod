@@ -31,6 +31,22 @@ const MASK: u64 = TOP - 1;
 /// adaptively-coded length/offset bucket.
 const BIT_SCALE: u64 = 1 << 16;
 
+/// Narrows `[low, high]` to the sub-range `[cum_low, cum_high)` out of
+/// `total`: the interval-splitting arithmetic [`Encoder::encode`] and
+/// [`Decoder::decode`] each perform before renormalizing. Shared so a future
+/// change to the rounding here can't drift between the two and desync them
+/// mid-stream (hard rule 1, `CLAUDE.md`).
+///
+/// # Panics
+///
+/// Panics if `total` is zero (integer division by zero).
+fn narrow(low: u64, high: u64, cum_low: u64, cum_high: u64, total: u64) -> (u64, u64) {
+    let range = high - low + 1;
+    let new_high = low + range * cum_high / total - 1;
+    let new_low = low + range * cum_low / total;
+    (new_low, new_high)
+}
+
 /// Range-codes a byte stream from a sequence of caller-supplied
 /// cumulative-frequency ranges.
 ///
@@ -91,9 +107,7 @@ impl Encoder {
     ///
     /// Panics if `total` is zero (integer division by zero).
     pub fn encode(&mut self, cum_low: u64, cum_high: u64, total: u64) {
-        let range = self.high - self.low + 1;
-        self.high = self.low + range * cum_high / total - 1;
-        self.low += range * cum_low / total;
+        (self.low, self.high) = narrow(self.low, self.high, cum_low, cum_high, total);
         loop {
             if self.high < HALF {
                 self.emit(0);
@@ -232,9 +246,7 @@ impl<'a> Decoder<'a> {
     ///
     /// Panics if `total` is zero (integer division by zero).
     pub fn decode(&mut self, cum_low: u64, cum_high: u64, total: u64) {
-        let range = self.high - self.low + 1;
-        self.high = self.low + range * cum_high / total - 1;
-        self.low += range * cum_low / total;
+        (self.low, self.high) = narrow(self.low, self.high, cum_low, cum_high, total);
         loop {
             let shift = if self.high < HALF {
                 true
