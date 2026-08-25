@@ -2,9 +2,9 @@
 
 # Baseline snapshot
 
-As of 2026-08-25T13:25:02Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals (ROADMAP M2, still landing). No gzip/zstd/xz comparison here yet: that needs the finals fetch (`research/JOURNAL.md` S2-D1) and a reference-compressor harness, neither of which exists in this crate yet.
+As of 2026-08-25T13:38:02Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals (ROADMAP M2, still landing). No gzip/zstd/xz comparison here yet: that needs the finals fetch (`research/JOURNAL.md` S2-D1) and a reference-compressor harness, neither of which exists in this crate yet.
 
-![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-08-25T13:25:02Z](baseline.svg)
+![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-08-25T13:38:02Z](baseline.svg)
 
 | case | bits/byte |
 |---|---|

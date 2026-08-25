@@ -39,11 +39,16 @@ fn sorted(bars: &[Bar]) -> Vec<&Bar> {
     out
 }
 
-/// Escapes `text` for use inside SVG element content or an attribute.
+/// Escapes `text` for use inside SVG element content or a double-quoted
+/// attribute value (e.g. `aria-label="{escape_svg(text)}"`): also escapes
+/// `"` and `'`, since an unescaped `"` in an attribute value closes the
+/// attribute early and turns the remainder into raw markup.
 fn escape_svg(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// Escapes `text` for use inside a markdown table cell: a pipe would end
@@ -276,6 +281,17 @@ mod tests {
         assert!(!svg.contains("<script>"));
         assert!(svg.contains("&amp;"));
         assert!(svg.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn svg_escapes_quotes_in_the_attribute_context() {
+        // aria-label="{alt_text}" is a double-quoted attribute; an
+        // unescaped `"` in alt_text would close the attribute early and
+        // turn the rest of its value into raw markup.
+        let svg = render_svg("A \"quote\" and 'apostrophe'", "s", &[]);
+        assert!(!svg.contains(r#"aria-label="A "quote""#));
+        assert!(svg.contains("&quot;quote&quot;"));
+        assert!(svg.contains("&apos;apostrophe&apos;"));
     }
 
     #[test]
