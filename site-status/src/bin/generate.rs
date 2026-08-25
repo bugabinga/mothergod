@@ -144,9 +144,9 @@ fn main() -> ExitCode {
         benchmarks_note: "Not yet measurable: no Silesia/Canterbury bits/byte vs \
             gzip/zstd/xz exists yet for this Rust build (ROADMAP M2's bench harness is \
             still landing, research/JOURNAL.md S2-D1). The founding research prototype \
-            beat zstd -19 in a single derivation session on different code; see \
-            research/JOURNAL.md S2-A17 for a dev-time spot-check, not the aggregate \
-            claim the scorecard wants."
+            (pre-port, different code) beat zstd -19 on one narrow synthetic dataset \
+            built to expose histogram-coder weaknesses; see research/JOURNAL.md S1-L3, \
+            not the aggregate claim the scorecard wants."
             .to_string(),
         experiments: experiment_stats,
         merged_prs_7d,
