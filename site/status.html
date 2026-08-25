@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Status — mothergod</title>
+    <meta
+      name="description"
+      content="mothergod's live project vitals: milestone progress, experiment ledger, and honest benchmark status, generated from the repository itself."
+    >
+    <link rel="icon" href="/logo.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Albert+Sans:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+    >
+    <style>
+    :root {
+      --void: #0b0618;
+      --nebula: #1c1136;
+      --raised: #251646;
+      --line: #382a5e;
+      --starlight: #f2ecff;
+      --muted: #a396c9;
+      --gold: #ffd76a;
+      --gold-deep: #e0a12f;
+      --green: #8fd6a8;
+      --amber: #e0b95c;
+      --dim: #6b5f8f;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      background:
+        radial-gradient(120% 90% at 50% 0%, #241548 0%, var(--void) 62%) fixed,
+        var(--void);
+      color: var(--starlight);
+      font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+      padding: 4rem 1.25rem 5rem;
+    }
+    main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 3rem; }
+
+    header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+    h1 {
+      font-family: "Unbounded", "Albert Sans", sans-serif;
+      font-weight: 600; font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+      letter-spacing: .02em;
+    }
+    .tagline { color: var(--muted); max-width: 46ch; text-align: center; }
+    .back { font-family: "JetBrains Mono", monospace; font-size: .8rem; }
+
+    h2 {
+      font-family: "Unbounded", "Albert Sans", sans-serif;
+      font-weight: 400; font-size: .8rem; letter-spacing: .28em;
+      text-transform: uppercase; color: var(--gold);
+      display: flex; align-items: center; gap: 1rem;
+    }
+    h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    section { display: flex; flex-direction: column; gap: 1rem; }
+    p { color: var(--muted); }
+    p strong { color: var(--starlight); font-weight: 500; }
+    a { color: var(--gold); }
+    a:hover, a:focus-visible { color: var(--gold-deep); }
+    code {
+      font-family: "JetBrains Mono", monospace; font-size: .85em;
+      background: var(--raised); padding: .1em .35em; border-radius: 4px;
+    }
+
+    .card {
+      background: var(--nebula); border: 1px solid var(--line); border-radius: 14px;
+      padding: 1.1rem 1.3rem; display: flex; flex-direction: column; gap: .6rem;
+    }
+    .card b { color: var(--gold); font-family: "JetBrains Mono", monospace; font-size: .78rem;
+      letter-spacing: .08em; text-transform: uppercase; }
+    .card p { color: var(--starlight); font-size: .95rem; }
+
+    .asof { color: var(--dim); font-size: .78rem; font-family: "JetBrains Mono", monospace; }
+
+    .milestones { list-style: none; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+    .milestones li {
+      display: flex; align-items: baseline; gap: .7rem;
+      padding: .6rem .8rem; border-radius: 10px; background: var(--nebula);
+      border: 1px solid var(--line);
+    }
+    .milestones .id {
+      font-family: "JetBrains Mono", monospace; font-size: .8rem; color: var(--dim);
+      min-width: 2.4rem;
+    }
+    .milestones .title { flex: 1; color: var(--starlight); font-size: .92rem; }
+    .milestones .badge {
+      font-family: "JetBrains Mono", monospace; font-size: .72rem; letter-spacing: .06em;
+      text-transform: uppercase; padding: .15rem .5rem; border-radius: 999px;
+      border: 1px solid var(--line);
+    }
+    .milestones li[data-status="done"] .badge { color: var(--green); border-color: var(--green); }
+    .milestones li[data-status="active"] .badge { color: var(--gold); border-color: var(--gold); }
+    .milestones li[data-status="pending"] .badge { color: var(--dim); }
+    .milestones li[data-status="done"] .id { color: var(--green); }
+    .milestones li[data-status="active"] .id { color: var(--gold); }
+
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .8rem; }
+    .stat {
+      background: var(--nebula); border: 1px solid var(--line); border-radius: 10px;
+      padding: .8rem 1rem; display: flex; flex-direction: column; gap: .2rem;
+    }
+    .stat .n {
+      font-family: "Unbounded", monospace; font-size: 1.4rem; color: var(--gold);
+    }
+    .stat .label {
+      font-size: .72rem; color: var(--muted); letter-spacing: .03em;
+    }
+
+    .latest {
+      font-size: .88rem; color: var(--muted); border-left: 2px solid var(--line);
+      padding-left: .8rem;
+    }
+    .latest .id { color: var(--gold); font-family: "JetBrains Mono", monospace; }
+
+    footer { text-align: center; color: var(--muted); font-size: .85rem; }
+
+    [data-loading] { color: var(--dim); font-size: .85rem; font-style: italic; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="back"><a href="/">← mothergod</a></p>
+        <h1>Project status</h1>
+        <p class="tagline">
+          Generated from the repository itself: ROADMAP.md's own checkboxes, the
+          research journal's experiment log, and this checkout's source tree.
+          Every number below names where it came from.
+        </p>
+      </header>
+
+      <section id="verdict-section">
+        <h2>Can I use this yet?</h2>
+        <div class="card" id="verdict-card" data-loading>Loading…</div>
+      </section>
+
+      <section id="benchmarks-section">
+        <h2>Is it any good?</h2>
+        <div class="card" id="benchmarks-card" data-loading>Loading…</div>
+      </section>
+
+      <section id="progress-section">
+        <h2>Is it alive?</h2>
+        <p>
+          Milestones, oldest first. Status comes straight from ROADMAP.md's
+          checkboxes.
+        </p>
+        <ul class="milestones" id="milestones-list" data-loading>Loading…</ul>
+
+        <div class="stats" id="stats-grid" data-loading>Loading…</div>
+
+        <p class="latest" id="latest-experiment"></p>
+      </section>
+
+      <p class="asof" id="asof-line"></p>
+
+      <footer>
+        <a href="/">mothergod</a> ·
+        <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
+        >Roadmap</a> ·
+        <a
+          href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md"
+        >Research journal</a>
+      </footer>
+    </main>
+
+    <script>
+    async function main() {
+      let data;
+      try {
+        const res = await fetch('/status-data.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`status-data.json: HTTP ${res.status}`);
+        data = await res.json();
+      } catch (err) {
+        document.querySelectorAll('[data-loading]').forEach((el) => {
+          el.textContent = `Could not load status-data.json (${err.message}).`;
+        });
+        return;
+      }
+
+      const verdict = document.getElementById('verdict-card');
+      verdict.removeAttribute('data-loading');
+      verdict.innerHTML = `
+        <b>${escapeHtml(data.phase)}</b>
+        <p><strong>Format version ${data.format_version}.</strong> ${escapeHtml(data.works_today)}</p>
+      `;
+
+      const benchmarks = document.getElementById('benchmarks-card');
+      benchmarks.removeAttribute('data-loading');
+      benchmarks.innerHTML = `<p>${escapeHtml(data.benchmarks_note)}</p>`;
+
+      const list = document.getElementById('milestones-list');
+      list.removeAttribute('data-loading');
+      list.innerHTML = data.milestones.map((m) => `
+        <li data-status="${escapeHtml(m.status)}">
+          <span class="id">${escapeHtml(m.id)}</span>
+          <span class="title">${escapeHtml(m.title)}</span>
+          <span class="badge">${escapeHtml(m.status)}</span>
+        </li>
+      `).join('');
+
+      const stats = document.getElementById('stats-grid');
+      stats.removeAttribute('data-loading');
+      const statEntries = [
+        [data.experiments.total, 'experiments recorded'],
+        [data.experiments.accepted, 'accepted'],
+        [data.experiments.rejected, 'rejected'],
+        [data.merged_prs_7d, 'commits merged, 7d'],
+        [data.recorded_experiments_7d, 'experiments, 7d'],
+        [data.sloc_src, 'lines in src/'],
+        [data.test_functions_src, 'unit tests in src/'],
+      ];
+      stats.innerHTML = statEntries.map(([n, label]) => `
+        <div class="stat"><span class="n">${n}</span><span class="label">${escapeHtml(label)}</span></div>
+      `).join('');
+
+      const latest = document.getElementById('latest-experiment');
+      if (data.experiments.latest_id) {
+        latest.innerHTML = `Latest: <span class="id">${escapeHtml(data.experiments.latest_id)}</span> — ${escapeHtml(data.experiments.latest_hypothesis)}`;
+      }
+
+      document.getElementById('asof-line').textContent =
+        `As of ${data.generated_at}. Regenerated by hand until research/JOURNAL.md's ` +
+        `S2-D1 scheduled-workflow line lands; see site-status/ for the generator.`;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+
+    main();
+    </script>
+  </body>
+</html>
