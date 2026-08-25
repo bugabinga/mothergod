@@ -44,6 +44,7 @@
 pub mod baseline;
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
+pub mod graph;
 
 use std::fmt::Write as _;
 

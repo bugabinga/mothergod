@@ -525,9 +525,13 @@ record.
   done as of S2-A28; split plumbing's rotating-window piece done as of
   S2-A29; the sealed-validation split's seed derivation done as of
   S2-A32; its dataset-kind separation done as of S2-A33; regret scoring
-  done as of S2-A34; remaining: CI baseline gate, progress-graph
-  rendering, and a scheduled workflow exercising `--features
-  corpus-fetch` (issue #231).
+  done as of S2-A34; progress-graph rendering (of `bench/baseline.json`,
+  the only real numbers available) done as of S2-A36; remaining: the CI
+  baseline gate and a scheduled workflow exercising `--features
+  corpus-fetch` (issue #231), both `.github/workflows/` pushes reserved
+  for `GH_ADMIN_TOKEN`, plus the gzip/zstd/xz reference column and real
+  Silesia/Canterbury numbers S2-A36 named as still missing from the
+  graph itself.
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1382,6 +1386,44 @@ record.
   entry investigates). Remaining S2-D1 scope: the CI wiring itself (needs
   `GH_ADMIN_TOKEN`), progress-graph rendering, and the scheduled
   `corpus-fetch` workflow (issue #231).
+- S2-A36 | ACCEPTED | Progress-graph rendering, next slice of the
+  remaining S2-D1 debt after S2-A35's `baseline` module (ROADMAP M2:
+  "per-dataset graphs rendered ... into `docs/benchmarks/`"): a new
+  `bench::graph` module renders `bench/baseline.json` as a hand-rolled
+  static SVG bar chart plus a markdown table, no charting dependency (11
+  bars, well inside hand-rolled SVG). 11 cases is past the dataviz
+  convention's ~7-class chart-alone ceiling, so both forms ship together
+  (`docs/benchmarks/baseline.svg` + `baseline.md`), generated in one pass
+  so they can't drift apart. A new `render_baseline_graph` binary
+  (`cargo run -p mothergod-bench --release --bin render_baseline_graph`)
+  writes both from the committed baseline; not yet on a schedule for the
+  same reason `baseline_gate` isn't wired into CI (S2-A35): a
+  `.github/workflows/` push needs `GH_ADMIN_TOKEN`
+  (`agents/GOVERNANCE.md`, "Push identity"), not available to this
+  session. `docs/benchmarks/README.md` states plainly what's still
+  missing (no gzip/zstd/xz column, no Silesia/Canterbury numbers) rather
+  than letting the chart imply more than `bench/baseline.json` measures.
+  | 9 unit tests on `bench::graph`: SVG well-formedness (one `<path>` per
+  bar), ascending sort order, HTML-entity escaping of title/subtitle
+  (guards against a case name or the "as of" stamp breaking the markup),
+  empty-input rendering, corner-radius clamping for a bar narrower than
+  the radius (an early draft's radius/width-halving guard, caught before
+  commit by manual geometry review, not by a failing test — the fix
+  landed with a regression test alongside it), a regression test pinning
+  bar width and the top gridline to the same rounded axis ceiling (an
+  early draft scaled bars by the raw data max but gridlines by its
+  ceiling, so the top gridline overshot the plot's right edge into the
+  value-label column — caught by rendering the SVG and checking
+  coordinate bounds with a script before committing, not by CI), and the
+  markdown table's header/row/pipe-escaping shape. All five root
+  CLAUDE.md gates clean. | No bpb measurement: this renders an existing
+  measurement, it doesn't take one — `progress.jsonl` records this as
+  `kind: "patch"` with null bpb deltas, same as S2-A29 through S2-A35.
+  Remaining S2-D1 scope: the CI baseline gate and the scheduled
+  `corpus-fetch` workflow (issue #231), both `.github/workflows/` pushes
+  reserved for `GH_ADMIN_TOKEN`; a gzip/zstd/xz reference column and real
+  Silesia/Canterbury numbers, both new scope this entry surfaced rather
+  than closed.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
