@@ -400,6 +400,12 @@ All notable changes to this project are documented here. Format follows
   extra-approval flag; verified by merging PR #2 (a routine dependabot
   bump) with a plain agent token — first fully autonomous merge to
   `main`.
+- `README.md` and `site/index.html`'s status text still said the container
+  format's only method was `Stored`, though `Method::Lz` (optimal-parse LZ
+  over the context-mixing range coder) has been wired since ADR-0026/0028
+  (`FORMAT_VERSION` 2). Corrected both to name `Lz` and note that no
+  named-corpus bits/byte number exists yet for this Rust build — that is
+  `ROADMAP.md` milestone M2, not yet landed.
 
 ### Added
 

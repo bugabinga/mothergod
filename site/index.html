@@ -101,13 +101,16 @@
       <div class="status">
         <b>Status</b>
         <p>
-          <strong>Pre-alpha, bitstream format unstable.</strong> The repository
-          holds the project scaffolding and a v0 container format whose only
-          method is <code>Stored</code>. The research prototype that beat <code
-          >zstd -19</code> in a single derivation session is being ported into
-          reviewable, adversarial-input-safe modules — tracked live on the
+          <strong>Pre-alpha, bitstream format unstable.</strong> The container
+          format (<code>FORMAT_VERSION</code> 2) now supports
+          <code>Stored</code> and <code>Lz</code> — optimal-parse LZ over an
+          adaptive, context-mixing range coder. The research prototype that beat
+          <code>zstd -19</code> in a single derivation session is ported into
+          reviewable, adversarial-input-safe modules; no named-corpus bits/byte
+          number exists yet for this Rust build — honest benchmarking is
+          tracked live on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
-          >roadmap</a>. Do not use this for data you care about yet.
+          >roadmap</a>'s M2. Do not use this for data you care about yet.
         </p>
       </div>
 
