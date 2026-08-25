@@ -27,6 +27,7 @@ Two agent-system pieces cannot live here, by platform requirement:
   `rust-craft` is the Rust standard for codec code, consulted by whoever is writing or judging it (ADR-0017).
   `compile-judgement` decides whether recurring work should become a mechanism (ADR-0022).
   `adr` governs creating, superseding, correcting, and reviewing architecture decisions (ADR-0030).
+  `information-placement` routes guidance, procedures, decisions, history, and work by lifetime (ADR-0030).
   The Claude Code harness only discovers skills there.
 
 Everything else in the repository — `src/`, `docs/`, `research/`,
