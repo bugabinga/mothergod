@@ -476,6 +476,9 @@ jobs:
             When placing or reviewing agent guidance, procedures,
             decisions, operational history, or work, use
             `information-placement`; skip it when those homes are unchanged.
+            When creating or editing `.claude/skills/`, or moving
+            workflow-prompt procedure into a skill, use `agent-skill-craft`;
+            skip it for workflow edits that do neither.
 
             Run economy — the delta core, every run, in order (CHAT
             reorders: inbox first, then sweeps as budget allows):
