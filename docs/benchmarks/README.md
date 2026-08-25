@@ -1,31 +1,38 @@
 # Benchmarks
 
-`baseline.md` and `baseline.svg` are a generated snapshot of mothergod's
-bits/byte on `bench/baseline.json`'s fixed regression-gate cases
-(`research/JOURNAL.md` S2-A35): one case per entropy-ladder target plus one
-per train-eligible structured dataset kind (`bench::DatasetKind`), all
-generated in-repo, none of them Silesia or Canterbury.
+Two generated snapshots, kept separate because they measure different
+tiers of `research/corpus/POLICY.md`'s corpus and neither should be read
+as the other:
 
-**Read `baseline.md`, not raw JSON**, for the current numbers: a markdown
-table plus the bar chart, both generated together so they can't drift apart.
+- **`baseline.md`/`baseline.svg`**: mothergod's bits/byte on
+  `bench/baseline.json`'s fixed regression-gate cases
+  (`research/JOURNAL.md` S2-A35) — one case per entropy-ladder target plus
+  one per train-eligible structured dataset kind (`bench::DatasetKind`),
+  all generated in-repo. Mothergod against itself, run over run; not a
+  claim about beating anything.
+- **`canterbury.md`**: real, named-corpus numbers against the pinned
+  reference compressors (`research/JOURNAL.md` S2-A37) — mothergod,
+  `gzip -9`, `zstd -19`, and `xz -9e`, each run on the actual Canterbury
+  corpus (`research/corpus/POLICY.md`'s held-out finals). This is the
+  first table in this directory CLAUDE.md rule 4's "X bits/byte on
+  \<corpus\>" applies to without qualification.
+
+**Read the `.md` files, not raw JSON**, for the current numbers.
 
 ## What this is not, yet
 
 ROADMAP M2 wants "bits/byte vs gzip/zstd/xz, per-dataset graphs ... into
-`docs/benchmarks/`". This is the graph-rendering half of that line
-(`research/JOURNAL.md` S2-D1), on the only real, named-corpus numbers this
-crate can measure today. Two things are still missing, both named as
-remaining S2-D1/M2 scope, not silently dropped:
+`docs/benchmarks/`". `canterbury.md` is the gzip/zstd/xz-comparison half of
+that line; one thing is still missing, named as remaining S2-D1/M2 scope,
+not silently dropped:
 
-- **No gzip/zstd/xz comparison.** `bench/baseline.json` is mothergod
-  against itself, run over run. A reference-compressor column needs a
-  harness that also runs gzip/zstd/xz on the same bytes; that harness
-  doesn't exist yet.
-- **No Silesia/Canterbury.** The held-out finals are fetched and cached by
-  `bench::corpus` (behind the `corpus-fetch` feature), but nothing measures
-  mothergod's ratio on them yet, and CLAUDE.md rule 4 means a number here
-  would need to name that corpus explicitly, distinct from the generator
-  cases above.
+- **No Silesia.** Canterbury only (~2.7 MB, under a minute of
+  `mothergod::compress` time). The full ~200 MB Silesia corpus would run
+  this codec's optimal-parse LZ for on the order of half an hour
+  (measured: 5.3 MB in 39s, ~0.14 MB/s) — too slow for a by-hand run;
+  `bin/finals_report.rs`'s module doc has the full reasoning. Silesia
+  numbers most naturally land behind the scheduled `corpus-fetch` workflow
+  (issue #231) once `GH_ADMIN_TOKEN` wiring exists.
 
 ## Regenerating
 
@@ -43,3 +50,13 @@ yet on a schedule: wiring a `.github/workflows/` file needs
 that leaves the CI baseline gate itself unwired
 (`research/JOURNAL.md` S2-A35). Re-run by hand after `bench/baseline.json`
 changes, same as `baseline_gate`'s own `write` mode.
+
+```
+cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report
+```
+
+Fetches Canterbury (pin-verified, cached under `target/bench-corpus-cache`),
+writes `canterbury.md`. Markdown is linted, not formatted
+(`cargo x lint -- docs/benchmarks/canterbury.md`). Also not yet on a
+schedule, same `GH_ADMIN_TOKEN` gap; re-run by hand whenever the codec or a
+reference-compressor version changes enough to be worth re-measuring.
