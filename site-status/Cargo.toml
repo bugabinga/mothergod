@@ -1,0 +1,11 @@
+[package]
+name = "mothergod-site-status"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[dependencies]
+mothergod = { path = ".." }
+
+[lints]
+workspace = true
