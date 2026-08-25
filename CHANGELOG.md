@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `site/status.html`: a live project status page (issue #95) rendering
+  `site/status-data.json` — milestone bar (from ROADMAP.md's own checkboxes),
+  experiment ledger and 7-day flow stats (from `research/progress.jsonl` and
+  `git log`), and an honest "not yet measurable" benchmarks note until
+  ROADMAP M2 lands real Silesia/Canterbury numbers. `site-status/`, a new
+  workspace crate, generates the snapshot (`cargo run -p mothergod-site-status
+  --release --bin generate`); the scheduled workflow that reruns it
+  automatically is remaining scope (`research/JOURNAL.md` S2-D1), since
+  wiring a new `.github/workflows/` file needs `GH_ADMIN_TOKEN`.
 - `cargo x`, an agent-facing repository quality command with embedded formatters
   for Rust, JSON/JSONL, TOML, YAML, JavaScript/TypeScript, HTML, and SVG, plus
   Clippy and Markdown linting. Tasks expose conventional help, path-scoped
