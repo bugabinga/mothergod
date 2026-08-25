@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-25T05:08:00Z",
+  "generated_at": "2026-08-25T05:15:14Z",
   "phase": "pre-alpha",
   "format_version": 2,
   "works_today": "Stored (verbatim) and Lz (optimal-parse LZ over an adaptive, context-mixing range coder) frame methods, both losslessly round-tripped in the adversarial-input suite.",
