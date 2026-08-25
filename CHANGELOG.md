@@ -8,6 +8,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `docs/benchmarks/`: mothergod's bits/byte on `bench/baseline.json`'s fixed
+  cases, rendered as a static SVG bar chart (`baseline.svg`) plus a markdown
+  table (`baseline.md`), generated together by a new `render_baseline_graph`
+  binary (`cargo run -p mothergod-bench --release --bin
+  render_baseline_graph`) so they can't drift apart. Own generator corpus
+  only — no gzip/zstd/xz column, no Silesia/Canterbury numbers yet
+  (`docs/benchmarks/README.md` states the gap plainly; `research/JOURNAL.md`
+  S2-A36).
 - `site/status.html`: a live project status page (issue #95) rendering
   `site/status-data.json` — milestone bar (from ROADMAP.md's own checkboxes),
   experiment ledger and 7-day flow stats (from `research/progress.jsonl` and
