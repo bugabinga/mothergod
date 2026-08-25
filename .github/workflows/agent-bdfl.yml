@@ -479,6 +479,9 @@ jobs:
             When creating or editing `.claude/skills/`, or moving
             workflow-prompt procedure into a skill, use `agent-skill-craft`;
             skip it for workflow edits that do neither.
+            When work changes `site/`, homepage layout, styling, browser
+            interaction, or accessibility, use `web-ui`; skip it for
+            deployment-workflow-only changes.
 
             Run economy — the delta core, every run, in order (CHAT
             reorders: inbox first, then sweeps as budget allows):
