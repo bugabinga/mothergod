@@ -93,10 +93,11 @@ fn main() -> ExitCode {
          As of {generated_at}. Source: `bench/baseline.json`, measured by \
          `mothergod::compress` on 11 fixed-seed, 50,000-byte cases \
          (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the \
-         pinned Silesia/Canterbury held-out finals (ROADMAP M2, still landing). No \
-         gzip/zstd/xz comparison here yet: that needs the finals fetch \
-         (`research/JOURNAL.md` S2-D1) and a reference-compressor harness, neither of \
-         which exists in this crate yet.\n\n\
+         pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: \
+         this table is mothergod against itself, run over run; see \
+         `docs/benchmarks/canterbury.md` for real numbers against the pinned \
+         reference compressors on the Canterbury held-out final \
+         (`research/JOURNAL.md` S2-A37).\n\n\
          ![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of {generated_at}](baseline.svg)\n\n\
          {}",
         render_table_markdown(&bars)

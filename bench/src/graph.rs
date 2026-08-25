@@ -53,8 +53,10 @@ fn escape_svg(text: &str) -> String {
 
 /// Escapes `text` for use inside a markdown table cell: a pipe would end
 /// the cell early. Case names are `[a-z0-9_]+` in practice, so this only
-/// guards against a future name that isn't.
-fn escape_markdown_cell(text: &str) -> String {
+/// guards against a future name that isn't. `pub(crate)`: [`crate::finals`]
+/// reuses it for held-out-final file names rather than growing a second
+/// copy of the same escape.
+pub(crate) fn escape_markdown_cell(text: &str) -> String {
     text.replace('|', "\\|")
 }
 

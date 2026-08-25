@@ -526,12 +526,16 @@ record.
   S2-A29; the sealed-validation split's seed derivation done as of
   S2-A32; its dataset-kind separation done as of S2-A33; regret scoring
   done as of S2-A34; progress-graph rendering (of `bench/baseline.json`,
-  the only real numbers available) done as of S2-A36; remaining: the CI
-  baseline gate and a scheduled workflow exercising `--features
-  corpus-fetch` (issue #231), both `.github/workflows/` pushes reserved
-  for `GH_ADMIN_TOKEN`, plus the gzip/zstd/xz reference column and real
-  Silesia/Canterbury numbers S2-A36 named as still missing from the
-  graph itself.
+  the only real numbers available) done as of S2-A36; the gzip/zstd/xz
+  reference column and real numbers on one held-out final (Canterbury)
+  done as of S2-A37; remaining: the CI baseline gate's `.github/
+  workflows/` wiring and a scheduled workflow exercising `--features
+  corpus-fetch` (issue #231), both reserved for `GH_ADMIN_TOKEN`, plus
+  real Silesia numbers (S2-A37's `finals_report` binary covers Silesia
+  too, in code — its remaining scope is throughput, not a missing
+  feature: ~0.14 MB/s measured means the full corpus needs on the order
+  of half an hour of `mothergod::compress` time, too slow for a by-hand
+  run).
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
@@ -1424,6 +1428,68 @@ record.
   reserved for `GH_ADMIN_TOKEN`; a gzip/zstd/xz reference column and real
   Silesia/Canterbury numbers, both new scope this entry surfaced rather
   than closed.
+- S2-A37 | ACCEPTED | The gzip/zstd/xz reference column and real
+  held-out-final numbers S2-A36 surfaced as new scope, one corpus at a
+  time (ROADMAP M2, ROADMAP Scorecard's RATIO metric): a new
+  `bench::reference` module (behind `corpus-fetch`, same gate as
+  `bench::corpus`) shells `gzip -9`/`zstd -19`/`xz -9e` on a temp-file
+  argument rather than piping stdin, sidestepping the pipe deadlock a
+  multi-megabyte write risks under `Command::output()`'s stdin-less
+  capture. A new `bench::finals` module (deliberately *not*
+  `corpus-fetch`-gated, so it builds under the default features CLAUDE.md's
+  required checks run) formats a report: per-file bits/byte for
+  `mothergod::compress` and all three references plus one aggregate row,
+  computed as total-compressed-over-total-original bytes rather than an
+  average of per-file ratios (the latter over-weights small files against
+  their real share of the corpus). Reuses `baseline::bits_per_byte` and
+  `regret` rather than a second copy of either, and `graph`'s markdown
+  pipe-escaping (promoted to `pub(crate)` for the reuse) rather than a
+  third. A new `finals_report` binary (`cargo run -p mothergod-bench
+  --release --features corpus-fetch --bin finals_report`) fetches
+  Canterbury (the `cantrbry` manifest entry), extracts its 11 files,
+  measures all four compressors, and writes
+  `docs/benchmarks/canterbury.md`. Silesia is not run: measured
+  throughput on this codec's optimal-parse LZ is ~0.14 MB/s (`xml`, the
+  smallest Silesia file, 5.3 MB in 39s), so the full ~200 MB corpus would
+  cost on the order of half an hour of `mothergod::compress` time alone —
+  the binary's own module doc names this as the reason, not a missing
+  feature; Silesia numbers most naturally land behind the scheduled
+  `corpus-fetch` workflow (issue #231) once it exists, not a slow
+  by-hand run. **First real result**: on Canterbury, mothergod's
+  aggregate is 1.380218 bits/byte against zstd -19's 1.469771 and
+  xz -9e's 1.403395 (gzip -9: 2.080544) — mothergod beats the stronger
+  reference by regret −0.023176 on this corpus, ROADMAP's RATIO ladder
+  rung (2) ("win or tie every file vs zstd -19") not yet true per-file
+  (`lcet10.txt` +0.054, `plrabn12.txt` +0.082, `sum` +0.323 against zstd,
+  full table in `docs/benchmarks/canterbury.md`) but true in aggregate on
+  this one corpus. `docs/benchmarks/baseline.md`'s own generated header
+  corrected to point at `canterbury.md` instead of claiming no
+  gzip/zstd/xz comparison exists anywhere in the crate. | 15 new unit
+  tests across `reference` (gzip/zstd/xz each shrink a repetitive
+  fixture, an unknown command errors, empty input doesn't error,
+  `--version` returns a nonempty line for all three, an unknown command's
+  version errors) and `finals` (files sort by name in the rendered
+  report, corpus name/versions are named, the aggregate row is the
+  byte-weighted number and not the naive average of per-file ratios, the
+  aggregate row names the file count, zero measurements render a `0/0`
+  aggregate without dividing by zero, a `|` in a file name is escaped).
+  All five root CLAUDE.md gates clean on default features;
+  `cargo clippy -p mothergod-bench --all-targets --features corpus-fetch
+  -- --deny warnings` and `cargo test -p mothergod-bench --features
+  corpus-fetch` (110 passed, 1 ignored network smoke test) both clean,
+  run by hand since CI's required checks build default features only
+  (same S1-D2 gap issue #231 will close). | Real bpb: this is the first
+  entry with an actual held-out-final measurement rather than a null
+  patch delta, but it isn't a `train_delta_bpb`/`val_delta_bpb` in the
+  schema's sense either — there is no champion-vs-candidate comparison,
+  only a new measurement capability's first output — so `progress.jsonl`
+  still records `kind: "patch"` with null deltas, same as every S2-D1
+  infra entry, and puts the real numbers in its `mechanism` field
+  instead. Remaining S2-D1 scope: the CI baseline gate's
+  `.github/workflows/` wiring and the scheduled `corpus-fetch` workflow
+  (issue #231), both needing `GH_ADMIN_TOKEN`; real Silesia numbers,
+  blocked on throughput (S1-P6's speed-tier lead) rather than on missing
+  code.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

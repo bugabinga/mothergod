@@ -40,11 +40,22 @@
 //! which generator kinds are sealed-only, never appearing in train.
 //! [`regret`] scores a candidate corpus addition once those three exist to
 //! feed it real numbers.
+//!
+//! [`finals`] and `reference` (the latter also behind `corpus-fetch`) are
+//! the first callers to feed `regret` real held-out-final numbers: a
+//! `finals_report` binary fetches Canterbury, compresses every file with
+//! `mothergod::compress` and the pinned reference compressors, and writes
+//! `docs/benchmarks/canterbury.md`. Silesia remains S2-D1 debt — see
+//! `finals_report`'s module doc for the throughput reason it's out of
+//! scope for a by-hand run.
 
 pub mod baseline;
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
+pub mod finals;
 pub mod graph;
+#[cfg(feature = "corpus-fetch")]
+pub mod reference;
 
 use std::fmt::Write as _;
 
