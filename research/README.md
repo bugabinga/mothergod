@@ -25,6 +25,10 @@ One JSON object per experiment, append-only:
 Numbers are bits/byte deltas vs the current champion (negative = better).
 `val_delta_bpb` comes from the sealed validation set — an accept requires
 train improvement AND no validation regression.
+For a `kind="patch"` whose sole purpose is enabling measurement and which has
+no comparable benchmark, `train_delta_bpb` and `val_delta_bpb` are `null`.
+Its verdict is `accepted` when the focused capability tests pass, otherwise
+`rejected`; null deltas are invalid for every other record.
 
 Iterations it1–it41 happened in the founding session before this repo
 existed; the surviving record (it1–it31) is archived verbatim in

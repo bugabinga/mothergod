@@ -29,6 +29,7 @@ Two agent-system pieces cannot live here, by platform requirement:
   `adr` governs creating, superseding, correcting, and reviewing architecture decisions (ADR-0030).
   `information-placement` routes guidance, procedures, decisions, history, and work by lifetime (ADR-0030).
   `agent-skill-craft` governs creating, moving, and reviewing conditional agent procedures (ADR-0025).
+  `compression-experiment` runs and records one researcher experiment or prerequisite capability patch.
   The Claude Code harness only discovers skills there.
 
 Everything else in the repository — `src/`, `docs/`, `research/`,
