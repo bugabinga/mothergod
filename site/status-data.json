@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-08-25T05:30:29Z",
+  "phase": "pre-alpha",
+  "format_version": 2,
+  "works_today": "Stored (verbatim) and Lz (optimal-parse LZ over an adaptive, context-mixing range coder) frame methods, both losslessly round-tripped in the adversarial-input suite.",
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "Scaffolding",
+      "status": "done"
+    },
+    {
+      "id": "M1",
+      "title": "Port the founding-session codec",
+      "status": "active"
+    },
+    {
+      "id": "M2",
+      "title": "Honest benchmarking (JOURNAL S1-D2)",
+      "status": "active"
+    },
+    {
+      "id": "M3",
+      "title": "Close the gaps (research program)",
+      "status": "pending"
+    },
+    {
+      "id": "M4",
+      "title": "Production hardening",
+      "status": "pending"
+    },
+    {
+      "id": "M5",
+      "title": "Speed tiers",
+      "status": "pending"
+    },
+    {
+      "id": "M6",
+      "title": "Release 0.1",
+      "status": "pending"
+    }
+  ],
+  "benchmarks_note": "Not yet measurable: no Silesia/Canterbury bits/byte vs gzip/zstd/xz exists yet for this Rust build (ROADMAP M2's bench harness is still landing, research/JOURNAL.md S2-D1). The founding research prototype (pre-port, different code) beat zstd -19 on one narrow synthetic dataset built to expose histogram-coder weaknesses; see research/JOURNAL.md S1-L3, not the aggregate claim the scorecard wants.",
+  "experiments": {
+    "total": 35,
+    "accepted": 34,
+    "rejected": 1,
+    "latest_id": "it76",
+    "latest_hypothesis": "The next unblocked slice of the remaining M2/S2-D1 corpus debt after S2-A34's regret is the CI baseline gate, per research/corpus/POLICY.md and ROADMAP M2's \"CI benchmark gate: PR fails on regression vs bench/baseline.json.\""
+  },
+  "merged_prs_7d": 176,
+  "recorded_experiments_7d": 35,
+  "sloc_src": 4894,
+  "test_functions_src": 131
+}
