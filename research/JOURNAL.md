@@ -1521,6 +1521,42 @@ record.
   scheduled `corpus-fetch` workflow (issue #231), both needing
   `GH_ADMIN_TOKEN`; real Silesia numbers, blocked on throughput
   (S1-P6) rather than on missing code.
+- S2-A39 | ACCEPTED | ROADMAP M4's "golden frames per `FORMAT_VERSION`"
+  and `docs/TESTING.md` layer 5, first slice: `tests/golden/` pins one
+  real `FORMAT_VERSION` 2 `Method::Lz` frame (`v2-lz-repeated-text.mgdc`,
+  62 bytes, the archive of `compress()` on a 2,250-byte repeated-text
+  fixture) plus its plaintext, and `tests/golden.rs` asserts
+  `decompress(golden) == plaintext` for every pair and, for the current
+  `FORMAT_VERSION` only, `compress(plaintext) == golden`. Two claims of
+  different strength, not one: the decode half is a real cross-platform
+  guarantee (decode is integer-only end to end, S1-A5), the re-encode
+  half only pins this runner's toolchain, because `lz.rs` pricing and
+  `filters.rs` filter scoring keep `f64::log2` as encoder-only floats
+  (ADR-0024 decision 3) that libm does not promise bit-identical across
+  targets. `docs/TESTING.md` layer 5 previously asserted "byte-identical
+  bitstream on every platform" as a blanket claim with no test behind
+  it; corrected to name which half is proven and which remains a plan,
+  per the Truth value (a stale sentence read confidently is how this
+  project produces wrong statements). Every future `FORMAT_VERSION`
+  bump adds a new pair and keeps every old one, so hard rule 5's
+  "decode support for all previous versions" is a running test rather
+  than a doc-comment claim, same shape as `old_version_lz_frame_is_
+  rejected_not_misparsed` already gave the version/method combination
+  that has no golden payload of its own. | 1 test, iterating every
+  `<name>.mgdc`/`<name>.plaintext` pair in `tests/golden/` (mirrors
+  `tests/adversarial.rs`'s seed-corpus-iteration shape): the fixture's
+  file name and its frame's version byte must agree, decode must match
+  the pinned plaintext, and (current version only) re-encoding the
+  plaintext must reproduce the pinned frame byte-for-byte. All five
+  root CLAUDE.md gates clean; the new test runs inside the existing
+  `test` required check, no `.github/workflows/` change needed. | No
+  bpb measurement: this is `docs/TESTING.md` layer 5 infrastructure,
+  not a ratio experiment against a champion — `progress.jsonl` records
+  this as `kind: "patch"` with null bpb deltas. Remaining layer-5 scope:
+  the multi-platform CI matrix that would prove the encoder claim too,
+  a `.github/workflows/` push reserved for whoever holds
+  `GH_ADMIN_TOKEN`, same constraint as S2-D1's remaining CI wiring
+  (issue #231).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

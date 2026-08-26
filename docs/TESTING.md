@@ -39,10 +39,13 @@ for each host architecture. Failed monster lanes update and reopen one
 `bug`/`agent-system` issue with the run, job, lane identity, and first useful
 failure.
 
-Fuzzing, mutation, benchmark regression, golden determinism, C ABI, and
-external E2E surfaces are not part of current automation. Their layers below
-remain plans owned by their respective issues; the monster workflow does not
-invent empty targets for them.
+Fuzzing, mutation, benchmark regression, C ABI, and external E2E surfaces
+are not part of current automation; their layers below remain plans owned
+by their respective issues, and the monster workflow does not invent empty
+targets for them. Golden determinism is a partial exception: single-platform
+golden-frame tests run in the existing `test` required check (layer 5), but
+the multi-platform matrix that would prove cross-platform determinism is
+still a plan.
 
 ## 1. Round-trip and unit tests (Rust-input PRs)
 
@@ -79,14 +82,28 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - `cargo-mutants` on the codec modules; surviving mutants become issues —
   a surviving mutant is a missing test by definition.
 
-## 5. Determinism (planned, no golden files exist)
+## 5. Determinism (partial: single-platform golden files exist)
 
-- Same input + same version ⇒ byte-identical bitstream on every platform
-  (the integer-only probability path exists precisely for this, JOURNAL
-  S1-A5). Golden-file tests pin known input → known output per
-  `FORMAT_VERSION`; changing a golden file without a version bump fails.
-- Old-version frames stay decodable (CLAUDE.md rule 5): keep one tiny
-  golden frame per historical `FORMAT_VERSION`.
+- `tests/golden/` (`JOURNAL` S2-A39) pins known input → known output per
+  `FORMAT_VERSION`: `decompress(golden) == plaintext` and, for the
+  current `FORMAT_VERSION`, `compress(plaintext) == golden`. Runs on
+  every PR through the existing `test` required check, on the one
+  runner that check already uses.
+- What that does and does not prove: decode is integer-only end to end
+  (JOURNAL S1-A5), so the decode half of this test is a real
+  cross-platform guarantee. The encoder is not — `lz.rs` pricing and
+  `filters.rs` filter scoring keep `f64::log2` as encoder-only floats
+  (`docs/adr/0024-no-libm-on-the-decode-path.md` decision 3), which
+  libm does not promise bit-identical across targets — so the re-encode
+  half only pins today's toolchain/runner, not "every platform" as this
+  section once claimed without a test to back it. Still planned: a
+  multi-platform CI matrix actually comparing encoder output across
+  `docs/TESTING.md`'s runtime table, which needs a `.github/workflows/`
+  change reserved for whoever holds `GH_ADMIN_TOKEN`
+  (`agents/GOVERNANCE.md`, "Push identity").
+- Old-version frames stay decodable (CLAUDE.md rule 5): every historical
+  `FORMAT_VERSION`'s golden pair is kept, never replaced, so this is a
+  running test rather than a claim in a doc comment.
 
 ## 6. Differential oracle (during the M1 port)
 

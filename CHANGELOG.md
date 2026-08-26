@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `tests/golden/`: golden-frame regression tests (ROADMAP M4,
+  `docs/TESTING.md` layer 5, `research/JOURNAL.md` S2-A39). Pins a real
+  `FORMAT_VERSION` 2 frame; `decompress` matching the pinned plaintext is
+  a real cross-platform guarantee (decode is integer-only), re-encoding
+  matching the pinned frame is a same-toolchain regression pin only
+  (encoder-only `f64::log2` calls in `lz.rs`/`filters.rs`, per
+  `docs/adr/0024-no-libm-on-the-decode-path.md`). `docs/TESTING.md`
+  corrected to stop claiming untested cross-platform byte-identity.
+
 - Ideal-cost accounting mode, closing slice (`research/JOURNAL.md` S2-A38,
   ADR-0006): `codec::ideal_cost_bits` sums the whole-codec ideal coding cost
   of a file, the flag/length/offset/slot streams and literal bytes together,
