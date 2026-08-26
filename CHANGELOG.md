@@ -17,6 +17,13 @@ All notable changes to this project are documented here. Format follows
   slice builds and tests the primitive standalone first, the same order
   every M1 filter and LZ slice shipped in.
 
+- `Encoder::encode_bit`/`Decoder::decode_bit` (`research/JOURNAL.md`
+  S1-P1, S2-A41): code one bit at an arbitrary caller-supplied
+  probability, the second prerequisite (after `Sse`, S2-A40) an
+  `Sse`-calibrated binary decision needs before it can be wired into
+  `codec`. Proven together with `Sse` in a new integration test; still
+  not wired to any bitstream.
+
 - `tests/golden/`: golden-frame regression tests (ROADMAP M4,
   `docs/TESTING.md` layer 5, `research/JOURNAL.md` S2-A39). Pins a real
   `FORMAT_VERSION` 2 frame; `decompress` matching the pinned plaintext is

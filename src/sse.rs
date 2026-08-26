@@ -39,17 +39,22 @@
 //! (literal / match / rep) is three-ary, and the six-expert literal mixer
 //! ([`crate::literal::Literal`]) codes a 256-ary symbol directly rather
 //! than a sequence of binary decisions, so wiring [`Sse`] against either
-//! needs a decomposition this port does not build. The smallest next step
-//! is measurable on its own: refine the flag model's binary "is this a
-//! copy, not a literal" sub-decision, which S1-P1's own text names as the
-//! candidate — targets the five zstd text holdouts named there. This
-//! slice builds and proves the calibration primitive standalone first,
-//! the same order every M1 filter and LZ slice shipped in (`JOURNAL`
-//! S2-A2 through S2-A12): built and unit-tested on its own before a later
-//! slice wires it behind a `Method`/`FORMAT_VERSION` change. No bpb
-//! measurement is possible yet for the same reason — `research/
-//! progress.jsonl` records this slice with `kind: "patch"` and null
-//! deltas, per `research/README.md`'s capability-patch rule.
+//! needs a decomposition this port does not build. This slice also closes
+//! a second prerequisite: [`crate::coder::Encoder::encode_bit`]/
+//! [`crate::coder::Decoder::decode_bit`] now let a caller drive the range
+//! coder from an arbitrary probability instead of only a
+//! [`crate::model::Model`]-derived frequency, and this module's own test
+//! suite proves the two work together — an `Sse`-calibrated probability,
+//! coded through that primitive, round-trips exactly and costs far fewer
+//! bits than a fixed 50/50 split on the same skewed sequence. What
+//! remains: decompose the flag model's binary "is this a copy, not a
+//! literal" sub-decision, which S1-P1's own text names as the candidate —
+//! targets the five zstd text holdouts named there — wire `Sse` and
+//! `encode_bit`/`decode_bit` behind it, bump `FORMAT_VERSION`, and measure
+//! a real bpb delta on the corpus policy's train/sealed split. No bpb
+//! measurement is possible yet: `research/progress.jsonl` records this
+//! slice with `kind: "patch"` and null deltas, per `research/README.md`'s
+//! capability-patch rule.
 
 /// Number of probability bins per context: 33 evenly spaced points across
 /// `[0.0, 1.0]` (32 intervals), the classic PAQ/APM bin count (Mahoney
@@ -201,6 +206,7 @@ impl Sse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coder::{Decoder, Encoder};
 
     #[test]
     #[should_panic(expected = "at least one context")]
@@ -328,5 +334,53 @@ mod tests {
     #[test]
     fn contexts_reports_the_constructed_count() {
         assert_eq!(Sse::new(5).contexts(), 5);
+    }
+
+    #[test]
+    fn calibrated_probability_round_trips_and_costs_less_than_a_fixed_split() {
+        // The mechanism S1-P1 names as this primitive's reason to exist,
+        // proven end to end: an uninformative primary estimate (constant
+        // 0.5, same as converges_toward_the_true_observed_rate above) that
+        // Sse calibrates toward a skewed context's true rate, fed through
+        // coder::Encoder::encode_bit/Decoder::decode_bit instead of just
+        // compared against refine()'s return value. Not yet wired into
+        // codec.rs (see this module's "Remaining scope" docs), but proves
+        // the two pieces compose correctly before that wiring decision.
+        let outcomes: Vec<bool> = crate::test_support::Xorshift32::new(0x5EED_5EED)
+            .take(2000)
+            .map(|state| state % 10 != 0) // true 90% of the time
+            .collect();
+
+        let mut sse = Sse::new(1);
+        let mut enc = Encoder::new();
+        for &outcome in &outcomes {
+            let p = sse.refine(0, 0.5);
+            enc.encode_bit(outcome, p);
+            sse.update(0, 0.5, outcome);
+        }
+        let calibrated_bytes = enc.finish();
+
+        let mut fixed = Encoder::new();
+        for &outcome in &outcomes {
+            fixed.encode_bits(u32::from(outcome), 1);
+        }
+        let fixed_bytes = fixed.finish();
+
+        assert!(
+            calibrated_bytes.len() < fixed_bytes.len() * 2 / 3,
+            "Sse-calibrated {} bytes should be well below fixed-50/50 {} bytes for a \
+             90%-skewed sequence",
+            calibrated_bytes.len(),
+            fixed_bytes.len()
+        );
+
+        let mut sse = Sse::new(1);
+        let mut dec = Decoder::new(&calibrated_bytes);
+        for &outcome in &outcomes {
+            let p = sse.refine(0, 0.5);
+            let bit = dec.decode_bit(p);
+            assert_eq!(bit, outcome, "round-trip mismatch");
+            sse.update(0, 0.5, bit);
+        }
     }
 }
