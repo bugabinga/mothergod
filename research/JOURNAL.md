@@ -1557,9 +1557,61 @@ record.
   a `.github/workflows/` push reserved for whoever holds
   `GH_ADMIN_TOKEN`, same constraint as S2-D1's remaining CI wiring
   (issue #231).
+- S2-A40 | ACCEPTED | First slice of ROADMAP M3's top standing lead
+  (S1-P1, SSE): a standalone secondary symbol estimation (SSE/APM)
+  primitive, `src/sse.rs` (`Sse`). Not a port — S1-P1 is a literature lead
+  the founding session never implemented (`research/imports/session-1/`
+  greps clean of any SSE/APM code), so there is no archive behavior to
+  carry forward, unlike every other module in this crate (ADR-0006).
+  Classic PAQ/APM design (Mahoney 2005): a small side context plus a
+  primary model's probability estimate index into an adaptive table that
+  has learned to correct that context's systematic bias, read by linear
+  interpolation between two neighboring bins, written by nudging both
+  toward the observed outcome. One deliberate design deviation: PAQ warps
+  its bin spacing through a logit transform (`stretch`/`squash`,
+  `ln`/`exp`) to concentrate resolution near 0 and 1; this crate's
+  `clippy.toml` forbids every libm transcendental crate-wide (ADR-0024),
+  since a probability the encoder computes and the decoder must reproduce
+  bit-for-bit cannot depend on a function libm implementations disagree
+  on in the last ulp — the exact problem `literal.rs`'s vendored `exp`
+  (S2-A16) already solved for the mixing-weight update. Rather than
+  vendor a second transcendental pair, this module uses linear-domain
+  bins instead: coarser resolution near the extremes than a production
+  APM would want, but built from `+ - * /` and `f64::clamp` only, so no
+  new transcendental surface is needed. Output is clamped to
+  `[1/4096, 1 - 1/4096]`: an adaptive table fed by finite, noisy evidence
+  should never claim an outcome is impossible, the same reasoning
+  `model::Model` already applies by starting every frequency at 1. |
+  10 unit tests: a fresh table is near-identity (untrained bins return
+  approximately their input probability); output stays strictly inside
+  `(0.0, 1.0)` even after 10,000 updates all pushing one direction;
+  calibration converges within 0.03 of a synthetic context's true 90%
+  observed rate when the primary estimate is a constant, uninformative
+  0.5 (the systematic-bias correction S1-P1 is for); two contexts adapt
+  independently; `refine` is monotonic in its input probability on a
+  fresh table; out-of-range input probabilities clamp rather than panic;
+  out-of-range context indices panic (mirrors `model::Model::encode`'s
+  documented bound); `contexts()` reports the constructed count. All five
+  root CLAUDE.md gates clean (two intra-doc-link warnings against private
+  items, `BINS` and `Self::position`, fixed by dropping the doc links,
+  same class as S2-A8/S2-A10/S2-A11/S2-A12/S2-A16). | No bpb measurement:
+  nothing in this crate has a binary probability stream to calibrate yet
+  — the flag stream `codec.rs` codes is three-ary (literal/match/rep),
+  and `literal::Literal` codes a 256-ary symbol directly rather than a
+  sequence of binary decisions, so wiring `Sse` against either needs a
+  decomposition this slice does not build. `progress.jsonl` records this
+  as `kind: "patch"` with null bpb deltas, per `research/README.md`'s
+  capability-patch rule, same reason as every unwired M1 filter/LZ slice
+  (S2-A2 through S2-A12). Remaining S1-P1 scope: decompose one binary
+  sub-decision to calibrate — the flag model's "is this a copy, not a
+  literal" split is the smallest candidate, since it is already the
+  coarsest three-way choice in the pipeline — wire `Sse` behind it, bump
+  `FORMAT_VERSION`, and measure a real bpb delta on the corpus policy's
+  train/sealed split against the five zstd text holdouts S1-P1 names.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
+  First slice: S2-A40 (standalone primitive, not yet wired).
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue.

@@ -16,6 +16,7 @@ pub mod filters;
 pub mod literal;
 pub mod lz;
 pub mod model;
+pub mod sse;
 
 /// First bytes of every mothergod frame.
 pub const MAGIC: [u8; 4] = *b"MGDC";
