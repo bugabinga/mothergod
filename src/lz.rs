@@ -1249,14 +1249,9 @@ mod tests {
     fn optimal_roundtrip_random_like_binary_never_worse_than_stored() {
         // A pseudo-random byte stream (no real structure): the DP must
         // still round-trip even when literals dominate.
-        let mut state = 0x2545_f491_4f6c_dd1du64;
-        let data: Vec<u8> = (0..500)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                u8::try_from(state & 0xff).unwrap()
-            })
+        let data: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(500)
+            .map(|state| u8::try_from(state % 256).unwrap())
             .collect();
         roundtrip_optimal(&data);
     }
