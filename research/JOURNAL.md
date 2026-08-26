@@ -1680,6 +1680,50 @@ record.
   `decode_bit` behind it, bump `FORMAT_VERSION`, and measure a real bpb
   delta on the corpus policy's train/sealed split against the five zstd
   text holdouts.
+- S2-A42 | ACCEPTED | First slice of ROADMAP M3's second standing lead
+  (S1-P2, btultra2-class parse): a binary-tree match finder,
+  `lz::BinaryTreeMatchFinder`, standalone and not yet wired into
+  `parse_greedy` or `parse_optimal` — the same standalone-primitive-first
+  order S1-P1 used (S2-A40/S2-A41). Unlike `MatchFinder`'s hash chain,
+  which walks candidates newest-first and gives up after a fixed
+  `max_tries`, insertion here keeps each hash bucket as a binary search
+  tree ordered by the candidate's suffix bytes (LZMA's bt4 shape, ported
+  as behavior not code per ADR-0006 — no bt4 source exists anywhere in
+  this crate or the archive; built from the published algorithm
+  description instead): one downward walk both inserts the new position
+  and returns the longest match among the nodes on the insertion path, so
+  with `max_depth` at least the bucket's tree height the match found is
+  length-exact (proven equal to a brute-force scan of the same hash
+  bucket), while a shallower `max_depth` trades exactness for a bounded
+  worst case, the same trade `MatchFinder` makes via `max_tries`.
+  Deliberately does not carry two things a wired-in successor needs:
+  eviction of positions older than `WINDOW` (the tree only grows) and the
+  `len0`/`len1` prefix-reuse optimization real bt4 finders use to avoid
+  re-comparing already-matched bytes (`suffix_common_len` always compares
+  from scratch) — both are speed/memory work, not correctness work, and
+  wait for the wiring slice. | 6 unit tests: no match before any position
+  is inserted; an exact repeat's reported length and distance checked
+  directly; a brute-force cross-check across 400 bytes of low-entropy
+  pseudo-random data (Xorshift32 mod 5, so hash buckets build real tree
+  structure) proving every returned length matches a full same-bucket
+  scan when `max_depth` cannot truncate the walk (the first draft of this
+  test compared against *every* earlier position rather than only those
+  sharing `i`'s hash bucket, and failed on a length-1 match neither
+  finder can ever see by construction — corrected before landing, not a
+  finder bug); zero `max_depth` finds nothing but leaves the tree
+  structure consistent for later inserts; a 65,000+-byte identical run
+  stays within `MAX_MATCH_LEN` and does not hang. All five root
+  CLAUDE.md gates clean (one private-intra-doc-link warning from the new
+  public struct's docs naming private `MatchFinder`/`suffix_common_len`,
+  fixed by dropping the links, same class as S2-A41). | No bpb
+  measurement: not yet wired to any parse pass, so there is no champion
+  to diff against — `progress.jsonl` records this as `kind: "patch"` with
+  null bpb deltas, same reason as S2-A40/S2-A41. Remaining S1-P2 scope:
+  wire this finder into `parse_optimal` in place of (or alongside)
+  `MatchFinder`, add window eviction, add per-position adaptive prices
+  (the DP's price table is currently frozen per round, S1-P2's other
+  named gap), and measure a real bpb delta on sqlite/json/jsonl-shaped
+  data, S1-P2's named target.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -1693,7 +1737,10 @@ record.
   `Model` split.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
-  Targets sqlite/json/jsonl residue.
+  Targets sqlite/json/jsonl residue. First slice: S2-A42 (standalone
+  binary-tree match finder, not yet wired). Remaining: wire it into
+  `parse_optimal`, evict positions past `WINDOW`, and add per-position
+  adaptive prices.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,

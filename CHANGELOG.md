@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `lz::BinaryTreeMatchFinder` (`research/JOURNAL.md` S1-P2, S2-A42):
+  standalone binary-tree match finder — insertion keeps each hash bucket
+  as a binary search tree ordered by candidate suffix bytes (LZMA's bt4
+  shape) instead of `MatchFinder`'s newest-first hash chain, so one
+  downward walk finds the exact longest match among the candidates on
+  the insertion path. Not yet wired into `parse_greedy` or
+  `parse_optimal`, the same standalone-primitive-first order S1-P1's
+  `Sse` shipped in (S2-A40).
+
 - `src/sse.rs`: standalone secondary symbol estimation (SSE/APM) primitive
   for ROADMAP M3's oldest standing lead (`research/JOURNAL.md` S1-P1,
   S2-A40) — an adaptive, per-context probability calibration table, in
