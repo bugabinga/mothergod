@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `src/sse.rs`: standalone secondary symbol estimation (SSE/APM) primitive
+  for ROADMAP M3's oldest standing lead (`research/JOURNAL.md` S1-P1,
+  S2-A40) — an adaptive, per-context probability calibration table, in
+  linear-domain bins rather than the classic logit-domain ones so it needs
+  no libm transcendental (`clippy.toml`, ADR-0024). Not yet wired to
+  `codec`: no binary probability stream exists yet to calibrate, so this
+  slice builds and tests the primitive standalone first, the same order
+  every M1 filter and LZ slice shipped in.
+
 - `tests/golden/`: golden-frame regression tests (ROADMAP M4,
   `docs/TESTING.md` layer 5, `research/JOURNAL.md` S2-A39). Pins a real
   `FORMAT_VERSION` 2 frame; `decompress` matching the pinned plaintext is
