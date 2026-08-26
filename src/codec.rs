@@ -218,6 +218,115 @@ fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Vec<u8> {
     }
 }
 
+/// Where a token's flag/length/offset/slot symbols and literal bytes go:
+/// real arithmetic coding for [`encode_tokens`]'s [`EncodeSink`], summed
+/// `-log2(p)` pricing for [`ideal_cost_bits`]'s [`CostSink`]. The two walks
+/// must code the same fields, in the same order, off the same token stream,
+/// or [`ideal_cost_bits`] silently stops pricing what [`encode_tokens`]
+/// actually emits; routing both through [`walk_tokens`] makes that a single
+/// piece of code instead of two loops kept in sync by hand.
+trait TokenSink {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize);
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8);
+    fn length(&mut self, models: &mut Models, value: u32);
+    fn offset(&mut self, models: &mut Models, value: u32);
+    fn slot(&mut self, models: &mut Models, symbol: usize);
+}
+
+/// The shared skeleton behind [`encode_tokens`] and [`ideal_cost_bits`]:
+/// walks `tokens` (already parsed from `data`) in coding order, routing
+/// every symbol through `sink`, and advancing the literal-model context
+/// exactly as [`Context::after_literal`]/[`Context::after_copy`] require.
+fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut impl TokenSink) {
+    let mut context = Context::default();
+    let mut pos = 0usize;
+
+    for token in tokens {
+        let flag_table = usize::from(context.after_copy);
+        match *token {
+            Token::Literal(byte) => {
+                sink.flag(models, flag_table, FLAG_LITERAL);
+                sink.literal(models, context, byte);
+                context = context.after_literal(byte);
+                pos += 1;
+            }
+            Token::Match { len, distance } => {
+                sink.flag(models, flag_table, FLAG_MATCH);
+                sink.length(models, len);
+                sink.offset(models, distance.get());
+                let end = pos + len as usize;
+                context = context.after_copy(&data[pos..end]);
+                pos = end;
+            }
+            Token::Rep { len, slot } => {
+                sink.flag(models, flag_table, FLAG_REP);
+                sink.slot(models, slot_to_symbol(slot));
+                sink.length(models, len);
+                let end = pos + len as usize;
+                context = context.after_copy(&data[pos..end]);
+                pos = end;
+            }
+        }
+    }
+}
+
+/// [`TokenSink`] that drives a real [`Encoder`], [`walk_tokens`]'s use in
+/// [`encode_tokens`].
+struct EncodeSink<'a> {
+    ac: &'a mut Encoder,
+}
+
+impl TokenSink for EncodeSink<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
+        models.flag[flag_table].encode(self.ac, kind);
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        models.literal.encode(self.ac, context, byte);
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        encode_bucketed(&mut models.length, self.ac, value);
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        encode_bucketed(&mut models.offset, self.ac, value);
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        models.slot.encode(self.ac, symbol);
+    }
+}
+
+/// [`TokenSink`] that sums `-log2(p)` instead of coding, [`walk_tokens`]'s
+/// use in [`ideal_cost_bits`].
+#[derive(Default)]
+struct CostSink {
+    bits: f64,
+}
+
+impl TokenSink for CostSink {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
+        self.bits += models.flag[flag_table].ideal_cost_bits(kind);
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        self.bits += models.literal.ideal_cost_bits(context, byte);
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        self.bits += ideal_cost_bucketed(&mut models.length, value);
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        self.bits += ideal_cost_bucketed(&mut models.offset, value);
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        self.bits += models.slot.ideal_cost_bits(symbol);
+    }
+}
+
 /// Encodes already-filtered `data` through the LZ + context-mixing
 /// pipeline: [`encode`]'s per-candidate trial body, and the whole of what
 /// this function used to be before filter trial-selection wrapped it.
@@ -238,36 +347,7 @@ fn encode_tokens(data: &[u8]) -> Vec<u8> {
 
     let mut models = Models::new();
     let mut ac = Encoder::new();
-    let mut context = Context::default();
-    let mut pos = 0usize;
-
-    for token in &tokens {
-        let flag_table = usize::from(context.after_copy);
-        match *token {
-            Token::Literal(byte) => {
-                models.flag[flag_table].encode(&mut ac, FLAG_LITERAL);
-                models.literal.encode(&mut ac, context, byte);
-                context = context.after_literal(byte);
-                pos += 1;
-            }
-            Token::Match { len, distance } => {
-                models.flag[flag_table].encode(&mut ac, FLAG_MATCH);
-                encode_bucketed(&mut models.length, &mut ac, len);
-                encode_bucketed(&mut models.offset, &mut ac, distance.get());
-                let end = pos + len as usize;
-                context = context.after_copy(&data[pos..end]);
-                pos = end;
-            }
-            Token::Rep { len, slot } => {
-                models.flag[flag_table].encode(&mut ac, FLAG_REP);
-                models.slot.encode(&mut ac, slot_to_symbol(slot));
-                encode_bucketed(&mut models.length, &mut ac, len);
-                let end = pos + len as usize;
-                context = context.after_copy(&data[pos..end]);
-                pos = end;
-            }
-        }
-    }
+    walk_tokens(&tokens, data, &mut models, &mut EncodeSink { ac: &mut ac });
 
     let mut out = Vec::with_capacity(8 + data.len() / 2);
     out.extend_from_slice(&declared_len.to_le_bytes());
@@ -293,38 +373,9 @@ fn encode_tokens(data: &[u8]) -> Vec<u8> {
 pub fn ideal_cost_bits(data: &[u8]) -> f64 {
     let tokens = lz::parse_optimal(data);
     let mut models = Models::new();
-    let mut context = Context::default();
-    let mut pos = 0usize;
-    let mut bits = 0.0;
-
-    for token in &tokens {
-        let flag_table = usize::from(context.after_copy);
-        match *token {
-            Token::Literal(byte) => {
-                bits += models.flag[flag_table].ideal_cost_bits(FLAG_LITERAL);
-                bits += models.literal.ideal_cost_bits(context, byte);
-                context = context.after_literal(byte);
-                pos += 1;
-            }
-            Token::Match { len, distance } => {
-                bits += models.flag[flag_table].ideal_cost_bits(FLAG_MATCH);
-                bits += ideal_cost_bucketed(&mut models.length, len);
-                bits += ideal_cost_bucketed(&mut models.offset, distance.get());
-                let end = pos + len as usize;
-                context = context.after_copy(&data[pos..end]);
-                pos = end;
-            }
-            Token::Rep { len, slot } => {
-                bits += models.flag[flag_table].ideal_cost_bits(FLAG_REP);
-                bits += models.slot.ideal_cost_bits(slot_to_symbol(slot));
-                bits += ideal_cost_bucketed(&mut models.length, len);
-                let end = pos + len as usize;
-                context = context.after_copy(&data[pos..end]);
-                pos = end;
-            }
-        }
-    }
-    bits
+    let mut sink = CostSink::default();
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    sink.bits
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
