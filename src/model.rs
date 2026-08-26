@@ -16,8 +16,8 @@
 //! experiment loop can price a distribution without paying for real
 //! arithmetic coding. [`crate::literal::Literal::ideal_cost_bits`]
 //! (`JOURNAL` S2-A31) is the same mode's counterpart for the six-expert
-//! mixer; a whole-codec ideal-cost pass summing both together is still
-//! S2-D1's remaining scope.
+//! mixer; [`crate::codec::ideal_cost_bits`] (`JOURNAL` S2-A38) sums both
+//! together into the whole-codec pass.
 
 use crate::coder::{Decoder, Encoder};
 
