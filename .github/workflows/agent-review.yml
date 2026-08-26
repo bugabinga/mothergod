@@ -245,7 +245,12 @@ jobs:
               every gate green (GOVERNANCE.md "Merging", PRs #25 and #84).
               Only if the REST call reports required gates still pending,
               arm `gh pr merge <n> --squash --auto` and stop; the BDFL
-              sweep rescues it if it stalls. One carve-out outranks
+              sweep rescues it if it stalls. Stop means stop: do not try
+              to wait for the gates yourself with any tool, watched or
+              not (PR #255's review died mid-run trying a `Monitor` call
+              this seat has no access to, denied twice, leaving the PR
+              unreviewed with a stalled filler line as the only output).
+              One carve-out outranks
               "unconditionally", merge identity: if the diff touches any
               file under `.github/workflows/`, do NOT merge, whatever
               your verdict. Those PRs are the BDFL's to land by operator
