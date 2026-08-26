@@ -1608,10 +1608,54 @@ record.
   coarsest three-way choice in the pipeline — wire `Sse` behind it, bump
   `FORMAT_VERSION`, and measure a real bpb delta on the corpus policy's
   train/sealed split against the five zstd text holdouts S1-P1 names.
+- S2-A41 | ACCEPTED | Second slice of ROADMAP M3's top standing lead
+  (S1-P1, SSE): the other prerequisite S2-A40 left outstanding — a
+  probability-driven bit-coding primitive, since `coder.rs` previously only
+  drove the range coder from a [`Model`] frequency table
+  (`Encoder::encode`/`Decoder::decode`) or a fixed, unmodeled 50/50 split
+  (`encode_bits`/`decode_bits`), neither of which an `Sse`-calibrated
+  probability can feed. Added `Encoder::encode_bit`/`Decoder::decode_bit`:
+  code one bit at an arbitrary caller-supplied `probability_of_one`,
+  quantized into a `BIT_SCALE`-wide (2^16) integer threshold by a shared
+  `quantize_probability` (`+ - * /`, `f64::clamp`, and rounding only, no
+  libm transcendental, so encoder and decoder compute the identical
+  threshold bit-for-bit — ADR-0024's determinism rule, the same reasoning
+  that led `Sse` to linear-domain bins). Threshold clamped to
+  `1..=BIT_SCALE - 1` so neither outcome is ever assigned zero width,
+  mirroring `Model::new`'s "nothing is ever impossible to code" guarantee.
+  Proved the two primitives compose: a new `sse.rs` integration test drives
+  `Encoder::encode_bit`/`Decoder::decode_bit` from `Sse::refine`'s output
+  (constant, uninformative 0.5 "primary" estimate, same shape as
+  S2-A40's `converges_toward_the_true_observed_rate` test) over a
+  2,000-outcome, 90%-skewed synthetic sequence: round-trips exactly and
+  costs well under two-thirds the bytes of the same sequence coded at a
+  fixed 50/50 split. Caught and fixed one bug before landing: the first
+  cut assigned `probability_of_one`'s interval to the *wrong* bit (the
+  likely outcome got the narrow range), which a skewed-input cost test in
+  `coder.rs` caught immediately — it demanded fewer bits than a fixed
+  split and instead measured 6.5x more. | 5 new `coder.rs` unit tests
+  (round trip across a probability range including near-0/near-1; the
+  unlikely outcome specifically, not just the likely one; out-of-range
+  `probability_of_one` clamps rather than panics; a 99%-skewed sequence
+  costs under a quarter of the fixed-50/50 byte count) plus the `sse.rs`
+  integration test above. All five root CLAUDE.md gates clean (one
+  private-intra-doc-link warning, `encode_bit`'s doc linking to the
+  private `quantize_probability`, fixed by dropping the link, same class
+  as S2-A8/S2-A10/S2-A11/S2-A12/S2-A16/S2-A40). | No bpb measurement:
+  still not wired into `codec.rs`'s bitstream — this closes the
+  primitive-availability gap, not the wiring decision. `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas, same reason as
+  S2-A40. Remaining S1-P1 scope unchanged from S2-A40's text: decompose
+  the flag model's literal/copy split, wire `Sse` and `encode_bit`/
+  `decode_bit` behind it, bump `FORMAT_VERSION`, and measure a real bpb
+  delta on the corpus policy's train/sealed split against the five zstd
+  text holdouts.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
-  First slice: S2-A40 (standalone primitive, not yet wired).
+  First slice: S2-A40 (standalone primitive). Second slice: S2-A41
+  (probability-driven bit-coding primitive, proven together with `Sse`).
+  Both not yet wired.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue.

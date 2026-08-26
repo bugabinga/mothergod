@@ -150,6 +150,23 @@ impl Encoder {
         }
     }
 
+    /// Codes `bit` at `probability_of_one` (the caller's current estimate
+    /// that the bit is `1`), quantized into a fixed-point threshold.
+    /// Complements [`Self::encode_bits`]: that method codes a bit at a
+    /// fixed, unmodeled 50/50 split, this one at an arbitrary
+    /// caller-supplied split — the primitive an [`crate::sse::Sse`]-
+    /// calibrated binary decision (`JOURNAL` S1-P1) needs, once wired into
+    /// `codec.rs`.
+    pub fn encode_bit(&mut self, bit: bool, probability_of_one: f64) {
+        let threshold = quantize_probability(probability_of_one);
+        let (cum_low, cum_high) = if bit {
+            (0, threshold)
+        } else {
+            (threshold, BIT_SCALE)
+        };
+        self.encode(cum_low, cum_high, BIT_SCALE);
+    }
+
     /// Flushes the final interval and any deferred carry bits, pads the
     /// last byte with zero bits, and returns the coded stream.
     #[must_use]
@@ -290,6 +307,56 @@ impl<'a> Decoder<'a> {
         }
         value
     }
+
+    /// Inverse of [`Encoder::encode_bit`]: resolves which side of the same
+    /// `probability_of_one`-derived threshold the coder's current value
+    /// falls on, consumes that sub-range, and returns the coded bit. Never
+    /// panics on adversarial `self` state, same guarantee as
+    /// [`Self::decode_bits`]: [`Self::target`] is mathematically bounded to
+    /// `[0, total)` regardless of what bytes produced it.
+    #[must_use]
+    pub fn decode_bit(&mut self, probability_of_one: f64) -> bool {
+        let threshold = quantize_probability(probability_of_one);
+        let bit = self.target(BIT_SCALE) < threshold;
+        let (cum_low, cum_high) = if bit {
+            (0, threshold)
+        } else {
+            (threshold, BIT_SCALE)
+        };
+        self.decode(cum_low, cum_high, BIT_SCALE);
+        bit
+    }
+}
+
+/// Quantizes `probability_of_one` (the caller's estimate that the coded bit
+/// is `1`) into a [`BIT_SCALE`]-wide integer threshold: bit `1` occupies
+/// `[0, threshold)`, bit `0` occupies `[threshold, BIT_SCALE)` — so a
+/// `probability_of_one` near `1.0` gives bit `1` the wide interval, and
+/// costs it the fewer bits. Clamped to
+/// `1..=BIT_SCALE - 1` so neither outcome is ever assigned zero width,
+/// mirroring [`crate::model::Model::new`]'s "nothing is ever impossible to
+/// code" guarantee for a caller-supplied probability instead of a frequency
+/// count. [`Encoder::encode_bit`] and [`Decoder::decode_bit`] both call this
+/// with identical inputs and only `+ - * /`, [`f64::clamp`], and rounding —
+/// no libm transcendental — so both sides compute the same threshold
+/// bit-for-bit (ADR-0024's determinism rule, the same reason
+/// [`crate::sse::Sse`] chose linear-domain bins over a logit transform).
+fn quantize_probability(probability_of_one: f64) -> u64 {
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "BIT_SCALE (2^16) is exact in f64, well inside its 53-bit mantissa"
+    )]
+    let scale = BIT_SCALE as f64;
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "probability_of_one.clamp(0.0, 1.0) * scale is in [0.0, scale]: rounds to a \
+                  value that always fits u64, and a NaN input (clamp leaves NaN as NaN, per its \
+                  docs) casts to 0 under Rust's defined float-to-int cast semantics, which the \
+                  clamp below still bounds away from 0 and BIT_SCALE"
+    )]
+    let scaled = (probability_of_one.clamp(0.0, 1.0) * scale).round() as u64;
+    scaled.clamp(1, BIT_SCALE - 1)
 }
 
 #[cfg(test)]
@@ -482,5 +549,83 @@ mod tests {
         // No panic is the assertion: decoded symbols past the real data are
         // whatever implicit-zero bits produce, never treated as ground
         // truth here.
+    }
+
+    #[test]
+    fn encode_bit_round_trips_across_a_range_of_probabilities() {
+        let plan = [
+            (true, 0.5),
+            (false, 0.5),
+            (true, 0.99),
+            (true, 0.01),
+            (false, 0.99),
+            (false, 0.01),
+            (true, 0.999_999),
+            (false, 0.000_001),
+        ];
+        let mut enc = Encoder::new();
+        for &(bit, p) in &plan {
+            enc.encode_bit(bit, p);
+        }
+        let bytes = enc.finish();
+
+        let mut dec = Decoder::new(&bytes);
+        for &(bit, p) in &plan {
+            assert_eq!(dec.decode_bit(p), bit);
+        }
+    }
+
+    #[test]
+    fn encode_bit_round_trips_the_unlikely_outcome() {
+        // The expensive but load-bearing case: a bit coded against a
+        // probability that says it is almost impossible must still decode
+        // exactly, not just the likely bit at the same probability.
+        let mut enc = Encoder::new();
+        enc.encode_bit(false, 0.999);
+        let bytes = enc.finish();
+        let mut dec = Decoder::new(&bytes);
+        assert!(!dec.decode_bit(0.999));
+    }
+
+    #[test]
+    fn encode_bit_out_of_range_probability_clamps_not_panics() {
+        let mut enc = Encoder::new();
+        enc.encode_bit(true, 2.0);
+        enc.encode_bit(false, -1.0);
+        let bytes = enc.finish();
+
+        let mut dec = Decoder::new(&bytes);
+        assert!(dec.decode_bit(2.0));
+        assert!(!dec.decode_bit(-1.0));
+    }
+
+    #[test]
+    fn encode_bit_at_a_skewed_probability_costs_far_fewer_bits_than_fixed_50_50() {
+        // 2000 bits, true 99% of the time: coding them at the matching
+        // skewed probability should compress far below encode_bits' fixed,
+        // unmodeled 50/50 split on the same sequence.
+        let bits: Vec<bool> = crate::test_support::Xorshift32::new(0x0BAD_F00D)
+            .take(2000)
+            .map(|state| state % 100 != 0)
+            .collect();
+
+        let mut skewed = Encoder::new();
+        for &bit in &bits {
+            skewed.encode_bit(bit, 0.99);
+        }
+        let skewed_bytes = skewed.finish();
+
+        let mut fixed = Encoder::new();
+        for &bit in &bits {
+            fixed.encode_bits(u32::from(bit), 1);
+        }
+        let fixed_bytes = fixed.finish();
+
+        assert!(
+            skewed_bytes.len() < fixed_bytes.len() / 4,
+            "skewed {} bytes should be far below fixed-50/50 {} bytes for a 99%-true sequence",
+            skewed_bytes.len(),
+            fixed_bytes.len()
+        );
     }
 }
