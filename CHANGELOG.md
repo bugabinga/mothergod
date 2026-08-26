@@ -8,6 +8,13 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Ideal-cost accounting mode, closing slice (`research/JOURNAL.md` S2-A38,
+  ADR-0006): `codec::ideal_cost_bits` sums the whole-codec ideal coding cost
+  of a file, the flag/length/offset/slot streams and literal bytes together,
+  by pricing the same `lz::parse_optimal` token stream `codec::encode_tokens`
+  would encode through `Model::ideal_cost_bits` and `Literal::ideal_cost_bits`
+  instead of a real `Encoder` — closes the whole-codec pass S2-A30 and
+  S2-A31 each flagged as remaining scope.
 - `docs/benchmarks/`: mothergod's bits/byte on `bench/baseline.json`'s fixed
   cases, rendered as a static SVG bar chart (`baseline.svg`) plus a markdown
   table (`baseline.md`), generated together by a new `render_baseline_graph`
@@ -273,7 +280,8 @@ All notable changes to this project are documented here. Format follows
   counterpart for the six-expert literal mixer, pricing a byte against
   the same mixed distribution `Literal::encode` codes against without
   touching an `Encoder`. Both entropy stages now support ideal-cost
-  accounting; a whole-codec pass summing them together remains.
+  accounting; a whole-codec pass summing them together landed in S2-A38,
+  above.
 - Train/sealed split plumbing, seed half (`research/JOURNAL.md` S2-A32):
   `bench::sealed_seed` derives a sealed-validation seed from a train seed
   (`research/corpus/POLICY.md`, "different seed... from train"), distinct

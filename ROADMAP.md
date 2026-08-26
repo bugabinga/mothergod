@@ -129,7 +129,7 @@ agent processes. Done 2026-08-20.
       per `research/corpus/POLICY.md`.
 - [x] Adversarial decode seed corpus + suite (`tests/adversarial/`,
       `docs/TESTING.md` layer 2).
-- [ ] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
+- [x] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
       emitting bits) — recovers the archive's proxy-speed experiment loop
       inside the codec of record.
 - [ ] CI benchmark gate: PR fails on regression vs `bench/baseline.json`.

@@ -1490,6 +1490,37 @@ record.
   (issue #231), both needing `GH_ADMIN_TOKEN`; real Silesia numbers,
   blocked on throughput (S1-P6's speed-tier lead) rather than on missing
   code.
+- S2-A38 | ACCEPTED | ROADMAP M2's ideal-cost accounting mode (ADR-0006),
+  closing slice: `codec::ideal_cost_bits`, the whole-codec pass S2-A30 and
+  S2-A31 each flagged as remaining scope after building
+  `Model::ideal_cost_bits` and `Literal::ideal_cost_bits`. Runs
+  `lz::parse_optimal` over already-filtered data, then walks the same
+  flag/length/offset/slot/literal sequence `codec::encode_tokens` would
+  encode, pricing each through the two per-model methods instead of
+  driving an `Encoder`. A new private `ideal_cost_bucketed` mirrors
+  `encode_bucketed`'s split: `Model::ideal_cost_bits` prices the bucket
+  symbol, and the residual low bits (raw, unmodeled — `Encoder::encode_bits`
+  emits them literally) cost exactly their own count, added as a plain
+  `f64`. Operates at `encode_tokens`'s layer (one already-chosen filter's
+  output), not `encode`'s filter-trial loop above it — an experiment
+  pricing a candidate doesn't need to pay for trialing every filter
+  candidate too. | 3 unit tests: empty input costs zero; summed ideal cost
+  over the archived codec source (`research/imports/session-1/
+  mothergod.rs`, 25,524 bytes, the same fixture every other ideal-cost
+  accuracy test in this crate uses) tracks `encode_tokens`'s real
+  `Encoder` output (past its 8-byte header, which no `ideal_cost_bits`
+  call ever prices) within 1%; a 50x repeat of an 8-byte pattern costs
+  under half the bits/byte of same-length pseudo-random data, confirming
+  the pass actually reflects the LZ/model pipeline's own sense of
+  compressibility rather than merely tracking one fixture's real length.
+  All five root CLAUDE.md gates clean. | No bpb measurement: this is the
+  accounting tool ROADMAP M2 calls for, not itself an experiment against a
+  champion — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas, closing the pattern S2-A30 through S2-A37 share. Remaining
+  S2-D1 scope: the CI baseline gate's `.github/workflows/` wiring and the
+  scheduled `corpus-fetch` workflow (issue #231), both needing
+  `GH_ADMIN_TOKEN`; real Silesia numbers, blocked on throughput
+  (S1-P6) rather than on missing code.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).

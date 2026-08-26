@@ -35,6 +35,11 @@
 //! capped at [`MAX_DECODED_LEN`], so a tiny payload cannot declare an
 //! unbounded length and force unbounded decode work; see
 //! [`MAX_DECODED_LEN`]'s docs for why, and [`decode`]'s docs for the rest.
+//!
+//! [`ideal_cost_bits`] completes ROADMAP M2's ideal-cost accounting mode
+//! (`research/JOURNAL.md` S2-A30/S2-A31 built the per-model pieces this
+//! sums): the whole-codec `-log2(p)` pass across the flag/length/offset/slot
+//! streams and literal bytes together, without touching an [`Encoder`].
 
 use std::num::NonZeroU32;
 
@@ -176,6 +181,19 @@ fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
     (1u32 << bits) | ac.decode_bits(bits)
 }
 
+/// [`ideal_cost_bits`]'s counterpart to [`encode_bucketed`]: the bucket
+/// symbol's modeled `-log2(p)` cost plus the residual low bits' cost, which
+/// is exactly `bits` — [`crate::coder::Encoder::encode_bits`] emits them
+/// raw and unmodeled, so their cost is their count, not a `Model` lookup.
+fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
+    let b = lz::bucket(value);
+    let cost = model.ideal_cost_bits(b);
+    // b is a Model alphabet index, at most OFFSET_BUCKETS - 1 (20): always
+    // fits u32, same bound encode_bucketed relies on.
+    let bits = u32::try_from(b).expect("bucket index is small, always fits u32");
+    cost + f64::from(bits)
+}
+
 /// Applies `candidate`'s filter to `data`, or returns a copy of it
 /// unchanged for [`Candidate::Identity`]. Every filter here preserves
 /// length, so the result is always `data.len()` bytes.
@@ -256,6 +274,57 @@ fn encode_tokens(data: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&token_count.to_le_bytes());
     out.extend(ac.finish());
     out
+}
+
+/// Sums the whole-codec ideal coding cost of already-filtered `data`, in
+/// bits: ROADMAP M2's ideal-cost accounting mode (ADR-0006), the slice
+/// `research/JOURNAL.md` S2-A30 and S2-A31 each flagged as remaining scope
+/// after building `Model::ideal_cost_bits` and `Literal::ideal_cost_bits`
+/// respectively. Walks the same `lz::parse_optimal` token stream this
+/// module's private `encode_tokens` would encode and prices every
+/// flag/length/offset/slot symbol and every literal byte through those two
+/// methods instead of an [`Encoder`], so an experiment loop can price a
+/// whole file's coding cost under this crate's real adaptive models without
+/// paying for real arithmetic coding or trialing candidate filters (this
+/// operates on one already-chosen filter's output, the same layer
+/// `encode_tokens` does, not on [`encode`]'s filter-selection loop above
+/// it).
+#[must_use]
+pub fn ideal_cost_bits(data: &[u8]) -> f64 {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut context = Context::default();
+    let mut pos = 0usize;
+    let mut bits = 0.0;
+
+    for token in &tokens {
+        let flag_table = usize::from(context.after_copy);
+        match *token {
+            Token::Literal(byte) => {
+                bits += models.flag[flag_table].ideal_cost_bits(FLAG_LITERAL);
+                bits += models.literal.ideal_cost_bits(context, byte);
+                context = context.after_literal(byte);
+                pos += 1;
+            }
+            Token::Match { len, distance } => {
+                bits += models.flag[flag_table].ideal_cost_bits(FLAG_MATCH);
+                bits += ideal_cost_bucketed(&mut models.length, len);
+                bits += ideal_cost_bucketed(&mut models.offset, distance.get());
+                let end = pos + len as usize;
+                context = context.after_copy(&data[pos..end]);
+                pos = end;
+            }
+            Token::Rep { len, slot } => {
+                bits += models.flag[flag_table].ideal_cost_bits(FLAG_REP);
+                bits += models.slot.ideal_cost_bits(slot_to_symbol(slot));
+                bits += ideal_cost_bucketed(&mut models.length, len);
+                let end = pos + len as usize;
+                context = context.after_copy(&data[pos..end]);
+                pos = end;
+            }
+        }
+    }
+    bits
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
@@ -635,5 +704,70 @@ mod tests {
         payload.extend(ac_bytes);
 
         assert_eq!(decode(&payload), Err(Error::Corrupt));
+    }
+
+    #[test]
+    fn ideal_cost_bits_is_zero_on_empty_input() {
+        assert!(ideal_cost_bits(b"").abs() < 1e-9);
+    }
+
+    #[test]
+    fn ideal_cost_bits_tracks_real_encoded_length_within_one_percent() {
+        // Named corpus (CLAUDE.md hard rule 4): the founding session's
+        // archived codec, real structured Rust source, 25,524 bytes — the
+        // same fixture roundtrip_founding_archive_source and literal.rs's
+        // vendored-exp accuracy test use. encode_tokens's real Encoder
+        // output is compared past its 8-byte declared-length/token-count
+        // header (no ideal_cost_bits call ever prices that header): summed
+        // ideal cost is an estimate, not the real coder's bit-exact output
+        // (integer cumulative-frequency division rounds; the coder also
+        // pays a handful of flush bits at the end), so this checks
+        // closeness, not equality — the same tolerance shape as
+        // model.rs's and literal.rs's own ideal-cost accuracy tests.
+        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+
+        let ideal_bits = ideal_cost_bits(data);
+
+        let real = encode_tokens(data);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "encoded length is far below f64's exact integer range (2^53)"
+        )]
+        let real_bits = ((real.len() - 8) * 8) as f64;
+
+        let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
+        assert!(
+            relative_diff <= 0.01,
+            "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
+             {relative_diff:.4} relative difference exceeds the 1% budget"
+        );
+    }
+
+    #[test]
+    fn ideal_cost_bits_is_lower_for_repetitive_than_random_data() {
+        // A sanity check the accuracy test above can't give directly: the
+        // ideal-cost pass must actually reflect the LZ/model pipeline's own
+        // sense of compressibility, not just track real encoded length on
+        // one fixture. A 50x repeat of an 8-byte pattern (long enough to
+        // clear lz::OPTIMAL_MIN_LEN) must cost far fewer bits per byte than
+        // pseudo-random bytes of the same length.
+        let repetitive = b"abcdefgh".repeat(50);
+        let random: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(repetitive.len())
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "byte lengths here are tiny, far below f64's exact integer range (2^53)"
+        )]
+        let (repetitive_len, random_len) = (repetitive.len() as f64, random.len() as f64);
+        let repetitive_bpb = ideal_cost_bits(&repetitive) / repetitive_len;
+        let random_bpb = ideal_cost_bits(&random) / random_len;
+        assert!(
+            repetitive_bpb < random_bpb / 2.0,
+            "repetitive data's ideal cost ({repetitive_bpb} bits/byte) should be far below \
+             random data's ({random_bpb} bits/byte)"
+        );
     }
 }
