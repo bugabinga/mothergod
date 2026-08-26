@@ -46,15 +46,18 @@
 //! [`crate::model::Model`]-derived frequency, and this module's own test
 //! suite proves the two work together — an `Sse`-calibrated probability,
 //! coded through that primitive, round-trips exactly and costs far fewer
-//! bits than a fixed 50/50 split on the same skewed sequence. What
-//! remains: decompose the flag model's binary "is this a copy, not a
-//! literal" sub-decision, which S1-P1's own text names as the candidate —
-//! targets the five zstd text holdouts named there — wire `Sse` and
-//! `encode_bit`/`decode_bit` behind it, bump `FORMAT_VERSION`, and measure
-//! a real bpb delta on the corpus policy's train/sealed split. No bpb
-//! measurement is possible yet: `research/progress.jsonl` records this
-//! slice with `kind: "patch"` and null deltas, per `research/README.md`'s
-//! capability-patch rule.
+//! bits than a fixed 50/50 split on the same skewed sequence.
+//!
+//! Decomposing the flag model's binary "is this a copy, not a literal"
+//! sub-decision and wiring `Sse` behind it was tried and reverted
+//! (`research/JOURNAL.md` S2-R1): measured on the train/sealed corpus, an
+//! `Sse` stage over an already order-0-adaptive binary decision showed no
+//! train improvement and one sealed regression, rather than the hoped-for
+//! move toward the five zstd text holdouts S1-P1 names. `research/JOURNAL.md`
+//! S1-P1's entry has the numbers and the mechanism read; the next attempt,
+//! if any, wants a compound estimate to calibrate (the literal mixer's own
+//! eventual binary decomposition is the obvious candidate), not another raw
+//! `Model` split.
 
 /// Number of probability bins per context: 33 evenly spaced points across
 /// `[0.0, 1.0]` (32 intervals), the classic PAQ/APM bin count (Mahoney

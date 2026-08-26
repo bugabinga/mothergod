@@ -88,6 +88,36 @@ record.
   unseen in context), still a LEAD below.
 - S1-R5 | REJECTED | Count-backoff toward order-0 for literals: damages exactly
   the contexts that predict best (val objectors: json, log).
+- S2-R1 | REJECTED | S1-P1's third slice: wired `Sse` + `encode_bit`/
+  `decode_bit` (S2-A40/S2-A41) behind the flag model's literal/copy
+  sub-decision, decomposing the old three-ary flag `Model` into an
+  SSE-calibrated `is_copy` bit plus a `copy_kind` bit (`FORMAT_VERSION` 3
+  candidate; kept `codec::decode` able to read `FORMAT_VERSION` 2 frames
+  too, since `tests/golden/v2-lz-repeated-text` commits this crate to
+  that forever). Measured on `bench::baseline`'s 11 train-tier cases and
+  the two sealed-only kinds (`access_log`, `gradient_image`): train net
+  effect ~+0.011 b/B worse (7 of 11 cases regressed, all individually
+  under `TOLERANCE_BITS`; `entropy_ladder_h6` alone +0.007), sealed split
+  one improvement (`access_log` −0.0014) and one regression
+  (`gradient_image` +0.0072). No train improvement and one validation
+  regression fails corpus policy's accept rule outright. Mechanism: an
+  order-0 adaptive frequency count over a single binary outcome (what
+  `is_copy` already was before this change) has little systematic
+  calibration bias for SSE to correct — SSE earns its keep calibrating a
+  *compound* estimate (several signals blended, e.g. a context-mixing
+  predictor's output), not a lone frequency counter already tracking its
+  own rate — consistent with the small but real ladder-case tax
+  `research/corpus/POLICY.md`'s entropy ladder exists to catch. Separately,
+  none of the train/sealed generators are natural-language text, so this
+  slice never actually tested S1-P1's named target (the five zstd text
+  holdouts); that is a real corpus gap, not a workaround (finals are
+  never inside the experiment loop, so Canterbury could not have been the
+  accept signal here regardless). Candidate code (the `codec.rs`/`lib.rs`
+  wiring and dual-version decode) reverted in full, per the
+  `compression-experiment` skill's "delete rejected candidate code" —
+  `Sse` and `Encoder::encode_bit`/`Decoder::decode_bit` themselves
+  (S2-A40/S2-A41) are unaffected, since this rejection is about their
+  combination with `is_copy`, not their own correctness.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -1655,7 +1685,12 @@ record.
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
   First slice: S2-A40 (standalone primitive). Second slice: S2-A41
   (probability-driven bit-coding primitive, proven together with `Sse`).
-  Both not yet wired.
+  Third slice, wiring `Sse` behind the flag model's literal/copy split:
+  tried and rejected, S2-R1 — a raw order-0 binary decision has little
+  systematic bias left for SSE to correct. Next attempt, if any, wants a
+  compound/mixed estimate to calibrate instead (the literal mixer's
+  eventual binary decomposition is the obvious one), not another raw
+  `Model` split.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue.
