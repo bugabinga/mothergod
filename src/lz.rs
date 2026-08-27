@@ -387,9 +387,19 @@ fn to_u32(i: usize) -> u32 {
 /// bt4 match finders use to keep comparisons near the tree height rather
 /// than the match length itself (`len0`/`len1` in the LZMA reference
 /// implementation, deliberately not carried here — see
-/// `suffix_common_len`, which always compares from scratch). Both are
-/// speed/memory work, not correctness work; they wait for whichever slice
-/// wires this into a parse pass.
+/// `suffix_common_len`, which always compares from scratch).
+///
+/// The length-prefix-reuse omission is not just speed/memory polish: a
+/// straight swap into `dp_round` in [`Self::insert_and_find`]'s place of
+/// `MatchFinder::insert` + `find_best` was tried and rejected
+/// (`research/JOURNAL.md` S2-R2). It won on ratio but broke the issue #179
+/// speed guard, because `insert_and_find` fuses insertion with search, so
+/// `dp_round`'s `carry` reuse can no longer skip the walk on a long run —
+/// only skip *using* a fresher result — and without length-prefix-reuse,
+/// highly repetitive data makes each visited candidate cost close to
+/// `MAX_MATCH_LEN` instead of the tree height. A future wiring attempt
+/// needs that optimization, or a cheap insert-only fast path `carry` can
+/// skip through, before repeating the swap.
 pub struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// `head[hash]` is the current tree root for that hash bucket, or
