@@ -28,7 +28,14 @@ silently when done wrong:
 Reads the body from stdin, prints the sent message_id to stdout so the caller
 can log it or reply to it.
 
-Usage: tg-send [--reply-to <message_id>] < body
+`--notice` marks the message as a notification rather than a turn in the
+operator conversation: it answers nothing, so it must not decrement the
+typing counter, and it comes from a deterministic workflow step, so it needs
+no chat-log receipt; logging it would evict real conversation from the
+40-entry memory at machine cadence. The mechanical heartbeat run notice
+(agent-heartbeat.yml) is the caller this exists for.
+
+Usage: tg-send [--reply-to <message_id>] [--notice] < body
 """
 
 import html
@@ -65,7 +72,11 @@ REF = re.compile(r"(?<![\w/#])#(\d{1,6})\b")
 def main() -> int:
     args = sys.argv[1:]
     reply_to = None
-    if args[:1] == ["--reply-to"]:
+    notice = False
+    while args and args[0] in ("--reply-to", "--notice"):
+        if args[0] == "--notice":
+            notice, args = True, args[1:]
+            continue
         if len(args) < 2:
             print("tg-send: --reply-to needs a message id", file=sys.stderr)
             return 2
@@ -131,8 +142,9 @@ def main() -> int:
         print(f"tg-send: {scrub(str(error), token)}", file=sys.stderr)
         return 1
 
-    stop_typing()
-    record(sent["result"], reply_to, body)
+    if not notice:
+        stop_typing()
+        record(sent["result"], reply_to, body)
     print(sent["result"]["message_id"])
     return 0
 

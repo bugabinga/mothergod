@@ -221,3 +221,19 @@ jobs:
             ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
             ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
             ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # Run notice (operator directive, Telegram, 2026-08-27): every
+      # heartbeat run lands in the operator's Telegram as a short summary,
+      # composed mechanically from the audit step's scrubbed output, never
+      # drafted in-session — the final response already says what the run
+      # did, and a prompt duty to restate it would waste context.
+      # Runs after agent-audit because it reads that step's files; a paused
+      # run sends nothing (claude skipped skips this too).
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+        run: |
+          .github/scripts/run-notice.py "${RUNNER_TEMP}/agent-audit" heartbeat \
+            | .github/scripts/tg-send --notice

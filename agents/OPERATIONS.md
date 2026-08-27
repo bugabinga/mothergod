@@ -88,7 +88,8 @@ The system is inert until these are done:
   one-time step is to send the bot any message (e.g. /start) — the next
   BDFL run detects it, stores your chat id as repo variable
   `OPERATOR_TELEGRAM_CHAT_ID`, and confirms. From then on: automatic pause
-  alerts on usage limits, dire escalations, the weekly digest summary — and
+  alerts on usage limits, dire escalations, the weekly digest summary, a
+  status line per BDFL run, a mechanical per-run heartbeat notice — and
   an **operator inbox**: text the bot instructions from your phone and the
   BDFL reads and acts on them at each wake-up (≤3 h latency). Messages from
   anyone but you are ignored. **This bot and its chat are permanently
