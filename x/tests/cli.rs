@@ -193,6 +193,34 @@ fn test_stops_at_the_first_failing_suite_and_names_the_rerun_command() {
     assert!(stderr.contains("next: cargo test --manifest-path x/Cargo.toml"));
 }
 
+#[test]
+fn test_doc_builds_documentation_with_warnings_denied() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+
+    let output = repository.x(&["doc"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("doc: built without warnings"));
+}
+
+#[test]
+fn test_doc_failure_names_the_rerun_command() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write("src/lib.rs", "//! Links to [nonexistent_item].\n");
+
+    let output = repository.x(&["doc"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("doc: documentation build failed"));
+    assert!(stderr.contains("next: RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps"));
+}
+
 fn write_passing_fixture(repository: &Repository) {
     repository.write(
         "Cargo.toml",

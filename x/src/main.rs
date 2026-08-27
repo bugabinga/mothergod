@@ -1,11 +1,12 @@
 //! Repository-local formatting and linting command.
 
+mod doc;
 mod files;
 mod format;
 mod lint;
 mod test;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
@@ -37,6 +38,11 @@ enum Task {
         after_help = "Runs `cargo test --all-targets`, `cargo test --manifest-path x/Cargo.toml`, then `cargo test --doc`, in order.\n\nNot file-scoped: the plan is fixed. Stops at the first failing suite and names the command to re-run just that one.\n\nExamples:\n  cargo x test"
     )]
     Test,
+    /// Build documentation with rustdoc warnings denied
+    #[command(
+        after_help = "Runs `RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps`.\n\nNot file-scoped: the whole crate documents or the task fails, naming the command to re-run.\n\nExamples:\n  cargo x doc"
+    )]
+    Doc,
 }
 
 #[derive(Args)]
@@ -76,7 +82,8 @@ fn main() -> ExitCode {
         Task::Lint(args) => execute(TaskKind::Lint, &args.paths, |selection| {
             lint::run(selection, args.fix)
         }),
-        Task::Test => run_test(),
+        Task::Test => run_at_root(test::run),
+        Task::Doc => run_at_root(doc::run),
     };
 
     match result {
@@ -99,9 +106,9 @@ fn execute(
     run(&selection)
 }
 
-fn run_test() -> Result<bool, String> {
+fn run_at_root(run: impl FnOnce(&Path) -> Result<bool, String>) -> Result<bool, String> {
     let cwd = std::env::current_dir()
         .map_err(|error| format!("cannot read the current directory: {error}"))?;
     let root = files::repository_root(&cwd)?;
-    test::run(&root)
+    run(&root)
 }
