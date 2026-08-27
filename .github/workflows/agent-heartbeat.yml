@@ -135,6 +135,9 @@ jobs:
                it with squash — this is the one PR type you merge yourself.
                If the bump is major or touches behavior our workflows rely
                on, read the release notes first and say what you concluded.
+               Checks still pending: skip the PR, the next wake owns it.
+               You cannot wait for anything; the run ends the moment your
+               turn ends, so never end a turn planning to resume.
             4. Issues missing a triage response: triage up to 3, product
                and unrouted ones only. Triage
                DECIDES, it does not just label. Every issue you touch
