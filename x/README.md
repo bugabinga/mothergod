@@ -15,6 +15,7 @@ cargo x help lint
 cargo x fmt [--check] [PATH...]
 cargo x lint [--fix] [PATH...]
 cargo x test
+cargo x doc
 ```
 
 `test` runs the fixed plan CLAUDE.md's Commands block names as the test
@@ -22,6 +23,10 @@ suites: `cargo test --all-targets`, `cargo test --manifest-path
 x/Cargo.toml`, then `cargo test --doc`, in that order. It is not
 file-scoped; it stops at the first failing suite and names the command to
 re-run just that one.
+
+`doc` runs `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`, the
+CLAUDE.md doc gate. It is not file-scoped either; on failure it names the
+command to re-run.
 
 No paths selects every supported tracked file.
 A file selects itself.

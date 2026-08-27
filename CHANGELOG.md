@@ -83,6 +83,9 @@ All notable changes to this project are documented here. Format follows
   --all-targets`, `cargo test --manifest-path x/Cargo.toml`, and
   `cargo test --doc` as one fixed plan, stopping at the first failing suite
   and naming the command to re-run just that one.
+- `cargo x doc` (ADR-0029, second of four steps): wraps
+  `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`, the CLAUDE.md doc
+  gate, naming the command to re-run on failure.
 - Benchmark harness, first slice (`research/JOURNAL.md` S2-A1): a new
   `bench/` workspace crate with the two mandatory corpus generators from
   `research/corpus/POLICY.md` ported to Rust — `entropy_ladder` (iid bytes
