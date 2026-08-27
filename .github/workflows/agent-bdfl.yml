@@ -681,6 +681,11 @@ jobs:
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
           #
+          # bypassPermissions (ADR-0033): only this clears the .claude/
+          # protected-path check in a non-interactive session, which the
+          # BDFL needs to author skills. Scoped to this workflow alone;
+          # accepts the transcript-integrity tradeoff the ADR records.
+          #
           # Model pin (ADR-0031): the director runs
           # the most capable model this project can afford, and owns both
           # halves of that. The ladder lives in agents/models.json.
@@ -692,6 +697,7 @@ jobs:
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 500
+            --permission-mode bypassPermissions
             --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
 
       - if: always() && steps.claude.outcome != 'skipped'
