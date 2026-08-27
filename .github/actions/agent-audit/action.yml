@@ -10,9 +10,15 @@
 # and CLAUDE.md hard rule 10 is the first.
 #
 # This step must never fail an agent run: observability does not get to break
-# the thing it observes.
+# the thing it observes. (The ledger step below can still fail the composite
+# action on a `gh` error; every call site already wraps it in
+# `continue-on-error: true`, same as the rest of this action.)
+#
+# Also upserts the allowance-state ledger issue (#202) when `token` is set:
+# the rolling seven-day utilization reading agent-guard projects against to
+# pick a role's `thrift` ladder in `agents/models.json`.
 name: agent-audit
-description: Publish an agent run's persona, prompt, metadata and final response as an artifact and a step summary
+description: Publish an agent run's persona, prompt, metadata and final response as an artifact and a step summary; upsert the allowance ledger
 inputs:
   role:
     description: Which agent produced this run (bdfl, maintainer, reviewer, researcher)
@@ -22,6 +28,13 @@ inputs:
     required: true
   redact:
     description: Newline-separated secret values to scrub from the output
+    required: false
+    default: ""
+  token:
+    description: >-
+      GitHub token with issues read/write. Optional; when empty the
+      allowance ledger (below) is not written, everything else is
+      unaffected.
     required: false
     default: ""
 runs:
@@ -202,6 +215,7 @@ runs:
         # enough to derive burn and runway. The full rate_limit_events payload
         # below remains authoritative; this is a rounded, lossy index only.
         allowance_index = ""
+        last_utilization, last_reset = "", ""
         for info in rate_limits:
             if not isinstance(info, dict):
                 continue
@@ -218,8 +232,13 @@ runs:
                 continue
             basis_points = int(utilization * 10_000 + 0.5)
             allowance_index = f"-u{basis_points}-r{reset}"
+            last_utilization, last_reset = utilization, reset
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"allowance_index={allowance_index}\n")
+            # Plain (non-suffix) form for the ledger-write step below (#202):
+            # a shell step reads these instead of re-parsing allowance_index.
+            fh.write(f"utilization={last_utilization}\n")
+            fh.write(f"resets_at={last_reset}\n")
 
         shape = {}
         for e in entries:
@@ -342,3 +361,85 @@ runs:
         path: ${{ runner.temp }}/agent-audit
         retention-days: 90
         if-no-files-found: warn
+
+    # Allowance ledger (issue #202): the retrospect's budget footer was the
+    # only reader of allowance readings, so restoring a budget-driven cut
+    # (cadence, effort, model tier) needed a human-shaped act every time
+    # (#198, #203, #213, #241, all hand-pulled, none self-reversing).
+    # Mirrors agent-pause's model-limits ledger: machinery writes here,
+    # agent-guard reads it, nobody hand-edits it. Keeps the last two
+    # observations only, enough for a burn-rate projection; older history
+    # lives in audit artifacts, not here.
+    - if: steps.extract.outputs.utilization != '' && inputs.token != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        UTILIZATION: ${{ steps.extract.outputs.utilization }}
+        RESETS_AT: ${{ steps.extract.outputs.resets_at }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        gh label create allowance-state --repo "$GITHUB_REPOSITORY" \
+          --color 0E8A16 --description "Rolling seven-day allowance observations (issue #202)" 2>/dev/null || true
+        n="$(gh issue list --repo "$GITHUB_REPOSITORY" --label allowance-state --state open --json number --jq '.[0].number // empty')"
+        old=''
+        [ -n "$n" ] && old="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+        body="$(UTILIZATION="$UTILIZATION" RESETS_AT="$RESETS_AT" OLD="$old" RUN="$RUN_URL" python3 - <<'PY'
+        import json, os, re, time
+
+        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("OLD", ""), re.S)
+        try:
+            prior = json.loads(m.group(1)) if m else {}
+        except (ValueError, TypeError, AttributeError):
+            prior = {}
+
+        current = {
+            "utilization": float(os.environ["UTILIZATION"]),
+            "resetsAt": int(os.environ["RESETS_AT"]),
+            "observedAt": int(time.time()),
+        }
+        # Shift current -> prev unless this is the same instant repeating
+        # (two audit steps in one run economy window): a zero-duration gap
+        # makes the rate undefined, and dividing by it is the bug, not the
+        # data.
+        prev = prior.get("current")
+        if not prev or prev.get("observedAt") == current["observedAt"]:
+            prev = prior.get("prev")
+        ledger = {"prev": prev, "current": current}
+
+        def row(label, obs):
+            if not obs:
+                return f"| {label} | (none yet) | | |"
+            when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(obs["observedAt"]))
+            return f"| {label} | {obs['utilization']*100:.1f}% | {when} | {obs['observedAt']} |"
+
+        print("\n".join([
+            "Rolling seven-day allowance observations. agent-guard reads this to",
+            "project whether the current burn rate reaches the next reset, and",
+            "picks a role's `thrift` ladder/effort in `agents/models.json` when it",
+            "would not. Two readings only; older history lives in audit artifacts.",
+            "",
+            "| Reading | Utilization | Observed | Epoch |",
+            "|---|---|---|---|",
+            row("previous", prev),
+            row("current", current),
+            "",
+            f"Next reset: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(current['resetsAt']))} ({current['resetsAt']})",
+            "",
+            "```json",
+            json.dumps(ledger, indent=2, sort_keys=True),
+            "```",
+            "",
+            f"Last written by {os.environ['RUN']}",
+            "",
+            "---",
+            "_Generated by [Claude Code](https://claude.ai/code)_",
+        ]))
+        PY
+        )"
+        if [ -n "$n" ]; then
+          gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --body "$body"
+        else
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "📊 Allowance observation ledger" --label allowance-state --body "$body"
+        fi

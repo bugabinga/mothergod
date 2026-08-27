@@ -28,6 +28,15 @@ description: >-
   dropped with a log line rather than failing the run: a typo in a data
   file must not take an agent offline.
 
+  Allowance projection (issue #202): before resolving the ladder, the guard
+  reads the `allowance-state` ledger (written by agent-audit) and projects
+  the observed seven-day burn rate against the next reset. When the
+  projection misses the reset, it resolves this role's `thrift` block
+  instead of its normal ladder/effort, if `agents/models.json` has one.
+  No restore step needed either direction: every wake re-projects from the
+  latest reading, so a role graduates back to its normal tier on its own
+  once the allowance shows slack, with no PR and no run remembering to do it.
+
   The log line always says which reason fired. A model-scoped limit never
   stops the other agents: that is the whole point of the ledger and the
   reason a per-model limit is not a global pause.
@@ -104,7 +113,8 @@ runs:
         # would be wasted API calls.
         if [ "$paused" = false ] && [ -n "$ROLE" ]; then
           ledger_body="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-limits --state open --json body --limit 1 --jq '.[0].body // ""')"
-          resolved="$(ROLE="$ROLE" LEDGER="$ledger_body" python3 - <<'PY'
+          allowance_body="$(gh issue list --repo "$GITHUB_REPOSITORY" --label allowance-state --state open --json body --limit 1 --jq '.[0].body // ""')"
+          resolved="$(ROLE="$ROLE" LEDGER="$ledger_body" ALLOWANCE="$allowance_body" python3 - <<'PY'
         import json, os, re, sys, time
 
         role = os.environ["ROLE"]
@@ -117,6 +127,37 @@ runs:
             sys.exit()
 
         entry = roles.get(role) or {}
+
+        # Allowance projection (#202): pick this role's `thrift` ladder/
+        # effort when the observed burn rate would exhaust the seven-day
+        # allowance before it resets. Fails open on any missing or
+        # malformed reading (no prior observation, non-positive rate, no
+        # thrift block for this role) by leaving `entry` as the normal one:
+        # a bad reading must cost one thin cycle at worst, never a stuck one.
+        thrift_reason = ""
+        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("ALLOWANCE", ""), re.S)
+        try:
+            ledger = json.loads(m.group(1)) if m else {}
+            prev, current = ledger.get("prev"), ledger.get("current")
+            span = current["observedAt"] - prev["observedAt"]
+            rate = (current["utilization"] - prev["utilization"]) / span if span > 0 else 0
+            if rate > 0:
+                exhausts_at = current["observedAt"] + (1.0 - current["utilization"]) / rate
+                if exhausts_at < current["resetsAt"]:
+                    thrift_reason = (
+                        f"projected exhaustion {time.strftime('%Y-%m-%d %H:%M', time.gmtime(exhausts_at))} UTC "
+                        f"misses reset {time.strftime('%Y-%m-%d %H:%M', time.gmtime(current['resetsAt']))} UTC "
+                        f"at {rate * 3600 * 100:.2f}%/h"
+                    )
+        except (TypeError, KeyError, ValueError, ZeroDivisionError, AttributeError):
+            pass  # No usable reading yet; run this role at its normal tier.
+
+        if thrift_reason and entry.get("thrift"):
+            entry = entry["thrift"]
+            thrift_reason = f"THRIFT ({thrift_reason})"
+        else:
+            thrift_reason = ""
+
         ladder = entry.get("ladder") or []
         # Levels per the Claude Code CLI --effort flag, verified against
         # `claude --help` on 2026-08-23: low, medium, high, xhigh, max.
@@ -130,7 +171,8 @@ runs:
             effort = ""
 
         if not ladder:
-            print(f"ok||{effort}|no ladder for this role; using action default model")
+            note = "no ladder for this role; using action default model"
+            print(f"ok||{effort}|{note}{' [' + thrift_reason + ']' if thrift_reason else ''}")
             sys.exit()
 
         # The ledger is a fenced JSON object mapping model id -> epoch
@@ -152,11 +194,16 @@ runs:
                 note = f"{model} (ladder: {' > '.join(ladder)})"
                 if blocked:
                     note += f"; limited: {', '.join(sorted(blocked))}"
+                if thrift_reason:
+                    note += f" [{thrift_reason}]"
                 print(f"ok|{model}|{effort}|{note}")
                 sys.exit()
 
         resets = min(blocked[m] for m in ladder if m in blocked)
-        print(f"exhausted|||every rung limited ({' > '.join(ladder)}); earliest reset {resets}")
+        note = f"every rung limited ({' > '.join(ladder)}); earliest reset {resets}"
+        if thrift_reason:
+            note += f" [{thrift_reason}]"
+        print(f"exhausted|||{note}")
         PY
         )"
           IFS='|' read -r status model effort note <<<"$resolved"

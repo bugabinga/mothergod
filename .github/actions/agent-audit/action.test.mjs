@@ -30,7 +30,7 @@ const fixtures = [
         },
       },
     ],
-    output: "allowance_index=-u1235-r1800000000\n",
+    output: "allowance_index=-u1235-r1800000000\nutilization=0.12345\nresets_at=1800000000\n",
   },
   {
     name: "ignores malformed rate-limit events",
@@ -49,12 +49,12 @@ const fixtures = [
         rate_limit_info: { rateLimitType: "seven_day", utilization: 0.5, resetsAt: false },
       },
     ],
-    output: "allowance_index=\n",
+    output: "allowance_index=\nutilization=\nresets_at=\n",
   },
   {
     name: "omits the suffix when no observation exists",
     input: [{ type: "result", result: "done" }],
-    output: "allowance_index=\n",
+    output: "allowance_index=\nutilization=\nresets_at=\n",
   },
   {
     name: "does not let an overage limit replace the shared allowance",
@@ -76,13 +76,13 @@ const fixtures = [
         },
       },
     ],
-    output: "allowance_index=-u4000-r1800000000\n",
+    output: "allowance_index=-u4000-r1800000000\nutilization=0.4\nresets_at=1800000000\n",
   },
   {
     name: "omits the suffix for malformed execution data",
     input: "{not json",
     raw: true,
-    output: "allowance_index=\n",
+    output: "allowance_index=\nutilization=\nresets_at=\n",
   },
 ];
 
