@@ -92,7 +92,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -uo pipefail
-          all='["actions","javascript-typescript","rust"]'
+          all='["actions","javascript-typescript","python","rust"]'
 
           files=""
           case "$EVENT" in
@@ -136,6 +136,12 @@ jobs:
           if echo "$files" | grep -qE '\.[cm]?[jt]sx?$'; then
             add javascript-typescript
           fi
+          # .py by extension, plus the extensionless scripts under
+          # .github/scripts/: those carry a python shebang and are where
+          # this project's credentials move (issue #189).
+          if echo "$files" | grep -qE '\.py$|^\.github/scripts/[^./]+$'; then
+            add python
+          fi
           if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|(^|/)rustfmt\.toml$|(^|/)clippy\.toml$'; then
             add rust
           fi
@@ -165,7 +171,7 @@ jobs:
         # The fail-safe default: an empty output (filter failed, timed out,
         # or was cancelled) falls back to all three languages rather than to
         # `fromJSON('')`, which is an expression error.
-        language: ${{ fromJSON(needs.changes.outputs.languages || '["actions","javascript-typescript","rust"]') }}
+        language: ${{ fromJSON(needs.changes.outputs.languages || '["actions","javascript-typescript","python","rust"]') }}
     steps:
       - uses: actions/checkout@v7
 
