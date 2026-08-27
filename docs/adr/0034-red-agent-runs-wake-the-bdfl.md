@@ -25,9 +25,11 @@ from outside via `workflow_run`, and when a completed run concludes
 the admin PAT, the same operator attribution the clock's wakes carry
 (issue #50); the dispatch records `source=alarm` on the run's inputs.
 `cancelled` never fires it.
-Deduplication is stateless and transition-based: the alarm acts only
-when the same workflow's previous completed run was not also red, so a
-seat failing every wake yields one dispatch, not a storm.
+Deduplication is stateless and transition-based, keyed by workflow and
+head branch: the alarm acts only when the same workflow's previous
+completed run on the same branch was not also red, so a seat failing
+every wake yields one dispatch, not a storm, while the per-PR reviewer
+(ADR-0014) never dedups across unrelated PRs.
 When the red run is agent-bdfl itself, the dispatch is a bounded retry
 and one Telegram line tells the operator, because a dead fixer cannot
 self-heal and its silence reads as a quiet factory.
@@ -42,9 +44,10 @@ fix itself.
 An absent run stays invisible: the alarm sees completions, so a cron
 that never fires creates no event, and the scheduled wakes' state check
 remains the only cover for that class.
-Consecutive red runs of one workflow with unrelated causes collapse
-into a single wake; the woken run's sweep is what guarantees the later
-failures are still seen.
+Consecutive red runs of one workflow on one branch collapse into a
+single wake; the woken run's retrospect, which reads every completed
+session since the previous successful wake, is where the later ones
+surface.
 Every watched completion, green ones included, spawns an alarm run that
 exists only to skip at the job gate, which costs no billable minutes.
 
