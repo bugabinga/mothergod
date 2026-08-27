@@ -1,0 +1,103 @@
+# The clock's sibling: agent-clock.yml wakes seats on schedule, this
+# file wakes the fixer on failure, cutting failure detection from the
+# next scheduled BDFL wake (up to an hour, issue #191) to about a
+# minute. It runs no model. Design, scope, and rejected alternatives:
+# ADR-0034.
+#
+# Invariants the steps below cannot show:
+# - `cancelled` is excluded because displaced runs are routine
+#   debouncing (ADR-0014), not failures.
+# - An absent run creates no completion event, so a cron that never
+#   fires stays covered only by the scheduled wakes' state checks.
+# - Nobody watches the watcher, accepted: no model runs here, and the
+#   moving parts are one run-list read and one dispatch.
+name: agent-alarm
+
+on:
+  workflow_run:
+    workflows:
+      - agent-clock
+      - agent-bdfl
+      - agent-heartbeat
+      - agent-review
+      - agent-research
+      - agent-deslop
+      - agent-model-intel
+    types: [completed]
+
+permissions:
+  contents: read # checkout, for tg-send
+  actions: read # run list, for the transition dedup
+
+concurrency:
+  # Serial, so two near-simultaneous red completions read a consistent
+  # run list instead of both concluding "previous run was green".
+  group: agent-alarm
+  cancel-in-progress: false
+
+jobs:
+  wake-fixer:
+    if: contains(fromJSON('["failure", "timed_out", "startup_failure"]'),
+      github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+
+      # Keyed by head branch as well as workflow: agent-review fans out
+      # per PR (ADR-0014), and two PRs' unrelated red reviews must not
+      # dedup each other (review on #270). Singleton seats run every
+      # wake on the same branch, so the extra key changes nothing for
+      # them.
+      - name: Act only on the green-to-red transition
+        id: dedup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          THIS_ID: ${{ github.event.workflow_run.id }}
+          THIS_CREATED: ${{ github.event.workflow_run.created_at }}
+        run: |
+          set -euo pipefail
+          prev="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WF_NAME" \
+            --branch "$HEAD_BRANCH" --status completed --limit 20 \
+            --json databaseId,conclusion,createdAt \
+            | jq -r --arg id "$THIS_ID" --arg at "$THIS_CREATED" \
+              '[.[] | select((.databaseId | tostring) != $id and .createdAt < $at)]
+               | first | .conclusion // "none"')"
+          echo "previous completed $WF_NAME run on $HEAD_BRANCH concluded: $prev"
+          case "$prev" in
+            failure | timed_out | startup_failure)
+              echo "same red streak; the first red run already woke the fixer"
+              echo "fresh=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "fresh=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      # The PAT, not github.token: the wake predicate admits only
+      # operator-attributed dispatches (issue #50).
+      - name: Wake agent-bdfl
+        if: steps.dedup.outputs.fresh == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+        run: gh workflow run agent-bdfl.yml --repo "$GITHUB_REPOSITORY" -f source=alarm
+
+      # always(): when the retry dispatch above fails, correlated with
+      # whatever killed the BDFL run, this line is the only survivor
+      # and must still go (review on #270).
+      - name: Tell the operator when the fixer itself died
+        if: always() && steps.dedup.outputs.fresh == 'true' &&
+          github.event.workflow_run.name == 'agent-bdfl'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          KV_ACCOUNT: c9526445475a4d62fd6e330810573ef0
+          KV_NAMESPACE: 06ae14f739f14d55b5d3c72c6b7e815f
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          printf 'A BDFL run failed: %s. One retry is dispatched; if this alert repeats, the fixer is down and the factory goes quiet.' "$RUN_URL" \
+            | .github/scripts/tg-send
