@@ -25,7 +25,9 @@ on:
       source:
         description: >-
           'cron' when agent-clock.yml's proxy dispatched this run;
-          left at the default for a human or the Telegram worker.
+          'alarm' when agent-alarm.yml woke this seat on a red agent
+          run (ADR-0034); left at the default for a human or the
+          Telegram worker.
         required: false
         default: manual
   # Operator-priority wake: any personal repo activity by the operator

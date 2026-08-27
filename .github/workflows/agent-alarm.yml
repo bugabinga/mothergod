@@ -1,0 +1,118 @@
+# The clock's sibling: agent-clock.yml wakes seats on schedule, this
+# file wakes the fixer on failure. It fires when a watched agent
+# workflow completes red and dispatches agent-bdfl, cutting
+# failure-detection latency from the next scheduled BDFL wake (up to an
+# hour, issue #191) to about a minute. It runs no model itself.
+# Decision record: ADR-0034.
+#
+# Design constraints, each load-bearing:
+#
+# - `workflow_run` is the only vantage that sees every completed death.
+#   A step inside the failing job (issue #191's candidate was extending
+#   agent-pause) cannot observe a job that never started, a checkout
+#   that failed ahead of it, or a timeout that killed the job around it.
+#   The observer stands outside the observed. What this vantage still
+#   cannot see is an absent run: a cron that never fires creates no
+#   completion event; the scheduled wakes' state check remains the only
+#   cover for that class.
+# - `cancelled` never fires it. Displaced runs are routine debouncing
+#   (ADR-0014), not failures.
+# - Dedup is stateless and transition-based: act only when this
+#   workflow's previous completed run was not also red, read from the
+#   run list at fire time. A seat failing every wake produces one
+#   dispatch, not a storm. The cost: back-to-back red runs with
+#   unrelated causes collapse into one wake; the woken BDFL's state
+#   check reads all open work, so the second failure is still seen.
+# - The dispatch rides the admin PAT for the same reason agent-clock's
+#   does: agent-bdfl admits workflow_dispatch only when attributed to
+#   the operator (issue #50), and a github.token dispatch carries a bot
+#   actor the wake predicate refuses. Same narrow scope as the clock:
+#   the PAT dispatches, nothing else.
+# - When the red run is agent-bdfl itself, the dispatch is a retry of
+#   the fixer and one Telegram line goes out, because a dead fixer
+#   cannot self-heal and its silence reads as a quiet factory. The
+#   transition dedup bounds the loop: fail, retry, fail again is
+#   previous-run-red and stays quiet.
+# - Watches the claude seats and their clock only. monster owns its
+#   failures via a tracking issue, ci and CodeQL gate PRs loudly, and
+#   the deploys stay out of scope until they bite (one idea per PR).
+# - Nobody watches the watcher. Accepted: it runs no model, and its two
+#   moving parts are a run-list read and one dispatch.
+name: agent-alarm
+
+on:
+  workflow_run:
+    workflows:
+      - agent-clock
+      - agent-bdfl
+      - agent-heartbeat
+      - agent-review
+      - agent-research
+      - agent-deslop
+      - agent-model-intel
+    types: [completed]
+
+permissions:
+  contents: read # checkout, for tg-send
+  actions: read # run list, for the transition dedup
+
+concurrency:
+  # Serial, so two near-simultaneous red completions read a consistent
+  # run list instead of both concluding "previous run was green".
+  group: agent-alarm
+  cancel-in-progress: false
+
+jobs:
+  wake-fixer:
+    if: contains(fromJSON('["failure", "timed_out", "startup_failure"]'),
+      github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Act only on the green-to-red transition
+        id: dedup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          THIS_ID: ${{ github.event.workflow_run.id }}
+          THIS_CREATED: ${{ github.event.workflow_run.created_at }}
+        run: |
+          set -euo pipefail
+          prev="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WF_NAME" \
+            --status completed --limit 20 --json databaseId,conclusion,createdAt \
+            | jq -r --arg id "$THIS_ID" --arg at "$THIS_CREATED" \
+              '[.[] | select((.databaseId | tostring) != $id and .createdAt < $at)]
+               | first | .conclusion // "none"')"
+          echo "previous completed $WF_NAME run concluded: $prev"
+          case "$prev" in
+            failure | timed_out | startup_failure)
+              echo "same red streak; the first red run already woke the fixer"
+              echo "fresh=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "fresh=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Wake agent-bdfl
+        if: steps.dedup.outputs.fresh == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+        run: gh workflow run agent-bdfl.yml --repo "$GITHUB_REPOSITORY" -f source=alarm
+
+      - name: Tell the operator when the fixer itself died
+        if: steps.dedup.outputs.fresh == 'true' &&
+          github.event.workflow_run.name == 'agent-bdfl'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          KV_ACCOUNT: c9526445475a4d62fd6e330810573ef0
+          KV_NAMESPACE: 06ae14f739f14d55b5d3c72c6b7e815f
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          printf 'A BDFL run failed: %s. One retry is dispatched; if this alert repeats, the fixer is down and the factory goes quiet.' "$RUN_URL" \
+            | .github/scripts/tg-send
