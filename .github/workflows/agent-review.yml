@@ -311,6 +311,7 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/agent-audit
         with:
+          token: ${{ github.token }}
           role: reviewer
           execution_file: ${{ steps.claude.outputs.execution_file }}
           redact: |

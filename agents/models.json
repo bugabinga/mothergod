@@ -21,17 +21,33 @@
     "cannot check; an unrecognized value is ignored with a log line rather than",
     "failing the run.",
     "",
+    "thrift (issue #202): optional per-role ladder/effort override. Absent",
+    "means unchanged. agent-guard reads the allowance-state ledger issue",
+    "(written by agent-audit) and projects the observed burn rate against",
+    "the next seven-day reset; when the projection misses the reset, it runs",
+    "this role at 'thrift' instead of its normal ladder/effort for that one",
+    "cycle. No file edit needed either direction: the guard re-projects on",
+    "every wake, so restoring the normal tier costs nothing once the",
+    "allowance shows slack again. Only roles worth thinning need an entry;",
+    "a role already on its floor model has nothing cheaper to fall back to.",
+    "",
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-08-24",
+  "reviewed": "2026-08-27",
   "roles": {
     "bdfl": {
       "ladder": [
         "claude-fable-5",
         "claude-opus-5"
       ],
-      "effort": "xhigh"
+      "effort": "xhigh",
+      "thrift": {
+        "ladder": [
+          "claude-sonnet-5"
+        ],
+        "effort": "medium"
+      }
     },
     "deslopper": {
       "ladder": [
