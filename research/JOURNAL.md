@@ -118,6 +118,39 @@ record.
   `Sse` and `Encoder::encode_bit`/`Decoder::decode_bit` themselves
   (S2-A40/S2-A41) are unaffected, since this rejection is about their
   combination with `is_copy`, not their own correctness.
+- S2-R2 | REJECTED | S1-P2's wiring slice: swapped `dp_round`'s hash-chain
+  `MatchFinder` for `BinaryTreeMatchFinder` (S2-A42), matching each
+  position's `finder.insert(i)` + `finder.find_best(i, ...)` pair with one
+  `finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL)` call (same 640 depth
+  as the retired `MAX_CHAIN_TRIES_OPTIMAL`, held equal on purpose so the
+  measurement isolated the finder swap). Ratio-wise this won outright: net
+  train effect ~−0.054 b/B across `bench::baseline`'s 11 cases (no case
+  regressed; `entropy_ladder_h1` −0.029, `entropy_ladder_h2` −0.012,
+  `markov_h8_2_trap` −0.012 carried most of it), sealed split both flat or
+  improved (`access_log` −0.00016, `gradient_image` unchanged). Rejected
+  anyway: `cargo test --all-targets` failed on
+  `lz::tests::optimal_roundtrip_long_run_of_one_repeated_byte_stays_linear`,
+  a committed regression guard (issue #179) that requires a 200,000-byte
+  single-byte-run to parse in under 15s — this wiring took 71s. Mechanism:
+  `BinaryTreeMatchFinder::insert_and_find` fuses insertion with search in
+  one mutating call (S2-A42's own docs), so `dp_round`'s `carry` reuse can
+  no longer skip the walk on a long run the way it skipped
+  `MatchFinder::find_best` — it can only skip *using* a fresher result,
+  not computing one. Compounding that, S2-A42 also deliberately deferred
+  the length-prefix-reuse optimization (`len0`/`len1`) real bt4 finders use
+  to keep each comparison near the tree height; without it, highly
+  repetitive data (near-identical suffixes everywhere) makes
+  `suffix_common_len` return close to `MAX_MATCH_LEN` (65535) on most of
+  the up to `max_depth` (640) candidates `insert_and_find` visits per
+  position, an unbounded-by-carry O(max_depth × MAX_MATCH_LEN) per-position
+  cost the hash-chain path never had. A ratio-only measurement (this
+  journal's usual accept gate) would have missed this: the failure surfaced
+  from the existing test suite, not from `bench::baseline`. Next attempt
+  needs the length-prefix-reuse optimization, a cheap insert-only fast path
+  so `carry` can skip the walk again, or both, before this finder can
+  safely replace `MatchFinder` in `dp_round`. Candidate code (the
+  `dp_round`/`next_match_candidate` wiring and `MAX_TREE_DEPTH_OPTIMAL`)
+  reverted in full; `BinaryTreeMatchFinder` itself (S2-A42) is unaffected.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -1748,9 +1781,18 @@ record.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue. First slice: S2-A42 (standalone
-  binary-tree match finder, not yet wired). Remaining: wire it into
-  `parse_optimal`, evict positions past `WINDOW`, and add per-position
-  adaptive prices.
+  binary-tree match finder, not yet wired). Second slice, wiring it
+  straight into `dp_round` in place of the hash-chain `MatchFinder`: tried
+  and rejected, S2-R2 — won on ratio (net train −0.054 b/B, no case
+  regressed) but broke the issue #179 speed guard, because
+  `insert_and_find` fuses insertion with search so `dp_round`'s `carry`
+  can no longer skip the walk on a long run, and S2-A42 deliberately
+  deferred the length-prefix-reuse optimization that would keep each
+  comparison cheap regardless. Next attempt needs the length-prefix-reuse
+  optimization (`len0`/`len1`) or a cheap insert-only fast path for
+  `carry` to skip, not another straight swap. Remaining: wire it into
+  `parse_optimal` (now blocked on one of those two prerequisites), evict
+  positions past `WINDOW`, and add per-position adaptive prices.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
