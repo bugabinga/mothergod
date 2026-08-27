@@ -365,9 +365,17 @@ fn to_u32(i: usize) -> u32 {
 /// With `max_depth` at least the bucket's true tree height, the match
 /// returned is length-exact: it equals a brute-force scan of every
 /// candidate in the bucket, proved by
-/// `tests::binary_tree_matches_brute_force`. A shallower `max_depth`
-/// trades that exactness for a bounded worst case, the same trade
-/// `MatchFinder` already makes via `max_tries`.
+/// `tests::binary_tree_matches_brute_force`. A shallower `max_depth` is
+/// *not* the same trade `MatchFinder` makes via `max_tries`:
+/// `MatchFinder::find_best` is read-only, so a low `max_tries` bounds only
+/// that one call. [`Self::insert_and_find`] mutates the tree on every
+/// call — cutting the walk short at `max_depth` permanently unlinks
+/// every candidate past the last visited node from the bucket (see the
+/// tail-cutting in [`Self::insert_and_find`]), so a single shallow call
+/// degrades every later, even full-depth, query into that same bucket,
+/// and repeated shallow calls compound the loss. Treat `max_depth` as a
+/// constant per-pass setting (LZMA/zstd's `cutValue` shape), never a
+/// value varied call-to-call for speed.
 ///
 /// Standalone primitive, not yet wired into [`parse_greedy`] or
 /// [`parse_optimal`] — the same standalone-primitive-first shape
@@ -410,7 +418,10 @@ impl<'d> BinaryTreeMatchFinder<'d> {
     /// Inserts `i` into its hash bucket's tree and returns the longest
     /// match found among the candidates visited on the way down, bounded
     /// to at most `max_depth` of them (see the struct docs for what
-    /// `max_depth` trades off). The match's distance is always within
+    /// `max_depth` trades off — notably, unlike a hash chain's
+    /// `max_tries`, a shallow `max_depth` here permanently prunes the
+    /// bucket for every later call, not just this one). The match's
+    /// distance is always within
     /// [`WINDOW`]; a candidate farther than that still participates in
     /// the tree's structure (it may still separate other candidates) but
     /// is never reported as a match.
@@ -482,9 +493,12 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         }
         // Whatever remains unlinked on either chain (the walk exhausted
         // max_depth, or ended naturally) is cut off rather than left
-        // dangling: those deeper candidates are dropped from the tree,
-        // the same bounded-search trade-off MatchFinder makes via
-        // max_tries.
+        // dangling: those deeper candidates are permanently dropped from
+        // the tree, unreachable by any later insert_and_find call into
+        // this bucket. Unlike MatchFinder's max_tries, which bounds only
+        // the one read-only call it is passed to, this is a mutation: a
+        // shallow max_depth here degrades every future query, not just
+        // this one.
         if let Some(t) = less_tail {
             self.right[t] = NO_POSITION;
         }

@@ -1694,8 +1694,18 @@ record.
   and returns the longest match among the nodes on the insertion path, so
   with `max_depth` at least the bucket's tree height the match found is
   length-exact (proven equal to a brute-force scan of the same hash
-  bucket), while a shallower `max_depth` trades exactness for a bounded
-  worst case, the same trade `MatchFinder` makes via `max_tries`.
+  bucket). A shallower `max_depth` is *not* the same trade `MatchFinder`
+  makes via `max_tries`: `MatchFinder::find_best` is read-only, so a low
+  `max_tries` bounds only that one call, while `insert_and_find` mutates
+  the tree on every call — cutting a walk short permanently unlinks the
+  unvisited candidates from the bucket, so one shallow call degrades
+  every later, even full-depth, query into that bucket, and repeated
+  shallow calls compound the loss (caught by post-merge review stress
+  testing, not by the 6 shipped tests below; fixed in the doc comments,
+  not the algorithm — the pruning matches real bt4's `cutValue`
+  mechanic per ADR-0006, so it is correct behavior, just previously
+  undersold). A wiring slice must treat `max_depth` as a constant
+  per-pass setting, never a value varied call-to-call for speed.
   Deliberately does not carry two things a wired-in successor needs:
   eviction of positions older than `WINDOW` (the tree only grows) and the
   `len0`/`len1` prefix-reuse optimization real bt4 finders use to avoid
