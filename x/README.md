@@ -12,11 +12,17 @@ cargo x help lint
 ## Commands
 
 ```text
+cargo x check
 cargo x fmt [--check] [PATH...]
 cargo x lint [--fix] [PATH...]
 cargo x test
 cargo x doc
 ```
+
+`check` is the whole gate: `fmt --check`, `lint`, `test`, then `doc`,
+unscoped, in that order. It stops at the first failing stage and names the
+command to re-run just that one. It is the one pre-push command CLAUDE.md
+names.
 
 `test` runs the fixed plan CLAUDE.md's Commands block names as the test
 suites: `cargo test --all-targets`, `cargo test --manifest-path
@@ -96,7 +102,7 @@ The exclusions live in `x/src/lint.rs` beside the executable rule selection.
 
 Path arguments are the integration boundary for agents and hooks.
 During iteration, pass only the files or directories being changed.
-Before a push, run both tasks without paths.
+Before a push, run `cargo x check`.
 
 Git integrations must produce NUL-delimited paths with `git diff --name-only -z --diff-filter=ACMR`.
 `git diff --stat` is display output, not a safe filename protocol.

@@ -86,6 +86,10 @@ All notable changes to this project are documented here. Format follows
 - `cargo x doc` (ADR-0029, second of four steps): wraps
   `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`, the CLAUDE.md doc
   gate, naming the command to re-run on failure.
+- `cargo x check` (ADR-0029, third of four steps): the umbrella gate running
+  `fmt --check`, `lint`, `test`, then `doc`, in order, stopping at the first
+  failing stage and naming the command to re-run just that one. CLAUDE.md's
+  Commands block collapses to this one command.
 - Benchmark harness, first slice (`research/JOURNAL.md` S2-A1): a new
   `bench/` workspace crate with the two mandatory corpus generators from
   `research/corpus/POLICY.md` ported to Rust — `entropy_ladder` (iid bytes

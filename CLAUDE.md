@@ -15,25 +15,22 @@ coder. The design was derived experimentally; `research/JOURNAL.md` is the
 institutional memory. Read it before touching codec code. Do not re-run
 falsified experiments unless conditions changed (note which condition).
 
-## Commands (run all before any push)
+## Commands (run before any push)
 
 ```
-cargo x fmt --check
-cargo x lint
-cargo test --all-targets
-cargo test --manifest-path x/Cargo.toml
-cargo test --doc
-RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps
+cargo x check
 ```
 
-Use `cargo x` rather than its constituent formatters or linters because x owns
-repository discovery and configuration. Invoke a constituent directly only to
-repair x when x cannot build. Scope iteration with path arguments; run both x
-tasks unscoped before pushing. `cargo x help` and task `--help` are the usage
-source of truth.
+The whole gate: fmt --check, lint, test, doc, in order, stopping at the
+first failure and naming the command to re-run just that stage. Scope
+iteration with the constituent tasks and path arguments (`cargo x fmt
+--check -- src`, `cargo x lint -- README.md`); `cargo x help` and task
+`--help` are the usage source of truth. Use `cargo x` rather than the
+tools it embeds because x owns repository discovery and configuration.
+Invoke an underlying tool directly only to repair x when x cannot build.
 
-CI runs exactly these as the required checks `fmt`, `clippy`, `test`, `doc`.
-A push that fails them wastes a cycle.
+CI enforces the same gate as the required checks `fmt`, `clippy`, `test`,
+`doc`. A push that fails them wastes a cycle.
 
 ## Hard rules
 
