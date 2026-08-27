@@ -28,9 +28,10 @@
   "roles": {
     "bdfl": {
       "ladder": [
-        "claude-sonnet-5"
+        "claude-fable-5",
+        "claude-opus-5"
       ],
-      "effort": "medium"
+      "effort": "xhigh"
     },
     "deslopper": {
       "ladder": [

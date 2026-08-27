@@ -37,15 +37,12 @@
 name: agent-clock
 on:
   schedule:
-    # Temporary cut, both lines, 2026-08-24: retrospect's budget footer
-    # read SLOW DOWN repeatedly and worsening across the day (86%->87%
-    # used, 7h->2.9h to exhaustion, ~48h to reset) despite discretionary
-    # work already cut. ADR-0027 names cadence as "the first lever" for
-    # exactly this signal and needs no new ADR to pull it. Normal rates
-    # are ADR-0015 (bdfl, hourly) and ADR-0027 (heartbeat, two-hourly);
-    # restore them once a retrospect reading shows slack again.
-    - cron: "11 */3 * * *" # agent-bdfl, normally hourly (ADR-0015)
-    - cron: "22 */4 * * *" # agent-heartbeat, normally two-hourly (ADR-0015/0027)
+    # Restored 2026-08-27: the seven-day allowance reset (2026-08-27T19:00Z)
+    # left utilization at 0-1% (audit artifact, run 33080297918), so the
+    # SLOW DOWN condition that justified the 2026-08-24 cut (#241) no longer
+    # holds. Back to ADR-0015's normal rates.
+    - cron: "11 * * * *" # agent-bdfl, hourly (ADR-0015)
+    - cron: "22 */2 * * *" # agent-heartbeat, two-hourly (ADR-0015/0027)
   workflow_dispatch:
 
 permissions: {}
@@ -60,13 +57,13 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Wake agent-bdfl
-        if: github.event.schedule == '11 */3 * * *' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '11 * * * *' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
         run: gh workflow run agent-bdfl.yml --repo "$GITHUB_REPOSITORY" -f source=cron
 
       - name: Wake agent-heartbeat
-        if: github.event.schedule == '22 */4 * * *' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '22 */2 * * *' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
         run: gh workflow run agent-heartbeat.yml --repo "$GITHUB_REPOSITORY"
