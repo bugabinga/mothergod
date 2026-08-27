@@ -38,10 +38,8 @@ def main() -> int:
         os.environ.get("GITHUB_RUN_ID", ""),
     )
 
-    try:
-        with open(os.path.join(audit_dir, "metadata.json"), encoding="utf-8") as fh:
-            meta = json.load(fh)
-    except (OSError, ValueError):
+    meta = read_metadata(audit_dir)
+    if meta is None:
         # A run that died before the audit wrote anything still gets
         # reported; the link is all the evidence there is.
         print(f"{label}: finished, no audit record\n{run_url}")
@@ -65,6 +63,22 @@ def main() -> int:
         lines.append(run_url)
     print("\n".join(lines))
     return 0
+
+
+def read_metadata(audit_dir: str):
+    """The audit metadata as a dict, or None for anything else.
+
+    A non-dict that parses (null, a list) is as much "no record" as a
+    missing file; letting it through would crash on the first .get() and
+    break the docstring's no-nonzero-exit promise (PR #274 review).
+    """
+    try:
+        with open(os.path.join(audit_dir, "metadata.json"),
+                  encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
 
 
 def clipped_response(audit_dir: str) -> str:
