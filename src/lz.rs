@@ -231,6 +231,24 @@ fn best_rep(data: &[u8], reps: RepCache, i: usize) -> (usize, RepSlot) {
     (best_len, best_slot)
 }
 
+/// 3-byte prefix hash shared by every match finder in this module
+/// ([`MatchFinder`] and [`BinaryTreeMatchFinder`]): factored out so their
+/// notion of "candidates sharing a hash bucket" cannot drift apart between
+/// the two structures.
+///
+/// Positions within 2 bytes of the end have no full prefix and all fall
+/// into bucket 0; harmless everywhere it's called, since [`match_len`] (or
+/// [`suffix_common_len`]) verifies real bytes before any hit from either
+/// finder is trusted.
+fn prefix_hash(data: &[u8], i: usize) -> usize {
+    if i + 3 > data.len() {
+        return 0;
+    }
+    let h =
+        (usize::from(data[i]) << 10) ^ (usize::from(data[i + 1]) << 5) ^ usize::from(data[i + 2]);
+    h & ((1 << HASH_BITS) - 1)
+}
+
 /// Hash-chain match finder over a 3-byte prefix hash, one per [`parse_greedy`]
 /// call. Bounded to a fixed-size hash table plus one `u32` per input byte
 /// (`prev`); the `prev` allocation is proportional to the caller's own
@@ -258,17 +276,9 @@ impl<'d> MatchFinder<'d> {
         }
     }
 
-    /// Hash of the 3-byte prefix at `i`. Positions within 2 bytes of the
-    /// end have no full prefix and all fall into bucket 0; harmless, since
-    /// [`match_len`] verifies real bytes before any hash-chain hit is
-    /// trusted.
+    /// Hash of the 3-byte prefix at `i`. See [`prefix_hash`].
     fn hash(&self, i: usize) -> usize {
-        let d = self.data;
-        if i + 3 > d.len() {
-            return 0;
-        }
-        let h = (usize::from(d[i]) << 10) ^ (usize::from(d[i + 1]) << 5) ^ usize::from(d[i + 2]);
-        h & ((1 << HASH_BITS) - 1)
+        prefix_hash(self.data, i)
     }
 
     /// Records `i` as a match candidate for future positions sharing its
@@ -313,6 +323,191 @@ impl<'d> MatchFinder<'d> {
             j = self.prev[j_pos];
             tries += 1;
         }
+        best_distance.map(|distance| (best_len, distance))
+    }
+}
+
+/// Longest common run between `data[a..]` and `data[b..]`, given `a < b`
+/// (so `data[a..]` is never shorter than `data[b..]`). Same cap as
+/// [`match_len`] ([`MAX_MATCH_LEN`], remaining data from the later
+/// position `b`), but compares two arbitrary earlier positions instead of
+/// a position against itself at a backward distance — what
+/// [`BinaryTreeMatchFinder`] needs to order two candidates' suffixes
+/// against each other, not just measure one candidate's match length.
+fn suffix_common_len(data: &[u8], a: usize, b: usize) -> usize {
+    let max_len = (data.len() - b).min(MAX_MATCH_LEN);
+    let mut len = 0;
+    while len < max_len && data[a + len] == data[b + len] {
+        len += 1;
+    }
+    len
+}
+
+/// `i`, or a `WINDOW`-bounded distance derived from it, as a `u32`. Every
+/// caller in this module already bounds its argument below `u32::MAX`
+/// (a position by `data.len()` fitting `u32` per [`parse_greedy`]'s own
+/// precondition, a distance by [`WINDOW`]), so this never truncates.
+fn to_u32(i: usize) -> u32 {
+    u32::try_from(i).expect("bounded by data.len() or WINDOW, both well under u32::MAX")
+}
+
+/// Binary-tree match finder (`JOURNAL` S1-P2, "btultra2-class parse"'s
+/// first slice): unlike `MatchFinder`'s hash chain, which walks
+/// candidates in pure recency order and gives up after a fixed number of
+/// tries, insertion here keeps each hash bucket as a binary search tree
+/// ordered by the candidate's suffix bytes. [`Self::insert_and_find`]
+/// both inserts the new position and returns the single longest match,
+/// found by one downward walk that visits only the nodes on the
+/// insertion path: for data whose match distribution keeps that path
+/// shallow, far fewer comparisons than a hash chain has to make to
+/// consider every same-bucket candidate.
+///
+/// With `max_depth` at least the bucket's true tree height, the match
+/// returned is length-exact: it equals a brute-force scan of every
+/// candidate in the bucket, proved by
+/// `tests::binary_tree_matches_brute_force`. A shallower `max_depth` is
+/// *not* the same trade `MatchFinder` makes via `max_tries`:
+/// `MatchFinder::find_best` is read-only, so a low `max_tries` bounds only
+/// that one call. [`Self::insert_and_find`] mutates the tree on every
+/// call — cutting the walk short at `max_depth` permanently unlinks
+/// every candidate past the last visited node from the bucket (see the
+/// tail-cutting in [`Self::insert_and_find`]), so a single shallow call
+/// degrades every later, even full-depth, query into that same bucket,
+/// and repeated shallow calls compound the loss. Treat `max_depth` as a
+/// constant per-pass setting (LZMA/zstd's `cutValue` shape), never a
+/// value varied call-to-call for speed.
+///
+/// Standalone primitive, not yet wired into [`parse_greedy`] or
+/// [`parse_optimal`] — the same standalone-primitive-first shape
+/// [`crate::sse::Sse`] shipped in S2-A40. Two things a wired-in successor
+/// still needs that this slice does not implement: eviction of positions
+/// older than [`WINDOW`] (the tree only grows, so nothing yet bounds it to
+/// a 1 MiB working set the way `MatchFinder`'s recency-ordered chain
+/// does by construction) and the length-prefix-reuse optimization real
+/// bt4 match finders use to keep comparisons near the tree height rather
+/// than the match length itself (`len0`/`len1` in the LZMA reference
+/// implementation, deliberately not carried here — see
+/// `suffix_common_len`, which always compares from scratch). Both are
+/// speed/memory work, not correctness work; they wait for whichever slice
+/// wires this into a parse pass.
+pub struct BinaryTreeMatchFinder<'d> {
+    data: &'d [u8],
+    /// `head[hash]` is the current tree root for that hash bucket, or
+    /// [`NO_POSITION`].
+    head: Vec<u32>,
+    /// `left[i]`/`right[i]`: the subtree of already-inserted positions
+    /// whose suffix sorts before/after `i`'s, or [`NO_POSITION`]. Only
+    /// meaningful once `i` has been passed to
+    /// [`Self::insert_and_find`].
+    left: Vec<u32>,
+    right: Vec<u32>,
+}
+
+impl<'d> BinaryTreeMatchFinder<'d> {
+    /// A finder with no positions inserted yet.
+    #[must_use]
+    pub fn new(data: &'d [u8]) -> Self {
+        Self {
+            data,
+            head: vec![NO_POSITION; 1 << HASH_BITS],
+            left: vec![NO_POSITION; data.len().max(1)],
+            right: vec![NO_POSITION; data.len().max(1)],
+        }
+    }
+
+    /// Inserts `i` into its hash bucket's tree and returns the longest
+    /// match found among the candidates visited on the way down, bounded
+    /// to at most `max_depth` of them (see the struct docs for what
+    /// `max_depth` trades off — notably, unlike a hash chain's
+    /// `max_tries`, a shallow `max_depth` here permanently prunes the
+    /// bucket for every later call, not just this one). The match's
+    /// distance is always within
+    /// [`WINDOW`]; a candidate farther than that still participates in
+    /// the tree's structure (it may still separate other candidates) but
+    /// is never reported as a match.
+    ///
+    /// Each position must be inserted at most once, in increasing order
+    /// — an LZ parse's own shape, not checked here: this type is
+    /// encode-only, so its caller is this crate's own parser, never
+    /// adversarial input.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= data.len()` (`data` from [`Self::new`]): reading
+    /// past the end would be a caller bug, never something adversarial
+    /// input can trigger.
+    #[must_use]
+    pub fn insert_and_find(&mut self, i: usize, max_depth: usize) -> Option<(usize, Distance)> {
+        assert!(i < self.data.len(), "position out of range");
+        let h = prefix_hash(self.data, i);
+        let mut cur = self.head[h];
+        self.head[h] = to_u32(i);
+
+        // The walk splits the existing tree into a "less" chain (suffixes
+        // sorting before i's) and a "greater" chain (sorting after),
+        // which become i's left and right subtrees. `less_tail`/
+        // `greater_tail` name the most recently attached node on each
+        // side; `None` means that side is still empty, so the next node
+        // found becomes `less_root`/`greater_root` (i's future child)
+        // instead of some existing node's child.
+        let mut less_root = NO_POSITION;
+        let mut less_tail: Option<usize> = None;
+        let mut greater_root = NO_POSITION;
+        let mut greater_tail: Option<usize> = None;
+
+        let mut best_len = 0usize;
+        let mut best_distance: Option<Distance> = None;
+        let mut depth = 0;
+
+        while cur != NO_POSITION && depth < max_depth {
+            let cur_pos = cur as usize;
+            let common = suffix_common_len(self.data, cur_pos, i);
+            let distance = i - cur_pos; // cur_pos was inserted earlier: i > cur_pos always.
+            if common > best_len && distance <= WINDOW {
+                best_len = common;
+                best_distance = NonZeroU32::new(to_u32(distance));
+            }
+            if self.data.get(cur_pos + common) < self.data.get(i + common) {
+                // cur's suffix sorts before i's: it belongs on the "less"
+                // side, descend into its right subtree (candidates
+                // between cur and i) to look for closer ones.
+                if let Some(t) = less_tail {
+                    self.right[t] = to_u32(cur_pos);
+                } else {
+                    less_root = to_u32(cur_pos);
+                }
+                less_tail = Some(cur_pos);
+                cur = self.right[cur_pos];
+            } else {
+                // cur's suffix sorts after (or ties with, up to the
+                // shorter one's end) i's: descend into its left subtree.
+                if let Some(t) = greater_tail {
+                    self.left[t] = to_u32(cur_pos);
+                } else {
+                    greater_root = to_u32(cur_pos);
+                }
+                greater_tail = Some(cur_pos);
+                cur = self.left[cur_pos];
+            }
+            depth += 1;
+        }
+        // Whatever remains unlinked on either chain (the walk exhausted
+        // max_depth, or ended naturally) is cut off rather than left
+        // dangling: those deeper candidates are permanently dropped from
+        // the tree, unreachable by any later insert_and_find call into
+        // this bucket. Unlike MatchFinder's max_tries, which bounds only
+        // the one read-only call it is passed to, this is a mutation: a
+        // shallow max_depth here degrades every future query, not just
+        // this one.
+        if let Some(t) = less_tail {
+            self.right[t] = NO_POSITION;
+        }
+        if let Some(t) = greater_tail {
+            self.left[t] = NO_POSITION;
+        }
+        self.left[i] = less_root;
+        self.right[i] = greater_root;
+
         best_distance.map(|distance| (best_len, distance))
     }
 }
@@ -1254,5 +1449,119 @@ mod tests {
             .map(|state| u8::try_from(state % 256).unwrap())
             .collect();
         roundtrip_optimal(&data);
+    }
+
+    /// Independent reference for [`binary_tree_matches_brute_force`]:
+    /// scans every earlier position sharing `i`'s hash bucket directly
+    /// instead of walking a tree. Restricted to the same bucket because
+    /// that's the population [`BinaryTreeMatchFinder`] (and
+    /// [`MatchFinder`]) can ever see in the first place — a match whose
+    /// candidate has a different 3-byte prefix hash than `i`'s is
+    /// invisible to either, by construction, same as a length below 3
+    /// bytes never entering either structure's hash table.
+    fn brute_force_best(data: &[u8], i: usize) -> Option<(usize, Distance)> {
+        let target_hash = prefix_hash(data, i);
+        let mut best_len = 0usize;
+        let mut best_distance = None;
+        for cur in 0..i {
+            if prefix_hash(data, cur) != target_hash {
+                continue;
+            }
+            let len = suffix_common_len(data, cur, i);
+            if len > best_len {
+                best_len = len;
+                best_distance = NonZeroU32::new(to_u32(i - cur));
+            }
+        }
+        best_distance.map(|distance| (best_len, distance))
+    }
+
+    #[test]
+    fn binary_tree_no_prior_positions_returns_none() {
+        let data = b"abcdef";
+        let mut finder = BinaryTreeMatchFinder::new(data);
+        assert_eq!(finder.insert_and_find(0, data.len()), None);
+    }
+
+    #[test]
+    fn binary_tree_finds_an_exact_repeat() {
+        let data = b"abcabcabc";
+        let mut finder = BinaryTreeMatchFinder::new(data);
+        let mut found_at_6 = None;
+        for i in 0..data.len() {
+            let found = finder.insert_and_find(i, data.len());
+            if let Some((len, distance)) = found {
+                assert_eq!(
+                    match_len(data, i, distance),
+                    len,
+                    "position {i}: reported length must be a real match at the reported distance"
+                );
+            }
+            if i == 6 {
+                found_at_6 = found;
+            }
+        }
+        let (len, distance) = found_at_6.expect("position 6 repeats position 3's \"abc\"");
+        assert_eq!(distance.get(), 3);
+        assert_eq!(len, 3);
+    }
+
+    #[test]
+    fn binary_tree_matches_brute_force() {
+        // A small byte alphabet keeps 3-byte prefixes colliding often, so
+        // hash buckets build up real tree structure to walk, unlike a
+        // near-uniform 0..256 stream where most buckets stay tiny.
+        let data: Vec<u8> = crate::test_support::Xorshift32::new(0xB17E_5EED)
+            .take(400)
+            .map(|state| u8::try_from(state % 5).unwrap())
+            .collect();
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        for i in 0..data.len() {
+            // max_depth covers every possible candidate in the bucket
+            // (at most i of them), so the walk cannot be truncated before
+            // it would reach the true best.
+            let found = finder.insert_and_find(i, data.len());
+            let expected_len = brute_force_best(&data, i).map(|(len, _)| len);
+            assert_eq!(
+                found.map(|(len, _)| len),
+                expected_len,
+                "position {i}: best length must equal a brute-force scan when max_depth covers every candidate"
+            );
+            if let Some((len, distance)) = found {
+                assert_eq!(
+                    match_len(&data, i, distance),
+                    len,
+                    "position {i}: reported length must be a real match at the reported distance"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn binary_tree_zero_max_depth_finds_nothing_but_stays_consistent() {
+        let data = b"abcabcabc";
+        let mut finder = BinaryTreeMatchFinder::new(data);
+        let _ = finder.insert_and_find(0, data.len());
+        let _ = finder.insert_and_find(1, data.len());
+        let _ = finder.insert_and_find(2, data.len());
+        // Position 3 shares position 0's hash bucket ("abc"); max_depth 0
+        // must not panic, and correctly reports no match even though a
+        // real one exists.
+        assert_eq!(finder.insert_and_find(3, 0), None);
+        // A later insert with a different hash bucket ("bca", shared with
+        // position 1) is unaffected and still finds its match.
+        assert!(finder.insert_and_find(4, data.len()).is_some());
+    }
+
+    #[test]
+    fn binary_tree_caps_match_length_at_max_match_len() {
+        let mut data = vec![b'x'; MAX_MATCH_LEN + 50];
+        data.push(b'y');
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let _ = finder.insert_and_find(0, 8);
+        let (len, _distance) = finder
+            .insert_and_find(1, 8)
+            .expect("position 1 repeats position 0's run of 'x'");
+        assert!(len <= MAX_MATCH_LEN);
     }
 }
