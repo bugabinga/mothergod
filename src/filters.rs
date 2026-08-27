@@ -802,6 +802,24 @@ pub mod select {
         }
     }
 
+    /// One `(from, to)` pair's contribution to an order-1 entropy sum:
+    /// `-count * log2(count / total)`, `total` being how often `from`
+    /// occurred as the first byte of a pair. Shared by [`order1_entropy`]
+    /// and [`column_entropy`], which both score a byte stream's
+    /// predictability by this same formula and differ only in how they
+    /// count `(from, to)` pairs — a plain array over the full probe in one,
+    /// a `HashMap` over one interleaved column in the other, sized that way
+    /// because a column is far smaller than the 256x256 pairs the array
+    /// bounds — never in what a pair's count is worth once counted.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
+    )]
+    fn surprisal_bits(count: u32, total: u32) -> f64 {
+        let p = f64::from(count) / f64::from(total);
+        -f64::from(count) * p.log2()
+    }
+
     /// Order-1 entropy in bits per byte: `data`, conditioned on each byte's
     /// immediate predecessor, estimated from `data`'s own pair frequencies.
     /// The proxy [`pick`] ranks delta candidates by — never a
@@ -809,10 +827,6 @@ pub mod select {
     /// (`JOURNAL` S1-L3: histogram entropy is not compressibility, but a
     /// *conditional* entropy proxy still separates structured candidates
     /// from noise well enough to shortlist).
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
-    )]
     fn order1_entropy(data: &[u8]) -> f64 {
         let mut pair_counts = vec![0u32; 256 * 256];
         let mut byte_counts = [0u32; 256];
@@ -830,8 +844,7 @@ pub mod select {
             for b in 0..256 {
                 let count = pair_counts[(a << 8) | b];
                 if count > 0 {
-                    let p = f64::from(count) / f64::from(total);
-                    bits -= f64::from(count) * p.log2();
+                    bits += surprisal_bits(count, total);
                 }
             }
         }
@@ -848,10 +861,6 @@ pub mod select {
     /// are each internally predictable, even though the raw byte stream
     /// (whose immediate predecessor is usually a *different* column) looks
     /// unpredictable.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
-    )]
     fn column_entropy(data: &[u8], columns: usize) -> f64 {
         let mut bits = 0f64;
         let mut transitions = 0usize;
@@ -868,8 +877,7 @@ pub mod select {
             }
             for (&(from, _), &count) in &pair_counts {
                 let total = byte_counts[&from];
-                let p = f64::from(count) / f64::from(total);
-                bits -= f64::from(count) * p.log2();
+                bits += surprisal_bits(count, total);
             }
             transitions += column.len() - 1;
         }
