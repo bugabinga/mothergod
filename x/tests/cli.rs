@@ -221,6 +221,40 @@ fn test_doc_failure_names_the_rerun_command() {
     assert!(stderr.contains("next: RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps"));
 }
 
+#[test]
+fn check_stops_at_the_first_failing_stage_before_running_later_ones() {
+    let repository = Repository::new();
+    repository.write("a.json", "{\"a\":1}");
+    repository.track();
+
+    let output = repository.x(&["check"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("check: fmt stage failed"));
+    assert!(stderr.contains("next: cargo x fmt --check"));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("lint:"));
+    assert!(!stdout.contains("test:"));
+}
+
+#[test]
+fn check_runs_passing_stages_in_order_and_names_the_failing_one() {
+    let repository = Repository::new();
+    repository.write("a.json", "{}\n");
+    repository.write("README.md", "# Title\n");
+    repository.track();
+
+    let output = repository.x(&["check"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("fmt:"));
+    assert!(stdout.contains("lint:"));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("check: test stage failed"));
+    assert!(stderr.contains("next: cargo x test"));
+    assert!(!stdout.contains("doc:"));
+}
+
 fn write_passing_fixture(repository: &Repository) {
     repository.write(
         "Cargo.toml",

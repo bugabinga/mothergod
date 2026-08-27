@@ -1,5 +1,6 @@
-//! Repository-local formatting and linting command.
+//! Repository quality command: format, lint, test, doc, and the check gate.
 
+mod check;
 mod doc;
 mod files;
 mod format;
@@ -18,8 +19,8 @@ use crate::files::TaskKind;
     name = "cargo x",
     bin_name = "cargo x",
     version,
-    about = "Fast repository formatting and linting",
-    long_about = "Fast repository formatting and linting.\n\nRun `cargo x help <COMMAND>` for task-specific scope, fixes, and examples.",
+    about = "The repository quality interface",
+    long_about = "The repository quality interface.\n\n`cargo x check` runs the whole gate. Run `cargo x help <COMMAND>` for task-specific scope, fixes, and examples.",
     arg_required_else_help = true
 )]
 struct Cli {
@@ -29,6 +30,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Task {
+    /// Run the whole quality gate: fmt --check, lint, test, doc
+    #[command(
+        after_help = "Runs `cargo x fmt --check`, `cargo x lint`, `cargo x test`, then `cargo x doc`, unscoped, in order.\n\nStops at the first failing stage and names the command to re-run just that one. This is the pre-push gate; CI enforces the same commands.\n\nExamples:\n  cargo x check"
+    )]
+    Check,
     /// Format supported files, or verify formatting with --check
     Fmt(FormatArgs),
     /// Run Rust and Markdown linters, optionally applying safe Markdown fixes
@@ -82,6 +88,7 @@ fn main() -> ExitCode {
         Task::Lint(args) => execute(TaskKind::Lint, &args.paths, |selection| {
             lint::run(selection, args.fix)
         }),
+        Task::Check => run_at_root(check::run),
         Task::Test => run_at_root(test::run),
         Task::Doc => run_at_root(doc::run),
     };

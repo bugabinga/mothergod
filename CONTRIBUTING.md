@@ -17,19 +17,17 @@ governed by [`CLAUDE.md`](CLAUDE.md) instead.
   the codec. Many plausible ideas were already tried and falsified; the
   journal saves you the repeat. If you want to retry a rejected idea, say
   which condition changed.
-- Quality gates (CI runs exactly these):
+- Quality gates (CI enforces the same gate):
 
   ```sh
-  cargo x fmt --check
-  cargo x lint
-  cargo test --all-targets
-  cargo test --manifest-path x/Cargo.toml
-  cargo test --doc
-  RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps
+  cargo x check
   ```
 
-  Use path arguments for narrow iteration, for example `cargo x lint -- src`.
-  Run `cargo x help` for the supported file types, fixes, and scope rules.
+  It runs formatting, lints, tests, and docs in order and stops at the
+  first failure, naming the command to re-run just that stage. Use the
+  constituent tasks with path arguments for narrow iteration, for example
+  `cargo x lint -- src`. Run `cargo x help` for the supported file types,
+  fixes, and scope rules.
 
 - Lossless is non-negotiable: codec changes ship with round-trip tests.
 - The decoder must never panic on any input — compressed data is adversarial.
