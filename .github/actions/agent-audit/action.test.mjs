@@ -84,6 +84,59 @@ const fixtures = [
     raw: true,
     output: "allowance_index=\nutilization=\nresets_at=\n",
   },
+  {
+    name: "reads the nested unifiedWindows shape (post-2026-08-26 payloads)",
+    input: [
+      {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          rateLimitType: "five_hour",
+          resetsAt: 1_787_933_400,
+          unifiedWindows: {
+            five_hour: { utilization: 0.17, resetsAt: 1_787_933_400 },
+            seven_day: { utilization: 0.22, resetsAt: 1_788_386_400 },
+          },
+        },
+      },
+    ],
+    output: "allowance_index=-u2200-r1788386400\nutilization=0.22\nresets_at=1788386400\n",
+  },
+  {
+    name: "nested shape present means flat fields are ignored",
+    input: [
+      {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          rateLimitType: "seven_day",
+          utilization: 0.9,
+          resetsAt: 1_800_000_000,
+          unifiedWindows: {
+            seven_day: { utilization: true, resetsAt: 1_800_000_000 },
+          },
+        },
+      },
+    ],
+    output: "allowance_index=\nutilization=\nresets_at=\n",
+  },
+  {
+    name: "last valid seven-day reading wins across mixed shapes",
+    input: [
+      {
+        type: "rate_limit_event",
+        rate_limit_info: { rateLimitType: "seven_day", utilization: 0.1, resetsAt: 1_800_000_000 },
+      },
+      {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          rateLimitType: "five_hour",
+          unifiedWindows: {
+            seven_day: { utilization: 0.2, resetsAt: 1_800_000_000 },
+          },
+        },
+      },
+    ],
+    output: "allowance_index=-u2000-r1800000000\nutilization=0.2\nresets_at=1800000000\n",
+  },
 ];
 
 test("agent-audit allowance index fixtures", async (t) => {
