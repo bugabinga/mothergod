@@ -591,9 +591,9 @@ record.
   done as of S2-A34; progress-graph rendering (of `bench/baseline.json`,
   the only real numbers available) done as of S2-A36; the gzip/zstd/xz
   reference column and real numbers on one held-out final (Canterbury)
-  done as of S2-A37; remaining: the CI baseline gate's `.github/
-  workflows/` wiring and a scheduled workflow exercising `--features
-  corpus-fetch` (issue #231), both reserved for `GH_ADMIN_TOKEN`, plus
+  done as of S2-A37; the scheduled `--features corpus-fetch` workflow
+  done as of S2-A45; remaining: the CI baseline gate's `.github/
+  workflows/` wiring (reserved for `GH_ADMIN_TOKEN`), plus
   real Silesia numbers (S2-A37's `finals_report` binary covers Silesia
   too, in code — its remaining scope is throughput, not a missing
   feature: ~0.14 MB/s measured means the full corpus needs on the order
@@ -1855,6 +1855,30 @@ record.
   is active, not a smaller `max_depth`-like bound layered on top of it;
   window eviction and per-position adaptive prices remain untouched from
   S2-A42.
+- S2-A45 | ACCEPTED | S1-D2/S2-D1's scheduled-workflow slice, named as
+  remaining scope since S2-A25: a new `corpus-fetch-check` workflow
+  (`.github/workflows/corpus-fetch-check.yml`) runs clippy, tests, and doc
+  for `mothergod-bench` with `--features corpus-fetch`, weekly (Sunday
+  05:41 UTC, offset from the other advisory sweeps) plus
+  `workflow_dispatch`, tests with `--include-ignored` so
+  `fetch_and_cache_smoke_tests_the_real_pins` finally executes against the
+  live pinned URLs. Closes the hole the feature gate left: keeping
+  `ci.yml`'s required checks cheap meant zero CI coverage for the gated
+  module, non-network unit tests included, so a stale `bench/corpus.toml`
+  pin (URL moved, checksum drifted) would have surfaced only when an
+  experiment run needed the real corpus. Designed and locally verified by
+  the heartbeat in issue #231; landed by the BDFL because
+  `.github/workflows/` paths need `GH_ADMIN_TOKEN` (issue #24). `fmt` is
+  deliberately absent from the job: rustfmt formats by syntax, not active
+  `cfg`s, so `ci.yml`'s default-feature check already covers the module's
+  formatting. | Re-verified before landing, not restated from the issue:
+  clippy clean, 111/111 tests pass including the real-network smoke test
+  (the suite has grown from the issue's 62 since it was filed), doc build
+  clean. The first scheduled run is the end-to-end proof of the YAML
+  itself; a red run there is the alarm doing its job. | No bpb deltas:
+  CI-coverage infrastructure, `kind: "patch"` in `progress.jsonl`.
+  Remaining S1-D2/S2-D1 scope after this: the CI baseline gate's workflow
+  wiring and real Silesia finals numbers (throughput-bound, per S2-D1).
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
