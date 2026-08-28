@@ -1935,6 +1935,46 @@ record.
   eviction, add per-position adaptive prices (the DP price table is still
   frozen per round), then re-attempt S2-R2's swap and measure a real bpb
   delta on sqlite/json/jsonl-shaped data, S1-P2's named target.
+- S2-A47 | REJECTED (process, not ratio) | Re-attempted S2-R2's swap per
+  S2-A46's own remaining-scope note: `dp_round` called
+  `finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL=640,
+  NICE_LEN_OPTIMAL=128)` every position in place of `MatchFinder::insert`
+  + a carry-skipped `find_best`, `MAX_TREE_DEPTH_OPTIMAL` held equal to
+  the retired `MAX_CHAIN_TRIES_OPTIMAL` so the measurement isolated the
+  finder swap, same methodology as S2-R2. Measured, not assumed: `cargo
+  x check` clean; `cargo test --all-targets` green including the issue
+  #179 regression guard S2-R2 broke (budget 15s, measured 1.06s debug /
+  0.10s release, S2-A46's `nice_len` scan cap doing exactly the job it
+  was built for); `bench::baseline` (11 train cases) net **-0.05376
+  b/B** (`x86_dense_code` alone worsened, by +0.00016, inside
+  `TOLERANCE_BITS` 0.02 but not literally zero-regression); sealed-only
+  kinds `access_log` **-0.00016**, `gradient_image` unchanged. These
+  numbers reproduce S2-R2's (it85) train/val deltas bit-for-bit, because
+  `nice_len=128` never actually truncates a match on any of these
+  generators — only the previously-unbounded per-candidate scan cost
+  changed. Not S1-P2's named target either way: `json_records` and
+  `sqlite_like_records` moved by -0.00064 and 0 respectively, the win is
+  almost entirely `entropy_ladder_h1`/`h2` and `markov_h8_2_trap`.
+  **Not merged, and not rejected on the merits**: `tests/golden.rs`'s
+  `fixtures_decode_and_reencode_to_the_pinned_frame` fails, because
+  `compress()`'s token choices changed, and its own message requires a
+  `FORMAT_VERSION` bump + ADR (CLAUDE.md hard rule 5) to fix. This
+  change touches no frame layout, method byte, or model semantic hard
+  rule 5 names — `codec::decode` is byte-for-byte unchanged and a
+  pre-change frame still decodes identically — so bumping the version
+  for it would be the first bump ever for a purely encoder-side parse
+  heuristic (0→1 and 1→2, ADR-0026/ADR-0028, were both genuinely
+  decode-visible). Editing the golden pin to narrow its scope in the
+  same PR that benefits from the narrowing is exactly the "don't grade
+  your own claim" hazard hard rule 3 names, so this stopped instead of
+  either bumping the version on its own authority or touching the test.
+  Ruling requested: issue #290. Candidate code (the `dp_round` wiring,
+  `MAX_TREE_DEPTH_OPTIMAL`, `NICE_LEN_OPTIMAL`) reverted in full, same as
+  S2-R2; `BinaryTreeMatchFinder` itself (S2-A42/S2-A46) is unaffected.
+  Remaining S1-P2 scope, once issue #290 resolves: land this wiring
+  (with or without the format ceremony, per the ruling), then window
+  eviction and per-position adaptive prices, still untouched from
+  S2-A42.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -1970,13 +2010,19 @@ record.
   standalone finder dropped from S2-A44's measured 32.9s to ~0.11s
   (`nice_len` 128), a ~300x reduction, at the cost of reporting a
   candidate's match as exactly `nice_len` long when the true run is
-  longer. Does not yet re-attempt S2-R2's swap: `dp_round`'s `carry` still
-  cannot skip calling `insert_and_find` entirely on a long run, only pay a
-  now-bounded cost for it every position, and `dp_round` has no `nice_len`
-  choice of its own yet. Remaining: pick a `nice_len` for `dp_round`'s use
-  of this finder, then re-attempt the wiring and measure a real bpb delta
-  on sqlite/json/jsonl-shaped data. Window eviction and per-position
-  adaptive prices remain untouched from S2-A42.
+  longer. Sixth slice, S2-A47: re-attempted S2-R2's swap with
+  `nice_len=128` — this time the issue #179 guard passes (1.06s debug /
+  0.10s release) and the ratio win reproduces S2-R2's exactly (train
+  -0.05376 b/B, sealed access_log -0.00016/gradient_image unchanged; not
+  actually on the named sqlite/json/jsonl target — the win is almost
+  entirely `entropy_ladder`/`markov_h8_2_trap`). **Blocked on process, not
+  ratio or speed**: fails `tests/golden.rs`'s re-encode pin, which wants a
+  `FORMAT_VERSION` bump + ADR for any `compress()` output change at the
+  current version, even though this one touches no frame layout, method
+  byte, or model semantic CLAUDE.md hard rule 5 actually names. Ruling
+  requested rather than decided unilaterally: issue #290. Remaining, once
+  that resolves: land the wiring (per whichever ruling), then window
+  eviction and per-position adaptive prices, still untouched from S2-A42.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
