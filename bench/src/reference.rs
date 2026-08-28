@@ -6,6 +6,7 @@
 //! (`crate::corpus`), so it never enters the default-feature build
 //! CLAUDE.md's required checks compile.
 
+use crate::finals::FileMeasurement;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -111,9 +112,69 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
         .ok_or_else(|| io::Error::other(format!("{cmd} --version produced no output")))
 }
 
+/// Measures one held-out-final file against `mothergod::compress` and the
+/// three pinned reference compressors, all on the exact same bytes.
+///
+/// # Errors
+///
+/// Returns an error naming `name` if any reference compressor fails on it.
+fn measure_one(name: &str, data: &[u8]) -> Result<FileMeasurement, String> {
+    println!("measuring {name} ({} bytes)...", data.len());
+    let mothergod_len = mothergod::compress(data).len();
+    let gzip_len = compressed_len("gzip", &["-9", "-c"], data)
+        .map_err(|err| format!("gzip failed on {name}: {err}"))?;
+    let zstd_len = compressed_len("zstd", &["-19", "-c"], data)
+        .map_err(|err| format!("zstd failed on {name}: {err}"))?;
+    let xz_len = compressed_len("xz", &["-9e", "-c"], data)
+        .map_err(|err| format!("xz failed on {name}: {err}"))?;
+    Ok(FileMeasurement {
+        name: name.to_string(),
+        original_len: data.len(),
+        mothergod_len,
+        gzip_len,
+        zstd_len,
+        xz_len,
+    })
+}
+
+/// Measures every `(name, data)` pair, one OS thread per file, joining
+/// before returning.
+///
+/// `mothergod::compress`'s optimal-parse LZ is the dominant, strictly
+/// single-threaded cost per file (measured on Silesia's smallest file,
+/// `xml` at 5.3 MB: ~39s, ~0.14 MB/s); run one file after another and the
+/// full ~200 MB Silesia corpus takes on the order of half an hour, too
+/// slow for a single CI or by-hand turn. Every file is independent (no
+/// shared mutable state, no cross-file model), so spawning a thread per
+/// file lets the OS scheduler spread the work across every available
+/// core instead — the same total CPU time, in wall-clock time divided by
+/// core count. `finals_report` and `silesia_report` both call this so
+/// the parallel measurement loop exists in exactly one place.
+///
+/// # Errors
+///
+/// Returns the first per-file error encountered, by input order, if any
+/// reference compressor fails on any file.
+pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, String> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = files
+            .iter()
+            .map(|(name, data)| scope.spawn(move || measure_one(name, data)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|_| Err("measurement thread panicked".to_string()))
+            })
+            .collect()
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{compressed_len, generated_at, tool_version};
+    use super::{compressed_len, generated_at, measure_all, tool_version};
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger
@@ -205,5 +266,27 @@ mod tests {
             2,
             "expected two date separators, got {stamp:?}"
         );
+    }
+
+    #[test]
+    fn measure_all_measures_every_file_and_preserves_input_order() {
+        let files = vec![
+            ("b.txt".to_string(), b"bbbbbbbbbbbbbbbbbbbb".to_vec()),
+            ("a.txt".to_string(), b"aaaaaaaaaaaaaaaaaaaa".to_vec()),
+        ];
+        let measurements = measure_all(&files).expect("reference compressors must be on PATH");
+        let names: Vec<&str> = measurements.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["b.txt", "a.txt"],
+            "measure_all must preserve input order, not race threads into an arbitrary one"
+        );
+        for m in &measurements {
+            assert_eq!(m.original_len, 20);
+            assert!(m.mothergod_len > 0);
+            assert!(m.gzip_len > 0);
+            assert!(m.zstd_len > 0);
+            assert!(m.xz_len > 0);
+        }
     }
 }

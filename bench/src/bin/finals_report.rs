@@ -9,22 +9,20 @@
 //! binary because Canterbury's single tarball (`extract_canterbury`) and
 //! Silesia's 12 individually pinned files (`decompress_silesia`) fetch
 //! differently. Measured throughput on this codec's optimal-parse LZ:
-//! `xml`, the smallest Silesia file (5.3 MB), took 39s (~0.14 MB/s) end to
-//! end. The full ~200 MB Silesia corpus would run `mothergod::compress`
-//! for on the order of half an hour, too slow for one PR's by-hand run;
-//! Canterbury (~2.7 MB total across 11 files) finishes in under a minute.
-//! Silesia numbers stay remaining S2-D1 scope, most naturally landing
-//! behind the scheduled `corpus-fetch` workflow (issue #231) once
-//! `GH_ADMIN_TOKEN` wiring exists, rather than forced into a slow by-hand
-//! run here.
+//! `xml`, the smallest Silesia file (5.3 MB), took 39s (~0.14 MB/s)
+//! single-threaded. Canterbury (~2.7 MB total across 11 files) finishes
+//! in under a minute either way; Silesia's ~200 MB would take on the
+//! order of half an hour run file-after-file, which is why
+//! `mothergod_bench::reference::measure_all` (shared by both binaries)
+//! spreads the per-file measurements across a thread each instead.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin finals_report`. Markdown is linted, not formatted (`cargo x lint
 //! -- docs/benchmarks/canterbury.md` to check).
 
 use mothergod_bench::corpus::{extract_canterbury, fetch_and_cache, parse_manifest};
-use mothergod_bench::finals::{FileMeasurement, Versions, format_report};
-use mothergod_bench::reference::{compressed_len, generated_at, tool_version};
+use mothergod_bench::finals::{Versions, format_report};
+use mothergod_bench::reference::{generated_at, measure_all, tool_version};
 use mothergod_bench::repo_root;
 use std::process::ExitCode;
 
@@ -71,40 +69,13 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut measurements = Vec::with_capacity(files.len());
-    for (name, data) in &files {
-        println!("measuring {name} ({} bytes)...", data.len());
-        let mothergod_len = mothergod::compress(data).len();
-        let gzip_len = match compressed_len("gzip", &["-9", "-c"], data) {
-            Ok(len) => len,
-            Err(err) => {
-                eprintln!("gzip failed on {name}: {err}");
-                return ExitCode::FAILURE;
-            }
-        };
-        let zstd_len = match compressed_len("zstd", &["-19", "-c"], data) {
-            Ok(len) => len,
-            Err(err) => {
-                eprintln!("zstd failed on {name}: {err}");
-                return ExitCode::FAILURE;
-            }
-        };
-        let xz_len = match compressed_len("xz", &["-9e", "-c"], data) {
-            Ok(len) => len,
-            Err(err) => {
-                eprintln!("xz failed on {name}: {err}");
-                return ExitCode::FAILURE;
-            }
-        };
-        measurements.push(FileMeasurement {
-            name: name.clone(),
-            original_len: data.len(),
-            mothergod_len,
-            gzip_len,
-            zstd_len,
-            xz_len,
-        });
-    }
+    let measurements = match measure_all(&files) {
+        Ok(measurements) => measurements,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let generated_at = match generated_at() {
         Ok(stamp) => stamp,
