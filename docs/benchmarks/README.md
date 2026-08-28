@@ -31,8 +31,9 @@ not silently dropped:
   this codec's optimal-parse LZ for on the order of half an hour
   (measured: 5.3 MB in 39s, ~0.14 MB/s) — too slow for a by-hand run;
   `bin/finals_report.rs`'s module doc has the full reasoning. Silesia
-  numbers most naturally land behind the scheduled `corpus-fetch` workflow
-  (issue #231) once `GH_ADMIN_TOKEN` wiring exists.
+  numbers most naturally land as an extension of the weekly
+  `corpus-fetch-check.yml` (issue #231's outcome), which already fetches
+  the pinned corpus on a schedule.
 
 ## Regenerating
 
@@ -45,11 +46,8 @@ Reads `bench/baseline.json`, writes `baseline.svg` and `baseline.md`; the
 `fmt` pass picks up the canonical SVG indentation `cargo x fmt --check`
 expects, same shape as `site/status-data.json`'s own generate-then-fmt
 step. Not
-yet on a schedule: wiring a `.github/workflows/` file needs
-`GH_ADMIN_TOKEN` (`agents/GOVERNANCE.md`, "Push identity"), the same gap
-that leaves the CI baseline gate itself unwired
-(`research/JOURNAL.md` S2-A35). Re-run by hand after `bench/baseline.json`
-changes, same as `baseline_gate`'s own `write` mode.
+on a schedule; re-run by hand after `bench/baseline.json` changes, same
+as `baseline_gate`'s own `write` mode.
 
 ```
 cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report
@@ -57,6 +55,6 @@ cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_repo
 
 Fetches Canterbury (pin-verified, cached under `target/bench-corpus-cache`),
 writes `canterbury.md`. Markdown is linted, not formatted
-(`cargo x lint -- docs/benchmarks/canterbury.md`). Also not yet on a
-schedule, same `GH_ADMIN_TOKEN` gap; re-run by hand whenever the codec or a
-reference-compressor version changes enough to be worth re-measuring.
+(`cargo x lint -- docs/benchmarks/canterbury.md`). Also by hand; re-run
+whenever the codec or a reference-compressor version changes enough to be
+worth re-measuring.
