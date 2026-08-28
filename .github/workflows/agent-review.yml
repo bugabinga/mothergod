@@ -352,7 +352,7 @@ jobs:
              review clears this check.
           2. **This PR edits `agent-review.yml`.** No agent review is
              possible, now or on any future push. The BDFL lands it by
-             discretion once the four quality gates are green (ADR-0008),
+             discretion once the required quality gates are green (ADR-0008),
              with the reasons written on this thread.
 
           `review` is not a required check, so this red blocks no merge.
