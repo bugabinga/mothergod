@@ -8,6 +8,19 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `mothergod-bench`'s `silesia_report` binary (`research/JOURNAL.md`
+  S2-D1/S2-A45's remaining "real Silesia finals numbers" line): Silesia's
+  counterpart to `finals_report`, fetching each of Silesia's 12
+  individually pinned files and writing `docs/benchmarks/silesia.md`.
+  Capability only — the full run is throughput-bound (~30 minutes,
+  `finals_report`'s module doc has the measurement) and hasn't been run
+  yet, so `silesia.md` doesn't exist in the tree. `finals::format_report`
+  now takes the generator binary name as a parameter (shared by
+  `finals_report` and `silesia_report`) instead of hardcoding
+  `finals_report`; `bench`'s duplicated `repo_root`/`date`-timestamp
+  helpers across its binaries are consolidated into
+  `mothergod_bench::repo_root` and `mothergod_bench::reference::generated_at`.
+
 - `lz::PriceCounts::observe` (`research/JOURNAL.md` S1-P2, S2-A50):
   standalone primitive that bumps one already-decided token's frequency
   counts, factored out of `PriceCounts::tally` (which now calls it in a

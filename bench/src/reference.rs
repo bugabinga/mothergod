@@ -59,6 +59,33 @@ pub fn compressed_len(cmd: &str, args: &[&str], data: &[u8]) -> io::Result<usize
     Ok(result?.len())
 }
 
+/// `date -u`'s current UTC timestamp, `YYYY-MM-DDTHH:MM:SSZ`, the same
+/// shape `site-status/src/bin/generate.rs` stamps `site/status-data.json`
+/// with. Shelling out rather than a `SystemTime`-to-calendar conversion:
+/// this crate's `corpus-fetch` feature already carries five dependencies:
+/// pulling in a datetime crate just for one timestamp isn't worth a sixth.
+/// Shared by every held-out-final report binary (`finals_report`,
+/// `silesia_report`) rather than each defining its own copy.
+///
+/// # Errors
+///
+/// Returns an error if `date` isn't on `PATH`, exits non-zero, or its
+/// output isn't valid UTF-8.
+pub fn generated_at() -> io::Result<String> {
+    let output = Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "date -u exited with {}",
+            output.status
+        )));
+    }
+    String::from_utf8(output.stdout)
+        .map(|s| s.trim().to_string())
+        .map_err(|err| io::Error::other(format!("date produced non-UTF-8 output: {err}")))
+}
+
 /// First line of `cmd --version`'s output (stdout, falling back to stderr
 /// if stdout is empty), trimmed. Names which build produced a reference
 /// number: `research/corpus/POLICY.md` pins the flags (`zstd -19`,
@@ -86,7 +113,7 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compressed_len, tool_version};
+    use super::{compressed_len, generated_at, tool_version};
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger
@@ -159,5 +186,24 @@ mod tests {
     #[test]
     fn tool_version_rejects_an_unknown_command() {
         assert!(tool_version("mothergod-does-not-exist-as-a-binary").is_err());
+    }
+
+    #[test]
+    fn generated_at_produces_an_iso8601_utc_timestamp() {
+        let stamp = generated_at().expect("date must be on PATH");
+        assert_eq!(
+            stamp.len(),
+            20,
+            "expected YYYY-MM-DDTHH:MM:SSZ, got {stamp:?}"
+        );
+        assert!(
+            stamp.ends_with('Z'),
+            "expected a Z-suffixed UTC stamp, got {stamp:?}"
+        );
+        assert_eq!(
+            stamp.matches('-').count(),
+            2,
+            "expected two date separators, got {stamp:?}"
+        );
     }
 }

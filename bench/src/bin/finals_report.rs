@@ -5,15 +5,18 @@
 //! compresses each file with `mothergod::compress` and the three pinned
 //! reference compressors, and writes `docs/benchmarks/canterbury.md`.
 //!
-//! Canterbury only, not Silesia yet. Measured throughput on this codec's
-//! optimal-parse LZ: `xml`, the smallest Silesia file (5.3 MB), took 39s
-//! (~0.14 MB/s) end to end. The full ~200 MB Silesia corpus would run
-//! `mothergod::compress` for on the order of half an hour, too slow for
-//! one PR's by-hand run; Canterbury (~2.7 MB total across 11 files)
-//! finishes in under a minute. Silesia numbers stay remaining S2-D1
-//! scope, most naturally landing behind the scheduled `corpus-fetch`
-//! workflow (issue #231) once `GH_ADMIN_TOKEN` wiring exists, rather than
-//! forced into a slow by-hand run here.
+//! Canterbury only; `silesia_report` is the Silesia counterpart, its own
+//! binary because Canterbury's single tarball (`extract_canterbury`) and
+//! Silesia's 12 individually pinned files (`decompress_silesia`) fetch
+//! differently. Measured throughput on this codec's optimal-parse LZ:
+//! `xml`, the smallest Silesia file (5.3 MB), took 39s (~0.14 MB/s) end to
+//! end. The full ~200 MB Silesia corpus would run `mothergod::compress`
+//! for on the order of half an hour, too slow for one PR's by-hand run;
+//! Canterbury (~2.7 MB total across 11 files) finishes in under a minute.
+//! Silesia numbers stay remaining S2-D1 scope, most naturally landing
+//! behind the scheduled `corpus-fetch` workflow (issue #231) once
+//! `GH_ADMIN_TOKEN` wiring exists, rather than forced into a slow by-hand
+//! run here.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin finals_report`. Markdown is linted, not formatted (`cargo x lint
@@ -21,37 +24,9 @@
 
 use mothergod_bench::corpus::{extract_canterbury, fetch_and_cache, parse_manifest};
 use mothergod_bench::finals::{FileMeasurement, Versions, format_report};
-use mothergod_bench::reference::{compressed_len, tool_version};
-use std::path::PathBuf;
-use std::process::{Command, ExitCode};
-
-/// The workspace root, located relative to this crate's manifest so the
-/// result is correct regardless of the caller's working directory.
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("bench/Cargo.toml has a parent directory (the workspace root)")
-        .to_path_buf()
-}
-
-/// `date -u`'s current UTC timestamp, `YYYY-MM-DDTHH:MM:SSZ`, the same
-/// shape `site-status/src/bin/generate.rs` stamps `site/status-data.json`
-/// with. Shelling out rather than a `SystemTime`-to-calendar conversion:
-/// this crate stays zero-dependency outside `corpus-fetch`'s own five
-/// crates, and pulling in a datetime crate just for one timestamp isn't
-/// worth a sixth.
-fn generated_at() -> Result<String, String> {
-    let output = Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output()
-        .map_err(|err| format!("failed to run date: {err}"))?;
-    if !output.status.success() {
-        return Err(format!("date exited with {}", output.status));
-    }
-    String::from_utf8(output.stdout)
-        .map(|s| s.trim().to_string())
-        .map_err(|err| format!("date produced non-UTF-8 output: {err}"))
-}
+use mothergod_bench::reference::{compressed_len, generated_at, tool_version};
+use mothergod_bench::repo_root;
+use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let root = repo_root();
@@ -134,7 +109,7 @@ fn main() -> ExitCode {
     let generated_at = match generated_at() {
         Ok(stamp) => stamp,
         Err(err) => {
-            eprintln!("{err}");
+            eprintln!("failed to get the current timestamp: {err}");
             return ExitCode::FAILURE;
         }
     };
@@ -145,6 +120,7 @@ fn main() -> ExitCode {
         &generated_at,
         &versions,
         &measurements,
+        "finals_report",
     );
 
     let out_path = root.join("docs/benchmarks/canterbury.md");
