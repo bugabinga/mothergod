@@ -23,6 +23,10 @@ on:
       - agent-research
       - agent-deslop
       - agent-model-intel
+      # Not an agent seat, but it ships the clock (ADR-0035): a red
+      # deploy means the next cadence change silently never arrives,
+      # the exact failure class the clock migration exists to end.
+      - deploy-telegram-worker
     types: [completed]
 
 permissions:
