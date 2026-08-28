@@ -15,7 +15,12 @@ All notable changes to this project are documented here. Format follows
   downward walk finds the exact longest match among the candidates on
   the insertion path. Not yet wired into `parse_greedy` or
   `parse_optimal`, the same standalone-primitive-first order S1-P1's
-  `Sse` shipped in (S2-A40).
+  `Sse` shipped in (S2-A40). Length-prefix reuse (`len0`/`len1`, S2-A43)
+  since: each comparison starts from the shorter of the two common
+  lengths already proven on the "less"/"greater" chains rather than
+  byte 0 — a real ~3.5x on near-duplicate structured data, though it
+  does not by itself fix the single-repeated-byte pathology that made
+  the S2-R2 wiring attempt break the issue #179 speed guard.
 
 - `src/sse.rs`: standalone secondary symbol estimation (SSE/APM) primitive
   for ROADMAP M3's oldest standing lead (`research/JOURNAL.md` S1-P1,

@@ -334,9 +334,16 @@ impl<'d> MatchFinder<'d> {
 /// a position against itself at a backward distance — what
 /// [`BinaryTreeMatchFinder`] needs to order two candidates' suffixes
 /// against each other, not just measure one candidate's match length.
-fn suffix_common_len(data: &[u8], a: usize, b: usize) -> usize {
+/// `start` lets a caller resume from a length it already knows both
+/// suffixes share, rather than re-comparing from byte 0
+/// ([`BinaryTreeMatchFinder::insert_and_find`]'s length-prefix-reuse
+/// optimization); every other caller passes `0`. Callers must only pass a
+/// `start` that both suffixes are already known to agree on for that many
+/// bytes — an unproven `start` claims bytes match without checking them,
+/// which is exactly the length-prefix-reuse invariant's job to uphold.
+fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize) -> usize {
     let max_len = (data.len() - b).min(MAX_MATCH_LEN);
-    let mut len = 0;
+    let mut len = start;
     while len < max_len && data[a + len] == data[b + len] {
         len += 1;
     }
@@ -379,27 +386,45 @@ fn to_u32(i: usize) -> u32 {
 ///
 /// Standalone primitive, not yet wired into [`parse_greedy`] or
 /// [`parse_optimal`] — the same standalone-primitive-first shape
-/// [`crate::sse::Sse`] shipped in S2-A40. Two things a wired-in successor
+/// [`crate::sse::Sse`] shipped in S2-A40. One thing a wired-in successor
 /// still needs that this slice does not implement: eviction of positions
 /// older than [`WINDOW`] (the tree only grows, so nothing yet bounds it to
-/// a 1 MiB working set the way `MatchFinder`'s recency-ordered chain
-/// does by construction) and the length-prefix-reuse optimization real
-/// bt4 match finders use to keep comparisons near the tree height rather
-/// than the match length itself (`len0`/`len1` in the LZMA reference
-/// implementation, deliberately not carried here — see
-/// `suffix_common_len`, which always compares from scratch).
+/// a 1 MiB working set the way `MatchFinder`'s recency-ordered chain does
+/// by construction).
 ///
-/// The length-prefix-reuse omission is not just speed/memory polish: a
-/// straight swap into `dp_round` in [`Self::insert_and_find`]'s place of
+/// A straight swap into `dp_round` in [`Self::insert_and_find`]'s place of
 /// `MatchFinder::insert` + `find_best` was tried and rejected
-/// (`research/JOURNAL.md` S2-R2). It won on ratio but broke the issue #179
-/// speed guard, because `insert_and_find` fuses insertion with search, so
-/// `dp_round`'s `carry` reuse can no longer skip the walk on a long run —
-/// only skip *using* a fresher result — and without length-prefix-reuse,
-/// highly repetitive data makes each visited candidate cost close to
-/// `MAX_MATCH_LEN` instead of the tree height. A future wiring attempt
-/// needs that optimization, or a cheap insert-only fast path `carry` can
-/// skip through, before repeating the swap.
+/// (`research/JOURNAL.md` S2-R2) before this slice existed. It won on
+/// ratio but broke the issue #179 speed guard, whose fixture is 200,000
+/// bytes of one repeated value: `insert_and_find` fuses insertion with
+/// search, so `dp_round`'s `carry` reuse can no longer skip the walk on a
+/// long run — only skip *using* a fresher result — and without
+/// length-prefix reuse, every visited candidate cost close to
+/// `MAX_MATCH_LEN` instead of the tree height.
+///
+/// [`Self::insert_and_find`] now carries that reuse (`len0`/`len1` in the
+/// LZMA reference implementation): each comparison starts from the
+/// shorter of the two common lengths already proven against the nearest
+/// node linked so far on the "less" and "greater" chains, rather than
+/// byte 0, via `suffix_common_len`'s `start` parameter. That bound is
+/// sound because both chains stay sorted relative to `i`: any node still
+/// to be visited lies between the last-linked "less" node and the
+/// last-linked "greater" node in suffix order, so it shares at least
+/// their common prefix with `i` (whichever of the two is shorter) before
+/// a single byte of it is compared. **This does not fix the issue #179
+/// fixture itself** (measured, `research/JOURNAL.md` S2-A43): a run of one
+/// repeated byte makes every candidate compare equal up to the shorter
+/// suffix's end, so every one ties to the *same* side (see
+/// [`Self::insert_and_find`]'s ordering rule) and the untouched side's
+/// bound never leaves 0 — length-prefix reuse only pays off when the walk
+/// actually alternates sides, which near-duplicate-but-not-identical data
+/// does and a single repeated byte does not. Measured on 300 near-duplicate
+/// 200-byte blocks (`tests::binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse`),
+/// a shape closer to S1-P2's sqlite/json/jsonl target: real ~3.5x. A future
+/// wiring attempt still needs a fix for the one-sided pathology specifically
+/// (a cheap insert-only fast path, or a `nice_len`-style early exit once a
+/// match is already long enough to stop improving the price) before
+/// repeating the swap; this slice narrows, but does not close, that gap.
 pub struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// `head[hash]` is the current tree root for that hash bucket, or
@@ -465,13 +490,24 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         let mut greater_root = NO_POSITION;
         let mut greater_tail: Option<usize> = None;
 
+        // Length-prefix reuse (LZMA bt4's `len0`/`len1`): the common length
+        // already proven between `i` and the nearest node linked so far on
+        // the "less"/"greater" chain. Every node still to be visited lies
+        // between those two in suffix order, so it shares at least the
+        // shorter of the two prefixes with `i` — `suffix_common_len` can
+        // start from that bound instead of byte 0. Both start at 0 (no
+        // bound proven yet), matching `suffix_common_len`'s own default.
+        let mut less_common = 0usize;
+        let mut greater_common = 0usize;
+
         let mut best_len = 0usize;
         let mut best_distance: Option<Distance> = None;
         let mut depth = 0;
 
         while cur != NO_POSITION && depth < max_depth {
             let cur_pos = cur as usize;
-            let common = suffix_common_len(self.data, cur_pos, i);
+            let start = less_common.min(greater_common);
+            let common = suffix_common_len(self.data, cur_pos, i, start);
             let distance = i - cur_pos; // cur_pos was inserted earlier: i > cur_pos always.
             if common > best_len && distance <= WINDOW {
                 best_len = common;
@@ -487,6 +523,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
                     less_root = to_u32(cur_pos);
                 }
                 less_tail = Some(cur_pos);
+                less_common = common;
                 cur = self.right[cur_pos];
             } else {
                 // cur's suffix sorts after (or ties with, up to the
@@ -497,6 +534,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
                     greater_root = to_u32(cur_pos);
                 }
                 greater_tail = Some(cur_pos);
+                greater_common = common;
                 cur = self.left[cur_pos];
             }
             depth += 1;
@@ -1477,7 +1515,7 @@ mod tests {
             if prefix_hash(data, cur) != target_hash {
                 continue;
             }
-            let len = suffix_common_len(data, cur, i);
+            let len = suffix_common_len(data, cur, i, 0);
             if len > best_len {
                 best_len = len;
                 best_distance = NonZeroU32::new(to_u32(i - cur));
@@ -1573,5 +1611,44 @@ mod tests {
             .insert_and_find(1, 8)
             .expect("position 1 repeats position 0's run of 'x'");
         assert!(len <= MAX_MATCH_LEN);
+    }
+
+    #[test]
+    fn binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse() {
+        // 300 copies of a 200-byte template, each differing in exactly one
+        // byte (index 100): every block-start position shares the same
+        // 3-byte prefix hash and a 100-byte common prefix with every other
+        // block, then a per-block-varying byte that gives the tree real
+        // left/right branching (unlike a single repeated byte, where every
+        // candidate ties and lands on the same side, see
+        // `research/JOURNAL.md` S2-A43 -- length-prefix reuse cannot help
+        // there, since the untouched side's bound never leaves 0). This
+        // shape approximates S1-P2's named target (sqlite/json/jsonl-like
+        // near-duplicate records), not a pathological single-byte run.
+        // Measured by hand before this guard existed: unoptimized (`start`
+        // forced to 0) took ~970ms here, this optimization ~280ms, a real
+        // ~3.5x. The bound below leaves generous headroom for slower CI
+        // hardware while still catching a regression back to the
+        // unoptimized cost.
+        let template: Vec<u8> = (0..200u32)
+            .map(|i| u8::try_from(i % 251).expect("i % 251 fits u8"))
+            .collect();
+        let mut data = Vec::new();
+        for copy in 0..300u16 {
+            let mut block = template.clone();
+            block[100] = u8::try_from(copy % 256).expect("copy % 256 fits u8");
+            data.extend_from_slice(&block);
+        }
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let start = std::time::Instant::now();
+        for i in 0..data.len() {
+            let _ = finder.insert_and_find(i, MAX_CHAIN_TRIES_OPTIMAL);
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "300 near-duplicate 200-byte blocks took {elapsed:?} to insert, expected well \
+             under 3s; likely a regression to length-prefix reuse always starting from 0"
+        );
     }
 }
