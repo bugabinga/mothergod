@@ -106,11 +106,11 @@ goes as long as it is useful to humans.
 Crate skeleton, v0 frame format (Stored), quality-gate CI, governance and
 agent processes. Done 2026-08-20.
 
-## M1 — Port the founding-session codec
+## M1 — Port the founding-session codec ✅
 
 - [x] Founding artifacts imported to `research/imports/session-1/` and the
       codec import-verified lossless (2026-08-20).
-- [ ] Port `research/imports/session-1/mothergod.rs` into `src/` as
+- [x] Port `research/imports/session-1/mothergod.rs` into `src/` as
       reviewable modules (filters, parse, models, coder) behind the frame
       format, one PR per module, tests per module, invariants written down
       (JOURNAL S1-A*). The archive file stays untouched; the port must meet
@@ -122,7 +122,7 @@ agent processes. Done 2026-08-20.
 
 ## M2 — Honest benchmarking (JOURNAL S1-D2)
 
-- [ ] `bench/` harness, in Rust (ADR-0006): `bench/corpus.toml` manifest
+- [x] `bench/` harness, in Rust (ADR-0006): `bench/corpus.toml` manifest
       pinning Silesia + Canterbury by URL + SHA-256 (fetch-and-cache, never
       committed), deterministic in-repo generators (entropy ladder,
       markov-H8/2, structured classes), three-tier train/sealed/finals split
