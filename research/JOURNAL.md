@@ -2052,6 +2052,46 @@ record.
   capability-patch rule applies (null deltas, no champion to diff
   against). | Remaining S1-P2 scope: per-position adaptive prices,
   still untouched from S2-A42.
+- S2-A50 | ACCEPTED | First slice of S1-P2's other remaining gap
+  (per-position adaptive prices, untouched since S2-A42): `PriceCounts`
+  gained `observe(token, prev_byte)`, bumping one already-decided
+  token's counts, factored out of `tally`'s per-token match arm (`tally`
+  now calls it in a loop; identical behavior, proven by a dedicated
+  test rather than assumed from the refactor). Standalone, not yet
+  called from `dp_round`: the DP's forward pass processes positions in
+  strictly increasing order and every relax edge moves strictly
+  forward, so by the time the loop reaches position `i`, `dp[i]` is
+  already final — nothing at or after `i` can still improve it. That
+  means the move that finalized `dp[i]` could legitimately feed a
+  running price table as the loop advances, which is what "per-position
+  adaptive" means; `tally` cannot do this because it only ever replays
+  a *complete* token sequence handed to it after the fact, so it cannot
+  sit inside `dp_round`'s own loop. Wiring that observation loop into
+  `dp_round` — deciding how often to re-derive `PriceTable` from the
+  running `PriceCounts` (every position is affordable in isolation, a
+  fixed-size ~4,200-entry rebuild each time, but not amortized over a
+  multi-megabyte input at every byte) and re-measuring bpb — is the
+  next slice, deliberately deferred: same standalone-primitive-first
+  order `BinaryTreeMatchFinder` (S2-A42) and `Sse` (S2-A40) shipped in,
+  chosen here to avoid touching `dp_round`'s hot loop, the golden
+  fixture, or the issue #179 speed guard in the same change that
+  introduces a new, unverified DP behavior. | 6 new unit tests: `observe`
+  on a literal bumps exactly its `(context, byte)` cell and nothing
+  else, both with a real preceding byte and at stream start (`None`
+  context, matching `tally`'s own `pos > 0` check); `observe` on a
+  `Match` bumps length and offset only; `observe` on a `Rep` bumps
+  length and `rep` only, not offset; repeated `observe` calls
+  accumulate; and a direct comparison of `tally`'s output against
+  driving `observe` one token at a time from outside (the shape a
+  future caller would use) on the same sequence, asserting identical
+  counts. `cargo x check` clean; `baseline_gate check` unaffected (11
+  cases, no regression) since `dp_round`/`parse_optimal` are untouched.
+  | No bpb measurement: `observe` is not called from any parse pass, so
+  there is no champion to diff against — `progress.jsonl` records this
+  as `kind: "patch"` with null bpb deltas, same reason as S2-A40/S2-A42.
+  Remaining S1-P2 scope: wiring the observation loop into `dp_round`
+  and measuring a real bpb delta on sqlite/json/jsonl-shaped data,
+  S1-P2's named target, still unmoved by every slice so far.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -2102,9 +2142,18 @@ record.
   for an encoder-only change instead). Seventh slice, S2-A48: landed the
   identical wiring under that ruling — pre-change `v2-lz-repeated-text`
   moved to `tests/golden/superseded/`, current pair regenerated, numbers
-  reproduce S2-A47 bit-for-bit. Remaining S1-P2 scope: window eviction and
-  per-position adaptive prices, still untouched from S2-A42 — the actual
-  named sqlite/json/jsonl target remains unmoved by every slice so far.
+  reproduce S2-A47 bit-for-bit. Eighth slice, S2-A49: closed the window-
+  eviction half of the remaining scope — `insert_and_find` now evicts a
+  candidate's entire remaining subtree the instant its distance exceeds
+  `WINDOW`, proven (not just tested) to never change a reported match,
+  since the walk's visited positions are strictly decreasing. Ninth
+  slice, S2-A50: standalone primitive for the other half — `PriceCounts`
+  can now be fed one already-decided token at a time (`observe`), not
+  just replayed from a complete sequence (`tally`) — still not called
+  from `dp_round`. Remaining S1-P2 scope: wiring that observation loop
+  into `dp_round`'s forward pass and measuring a real bpb delta — the
+  actual named sqlite/json/jsonl target remains unmoved by every slice
+  so far.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
