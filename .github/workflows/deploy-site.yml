@@ -9,6 +9,15 @@ on:
       - "site/**"
       - ".github/workflows/deploy-site.yml"
       - ".github/scripts/run-telemetry.py"
+      # /status-data.json sources (issue #95): a merge that moves one
+      # redeploys the page the same hour; the daily cron catches the rest
+      # (src/ line counts are deliberately not a trigger, codec merges are
+      # too frequent to each buy a deploy).
+      - ".github/scripts/status-data.py"
+      - "ROADMAP.md"
+      - "research/progress.jsonl"
+      - "bench/baseline.json"
+      - "src/lib.rs"
   # Daily refresh of /agent-metrics.json (issue #64); the page warns at 48h.
   schedule:
     - cron: "43 5 * * *"
@@ -28,6 +37,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # status-data.py publishes a 7-day commit count and refuses to
+          # count a shallow clone.
+          fetch-depth: 0
+      # Status data for /status.html (issue #95): generated from repo
+      # evidence (ROADMAP checkboxes, progress.jsonl, bench/baseline.json,
+      # src/) on every deploy, never committed, same pattern and rationale
+      # as agent-metrics.json below. The script nulls fields it cannot read
+      # and exits 0; continue-on-error covers a crash before that, and the
+      # page reports the missing file rather than breaking.
+      - continue-on-error: true
+        run: python3 .github/scripts/status-data.py site/status-data.json
       # Agent telemetry for /agents.html (issue #64): a stateless 7-day
       # window re-read from audit artifacts on every deploy, never a
       # committed data file, because concurrent agent appends to a tracked

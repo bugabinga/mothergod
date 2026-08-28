@@ -1,6 +1,6 @@
 # ADR-0020: Python is allowed in CI glue, and stops hiding in YAML
 
-Status: accepted · Date: 2026-08-23 · Amends ADR-0006 (scope of the language rule)
+Status: accepted · Date: 2026-08-23 · Amends ADR-0006 (scope of the language rule) · Clarified by ADR-0037 (published-number clause means measured, not republished)
 
 ## Context
 

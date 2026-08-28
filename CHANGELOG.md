@@ -417,6 +417,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- The status page ([mothergod.dev/status](https://mothergod.dev/status.html))
+  regenerates its data at every site deploy instead of reading a
+  hand-committed snapshot that drifted stale within days (ADR-0037):
+  `.github/scripts/status-data.py` derives milestones from ROADMAP.md
+  checkboxes, the experiment ledger from `research/progress.jsonl`, and
+  the new benchmarks table from `bench/baseline.json`, the CI ratio
+  gate's own numbers. The unwired `site-status` crate is deleted; its
+  planned commit-back wiring was the pattern PR #34 already falsified.
 - The agent telemetry feed (`site/agent-metrics.json`, behind
   [mothergod.dev/agents.html](https://mothergod.dev/agents.html)) and the
   model-intel report carry a self-wake audit (issue #144): every admitted
