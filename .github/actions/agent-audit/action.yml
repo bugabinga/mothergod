@@ -222,9 +222,12 @@ runs:
         # utilization; both windows ride nested under `unifiedWindows`,
         # keyed by window name. A nested form present means the flat fields
         # are ignored, because a payload carrying both describes the same
-        # windows twice. Twin parse: `window_readings` in
-        # .github/scripts/retrospect, which feeds the budget footer from
-        # the same payloads.
+        # windows twice. The same shape rule lives in `window_readings` in
+        # .github/scripts/retrospect, which feeds the budget footer;
+        # validation differs where the consumers differ (this index encodes
+        # both fields so both must be valid, the footer degrades a bad
+        # reset), and the footer's events-but-no-readings alarm is the loud
+        # signal when a payload stops parsing here too.
         def window_readings(info):
             if not isinstance(info, dict):
                 return

@@ -54,6 +54,7 @@ is distinguishable from a quiet hour.
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -195,19 +196,32 @@ def window_readings(info):
     event's trigger window and carry no utilization; both windows ride nested
     under `unifiedWindows`, keyed by window name. A nested form present means
     the flat fields are ignored, because a payload carrying both describes the
-    same windows twice. Twin parse: the extract step of
-    `.github/actions/agent-audit`, which builds the allowance index and the
-    guard ledger from the same payloads.
+    same windows twice.
+
+    Only readings with a finite utilization fraction in [0, 1] are yielded:
+    a malformed window drops here so `budget()`'s events-but-no-readings
+    alarm covers type drift as well as missing fields, instead of printing a
+    wrong number or crashing mid-retrospect. `resetsAt` is NOT validated
+    here; `budget()` degrades a bad one to "(no reset time reported)",
+    because a valid fraction still informs without it. The same shape rule
+    lives in the extract step of `.github/actions/agent-audit`; its
+    validation demands both fields because the allowance index encodes both.
     """
     if not isinstance(info, dict):
         return
     nested = info.get("unifiedWindows")
-    if isinstance(nested, dict):
-        for kind, window in nested.items():
-            if isinstance(window, dict):
-                yield kind, window
-        return
-    yield info.get("rateLimitType", "unknown"), info
+    windows = (nested.items() if isinstance(nested, dict)
+               else [(info.get("rateLimitType", "unknown"), info)])
+    for kind, window in windows:
+        if not isinstance(window, dict):
+            continue
+        utilization = window.get("utilization")
+        if (not isinstance(utilization, (int, float))
+                or isinstance(utilization, bool)
+                or not math.isfinite(utilization)
+                or not 0 <= utilization <= 1):
+            continue
+        yield kind, window
 
 
 def budget(samples, anchor):
@@ -229,24 +243,24 @@ def budget(samples, anchor):
     for when, info in samples:
         for kind, reading in window_readings(info):
             by_type.setdefault(kind, []).append((when, reading))
+    if not by_type:
+        print("    rate-limit events present but no readable window "
+              "utilization. Treat this as a payload shape change, not a "
+              "quiet window: the allowance index and the guard ledger parse "
+              "the same events, so the whole budget chain is blind until "
+              "agent-audit and this script learn the new shape.")
+        return
 
     for kind, series in sorted(by_type.items()):
         series.sort(key=lambda pair: pair[0])
         first_when, first = series[0]
         last_when, last = series[-1]
-        used = last.get("utilization")
-        if used is None:
-            print(f"    {kind}: events present but no readable utilization. "
-                  "Treat this as a payload shape change, not a quiet window: "
-                  "the allowance index and the guard ledger parse the same "
-                  "events, so the whole budget chain is blind until "
-                  "agent-audit and this script learn the new shape.")
-            continue
+        used = last["utilization"]
         left = max(0.0, 1.0 - used)
         line = f"    {kind}: {used:.0%} used, {left:.0%} left"
 
         resets_at = last.get("resetsAt")
-        if not resets_at:
+        if not isinstance(resets_at, int) or isinstance(resets_at, bool) or resets_at <= 0:
             print(line + " (no reset time reported)")
             continue
 
@@ -259,7 +273,7 @@ def budget(samples, anchor):
             continue
         affordable = left / hours
         elapsed = (stamp_to_dt(last_when) - stamp_to_dt(first_when)).total_seconds() / 3600
-        burned = used - (first.get("utilization") or used)
+        burned = used - first["utilization"]
         if elapsed > 0 and burned > 0:
             observed = burned / elapsed
             runway = left / observed
