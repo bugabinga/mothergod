@@ -126,14 +126,20 @@ this even by mistake.
 Two independent mechanisms sit under that one rule, and both survive if
 either is fixed:
 
-- The app token's merge of such a PR has drawn `403 refusing to allow a
+- The app token's merge of such a PR drew `403 refusing to allow a
   GitHub App to create or update workflow ... without workflows
-  permission` since 12:15 UTC on 2026-08-23. The installation grants
-  `workflows` and nothing on our side changed, so the capability is not
-  ours to restore (issue #136, closed with the operator's ruling that
-  the restriction is the control they want). Do not spend an API call
-  testing it. Distinct from app-token *pushes* to workflow files, which
-  were always refused (issue #24).
+  permission` from 12:15 UTC 2026-08-23 (issue #136, closed with the
+  operator's ruling that the restriction is a control they want)
+  until at latest 2026-08-28, when PRs #287 and #288, both
+  workflow-touching, merged on the app token with no 403. The
+  platform refusal is not currently a control; the rule above holds
+  by prompt discipline and by `GH_ADMIN_TOKEN` living only in the
+  BDFL seat. `merge-pr` attempts before predicting, so neither state
+  breaks it: if the 403 returns, it escalates; while the 403 stays
+  gone, the escalation is idle. Distinct from app-token *pushes* to
+  workflow files, which were refused independently (issue #24);
+  `push-branch` derives the PAT for those paths, so that refusal's
+  current state goes untested by design.
 - A native `schedule:` trigger on a claude-code-action seat is not
   worth carrying at all: GitHub's schedule-run actor attribution is
   unreliable enough that re-attributing the cron line by hand (PR #30,
