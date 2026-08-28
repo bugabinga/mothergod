@@ -482,6 +482,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `docs/benchmarks/baseline.md`/`baseline.svg` regenerated from the current
+  `bench/baseline.json`: stale since #301 (S2-A48) landed the
+  `BinaryTreeMatchFinder` wiring and moved several baseline cases (e.g.
+  `entropy_ladder_h1` 1.298080 -> 1.268960 b/B) without anyone re-running
+  `render_baseline_graph`. `bench/baseline.json` is the source of truth;
+  these files are a rendering of it and drift silently once out of sync.
 - `lz::BinaryTreeMatchFinder::insert_and_find` now evicts a candidate from
   the tree the instant its distance exceeds `WINDOW`, instead of leaving it
   reachable and filtering it only at report time (`research/JOURNAL.md`
