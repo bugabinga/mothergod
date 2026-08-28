@@ -162,7 +162,9 @@ jobs:
                labeled agent-system at every step:
                a. an issue labeled bug,
                b. an issue that blocks other open work, named as a blocker
-                  by another issue or PR,
+                  by another issue or PR; a journal DEBT entry blocking
+                  the current milestone counts, and if it lacks an issue
+                  link, filing that issue is the first step (#165),
                c. the top unblocked ROADMAP item, or the journal's top
                   standing lead,
                d. the oldest enhancement issue that is not
