@@ -160,9 +160,9 @@ jobs:
 
             Procedure:
             1. Read the full diff (gh pr diff) and the PR body.
-            2. Don't re-run what CI already ran: fmt, clippy, test, and doc
-               are required checks that already executed on this exact
-               commit (ci.yml). Re-running `cargo x fmt/lint/test/doc`
+            2. Don't re-run what CI already ran: fmt, clippy, test, doc,
+               and ratio (the bits/byte regression gate) are required
+               checks that already executed on this exact commit (ci.yml). Re-running `cargo x fmt/lint/test/doc`
                yourself recomputes an identical result at full runner cost
                and adds no signal — check it with `gh pr checks $PR_NUMBER`
                (no --watch; watching your own review job hangs it) instead

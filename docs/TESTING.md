@@ -5,13 +5,16 @@ What "tested" means for this project, in layers. Corpus rules live in
 
 ## Current automated cadence
 
-Every PR retains the required job names `fmt`, `clippy`, `test`, and `doc`.
-Rust-input PRs run them on Linux x64 stable through
+Every PR retains the required job names `fmt`, `clippy`, `test`, `doc`, and
+`ratio`. Rust-input PRs run the first four on Linux x64 stable through
 `.github/actions/rust-ci`, each job delegating to its `cargo x` stage so CI
 and the local gate share one command list (ADR-0029): formatting, Clippy,
 all Cargo targets, doctests,
-and warning-clean rustdoc output. Non-Rust PRs receive four successful skips
-through the path filter. Those four names are the repository ruleset contract.
+and warning-clean rustdoc output. `ratio` is the benchmark regression gate
+(layer 7): it runs the `baseline_gate` binary directly, because it is not a
+stage of x's quality gate. PRs touching no gate input receive successful
+skips through the path filter. Those five names are the repository ruleset
+contract.
 
 The advisory `monster` workflow runs Saturdays at 03:17 UTC and on manual
 dispatch, never on pull requests. Every runtime lane runs
@@ -41,7 +44,7 @@ for each host architecture. Failed monster lanes update and reopen one
 `bug`/`agent-system` issue with the run, job, lane identity, and first useful
 failure.
 
-Fuzzing, mutation, benchmark regression, C ABI, and external E2E surfaces
+Fuzzing, mutation, C ABI, and external E2E surfaces
 are not part of current automation; their layers below remain plans owned
 by their respective issues, and the monster workflow does not invent empty
 targets for them. Golden determinism is a partial exception: single-platform
@@ -115,9 +118,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   dataset. Divergences are findings — either a port bug or an archive bug;
   journal them either way. The oracle is frozen; the port is what changes.
 
-## 7. Benchmark regression gate (planned, not implemented)
+## 7. Benchmark regression gate (required `ratio` check)
 
-- PRs fail on bits/byte regression vs `bench/baseline.json` beyond stated
-  noise bounds, on the train tier only (sealing rules in POLICY.md).
+- PRs fail on bits/byte regression vs `bench/baseline.json` beyond
+  `baseline::TOLERANCE_BITS`, on the fixed-seed gate cases only (sealing
+  rules in POLICY.md). The measurement is deterministic, so a red is a
+  real regression, never noise; an accepted ratio trade updates
+  `bench/baseline.json` in the same PR with the reason in the PR body.
   Ratio improvements that break layers 1–2 are rejected regardless — a
   faster-shrinking codec that panics on truncated input is a worse codec.

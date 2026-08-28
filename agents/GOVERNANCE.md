@@ -188,7 +188,7 @@ both swept by the BDFL every run on open `agent-approved` PRs:
   Push identity below), settle it with
   `.github/scripts/settle-push <pr>`, then land with the REST squash
   merge above once the required gates are green.
-- Mergeable state clean, four gates green, auto-merge armed, PR still
+- Mergeable state clean, required gates green, auto-merge armed, PR still
   open: the branch tip is unsigned, so GitHub's own evaluation sits
   at `blocked` while the REST squash merge succeeds immediately
   (first hit PR #84; same porcelain/API asymmetry as PR #25). Rescue:

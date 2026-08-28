@@ -1,8 +1,8 @@
 # Quality gate for every change. This is the ground truth all other
 # automation (including agent-driven workflows) trusts: nothing merges red.
-# The four job names (fmt, clippy, test, doc) are load-bearing: the main
-# ruleset requires exactly these check names. Rename only together with the
-# ruleset — a mismatch blocks every merge.
+# The required job names (fmt, clippy, test, doc, ratio) are load-bearing:
+# the main ruleset requires exactly these check names. Rename only together
+# with the ruleset — a mismatch blocks every merge.
 name: ci
 
 on:
@@ -27,7 +27,7 @@ env:
 
 jobs:
   # Path filter (operator directive, Telegram, 2026-08-22). A PR that
-  # changes no gate input gets four skips, and the ruleset counts a skipped
+  # changes no gate input gets skips, and the ruleset counts a skipped
   # required check as satisfied. Outputs describe x quality inputs, Rust
   # build inputs, and JavaScript tests. The filter enumerates tool-input
   # file types, never tree paths: globs like *.rs and Cargo.toml stay correct
@@ -55,6 +55,7 @@ jobs:
       quality: ${{ steps.filter.outputs.quality }}
       rust: ${{ steps.filter.outputs.rust }}
       js: ${{ steps.filter.outputs.js }}
+      ratio: ${{ steps.filter.outputs.ratio }}
     steps:
       - name: Detect tool-input changes
         id: filter
@@ -65,6 +66,7 @@ jobs:
             echo "quality=true" >> "$GITHUB_OUTPUT"
             echo "rust=true" >> "$GITHUB_OUTPUT"
             echo "js=true" >> "$GITHUB_OUTPUT"
+            echo "ratio=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
@@ -82,6 +84,11 @@ jobs:
             echo "js=true" >> "$GITHUB_OUTPUT"
           else
             echo "js=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)baseline\.json$|^rust-toolchain|^\.cargo/|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
+            echo "ratio=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ratio=false" >> "$GITHUB_OUTPUT"
           fi
 
   fmt:
@@ -129,6 +136,25 @@ jobs:
         with:
           checks: doc
 
+  # Ratio regression gate (docs/TESTING.md layer 7, JOURNAL S2-D1, #284):
+  # a PR fails when measured bits/byte on the fixed gate cases regresses
+  # past `baseline::TOLERANCE_BITS` vs the committed `bench/baseline.json`.
+  # Fixed seeds through a deterministic codec: a red here is a real ratio
+  # regression, never noise. Runs the gate binary directly, not through x:
+  # the ratio gate is not a stage of x's quality gate (ADR-0029), and its
+  # own error output teaches the accepted-trade path (`-- write`).
+  ratio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ always() && needs.changes.outputs.ratio != 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      - run: cargo run -p mothergod-bench --release --bin baseline_gate -- check
+
   # The Telegram worker is the one piece of logic here that cannot be Rust:
   # it runs on Cloudflare's edge (ADR-0006 covers what produces published
   # numbers; this produces none). Its typing state machine cost three
@@ -136,7 +162,7 @@ jobs:
   # nobody runs are decoration. The same dependency-free Node runner exercises
   # agent-audit's allowance index against its real extraction block. Not a
   # required check: it gates nothing on a red day for the crate, and the
-  # ruleset's four names stay exactly as they are.
+  # ruleset's required names stay exactly as they are.
   worker:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -150,8 +176,8 @@ jobs:
   # ADRs are numbered by listing the directory at branch-cut time (#195):
   # two PRs open at once can pick the same number and neither CI job
   # notices, because nothing else reads the whole directory at once. Not
-  # a required check (the ruleset's four names stay exactly as they are);
-  # it still turns a silent collision into a red run on every PR.
+  # a required check (the ruleset's required names stay exactly as they
+  # are); it still turns a silent collision into a red run on every PR.
   adr-numbers:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
