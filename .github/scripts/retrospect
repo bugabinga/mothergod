@@ -61,7 +61,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 
-from allowance import valid_fraction, window_readings
+from allowance import valid_fraction, valid_reset, window_readings
 from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
 
 # Only these produce a judgeable session. Everything else in the repository is
@@ -232,7 +232,7 @@ def budget(samples, anchor):
         line = f"    {kind}: {used:.0%} used, {left:.0%} left"
 
         resets_at = last.get("resetsAt")
-        if not isinstance(resets_at, int) or isinstance(resets_at, bool) or resets_at <= 0:
+        if not valid_reset(resets_at):
             print(line + " (no reset time reported)")
             continue
 
