@@ -1821,6 +1821,40 @@ record.
   found match is already long enough that a longer one cannot improve the
   DP price — before repeating the swap; window eviction and per-position
   adaptive prices remain untouched from S2-A42.
+- S2-A44 | ACCEPTED | Third slice of ROADMAP M3's second standing lead
+  (S1-P2, btultra2-class parse): `nice_len`, a third parameter on
+  `lz::BinaryTreeMatchFinder::insert_and_find`, the early-exit half of the
+  fix S2-A43 named but did not build (a cheap insert-only fast path, or a
+  `nice_len`-style early exit). The walk now stops visiting further
+  candidates once the best match found so far is at least `nice_len` long,
+  cut off the same way an exhausted `max_depth` already is; passing
+  `MAX_MATCH_LEN` (65535) reproduces the old unbounded search exactly,
+  since `suffix_common_len` itself never reports a longer match than that.
+  **Falsified the obvious follow-on hypothesis before it shipped**
+  (`compression-experiment` skill's "measured, not assumed"): the first
+  draft claimed this closes S2-A43's named one-sided-branching pathology
+  (issue #179's 200,000-byte single-repeated-byte fixture) outright,
+  reasoning that a low `nice_len` (128) would stop the walk after one
+  candidate instead of up to `max_depth`. Measured against that exact
+  fixture: 32.9s, still an order of magnitude past the issue's 15s speed
+  guard. Root cause, found by tracing rather than re-guessing: `nice_len`
+  only bounds how many *candidates* a walk visits, not the cost of scanning
+  any single one — on a repeated-byte run, `suffix_common_len` itself scans
+  to `MAX_MATCH_LEN` on the very *first* candidate, before `nice_len` is
+  ever consulted. Rewritten before landing to claim only what's true: a
+  new test measures `nice_len`'s real, positive effect on a shape where
+  per-candidate cost is cheap and candidate *count* is what varies (the
+  300-near-duplicate-block generator S2-A43 already introduced, unbounded
+  `max_depth`) — 69ms with `nice_len` 50 vs. 228ms with no early exit, a
+  real ~3.3x, smaller than the `len0`/`len1` win but compounding with it
+  (both apply to every call). Does **not** unblock S2-R2's swap: the issue
+  #179 fixture is unaffected, by the mechanism above. Remaining S1-P2
+  scope, now sharper: the wiring blocker isn't candidate count, it's the
+  per-candidate scan cost on highly repetitive runs, which needs an actual
+  insert-only path that skips `suffix_common_len` itself while a `carry`
+  is active, not a smaller `max_depth`-like bound layered on top of it;
+  window eviction and per-position adaptive prices remain untouched from
+  S2-A42.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -1842,11 +1876,19 @@ record.
   `insert_and_find` fuses insertion with search so `dp_round`'s `carry`
   can no longer skip the walk on a long run, and S2-A42 deliberately
   deferred the length-prefix-reuse optimization that would keep each
-  comparison cheap regardless. Next attempt needs the length-prefix-reuse
-  optimization (`len0`/`len1`) or a cheap insert-only fast path for
-  `carry` to skip, not another straight swap. Remaining: wire it into
-  `parse_optimal` (now blocked on one of those two prerequisites), evict
-  positions past `WINDOW`, and add per-position adaptive prices.
+  comparison cheap regardless. Third and fourth slices narrowed but did not
+  close that gap: length-prefix reuse (S2-A43, real ~3.5x on near-duplicate
+  data, no measurable effect on the issue #179 fixture itself, since every
+  candidate ties and lands on the same side there) and a `nice_len` early
+  exit (S2-A44, real ~3.3x on the same near-duplicate shape, also no effect
+  on the fixture — `nice_len` bounds candidates visited, not the cost of
+  scanning the one candidate a repeated-byte run always finds first).
+  Remaining, sharper after both: the wiring blocker is per-candidate scan
+  cost on highly repetitive runs, not candidate count, so the next attempt
+  needs an actual insert-only path that skips `suffix_common_len` itself
+  while a `carry` is active, not another bound layered on top of
+  `max_depth`. Window eviction and per-position adaptive prices remain
+  untouched from S2-A42.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,

@@ -420,11 +420,30 @@ fn to_u32(i: usize) -> u32 {
 /// actually alternates sides, which near-duplicate-but-not-identical data
 /// does and a single repeated byte does not. Measured on 300 near-duplicate
 /// 200-byte blocks (`tests::binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse`),
-/// a shape closer to S1-P2's sqlite/json/jsonl target: real ~3.5x. A future
-/// wiring attempt still needs a fix for the one-sided pathology specifically
-/// (a cheap insert-only fast path, or a `nice_len`-style early exit once a
-/// match is already long enough to stop improving the price) before
-/// repeating the swap; this slice narrows, but does not close, that gap.
+/// a shape closer to S1-P2's sqlite/json/jsonl target: real ~3.5x.
+///
+/// [`Self::insert_and_find`] now also takes `nice_len` (`research/JOURNAL.md`
+/// S2-A44): the walk stops visiting further candidates as soon as the best
+/// match found so far is at least `nice_len` long, cut off the same way an
+/// exhausted `max_depth` already is. Unlike `max_depth`, this is never a
+/// heuristic trade against exactness: no candidate can ever report a match
+/// longer than `MAX_MATCH_LEN` (`suffix_common_len`'s own cap), so a
+/// caller that passes `nice_len >= MAX_MATCH_LEN` gets exactly the old
+/// unbounded behavior, and any smaller `nice_len` only ever stops looking
+/// once further looking cannot find something strictly longer than what a
+/// DP round is already willing to spend a token price on. **Measured, not
+/// assumed, and it does *not* close the one-sided-pathology gap
+/// length-prefix reuse left open**: on the issue #179 fixture (200,000
+/// bytes of one repeated value) the very first candidate visited already
+/// costs a full `MAX_MATCH_LEN`-length `suffix_common_len` scan, so
+/// `nice_len` — which only bounds how many *candidates* get visited, not
+/// the cost of scanning any one of them — cuts that fixture's cost by
+/// roughly `max_depth`-fold (fewer candidates) but not enough: still
+/// `O(MAX_MATCH_LEN)` per position, `O(n * MAX_MATCH_LEN)` overall, well
+/// past the issue #179 speed guard's bound. What a real fix needs instead
+/// is an insert-only path that skips the expensive scan itself while a DP
+/// `carry` is active, not merely visiting fewer candidates that are each
+/// still this expensive.
 pub struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// `head[hash]` is the current tree root for that hash bucket, or
@@ -466,13 +485,25 @@ impl<'d> BinaryTreeMatchFinder<'d> {
     /// encode-only, so its caller is this crate's own parser, never
     /// adversarial input.
     ///
+    /// `nice_len` also stops the walk early, as soon as the best match
+    /// found so far reaches that length — cut off the same way an
+    /// exhausted `max_depth` already is. Pass `MAX_MATCH_LEN` to disable
+    /// this and search exactly as before: no match can ever be reported
+    /// longer than that (`suffix_common_len`'s own cap), so a `nice_len`
+    /// at or above it never fires early.
+    ///
     /// # Panics
     ///
     /// Panics if `i >= data.len()` (`data` from [`Self::new`]): reading
     /// past the end would be a caller bug, never something adversarial
     /// input can trigger.
     #[must_use]
-    pub fn insert_and_find(&mut self, i: usize, max_depth: usize) -> Option<(usize, Distance)> {
+    pub fn insert_and_find(
+        &mut self,
+        i: usize,
+        max_depth: usize,
+        nice_len: usize,
+    ) -> Option<(usize, Distance)> {
         assert!(i < self.data.len(), "position out of range");
         let h = prefix_hash(self.data, i);
         let mut cur = self.head[h];
@@ -504,7 +535,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         let mut best_distance: Option<Distance> = None;
         let mut depth = 0;
 
-        while cur != NO_POSITION && depth < max_depth {
+        while cur != NO_POSITION && depth < max_depth && best_len < nice_len {
             let cur_pos = cur as usize;
             let start = less_common.min(greater_common);
             let common = suffix_common_len(self.data, cur_pos, i, start);
@@ -1528,7 +1559,7 @@ mod tests {
     fn binary_tree_no_prior_positions_returns_none() {
         let data = b"abcdef";
         let mut finder = BinaryTreeMatchFinder::new(data);
-        assert_eq!(finder.insert_and_find(0, data.len()), None);
+        assert_eq!(finder.insert_and_find(0, data.len(), MAX_MATCH_LEN), None);
     }
 
     #[test]
@@ -1537,7 +1568,7 @@ mod tests {
         let mut finder = BinaryTreeMatchFinder::new(data);
         let mut found_at_6 = None;
         for i in 0..data.len() {
-            let found = finder.insert_and_find(i, data.len());
+            let found = finder.insert_and_find(i, data.len(), MAX_MATCH_LEN);
             if let Some((len, distance)) = found {
                 assert_eq!(
                     match_len(data, i, distance),
@@ -1568,7 +1599,7 @@ mod tests {
             // max_depth covers every possible candidate in the bucket
             // (at most i of them), so the walk cannot be truncated before
             // it would reach the true best.
-            let found = finder.insert_and_find(i, data.len());
+            let found = finder.insert_and_find(i, data.len(), MAX_MATCH_LEN);
             let expected_len = brute_force_best(&data, i).map(|(len, _)| len);
             assert_eq!(
                 found.map(|(len, _)| len),
@@ -1589,16 +1620,20 @@ mod tests {
     fn binary_tree_zero_max_depth_finds_nothing_but_stays_consistent() {
         let data = b"abcabcabc";
         let mut finder = BinaryTreeMatchFinder::new(data);
-        let _ = finder.insert_and_find(0, data.len());
-        let _ = finder.insert_and_find(1, data.len());
-        let _ = finder.insert_and_find(2, data.len());
+        let _ = finder.insert_and_find(0, data.len(), MAX_MATCH_LEN);
+        let _ = finder.insert_and_find(1, data.len(), MAX_MATCH_LEN);
+        let _ = finder.insert_and_find(2, data.len(), MAX_MATCH_LEN);
         // Position 3 shares position 0's hash bucket ("abc"); max_depth 0
         // must not panic, and correctly reports no match even though a
         // real one exists.
-        assert_eq!(finder.insert_and_find(3, 0), None);
+        assert_eq!(finder.insert_and_find(3, 0, MAX_MATCH_LEN), None);
         // A later insert with a different hash bucket ("bca", shared with
         // position 1) is unaffected and still finds its match.
-        assert!(finder.insert_and_find(4, data.len()).is_some());
+        assert!(
+            finder
+                .insert_and_find(4, data.len(), MAX_MATCH_LEN)
+                .is_some()
+        );
     }
 
     #[test]
@@ -1606,11 +1641,51 @@ mod tests {
         let mut data = vec![b'x'; MAX_MATCH_LEN + 50];
         data.push(b'y');
         let mut finder = BinaryTreeMatchFinder::new(&data);
-        let _ = finder.insert_and_find(0, 8);
+        let _ = finder.insert_and_find(0, 8, MAX_MATCH_LEN);
         let (len, _distance) = finder
-            .insert_and_find(1, 8)
+            .insert_and_find(1, 8, MAX_MATCH_LEN)
             .expect("position 1 repeats position 0's run of 'x'");
         assert!(len <= MAX_MATCH_LEN);
+    }
+
+    #[test]
+    fn binary_tree_nice_len_bounds_candidates_on_deep_correct_chains() {
+        // The 300 near-duplicate 200-byte blocks from
+        // `binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse`:
+        // unlike a single repeated byte (where BST pruning already visits
+        // only one candidate per insert, `research/JOURNAL.md` S2-A44), a
+        // per-block varying byte gives every insert a genuinely deep,
+        // correctly-pruned chain of ever-closer candidates to walk past --
+        // each one an ~100-byte match, cheap enough per comparison that
+        // candidate *count*, not per-candidate cost, dominates here. `nice_len`
+        // 50 (below every block's true match length) stops each walk after
+        // its first candidate instead of the up to `data.len()` candidates
+        // `max_depth` alone would allow. Measured by hand: ~69ms with
+        // `nice_len` 50 at this same (unbounded) `max_depth`, vs. ~228ms
+        // with `nice_len` set to `MAX_MATCH_LEN` (i.e. no early exit) — a
+        // real, if modest, ~3.3x on data shaped like this. The bound below
+        // leaves generous headroom for slower CI hardware.
+        let template: Vec<u8> = (0..200u32)
+            .map(|i| u8::try_from(i % 251).expect("i % 251 fits u8"))
+            .collect();
+        let mut data = Vec::new();
+        for copy in 0..300u16 {
+            let mut block = template.clone();
+            block[100] = u8::try_from(copy % 256).expect("copy % 256 fits u8");
+            data.extend_from_slice(&block);
+        }
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let start = std::time::Instant::now();
+        for i in 0..data.len() {
+            let _ = finder.insert_and_find(i, data.len(), 50);
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "300 near-duplicate 200-byte blocks with nice_len 50 and unbounded max_depth took \
+             {elapsed:?}, expected well under 3s; likely a regression to nice_len no longer \
+             bounding candidates visited"
+        );
     }
 
     #[test]
@@ -1642,7 +1717,7 @@ mod tests {
         let mut finder = BinaryTreeMatchFinder::new(&data);
         let start = std::time::Instant::now();
         for i in 0..data.len() {
-            let _ = finder.insert_and_find(i, MAX_CHAIN_TRIES_OPTIMAL);
+            let _ = finder.insert_and_find(i, MAX_CHAIN_TRIES_OPTIMAL, MAX_MATCH_LEN);
         }
         let elapsed = start.elapsed();
         assert!(
