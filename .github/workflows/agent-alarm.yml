@@ -31,6 +31,10 @@ on:
       # deploy means the next cadence change silently never arrives,
       # the exact failure class the clock migration exists to end.
       - deploy-telegram-worker
+      # Not an agent seat either: its red means a merge conflict or a
+      # dead push left open PRs unreviewable (issue #132), and the
+      # conflict is judgment only a woken fixer can apply.
+      - propagate-review
     types: [completed]
 
 permissions:

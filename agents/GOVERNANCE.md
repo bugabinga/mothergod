@@ -217,6 +217,15 @@ SHA older than a few minutes — that is the tell. Rescue is the same
 mechanical merge as the `dirty` case above, just reached by a
 different detection path.
 
+A fourth signature is machine-owned and needs no sweep: an
+`agent-review.yml` change landing on main leaves every open PR with a
+stale copy that claude-code-action refuses to run (issue #132).
+`propagate-review.yml` merges the change into each stale branch the
+moment it lands; only its conflicts reach an agent, as a red
+propagate-review run that agent-alarm dispatches on, and the rescue
+for those is the same mechanical merge as the `dirty` case, resolved
+by hand.
+
 ## Push identity
 
 Three credentials can push, and the pusher decides whether the pipeline
