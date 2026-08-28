@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run untrusted PR code with the session's credentials scrubbed from
+# its environment (issue #106, direction 2).
+#
+#   .github/scripts/probe cargo test --workspace
+#
+# The reviewer verifies claims by executing them, and what it executes
+# came from a PR branch: build scripts, proc macros, and test code all
+# run arbitrary code, and a child process inherits the session
+# environment, which carries live credentials (GH_TOKEN, the Claude
+# OAuth token, whatever a later workflow adds). Allowlist, not
+# denylist, because the two fail differently: a denylist misses every
+# secret added after it was written, silently; an allowlist breaks a
+# probe that needed a var, loudly, and the fix is one line here.
+#
+# What this is not: a boundary. Probed code still runs as this user
+# and can in principle read /proc/<session-pid>/environ. The scrub
+# closes environment inheritance, the path an injected build script
+# actually reaches for. Process isolation is issue #106's remaining
+# scope, gated on accepting outside contributions.
+#
+# gh never goes through probe: gh is our own tool and needs the token.
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+  echo "usage: probe <command> [args...]" >&2
+  exit 2
+fi
+
+# Enough for cargo, rustup proxies, and test binaries; nothing that
+# authenticates. HOME stays because rustup and cargo resolve their
+# default dirs through it.
+keep=(
+  PATH HOME USER SHELL TERM TMPDIR LANG LC_ALL CI
+  CARGO_HOME RUSTUP_HOME CARGO_TERM_COLOR RUST_BACKTRACE
+)
+
+kept=()
+for var in "${keep[@]}"; do
+  if [[ -v $var ]]; then
+    kept+=("$var=${!var}")
+  fi
+done
+
+exec env -i "${kept[@]}" "$@"
