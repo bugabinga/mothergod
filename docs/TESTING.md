@@ -16,6 +16,11 @@ stage of x's quality gate. PRs touching no gate input receive successful
 skips through the path filter. Those five names are the repository ruleset
 contract.
 
+The advisory `fuzz-check` workflow runs Sundays at 06:13 UTC and on
+manual dispatch: both `fuzz/` targets, 30 seconds each, Linux x64 only
+(layer 3). A found crasher fails the job, uploads `fuzz/artifacts/`,
+and wakes the fixer through the alarm (ADR-0036).
+
 The advisory `monster` workflow runs Saturdays at 03:17 UTC and on manual
 dispatch, never on pull requests. Every runtime lane runs
 `cargo test --all-targets` and `cargo test --doc` on stable and the root
@@ -44,7 +49,7 @@ for each host architecture. Failed monster lanes update and reopen one
 `bug`/`agent-system` issue with the run, job, lane identity, and first useful
 failure.
 
-Fuzzing, mutation, C ABI, and external E2E surfaces
+Mutation, C ABI, and external E2E surfaces
 are not part of current automation; their layers below remain plans owned
 by their respective issues, and the monster workflow does not invent empty
 targets for them. Golden determinism is a partial exception: single-platform
@@ -74,13 +79,16 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - Tests assert graceful `Err`, never a panic; allocation stays bounded by a
   stated multiple of the declared output size.
 
-## 3. Fuzzing (planned, not implemented)
+## 3. Fuzzing (scheduled: `fuzz-check`, weekly)
 
-- `cargo-fuzz` targets: `decode(arbitrary bytes)` must not panic;
-  `roundtrip(arbitrary bytes)` must be identity; `decode` under an
-  allocation limiter must respect bounds.
-- When implemented, it runs on a schedule (nightly toolchain, time-boxed),
-  not per-PR. New crashers land in `tests/adversarial/` as regression seeds.
+- `cargo-fuzz` targets in `fuzz/` (`JOURNAL` S2-A25): `decode_arbitrary`
+  (decode of arbitrary bytes must not panic) and `roundtrip`
+  (`decompress(compress(x)) == x` for arbitrary `x`).
+- `fuzz-check` runs both on a schedule (nightly toolchain, 30 seconds per
+  target, Linux x64), not per-PR (`JOURNAL` S2-A53). New crashers land in
+  `tests/adversarial/` as regression seeds.
+- Still planned: an explicit allocation-limiter target beyond
+  `MAX_DECODED_LEN`'s bound, and cross-OS fuzz coverage in `monster`.
 
 ## 4. Mutation testing (planned, not implemented)
 

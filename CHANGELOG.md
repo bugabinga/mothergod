@@ -360,7 +360,8 @@ All notable changes to this project are documented here. Format follows
   2 as an executable — `decompress` must not panic or overallocate on
   arbitrary bytes) and `roundtrip` (hard rule 1 as an executable —
   `decompress(compress(x)) == x`). Not wired into any required check;
-  a scheduled smoke run belongs in `monster.yml` (#42) as a follow-up.
+  the scheduled smoke run landed later as `fuzz-check.yml` (S2-A53,
+  below), a dedicated workflow rather than a `monster.yml` lane.
 - Silesia/Canterbury fetch-and-cache (`research/JOURNAL.md` S2-A26,
   `research/corpus/POLICY.md`): `bench/corpus.toml` pins all 12 Silesia
   files and the Canterbury tarball by URL + SHA-256, and a new
@@ -433,6 +434,12 @@ All notable changes to this project are documented here. Format follows
   identity"), not available to the agent that measured this. Progress-graph
   rendering, the CI wiring, and the scheduled `corpus-fetch` workflow
   (issue #231) remain.
+- Scheduled fuzz smoke run (`research/JOURNAL.md` S2-A53, issues
+  #53/#295): `fuzz-check.yml` runs both `fuzz/` targets
+  (`decode_arbitrary`, `roundtrip`) weekly, Sunday 06:13 UTC, 30 seconds
+  each on Linux x64, failing the job and uploading crashers on a find.
+  Completes the scheduled-run scope S2-A25 left open; cross-OS fuzzing,
+  OSS-Fuzz, and an allocation-limiter target remain M4 scope.
 
 ### Removed
 
