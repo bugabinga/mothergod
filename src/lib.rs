@@ -165,13 +165,16 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     }
 }
 
-/// Shared deterministic pseudo-random fixture generator for round-trip
-/// tests in `coder`, `model`, and `literal`: those three modules' test
-/// suites each need a long, deterministic-but-unstructured symbol stream
-/// with no external RNG dependency, and had each hand-rolled the same
-/// xorshift32 step to get one.
+/// Shared test-only fixtures multiple modules' test suites had each
+/// hand-rolled a copy of.
 #[cfg(test)]
 pub(crate) mod test_support {
+    /// Deterministic pseudo-random symbol stream for round-trip tests in
+    /// `coder`, `model`, and `literal`: those three modules' test suites
+    /// each need a long, deterministic-but-unstructured stream with no
+    /// external RNG dependency, and had each hand-rolled the same
+    /// xorshift32 step to get one.
+    ///
     /// xorshift32 generator: `next()` advances the state and returns it,
     /// so the seed itself is never yielded, only states derived from it.
     pub(crate) struct Xorshift32(u32);
@@ -191,6 +194,22 @@ pub(crate) mod test_support {
             self.0 ^= self.0 << 5;
             Some(self.0)
         }
+    }
+
+    /// `v` as a [`std::num::NonZeroUsize`], for tests that need one as a
+    /// filter parameter (a delta stride, a transpose column count) and
+    /// know `v` is nonzero by construction: `filters::delta` and
+    /// `filters::transpose`'s test suites each need this same conversion
+    /// and had each hand-rolled the identical helper to get it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` is zero: every call site passes a literal already
+    /// known to be nonzero, so this is a test-fixture bug, never
+    /// something a non-test caller could trigger (this function only
+    /// exists under `#[cfg(test)]`).
+    pub(crate) fn nz(v: usize) -> std::num::NonZeroUsize {
+        std::num::NonZeroUsize::new(v).unwrap()
     }
 }
 

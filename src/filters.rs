@@ -50,10 +50,7 @@ pub mod delta {
     #[cfg(test)]
     mod tests {
         use super::*;
-
-        fn nz(v: usize) -> NonZeroUsize {
-            NonZeroUsize::new(v).unwrap()
-        }
+        use crate::test_support::nz;
 
         #[test]
         fn roundtrip_empty() {
@@ -162,10 +159,7 @@ pub mod transpose {
     #[cfg(test)]
     mod tests {
         use super::*;
-
-        fn nz(v: usize) -> NonZeroUsize {
-            NonZeroUsize::new(v).unwrap()
-        }
+        use crate::test_support::nz;
 
         #[test]
         fn roundtrip_empty() {
