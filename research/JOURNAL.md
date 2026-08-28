@@ -1975,6 +1975,50 @@ record.
   (with or without the format ceremony, per the ruling), then window
   eviction and per-position adaptive prices, still untouched from
   S2-A42.
+- S2-A48 | ACCEPTED | Landed S2-A47's identical `dp_round` wiring: issue
+  #290's ruling resolved between S2-A47 and this slice (`tests/golden.rs`,
+  #292/#293) — an encoder-only change (`decode` byte-for-byte unchanged)
+  regenerates the current-version golden fixture instead of needing a
+  `FORMAT_VERSION` bump, so the sole blocker is gone. `dp_round` now
+  builds a `BinaryTreeMatchFinder` and calls `insert_and_find(i,
+  MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL)` every position in place of
+  `MatchFinder::insert` + the `carry`-skipped `find_best` the deleted
+  `next_match_candidate` wrapped; that wrapper and the normal-match
+  `carry` variable are deleted outright rather than kept dead, since
+  `insert_and_find`'s fused insert+search leaves nothing for a
+  skip-the-search cache to skip (`rep_carry`, the separate rep-candidate
+  cache, is unaffected and still runs every position). Measured fresh
+  rather than trusted from S2-A47's record (`compression-experiment`
+  skill, sealed-set discipline): `cargo run -p mothergod-bench --release
+  --bin baseline_gate -- check` against a `git stash`-restored pre-change
+  build reproduced S2-A47's train numbers bit-for-bit (net **-0.05376
+  b/B** across `bench::baseline`'s 11 cases: `entropy_ladder_h1` -0.02912,
+  `h2` -0.01200, `json_records` -0.00064, `markov_h8_2_trap` -0.01216,
+  `x86_dense_code` +0.00016 worse — inside `TOLERANCE_BITS` 0.02 — every
+  other case flat); a standalone throwaway binary (`bench/src/bin/
+  measure_sealed_tmp.rs`, deleted before landing) measured the two
+  sealed-only kinds the same way, before/after the same stash: `access_log`
+  **-0.00016**, `gradient_image` unchanged, also bit-for-bit against
+  S2-A47. `bench/baseline.json` updated to the new numbers (`baseline_gate
+  -- write` then `cargo x fmt`) so this improvement is the regression
+  floor going forward, not just a one-time measurement. `cargo test
+  --all-targets`: 158 lib tests green including the issue #179 guard
+  (unmeasured this slice; S2-A47 measured 1.06s debug/0.10s release
+  against the same 15s budget, and nothing touching the bounded cost
+  changed). `tests/golden.rs`'s re-encode pin failed as expected
+  (`compress`'s token choices changed, 63 bytes vs the prior 62); the
+  pre-change `v2-lz-repeated-text` pair moved to `tests/golden/superseded/`
+  unchanged (still decode-checked, forever) and the pair in `tests/golden/`
+  regenerated from the new `compress()` output via a second throwaway
+  binary (`bench/src/bin/regen_golden_tmp.rs`, also deleted before
+  landing) — `codec::decode` itself untouched, so `superseded_fixtures_still_decode`
+  and the main fixture's own decode assertion both stay green. Not
+  S1-P2's own named target even now: the win is still almost entirely
+  `entropy_ladder`/`markov_h8_2_trap`, `json_records` moved a fraction of
+  its own deficit and `sqlite_like_records` didn't move at all — real
+  progress on that target needs the window eviction and per-position
+  adaptive prices S2-A42 deferred, unchanged by this slice. Remaining
+  S1-P2 scope: those two, still.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -2015,14 +2059,19 @@ record.
   0.10s release) and the ratio win reproduces S2-R2's exactly (train
   -0.05376 b/B, sealed access_log -0.00016/gradient_image unchanged; not
   actually on the named sqlite/json/jsonl target — the win is almost
-  entirely `entropy_ladder`/`markov_h8_2_trap`). **Blocked on process, not
-  ratio or speed**: fails `tests/golden.rs`'s re-encode pin, which wants a
-  `FORMAT_VERSION` bump + ADR for any `compress()` output change at the
-  current version, even though this one touches no frame layout, method
-  byte, or model semantic CLAUDE.md hard rule 5 actually names. Ruling
-  requested rather than decided unilaterally: issue #290. Remaining, once
-  that resolves: land the wiring (per whichever ruling), then window
-  eviction and per-position adaptive prices, still untouched from S2-A42.
+  entirely `entropy_ladder`/`markov_h8_2_trap`). Blocked on process, not
+  ratio or speed: failed `tests/golden.rs`'s re-encode pin, which at the
+  time wanted a `FORMAT_VERSION` bump + ADR for any `compress()` output
+  change at the current version, even though this one touched no frame
+  layout, method byte, or model semantic CLAUDE.md hard rule 5 actually
+  names. Ruling requested rather than decided unilaterally: issue #290,
+  resolved (`tests/golden.rs` now regenerates the current-version fixture
+  for an encoder-only change instead). Seventh slice, S2-A48: landed the
+  identical wiring under that ruling — pre-change `v2-lz-repeated-text`
+  moved to `tests/golden/superseded/`, current pair regenerated, numbers
+  reproduce S2-A47 bit-for-bit. Remaining S1-P2 scope: window eviction and
+  per-position adaptive prices, still untouched from S2-A42 — the actual
+  named sqlite/json/jsonl target remains unmoved by every slice so far.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,

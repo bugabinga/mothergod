@@ -61,11 +61,20 @@ const LAZY_MAX_LEN: usize = 256;
 /// time on pathological (highly repetitive) input.
 const MAX_CHAIN_TRIES: usize = 128;
 
-/// Hash-chain positions [`MatchFinder::find_best`] walks for
-/// [`parse_optimal`]'s once-per-position search: deeper than
-/// [`MAX_CHAIN_TRIES`] because the DP amortizes the cost via the `carry`
-/// reuse in [`dp_round`] rather than searching once per emitted token.
-const MAX_CHAIN_TRIES_OPTIMAL: usize = 640;
+/// Tree-depth bound [`dp_round`] passes to
+/// [`BinaryTreeMatchFinder::insert_and_find`] (JOURNAL S1-P2/S2-A48):
+/// [`dp_round`] used a hash-chain `MatchFinder` at this same depth before
+/// the S2-A48 finder swap (as `MAX_CHAIN_TRIES_OPTIMAL`, since retired —
+/// [`parse_greedy`]'s hash-chain search uses [`MAX_CHAIN_TRIES`] instead,
+/// unrelated), held equal on purpose so ratio measurements isolated the
+/// finder algorithm change from the depth budget.
+const MAX_TREE_DEPTH_OPTIMAL: usize = 640;
+
+/// `nice_len` bound [`dp_round`] passes to the same call (JOURNAL S2-A46):
+/// caps both candidates visited and each candidate's own
+/// `suffix_common_len` scan, keeping the once-per-position search inside
+/// the issue #179 speed guard.
+const NICE_LEN_OPTIMAL: usize = 128;
 
 /// `log2` of the match-finder hash table's bucket count (a 3-byte prefix
 /// hash).
@@ -293,7 +302,8 @@ impl<'d> MatchFinder<'d> {
 
     /// Best match ending at `i`, found by walking the hash chain for `i`'s
     /// 3-byte prefix, bounded by [`WINDOW`] and `max_tries` (callers pass
-    /// [`MAX_CHAIN_TRIES`] or [`MAX_CHAIN_TRIES_OPTIMAL`]). Does not
+    /// [`MAX_CHAIN_TRIES`], its sole remaining caller since
+    /// [`dp_round`] moved to [`BinaryTreeMatchFinder`]). Does not
     /// require `i` itself to have been [`insert`](Self::insert)ed;
     /// [`parse_greedy`]'s one-step lazy-matching probe relies on that to
     /// look ahead without mutating the chain.
@@ -388,21 +398,27 @@ fn to_u32(i: usize) -> u32 {
 /// constant per-pass setting (LZMA/zstd's `cutValue` shape), never a
 /// value varied call-to-call for speed.
 ///
-/// Standalone primitive, not yet wired into [`parse_greedy`] or
-/// [`parse_optimal`] — the same standalone-primitive-first shape
-/// [`crate::sse::Sse`] shipped in S2-A40. One thing a wired-in successor
-/// still needs that this slice does not implement: eviction of positions
-/// older than [`WINDOW`] (the tree only grows, so nothing yet bounds it to
-/// a 1 MiB working set the way `MatchFinder`'s recency-ordered chain does
-/// by construction).
+/// Wired into `dp_round`'s once-per-position normal-match search
+/// (`research/JOURNAL.md` S1-P2/S2-A48), not [`parse_greedy`]'s
+/// once-per-token search, which still uses the hash-chain `MatchFinder`
+/// unchanged. One thing this finder still does not implement, open S1-P2
+/// scope: eviction of positions older than [`WINDOW`] (the tree only
+/// grows, so nothing yet bounds it to a 1 MiB working set the way
+/// `MatchFinder`'s recency-ordered chain does by construction) — every
+/// position inserted this crate ever encodes stays reachable, and a match
+/// past [`WINDOW`] is filtered at report time (below), not pruned from the
+/// tree, so long inputs pay unbounded tree-walk cost for buckets `WINDOW`
+/// cannot use.
 ///
 /// A straight swap into `dp_round` in [`Self::insert_and_find`]'s place of
-/// `MatchFinder::insert` + `find_best` was tried and rejected
-/// (`research/JOURNAL.md` S2-R2) before this slice existed. It won on
-/// ratio but broke the issue #179 speed guard, whose fixture is 200,000
-/// bytes of one repeated value: `insert_and_find` fuses insertion with
-/// search, so `dp_round`'s `carry` reuse can no longer skip the walk on a
-/// long run — only skip *using* a fresher result — and without
+/// `MatchFinder::insert` + `find_best` was tried and rejected twice before
+/// landing on the third attempt (`research/JOURNAL.md` S2-R2, then S2-A47
+/// blocked on process, not ratio; S2-A48 lands the identical wiring once
+/// issue #290's ruling unblocked it). All three attempts won on ratio
+/// outright; S2-R2 broke the issue #179 speed guard, whose fixture is
+/// 200,000 bytes of one repeated value: `insert_and_find` fuses insertion
+/// with search, so `dp_round`'s `carry` reuse can no longer skip the walk
+/// on a long run — only skip *using* a fresher result — and without
 /// length-prefix reuse, every visited candidate cost close to
 /// `MAX_MATCH_LEN` instead of the tree height.
 ///
@@ -451,7 +467,11 @@ fn to_u32(i: usize) -> u32 {
 /// already makes over candidate *count* — `nice_len` at or above
 /// `MAX_MATCH_LEN` still disables both the count bound and the scan cap
 /// and searches exactly as before (`suffix_common_len` never reports a
-/// longer match than `MAX_MATCH_LEN` regardless).
+/// longer match than `MAX_MATCH_LEN` regardless). `dp_round` calls
+/// [`Self::insert_and_find`] with `MAX_TREE_DEPTH_OPTIMAL` (640) and
+/// `NICE_LEN_OPTIMAL` (128): the same combination S2-A47 measured, which
+/// passes the issue #179 guard at ~0.1s release / ~1s debug, well inside
+/// its 15s budget.
 pub struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// `head[hash]` is the current tree root for that hash bucket, or
@@ -736,11 +756,19 @@ pub fn replay(tokens: &[Token]) -> Vec<u8> {
 /// an input this small.
 const OPTIMAL_MIN_LEN: usize = 64;
 
-/// Match length at and above which [`dp_round`]'s normal-match search
-/// reuses the previous position's result instead of re-walking the hash
-/// chain (the archive's `carry`): a run this long at position `i` is
-/// `len - 1` bytes long at `i + 1` too, at the same distance, since it is
-/// the same underlying repeat.
+/// Match length at and above which [`rep_match_len`]'s rep-cache scan
+/// reuses the previous position's result instead of re-walking
+/// [`match_len`] from scratch: a run this long at position `i` is `len -
+/// 1` bytes long at `i + 1` too, at the same distance, since it is the
+/// same underlying repeat. Also the breakpoint below which
+/// [`DpState::relax_match_candidate`] prices every [`LENGTH_STEPS`] entry
+/// for a fresh match instead of only the full length (the archive's
+/// `l1>=4` branch); unrelated to the reuse this doc names, but the
+/// archive uses the same threshold for both. `dp_round`'s normal-match
+/// search itself no longer has a carry-reuse counterpart: `research/
+/// JOURNAL.md` S2-R2/S2-A47 replaced its hash-chain [`MatchFinder`] with
+/// [`BinaryTreeMatchFinder`], whose `insert_and_find` fuses insertion with
+/// search, so nothing is left to skip.
 const CARRY_MIN_LEN: usize = 64;
 
 /// Match length [`dp_round`] additionally prices as a candidate when the
@@ -1027,9 +1055,10 @@ impl DpState {
         }
     }
 
-    /// Prices the normal-match candidate found at position `i`
-    /// ([`next_match_candidate`]): a length-[`SHORT_MATCH_LEN`] candidate
-    /// when the distance is close enough, and — for a real
+    /// Prices the normal-match candidate found at position `i` (
+    /// [`BinaryTreeMatchFinder::insert_and_find`]'s result in [`dp_round`]):
+    /// a length-[`SHORT_MATCH_LEN`] candidate when the distance is close
+    /// enough, and — for a real
     /// [`MIN_MATCH_LEN`]-or-longer match — each [`LENGTH_STEPS`]
     /// breakpoint under [`CARRY_MIN_LEN`] plus the real match length
     /// itself, matching the archive's `l1>=4` branch.
@@ -1103,8 +1132,10 @@ impl DpState {
 }
 
 /// One DP pass: the cheapest token sequence for `data` under `prices`,
-/// using [`parse_greedy`]'s hash-chain match finder and the same
-/// rep-cache transition rules [`replay`] uses ([`RepCache::push_front`]
+/// using [`BinaryTreeMatchFinder`] for its once-per-position normal-match
+/// search (`research/JOURNAL.md` S1-P2/S2-A48; [`parse_greedy`]'s
+/// once-per-token search still uses the hash-chain [`MatchFinder`]) and
+/// the same rep-cache transition rules [`replay`] uses ([`RepCache::push_front`]
 /// on a fresh [`Token::Match`], [`RepCache::promote`] on a
 /// [`Token::Rep`]) so the chosen tokens replay exactly as this DP
 /// costed them.
@@ -1124,24 +1155,27 @@ impl DpState {
 fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
     let n = data.len();
     let mut state = DpState::new(n);
-    let mut finder = MatchFinder::new(data);
-    // (len, distance) of a long match found at the previous position,
-    // still long enough at this position to skip a fresh hash-chain walk.
-    let mut carry: Option<(usize, Distance)> = None;
-    // Per-slot echo of `carry`, for `relax_rep_candidates`' match_len scan
-    // (issue #179): unlike parse_greedy, which jumps ahead by a chosen
-    // token's length, this loop visits every position, so a long run's
-    // rep-length scan needs the same reuse the hash-chain search already
-    // gets or it costs O(MAX_MATCH_LEN) per position.
+    let mut finder = BinaryTreeMatchFinder::new(data);
+    // Per-slot carry for `relax_rep_candidates`' match_len scan (issue
+    // #179): unlike parse_greedy, which jumps ahead by a chosen token's
+    // length, this loop visits every position, so a long run's rep-length
+    // scan needs its own reuse or it costs O(MAX_MATCH_LEN) per position.
+    // The normal-match search below has no equivalent cache: `insert_and_find`
+    // fuses insertion with search, so every position pays for a fresh walk
+    // regardless (`research/JOURNAL.md` S2-R2), bounded instead by
+    // `NICE_LEN_OPTIMAL` (S2-A46).
     let mut rep_carry: [Option<(Distance, usize, usize)>; REP_SLOTS] = [None; REP_SLOTS];
 
     for i in 0..n {
-        finder.insert(i);
+        let match_candidate = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL);
         if !state.dp[i].is_finite() {
             // Never actually reached: dp[0] = 0 and the literal transition
             // below always advances dp[i] -> dp[i+1] when dp[i] is finite,
             // so every position is reachable by induction. Kept as a
             // defensive guard matching the archive's identical check.
+            // `insert_and_find` still runs unconditionally above, matching
+            // the unconditional `finder.insert(i)` this replaced: every
+            // position must enter the tree regardless of dp[i]'s state.
             continue;
         }
         let base = state.dp[i];
@@ -1158,7 +1192,6 @@ fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
 
         state.relax_rep_candidates(prices, data, i, base, reps, &mut rep_carry);
 
-        let match_candidate = next_match_candidate(&mut finder, &mut carry, i);
         if let Some((match_len_here, distance_here)) = match_candidate {
             state.relax_match_candidate(prices, i, base, reps, match_len_here, distance_here);
         }
@@ -1167,32 +1200,9 @@ fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
     reconstruct(data, &state.parent)
 }
 
-/// The normal-match candidate at position `i`: either the archive's
-/// `carry` reuse (a long match found at `i - 1`, one byte shorter here,
-/// same distance) or a fresh hash-chain search, which refreshes `carry`
-/// for the next position when it finds another long match.
-fn next_match_candidate(
-    finder: &mut MatchFinder<'_>,
-    carry: &mut Option<(usize, Distance)>,
-    i: usize,
-) -> Option<(usize, Distance)> {
-    match *carry {
-        Some((len, distance)) if len >= CARRY_MIN_LEN => {
-            *carry = (len > CARRY_MIN_LEN).then_some((len - 1, distance));
-            Some((len, distance))
-        }
-        _ => {
-            let found = finder.find_best(i, MAX_CHAIN_TRIES_OPTIMAL);
-            *carry = found
-                .and_then(|(len, distance)| (len >= CARRY_MIN_LEN).then_some((len - 1, distance)));
-            found
-        }
-    }
-}
-
 /// [`match_len`] against `distance` at `i`, reusing a previous position's
-/// scan on the same distance the way [`next_match_candidate`]'s `carry`
-/// reuses the hash-chain search: `match_len(data, i, d)` of `len` implies
+/// scan on the same distance via a `carry` cache, one per [`REP_SLOTS`]
+/// entry: `match_len(data, i, d)` of `len` implies
 /// `match_len(data, i + 1, d)` is at least `len - 1` (the same run of
 /// equalities, shifted by one index), so once a scan finds a run at or past
 /// [`CARRY_MIN_LEN`], later positions on the same distance decrement
@@ -1736,7 +1746,7 @@ mod tests {
         let mut finder = BinaryTreeMatchFinder::new(&data);
         let start = std::time::Instant::now();
         for i in 0..data.len() {
-            let _ = finder.insert_and_find(i, MAX_CHAIN_TRIES_OPTIMAL, 128);
+            let _ = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL);
         }
         let elapsed = start.elapsed();
         assert!(
@@ -1776,7 +1786,7 @@ mod tests {
         let mut finder = BinaryTreeMatchFinder::new(&data);
         let start = std::time::Instant::now();
         for i in 0..data.len() {
-            let _ = finder.insert_and_find(i, MAX_CHAIN_TRIES_OPTIMAL, MAX_MATCH_LEN);
+            let _ = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
         }
         let elapsed = start.elapsed();
         assert!(
