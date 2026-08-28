@@ -47,10 +47,12 @@ A number is read as a PR and resolved to its head ref, so a session pushing to
 a PR it did not open never has to name that branch and get it wrong (#133).
 
 Deletion is explicit, never inferred: a path after `--delete` is removed from
-the branch's tree, and it must already be gone from this checkout, the mirror
-of the exists check on pushed paths, so a typo cannot silently delete and a
-forgotten `git rm` cannot silently keep. Renames are a push plus a delete of
-the old path, one commit.
+the branch's tree, and it must already be untracked here (`git rm`ed), the
+mirror of the exists check on pushed paths, so a typo cannot silently delete
+and a forgotten `git rm` cannot silently keep. Untracked is the test, not
+absent from disk: a gitignored file regenerated in place (site/status-data.json
+is deleted from the tree while its generated successor sits in the checkout)
+is legitimate. Renames are a push plus a delete of the old path, one commit.
 
 """
 
@@ -187,10 +189,10 @@ def main() -> int:
                 "the branch, name it after --delete.",
             )
     for p in deletions:
-        if os.path.exists(p):
+        if git("ls-files", "--error-unmatch", p).returncode == 0:
             die(
-                f"{p} still exists in this checkout but is listed after --delete.",
-                "remove it locally first; the checkout is the source of truth "
+                f"{p} is still tracked in this checkout but is listed after --delete.",
+                "git rm it first; the checkout is the source of truth "
                 "this push mirrors.",
             )
 
