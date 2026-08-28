@@ -510,9 +510,9 @@ jobs:
                  agents/GOVERNANCE.md "Stalled auto-merge": dirty
                  needs the mechanical merge of main, a deliberate push
                  identity, then `.github/scripts/settle-push <pr>`;
-                 clean needs only the REST squash merge. Either way
-                 land by REST once the required gates are green,
-                 blocked-on-human if still stuck.
+                 clean needs only the merge. Either way land it with
+                 `.github/scripts/merge-pr <pr>` once the required
+                 gates are green, blocked-on-human if still stuck.
                - An open PR, ANY label, with zero check runs on its
                  head SHA and older than a few minutes: conflicted at
                  birth, so no merge ref ever formed and `ci`/
@@ -621,8 +621,8 @@ jobs:
             workflow; it also carried a second workflow, an ADR and
             their doc entries onto main unreviewed, and #115 spent a
             cycle taking them back off.
-            Then merge it yourself (gh pr merge --squash). Push
-            directly to main only
+            Then merge it yourself (`.github/scripts/merge-pr <pr>`).
+            Push directly to main only
             if branch protection permits and the change is trivial
             (typos, label text). CODE decisions (src/, tests, bench
             logic) are also yours (ADR-0011), but their default SHIPPING

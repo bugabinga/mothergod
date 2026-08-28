@@ -97,28 +97,29 @@ required checks never see, and a request-changes there blocks the
 merge until addressed on the record (PR #99 landed 44 seconds after
 an unread one). The squash commit's subject is the PR title and its
 message is the PR body, so write every PR body as the commit message
-the change deserves. Land with the REST call, not the porcelain:
-`gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
-merge_method=squash`. The porcelain's client-side mergeable-state
-check refuses squashes the API accepts (PR #25), and `--auto` armed
-on a branch whose tip commit is unsigned reports `blocked` and never
-fires, even with every gate green (PR #84). Arm
-`gh pr merge <n> --squash --auto` only when the REST call reports
-required gates still pending, and expect the BDFL sweep to rescue it
-if the tip is unsigned. GitHub creates the squash commit server-side
-and signs it (committer `GitHub <noreply@github.com>`); the
-`required_signatures` rule on `main` is satisfied by that signature
-regardless of whether the source branch's own commits are signed. An
-unsigned branch commit is never, by itself, a reason to stop or to
-label `blocked-on-human` — attempt the REST merge before predicting
-it will fail (issue #24, PR #22 postmortem).
+the change deserves. Executing the merge is
+`.github/scripts/merge-pr <pr>`, with `--sha` pinning the head your
+verdict actually covered. The script carries the recipe this section
+used to hand out: REST instead of the porcelain (PRs #25, #84), the
+403 escalation to the admin PAT, taken only for a PR that actually
+touches workflow files and only with the required gates proven green
+first, and a distinct exit (2) for gates-unmet, the one outcome where
+arming `gh pr merge <n> --squash --auto` and stopping is right (the
+BDFL sweep rescues an armed merge that never fires). It decides
+nothing: verdicts, carve-outs, and discretion stay with the caller.
+An unsigned branch commit is never, by itself, a reason to stop or to
+label `blocked-on-human`: GitHub creates and signs the squash commit
+server-side (committer `GitHub <noreply@github.com>`), satisfying
+`required_signatures` on `main` regardless of the branch's own
+commits (issue #24, PR #22 postmortem).
 
 **A PR touching `.github/workflows/**` is the BDFL's to merge, nobody
 else's** (operator ruling, issue #136, 2026-08-23). Review still
 happens and still matters: the reviewer reads the diff, posts its
 verdict, adds `agent-approved`, says the merge is the BDFL's, and
-stops. The BDFL lands it with `GH_TOKEN="$GH_ADMIN_TOKEN"` on its next
-sweep, at most one cadence away. The admin token is the BDFL's alone
+stops. The BDFL lands it on its next sweep, at most one cadence away;
+`merge-pr` performs the PAT escalation itself. The admin token is the
+BDFL's alone
 (`OPERATIONS.md`, "Admin token & signing"), so no other seat can do
 this even by mistake.
 
@@ -186,14 +187,14 @@ both swept by the BDFL every run on open `agent-approved` PRs:
   `main` into the branch, resolve without judgment calls (append
   conflicts keep both sides), push with a deliberate identity (see
   Push identity below), settle it with
-  `.github/scripts/settle-push <pr>`, then land with the REST squash
-  merge above once the required gates are green.
-- Mergeable state clean, required gates green, auto-merge armed, PR still
-  open: the branch tip is unsigned, so GitHub's own evaluation sits
-  at `blocked` while the REST squash merge succeeds immediately
+  `.github/scripts/settle-push <pr>`, then land it with
+  `.github/scripts/merge-pr <pr>` once the required gates are green.
+- Mergeable state clean, required gates green, auto-merge armed, PR
+  still open: the branch tip is unsigned, so GitHub's own evaluation
+  sits at `blocked` while the REST squash merge succeeds immediately
   (first hit PR #84; same porcelain/API asymmetry as PR #25). Rescue:
-  the REST squash merge, nothing else — the reviewer's verdict
-  already covers the exact head SHA.
+  `merge-pr <pr> --sha <reviewed-head>`, nothing else; the reviewer's
+  verdict already covers that exact head.
 
 If a held run still blocks after re-attribution, comment on the PR
 naming it, label `blocked-on-human`, move on.
