@@ -7,7 +7,9 @@ What "tested" means for this project, in layers. Corpus rules live in
 
 Every PR retains the required job names `fmt`, `clippy`, `test`, and `doc`.
 Rust-input PRs run them on Linux x64 stable through
-`.github/actions/rust-ci`: formatting, Clippy, all Cargo targets, doctests,
+`.github/actions/rust-ci`, each job delegating to its `cargo x` stage so CI
+and the local gate share one command list (ADR-0029): formatting, Clippy,
+all Cargo targets, doctests,
 and warning-clean rustdoc output. Non-Rust PRs receive four successful skips
 through the path filter. Those four names are the repository ruleset contract.
 
@@ -16,7 +18,7 @@ dispatch, never on pull requests. Every runtime lane runs
 `cargo test --all-targets` and `cargo test --doc` on stable and the root
 `Cargo.toml` package's `rust-version`; the workflow reads that declaration
 instead of copying the MSRV. The canonical `ubuntu-24.04` x64/glibc stable
-lane additionally runs fmt, Clippy, and rustdoc once.
+lane instead runs the whole `cargo x check` gate natively.
 
 | Runtime | Hosted runner | Rust target |
 |---|---|---|

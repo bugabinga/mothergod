@@ -107,7 +107,7 @@ runs:
         fi
 
     - name: Restore x binary
-      if: ${{ inputs.checks == 'fmt' || inputs.checks == 'clippy' || inputs.checks == 'canonical' }}
+      if: ${{ inputs.checks != 'setup' && inputs.checks != 'runtime' }}
       id: x-cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -117,7 +117,7 @@ runs:
         key: cargo-x-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'x/Cargo.lock', 'x/Cargo.toml', 'x/src/**') }}
 
     - name: Build x
-      if: ${{ (inputs.checks == 'fmt' || inputs.checks == 'clippy' || inputs.checks == 'canonical') && steps.x-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.checks != 'setup' && inputs.checks != 'runtime' && steps.x-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: cargo build --manifest-path x/Cargo.toml
 

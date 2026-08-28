@@ -98,13 +98,21 @@ jobs:
             architecture: ARM64
             abi: Darwin-libc
             target: aarch64-apple-darwin
+          # The canonical leg runs x's whole native gate, which takes no
+          # target (ADR-0029): this three-key include overrides the triple
+          # the two-key ubuntu include set above.
+          - os: ubuntu-24.04
+            surface: native
+            toolchain: stable
+            target: ""
+            checks: canonical
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-ci
         with:
           toolchain: ${{ matrix.toolchain }}
           target: ${{ matrix.target }}
-          checks: ${{ matrix.os == 'ubuntu-24.04' && matrix.surface == 'native' && matrix.toolchain == 'stable' && 'canonical' || 'runtime' }}
+          checks: ${{ matrix.checks || 'runtime' }}
 
   x-msrv:
     name: x | MSRV
