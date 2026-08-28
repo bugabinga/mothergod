@@ -462,6 +462,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- Site prose used the em dash the house voice bans (issue #298):
+  `site/index.html` and `site/status.html` rewritten with comma, colon, or
+  semicolon in place of every prose em dash. Page `<title>` separators, the
+  logo `alt` text, and the `.principles` CSS list marker are typography, not
+  prose, and keep theirs per the issue's ruling.
 - `compress()` hung on long runs of a single repeated byte (issue #179,
   found while landing `Method::Lz`, S2-A17): a 200,000-byte input took
   over 60 seconds and had to be killed. `lz::parse_optimal`'s

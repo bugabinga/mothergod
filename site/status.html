@@ -222,7 +222,7 @@
 
       const latest = document.getElementById('latest-experiment');
       if (data.experiments.latest_id) {
-        latest.innerHTML = `Latest: <span class="id">${escapeHtml(data.experiments.latest_id)}</span> — ${escapeHtml(data.experiments.latest_hypothesis)}`;
+        latest.innerHTML = `Latest: <span class="id">${escapeHtml(data.experiments.latest_id)}</span>: ${escapeHtml(data.experiments.latest_hypothesis)}`;
       }
 
       document.getElementById('asof-line').textContent =
