@@ -5,11 +5,18 @@ name: deploy-site
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/deploy-site.yml"]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy-site.yml"
+      - ".github/scripts/run-telemetry.py"
+  # Daily refresh of /agent-metrics.json (issue #64); the page warns at 48h.
+  schedule:
+    - cron: "43 5 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read # run-telemetry.py lists and downloads audit artifacts
 
 concurrency:
   group: deploy-site
@@ -21,6 +28,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # Agent telemetry for /agents.html (issue #64): a stateless 7-day
+      # window re-read from audit artifacts on every deploy, never a
+      # committed data file, because concurrent agent appends to a tracked
+      # file conflict (PR #34). The script writes a self-diagnosing JSON on
+      # its own failures; continue-on-error covers a crash before that, and
+      # the page reports the missing file rather than breaking.
+      - continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/run-telemetry.py site/agent-metrics.json 7
       - run: npx wrangler@4 pages deploy site --project-name=mothergod-site --branch=main --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

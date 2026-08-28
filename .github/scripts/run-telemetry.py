@@ -19,7 +19,15 @@ surface does not exist here (ADR-0019).
 Self-diagnosing: any failure writes a section saying what was actually seen
 and exits 0. Observability does not get to break the thing it observes.
 
-Usage: run-telemetry.py <out.md> [window_days]
+Two consumers, one walk and one whitelist. A `.md` output is the model-intel
+report (ADR-0023). A `.json` output is the site's public telemetry feed
+(issue #64, rendered by site/agents.html): the same per-role summaries plus
+per-run rows for the recent-runs table. The format follows the output file's
+extension because that is the one dispatch a call site cannot state wrongly.
+USD stays absent from both, per the honesty note in the report: under
+subscription auth the figure is notional, not a bill.
+
+Usage: run-telemetry.py <out.md|out.json> [window_days]
 """
 
 import collections
@@ -35,6 +43,7 @@ from datetime import datetime, timedelta, timezone
 out_path = sys.argv[1]
 WINDOW = int(sys.argv[2]) if len(sys.argv) > 2 else 7
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
+JSON_MODE = out_path.endswith(".json")
 
 # Cap on artifacts downloaded per run. Two windows of a busy week ran 129
 # artifacts at ~10 KB each on 2026-08-23; the cap is headroom, not a budget,
@@ -48,7 +57,16 @@ def write(text):
 
 
 def bail(reason):
-    write(f"# Run economics\n\n{reason}\n")
+    if JSON_MODE:
+        write(json.dumps({
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "window_days": WINDOW,
+            "error": reason,
+            "roles": [],
+            "runs": [],
+        }))
+    else:
+        write(f"# Run economics\n\n{reason}\n")
     sys.exit(0)
 
 
@@ -128,6 +146,11 @@ def facts(meta):
                     key=lambda kv: (kv[1] or {}).get("outputTokens", 0))[0]
     thinking = details.get("thinking_tokens")
     return {
+        # Artifact creation instant and run id: identifiers, not numbers,
+        # but API-authored like everything else here. They exist for the
+        # JSON consumer's recent-runs table and its link to the run page.
+        "at": meta["_at"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "run_id": meta.get("run_id") or "",
         "role": meta.get("role") or "?",
         # A run whose execution file carried no result entry was never
         # measured: guard-skipped, paused, or died before finishing. Zero is
@@ -172,11 +195,35 @@ def summarize(all_rows):
 
 
 recent, prior = collections.defaultdict(list), collections.defaultdict(list)
+rows = []
 for meta in runs:
     row = facts(meta)
+    rows.append(row)
     (recent if meta["_at"] >= recent_from else prior)[row["role"]].append(row)
 
 roles = sorted(set(recent) | set(prior))
+
+if JSON_MODE:
+    def portable(summary):
+        """Counter to pairs; everything else in a summary is already JSON."""
+        return {**summary, "models": summary["models"].most_common()} if summary else None
+
+    rows.sort(key=lambda r: r["at"], reverse=True)
+    write(json.dumps({
+        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "window_days": WINDOW,
+        "artifact_count": len(runs),
+        "unreadable": unreadable,
+        "truncated": truncated,
+        "roles": [{"role": role,
+                   "recent": portable(summarize(recent.get(role, []))),
+                   "prior": portable(summarize(prior.get(role, [])))}
+                  for role in roles],
+        "runs": rows[:25],
+    }, indent=1))
+    print(f"telemetry json: {len(runs)} runs, {len(roles)} roles, "
+          f"{unreadable} unreadable, {truncated} over cap")
+    sys.exit(0)
 
 
 def cell(new, old, fmt="{:.0f}"):

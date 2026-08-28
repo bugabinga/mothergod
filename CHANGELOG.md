@@ -8,6 +8,13 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Agent telemetry page at [mothergod.dev/agents.html](https://mothergod.dev/agents.html)
+  (issue #64): per-seat run economics (output tokens, turns, minutes,
+  denials, errors) for the last 7 days with prior-week trend, plus the 25
+  most recent runs, aggregated daily from the public audit artifacts.
+  Metadata only, no model-written prose; USD deliberately absent because
+  the subscription-auth figure is notional, not a bill.
+
 - `corpus-fetch-check` scheduled workflow (`research/JOURNAL.md` S2-A45,
   issue #231): weekly CI coverage for `bench`'s off-by-default
   `corpus-fetch` feature, running clippy, tests with `--include-ignored`

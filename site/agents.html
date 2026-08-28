@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent telemetry — mothergod</title>
+    <meta
+      name="description"
+      content="Run economics of the Claude agents that build mothergod: output tokens, turns, minutes, denials and errors per seat, aggregated from public audit artifacts."
+    >
+    <link rel="icon" href="/logo.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Albert+Sans:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+    >
+    <style>
+    :root {
+      --void: #0b0618;
+      --nebula: #1c1136;
+      --raised: #251646;
+      --line: #382a5e;
+      --starlight: #f2ecff;
+      --muted: #a396c9;
+      --gold: #ffd76a;
+      --gold-deep: #e0a12f;
+      --green: #8fd6a8;
+      --red: #e08b8b;
+      --dim: #6b5f8f;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      background:
+        radial-gradient(120% 90% at 50% 0%, #241548 0%, var(--void) 62%) fixed,
+        var(--void);
+      color: var(--starlight);
+      font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+      padding: 4rem 1.25rem 5rem;
+    }
+    main { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 3rem; }
+
+    header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+    h1 {
+      font-family: "Unbounded", "Albert Sans", sans-serif;
+      font-weight: 600; font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+      letter-spacing: .02em;
+    }
+    .tagline { color: var(--muted); max-width: 52ch; text-align: center; }
+    .back { font-family: "JetBrains Mono", monospace; font-size: .8rem; }
+
+    h2 {
+      font-family: "Unbounded", "Albert Sans", sans-serif;
+      font-weight: 400; font-size: .8rem; letter-spacing: .28em;
+      text-transform: uppercase; color: var(--gold);
+      display: flex; align-items: center; gap: 1rem;
+    }
+    h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    section { display: flex; flex-direction: column; gap: 1rem; }
+    p { color: var(--muted); }
+    p strong { color: var(--starlight); font-weight: 500; }
+    a { color: var(--gold); }
+    a:hover, a:focus-visible { color: var(--gold-deep); }
+    code {
+      font-family: "JetBrains Mono", monospace; font-size: .85em;
+      background: var(--raised); padding: .1em .35em; border-radius: 4px;
+    }
+
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .8rem; }
+    .stat {
+      background: var(--nebula); border: 1px solid var(--line); border-radius: 10px;
+      padding: .8rem 1rem; display: flex; flex-direction: column; gap: .2rem;
+    }
+    .stat .n { font-family: "Unbounded", monospace; font-size: 1.4rem; color: var(--gold); }
+    .stat .label { font-size: .72rem; color: var(--muted); letter-spacing: .03em; }
+
+    .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--nebula); }
+    table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+    caption {
+      caption-side: top; text-align: left; color: var(--dim);
+      font-family: "JetBrains Mono", monospace; font-size: .72rem;
+      padding: .6rem .8rem 0;
+    }
+    th, td { padding: .45rem .8rem; text-align: right; white-space: nowrap; }
+    th {
+      color: var(--muted); font-weight: 500; font-size: .72rem;
+      letter-spacing: .06em; text-transform: uppercase;
+      border-bottom: 1px solid var(--line);
+    }
+    th:first-child, td:first-child { text-align: left; }
+    td { font-family: "JetBrains Mono", monospace; color: var(--starlight); }
+    tr + tr td { border-top: 1px solid var(--raised); }
+    td.dim, tr.unmeasured td { color: var(--dim); }
+    td .err { color: var(--red); }
+    td .ok { color: var(--green); }
+    .trend { color: var(--dim); font-size: .9em; }
+
+    .note {
+      font-size: .88rem; color: var(--muted); border-left: 2px solid var(--line);
+      padding-left: .8rem;
+    }
+
+    .asof { color: var(--dim); font-size: .78rem; font-family: "JetBrains Mono", monospace; }
+    .asof .stale { color: var(--red); }
+
+    footer { text-align: center; color: var(--muted); font-size: .85rem; }
+
+    [data-loading] { color: var(--dim); font-size: .85rem; font-style: italic; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="back"><a href="/">← mothergod</a></p>
+        <h1>Agent telemetry</h1>
+        <p class="tagline">
+          mothergod is built and operated by Claude agents. Every run uploads a
+          public audit artifact: persona, prompt, response, and API-authored
+          metadata. This page aggregates the metadata's numbers; no
+          model-written prose reaches it.
+        </p>
+      </header>
+
+      <noscript>
+        <p class="note">
+          This page renders <a href="/agent-metrics.json"
+          >/agent-metrics.json</a>
+          in your browser. Without JavaScript, read the JSON directly; every
+          number below comes from it unmodified.
+        </p>
+      </noscript>
+
+      <section id="week-section">
+        <h2>Run economics</h2>
+        <p id="window-line" data-loading>Loading…</p>
+        <div class="stats" id="stats-grid" data-loading>Loading…</div>
+        <p class="note">
+          No dollars here, on purpose: the agents run on subscription auth, so
+          the API's cost figure is notional, not a bill, and a public number
+          that reads as spend but is not would be dishonest. Output tokens,
+          turns and minutes are what the subscription and the contributor's wait
+          actually pay.
+        </p>
+      </section>
+
+      <section id="seats-section">
+        <h2>By seat</h2>
+        <div class="tablewrap">
+          <p data-loading>Loading…</p>
+          <table id="seats-table"></table>
+        </div>
+        <p class="note">
+          Medians over the window, ▲▼ against the window before it when the
+          move exceeds 10%. Runs whose execution log carried no result entry
+          (paused, guard-skipped, or died early) count as unmeasured and are
+          excluded from medians rather than folded in as zeros.
+        </p>
+      </section>
+
+      <section id="runs-section">
+        <h2>Recent runs</h2>
+        <div class="tablewrap">
+          <p data-loading>Loading…</p>
+          <table id="runs-table"></table>
+        </div>
+      </section>
+
+      <p class="asof" id="asof-line"></p>
+
+      <footer>
+        <a href="/">mothergod</a> ·
+        <a href="/status.html">Project status</a> ·
+        <a href="https://github.com/bugabinga/mothergod/actions"
+        >Runs and audit artifacts</a>
+      </footer>
+    </main>
+
+    <script>
+    const REPO = 'https://github.com/bugabinga/mothergod';
+
+    async function main() {
+      let data;
+      try {
+        const res = await fetch('/agent-metrics.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`agent-metrics.json: HTTP ${res.status}`);
+        data = await res.json();
+      } catch (err) {
+        fail(`Could not load agent-metrics.json (${err.message}).`);
+        return;
+      }
+      if (data.error) {
+        fail(`The aggregator could not read the audit artifacts: ${data.error}`);
+        asof(data);
+        return;
+      }
+
+      const days = Number(data.window_days);
+      const windowLine = document.getElementById('window-line');
+      windowLine.removeAttribute('data-loading');
+      windowLine.innerHTML =
+        `The last <strong>${days} day${days === 1 ? '' : 's'}</strong> of agent runs, ` +
+        `read straight from ${Number(data.artifact_count)} audit artifacts.`;
+
+      const recents = data.roles.map((r) => r.recent).filter(Boolean);
+      const measured = recents.reduce((a, s) => a + s.n, 0);
+      const unmeasured = recents.reduce((a, s) => a + s.unmeasured, 0);
+      const outTotal = recents.reduce((a, s) => a + s.out_total, 0);
+      const errors = recents.reduce((a, s) => a + s.errors, 0);
+      const stats = document.getElementById('stats-grid');
+      stats.removeAttribute('data-loading');
+      stats.innerHTML = [
+        [measured.toLocaleString('en-US'), 'measured runs'],
+        [outTotal.toLocaleString('en-US'), 'output tokens'],
+        [errors.toLocaleString('en-US'), 'errored runs'],
+        [unmeasured.toLocaleString('en-US'), 'unmeasured runs'],
+      ].map(([n, label]) =>
+        `<div class="stat"><span class="n">${n}</span><span class="label">${label}</span></div>`
+      ).join('');
+
+      document.querySelectorAll('.tablewrap [data-loading]').forEach((el) => el.remove());
+      const seats = document.getElementById('seats-table');
+      seats.innerHTML = `
+        <caption>medians per run; unmeasured runs excluded</caption>
+        <thead><tr>
+          <th scope="col">seat</th><th scope="col">model</th>
+          <th scope="col">runs</th><th scope="col">out tok</th>
+          <th scope="col">think %</th><th scope="col">turns</th>
+          <th scope="col">min</th><th scope="col">denials</th>
+          <th scope="col">errors</th>
+        </tr></thead><tbody>` +
+        data.roles.map((r) => seatRow(r)).join('') + '</tbody>';
+
+      const runs = document.getElementById('runs-table');
+      runs.innerHTML = `
+        <caption>newest first; each row links to its run and artifact</caption>
+        <thead><tr>
+          <th scope="col">when (UTC)</th><th scope="col">seat</th>
+          <th scope="col">out tok</th><th scope="col">turns</th>
+          <th scope="col">min</th><th scope="col">result</th>
+        </tr></thead><tbody>` +
+        data.runs.map((r) => runRow(r)).join('') + '</tbody>';
+
+      asof(data);
+    }
+
+    function seatRow(r) {
+      const s = r.recent;
+      if (!s) {
+        return `<tr><td>${esc(r.role)}</td><td class="dim" colspan="8">no runs in window</td></tr>`;
+      }
+      const model = s.models.length ? s.models[0][0] : '-';
+      const p = r.prior;
+      return `<tr>
+        <td>${esc(r.role)}</td>
+        <td class="dim">${esc(model)}</td>
+        <td>${s.n}</td>
+        <td>${trend(s.out, p && p.out, 0)}</td>
+        <td>${trend(s.think, p && p.think, 0)}</td>
+        <td>${trend(s.turns, p && p.turns, 0)}</td>
+        <td>${trend(s.mins, p && p.mins, 1)}</td>
+        <td>${trend(s.denials, p && p.denials, 1)}</td>
+        <td>${s.errors ? `<span class="err">${s.errors}/${s.n}</span>` : `<span class="ok">0/${s.n}</span>`}</td>
+      </tr>`;
+    }
+
+    function runRow(r) {
+      const when = esc(r.at.slice(5, 16).replace('T', ' '));
+      const link = r.run_id
+        ? `<a href="${REPO}/actions/runs/${esc(r.run_id)}">${when}</a>` : when;
+      const result = !r.measured ? '<span class="dim">unmeasured</span>'
+        : r.error ? '<span class="err">error</span>' : '<span class="ok">ok</span>';
+      return `<tr${r.measured ? '' : ' class="unmeasured"'}>
+        <td>${link}</td>
+        <td>${esc(r.role)}</td>
+        <td>${r.measured ? Number(r.out).toLocaleString('en-US') : '-'}</td>
+        <td>${r.measured && r.turns != null ? r.turns : '-'}</td>
+        <td>${r.measured && r.mins != null ? Number(r.mins).toFixed(1) : '-'}</td>
+        <td>${result}</td>
+      </tr>`;
+    }
+
+    function trend(value, old, digits) {
+      if (value == null) return '-';
+      const text = Number(value).toLocaleString('en-US', {
+        minimumFractionDigits: digits, maximumFractionDigits: digits,
+      });
+      if (old == null || old === 0) return text;
+      const change = 100 * (value - old) / old;
+      if (Math.abs(change) < 10) return text;
+      const arrow = change > 0 ? '▲' : '▼';
+      return `${text} <span class="trend">${arrow}${Math.abs(change).toFixed(0)}%</span>`;
+    }
+
+    function asof(data) {
+      const el = document.getElementById('asof-line');
+      const age = Date.now() - Date.parse(data.generated_at);
+      const stale = Number.isFinite(age) && age > 48 * 3600 * 1000
+        ? ' <span class="stale">Stale: the daily aggregation has missed a beat;' +
+          ' check the deploy-site workflow.</span>'
+        : '';
+      el.innerHTML =
+        `Generated ${esc(data.generated_at)} by the deploy-site workflow, ` +
+        'daily, from artifacts of the agent-audit action.' + stale;
+    }
+
+    function fail(message) {
+      document.querySelectorAll('[data-loading]').forEach((el) => {
+        el.textContent = message;
+      });
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+
+    main();
+    </script>
+  </body>
+</html>
