@@ -105,10 +105,6 @@ const FLAG_REP: usize = 2;
 /// Alphabet size of the flag [`Model`]s: exactly the three symbols above.
 const FLAG_ALPHABET: usize = 3;
 
-/// Repeat-offset cache slot count and the [`Model`] alphabet size for
-/// coding which slot a [`Token::Rep`] used.
-const REP_SLOTS: usize = 3;
-
 /// The five adaptive tables `Method::Lz` drives, bundled so encode and
 /// decode construct and thread them identically.
 struct Models {
@@ -130,28 +126,8 @@ impl Models {
             flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
             length: Model::new(lz::LENGTH_BUCKETS),
             offset: Model::new(lz::OFFSET_BUCKETS),
-            slot: Model::new(REP_SLOTS),
+            slot: Model::new(lz::REP_SLOTS),
         }
-    }
-}
-
-fn slot_to_symbol(slot: RepSlot) -> usize {
-    match slot {
-        RepSlot::First => 0,
-        RepSlot::Second => 1,
-        RepSlot::Third => 2,
-    }
-}
-
-/// [`Model::decode`] over a [`REP_SLOTS`]-symbol alphabet always returns a
-/// value `< REP_SLOTS`, never anything adversarial input could push out of
-/// range (see [`Model::decode`]'s own panic-free guarantee), so the only
-/// three cases below are exhaustive without a fallback panic.
-fn symbol_to_slot(symbol: usize) -> RepSlot {
-    match symbol {
-        0 => RepSlot::First,
-        1 => RepSlot::Second,
-        _ => RepSlot::Third,
     }
 }
 
@@ -260,7 +236,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
             }
             Token::Rep { len, slot } => {
                 sink.flag(models, flag_table, FLAG_REP);
-                sink.slot(models, slot_to_symbol(slot));
+                sink.slot(models, slot.index());
                 sink.length(models, len);
                 let end = pos + len as usize;
                 context = context.after_copy(&data[pos..end]);
@@ -547,11 +523,11 @@ pub fn decode(payload: &[u8]) -> Result<Vec<u8>, Error> {
                 context = context.after_copy(&output[output.len() - len as usize..]);
             }
             _ => {
-                // models.slot's alphabet is REP_SLOTS (3) symbols, and
-                // Model::decode never returns a value outside its
-                // alphabet; models.flag's alphabet is FLAG_ALPHABET (3),
-                // so this arm is FLAG_REP (2), never a fourth flag value.
-                let slot = symbol_to_slot(models.slot.decode(&mut ac));
+                // models.flag's alphabet is FLAG_ALPHABET (3), so this arm
+                // is FLAG_REP (2), never a fourth flag value.
+                // RepSlot::from_index documents why models.slot's decode
+                // is safe to feed it directly.
+                let slot = RepSlot::from_index(models.slot.decode(&mut ac));
                 let len = decode_bucketed(&mut models.length, &mut ac);
                 let distance = reps.get(slot);
                 ensure_room(output.len(), len as usize, declared_len)?;
