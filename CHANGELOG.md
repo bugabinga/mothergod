@@ -34,7 +34,17 @@ All notable changes to this project are documented here. Format follows
   candidate count rather than per-candidate cost — a real ~3.3x on the
   same near-duplicate shape, compounding with length-prefix reuse, but
   still no effect on the single-repeated-byte pathology (measured, not
-  assumed, before landing).
+  assumed, before landing). `nice_len` now also bounds each candidate's
+  own suffix comparison (S2-A46), not just how many candidates get
+  visited: `suffix_common_len` gained a `limit` parameter, so a single
+  candidate can never cost more than `O(nice_len)` regardless of how long
+  its true common run is, at the cost of reporting that candidate's match
+  as exactly `nice_len` long when its true length is longer. This closes
+  the issue #179 pathology the two prior slices measured and could not
+  fix: the same 200,000-byte single-repeated-byte fixture that took 32.9s
+  with `nice_len` alone now completes in about 0.1s with `nice_len` 128
+  (measured directly against the standalone finder, not yet through
+  `dp_round`, which still uses `MatchFinder`'s hash chain).
 
 - `src/sse.rs`: standalone secondary symbol estimation (SSE/APM) primitive
   for ROADMAP M3's oldest standing lead (`research/JOURNAL.md` S1-P1,
