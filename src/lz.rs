@@ -328,21 +328,25 @@ impl<'d> MatchFinder<'d> {
 }
 
 /// Longest common run between `data[a..]` and `data[b..]`, given `a < b`
-/// (so `data[a..]` is never shorter than `data[b..]`). Same cap as
-/// [`match_len`] ([`MAX_MATCH_LEN`], remaining data from the later
-/// position `b`), but compares two arbitrary earlier positions instead of
-/// a position against itself at a backward distance — what
+/// (so `data[a..]` is never shorter than `data[b..]`), capped at `limit` in
+/// addition to [`MAX_MATCH_LEN`] and the data remaining from the later
+/// position `b`. Compares two arbitrary earlier positions instead of a
+/// position against itself at a backward distance — what
 /// [`BinaryTreeMatchFinder`] needs to order two candidates' suffixes
 /// against each other, not just measure one candidate's match length.
 /// `start` lets a caller resume from a length it already knows both
 /// suffixes share, rather than re-comparing from byte 0
 /// ([`BinaryTreeMatchFinder::insert_and_find`]'s length-prefix-reuse
-/// optimization); every other caller passes `0`. Callers must only pass a
-/// `start` that both suffixes are already known to agree on for that many
-/// bytes — an unproven `start` claims bytes match without checking them,
-/// which is exactly the length-prefix-reuse invariant's job to uphold.
-fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize) -> usize {
-    let max_len = (data.len() - b).min(MAX_MATCH_LEN);
+/// optimization); every caller not bounding the scan passes
+/// [`MAX_MATCH_LEN`] for `limit`, under which the extra `.min` is a no-op
+/// (that cap already applies). Callers must only pass a `start` that both
+/// suffixes are already known to agree on for that many bytes — an
+/// unproven `start` claims bytes match without checking them, which is
+/// exactly the length-prefix-reuse invariant's job to uphold, and `start`
+/// must never exceed `limit` for the same reason a truncated scan cannot
+/// retroactively prove more than it looked at.
+fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize, limit: usize) -> usize {
+    let max_len = (data.len() - b).min(MAX_MATCH_LEN).min(limit);
     let mut len = start;
     while len < max_len && data[a + len] == data[b + len] {
         len += 1;
@@ -423,27 +427,31 @@ fn to_u32(i: usize) -> u32 {
 /// a shape closer to S1-P2's sqlite/json/jsonl target: real ~3.5x.
 ///
 /// [`Self::insert_and_find`] now also takes `nice_len` (`research/JOURNAL.md`
-/// S2-A44): the walk stops visiting further candidates as soon as the best
-/// match found so far is at least `nice_len` long, cut off the same way an
-/// exhausted `max_depth` already is. Unlike `max_depth`, this is never a
-/// heuristic trade against exactness: no candidate can ever report a match
-/// longer than `MAX_MATCH_LEN` (`suffix_common_len`'s own cap), so a
-/// caller that passes `nice_len >= MAX_MATCH_LEN` gets exactly the old
-/// unbounded behavior, and any smaller `nice_len` only ever stops looking
-/// once further looking cannot find something strictly longer than what a
-/// DP round is already willing to spend a token price on. **Measured, not
-/// assumed, and it does *not* close the one-sided-pathology gap
-/// length-prefix reuse left open**: on the issue #179 fixture (200,000
-/// bytes of one repeated value) the very first candidate visited already
-/// costs a full `MAX_MATCH_LEN`-length `suffix_common_len` scan, so
-/// `nice_len` — which only bounds how many *candidates* get visited, not
-/// the cost of scanning any one of them — cuts that fixture's cost by
-/// roughly `max_depth`-fold (fewer candidates) but not enough: still
-/// `O(MAX_MATCH_LEN)` per position, `O(n * MAX_MATCH_LEN)` overall, well
-/// past the issue #179 speed guard's bound. What a real fix needs instead
-/// is an insert-only path that skips the expensive scan itself while a DP
-/// `carry` is active, not merely visiting fewer candidates that are each
-/// still this expensive.
+/// S2-A44), originally only a candidate-count bound: the walk stopped
+/// visiting further candidates as soon as the best match found so far was
+/// at least `nice_len` long, cut off the same way an exhausted `max_depth`
+/// already is, but each candidate's own `suffix_common_len` scan still ran
+/// uncapped. **That left a gap, measured against the issue #179 fixture
+/// (200,000 bytes of one repeated value) rather than assumed**: the very
+/// first candidate visited already cost a full `MAX_MATCH_LEN`-length
+/// scan before `nice_len` was ever consulted between candidates, so a low
+/// `nice_len` cut the fixture's cost by roughly `max_depth`-fold (fewer
+/// candidates) but not enough — still `O(MAX_MATCH_LEN)` per position,
+/// `O(n * MAX_MATCH_LEN)` overall, well past the issue #179 speed guard's
+/// bound. `research/JOURNAL.md` S2-A46 closed that gap: `nice_len` now
+/// also bounds `suffix_common_len`'s own scan (its `limit` parameter), so
+/// a single candidate can never cost more than `O(nice_len)` regardless of
+/// how long the true common run is — on a repeated-byte run the very first
+/// candidate's capped scan already reaches `nice_len`, so the walk stops
+/// there instead of paying for a second `MAX_MATCH_LEN`-length scan that
+/// would only confirm what the cap already reports. The trade this makes
+/// is real, not free: a candidate whose true match exceeds `nice_len` is
+/// now reported as exactly `nice_len` long, not its true length, the same
+/// "good enough, stop paying to confirm more" trade a small `max_depth`
+/// already makes over candidate *count* — `nice_len` at or above
+/// `MAX_MATCH_LEN` still disables both the count bound and the scan cap
+/// and searches exactly as before (`suffix_common_len` never reports a
+/// longer match than `MAX_MATCH_LEN` regardless).
 pub struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// `head[hash]` is the current tree root for that hash bucket, or
@@ -487,10 +495,16 @@ impl<'d> BinaryTreeMatchFinder<'d> {
     ///
     /// `nice_len` also stops the walk early, as soon as the best match
     /// found so far reaches that length — cut off the same way an
-    /// exhausted `max_depth` already is. Pass `MAX_MATCH_LEN` to disable
-    /// this and search exactly as before: no match can ever be reported
-    /// longer than that (`suffix_common_len`'s own cap), so a `nice_len`
-    /// at or above it never fires early.
+    /// exhausted `max_depth` already is — and separately bounds the cost of
+    /// scanning each individual candidate (`research/JOURNAL.md` S2-A46):
+    /// a candidate's own suffix comparison never runs past `nice_len`
+    /// bytes, so a single candidate can never cost more than `O(nice_len)`
+    /// regardless of how long its true common run is. A match whose true
+    /// length exceeds `nice_len` is therefore reported as exactly
+    /// `nice_len`, not its true length. Pass `MAX_MATCH_LEN` to disable
+    /// both effects and search exactly as before: no match can ever be
+    /// reported longer than that (`suffix_common_len`'s own cap), so a
+    /// `nice_len` at or above it never truncates a scan or fires early.
     ///
     /// # Panics
     ///
@@ -538,7 +552,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         while cur != NO_POSITION && depth < max_depth && best_len < nice_len {
             let cur_pos = cur as usize;
             let start = less_common.min(greater_common);
-            let common = suffix_common_len(self.data, cur_pos, i, start);
+            let common = suffix_common_len(self.data, cur_pos, i, start, nice_len);
             let distance = i - cur_pos; // cur_pos was inserted earlier: i > cur_pos always.
             if common > best_len && distance <= WINDOW {
                 best_len = common;
@@ -1546,7 +1560,7 @@ mod tests {
             if prefix_hash(data, cur) != target_hash {
                 continue;
             }
-            let len = suffix_common_len(data, cur, i, 0);
+            let len = suffix_common_len(data, cur, i, 0, MAX_MATCH_LEN);
             if len > best_len {
                 best_len = len;
                 best_distance = NonZeroU32::new(to_u32(i - cur));
@@ -1685,6 +1699,51 @@ mod tests {
             "300 near-duplicate 200-byte blocks with nice_len 50 and unbounded max_depth took \
              {elapsed:?}, expected well under 3s; likely a regression to nice_len no longer \
              bounding candidates visited"
+        );
+    }
+
+    #[test]
+    fn binary_tree_nice_len_caps_reported_length_when_true_match_is_longer() {
+        // nice_len now bounds suffix_common_len's own scan (S2-A46), not
+        // just how many candidates get visited: a true match longer than
+        // nice_len is reported as exactly nice_len, the "good enough, stop
+        // paying to confirm more" trade the struct docs describe.
+        let mut data = vec![b'x'; 300];
+        data.push(b'y');
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let _ = finder.insert_and_find(0, data.len(), MAX_MATCH_LEN);
+        let (len, distance) = finder
+            .insert_and_find(1, data.len(), 50)
+            .expect("position 1 repeats position 0's run of 'x'");
+        assert_eq!(distance.get(), 1);
+        assert_eq!(
+            len, 50,
+            "nice_len must cap the reported length itself, not just stop visiting more candidates"
+        );
+    }
+
+    #[test]
+    fn binary_tree_nice_len_bounds_per_candidate_scan_cost_on_repeated_byte_run() {
+        // The issue #179 shape S2-A44 measured and could not fix: a low
+        // nice_len there still let the first candidate's suffix_common_len
+        // scan run to a full MAX_MATCH_LEN before nice_len was ever
+        // consulted between candidates (32.9s on this exact fixture).
+        // S2-A46 additionally caps each candidate's own scan at nice_len,
+        // so the first candidate here now costs O(nice_len) instead of
+        // O(MAX_MATCH_LEN), and the walk stops immediately after (its
+        // capped common length already reaches nice_len).
+        let data = vec![b'z'; 200_000];
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let start = std::time::Instant::now();
+        for i in 0..data.len() {
+            let _ = finder.insert_and_find(i, MAX_CHAIN_TRIES_OPTIMAL, 128);
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "200,000 bytes of one repeated value with nice_len 128 took {elapsed:?}, expected \
+             well under 5s; likely a regression to nice_len no longer bounding per-candidate \
+             scan cost (research/JOURNAL.md S2-A46)"
         );
     }
 

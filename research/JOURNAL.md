@@ -1883,6 +1883,56 @@ record.
   CI-coverage infrastructure, `kind: "patch"` in `progress.jsonl`.
   Remaining S1-D2/S2-D1 scope after this: the CI baseline gate's workflow
   wiring and real Silesia finals numbers (throughput-bound, per S2-D1).
+- S2-A46 | ACCEPTED | Fourth slice of ROADMAP M3's second standing lead
+  (S1-P2, btultra2-class parse): closes the gap S2-A44 measured and named
+  as remaining scope — `nice_len` bounded how many candidates
+  `lz::BinaryTreeMatchFinder::insert_and_find` visited, but not the cost
+  of scanning any one of them, so the issue #179 fixture (200,000 bytes of
+  one repeated value) still cost a full `MAX_MATCH_LEN`-length
+  `suffix_common_len` scan on its very first candidate. `suffix_common_len`
+  gained a `limit` parameter (`max_len = ....min(limit)`), and
+  `insert_and_find` now passes its own `nice_len` as that limit instead of
+  only checking `best_len < nice_len` between candidates. Sound for the
+  same reason S2-A43's `start` bound is: a truncated scan still reports a
+  real, verified common length, just possibly short of the true one — the
+  struct's own docs already frame `nice_len` as "good enough, stop
+  looking," and this extends that trade from "stop looking at more
+  candidates" to "stop paying to confirm this one further," the same
+  trade a small `max_depth` already makes over candidate count. On a
+  repeated-byte run every candidate's capped scan now reaches `nice_len`
+  immediately, so the walk stops after exactly one candidate instead of
+  paying a second `MAX_MATCH_LEN`-length scan per position. | 2 new
+  tests: `binary_tree_nice_len_caps_reported_length_when_true_match_is_longer`
+  (a 300-byte repeated-'x' run with `nice_len` 50 must report length 50,
+  not the true 299 — the correctness half, that the cap is honored, not
+  just fast) and
+  `binary_tree_nice_len_bounds_per_candidate_scan_cost_on_repeated_byte_run`,
+  the issue #179 fixture itself run directly against the standalone finder
+  with `nice_len` 128, asserting under 5s. All five root CLAUDE.md gates
+  clean; `binary_tree_matches_brute_force` (nice_len `MAX_MATCH_LEN`,
+  where the new `limit` is a no-op) still passes unchanged, the
+  correctness guard for the unbounded case. | **Measured, not assumed**:
+  the new issue #179 fixture test completes in ~0.11s in an unoptimized
+  debug build (~0.04s release), against S2-A44's own measurement of 32.9s
+  for `nice_len` alone on the identical fixture — roughly a 300x
+  reduction, and comfortably inside the 15s budget `dp_round`'s existing
+  regression guard (`optimal_roundtrip_long_run_of_one_repeated_byte_stays_linear`)
+  enforces once this finder is wired in. No bpb measurement: still not
+  wired to any parse pass (this measures the standalone finder directly,
+  not through `dp_round`, which still uses `MatchFinder`'s hash chain) —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
+  same as S2-A42 through S2-A44. **Does not yet re-attempt S2-R2's swap**:
+  this closes the per-candidate-cost half of the gap S2-A44 named, but
+  `dp_round`'s `carry` reuse still cannot skip `insert_and_find`'s call
+  entirely on a long run the way it skips `MatchFinder::find_best` — every
+  position still pays one bounded-now-but-nonzero `O(nice_len)` call, and
+  `dp_round` would need a `nice_len` choice of its own (currently nothing
+  in `dp_round` passes one) plus window eviction (still absent from
+  S2-A42) before the wiring slice is worth re-attempting. Remaining S1-P2
+  scope: pick a `nice_len` for `dp_round`'s use of this finder, add window
+  eviction, add per-position adaptive prices (the DP price table is still
+  frozen per round), then re-attempt S2-R2's swap and measure a real bpb
+  delta on sqlite/json/jsonl-shaped data, S1-P2's named target.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -1911,12 +1961,20 @@ record.
   exit (S2-A44, real ~3.3x on the same near-duplicate shape, also no effect
   on the fixture — `nice_len` bounds candidates visited, not the cost of
   scanning the one candidate a repeated-byte run always finds first).
-  Remaining, sharper after both: the wiring blocker is per-candidate scan
-  cost on highly repetitive runs, not candidate count, so the next attempt
-  needs an actual insert-only path that skips `suffix_common_len` itself
-  while a `carry` is active, not another bound layered on top of
-  `max_depth`. Window eviction and per-position adaptive prices remain
-  untouched from S2-A42.
+  Fifth slice, S2-A46: closed that per-candidate-cost gap directly by
+  having `nice_len` also bound `suffix_common_len`'s own scan (a `limit`
+  parameter), not just the between-candidate check — the issue #179
+  fixture (200,000 bytes of one repeated value) run directly against the
+  standalone finder dropped from S2-A44's measured 32.9s to ~0.11s
+  (`nice_len` 128), a ~300x reduction, at the cost of reporting a
+  candidate's match as exactly `nice_len` long when the true run is
+  longer. Does not yet re-attempt S2-R2's swap: `dp_round`'s `carry` still
+  cannot skip calling `insert_and_find` entirely on a long run, only pay a
+  now-bounded cost for it every position, and `dp_round` has no `nice_len`
+  choice of its own yet. Remaining: pick a `nice_len` for `dp_round`'s use
+  of this finder, then re-attempt the wiring and measure a real bpb delta
+  on sqlite/json/jsonl-shaped data. Window eviction and per-position
+  adaptive prices remain untouched from S2-A42.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
