@@ -2,9 +2,8 @@
 //! bits/byte on the fixed regression-gate cases and either checks them
 //! against the committed `bench/baseline.json` (exit non-zero on a
 //! regression past `baseline::TOLERANCE_BITS`) or overwrites that file with
-//! today's measurements. Not yet wired into `.github/workflows/ci.yml`
-//! (`research/JOURNAL.md` S2-A35: that wiring needs a workflow-file push,
-//! which needs `GH_ADMIN_TOKEN`); run by hand until it is.
+//! today's measurements. Wired into `.github/workflows/ci.yml` as the
+//! required `ratio` check.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --bin baseline_gate --
 //! check` (the default) or `... -- write` (after an accepted ratio change,

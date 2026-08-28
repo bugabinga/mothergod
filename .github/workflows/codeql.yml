@@ -3,7 +3,7 @@
 # none of the thinking `ci.yml` already encodes: no path filter, no
 # concurrency group, and five language configs for three languages. It
 # analyzed every docs-only push, which was 55 of 71 pushes in the window #163
-# measured, and cost 4.8x what the four required gates cost.
+# measured, and cost 4.8x what the then-four required gates cost.
 #
 # Advanced setup is the only way to control triggers, paths and concurrency,
 # and it puts the config in the repo where it evolves by PR like everything

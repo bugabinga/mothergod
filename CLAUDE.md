@@ -30,7 +30,10 @@ tools it embeds because x owns repository discovery and configuration.
 Invoke an underlying tool directly only to repair x when x cannot build.
 
 CI enforces the same gate as the required checks `fmt`, `clippy`, `test`,
-`doc`. A push that fails them wastes a cycle.
+`doc`, plus `ratio`, the bits/byte regression gate vs `bench/baseline.json`
+(CI-only; run it locally with `cargo run -p mothergod-bench --release --bin
+baseline_gate -- check` before pushing a codec change). A push that fails
+them wastes a cycle.
 
 ## Hard rules
 

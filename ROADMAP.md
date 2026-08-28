@@ -132,7 +132,8 @@ agent processes. Done 2026-08-20.
 - [x] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
       emitting bits) — recovers the archive's proxy-speed experiment loop
       inside the codec of record.
-- [ ] CI benchmark gate: PR fails on regression vs `bench/baseline.json`.
+- [x] CI benchmark gate: PR fails on regression vs `bench/baseline.json`
+      (required `ratio` check, docs/TESTING.md layer 7).
 - [ ] Nightly/weekly report: bits/byte vs gzip/zstd/xz, per-dataset graphs
       rendered from `research/progress.jsonl` into `docs/benchmarks/`.
 
