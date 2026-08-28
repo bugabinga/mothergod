@@ -596,8 +596,8 @@ record.
   the only real numbers available) done as of S2-A36; the gzip/zstd/xz
   reference column and real numbers on one held-out final (Canterbury)
   done as of S2-A37; the scheduled `--features corpus-fetch` workflow
-  done as of S2-A45; remaining: the CI baseline gate's `.github/
-  workflows/` wiring (reserved for `GH_ADMIN_TOKEN`), plus
+  done as of S2-A45; remaining (tracked: issue #284): the CI baseline
+  gate's `.github/workflows/` wiring (reserved for `GH_ADMIN_TOKEN`), plus
   real Silesia numbers (S2-A37's `finals_report` binary covers Silesia
   too, in code — its remaining scope is throughput, not a missing
   feature: ~0.14 MB/s measured means the full corpus needs on the order
