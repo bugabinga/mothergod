@@ -2221,8 +2221,9 @@ record.
   case measures ~1170 ns/byte (~854 KB/s), under the ROADMAP SPEED floor
   (≥1 MB/s decode) — `Literal::mix` rebuilds all 256 cumulative entries
   from scratch every byte instead of an incremental structure.
-- S1-P7 | LEAD | Production hardening: fuzzing (decoder-never-panics),
-  streaming mode, frozen format spec v1.
+- S1-P7 | LEAD | Production hardening: streaming mode, frozen format
+  spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
+  S2-A53, remaining fuzz scope named in S2-A53.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
@@ -2265,3 +2266,25 @@ record.
   "patch"` with null bpb deltas, same reason as S2-A45. Remaining
   S1-D2/S2-D1 scope: an actual real Silesia run, by hand or via a
   scheduled workflow (issue #231).
+- S2-A53 | ACCEPTED | Scheduled CI for S2-A25's fuzz targets, the
+  remaining scope issue #53 named and issue #295 designed:
+  `fuzz-check.yml` (#297) runs `decode_arbitrary` and `roundtrip`
+  weekly, Sunday 06:13 UTC, offset from the other advisory sweeps, on
+  Linux x64 only, 30s per target, nightly installed explicitly so a
+  missing toolchain fails loudly instead of silently costing the first
+  fuzz step its time budget. A found crasher fails the job, wakes the
+  fixer via the alarm (ADR-0036), and uploads `fuzz/artifacts/` for
+  promotion into `tests/adversarial/` as a regression seed.
+  Deliberately single-OS, not #53's cross-OS `monster` suggestion:
+  libFuzzer needs a nightly sanitizer-coverage rebuild per OS, and six
+  instrumented rebuilds for a 30-second smoke check buy runner minutes,
+  not coverage. | Verified locally before wiring (#295): 36,701
+  executions of `decode_arbitrary` and 694 of `roundtrip`, no crashes,
+  one 15s slow unit on a decode-amplification input matching the
+  bounded-not-fast pattern S2-A25 first measured at 12s. First
+  scheduled run 2026-08-30. | No bpb measurement: CI-coverage infra,
+  not a ratio experiment; `progress.jsonl` records `kind: "patch"`
+  with null deltas. Remaining M4 fuzz scope: cross-OS coverage in
+  `monster`, the OSS-Fuzz application (needs an operator contact
+  email, `blocked-on-human` when picked up), and an explicit
+  allocation-limiter target beyond `MAX_DECODED_LEN`'s existing bound.
