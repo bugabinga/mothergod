@@ -31,3 +31,10 @@ new_sqlite_classes = ["Typing"]
 # Not secrets: chat ids and repo slugs are identifiers, not credentials.
 OPERATOR_CHAT_ID = "66834832"
 GITHUB_REPO = "bugabinga/mothergod"
+
+# The agent clock (ADR-0035): these lines are the single source of
+# truth for how often the seats run. Each expression fires worker.js's
+# `scheduled`, whose CLOCK table maps it to the seats it wakes; the
+# values are ADR-0015/0027's cadences.
+[triggers]
+crons = ["11 * * * *", "22 */2 * * *", "37 */12 * * *"]

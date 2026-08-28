@@ -599,3 +599,79 @@ test("Telegram command and prose routes", async (t) => {
     assert.deepEqual(githubPaths(result.calls), []);
   });
 });
+
+test("Clock ticks (ADR-0035)", async (t) => {
+  const tick = (setup, cron) => worker.scheduled({ cron, scheduledTime: 1_700_000_000_000 }, setup.env);
+  const clocklog = (setup) => JSON.parse(setup.kv.get("clocklog"));
+
+  await t.test("the hourly tick wakes the BDFL as a cron wake and logs it", async () => {
+    const setup = harness(() => new Response(null, { status: 204 }));
+    await tick(setup, "11 * * * *");
+    const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
+    assert.match(dispatch.url, /agent-bdfl\.yml/);
+    assert.deepEqual(JSON.parse(dispatch.init.body), {
+      ref: "main",
+      inputs: { source: "cron" },
+    });
+    assert.deepEqual(clocklog(setup), [
+      {
+        cron: "11 * * * *",
+        at: "2023-11-14T22:13:20.000Z",
+        woke: ["agent-bdfl.yml"],
+        failed: [],
+      },
+    ]);
+  });
+
+  await t.test("heartbeat and deslop ticks dispatch without inputs", async () => {
+    for (
+      const [cron, workflow] of [
+        ["22 */2 * * *", "agent-heartbeat.yml"],
+        ["37 */12 * * *", "agent-deslop.yml"],
+      ]
+    ) {
+      const setup = harness(() => new Response(null, { status: 204 }));
+      await tick(setup, cron);
+      const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
+      assert.ok(dispatch.url.includes(workflow), `${cron} must wake ${workflow}`);
+      assert.deepEqual(JSON.parse(dispatch.init.body), { ref: "main" });
+      assert.deepEqual(clocklog(setup)[0].woke, [workflow]);
+    }
+  });
+
+  await t.test("a failed dispatch is logged as failed, never thrown", async () => {
+    const setup = harness(() => json({ message: "down" }, 503));
+    await tick(setup, "11 * * * *");
+    assert.deepEqual(clocklog(setup)[0].failed, ["agent-bdfl.yml"]);
+    assert.deepEqual(clocklog(setup)[0].woke, []);
+  });
+
+  await t.test("an expression missing from CLOCK wakes nothing but leaves evidence", async () => {
+    const setup = harness(() => new Response(null, { status: 204 }));
+    await tick(setup, "59 13 * * *");
+    assert.ok(!setup.calls.some((call) => call.url.includes("/dispatches")));
+    assert.deepEqual(clocklog(setup)[0], {
+      cron: "59 13 * * *",
+      at: "2023-11-14T22:13:20.000Z",
+      woke: [],
+      failed: [],
+    });
+  });
+
+  await t.test("the log trims to 48 ticks and a corrupt log restarts", async () => {
+    const setup = harness(() => new Response(null, { status: 204 }));
+    setup.kv.set(
+      "clocklog",
+      JSON.stringify(Array.from({ length: 48 }, (_, i) => ({ cron: String(i) }))),
+    );
+    await tick(setup, "11 * * * *");
+    const log = clocklog(setup);
+    assert.equal(log.length, 48);
+    assert.equal(log[0].cron, "1");
+    assert.equal(log.at(-1).cron, "11 * * * *");
+
+    setup.kv.set("clocklog", "not json");
+    await tick(setup, "11 * * * *");
+    assert.equal(clocklog(setup).length, 1);
+  });
+});
