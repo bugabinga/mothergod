@@ -2019,6 +2019,39 @@ record.
   progress on that target needs the window eviction and per-position
   adaptive prices S2-A42 deferred, unchanged by this slice. Remaining
   S1-P2 scope: those two, still.
+- S2-A49 | ACCEPTED | Closed the window-eviction half of S1-P2's
+  remaining scope, unchanged since S2-A42:
+  `BinaryTreeMatchFinder::insert_and_find`'s walk now evicts a candidate
+  the instant its distance exceeds `WINDOW`, instead of continuing to
+  link it into the less/greater chains and descend into its own
+  children (only filtered at report time, as before). Proved safe
+  before landing, not just tested: a node's `left`/`right` fields are
+  written exactly once, at its own insertion, from whatever the
+  bucket's tree held at that moment — strictly older positions only —
+  so the walk's visited positions are provably a strictly decreasing
+  sequence and the first out-of-window node's *entire* remaining
+  subtree is also out-of-window; cutting there drops that subtree from
+  the bucket for good; nothing re-links it once `head[h]` moves to a
+  newer root. Because in-window candidates are always visited before
+  any out-of-window one (same monotonic property), no previously
+  reported match can ever become unreported: this is a pure
+  tree-walk-cost fix, not a ratio change, closing the doc comment's own
+  complaint that "long inputs pay unbounded tree-walk cost for buckets
+  `WINDOW` cannot use." 2 new tests: an exact-boundary check (distance
+  == `WINDOW` still reported, `WINDOW` + 1 never is) and a structural
+  one that walks every position still reachable from a bucket's root
+  after the eviction and asserts the stale one is gone, not merely
+  excluded from the return value — the second fails against the
+  pre-fix code (the old root gets linked into the new root's child
+  regardless of distance). | `cargo x check` clean; the issue #179
+  speed guard and `cargo run -p mothergod-bench --release --bin
+  baseline_gate -- check` (11 cases) both stay green with **no bpb
+  change**, exactly as predicted — no generator or golden fixture in
+  this crate exceeds `WINDOW` (2^20 bytes) yet, so the new code path is
+  untouched by any existing measurement; `research/README.md`'s
+  capability-patch rule applies (null deltas, no champion to diff
+  against). | Remaining S1-P2 scope: per-position adaptive prices,
+  still untouched from S2-A42.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
