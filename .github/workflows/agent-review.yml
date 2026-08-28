@@ -13,8 +13,10 @@
 # stalled the #105 review on python3/mkdir approvals no human was
 # present to grant. The security boundary is what it always was: only
 # same-repo branches reach this job, so every author is our own
-# machinery or the operator. Token exposure to executed PR code
-# predates this change and is tracked in issue #106.
+# machinery or the operator. Commands that execute PR code run through
+# .github/scripts/probe, which scrubs credentials from the child
+# environment; the residual same-UID exposure (/proc reads) is issue
+# #106's remaining scope, gated on outside contributions.
 #
 # Identity note: gh runs with the workflow's GITHUB_TOKEN (github-actions
 # bot), a different identity from the claude[bot] app that authors agent
@@ -171,7 +173,12 @@ jobs:
                protection blocks the merge regardless of your verdict.
                Spend your own Bash budget on what CI does not check: check
                out the PR branch and run whatever tests/benchmarks the PR's
-               specific claims rest on. A claim you did not execute is
+               specific claims rest on. Anything that executes PR code —
+               cargo build/test/bench/run, a script or binary from the
+               branch — goes through `.github/scripts/probe <command>`,
+               which strips this session's credentials from the child
+               environment (issue #106). gh stays outside probe; it needs
+               the token. A claim you did not execute is
                unverified — say so explicitly in the review.
             3. For codec changes additionally: round-trip on the relevant
                data classes plus adversarial inputs (truncated, bit-flipped);
