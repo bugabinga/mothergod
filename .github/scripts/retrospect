@@ -19,8 +19,9 @@ something" is exactly the kind of false alarm a retrospect exists to avoid.
 The parse lives here now, once, where it can be wrong at most once.
 
 BUDGET is the second half, and it rides free. Every artifact carries the
-session's `rate_limit_events`, each with a `utilization` fraction and the
-instant the allowance resets. Nothing in this project read them: the pause
+session's `rate_limit_events`, each carrying allowance-window utilization
+and reset instants in one of two shapes (see `window_readings`). Nothing in
+this project read them: the pause
 machinery keys on `status == "rejected"` (ADR-0018), which fires when the
 factory has ALREADY stopped for up to a week. Between "fine" and "stopped"
 there was no signal at all. These artifacts are downloaded for the audit
@@ -185,13 +186,37 @@ def describe(run, meta, response):
         print(f"    {line}")
 
 
+def window_readings(info):
+    """Yield (window kind, reading dict) pairs from one rate_limit_info payload.
+
+    Two payload shapes exist on the record. Until 2026-08-26 an event carried
+    one window flat: rateLimitType, utilization, resetsAt. Since then (run
+    33171829189's artifact is the reference) the flat fields only name the
+    event's trigger window and carry no utilization; both windows ride nested
+    under `unifiedWindows`, keyed by window name. A nested form present means
+    the flat fields are ignored, because a payload carrying both describes the
+    same windows twice. Twin parse: the extract step of
+    `.github/actions/agent-audit`, which builds the allowance index and the
+    guard ledger from the same payloads.
+    """
+    if not isinstance(info, dict):
+        return
+    nested = info.get("unifiedWindows")
+    if isinstance(nested, dict):
+        for kind, window in nested.items():
+            if isinstance(window, dict):
+                yield kind, window
+        return
+    yield info.get("rateLimitType", "unknown"), info
+
+
 def budget(samples, anchor):
     """What the subscription has left, from the rate-limit events just read.
 
-    `samples` is (when, rate_limit_info) in session order. Each info carries a
-    utilization fraction of one allowance window and the instant it resets, so
-    the remaining headroom and the pace being set against it are both readable
-    without storing anything.
+    `samples` is (when, rate_limit_info) in session order. Each info carries
+    one or both allowance windows' utilization and reset instant (see
+    `window_readings`), so the remaining headroom and the pace being set
+    against it are both readable without storing anything.
     """
     print("\nbudget:")
     if not samples:
@@ -202,7 +227,8 @@ def budget(samples, anchor):
 
     by_type = {}
     for when, info in samples:
-        by_type.setdefault(info.get("rateLimitType", "unknown"), []).append((when, info))
+        for kind, reading in window_readings(info):
+            by_type.setdefault(kind, []).append((when, reading))
 
     for kind, series in sorted(by_type.items()):
         series.sort(key=lambda pair: pair[0])
@@ -210,7 +236,11 @@ def budget(samples, anchor):
         last_when, last = series[-1]
         used = last.get("utilization")
         if used is None:
-            print(f"    {kind}: events carry no utilization; nothing to project.")
+            print(f"    {kind}: events present but no readable utilization. "
+                  "Treat this as a payload shape change, not a quiet window: "
+                  "the allowance index and the guard ledger parse the same "
+                  "events, so the whole budget chain is blind until "
+                  "agent-audit and this script learn the new shape.")
             continue
         left = max(0.0, 1.0 - used)
         line = f"    {kind}: {used:.0%} used, {left:.0%} left"

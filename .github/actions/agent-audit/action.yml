@@ -214,25 +214,43 @@ runs:
         # utilization basis points and reset epoch makes two observations
         # enough to derive burn and runway. The full rate_limit_events payload
         # below remains authoritative; this is a rounded, lossy index only.
+        #
+        # Two payload shapes exist on the record. Until 2026-08-26 an event
+        # carried one window flat: rateLimitType, utilization, resetsAt.
+        # Since then (run 33171829189's artifact is the reference) the flat
+        # fields only name the event's trigger window and carry no
+        # utilization; both windows ride nested under `unifiedWindows`,
+        # keyed by window name. A nested form present means the flat fields
+        # are ignored, because a payload carrying both describes the same
+        # windows twice. Twin parse: `window_readings` in
+        # .github/scripts/retrospect, which feeds the budget footer from
+        # the same payloads.
+        def window_readings(info):
+            if not isinstance(info, dict):
+                return
+            nested = info.get("unifiedWindows")
+            if isinstance(nested, dict):
+                for kind, window in nested.items():
+                    if isinstance(window, dict):
+                        yield kind, window.get("utilization"), window.get("resetsAt")
+                return
+            yield info.get("rateLimitType"), info.get("utilization"), info.get("resetsAt")
+
         allowance_index = ""
         last_utilization, last_reset = "", ""
         for info in rate_limits:
-            if not isinstance(info, dict):
-                continue
-            kind = info.get("rateLimitType")
-            utilization = info.get("utilization")
-            reset = info.get("resetsAt")
-            if (kind != "seven_day"
-                    or not isinstance(utilization, (int, float))
-                    or isinstance(utilization, bool)
-                    or not math.isfinite(utilization)
-                    or not 0 <= utilization <= 1
-                    or not isinstance(reset, int) or isinstance(reset, bool)
-                    or reset <= 0):
-                continue
-            basis_points = int(utilization * 10_000 + 0.5)
-            allowance_index = f"-u{basis_points}-r{reset}"
-            last_utilization, last_reset = utilization, reset
+            for kind, utilization, reset in window_readings(info):
+                if (kind != "seven_day"
+                        or not isinstance(utilization, (int, float))
+                        or isinstance(utilization, bool)
+                        or not math.isfinite(utilization)
+                        or not 0 <= utilization <= 1
+                        or not isinstance(reset, int) or isinstance(reset, bool)
+                        or reset <= 0):
+                    continue
+                basis_points = int(utilization * 10_000 + 0.5)
+                allowance_index = f"-u{basis_points}-r{reset}"
+                last_utilization, last_reset = utilization, reset
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"allowance_index={allowance_index}\n")
             # Plain (non-suffix) form for the ledger-write step below (#202):

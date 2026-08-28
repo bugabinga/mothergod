@@ -462,6 +462,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- The allowance-sensing chain went blind on 2026-08-26 when the rate-limit
+  event payload moved utilization from flat fields into nested
+  `unifiedWindows`: the audit artifact's allowance index emitted empty, the
+  #202 guard ledger never received its first write, and the retrospect
+  budget footer printed a calm "nothing to project" instead of an alarm.
+  `agent-audit`'s extract step and `retrospect` now read both shapes
+  (nested preferred when present), and a payload with events but no
+  readable utilization is reported as a probable shape change, naming the
+  whole blind chain, so the next silent format drift is loud.
 - Site prose used the em dash the house voice bans (issue #298):
   `site/index.html` and `site/status.html` rewritten with comma, colon, or
   semicolon in place of every prose em dash. Page `<title>` separators, the
