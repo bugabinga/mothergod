@@ -1,8 +1,9 @@
 // Fixtures for retrospect's budget footer, the display half of the
-// allowance-sensing chain. The authoritative parse (agent-audit's extract
-// step) carries its own fixtures; these exist because the untested twin is
-// where PR #308's review found the wrong-number and crash cases, and a
-// footer the BDFL reads every wake must degrade loudly, never lie or die.
+// allowance-sensing chain. The shape parse is shared with the allowance
+// index (.github/scripts/allowance.py, issue #310), whose consumer has
+// its own fixtures in agent-audit's action.test.mjs; these cover what
+// only the footer does with the readings, because a footer the BDFL
+// reads every wake must degrade loudly, never lie or die (PR #308).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
@@ -72,6 +73,22 @@ const fixtures = [
       },
     ],
     expect: [/seven_day: 40% used, 60% left \(no reset time reported\)/],
+  },
+  {
+    name: "a malformed window beside a healthy sibling is named, not dropped",
+    events: [
+      {
+        rateLimitType: "five_hour",
+        unifiedWindows: {
+          five_hour: { utilization: 0.5, resetsAt: 1_800_000_000 },
+          seven_day: { utilization: true, resetsAt: 1_800_000_000 },
+        },
+      },
+    ],
+    expect: [
+      /five_hour: 50% used, 50% left/,
+      /seven_day: present in 1 event\(s\), none readable/,
+    ],
   },
   {
     name: "empty unifiedWindows alarms instead of going silent",

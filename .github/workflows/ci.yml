@@ -80,7 +80,7 @@ jobs:
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/actions/agent-audit/action\.yml$|^\.github/workflows/ci\.yml$'; then
+          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/(scripts|actions/agent-audit)/|^\.github/workflows/ci\.yml$'; then
             echo "js=true" >> "$GITHUB_OUTPUT"
           else
             echo "js=false" >> "$GITHUB_OUTPUT"
@@ -160,9 +160,12 @@ jobs:
   # numbers; this produces none). Its typing state machine cost three
   # rounds of hand-tracing in PR #155 review, so it has tests, and tests
   # nobody runs are decoration. The same dependency-free Node runner exercises
-  # agent-audit's allowance index against its real extraction block. Not a
-  # required check: it gates nothing on a red day for the crate, and the
-  # ruleset's required names stay exactly as they are.
+  # agent-audit's extraction script and retrospect's budget footer, both
+  # importing the shared allowance parse (issue #310); the js filter above
+  # watches all of .github/scripts/ because those files, retrospect included
+  # (extensionless, invisible to a suffix match), are what these tests read.
+  # Not a required check: it gates nothing on a red day for the crate, and
+  # the ruleset's required names stay exactly as they are.
   worker:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
