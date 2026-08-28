@@ -118,7 +118,11 @@ def required_contexts():
 
 
 def unmet_gates(sha):
-    """Required contexts not green on this SHA; empty means proven green."""
+    """Required contexts not satisfied on this SHA; empty means proven green.
+    `skipped` and `neutral` satisfy a required check in GitHub's own
+    evaluation, which is how path-filtered gates (`test`/`doc`/`ratio` on a
+    no-Rust PR) pass; refusing them would deadlock exactly the workflow-only
+    PRs the escalation exists for (PR #287 review, PR #274 precedent)."""
     proc, _ = gh_api((f"repos/{REPO}/commits/{sha}/check-runs?per_page=100",))
     if proc.returncode != 0:
         die(f"cannot read check runs on {sha[:12]} ({api_message(proc)}); "
@@ -131,7 +135,8 @@ def unmet_gates(sha):
     return [
         name
         for name in required_contexts()
-        if latest.get(name, {}).get("conclusion") != "success"
+        if latest.get(name, {}).get("conclusion")
+        not in ("success", "skipped", "neutral")
     ]
 
 
