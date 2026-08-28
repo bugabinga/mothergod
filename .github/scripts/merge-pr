@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Land a PR with the REST squash merge, reacting to GitHub instead of predicting it.
+
+Extensionless and executable because agents type it as a command mid-session,
+like push-branch and settle-push.
+
+One call replaces the merge recipe agents carried as prose (issue #151, the
+most repeated procedure in this project). The prose was a model of GitHub's
+merge behavior; this attempts and reacts, which stays correct when GitHub
+moves:
+
+- REST, never the `gh pr merge` porcelain: the porcelain's client-side
+  mergeable-state check refuses squashes the API accepts (PR #25), and
+  `--auto` on an unsigned-tip branch reports blocked and never fires even
+  with every gate green (PR #84). The server creates and signs the squash
+  commit itself, so `required_signatures` on `main` is satisfied regardless
+  of the branch's own commits.
+- HTTP 405 is GitHub saying required gates are unmet, in its own words.
+  That is the one outcome where arming `gh pr merge <n> --squash --auto`
+  is correct, so it gets exit code 2 instead of a generic failure.
+- HTTP 403 on a PR touching `.github/workflows/**` is the app token's
+  standing refusal (issue #136); that merge belongs to the admin PAT, the
+  BDFL's alone. With GH_ADMIN_TOKEN present the merge retries on it once;
+  absent, the failure names whose merge this is. The retry is the one place
+  with a pre-check: an admin credential can bypass the server-side gate
+  enforcement that makes attempt-and-react safe for the app token, so the
+  escalation first proves every required context green on the pinned SHA,
+  and refuses blind escalation if it cannot read the ruleset.
+- The merge pins a head SHA (409 on mismatch), so a push landing between
+  the caller's decision and this call fails loud instead of shipping
+  unreviewed content. Default pin is the head read here; pass --sha for
+  the head the verdict actually covered.
+
+What this does NOT do, deliberately: decide. Reading the thread for a
+request-changes verdict, the workflow carve-out, and the file-list read
+before a discretion merge are the caller's judgment (agents/GOVERNANCE.md
+"Merging"). This executes a decision already made.
+
+Every attempt prints what it did and on which credential, so the transcript
+shows how the merge landed; silence is never success.
+
+Usage: merge-pr <pr-number> [--sha <reviewed-head>]
+
+Exit: 0 merged (or already was), 2 required gates unmet (arm auto or let the
+BDFL sweep rescue), 1 anything else, carrying GitHub's own message.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+REPO = os.environ.get("GITHUB_REPOSITORY", "")
+
+
+def die(msg, code=1):
+    print(f"merge-pr: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def note(msg):
+    print(f"merge-pr: {msg}")
+
+
+def gh_api(args, token=None, body=None):
+    """Run gh api on an explicit credential; the token rides the environment,
+    never argv (hard rule 10). Returns (proc, http_status), status 0 when the
+    call succeeded and -1 when gh failed before speaking HTTP."""
+    env = dict(os.environ)
+    if token:
+        env["GH_TOKEN"] = token
+    proc = subprocess.run(
+        ("gh", "api") + tuple(args),
+        capture_output=True,
+        text=True,
+        env=env,
+        input=body,
+    )
+    if proc.returncode == 0:
+        return proc, 0
+    match = re.search(r"HTTP (\d{3})", proc.stderr)
+    return proc, int(match.group(1)) if match else -1
+
+
+def api_message(proc):
+    """GitHub's own words for what went wrong, from the body when it parses."""
+    try:
+        return json.loads(proc.stdout)["message"]
+    except (ValueError, KeyError):
+        return proc.stderr.strip()
+
+
+def required_contexts():
+    """The gate names `main` actually enforces, from the ruleset, so this list
+    cannot drift from the one the server uses."""
+    proc, _ = gh_api((f"repos/{REPO}/rules/branches/main",))
+    if proc.returncode != 0:
+        die(f"cannot read main's ruleset ({api_message(proc)}); "
+            "refusing to escalate without proof the gates are green")
+    return [
+        check["context"]
+        for rule in json.loads(proc.stdout)
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    ]
+
+
+def unmet_gates(sha):
+    """Required contexts not green on this SHA; empty means proven green."""
+    proc, _ = gh_api((f"repos/{REPO}/commits/{sha}/check-runs?per_page=100",))
+    if proc.returncode != 0:
+        die(f"cannot read check runs on {sha[:12]} ({api_message(proc)}); "
+            "refusing to escalate without proof the gates are green")
+    latest = {}
+    for run in json.loads(proc.stdout).get("check_runs", []):
+        seen = latest.get(run["name"])
+        if seen is None or (run["started_at"] or "") > (seen["started_at"] or ""):
+            latest[run["name"]] = run
+    return [
+        name
+        for name in required_contexts()
+        if latest.get(name, {}).get("conclusion") != "success"
+    ]
+
+
+def attempt(pr, sha, token=None):
+    body = json.dumps({"merge_method": "squash", "sha": sha})
+    return gh_api(
+        ("-X", "PUT", f"repos/{REPO}/pulls/{pr}/merge", "--input", "-"),
+        token=token,
+        body=body,
+    )
+
+
+def main():
+    args = sys.argv[1:]
+    sha = None
+    if "--sha" in args:
+        at = args.index("--sha")
+        if at + 1 >= len(args):
+            die("usage: merge-pr <pr-number> [--sha <reviewed-head>]")
+        sha = args[at + 1]
+        del args[at:at + 2]
+    if len(args) != 1 or not args[0].isdigit():
+        die("usage: merge-pr <pr-number> [--sha <reviewed-head>]")
+    pr = args[0]
+    if not REPO:
+        die("GITHUB_REPOSITORY is not set; run this from an agent session")
+
+    proc, _ = gh_api((f"repos/{REPO}/pulls/{pr}",))
+    if proc.returncode != 0:
+        die(f"reading PR #{pr} failed: {api_message(proc)}")
+    info = json.loads(proc.stdout)
+    if info.get("merged"):
+        note(f"#{pr} already merged as {info.get('merge_commit_sha')}; nothing to do")
+        return
+    if info.get("state") != "open":
+        die(f"#{pr} is {info.get('state')}, not open; nothing to merge")
+    sha = sha or info["head"]["sha"]
+
+    proc, status = attempt(pr, sha)
+    if proc.returncode == 0:
+        note(f"merged #{pr} at {sha[:12]} as "
+             f"{json.loads(proc.stdout)['sha']} on the session token")
+        return
+    if status == 405:
+        die(f"required gates unmet on #{pr}: {api_message(proc)}", 2)
+    if status == 409:
+        die(f"head moved past the pinned {sha[:12]}: {api_message(proc)}; "
+            "re-read the PR before deciding again")
+    if status != 403:
+        die(f"merging #{pr} failed: {api_message(proc)}")
+
+    admin = os.environ.get("GH_ADMIN_TOKEN")
+    if not admin:
+        die(f"session token refused #{pr} (403: {api_message(proc)}); "
+            "this merge is the BDFL's, on the admin PAT "
+            "(agents/GOVERNANCE.md, Merging)")
+    pending = unmet_gates(sha)
+    if pending:
+        die(f"refusing to escalate #{pr}: required gates not green on "
+            f"{sha[:12]}: {', '.join(pending)}", 2)
+    note(f"session token refused (403); gates proven green on {sha[:12]}, "
+         "retrying once on the admin PAT")
+    proc, status = attempt(pr, sha, token=admin)
+    if proc.returncode == 0:
+        note(f"merged #{pr} at {sha[:12]} as "
+             f"{json.loads(proc.stdout)['sha']} on the admin PAT")
+        return
+    if status == 405:
+        die(f"required gates unmet on #{pr}: {api_message(proc)}", 2)
+    die(f"admin PAT also refused #{pr}: {api_message(proc)}")
+
+
+if __name__ == "__main__":
+    main()
