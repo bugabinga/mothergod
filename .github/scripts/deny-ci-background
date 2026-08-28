@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Deny background execution inside CI agent sessions (PreToolUse hook).
+
+Extensionless and executable like tg-send and push-branch, but no agent
+types this one: `.claude/settings.json` wires it as a PreToolUse hook and
+the harness runs it before every matched tool call.
+
+A GitHub Actions session ends the moment the model's turn ends. The
+completion notification a backgrounded command or subagent promises can
+never arrive, so work parked on it evaporates while the run reports
+success. Prompt prose taught this twice (PR #271 after run 33098942211;
+agent-review.yml after PR #255) and a third session still ended its turn
+"waiting" (run 33207936812, 2026-08-28), because the harness's own tool
+docs promise the notification and a buried prompt line loses to them.
+Third occurrence means the rule stops being prose and becomes this guard
+(ADR-0022).
+
+Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions
+(GITHUB_ACTIONS != "true") everything is allowed; an interactive session
+really does get notifications. In CI, exit 2 (deny; stderr is shown to
+the model) for Bash with run_in_background true, and for Agent, Task, or
+Workflow calls unless run_in_background is explicitly false, because
+background is those tools' default. Everything else exits 0.
+
+Liveness: a deny's stderr lands in the transcript inside the audit
+artifact retrospect prints every run, and a broken hook reference errors
+loudly in-session.
+"""
+
+import json
+import os
+import sys
+
+# Tools that can detach work from the turn. Bash backgrounds only on
+# request; the rest background by default, Workflow unconditionally.
+DEFAULT_FOREGROUND = ("Bash",)
+DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
+
+
+def main() -> int:
+    """Allow (0) or deny (2) the tool call described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    tool = call.get("tool_name", "")
+    background = call.get("tool_input", {}).get("run_in_background")
+    if tool in DEFAULT_FOREGROUND and background is not True:
+        return 0
+    if tool in DEFAULT_BACKGROUND and background is False:
+        return 0
+    if tool not in DEFAULT_FOREGROUND + DEFAULT_BACKGROUND:
+        return 0
+    print(
+        "Background execution does not survive a CI session: the run ends "
+        "the moment your turn ends, and the completion notification never "
+        "arrives (PR #271, run 33207936812). Run the command in the "
+        "foreground (timeout goes up to 600000 ms); for a subagent pass "
+        "run_in_background: false. Work that cannot finish inside this "
+        "run belongs to the next wake, stated where that wake will read it.",
+        file=sys.stderr,
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
