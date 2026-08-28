@@ -3,63 +3,51 @@ set -euo pipefail
 
 checks=${1:?check set is required}
 target=${2:-}
-target_args=()
-if [ -n "$target" ]; then
-  target_args=(--target "$target")
-fi
 
 x_binary=x/target/debug/cargo-x
 if [ -x "$x_binary.exe" ]; then
   x_binary="$x_binary.exe"
 fi
 
-run_fmt() {
-  "$x_binary" fmt --check
-}
-
-run_clippy() {
-  "$x_binary" lint
-}
-
-run_tests() {
-  cargo test --all-targets "${target_args[@]}"
-  if [ -z "$target" ]; then
-    cargo test --manifest-path x/Cargo.toml
+# fmt, clippy, test, doc, and canonical are stages of x's quality gate;
+# x owns their command lists (ADR-0029, issue #227) and the gate is
+# native-only by design. runtime is monster's cross-triple execution
+# sweep, target-parameterized by nature, so its commands live here.
+require_native() {
+  if [ -n "$target" ]; then
+    echo "check set '$checks' delegates to x, which takes no target; use 'runtime'" >&2
+    exit 2
   fi
-}
-
-run_doctests() {
-  cargo test --doc "${target_args[@]}"
-}
-
-run_rustdoc() {
-  RUSTDOCFLAGS='--deny warnings' cargo doc --no-deps "${target_args[@]}"
 }
 
 case "$checks" in
   fmt)
-    run_fmt
+    require_native
+    "$x_binary" fmt --check
     ;;
   clippy)
-    run_clippy
+    require_native
+    "$x_binary" lint
     ;;
   test)
-    run_tests
+    require_native
+    "$x_binary" test
     ;;
   doc)
-    run_doctests
-    run_rustdoc
-    ;;
-  runtime)
-    run_tests
-    run_doctests
+    require_native
+    "$x_binary" doc
     ;;
   canonical)
-    run_fmt
-    run_clippy
-    run_tests
-    run_doctests
-    run_rustdoc
+    require_native
+    "$x_binary" check
+    ;;
+  runtime)
+    if [ -z "$target" ]; then
+      echo "check set 'runtime' requires a target; the native plan is 'test'" >&2
+      exit 2
+    fi
+    cargo test --all-targets --target "$target"
+    cargo test --doc --target "$target"
     ;;
   *)
     echo "unsupported check set: $checks" >&2
