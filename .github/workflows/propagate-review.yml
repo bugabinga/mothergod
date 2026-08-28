@@ -1,0 +1,49 @@
+# When agent-review.yml changes on main, every open PR branch carries a
+# stale copy and claude-code-action refuses to start on all of them
+# (issue #132, observed on #68 and #126). This job merges the change
+# into each stale branch the moment it lands, so the class never opens.
+# The script owns the per-PR mechanics; this header owns the credential
+# ruling.
+#
+# Why MOTHERGOD_ADMIN_TOKEN is safe here, the reasoning #132 asked for:
+# - The token's only use is server-side calls: list PRs, read one blob,
+#   POST /merges. No PR tree is checked out, no PR code executes; the
+#   only tree on the runner is main at the triggering SHA, which just
+#   came through the quality gate. A merge commit rewrites a workflow
+#   file on the PR branch, which is exactly the push GOVERNANCE.md
+#   "Push identity" reserves the admin PAT for (issue #24).
+# - Trigger surface is pushes to main touching this one path, all of
+#   them gate-merged PRs or the operator; no external content reaches
+#   the job (GOVERNANCE.md "Tool envelopes").
+# - The PAT's pushes are operator-attributed: the synchronize events
+#   re-fire ci and agent-review (the point), start unheld, and do not
+#   wake the BDFL, whose pull_request triggers are opened/reopened only.
+#
+# A merge conflict is judgment, never resolved here: the job goes red,
+# agent-alarm wakes the fixer within a minute. cancel-in-progress
+# because a newer main supersedes: each run re-derives staleness from
+# its own SHA.
+name: propagate-review
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/agent-review.yml]
+
+permissions:
+  contents: read # checkout, for the scripts
+
+concurrency:
+  group: propagate-review
+  cancel-in-progress: true
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # settle-push may poll ~6 min per PR when runs stall
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Merge main into stale PR branches
+        env:
+          GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+        run: python3 .github/scripts/propagate-review.py
