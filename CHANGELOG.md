@@ -409,7 +409,22 @@ All notable changes to this project are documented here. Format follows
   rendering, the CI wiring, and the scheduled `corpus-fetch` workflow
   (issue #231) remain.
 
+### Removed
+
+- The interactive `@claude` mention agent (operator directive). Mentions
+  no longer trigger anything; open an issue instead, the heartbeat
+  triages and answers daily.
+
 ### Changed
+
+- The agent telemetry feed (`site/agent-metrics.json`, behind
+  [mothergod.dev/agents.html](https://mothergod.dev/agents.html)) and the
+  model-intel report carry a self-wake audit (issue #144): every admitted
+  thread-event BDFL wake in the 7-day window is re-derived from the API,
+  independently of the wake predicate that admitted it. Zero is claimed
+  only when every wake was verified; fetch failures are counted and named.
+  Validated live against the two known pre-#142 incidents, which it flags
+  exactly.
 
 - `tests/golden.rs`'s re-encode pin (issue #290's ruling): an encoder-only
   change (a parse/pricing heuristic that picks a different valid token
@@ -422,14 +437,6 @@ All notable changes to this project are documented here. Format follows
   `bench/baseline.json` pattern. CLAUDE.md rule 5 and `docs/TESTING.md`
   layer 5 gained one clarifying line each. Unblocks `research/JOURNAL.md`
   S1-P2's `dp_round` wiring (S2-A47, issue #290).
-
-### Removed
-
-- The interactive `@claude` mention agent (operator directive). Mentions
-  no longer trigger anything; open an issue instead, the heartbeat
-  triages and answers daily.
-
-### Changed
 
 - CI gate (operator directive): the four cargo jobs (fmt, clippy, test,
   doc) skip on pull requests that change no cargo input, decided by one
