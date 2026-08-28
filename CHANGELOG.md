@@ -20,7 +20,13 @@ All notable changes to this project are documented here. Format follows
   lengths already proven on the "less"/"greater" chains rather than
   byte 0 — a real ~3.5x on near-duplicate structured data, though it
   does not by itself fix the single-repeated-byte pathology that made
-  the S2-R2 wiring attempt break the issue #179 speed guard.
+  the S2-R2 wiring attempt break the issue #179 speed guard. A `nice_len`
+  early exit (S2-A44) since: the walk stops visiting further candidates
+  once the best match found so far is at least `nice_len` long, cutting
+  candidate count rather than per-candidate cost — a real ~3.3x on the
+  same near-duplicate shape, compounding with length-prefix reuse, but
+  still no effect on the single-repeated-byte pathology (measured, not
+  assumed, before landing).
 
 - `src/sse.rs`: standalone secondary symbol estimation (SSE/APM) primitive
   for ROADMAP M3's oldest standing lead (`research/JOURNAL.md` S1-P1,
