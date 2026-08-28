@@ -46,7 +46,10 @@ def main() -> int:
     except json.JSONDecodeError:
         return 0
     tool = call.get("tool_name", "")
-    background = call.get("tool_input", {}).get("run_in_background")
+    tool_input = call.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    background = tool_input.get("run_in_background")
     if tool in DEFAULT_FOREGROUND and background is not True:
         return 0
     if tool in DEFAULT_BACKGROUND and background is False:
@@ -58,8 +61,9 @@ def main() -> int:
         "the moment your turn ends, and the completion notification never "
         "arrives (PR #271, run 33207936812). Run the command in the "
         "foreground (timeout goes up to 600000 ms); for a subagent pass "
-        "run_in_background: false. Work that cannot finish inside this "
-        "run belongs to the next wake, stated where that wake will read it.",
+        "run_in_background: false; a Workflow cannot run in CI at all. "
+        "Work that cannot finish inside this run belongs to the next "
+        "wake, stated where that wake will read it.",
         file=sys.stderr,
     )
     return 2
