@@ -117,6 +117,19 @@
     }
     .latest .id { color: var(--gold); font-family: "JetBrains Mono", monospace; }
 
+    .bench { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    .bench caption {
+      text-align: left; color: var(--muted); font-size: .85rem;
+      padding-bottom: .5rem;
+    }
+    .bench th, .bench td {
+      text-align: left; padding: .3rem .6rem; border-bottom: 1px solid var(--line);
+    }
+    .bench th { color: var(--muted); font-weight: 500; }
+    .bench td:last-child, .bench th:last-child { text-align: right; }
+    .bench td:last-child { font-family: "JetBrains Mono", monospace; color: var(--gold); }
+    .bench td:first-child { font-family: "JetBrains Mono", monospace; color: var(--starlight); }
+
     footer { text-align: center; color: var(--muted); font-size: .85rem; }
 
     [data-loading] { color: var(--dim); font-size: .85rem; font-style: italic; }
@@ -159,6 +172,14 @@
 
       <p class="asof" id="asof-line"></p>
 
+      <noscript>
+        <p class="asof">
+          This page renders status-data.json with JavaScript. Without it, read
+          the sources directly: ROADMAP.md for milestones,
+          research/progress.jsonl for experiments, linked below.
+        </p>
+      </noscript>
+
       <footer>
         <a href="/">mothergod</a> ·
         <a href="/agents.html">Agent telemetry</a> ·
@@ -186,14 +207,40 @@
 
       const verdict = document.getElementById('verdict-card');
       verdict.removeAttribute('data-loading');
+      const methods = (data.methods ?? []).map((m) => `
+        <p><strong>${escapeHtml(m.name)}.</strong> ${escapeHtml(m.doc)}</p>
+      `).join('');
       verdict.innerHTML = `
-        <b>${escapeHtml(data.phase)}</b>
-        <p><strong>Format version ${data.format_version}.</strong> ${escapeHtml(data.works_today)}</p>
+        <b>${escapeHtml(data.phase ?? 'phase unknown')}</b>
+        <p><strong>Format version ${data.format_version ?? '?'}.</strong>
+        Frame methods in this build, described by their own
+        <code>src/lib.rs</code> doc comments:</p>
+        ${methods}
       `;
 
       const benchmarks = document.getElementById('benchmarks-card');
       benchmarks.removeAttribute('data-loading');
-      benchmarks.innerHTML = `<p>${escapeHtml(data.benchmarks_note)}</p>`;
+      if (data.benchmarks?.bits_per_byte) {
+        const rows = Object.entries(data.benchmarks.bits_per_byte).map(([corpus, bpb]) => `
+          <tr><td>${escapeHtml(corpus)}</td><td>${escapeHtml(bpb)}</td></tr>
+        `).join('');
+        benchmarks.innerHTML = `
+          <table class="bench">
+            <caption>
+              The CI regression baseline (${escapeHtml(data.benchmarks.source)}):
+              mothergod's bits per byte on the in-repo generated corpora, lower
+              is better; a PR that regresses these fails the required ratio
+              check. The gzip/zstd/xz comparison on Silesia and Canterbury is
+              ROADMAP M2's last open box.
+            </caption>
+            <thead><tr><th scope="col">corpus</th><th scope="col">bits/byte</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+      } else {
+        benchmarks.textContent =
+          'bench/baseline.json could not be read at generation time.';
+      }
 
       const list = document.getElementById('milestones-list');
       list.removeAttribute('data-loading');
@@ -208,26 +255,30 @@
       const stats = document.getElementById('stats-grid');
       stats.removeAttribute('data-loading');
       const statEntries = [
-        [data.experiments.total, 'experiments recorded'],
-        [data.experiments.accepted, 'accepted'],
-        [data.experiments.rejected, 'rejected'],
-        [data.merged_prs_7d, 'commits merged, 7d'],
-        [data.recorded_experiments_7d, 'experiments, 7d'],
+        [data.experiments?.total, 'experiments recorded'],
+        [data.experiments?.accepted, 'accepted'],
+        [data.experiments?.rejected, 'rejected'],
+        [data.merged_commits_7d, 'commits merged, 7d'],
+        [data.experiments?.recent_7d, 'experiments, 7d'],
         [data.sloc_src, 'lines in src/'],
         [data.test_functions_src, 'unit tests in src/'],
       ];
       stats.innerHTML = statEntries.map(([n, label]) => `
-        <div class="stat"><span class="n">${n}</span><span class="label">${escapeHtml(label)}</span></div>
+        <div class="stat"><span class="n">${escapeHtml(n ?? 'n/a')}</span><span class="label">${escapeHtml(label)}</span></div>
       `).join('');
 
       const latest = document.getElementById('latest-experiment');
-      if (data.experiments.latest_id) {
+      if (data.experiments?.latest_id) {
         latest.innerHTML = `Latest: <span class="id">${escapeHtml(data.experiments.latest_id)}</span>: ${escapeHtml(data.experiments.latest_hypothesis)}`;
       }
 
+      const problems = (data.problems ?? []).length
+        ? ` ${data.problems.length} field(s) failed to generate; the deploy log has the diagnosis.`
+        : '';
       document.getElementById('asof-line').textContent =
-        `As of ${data.generated_at}. Regenerated by hand until research/JOURNAL.md's ` +
-        `S2-D1 scheduled-workflow line lands; see site-status/ for the generator.`;
+        `As of ${data.generated_at} (commit ${data.commit ?? 'unknown'}), ` +
+        'regenerated by .github/scripts/status-data.py on every site deploy: ' +
+        'daily, and on merges that change its sources.' + problems;
     }
 
     function escapeHtml(s) {

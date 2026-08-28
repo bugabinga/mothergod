@@ -1,9 +1,8 @@
 [workspace]
-members = ["bench", "site-status"]
+members = ["bench"]
 # CLAUDE.md's required checks invoke bare `cargo <cmd>` (no --workspace), so
-# make that cover the bench and site-status crates too, not just the root
-# package.
-default-members = [".", "bench", "site-status"]
+# make that cover the bench crate too, not just the root package.
+default-members = [".", "bench"]
 
 [package]
 name = "mothergod"
