@@ -418,14 +418,23 @@ fn to_u32(i: usize) -> u32 {
 /// Wired into `dp_round`'s once-per-position normal-match search
 /// (`research/JOURNAL.md` S1-P2/S2-A48), not [`parse_greedy`]'s
 /// once-per-token search, which still uses the hash-chain `MatchFinder`
-/// unchanged. One thing this finder still does not implement, open S1-P2
-/// scope: eviction of positions older than [`WINDOW`] (the tree only
-/// grows, so nothing yet bounds it to a 1 MiB working set the way
-/// `MatchFinder`'s recency-ordered chain does by construction) — every
-/// position inserted this crate ever encodes stays reachable, and a match
-/// past [`WINDOW`] is filtered at report time (below), not pruned from the
-/// tree, so long inputs pay unbounded tree-walk cost for buckets `WINDOW`
-/// cannot use.
+/// unchanged.
+///
+/// [`Self::insert_and_find`] evicts positions older than [`WINDOW`]
+/// from the tree instead of only filtering them at report time
+/// (`research/JOURNAL.md` S2-A49, closing that half of the open S1-P2
+/// scope): a node's `left`/`right` fields are set exactly once, at its
+/// own insertion, from whatever the bucket's tree contained at that
+/// moment — every position they can ever reference was therefore
+/// already inserted earlier, so a node's whole subtree holds positions
+/// no younger than the node itself. The first out-of-window node the
+/// walk reaches is thus a safe cut point: it and everything beneath it
+/// are *all* out of window (distance from any future `i` only grows),
+/// so ending the walk there both drops the dead weight permanently
+/// (nothing re-links it, so it becomes unreachable from `head[h]`) and
+/// never discards a candidate that could have been reported. Remaining
+/// S1-P2 scope: per-position adaptive prices, still untouched from
+/// S2-A42.
 ///
 /// A straight swap into `dp_round` in [`Self::insert_and_find`]'s place of
 /// `MatchFinder::insert` + `find_best` was tried and rejected twice before
@@ -588,10 +597,18 @@ impl<'d> BinaryTreeMatchFinder<'d> {
 
         while cur != NO_POSITION && depth < max_depth && best_len < nice_len {
             let cur_pos = cur as usize;
+            let distance = i - cur_pos; // cur_pos was inserted earlier: i > cur_pos always.
+            if distance > WINDOW {
+                // cur_pos and its whole subtree are out of window and can
+                // only get farther as `i` grows (struct docs): stop the
+                // walk here rather than linking cur_pos back into either
+                // chain, which evicts it and everything beneath it from
+                // the tree for good.
+                break;
+            }
             let start = less_common.min(greater_common);
             let common = suffix_common_len(self.data, cur_pos, i, start, nice_len);
-            let distance = i - cur_pos; // cur_pos was inserted earlier: i > cur_pos always.
-            if common > best_len && distance <= WINDOW {
+            if common > best_len {
                 best_len = common;
                 best_distance = NonZeroU32::new(to_u32(distance));
             }
@@ -1810,6 +1827,65 @@ mod tests {
             elapsed < std::time::Duration::from_secs(3),
             "300 near-duplicate 200-byte blocks took {elapsed:?} to insert, expected well \
              under 3s; likely a regression to length-prefix reuse always starting from 0"
+        );
+    }
+
+    #[test]
+    fn binary_tree_finds_match_exactly_at_window_boundary_but_not_past_it() {
+        let mut at_boundary = vec![0xAAu8; WINDOW + 3];
+        at_boundary[0..3].copy_from_slice(b"xyz");
+        at_boundary[WINDOW..WINDOW + 3].copy_from_slice(b"xyz");
+        let mut finder = BinaryTreeMatchFinder::new(&at_boundary);
+        let _ = finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
+        let (_, distance) = finder
+            .insert_and_find(WINDOW, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN)
+            .expect("distance == WINDOW is still in range");
+        assert_eq!(distance.get() as usize, WINDOW);
+
+        let mut past_boundary = vec![0xAAu8; WINDOW + 4];
+        past_boundary[0..3].copy_from_slice(b"xyz");
+        past_boundary[WINDOW + 1..WINDOW + 4].copy_from_slice(b"xyz");
+        let mut finder = BinaryTreeMatchFinder::new(&past_boundary);
+        let _ = finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
+        assert_eq!(
+            finder.insert_and_find(WINDOW + 1, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN),
+            None,
+            "distance == WINDOW + 1 must never be reported"
+        );
+    }
+
+    #[test]
+    fn binary_tree_evicts_stale_positions_from_the_tree_structure() {
+        // Same shape as the boundary test above, but checked structurally:
+        // a match past WINDOW was already unreachable through the public
+        // API before this fix (filtered at report time). What's new is
+        // that the stale node is gone from the tree itself, not just
+        // skipped when reporting -- proven by walking every position
+        // reachable from the bucket's root after the second insert.
+        let mut data = vec![0xAAu8; WINDOW + 4];
+        data[0..3].copy_from_slice(b"xyz");
+        data[WINDOW + 1..WINDOW + 4].copy_from_slice(b"xyz");
+        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let _ = finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
+        let _ = finder.insert_and_find(WINDOW + 1, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
+
+        let h = prefix_hash(&data, 0);
+        let mut stack = vec![finder.head[h]];
+        let mut reachable = Vec::new();
+        while let Some(cur) = stack.pop() {
+            if cur == NO_POSITION {
+                continue;
+            }
+            let p = cur as usize;
+            reachable.push(p);
+            stack.push(finder.left[p]);
+            stack.push(finder.right[p]);
+        }
+        assert_eq!(
+            reachable,
+            vec![WINDOW + 1],
+            "position 0 must be evicted from the tree once it falls past WINDOW, not just \
+             excluded from the reported match"
         );
     }
 }

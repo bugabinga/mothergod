@@ -462,6 +462,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `lz::BinaryTreeMatchFinder::insert_and_find` now evicts a candidate from
+  the tree the instant its distance exceeds `WINDOW`, instead of leaving it
+  reachable and filtering it only at report time (`research/JOURNAL.md`
+  S1-P2, S2-A49). Closes the tree-walk-cost half of the doc comment's
+  standing complaint on inputs over `WINDOW` (2^20 bytes); provably no bpb
+  change, since in-window candidates are always visited before any
+  out-of-window one, so no previously reported match can become
+  unreported.
 - The allowance-sensing chain went blind on 2026-08-26 when the rate-limit
   event payload moved utilization from flat fields into nested
   `unifiedWindows`: the audit artifact's allowance index emitted empty, the
