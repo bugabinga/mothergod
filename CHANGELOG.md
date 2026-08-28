@@ -8,6 +8,18 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `lz::PriceCounts::observe` (`research/JOURNAL.md` S1-P2, S2-A50):
+  standalone primitive that bumps one already-decided token's frequency
+  counts, factored out of `PriceCounts::tally` (which now calls it in a
+  loop, behavior unchanged). `tally` only ever replays a *complete* token
+  sequence; closing S1-P2's other named gap (the DP's price table is
+  frozen per round, not adaptive per position) needs `dp_round`'s forward
+  pass to feed its own already-finalized moves into a running table as it
+  advances, which `tally` cannot do. Not yet called from `dp_round`, the
+  same standalone-primitive-first order `BinaryTreeMatchFinder` (S2-A42)
+  and `Sse` (S2-A40) shipped in. No bpb change: private, unwired, and
+  `tally`'s refactor is proven behavior-preserving by a dedicated test.
+
 - `lz::parse_optimal`'s DP now searches matches with `BinaryTreeMatchFinder`
   instead of the hash-chain `MatchFinder` (`research/JOURNAL.md` S1-P2,
   S2-A48): -0.05376 bits/byte net on `bench/baseline.json`'s 11 train

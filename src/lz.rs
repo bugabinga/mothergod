@@ -944,29 +944,43 @@ impl PriceCounts {
         let mut counts = Self::new();
         let mut pos = 0usize;
         for token in tokens {
-            match *token {
-                Token::Literal(byte) => {
-                    let context = if pos > 0 {
-                        usize::from(data[pos - 1] >> 4)
-                    } else {
-                        0
-                    };
-                    counts.literal[context * 256 + usize::from(byte)] += 1;
-                    pos += 1;
-                }
-                Token::Match { len, distance } => {
-                    counts.length[bucket(len)] += 1;
-                    counts.offset[bucket(distance.get())] += 1;
-                    pos += len as usize;
-                }
-                Token::Rep { len, .. } => {
-                    counts.length[bucket(len)] += 1;
-                    counts.rep += 1;
-                    pos += len as usize;
-                }
-            }
+            let prev_byte = if pos > 0 { Some(data[pos - 1]) } else { None };
+            counts.observe(*token, prev_byte);
+            pos += match *token {
+                Token::Literal(_) => 1,
+                Token::Match { len, .. } | Token::Rep { len, .. } => len as usize,
+            };
         }
         counts
+    }
+
+    /// Bumps the counts for one already-decided `token`, whose preceding
+    /// byte (for a literal's context; `None` at the start of the stream,
+    /// matching [`Self::tally`]'s own `pos > 0` check) is `prev_byte`.
+    ///
+    /// Lets a caller build up frequency counts one finalized token at a
+    /// time — the DP price table is currently frozen per round (`JOURNAL`
+    /// S1-P2's named gap), and closing that gap needs [`dp_round`]'s
+    /// forward pass to feed its own already-finalized moves back into a
+    /// running table as it advances, which [`Self::tally`] cannot do
+    /// (it only ever replays a *complete* token sequence). Not yet called
+    /// from [`dp_round`]: this is the standalone primitive, matching how
+    /// [`BinaryTreeMatchFinder`] shipped before its own wiring slice.
+    fn observe(&mut self, token: Token, prev_byte: Option<u8>) {
+        match token {
+            Token::Literal(byte) => {
+                let context = prev_byte.map_or(0, |b| usize::from(b >> 4));
+                self.literal[context * 256 + usize::from(byte)] += 1;
+            }
+            Token::Match { len, distance } => {
+                self.length[bucket(len)] += 1;
+                self.offset[bucket(distance.get())] += 1;
+            }
+            Token::Rep { len, .. } => {
+                self.length[bucket(len)] += 1;
+                self.rep += 1;
+            }
+        }
     }
 
     /// Derives a [`PriceTable`] from these counts. `total_tokens` prices
@@ -1887,5 +1901,78 @@ mod tests {
             "position 0 must be evicted from the tree once it falls past WINDOW, not just \
              excluded from the reported match"
         );
+    }
+
+    #[test]
+    fn price_counts_observe_bumps_literal_by_prev_byte_context() {
+        let mut counts = PriceCounts::new();
+        counts.observe(Token::Literal(b'x'), Some(0x35));
+        assert_eq!(counts.literal[3 * 256 + usize::from(b'x')], 2);
+        assert_eq!(counts.length, vec![1; LENGTH_BUCKETS]);
+        assert_eq!(counts.offset, vec![1; OFFSET_BUCKETS]);
+        assert_eq!(counts.rep, 1);
+    }
+
+    #[test]
+    fn price_counts_observe_literal_at_stream_start_uses_context_zero() {
+        let mut counts = PriceCounts::new();
+        counts.observe(Token::Literal(b'z'), None);
+        assert_eq!(counts.literal[usize::from(b'z')], 2);
+    }
+
+    #[test]
+    fn price_counts_observe_match_bumps_length_and_offset_only() {
+        let mut counts = PriceCounts::new();
+        let distance = NonZeroU32::new(100).unwrap();
+        counts.observe(Token::Match { len: 10, distance }, Some(0));
+        assert_eq!(counts.length[bucket(10)], 2);
+        assert_eq!(counts.offset[bucket(100)], 2);
+        assert_eq!(counts.rep, 1);
+    }
+
+    #[test]
+    fn price_counts_observe_rep_bumps_length_and_rep_only() {
+        let mut counts = PriceCounts::new();
+        counts.observe(
+            Token::Rep {
+                len: 6,
+                slot: RepSlot::First,
+            },
+            Some(0),
+        );
+        assert_eq!(counts.length[bucket(6)], 2);
+        assert_eq!(counts.rep, 2);
+        assert_eq!(counts.offset, vec![1; OFFSET_BUCKETS]);
+    }
+
+    #[test]
+    fn price_counts_observe_accumulates_across_calls() {
+        let mut counts = PriceCounts::new();
+        counts.observe(Token::Literal(b'a'), None);
+        counts.observe(Token::Literal(b'a'), None);
+        assert_eq!(counts.literal[usize::from(b'a')], 3);
+    }
+
+    #[test]
+    fn price_counts_observe_matches_tally_for_the_same_sequence() {
+        let data = b"abracadabra";
+        let tokens = parse_greedy(data);
+        let via_tally = PriceCounts::tally(&tokens, data);
+
+        let mut via_observe = PriceCounts::new();
+        let mut pos = 0usize;
+        for token in &tokens {
+            let prev_byte = if pos > 0 { Some(data[pos - 1]) } else { None };
+            via_observe.observe(*token, prev_byte);
+            pos += match *token {
+                Token::Literal(_) => 1,
+                Token::Match { len, .. } | Token::Rep { len, .. } => len as usize,
+            };
+        }
+
+        assert_eq!(via_tally.literal, via_observe.literal);
+        assert_eq!(via_tally.length, via_observe.length);
+        assert_eq!(via_tally.offset, via_observe.offset);
+        assert_eq!(via_tally.rep, via_observe.rep);
     }
 }
