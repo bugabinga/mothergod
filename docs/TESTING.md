@@ -109,6 +109,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - Old-version frames stay decodable (CLAUDE.md rule 5): every historical
   `FORMAT_VERSION`'s golden pair is kept, never replaced, so this is a
   running test rather than a claim in a doc comment.
+- An encoder-only change (no decode difference) is not a `FORMAT_VERSION`
+  bump; it moves the current-version pair to `tests/golden/superseded/`
+  (decode-only from then on) and regenerates the pair in `tests/golden/`,
+  declared in the PR body with the measured justification, the
+  `bench/baseline.json` pattern (issue #290's ruling; mechanics in
+  `tests/golden.rs`'s module doc).
 
 ## 6. Differential oracle (during the M1 port)
 

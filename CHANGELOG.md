@@ -389,6 +389,20 @@ All notable changes to this project are documented here. Format follows
   rendering, the CI wiring, and the scheduled `corpus-fetch` workflow
   (issue #231) remain.
 
+### Changed
+
+- `tests/golden.rs`'s re-encode pin (issue #290's ruling): an encoder-only
+  change (a parse/pricing heuristic that picks a different valid token
+  sequence, with `decode` byte-for-byte unchanged) no longer needs a
+  `FORMAT_VERSION` bump to pass. `FORMAT_VERSION` versions the decode
+  contract only. Such a change now moves the current-version fixture pair
+  into the new `tests/golden/superseded/` (decode-only forever after,
+  proving old frames still decode) and regenerates the pair in
+  `tests/golden/`, declared in the PR body with measured justification, the
+  `bench/baseline.json` pattern. CLAUDE.md rule 5 and `docs/TESTING.md`
+  layer 5 gained one clarifying line each. Unblocks `research/JOURNAL.md`
+  S1-P2's `dp_round` wiring (S2-A47, issue #290).
+
 ### Removed
 
 - The interactive `@claude` mention agent (operator directive). Mentions
