@@ -41,10 +41,16 @@ a PAT-opened PR is operator-attributed and wakes a full BDFL run on its own PR
 Prints the new commit SHA on stdout, which is the argument `settle-push <pr>
 --sha <that>` wants.
 
-Usage: push-branch <branch|pr-number> <path>... < commit message
+Usage: push-branch <branch|pr-number> <path>... [--delete <path>...] < commit message
 
 A number is read as a PR and resolved to its head ref, so a session pushing to
 a PR it did not open never has to name that branch and get it wrong (#133).
+
+Deletion is explicit, never inferred: a path after `--delete` is removed from
+the branch's tree, and it must already be gone from this checkout, the mirror
+of the exists check on pushed paths, so a typo cannot silently delete and a
+forgotten `git rm` cannot silently keep. Renames are a push plus a delete of
+the old path, one commit.
 
 """
 
@@ -162,21 +168,37 @@ def main() -> int:
         die("usage: push-branch <branch|pr-number> <path>... < commit message")
     if not REPO:
         die("GITHUB_REPOSITORY is unset; this runs inside the repo's workflows")
-    target, paths = argv[0], argv[1:]
+    target, rest = argv[0], argv[1:]
+    if "--delete" in rest:
+        cut = rest.index("--delete")
+        paths, deletions = rest[:cut], rest[cut + 1 :]
+        if not deletions:
+            die("--delete names the paths to remove and none followed it")
+    else:
+        paths, deletions = rest, []
+    if not paths and not deletions:
+        die("usage: push-branch <branch|pr-number> <path>... [--delete <path>...] < commit message")
 
     for p in paths:
         if not os.path.isfile(p):
             die(
                 f"{p} is not a file in this checkout.",
-                "paths are repo-relative and must exist; this pushes content, "
-                "it does not delete or move.",
+                "paths are repo-relative and must exist; to remove a file from "
+                "the branch, name it after --delete.",
+            )
+    for p in deletions:
+        if os.path.exists(p):
+            die(
+                f"{p} still exists in this checkout but is listed after --delete.",
+                "remove it locally first; the checkout is the source of truth "
+                "this push mirrors.",
             )
 
     message = sys.stdin.read().strip()
     if not message:
         die("the commit message comes from stdin and it is empty")
 
-    needs_admin = [p for p in paths if p.startswith(ADMIN_PREFIX)]
+    needs_admin = [p for p in paths + deletions if p.startswith(ADMIN_PREFIX)]
     if needs_admin:
         token = os.environ.get("GH_ADMIN_TOKEN", "")
         if not token:
@@ -200,7 +222,7 @@ def main() -> int:
     else:
         base_sha, action = api("GET", "git/ref/heads/main", token)["object"]["sha"], "create"
 
-    guard_not_stale(branch, base_sha, paths)
+    guard_not_stale(branch, base_sha, paths + deletions)
 
     base_tree = api("GET", f"git/commits/{base_sha}", token)["tree"]["sha"]
     tree = []
@@ -212,6 +234,9 @@ def main() -> int:
         # unrunnable and fails at its first call site, not at this one.
         mode = "100755" if os.access(p, os.X_OK) else "100644"
         tree.append({"path": p, "mode": mode, "type": "blob", "sha": blob["sha"]})
+    # A null sha is the tree API's deletion marker: the entry removes `p`
+    # from the base tree instead of writing a blob.
+    tree.extend({"path": p, "mode": "100644", "type": "blob", "sha": None} for p in deletions)
 
     new_tree = api("POST", "git/trees", token, {"base_tree": base_tree, "tree": tree})
     commit = api(
