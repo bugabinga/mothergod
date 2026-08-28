@@ -1,0 +1,65 @@
+# Scheduled cargo-fuzz smoke run.
+#
+# ROADMAP M4's "cargo-fuzz targets ... in scheduled CI", journal lead S1-P7:
+# `fuzz/` (research/JOURNAL.md S2-A25, issue #53) has carried two libFuzzer
+# targets — `decode_arbitrary` (hard rule 2: decode never panics or
+# overallocates unbounded on any input) and `roundtrip` (hard rule 1:
+# decompress(compress(x)) == x) — since 2026-08-24, smoke-verified locally
+# only. This is the scheduled run S2-A25 named as remaining scope: each
+# target gets a time-boxed run, not the fast per-PR gate, because libFuzzer's
+# sanitizer-coverage instrumentation is nightly-only and a real fuzz run's
+# runtime doesn't belong on every push. A found crasher fails the job here;
+# promoting it to a `tests/adversarial/` regression seed is a follow-up PR,
+# same as any other bug found in CI.
+name: fuzz-check
+
+on:
+  schedule:
+    # Sunday 06:13 UTC: same weekly cadence as the other advisory sweeps
+    # (codeql 04:07, agent-model-intel 05:07, corpus-fetch-check 05:41),
+    # offset so they don't contend for runners.
+    - cron: "13 6 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-check
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # fuzz/rust-toolchain.toml pins nightly; install it explicitly rather
+      # than relying on rustup's implicit auto-install, so a missing
+      # toolchain fails loudly instead of silently costing the first
+      # fuzz-run step its time budget.
+      - run: rustup toolchain install nightly --profile minimal --no-self-update
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ runner.os }}-0.13.2
+      # Guarded by the binary, not left to `cargo install`'s own check: the
+      # cache restores only the binary, not ~/.cargo/.crates.toml, so an
+      # unguarded install would rebuild from source on every hit.
+      - run: test -x ~/.cargo/bin/cargo-fuzz || cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: fuzz decode_arbitrary
+        working-directory: fuzz
+        run: cargo fuzz run decode_arbitrary -- -max_total_time=30
+      - name: fuzz roundtrip
+        working-directory: fuzz
+        run: cargo fuzz run roundtrip -- -max_total_time=30
+      - name: upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
