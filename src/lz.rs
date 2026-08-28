@@ -80,8 +80,11 @@ const NICE_LEN_OPTIMAL: usize = 128;
 /// hash).
 const HASH_BITS: u32 = 17;
 
-/// Repeat-offset cache slot count (`JOURNAL` S1-A3: 3-slot cache).
-const REP_SLOTS: usize = 3;
+/// Repeat-offset cache slot count (`JOURNAL` S1-A3: 3-slot cache). Also
+/// [`crate::codec`]'s `models.slot` alphabet size: one source of truth for
+/// both, since the two must stay in lockstep or a rep symbol decodes to a
+/// slot the cache doesn't have.
+pub(crate) const REP_SLOTS: usize = 3;
 
 /// Cache-empty sentinel in the match finder's hash chains: no valid
 /// position, ever, since positions are assigned from `0`.
@@ -115,12 +118,26 @@ impl RepSlot {
     /// All slots, most- to least-recently-used order.
     const ALL: [Self; REP_SLOTS] = [Self::First, Self::Second, Self::Third];
 
-    /// This slot's position in [`RepCache`]'s backing array.
-    const fn index(self) -> usize {
+    /// This slot's position in [`RepCache`]'s backing array, and the
+    /// [`Model`](crate::model::Model) symbol [`crate::codec`] codes it as.
+    pub(crate) const fn index(self) -> usize {
         match self {
             Self::First => 0,
             Self::Second => 1,
             Self::Third => 2,
+        }
+    }
+
+    /// Inverse of [`Self::index`]. [`Model::decode`](crate::model::Model::decode)
+    /// over a [`REP_SLOTS`]-symbol alphabet always returns a value `<
+    /// REP_SLOTS`, never anything adversarial input could push out of
+    /// range, so the only three cases below are exhaustive without a
+    /// fallback panic.
+    pub(crate) const fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::First,
+            1 => Self::Second,
+            _ => Self::Third,
         }
     }
 }
