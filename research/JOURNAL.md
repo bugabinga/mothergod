@@ -2288,3 +2288,36 @@ record.
   `monster`, the OSS-Fuzz application (needs an operator contact
   email, `blocked-on-human` when picked up), and an explicit
   allocation-limiter target beyond `MAX_DECODED_LEN`'s existing bound.
+- S2-A54 | ACCEPTED | S2-A52 shipped `silesia_report` capability-only:
+  Silesia's full corpus at the measured `xml` throughput (~0.14 MB/s
+  single-threaded) is on the order of half an hour serially, too slow for
+  one PR's by-hand turn. Closed that gap by parallelizing instead of
+  waiting for a scheduled workflow: `mothergod_bench::reference::measure_all`
+  runs one OS thread per file (`std::thread::scope`, no new dependency) —
+  every file's measurement (`mothergod::compress` plus the three
+  reference-compressor shells) touches only its own bytes, no shared
+  mutable state, so spreading independent CPU-bound work across cores
+  changes wall-clock time only, never which bytes get compressed or how.
+  `finals_report` and `silesia_report` both call this one function now
+  instead of each looping over its files in-process, collapsing a
+  near-duplicate measurement loop that existed only because the two
+  binaries fetch their corpora differently (tarball vs. 12 independent
+  files) into one place that has nothing to do with that difference.
+  | Measured: 8m20s wall clock (22m15s total CPU) on 4 cores for the full
+  12-file, ~212 MB Silesia corpus, against the serial ~half-hour estimate
+  `finals_report`'s module doc carried; `cargo x check` clean; `cargo
+  clippy -p mothergod-bench --all-targets --features corpus-fetch --
+  --deny warnings`, `cargo test -p mothergod-bench --features
+  corpus-fetch --all-targets -- --include-ignored` (114 passed, up from
+  113: the new `measure_all_measures_every_file_and_preserves_input_order`
+  test), `cargo doc -p mothergod-bench --features corpus-fetch --no-deps`
+  all clean, matching `corpus-fetch-check.yml`'s exact commands;
+  `baseline_gate check` unaffected (11 cases, no regression) since no
+  codec code changed. | Real Silesia numbers, landed in
+  `docs/benchmarks/silesia.md`: aggregate 2.069848 bits/byte vs zstd
+  -19's 1.996629 and xz -9e's 1.829058 (regret +0.240790 against the
+  stronger reference); mothergod already beats both references outright
+  on `ooffice` (regret -0.172963). Closes S2-D1/S1-D2's "real Silesia
+  finals numbers" line and ROADMAP M2's report line, done by hand;
+  nightly/weekly scheduling of either report is still unwired (a
+  workflow file, `agent-system` scope, not this session's to land).

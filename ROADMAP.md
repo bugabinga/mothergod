@@ -134,8 +134,9 @@ agent processes. Done 2026-08-20.
       inside the codec of record.
 - [x] CI benchmark gate: PR fails on regression vs `bench/baseline.json`
       (required `ratio` check, docs/TESTING.md layer 7).
-- [ ] Nightly/weekly report: bits/byte vs gzip/zstd/xz, per-dataset graphs
-      rendered from `research/progress.jsonl` into `docs/benchmarks/`.
+- [x] Report: bits/byte vs gzip/zstd/xz, per-dataset, in `docs/benchmarks/`
+      (`canterbury.md`, `silesia.md`). By hand, not nightly/weekly yet —
+      no scheduled job regenerates either file on a cadence.
 
 ## M3 — Close the gaps (research program)
 

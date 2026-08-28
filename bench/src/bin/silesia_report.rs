@@ -14,25 +14,22 @@
 //! second hardcoded file-name list, so `bench/corpus.toml` stays the one
 //! place that names which files belong to Silesia.
 //!
-//! Not yet run: `finals_report`'s module doc measured `xml`, Silesia's
-//! smallest file (5.3 MB), at 39s (~0.14 MB/s) end to end under this
-//! codec's optimal-parse LZ. Silesia is ~200 MB total across the 12
-//! files, on the order of half an hour of `mothergod::compress` time —
-//! too slow for one PR's by-hand run. `docs/benchmarks/silesia.md` does
-//! not exist in the tree yet; this binary is the capability, staged the
-//! same way `finals_report` was (#252) before `canterbury.md` was
-//! generated and committed in a follow-up (#253). Most naturally lands
-//! behind the scheduled `corpus-fetch` workflow (issue #231) once
-//! something schedules a run long enough to carry it, rather than forced
-//! into a slow by-hand run here.
+//! `finals_report`'s module doc measured `xml`, Silesia's smallest file
+//! (5.3 MB), at 39s (~0.14 MB/s) single-threaded under this codec's
+//! optimal-parse LZ; run one file after another, the full ~200 MB corpus
+//! is on the order of half an hour, too slow for one PR's by-hand run.
+//! `mothergod_bench::reference::measure_all` spreads the 12 independent
+//! files across a thread per file instead, so the wall-clock cost is that
+//! half hour divided by however many cores the runner has, not paid
+//! serially.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint
 //! -- docs/benchmarks/silesia.md` to check).
 
 use mothergod_bench::corpus::{ManifestEntry, decompress_silesia, fetch_and_cache, parse_manifest};
-use mothergod_bench::finals::{FileMeasurement, Versions, format_report};
-use mothergod_bench::reference::{compressed_len, generated_at, tool_version};
+use mothergod_bench::finals::{Versions, format_report};
+use mothergod_bench::reference::{generated_at, measure_all, tool_version};
 use mothergod_bench::repo_root;
 use std::path::Path;
 use std::process::ExitCode;
@@ -63,31 +60,6 @@ fn fetch_silesia_files(
         files.push((name.to_string(), data));
     }
     Ok(files)
-}
-
-/// Compresses every fetched file with `mothergod::compress` and the three
-/// pinned reference compressors, on the same bytes.
-fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, String> {
-    let mut measurements = Vec::with_capacity(files.len());
-    for (name, data) in files {
-        println!("measuring {name} ({} bytes)...", data.len());
-        let mothergod_len = mothergod::compress(data).len();
-        let gzip_len = compressed_len("gzip", &["-9", "-c"], data)
-            .map_err(|err| format!("gzip failed on {name}: {err}"))?;
-        let zstd_len = compressed_len("zstd", &["-19", "-c"], data)
-            .map_err(|err| format!("zstd failed on {name}: {err}"))?;
-        let xz_len = compressed_len("xz", &["-9e", "-c"], data)
-            .map_err(|err| format!("xz failed on {name}: {err}"))?;
-        measurements.push(FileMeasurement {
-            name: name.clone(),
-            original_len: data.len(),
-            mothergod_len,
-            gzip_len,
-            zstd_len,
-            xz_len,
-        });
-    }
-    Ok(measurements)
 }
 
 fn main() -> ExitCode {

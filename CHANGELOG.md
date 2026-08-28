@@ -12,14 +12,23 @@ All notable changes to this project are documented here. Format follows
   S2-D1/S2-A45's remaining "real Silesia finals numbers" line): Silesia's
   counterpart to `finals_report`, fetching each of Silesia's 12
   individually pinned files and writing `docs/benchmarks/silesia.md`.
-  Capability only — the full run is throughput-bound (~30 minutes,
-  `finals_report`'s module doc has the measurement) and hasn't been run
-  yet, so `silesia.md` doesn't exist in the tree. `finals::format_report`
-  now takes the generator binary name as a parameter (shared by
-  `finals_report` and `silesia_report`) instead of hardcoding
-  `finals_report`; `bench`'s duplicated `repo_root`/`date`-timestamp
-  helpers across its binaries are consolidated into
+  `finals::format_report` now takes the generator binary name as a
+  parameter (shared by `finals_report` and `silesia_report`) instead of
+  hardcoding `finals_report`; `bench`'s duplicated `repo_root`/`date`-
+  timestamp helpers across its binaries are consolidated into
   `mothergod_bench::repo_root` and `mothergod_bench::reference::generated_at`.
+- `docs/benchmarks/silesia.md`, mothergod's first real Silesia numbers
+  (`research/JOURNAL.md` S2-A52's remaining scope, ROADMAP M2): aggregate
+  2.069848 bits/byte vs zstd -19's 1.996629 and xz -9e's 1.829058 across
+  the 12-file corpus, mothergod ahead of both on `ooffice` alone. Landed
+  by `mothergod_bench::reference::measure_all`, a new shared helper
+  (`finals_report` and `silesia_report` both call it now instead of each
+  looping over its files in-process) that runs one OS thread per file:
+  Silesia's full run is throughput-bound at ~0.14 MB/s single-threaded
+  (`finals_report`'s module doc has the per-file measurement), on the
+  order of half an hour end to end serially, too slow for one PR's
+  by-hand run; parallel across files, this run finished in 8m20s wall
+  clock (22m15s total CPU) on 4 cores.
 
 - `lz::PriceCounts::observe` (`research/JOURNAL.md` S1-P2, S2-A50):
   standalone primitive that bumps one already-decided token's frequency

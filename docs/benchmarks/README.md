@@ -16,27 +16,10 @@ as the other:
   corpus (`research/corpus/POLICY.md`'s held-out finals). This is the
   first table in this directory CLAUDE.md rule 4's "X bits/byte on
   \<corpus\>" applies to without qualification.
+- **`silesia.md`**: the same shape as `canterbury.md`, over Silesia's 12
+  individually pinned files (`research/JOURNAL.md` S2-A52).
 
 **Read the `.md` files, not raw JSON**, for the current numbers.
-
-## What this is not, yet
-
-ROADMAP M2 wants "bits/byte vs gzip/zstd/xz, per-dataset graphs ... into
-`docs/benchmarks/`". `canterbury.md` is the gzip/zstd/xz-comparison half of
-that line; one thing is still missing, named as remaining S2-D1/M2 scope,
-not silently dropped:
-
-- **No Silesia numbers yet.** `bin/silesia_report.rs` exists (mirrors
-  `finals_report.rs`, over Silesia's 12 individually pinned files) but has
-  never been run, so `silesia.md` doesn't exist in this directory. Canterbury
-  is ~2.7 MB, under a minute of `mothergod::compress` time; the full ~200 MB
-  Silesia corpus would run this codec's optimal-parse LZ for on the order of
-  half an hour (measured: 5.3 MB in 39s, ~0.14 MB/s) — too slow for a
-  by-hand run; `bin/finals_report.rs`'s module doc has the full reasoning.
-  Silesia numbers most naturally land as an extension of the weekly
-  `corpus-fetch-check.yml` (issue #231's outcome), which already fetches
-  the pinned corpus on a schedule, once something schedules a run long
-  enough to carry them.
 
 ## Regenerating
 
@@ -66,7 +49,8 @@ worth re-measuring.
 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report
 ```
 
-Silesia's counterpart: same shape, ~30 minutes end to end (see "What this
-is not, yet" above), writes `silesia.md`. Nobody has run this to
-completion yet — the first real run is remaining scope, not this
-capability.
+Silesia's counterpart, writes `silesia.md`. Measurement is parallel
+(`mothergod_bench::reference::measure_all` runs one thread per file), so
+this finishes in single-digit minutes on a multi-core machine rather than
+the roughly half hour a serial pass over ~200 MB would take; also by
+hand, re-run under the same conditions as `finals_report`.
