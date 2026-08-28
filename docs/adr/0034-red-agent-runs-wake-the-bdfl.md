@@ -1,6 +1,6 @@
 # ADR-0034: Red agent runs wake the BDFL
 
-Status: accepted · Date: 2026-08-27 · Prompted by issue #191
+Status: superseded by ADR-0036 · Date: 2026-08-27 · Prompted by issue #191
 
 ## Context
 

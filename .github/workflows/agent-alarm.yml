@@ -9,6 +9,10 @@
 #   debouncing (ADR-0014), not failures.
 # - An absent run creates no completion event, so a cron that never
 #   fires stays covered only by the scheduled wakes' state checks.
+# - A red whose only failing step is agent-review's refusal sentinel
+#   never dispatches (ADR-0036): that red is the machinery speaking,
+#   not failing, and a step rename over there fails open to spurious
+#   wakes, never to silence.
 # - Nobody watches the watcher, accepted: no model runs here, and the
 #   moving parts are one run-list read and one dispatch.
 name: agent-alarm
@@ -80,10 +84,35 @@ jobs:
               ;;
           esac
 
+      # agent-review's "A green review means a review happened" step
+      # turns the action's silent anti-tamper refusal into a deliberate
+      # red so an unreviewed PR cannot look reviewed. That red is a
+      # signal with an owner: its PR comment names the next step, and
+      # both wakes it ever caused found nothing to rescue (#286, #292;
+      # ADR-0036). Matched by step name, the interface with
+      # agent-review.yml; any other failing step still wakes the fixer.
+      - name: A refusal red is a signal, not a failure
+        id: refusal
+        if: steps.dedup.outputs.fresh == 'true' &&
+          github.event.workflow_run.name == 'agent-review'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          refused="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$THIS_ID/jobs" \
+            --jq '[.jobs[].steps[] | select(.conclusion == "failure") | .name]
+                  | (length > 0) and all(. == "A green review means a review happened")')"
+          echo "refused=$refused" >> "$GITHUB_OUTPUT"
+          if [ "$refused" = "true" ]; then
+            echo "anti-tamper refusal; the comment on the PR owns the next step"
+          fi
+
       # The PAT, not github.token: the wake predicate admits only
       # operator-attributed dispatches (issue #50).
       - name: Wake agent-bdfl
-        if: steps.dedup.outputs.fresh == 'true'
+        if: steps.dedup.outputs.fresh == 'true' &&
+          steps.refusal.outputs.refused != 'true'
         env:
           GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
         run: gh workflow run agent-bdfl.yml --repo "$GITHUB_REPOSITORY" -f source=alarm
