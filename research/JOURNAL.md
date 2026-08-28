@@ -155,6 +155,43 @@ record.
   safely replace `MatchFinder` in `dp_round`. Candidate code (the
   `dp_round`/`next_match_candidate` wiring and `MAX_TREE_DEPTH_OPTIMAL`)
   reverted in full; `BinaryTreeMatchFinder` itself (S2-A42) is unaffected.
+- S2-R3 | REJECTED | S1-P2's other wiring slice: fed `dp_round`'s own
+  forward pass into `PriceCounts::observe` (S2-A50) as it advanced,
+  rebuilding `PriceTable` from the running counts every
+  `PRICE_REBUILD_INTERVAL` (4,096) finalized moves instead of leaving
+  prices frozen at the round's seed table for its whole pass. Every
+  position's `dp[i]`/`parent[i]` is finalized in strictly increasing order
+  (proved in S2-A50), so observing `parent[i]`'s move the instant the loop
+  reaches `i` is sound regardless of whether `i` ends up on the final
+  backtrace. Measured on `bench::baseline`'s 11 train-tier cases and the
+  two sealed-only kinds: train net effect ~−0.050 b/B
+  (`entropy_ladder_h4` −0.027, `entropy_ladder_h6` −0.016,
+  `markov_h8_2_trap` −0.011 carried most of it; two cases regressed within
+  tolerance, `base64_wrapped` +0.0096 and `json_records` +0.0077), sealed
+  split one regression (`access_log` +0.0178) and one improvement
+  (`gradient_image` −0.0053). One validation regression fails corpus
+  policy's accept rule outright, independent of the net train number.
+  Mechanism: observing *every* position's finalizing move, not just the
+  tokens the final backtrace actually uses, feeds the running price table
+  with locally-competitive-but-discarded candidates alongside real ones:
+  for literal-context-heavy, text-like data (`json_records`, `access_log`)
+  that noise measurably hurts the literal price table's fit to the
+  sequence actually emitted; for near-memoryless sources (the entropy
+  ladder, the markov trap) more samples of any kind help pure frequency
+  convergence regardless of which candidate produced them, which is why
+  the net aggregate looks like a win while the named target
+  (sqlite/json/jsonl) does not move favorably, the same shape of false
+  signal S2-A47 flagged once already. Swept `PRICE_REBUILD_INTERVAL` at
+  256/512/1024/2048/4096 on train only (`research/corpus/POLICY.md`
+  permits tuning against train): the per-case sign pattern was identical
+  at every value, so this is not an undertuned cadence, it is the sampling
+  rule itself. Next attempt, if any, wants to observe only tokens that
+  survive to the final backtrace (a backward pass after the forward DP
+  completes, or restructuring the loop to discover the backtrace
+  incrementally), not every position's locally-finalized move. Candidate
+  code (the `dp_round`/`parse_optimal` wiring, `move_to_token`,
+  `PRICE_REBUILD_INTERVAL`) reverted in full; `PriceCounts::observe`/
+  `tally` themselves (S2-A50) are unaffected.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -2092,6 +2129,20 @@ record.
   Remaining S1-P2 scope: wiring the observation loop into `dp_round`
   and measuring a real bpb delta on sqlite/json/jsonl-shaped data,
   S1-P2's named target, still unmoved by every slice so far.
+- S2-A51 | REJECTED, see S2-R3 | Tenth slice of S1-P2's remaining scope:
+  wired S2-A50's `PriceCounts::observe` into `dp_round`'s forward pass: a
+  running price table, rebuilt from the observed counts every 4,096
+  finalized moves, replacing the round's single frozen `PriceTable`. Net
+  train effect ~−0.050 b/B across `bench::baseline`'s 11 cases, but the
+  sealed split regressed on `access_log` (+0.0178 b/B): corpus policy's
+  accept rule requires no validation regression, so this fails regardless
+  of the net number, and the named target (`json_records`,
+  `sqlite_like_records`) did not move favorably either. Full mechanism and
+  the `PRICE_REBUILD_INTERVAL` sweep that ruled out an undertuned cadence:
+  S2-R3. Remaining S1-P2 scope: an observation rule limited to tokens that
+  survive to the final backtrace, not every position's locally-finalized
+  move, the actual named sqlite/json/jsonl target, still unmoved by every
+  slice so far.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
@@ -2150,10 +2201,16 @@ record.
   slice, S2-A50: standalone primitive for the other half — `PriceCounts`
   can now be fed one already-decided token at a time (`observe`), not
   just replayed from a complete sequence (`tally`) — still not called
-  from `dp_round`. Remaining S1-P2 scope: wiring that observation loop
-  into `dp_round`'s forward pass and measuring a real bpb delta — the
-  actual named sqlite/json/jsonl target remains unmoved by every slice
-  so far.
+  from `dp_round`. Tenth slice, S2-A51/S2-R3: wired that observation loop
+  into `dp_round`'s forward pass, rebuilding the price table from the
+  running counts every 4,096 finalized moves. Rejected: a real sealed-
+  validation regression (`access_log` +0.018 b/B), and the named target
+  didn't move favorably either: the net train win was, again, entropy-
+  ladder/markov statistical convergence, not sqlite/json/jsonl structure
+  (the same shape S2-A47 already flagged once). Remaining S1-P2 scope: an
+  observation rule that only counts tokens surviving to the final
+  backtrace, not every position's locally-finalized move, the actual
+  named sqlite/json/jsonl target remains unmoved by every slice so far.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
