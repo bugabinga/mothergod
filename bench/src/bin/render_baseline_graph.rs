@@ -11,17 +11,8 @@
 
 use mothergod_bench::baseline::parse_baseline;
 use mothergod_bench::graph::{Bar, render_svg, render_table_markdown};
-use std::path::PathBuf;
+use mothergod_bench::repo_root;
 use std::process::{Command, ExitCode};
-
-/// The workspace root, located relative to this crate's manifest so the
-/// result is correct regardless of the caller's working directory.
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("bench/Cargo.toml has a parent directory (the workspace root)")
-        .to_path_buf()
-}
 
 fn main() -> ExitCode {
     let root = repo_root();

@@ -2225,3 +2225,43 @@ record.
   streaming mode, frozen format spec v1.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
+- S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
+  `finals_report`: a new `silesia_report` binary (`bench`'s `corpus-fetch`
+  feature) fetches each of Silesia's 12 individually pinned
+  `bench/corpus.toml` entries (filtered by `corpus == "silesia"`, not a
+  second hardcoded name list), decompresses with the already-tested
+  `decompress_silesia`, and would write `docs/benchmarks/silesia.md` via
+  the same `finals::format_report` `finals_report` already uses.
+  Capability only, not run: `finals_report`'s own module doc measured
+  Silesia's smallest file (`xml`, 5.3 MB) at 39s (~0.14 MB/s), so the full
+  ~200 MB corpus is on the order of half an hour — too slow for a by-hand
+  PR turn, the same call `finals_report` already made for Silesia's
+  absence; this slice stops at capability, the same shape `finals_report`
+  itself landed in (#252) before `canterbury.md` was generated in a
+  follow-up (#253). `format_report` gained a `generator_bin` parameter
+  (was hardcoded to say "finals_report" in every report's regeneration
+  line, which would have made a Silesia report lie about which binary
+  produced it) so both callers name themselves correctly. Also collapsed
+  a real duplicate noticed while adding a third copy: `repo_root()`
+  existed once in `finals_report.rs` and once in
+  `render_baseline_graph.rs`; both now call a single
+  `mothergod_bench::repo_root()`. `date -u` timestamp logic similarly
+  consolidated into `mothergod_bench::reference::generated_at()`, shared
+  by `finals_report` and `silesia_report` (kept out of
+  `render_baseline_graph`, which isn't built with `corpus-fetch` and
+  shouldn't need to be). | New tests:
+  `format_report_names_its_generator_binary`,
+  `generated_at_produces_an_iso8601_utc_timestamp`; full `cargo x check`
+  clean; `cargo clippy -p mothergod-bench --all-targets --features
+  corpus-fetch -- --deny warnings`, `cargo test -p mothergod-bench
+  --features corpus-fetch --all-targets -- --include-ignored` (113
+  passed, including the real-network
+  `fetch_and_cache_smoke_tests_the_real_pins`), and `cargo doc -p
+  mothergod-bench --features corpus-fetch --no-deps` all clean, matching
+  `corpus-fetch-check.yml`'s exact commands; `baseline_gate check`
+  unaffected (11 cases, no regression) since no codec code changed. | No
+  bpb measurement: `silesia_report` has never been run, so there is no
+  Silesia number to report yet — `progress.jsonl` records this as `kind:
+  "patch"` with null bpb deltas, same reason as S2-A45. Remaining
+  S1-D2/S2-D1 scope: an actual real Silesia run, by hand or via a
+  scheduled workflow (issue #231).

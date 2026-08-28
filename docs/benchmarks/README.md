@@ -26,14 +26,17 @@ ROADMAP M2 wants "bits/byte vs gzip/zstd/xz, per-dataset graphs ... into
 that line; one thing is still missing, named as remaining S2-D1/M2 scope,
 not silently dropped:
 
-- **No Silesia.** Canterbury only (~2.7 MB, under a minute of
-  `mothergod::compress` time). The full ~200 MB Silesia corpus would run
-  this codec's optimal-parse LZ for on the order of half an hour
-  (measured: 5.3 MB in 39s, ~0.14 MB/s) — too slow for a by-hand run;
-  `bin/finals_report.rs`'s module doc has the full reasoning. Silesia
-  numbers most naturally land as an extension of the weekly
+- **No Silesia numbers yet.** `bin/silesia_report.rs` exists (mirrors
+  `finals_report.rs`, over Silesia's 12 individually pinned files) but has
+  never been run, so `silesia.md` doesn't exist in this directory. Canterbury
+  is ~2.7 MB, under a minute of `mothergod::compress` time; the full ~200 MB
+  Silesia corpus would run this codec's optimal-parse LZ for on the order of
+  half an hour (measured: 5.3 MB in 39s, ~0.14 MB/s) — too slow for a
+  by-hand run; `bin/finals_report.rs`'s module doc has the full reasoning.
+  Silesia numbers most naturally land as an extension of the weekly
   `corpus-fetch-check.yml` (issue #231's outcome), which already fetches
-  the pinned corpus on a schedule.
+  the pinned corpus on a schedule, once something schedules a run long
+  enough to carry them.
 
 ## Regenerating
 
@@ -58,3 +61,12 @@ writes `canterbury.md`. Markdown is linted, not formatted
 (`cargo x lint -- docs/benchmarks/canterbury.md`). Also by hand; re-run
 whenever the codec or a reference-compressor version changes enough to be
 worth re-measuring.
+
+```
+cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report
+```
+
+Silesia's counterpart: same shape, ~30 minutes end to end (see "What this
+is not, yet" above), writes `silesia.md`. Nobody has run this to
+completion yet — the first real run is remaining scope, not this
+capability.

@@ -45,9 +45,10 @@
 //! the first callers to feed `regret` real held-out-final numbers: a
 //! `finals_report` binary fetches Canterbury, compresses every file with
 //! `mothergod::compress` and the pinned reference compressors, and writes
-//! `docs/benchmarks/canterbury.md`. Silesia remains S2-D1 debt — see
-//! `finals_report`'s module doc for the throughput reason it's out of
-//! scope for a by-hand run.
+//! `docs/benchmarks/canterbury.md`. A `silesia_report` binary does the same
+//! over Silesia's 12 individually pinned files, writing
+//! `docs/benchmarks/silesia.md` — not yet run (throughput-bound, see its
+//! module doc), so that file doesn't exist in the tree yet.
 
 pub mod baseline;
 #[cfg(feature = "corpus-fetch")]
@@ -58,6 +59,25 @@ pub mod graph;
 pub mod reference;
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
+
+/// The workspace root, located relative to this crate's manifest so the
+/// result is correct regardless of the caller's working directory. Shared
+/// by every `bench` binary that reads or writes repo-relative paths
+/// (`docs/benchmarks/`, `bench/baseline.json`) rather than each defining
+/// its own copy.
+///
+/// # Panics
+///
+/// Panics if `CARGO_MANIFEST_DIR` (set by cargo at compile time) has no
+/// parent directory, which does not happen for `bench/Cargo.toml`.
+#[must_use]
+pub fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("bench/Cargo.toml has a parent directory (the workspace root)")
+        .to_path_buf()
+}
 
 /// A small, fast, deterministic PRNG (`SplitMix64`). Not cryptographic; only
 /// property this module needs is "same seed produces the same corpus".
