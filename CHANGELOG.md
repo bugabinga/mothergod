@@ -8,6 +8,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `corpus-fetch-check` scheduled workflow (`research/JOURNAL.md` S2-A45,
+  issue #231): weekly CI coverage for `bench`'s off-by-default
+  `corpus-fetch` feature, running clippy, tests with `--include-ignored`
+  (so the real-network `bench/corpus.toml` pin smoke test finally
+  executes), and doc. Closes the zero-coverage hole the feature gate
+  left: a stale corpus pin now surfaces on Sunday's scheduled run
+  instead of mid-experiment.
+
 - `lz::BinaryTreeMatchFinder` (`research/JOURNAL.md` S1-P2, S2-A42):
   standalone binary-tree match finder — insertion keeps each hash bucket
   as a binary search tree ordered by candidate suffix bytes (LZMA's bt4

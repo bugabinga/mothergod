@@ -1,0 +1,52 @@
+# Scheduled coverage for `bench`'s opt-in `corpus-fetch` feature.
+#
+# `bench/Cargo.toml`: `corpus-fetch` gates the fetch/decompress code (and its
+# ureq/sha2/bzip2-rs/flate2/tar dependency tree) behind an off-by-default
+# feature so ci.yml's required `cargo test --all-targets` never pays for it.
+# That means the module has zero coverage in the PR-gating path, including
+# its non-network unit tests, and `fetch_and_cache_smoke_tests_the_real_pins`
+# (`bench/src/corpus.rs`) is `#[ignore]`d specifically because it hits the
+# real network — nothing was running it either. `research/JOURNAL.md`
+# (S1-D2/S2-D1) has named this "the scheduled workflow exercising
+# `--features corpus-fetch`" as remaining scope since S2-A25. This is that
+# workflow: it catches a `bench/corpus.toml` pin going stale (URL moved,
+# checksum drifted) or a regression in the gated code before either would
+# otherwise surface only when an experiment run needs the real corpus.
+name: corpus-fetch-check
+
+on:
+  schedule:
+    # Sunday 05:41 UTC: same weekly cadence as the other advisory sweeps
+    # (codeql 04:07, agent-model-intel 05:07, monster Saturday 03:17), offset
+    # so they don't contend for runners.
+    - cron: "41 5 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus-fetch-check
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  corpus-fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      # fmt is skipped: rustfmt formats by syntax, not active `cfg`s, so
+      # ci.yml's default-feature `cargo x fmt --check` already covers this
+      # module's formatting.
+      - run: cargo clippy -p mothergod-bench --all-targets --features corpus-fetch -- --deny warnings
+      - run: cargo test -p mothergod-bench --features corpus-fetch --all-targets -- --include-ignored
+      - run: cargo doc -p mothergod-bench --features corpus-fetch --no-deps
+        env:
+          RUSTDOCFLAGS: --deny warnings
