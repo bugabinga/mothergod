@@ -237,14 +237,12 @@ jobs:
               below. Either way, add the agent-approved label and remove
               changes-requested if an earlier round left it, then merge as
               your last action, unconditionally:
-              `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/merge -f
-              merge_method=squash`. The REST call, not the `gh pr merge`
-              porcelain: the porcelain's client-side mergeable-state check
-              refuses squashes the API accepts, and `--auto` armed on an
-              unsigned-tip branch reports blocked and never fires even with
-              every gate green (GOVERNANCE.md "Merging", PRs #25 and #84).
-              Only if the REST call reports required gates still pending,
-              arm `gh pr merge <n> --squash --auto` and stop; the BDFL
+              `.github/scripts/merge-pr <n> --sha <reviewed-head>`. It
+              runs the REST squash your verdict authorizes, pinned to the
+              head you actually reviewed, and reacts to GitHub's answer
+              itself (GOVERNANCE.md "Merging"). Only if it exits 2,
+              required gates are still pending: arm
+              `gh pr merge <n> --squash --auto` and stop; the BDFL
               sweep rescues it if it stalls. Stop means stop: do not try
               to wait for the gates yourself with any tool, watched or
               not (PR #255's review died mid-run trying a `Monitor` call
@@ -268,10 +266,10 @@ jobs:
               never a reason to stop short and hand off to the operator —
               GitHub creates and signs the squash merge commit itself, so
               `required_signatures` on `main` is satisfied either way.
-              Attempt the merge before predicting it will fail. If the
-              REST call itself fails, leave a comment stating you approved
-              but the merge did not go through, so the heartbeat will fix
-              it.
+              Attempt the merge before predicting it will fail. If
+              merge-pr fails outright, leave a comment stating you
+              approved but the merge did not go through, so the heartbeat
+              will fix it.
             - FAIL: add the changes-requested label, remove agent-approved if
               it is there, and give specific, actionable items, each tagged
               [must] or [nit]. Be courteous and explanatory, especially to
