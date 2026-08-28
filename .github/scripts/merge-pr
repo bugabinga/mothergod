@@ -22,10 +22,16 @@ moves:
   standing refusal (issue #136); that merge belongs to the admin PAT, the
   BDFL's alone. With GH_ADMIN_TOKEN present the merge retries on it once;
   absent, the failure names whose merge this is. The retry is the one place
-  with a pre-check: an admin credential can bypass the server-side gate
-  enforcement that makes attempt-and-react safe for the app token, so the
-  escalation first proves every required context green on the pinned SHA,
-  and refuses blind escalation if it cannot read the ruleset.
+  with pre-checks, because an admin credential can bypass the server-side
+  enforcement that makes attempt-and-react safe for the app token: the PR
+  must actually touch `.github/workflows/**` (the one 403 the PAT exists
+  to absorb; any other 403 is news to read, never to route around, since
+  the PAT never lands a routine merge), and every ruleset-required status
+  check must be proven green on the pinned SHA. An unreadable ruleset,
+  an empty required-check list, or an unreadable file list each refuse
+  escalation loudly; a vacuous truth is not proof. The proof covers
+  required status checks, the gates this pipeline owns, and does not
+  model other rule types.
 - The merge pins a head SHA (409 on mismatch), so a push landing between
   the caller's decision and this call fails loud instead of shipping
   unreviewed content. Default pin is the head read here; pass --sha for
@@ -98,12 +104,17 @@ def required_contexts():
     if proc.returncode != 0:
         die(f"cannot read main's ruleset ({api_message(proc)}); "
             "refusing to escalate without proof the gates are green")
-    return [
+    contexts = [
         check["context"]
         for rule in json.loads(proc.stdout)
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]
     ]
+    if not contexts:
+        die("main's ruleset lists no required status checks; that is ruleset "
+            "drift or an API shape change, not proof of green, so no "
+            "escalation (PR #287 review)")
+    return contexts
 
 
 def unmet_gates(sha):
@@ -122,6 +133,21 @@ def unmet_gates(sha):
         for name in required_contexts()
         if latest.get(name, {}).get("conclusion") != "success"
     ]
+
+
+def touches_workflows(pr):
+    """Whether the PR changes any path under `.github/workflows/`: the one 403
+    cause the admin PAT exists to absorb (issues #24, #136). Single page of
+    100 files; a longer PR whose workflow file hides beyond it biases toward
+    refusing escalation, never toward taking it."""
+    proc, _ = gh_api((f"repos/{REPO}/pulls/{pr}/files?per_page=100",))
+    if proc.returncode != 0:
+        die(f"cannot read #{pr}'s file list ({api_message(proc)}); "
+            "refusing to escalate without knowing why the 403 happened")
+    return any(
+        entry["filename"].startswith(".github/workflows/")
+        for entry in json.loads(proc.stdout)
+    )
 
 
 def attempt(pr, sha, token=None):
@@ -172,6 +198,11 @@ def main():
     if status != 403:
         die(f"merging #{pr} failed: {api_message(proc)}")
 
+    if not touches_workflows(pr):
+        die(f"session token refused #{pr} (403: {api_message(proc)}), but the "
+            "PR touches no workflow file, so this 403 is not the known app "
+            "refusal; the admin PAT never lands a routine merge (agents/"
+            "OPERATIONS.md), read the message instead of routing around it")
     admin = os.environ.get("GH_ADMIN_TOKEN")
     if not admin:
         die(f"session token refused #{pr} (403: {api_message(proc)}); "

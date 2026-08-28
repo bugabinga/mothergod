@@ -101,7 +101,8 @@ the change deserves. Executing the merge is
 `.github/scripts/merge-pr <pr>`, with `--sha` pinning the head your
 verdict actually covered. The script carries the recipe this section
 used to hand out: REST instead of the porcelain (PRs #25, #84), the
-403 escalation to the admin PAT with the required gates proven green
+403 escalation to the admin PAT, taken only for a PR that actually
+touches workflow files and only with the required gates proven green
 first, and a distinct exit (2) for gates-unmet, the one outcome where
 arming `gh pr merge <n> --squash --auto` and stopping is right (the
 BDFL sweep rescues an armed merge that never fires). It decides
