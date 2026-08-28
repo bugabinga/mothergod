@@ -27,6 +27,12 @@ extension because that is the one dispatch a call site cannot state wrongly.
 USD stays absent from both, per the honesty note in the report: under
 subscription auth the figure is notional, not a bill.
 
+Both outputs also carry the self-wake audit (issue #144): every admitted
+thread-event bdfl wake in the recent window, re-derived from the API as
+ours or the operator's, independently of the wake predicate that admitted
+it. Its correct value is zero, and a zero is only claimed when every wake
+was actually verified.
+
 Usage: run-telemetry.py <out.md|out.json> [window_days]
 """
 
@@ -145,6 +151,7 @@ def facts(meta):
         model = max(model_usage.items(),
                     key=lambda kv: (kv[1] or {}).get("outputTokens", 0))[0]
     thinking = details.get("thinking_tokens")
+    trigger = meta.get("trigger") if isinstance(meta.get("trigger"), dict) else {}
     return {
         # Artifact creation instant and run id: identifiers, not numbers,
         # but API-authored like everything else here. They exist for the
@@ -152,6 +159,12 @@ def facts(meta):
         "at": meta["_at"].strftime("%Y-%m-%dT%H:%M:%SZ"),
         "run_id": meta.get("run_id") or "",
         "role": meta.get("role") or "?",
+        # Trigger identity, API-authored (github context via agent-audit):
+        # what woke the run, who authored the waking event, which thread.
+        # The self-wake audit (issue #144) reads these.
+        "event": trigger.get("event") or "",
+        "actor": trigger.get("actor") or "",
+        "number": trigger.get("number") or "",
         # A run whose execution file carried no result entry was never
         # measured: guard-skipped, paused, or died before finishing. Zero is
         # not its cost, so it is excluded from every median and counted
@@ -203,6 +216,85 @@ for meta in runs:
 
 roles = sorted(set(recent) | set(prior))
 
+# Self-wake audit (issue #144). The bdfl wake predicate admits a
+# thread-event run when the actor is the operator and the triggering body
+# carries no attribution link; the #142 incident ran 460 times because the
+# predicate was wrong and nothing measured its decisions. This re-derives
+# each admitted wake from the API, so a predicate defect shows up as a
+# non-zero here instead of as a human reading run metadata by hand.
+#
+# Admitted means the audit artifact exists: the wake predicate ran the job.
+# `measured` is deliberately NOT required, because the incident's runs died
+# mid-run and a self-wake that wastes 22 runner-minutes before dying is
+# still a self-wake.
+#
+# Classification, by event shape:
+# - issues / pull_request: the wake IS the thread, so the thread's author
+#   and body are the wake's. Fetched fresh, never trusted from the
+#   predicate's own inputs. Ours when the author is a Bot or the body
+#   carries the attribution link (a thread opened on the operator's PAT is
+#   operator-authored; only its body gives it away).
+# - comment and review events: the wake's author is the event actor, ours
+#   when it is a bot account. A machinery comment posted unattributed on
+#   the operator's own token is invisible here, but it is equally invisible
+#   to the predicate, so this audit still covers everything the predicate
+#   claims to decide.
+THREAD_EVENTS = frozenset(("issues", "issue_comment", "pull_request",
+                           "pull_request_review",
+                           "pull_request_review_comment"))
+ATTRIBUTION = "[Claude Code](https://claude.ai/code)"
+
+
+def self_wake_audit(all_rows):
+    """Count admitted bdfl thread-event wakes that were our own output."""
+    checked, ours, unverifiable, flagged = 0, 0, 0, []
+    threads = {}
+    for r in all_rows:
+        if r["event"] not in THREAD_EVENTS:
+            continue
+        checked += 1
+        is_ours = r["actor"].endswith("[bot]")
+        if not is_ours and r["event"] in ("issues", "pull_request"):
+            number = r["number"]
+            if number not in threads:
+                try:
+                    threads[number] = json.loads(
+                        gh("api", f"repos/{REPO}/issues/{number}"))
+                except (RuntimeError, ValueError):
+                    threads[number] = None
+            thread = threads[number]
+            if thread is None:
+                unverifiable += 1
+                continue
+            is_ours = ((thread.get("user") or {}).get("type") == "Bot"
+                       or ATTRIBUTION in (thread.get("body") or ""))
+        if is_ours:
+            ours += 1
+            flagged.append(r["run_id"])
+    return {"checked": checked, "self_triggered": ours,
+            "unverifiable": unverifiable, "flagged_runs": flagged}
+
+
+self_wakes = self_wake_audit(recent.get("bdfl", []))
+
+
+def self_wake_line():
+    """One sentence, and a zero only when it was actually measured."""
+    n, bad, dark = (self_wakes["checked"], self_wakes["self_triggered"],
+                    self_wakes["unverifiable"])
+    if bad:
+        runs_txt = ", ".join(f"run {r}" for r in self_wakes["flagged_runs"])
+        return (f"**{bad} of {n} admitted bdfl thread-event wakes in the "
+                f"window were our own output** ({runs_txt}): the wake "
+                "predicate admitted what it exists to skip (issue #144).")
+    if dark:
+        return (f"Self-wake audit: {dark} of {n} admitted bdfl thread-event "
+                "wakes could not be re-derived from the API; zero is not "
+                "claimed for them (issue #144).")
+    return (f"Self-wake audit: 0 of {n} admitted bdfl thread-event wakes "
+            "in the window were our own output (issue #144; measured, "
+            "not assumed).")
+
 if JSON_MODE:
     def portable(summary):
         """Counter to pairs; everything else in a summary is already JSON."""
@@ -215,6 +307,7 @@ if JSON_MODE:
         "artifact_count": len(runs),
         "unreadable": unreadable,
         "truncated": truncated,
+        "self_wakes": self_wakes,
         "roles": [{"role": role,
                    "recent": portable(summarize(recent.get(role, []))),
                    "prior": portable(summarize(prior.get(role, [])))}
@@ -280,6 +373,8 @@ lines += [
     f"runs. A further {unmeasured} runs carried no result entry (paused, "
     "guard-skipped, or died before finishing) and are excluded from every "
     "median rather than counted as zero.",
+    "",
+    self_wake_line(),
     "",
     "Cost in USD is deliberately absent: under subscription auth the "
     "action's figure is notional, not a bill, and a public number that "
