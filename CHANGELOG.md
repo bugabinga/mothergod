@@ -8,6 +8,19 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `lz::parse_optimal`'s DP now searches matches with `BinaryTreeMatchFinder`
+  instead of the hash-chain `MatchFinder` (`research/JOURNAL.md` S1-P2,
+  S2-A48): -0.05376 bits/byte net on `bench/baseline.json`'s 11 train
+  cases, no case regressed beyond `TOLERANCE_BITS`, sealed-only `access_log`
+  -0.00016 and `gradient_image` unchanged. Twice rejected before this
+  (S2-R2, then S2-A47) on the issue #179 speed guard and, once that was
+  fixed, on process — `tests/golden.rs` demanded a `FORMAT_VERSION` bump
+  for an encoder-only change; issue #290's ruling removed that requirement,
+  so this slice is the identical wiring, now legitimately landed with the
+  current-version golden fixture regenerated instead. Not yet a win on
+  S1-P2's actual sqlite/json/jsonl target: window eviction and
+  per-position adaptive prices remain.
+
 - Agent telemetry page at [mothergod.dev/agents.html](https://mothergod.dev/agents.html)
   (issue #64): per-seat run economics (output tokens, turns, minutes,
   denials, errors) for the last 7 days with prior-week trend, plus the 25
