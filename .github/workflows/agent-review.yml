@@ -178,8 +178,16 @@ jobs:
                stored-block floor intact; no test, guard, benchmark, or
                corpus weakened to flatter a metric (Goodhart check —
                JOURNAL S1-L5); journal + progress.jsonl entries present;
-               every quoted number names its corpus.
-            4. For format changes: FORMAT_VERSION bump + ADR + SPEC.md update
+               every quoted number names its corpus. A regenerated
+               current-version tests/golden/ pair is legitimate only when
+               the PR body declares it as an intentional encoder-only
+               output change with the measured justification (issue #290
+               ruling); undeclared regeneration is an automatic FAIL, and
+               deleting or editing a decode fixture always is.
+            4. For format changes, meaning decode-visible ones (frame
+               layout, method bytes, model semantics in the bitstream; an
+               encoder-only output change is not one, issue #290):
+               FORMAT_VERSION bump + ADR + SPEC.md update
                in this same PR, else request changes.
             5. For process changes (.github/**, .claude/skills/**,
                CLAUDE.md, agents/GOVERNANCE.md, agents/personas/**):
