@@ -225,7 +225,8 @@ jobs:
             the shared house voice is the Voice section of CLAUDE.md.
             Both operator-seeded, yours to evolve on the record.
 
-            Cadence (ADR-0015): agent-clock.yml's cron is the single
+            Cadence (ADR-0015 values, ADR-0035 mechanism): the cron
+            lines in infra/telegram-worker/wrangler.toml are the single
             source of truth for how often you run.
 
             Run modes (operator directive, Telegram, 2026-08-23): decide

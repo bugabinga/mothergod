@@ -17,6 +17,10 @@ const KEEP = 40;
 // Chars of an entry's text: 40 entries have to stay readable in one
 // screenful, and the full update is in the inbox until the run drains it.
 const SUMMARY = 200;
+const CLOCKLOG = "clocklog";
+// Two days of ticks: enough history to judge "a day of clean ticks"
+// with margin, small enough to read in one KV get.
+const TICKS = 48;
 
 // sendChatAction's status expires after 5s, so the refresh sits just
 // inside that.
@@ -752,7 +756,69 @@ async function commandResult(env, updateId, parsed) {
   return response.text();
 }
 
+// The agent clock (ADR-0035). Each expression in wrangler.toml's
+// [triggers] crons fires `scheduled` with the matching key here; the
+// value names the seats that tick wakes. Cadence values are
+// ADR-0015/0027's; a new seat needs both files in one PR. GitHub's own
+// `schedule:` trigger is not an alternative: its runs are attributed
+// to whoever last committed the cron line, a bot actor kills them
+// silently, and most clock edits here are bot-authored by design
+// (incidents 2026-08-23 and 2026-08-27). A dispatch below is
+// attributed to the PAT's owner by API semantics, immune to git blame.
+const CLOCK = {
+  "11 * * * *": [
+    // agent-bdfl, hourly (ADR-0015). `source: cron` lets the seat
+    // report TRIGGER_EVENT=schedule downstream, telling a tick from an
+    // operator dispatch.
+    { workflow: "agent-bdfl.yml", inputs: { source: "cron" } },
+  ],
+  "22 */2 * * *": [
+    // agent-heartbeat, two-hourly (ADR-0015/0027).
+    { workflow: "agent-heartbeat.yml" },
+  ],
+  "37 */12 * * *": [
+    // agent-deslop, twice daily, off the other seats' minutes.
+    { workflow: "agent-deslop.yml" },
+  ],
+};
+
+/**
+ * One clock tick: wake every seat the firing cron names, then record
+ * the attempt under `clocklog` so any repo-side run can verify
+ * liveness from KV without Cloudflare console access. A seat that
+ * fails to dispatch is recorded, never retried: the next tick is the
+ * retry. The log write shares `remember`'s contract — losing memory
+ * must not cost the tick.
+ */
+export async function tick(env, cron, at) {
+  const entry = { cron, at, woke: [], failed: [] };
+  for (const seat of CLOCK[cron] ?? []) {
+    try {
+      await github(env, `/actions/workflows/${seat.workflow}/dispatches`, {
+        method: "POST",
+        body: { ref: "main", ...(seat.inputs ? { inputs: seat.inputs } : {}) },
+        json: false,
+      });
+      entry.woke.push(seat.workflow);
+    } catch (error) {
+      entry.failed.push(seat.workflow);
+      console.error("tick", seat.workflow, error);
+    }
+  }
+  try {
+    const log = parse(await env.INBOX.get(CLOCKLOG));
+    log.push(entry);
+    await env.INBOX.put(CLOCKLOG, JSON.stringify(log.slice(-TICKS)));
+  } catch (error) {
+    console.error("clocklog", error);
+  }
+}
+
 export default {
+  async scheduled(event, env) {
+    await tick(env, event.cron, new Date(event.scheduledTime).toISOString());
+  },
+
   async fetch(request, env) {
     if (request.method !== "POST") {
       return new Response("mothergod telegram webhook", { status: 200 });
