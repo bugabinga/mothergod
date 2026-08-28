@@ -1767,6 +1767,60 @@ record.
   (the DP's price table is currently frozen per round, S1-P2's other
   named gap), and measure a real bpb delta on sqlite/json/jsonl-shaped
   data, S1-P2's named target.
+- S2-A43 | ACCEPTED | Second slice of ROADMAP M3's second standing lead
+  (S1-P2, btultra2-class parse): the `len0`/`len1` length-prefix reuse
+  optimization S2-A42 named and deliberately deferred, added to
+  `lz::BinaryTreeMatchFinder::insert_and_find`. Prompted by re-reading
+  S2-R2's own diagnosis before attempting SSE's next slice (S1-P1's
+  remaining scope names an SSE path that S2-R1 already closed; S1-P2's
+  remaining scope named a concrete, buildable prerequisite instead —
+  picked over SSE for being unclaimed and well-specified, not because it
+  ranks above S1-P1 in the standing-leads list). `suffix_common_len`
+  gained a `start` parameter; `insert_and_find` tracks the common length
+  already proven against the nearest node linked so far on each of the
+  "less"/"greater" chains and starts each new comparison from the
+  shorter of the two instead of byte 0. Sound because both chains stay
+  sorted relative to `i`: any node still to be visited lies between the
+  last-linked "less" node and the last-linked "greater" node in suffix
+  order, so it shares at least their common prefix with `i` before a
+  single byte of it is compared. **Measured, not assumed, against the
+  exact fixture S2-R2 failed on** (`compression-experiment` skill's
+  "prove the capability" step, `rust-craft`'s mechanical-sympathy
+  emphasis on measuring instead of assuming): a hand-timed A/B (`start`
+  forced to 0 vs. this optimization) on 200,000 bytes of one repeated
+  value showed no measurable difference (~15ms at n=3,000 either way,
+  scaled). Mechanism, found by tracing the algorithm rather than
+  guessing from the timing alone: on a run of one repeated byte, every
+  candidate's suffix ties with `i`'s up to the shorter one's end, so
+  every comparison's tie-break (`insert_and_find`'s ordering rule) sends
+  every candidate to the *same* side — the untouched side's common
+  length never leaves 0, and `min(len0, len1)` is 0 forever. Length-prefix
+  reuse only pays off when the walk actually alternates sides. A second
+  hand-timed A/B on 300 near-duplicate 200-byte blocks (one varying byte
+  per block, deliberately shaped closer to S1-P2's sqlite/json/jsonl
+  target than a single-byte run) showed a real ~3.5x (970ms unoptimized,
+  280ms with reuse) — real alternation from the varying byte gives the
+  optimization something to bound. New test
+  `binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse` pins that
+  win as a guard (asserts under 3s, generous headroom over the measured
+  280ms); the existing `binary_tree_matches_brute_force` test (unchanged)
+  is the correctness guard — it already independently re-derives every
+  reported match's length via `match_len`, which a wrong `start` bound
+  would have failed immediately, and still passes.
+  | 1 new test (above); all five root CLAUDE.md gates clean. | No bpb
+  measurement: still not wired to any parse pass, same reason as
+  S2-A42. `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas. **Does not by
+  itself unblock S2-R2's swap**: the issue #179 fixture (one repeated
+  byte) is exactly the case this optimization cannot help, by the
+  mechanism above, so re-wiring today would fail the same speed guard the
+  same way. Remaining S1-P2 scope: a fix for the one-sided-branching
+  pathology specifically — a cheap insert-only fast path for `dp_round`'s
+  `carry` to skip through (so `insert_and_find`'s full walk is never
+  reached on a long carried run), or a `nice_len`-style early exit once a
+  found match is already long enough that a longer one cannot improve the
+  DP price — before repeating the swap; window eviction and per-position
+  adaptive prices remain untouched from S2-A42.
 - S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
   literature lead; targets the five zstd text holdouts (combined deficit
   0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
