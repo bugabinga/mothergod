@@ -35,6 +35,12 @@ CI enforces the same gate as the required checks `fmt`, `clippy`, `test`,
 baseline_gate -- check` before pushing a codec change). A push that fails
 them wastes a cycle.
 
+Run long commands in the foreground. A CI session is non-interactive:
+ending your turn ends the session, and the job's cleanup kills a
+backgrounded command as an orphan, so "I'll continue when it reports
+back" never happens (run 33269388206 lost a fix cycle this way).
+Background a command only if you keep taking turns until it exits.
+
 ## Hard rules
 
 1. Lossless is sacred. Every codec change ships with a round-trip test on the
