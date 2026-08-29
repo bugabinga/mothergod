@@ -19,6 +19,7 @@ use crate::DatasetKind;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
+use std::path::Path;
 
 /// Bytes generated per case. Small enough that every case's
 /// `mothergod::compress` call finishes in well under a second in a release
@@ -280,6 +281,22 @@ pub fn fingerprint(measurements: &BTreeMap<String, f64>) -> String {
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     format!("{hash:016x}")
+}
+
+/// Reads `bench/baseline.json` under `root`, parses it, and fingerprints
+/// it: the read-parse-fingerprint sequence `finals_report` and
+/// `silesia_report` both need before compressing anything (issue #330,
+/// this exact block regrew once already after it95 first consolidated it).
+///
+/// # Errors
+///
+/// A human-readable message if the file cannot be read or its content
+/// fails [`parse_baseline`].
+pub fn load_and_fingerprint(root: &Path) -> Result<String, String> {
+    let text = std::fs::read_to_string(root.join("bench/baseline.json"))
+        .map_err(|err| format!("failed to read bench/baseline.json: {err}"))?;
+    let baseline = parse_baseline(&text).map_err(|err| err.to_string())?;
+    Ok(fingerprint(&baseline))
 }
 
 /// Compares `measured` against `baseline`, reporting every case that grew
