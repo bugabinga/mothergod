@@ -43,6 +43,16 @@ const denied = [
   ["cargo \"test\"", "quoted unwrapped form, no scope"],
   ["cargo run --manifest-path x/Cargo.toml -- test", "the alias expanded"],
   ["cargo run --quiet --manifest-path x/Cargo.toml -- check", "with --quiet"],
+  ["cargo run --manifest-path ./x/Cargo.toml -- test", "./ prefix (#333 r5)"],
+  [
+    "cargo run --manifest-path /home/runner/work/mothergod/mothergod/x/Cargo.toml -- check",
+    "absolute path, same manifest",
+  ],
+  [
+    "cargo run --quiet --manifest-path ../mothergod/x/Cargo.toml -- test",
+    "../ spelling, same manifest",
+  ],
+  ["cargo run --manifest-path=x/Cargo.toml -- lint", "= joins flag to path"],
   ["cargo +stable x check", "toolchain selector is transparent (#333 r4)"],
   ["cargo +stable test", "same on the unwrapped form"],
   ["cargo +nightly x lint", "same, unscoped lint"],
@@ -64,6 +74,14 @@ const allowed = [
   [
     "cargo run --manifest-path x/Cargo.toml -- test -- src/lz",
     "expanded alias, scoped",
+  ],
+  [
+    "cargo run --manifest-path ./x/Cargo.toml -- test -- src/lz",
+    "prefixed path, still scoped",
+  ],
+  [
+    "cargo run --manifest-path tools/unix/Cargo.toml -- test",
+    "component ending in x is not the x crate",
   ],
 ];
 

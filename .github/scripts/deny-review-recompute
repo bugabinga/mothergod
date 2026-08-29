@@ -33,9 +33,11 @@ test'` slips through as a multi-word argument, is accepted for a
 guardrail aimed at a forgetful model, not an adversary. Two ordinary
 spellings normalize away before matching (#333, round four): a
 toolchain selector reads as plain cargo (`cargo +stable x check` is
-`cargo x check`), and the x alias's literal expansion reads as the
-alias (`cargo run [--quiet] --manifest-path x/Cargo.toml -- test` is
-`cargo x test`, because .cargo/config.toml defines exactly that).
+`cargo x check`), and the x alias's expansion reads as the alias
+(`cargo run --manifest-path <path to x/Cargo.toml> -- test` is `cargo
+x test`, because .cargo/config.toml defines exactly that; any prefix
+spelling of the path, `=` or space, and reordered flags all count,
+#333 round five).
 Scoped runs are the reviewer's real job and stay
 allowed: `cargo test -p <crate>`, `cargo x test -- <path>`,
 feature-flagged builds CI does not cover, and any segment carrying
@@ -81,9 +83,15 @@ QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 # A toolchain selector between cargo and its subcommand is transparent
 # to what runs; so is the x alias's own expansion (.cargo/config.toml).
+# The manifest path matches by its final components behind a component
+# boundary (#333, round five): `./x/Cargo.toml`, an absolute path, and
+# a `../` spelling all name the identical manifest, while a component
+# merely ending in x (`unix/Cargo.toml`) does not. `=` and space both
+# join flag to path, and other flags may sit on either side of it.
 TOOLCHAIN = re.compile(r"\bcargo\s+\+\S+")
 X_ALIAS = re.compile(
-    r"\bcargo\s+run\s+(?:--quiet\s+)?--manifest-path\s+x/Cargo\.toml\s+--\s+"
+    r"\bcargo\s+run\s+(?:-\S+\s+)*--manifest-path(?:=|\s+)"
+    r"(?:\S*/)?x/Cargo\.toml(?:\s+-\S+)*\s+--\s+"
 )
 
 
