@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+r"""Deny full-gate recomputes inside pull_request CI sessions (PreToolUse hook).
+
+A pull_request-triggered session sits on a commit that already carries
+the required checks: fmt, clippy, test, doc, ratio (ci.yml). That is
+the reviewer on every PR, and also the BDFL's opened/reopened wakes
+(agent-bdfl.yml); binding both is decided, not incidental, because the
+no-signal argument keys on the commit's checks, not on the seat
+(PR #333 review thread). Re-running the same unscoped command locally recomputes
+an identical result at cold-build runner cost and adds no signal. Prompt
+prose has said so since #237 (af0bdc5); run 33229032665 re-ran `cargo x
+test` anyway, detached it with a shell `&`, deleted the worktree under
+it, and posted a pass claim for a run that died compiling. Second loss
+for the prose, and this one cost trust, so the rule compiles into this
+guard (ADR-0022). The shell-`&` variant is deliberately not parsed here:
+backgrounding only paid because the recompute was long, so denying the
+recompute removes the reason to detach.
+
+Denied, per shell segment (split on `;`, `&`, `|`): `cargo x check` in
+any form, `cargo x test|lint|doc|fmt` without a ` -- <arg>` scope, and
+`cargo test` without `-p`/`--package` or a ` -- <arg>` filter. The
+escape demands a real argument after the `--`, because a bare trailing
+`--` passes no filter and runs the whole suite. Quotes are normalized
+before matching, three cases pulling three directions (#333 review,
+rounds two and three): a single-word span unwraps to its contents,
+because quoting one token is a no-op to the shell and `cargo x
+"check"` must still deny; a multi-word span collapses to a placeholder
+argument, because it is an argument rather than command words, so
+`grep 'cargo x check'` never triggers while `-- 'roundtrip stored'`
+still satisfies the escape; an empty span vanishes, so `cargo test --
+''` stays bare and denied. The residual cost, that `bash -c 'cargo x
+test'` slips through as a multi-word argument, is accepted for a
+guardrail aimed at a forgetful model, not an adversary. Two ordinary
+spellings normalize away before matching (#333, round four): a
+toolchain selector reads as plain cargo (`cargo +stable x check` is
+`cargo x check`), and the x alias's expansion reads as the alias
+(`cargo run --manifest-path <path to x/Cargo.toml> -- test` is `cargo
+x test`, because .cargo/config.toml defines exactly that; any prefix
+spelling of the path, `=` or space, and reordered flags all count,
+#333 round five). A backslash-newline splices out before any other
+step, with nothing in its place, exactly as the shell's lexer deletes
+the pair before words form: a continued `cargo x \<newline>check` and
+a mid-word `che\<newline>ck` both read as the plain spelling (#333
+round six). A global flag between cargo and its subcommand is
+transparent to what runs, so it strips before matching: `cargo
+--offline x check` is `cargo x check`, and the four space-valued
+globals (`--color`, `--config`, `-C`, `-Z`, the closed set per `cargo
+--help`) consume their value token too (#333 round seven). A
+space-valued global this list does not know fails open, the accepted
+posture for a guard aimed at a forgetful model, not an adversary.
+Scoped runs are the reviewer's real job and stay
+allowed: `cargo test -p <crate>`, `cargo x test -- <path>`,
+feature-flagged builds CI does not cover, and any segment carrying
+`--help`. Matching keys on our own task names and GitHub's
+GITHUB_EVENT_NAME, so only our own renames break it, and a false deny
+teaches its own correction in stderr.
+
+Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions,
+outside a pull_request event, or for any tool but Bash, everything is
+allowed, as are malformed JSON and a null tool_input (the #324 shape).
+Exit 2 denies; stderr is shown to the model.
+
+Liveness: every deny appends a fixed-vocabulary line to
+GITHUB_STEP_SUMMARY, so the run page shows the guard working; the
+audit artifact excludes transcripts by design and would never show a
+deny. A missing or broken hook script errors loudly in-session on
+every Bash call.
+"""
+
+import json
+import os
+import re
+import sys
+
+# One entry per denied class: (name for the summary line, trigger, scope
+# escape). A segment matching the trigger is denied unless it also
+# matches the escape; escape None means no scoped form exists.
+DENIED = (
+    ("cargo x check", re.compile(r"\bcargo\s+x\s+check\b"), None),
+    (
+        "unscoped cargo x test/lint/doc/fmt",
+        re.compile(r"\bcargo\s+x\s+(?:test|lint|doc|fmt)\b"),
+        re.compile(r"\s--\s+\S"),
+    ),
+    (
+        "unscoped cargo test",
+        re.compile(r"\bcargo\s+test\b"),
+        re.compile(r"(?:^|\s)(?:-p\b|--package\b)|\s--\s+\S"),
+    ),
+)
+
+QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+# The shell deletes a backslash-newline pair before words form, so the
+# matcher must too, and with nothing in its place: `che\<newline>ck` is
+# one word, not two (#333, round six).
+CONTINUATION = re.compile(r"\\\n")
+
+# A toolchain selector between cargo and its subcommand is transparent
+# to what runs; so is the x alias's own expansion (.cargo/config.toml).
+# The manifest path matches by its final components behind a component
+# boundary (#333, round five): `./x/Cargo.toml`, an absolute path, and
+# a `../` spelling all name the identical manifest, while a component
+# merely ending in x (`unix/Cargo.toml`) does not. `=` and space both
+# join flag to path, and other flags may sit on either side of it.
+TOOLCHAIN = re.compile(r"\bcargo\s+\+\S+")
+# A global flag between cargo and its subcommand (`cargo --offline x
+# check`, `cargo -q test`) does not change what runs. The generic
+# `-\S+` arm eats any flag token including `=`-joined values; the
+# named arms eat the four space-valued globals with their value
+# (#333, round seven). Runs after quote and toolchain normalization,
+# before the x-alias rewrite, so `cargo -q run --manifest-path ...`
+# still reads as the alias.
+GLOBAL_FLAGS = re.compile(
+    r"\bcargo\s+(?:(?:--color|--config|-C|-Z)\s+\S+\s+|-\S+\s+)+"
+)
+X_ALIAS = re.compile(
+    r"\bcargo\s+run\s+(?:-\S+\s+)*--manifest-path(?:=|\s+)"
+    r"(?:\S*/)?x/Cargo\.toml(?:\s+-\S+)*\s+--\s+"
+)
+
+
+def normalize_quotes(command: str) -> str:
+    """Rewrite each quoted span for matching: a single word unwraps (the
+    shell reads `"check"` as `check`, so must the trigger), multiple
+    words collapse to a placeholder argument (an argument can satisfy an
+    escape but never supplies command words), empty disappears (an empty
+    filter scopes nothing, so `-- ''` must read as bare)."""
+
+    def rewrite(match: re.Match[str]) -> str:
+        content = match.group(0)[1:-1]
+        if not content:
+            return ""
+        if any(ch.isspace() for ch in content):
+            return "q"
+        return content
+
+    return QUOTED.sub(rewrite, command)
+
+MESSAGE = (
+    "fmt, clippy, test, doc and ratio already ran on this exact commit "
+    "as required checks; an unscoped re-run recomputes an identical "
+    "result at cold-build cost and adds no signal (#237). Read them "
+    "with `gh pr checks <n>`. A pending check is not a gap you fill by "
+    "re-running: say so, and merge-pr's exit 2 arms auto-merge. Spend "
+    "Bash on what CI does not check, scoped to the PR's claims: `cargo "
+    "test -p <crate>`, `cargo x test -- <path>`, feature-flagged "
+    "builds, through .github/scripts/probe."
+)
+
+
+def denied_class(command: str) -> str | None:
+    """Name the denied class the command falls in, or None if allowed."""
+    normalized = CONTINUATION.sub("", command)
+    normalized = TOOLCHAIN.sub("cargo", normalize_quotes(normalized))
+    normalized = GLOBAL_FLAGS.sub("cargo ", normalized)
+    normalized = X_ALIAS.sub("cargo x ", normalized)
+    for segment in re.split(r"[;&|]+", normalized):
+        if "--help" in segment:
+            continue
+        for name, trigger, escape in DENIED:
+            if trigger.search(segment) and not (
+                escape and escape.search(segment)
+            ):
+                return name
+    return None
+
+
+def main() -> int:
+    """Allow (0) or deny (2) the tool call described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if call.get("tool_name") != "Bash":
+        return 0
+    tool_input = call.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return 0
+    name = denied_class(command)
+    if name is None:
+        return 0
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"deny-review-recompute: denied {name}\n")
+    print(MESSAGE, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
