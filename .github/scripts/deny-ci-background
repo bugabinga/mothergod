@@ -24,10 +24,14 @@ is part of the attack surface; the guard scans it too.
 Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions
 (GITHUB_ACTIONS != "true") everything is allowed; an interactive session
 really does get notifications. In CI, exit 2 (deny; stderr is shown to
-the model) for Bash with run_in_background true or a bare `&` control
-operator in the command string, and for Agent, Task, or Workflow calls
-unless run_in_background is explicitly false, because background is
-those tools' default. Everything else exits 0.
+the model) for Bash with run_in_background true or a command string
+carrying a listed detach idiom (bare `&` control operator, `setsid
+-f/--fork`), and for Agent, Task, or Workflow calls unless
+run_in_background is explicitly false, because background is those
+tools' default. Everything else exits 0. The idiom list is a blocklist
+of what sessions have done or the runner hands them for free, not a
+proof of coverage: the shell offers more ways to daemonize, and a new
+one observed in the wild gets appended here, not to prose.
 
 Liveness: every deny appends a line to GITHUB_STEP_SUMMARY, the durable
 trace, because the audit artifact excludes transcripts by design
@@ -47,10 +51,16 @@ DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 
 # A bare `&` control operator detaches like run_in_background does.
 # The lookbehind clears `&&`, `>&`, `<&`, `|&`; the lookahead clears
-# `&&`, `&>`, and ampersands embedded in tokens (`?a=1&b=2`). A quoted
-# prose ampersand (`echo "fish & chips"`) still trips it: an accepted
-# cost, and the deny message names the rewrite.
+# `&&`, `&>`, and ampersands embedded in tokens (`?a=1&b=2`). The scan
+# has no notion of quoting, so a `&` that is inert data (prose, a -c
+# payload, a heredoc) still trips it: an accepted cost, because a
+# quote-aware shell parser in a hook is entanglement this guard refuses,
+# and the deny message names the rewrite.
 SHELL_BACKGROUND = re.compile(r"(?<![&<>|])&(?=[\s;)]|$)")
+
+# `setsid -f`/`--fork` daemonizes with no `&` anywhere, and setsid
+# ships on the Actions runner. Same hazard, second listed idiom.
+SETSID_FORK = re.compile(r"\bsetsid\s+(-f\b|--fork\b)")
 
 DETACH_MESSAGE = (
     "Background execution does not survive a CI session: the run ends "
@@ -62,12 +72,12 @@ DETACH_MESSAGE = (
     "wake, stated where that wake will read it."
 )
 
-SHELL_AMP_MESSAGE = (
-    "A shell `&` detaches the command, and background execution does "
-    "not survive a CI session: the run ends the moment your turn ends "
-    "and orphan cleanup kills the process (runs 33207936812, "
-    "33269388206). Drop the `&` and run it in the foreground (timeout "
-    "goes up to 600000 ms). If the `&` is literal text inside quotes, "
+SHELL_DETACH_MESSAGE = (
+    "A shell-level detach (bare `&`, or setsid --fork) does not survive "
+    "a CI session: the run ends the moment your turn ends and orphan "
+    "cleanup kills the process (runs 33207936812, 33269388206). Drop "
+    "the detach and run the command in the foreground (timeout goes up "
+    "to 600000 ms). If the `&` is literal text, not shell syntax, "
     "rewrite it, for example as 'and'."
 )
 
@@ -90,8 +100,11 @@ def main() -> int:
         command = tool_input.get("command")
         if background is True:
             reason = "in background"
-        elif isinstance(command, str) and SHELL_BACKGROUND.search(command):
-            reason = "via shell &"
+        elif isinstance(command, str):
+            if SHELL_BACKGROUND.search(command):
+                reason = "via shell &"
+            elif SETSID_FORK.search(command):
+                reason = "via setsid --fork"
     elif tool in DEFAULT_BACKGROUND and background is not False:
         reason = "in background"
     if reason is None:
@@ -100,7 +113,7 @@ def main() -> int:
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
             fh.write(f"deny-ci-background: denied {tool} {reason}\n")
-    message = SHELL_AMP_MESSAGE if reason == "via shell &" else DETACH_MESSAGE
+    message = DETACH_MESSAGE if reason == "in background" else SHELL_DETACH_MESSAGE
     print(message, file=sys.stderr)
     return 2
 

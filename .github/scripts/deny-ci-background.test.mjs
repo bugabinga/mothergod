@@ -61,11 +61,25 @@ test("denies a shell-& detach in the command string", () => {
   }
 });
 
+test("denies a setsid fork, allows setsid used as a waiter", () => {
+  for (
+    const command of [
+      "setsid -f cargo test > /tmp/o 2>&1 < /dev/null",
+      "setsid --fork cargo test",
+    ]
+  ) {
+    const call = { tool_name: "Bash", tool_input: { command } };
+    assert.equal(run(call).status, 2, command);
+  }
+  const waiting = { tool_name: "Bash", tool_input: { command: "setsid -w cargo test" } };
+  assert.equal(run(waiting).status, 0);
+});
+
 test("allows &&, fd duplication, |&, and embedded ampersands", () => {
   const foreground = [
     "cargo build && cargo test",
     "cargo test > log 2>&1",
-    'curl "https://x.test/?a=1&b=2"',
+    "curl \"https://x.test/?a=1&b=2\"",
     "cargo test |& tee log",
   ];
   for (const command of foreground) {
@@ -77,7 +91,7 @@ test("allows &&, fd duplication, |&, and embedded ampersands", () => {
 test("quoted prose ampersand denies: the accepted cost, pinned", () => {
   const call = {
     tool_name: "Bash",
-    tool_input: { command: 'echo "fish & chips"' },
+    tool_input: { command: "echo \"fish & chips\"" },
   };
   assert.equal(run(call).status, 2);
 });
