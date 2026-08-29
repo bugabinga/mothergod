@@ -76,3 +76,60 @@ fn help_flag_succeeds() {
     assert_eq!(code, 0);
     assert!(!stdout.is_empty());
 }
+
+#[test]
+fn compress_then_decompress_roundtrips_a_file_argument() {
+    let dir = std::env::temp_dir().join(format!("mothergod-cli-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let input_path = dir.join("payload");
+    let original: Vec<u8> = (0..2000u32).map(|i| (i * 37 % 251) as u8).collect();
+    std::fs::write(&input_path, &original).expect("write input file");
+
+    let (_stdout, compress_code) = run(bin().arg("compress").arg(&input_path), b"");
+    assert_eq!(compress_code, 0);
+    let compressed_path = dir.join("payload.mgdc");
+    assert!(compressed_path.exists());
+
+    // The original is untouched; a file-argument run never deletes its input.
+    assert_eq!(std::fs::read(&input_path).unwrap(), original);
+
+    let output_path = dir.join("output");
+    let renamed_compressed = output_path.with_extension("mgdc");
+    std::fs::rename(&compressed_path, &renamed_compressed).expect("rename for decompress input");
+    let (_stdout, decompress_code) = run(bin().arg("decompress").arg(&renamed_compressed), b"");
+    assert_eq!(decompress_code, 0);
+    assert_eq!(std::fs::read(&output_path).unwrap(), original);
+
+    std::fs::remove_dir_all(&dir).expect("clean up temp dir");
+}
+
+#[test]
+fn compress_refuses_to_overwrite_an_existing_output_file() {
+    let dir =
+        std::env::temp_dir().join(format!("mothergod-cli-test-clobber-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let input_path = dir.join("payload");
+    std::fs::write(&input_path, b"hello").expect("write input file");
+    let output_path = dir.join("payload.mgdc");
+    std::fs::write(&output_path, b"already here").expect("write pre-existing output");
+
+    let (_stdout, code) = run(bin().arg("compress").arg(&input_path), b"");
+    assert_ne!(code, 0);
+    assert_eq!(std::fs::read(&output_path).unwrap(), b"already here");
+
+    std::fs::remove_dir_all(&dir).expect("clean up temp dir");
+}
+
+#[test]
+fn decompress_of_a_file_without_the_mgdc_suffix_fails_cleanly() {
+    let dir =
+        std::env::temp_dir().join(format!("mothergod-cli-test-suffix-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let input_path = dir.join("payload.bin");
+    std::fs::write(&input_path, b"not compressed").expect("write input file");
+
+    let (_stdout, code) = run(bin().arg("decompress").arg(&input_path), b"");
+    assert_ne!(code, 0);
+
+    std::fs::remove_dir_all(&dir).expect("clean up temp dir");
+}
