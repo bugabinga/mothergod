@@ -2355,3 +2355,44 @@ record.
   recorded changes. Remaining scope this doesn't close: nightly/weekly
   regeneration scheduling is still unwired and still `agent-system`
   scope (a workflow file), same carve-out S2-A54 named.
+- S2-A56 | ACCEPTED | S2-A9's own doc comment flagged the archive's
+  `lz_opt` structure as "two DP rounds... not iterated to convergence"
+  the day it was ported, and no slice had tested that gap since.
+  `parse_optimal` now runs a third `dp_round`, reseeding its price table
+  from the second round's own token sequence the same way the second
+  round already reseeds from the first — pure repetition of an
+  already-proven-correct step, not new DP machinery, so it carries none
+  of S2-R2/S2-R3's wiring risk (a fresh `MatchFinder`, or intra-round
+  price observation racing the forward pass). | `cargo x check` clean;
+  the full `lz` module suite (40 tests) including the issue #179 speed
+  guard (200,000-byte single-byte run, 0.15s for the whole module, well
+  under the 15s bound — a third round adds a constant ~50% more
+  `dp_round` work, not a new asymptotic cost); `tests/golden.rs`'s
+  `fixtures_decode_and_reencode_to_the_pinned_frame` passed unchanged, no
+  fixture regen needed — the pinned `v2-lz-repeated-text` fixture's parse
+  already converged by round two, so its re-encode is bit-identical
+  either way; this is still an encoder-only change per issue #290's
+  ruling (`decode` untouched), just one this particular fixture happens
+  not to exercise. | Measured on `bench::baseline`'s 11 train cases and
+  the two sealed-only kinds (`access_log`, `gradient_image`), fixed
+  seeds, `CASE_LEN` 50,000: net train effect ~−0.039 b/B, ten of eleven
+  cases improved (`entropy_ladder_h6` −0.01104, `markov_h8_2_trap`
+  −0.00624, `entropy_ladder_h4` −0.00736 carried most of it;
+  `entropy_ladder_h8` flat), one regression within `TOLERANCE_BITS`
+  (`base64_wrapped` +0.00144). Sealed split both improved: `access_log`
+  −0.00112, `gradient_image` −0.00368 — no validation regression, unlike
+  every S1-P2 wiring attempt so far (S2-R1's ladder tax, S2-R3's
+  `access_log` regression). S1-P2's actual named target moved favorably
+  but modestly (`json_records` −0.00256, `sqlite_like_records`
+  −0.00096): real, but small enough that this slice does not claim to
+  close S1-P2, which stays open at its S2-A51/S2-R3 stopping point — an
+  observation rule limited to backtrace survivors, still unbuilt.
+  `bench/baseline.json`, `docs/benchmarks/baseline.{md,svg}`, and (issue
+  #327's fingerprint gate, S2-A55, now required) `canterbury.md`/
+  `silesia.md` all regenerated to match: Canterbury aggregate 1.382712 ->
+  1.381605 b/B (regret vs the stronger reference -0.020683 -> -0.021790),
+  Silesia aggregate 2.069848 -> 2.068237 b/B (regret +0.240790 ->
+  +0.239178) — both finals move the same direction as train/sealed, a
+  small real win, not a regression the gate would have caught either way.
+  Whether a fourth round keeps paying, and at what compress-time cost,
+  is untested and a candidate next slice.

@@ -18,6 +18,20 @@ All notable changes to this project are documented here. Format follows
   regenerated in this change alongside `silesia.md` (research/JOURNAL.md
   S2-A55).
 
+- `lz::parse_optimal` now runs a third `dp_round` (`research/JOURNAL.md`
+  S2-A56, closing S2-A9's own "not iterated to convergence" note): net
+  -0.039 bits/byte on `bench/baseline.json`'s 11 train cases, one
+  within-tolerance regression (`base64_wrapped` +0.00144), sealed-only
+  `access_log` and `gradient_image` both improved, no validation
+  regression — unlike every prior S1-P2 wiring attempt. Pure repetition
+  of the existing reseed-from-backtrace step, not new DP machinery, so
+  none of S2-R2/S2-R3's wiring risk applies; S1-P2's own named
+  sqlite/json/jsonl target moved favorably but modestly and stays open.
+  `bench/baseline.json`, `docs/benchmarks/baseline.{md,svg}`, and (issue
+  #327's new fingerprint gate) `canterbury.md`/`silesia.md` all
+  regenerated to match: Canterbury aggregate 1.382712 -> 1.381605 b/B,
+  Silesia aggregate 2.069848 -> 2.068237 b/B, both a small real
+  improvement in the same direction as train/sealed.
 - `mothergod-bench`'s `silesia_report` binary (`research/JOURNAL.md`
   S2-D1/S2-A45's remaining "real Silesia finals numbers" line): Silesia's
   counterpart to `finals_report`, fetching each of Silesia's 12
