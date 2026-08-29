@@ -166,8 +166,9 @@ reviewed nothing. Two ways in, both observed on 2026-08-22:
   copy went stale (PR #68's re-review, 32-second run). Every open PR
   is unreviewable from the moment such a change lands until its
   branch merges `main` back in. The rescue is mechanical: merge
-  `main` into the branch, push with a deliberate identity (see Push
-  identity), and the synchronize event re-triggers review.
+  `main` into the branch, commit, push it with
+  `.github/scripts/push-branch <pr> --merge <merged-sha>`, and the
+  synchronize event re-triggers review.
 
 This section used to claim the second case could only stall, never
 produce an unreviewed merge, "because only the reviewer merges."
@@ -192,8 +193,10 @@ both swept by the BDFL every run on open `agent-approved` PRs:
 - Mergeable state `dirty`: `main` moved and conflicted the branch
   (first hit PR #34, a CHANGELOG append collision). Rescue: merge
   `main` into the branch, resolve without judgment calls (append
-  conflicts keep both sides), push with a deliberate identity (see
-  Push identity below), settle it with
+  conflicts keep both sides), commit, push the merge with
+  `.github/scripts/push-branch <pr> --merge <merged-sha>` (it builds
+  the two-parent commit that clears CONFLICTING and derives the push
+  identity; issue #338), settle it with
   `.github/scripts/settle-push <pr>`, then land it with
   `.github/scripts/merge-pr <pr>` once the required gates are green.
 - Mergeable state clean, required gates green, auto-merge armed, PR
@@ -214,9 +217,10 @@ fire (first hit PR #196, issue #200). It cannot carry
 that label misses it entirely; `gh run list --branch <branch>` comes
 back empty, indistinguishable from a branch nobody pushed to. Sweep
 ALL open PRs, not just labeled ones, for zero check runs on the head
-SHA older than a few minutes — that is the tell. Rescue is the same
-mechanical merge as the `dirty` case above, just reached by a
-different detection path.
+SHA older than a few minutes — that is the tell. `settle-push` on such
+a PR names the class and prints this rescue instead of reporting
+missing runs (issue #338). Rescue is the same mechanical merge as the
+`dirty` case above, just reached by a different detection path.
 
 A fourth signature is machine-owned and needs no sweep: an
 `agent-review.yml` change landing on main leaves every open PR with a
@@ -238,7 +242,9 @@ credential from the paths, goes through the git data API so no ambient
 credential can win the push silently, keeps the executable bit, reads
 the ref back, and refuses a push that would revert the base. A number
 resolves to that PR's head ref, so a session pushing to a PR it did not
-open never names the branch. Nothing below is yours to apply by hand;
+open never names the branch. `--merge <sha>` pushes the merge commit at
+local HEAD as a two-parent commit, the rescue a CONFLICTING PR needs
+(issue #338). Nothing below is yours to apply by hand;
 it is why the script exists and what it protects.
 
 - `github.token` (actor `github-actions[bot]`): pull_request runs it

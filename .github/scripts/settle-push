@@ -63,6 +63,21 @@ def same(sha, other):
     return sha.startswith(other) or other.startswith(sha)
 
 
+def die_conflicting(pr, branch):
+    """A conflicted PR has no merge ref, so ci and agent-review cannot fire.
+
+    Naming that beats reporting their absence as missing runs: the misreport
+    sent PR #336's rescue down a 25-minute wrong-cause hunt (issue #338)."""
+    die(f"PR #{pr} is CONFLICTING with main (issue #200's class).",
+        "GitHub builds no merge ref for it, so ci and agent-review will not",
+        "fire on this head and the PR cannot merge. Runs are not the problem;",
+        "the conflict is. Rescue:",
+        f"1. In a checkout of `{branch}`: git fetch origin && git merge origin/main",
+        "   Resolve mechanically (append conflicts keep both sides), commit.",
+        f"2. .github/scripts/push-branch {pr} --merge $(git rev-parse origin/main)",
+        f"3. .github/scripts/settle-push {pr} --sha <the printed sha>")
+
+
 def report(pr, sha, branch, grouped, expected):
     """Print the liveness result, naming what the claim is about.
 
@@ -124,7 +139,7 @@ def main():
 
     repo = os.environ.get("GITHUB_REPOSITORY") or gh(
         "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
-    pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
+    pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName,mergeable"))
     branch = pull["headRefName"]
     # Every documented caller runs this straight after `git push` from a
     # checkout of the PR branch, so local HEAD is the commit they mean.
@@ -143,7 +158,7 @@ def main():
         if time.monotonic() >= deadline:
             break
         time.sleep(POLL)
-        pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName"))
+        pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName,mergeable"))
     sha, state = pull["headRefOid"], pull["state"]
 
     if expected and not same(sha, expected):
@@ -153,14 +168,26 @@ def main():
             "commit_files on a PR-comment run, which creates a literal `<n>/merge`",
             "branch parented on main instead (observed on PR #78).",
             "1. Check `git ls-remote origin` for a stray ref.",
-            "2. Re-push to the PR branch with the git data API.",
+            "2. Re-push with `.github/scripts/push-branch <pr> <path>...`.",
             "3. If you deliberately pushed a commit this checkout does not have,",
             "   name it: --sha <pushed-sha>.")
     if state != "OPEN":
         die(f"PR #{pr} is {state}, so there is nothing to settle.")
+    if pull["mergeable"] == "CONFLICTING":
+        die_conflicting(pr, branch)
 
     grouped, stuck = observe(repo, sha, time.monotonic() + TIMEOUT)
     if stuck is None:
+        # Silence has two causes with different rescues, and `mergeable` is
+        # the field that separates them. It reads UNKNOWN while GitHub
+        # computes, so give a definite answer a moment to form.
+        mergeable = pull["mergeable"]
+        deadline = time.monotonic() + HEAD_TIMEOUT
+        while mergeable == "UNKNOWN" and time.monotonic() < deadline:
+            time.sleep(POLL)
+            mergeable = json.loads(gh("pr", "view", pr, "--json", "mergeable"))["mergeable"]
+        if mergeable == "CONFLICTING":
+            die_conflicting(pr, branch)
         die(f"No runs appeared for {sha[:9]} within {TIMEOUT}s.",
             "Silence is not health. Either the push never reached the branch, or",
             "every workflow filtered it out by path, or Actions is degraded.",
