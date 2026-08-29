@@ -27,6 +27,7 @@
 //! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint
 //! -- docs/benchmarks/silesia.md` to check).
 
+use mothergod_bench::baseline::{fingerprint, parse_baseline};
 use mothergod_bench::corpus::{ManifestEntry, decompress_silesia, fetch_and_cache, parse_manifest};
 use mothergod_bench::finals::{Versions, format_report};
 use mothergod_bench::reference::{generated_at, measure_all, tool_version};
@@ -64,6 +65,22 @@ fn fetch_silesia_files(
 
 fn main() -> ExitCode {
     let root = repo_root();
+
+    let baseline_text = match std::fs::read_to_string(root.join("bench/baseline.json")) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("failed to read bench/baseline.json: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let baseline = match parse_baseline(&baseline_text) {
+        Ok(baseline) => baseline,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let baseline_fingerprint = fingerprint(&baseline);
 
     let manifest_text = match std::fs::read_to_string(root.join("bench/corpus.toml")) {
         Ok(text) => text,
@@ -121,6 +138,7 @@ fn main() -> ExitCode {
         &versions,
         &measurements,
         "silesia_report",
+        &baseline_fingerprint,
     );
 
     let out_path = root.join("docs/benchmarks/silesia.md");

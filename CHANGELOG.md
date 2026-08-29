@@ -8,6 +8,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `baseline_gate check` (the required `ratio` job's own binary) now also
+  fails when `docs/benchmarks/canterbury.md` or `docs/benchmarks/
+  silesia.md` embeds a `bench/baseline.json` fingerprint that no longer
+  matches the committed file (issue #327, ROADMAP M2's dropped "by hand"
+  gap): a baseline change signals the codec's measured behavior changed,
+  so the held-out finals reports can now be stale. Caught real drift
+  landing this: `canterbury.md` had gone stale since 2026-08-25,
+  regenerated in this change alongside `silesia.md` (research/JOURNAL.md
+  S2-A55).
+
 - `mothergod-bench`'s `silesia_report` binary (`research/JOURNAL.md`
   S2-D1/S2-A45's remaining "real Silesia finals numbers" line): Silesia's
   counterpart to `finals_report`, fetching each of Silesia's 12

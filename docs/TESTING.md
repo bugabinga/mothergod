@@ -141,3 +141,11 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `bench/baseline.json` in the same PR with the reason in the PR body.
   Ratio improvements that break layers 1–2 are rejected regardless — a
   faster-shrinking codec that panics on truncated input is a worse codec.
+- The same `baseline_gate check` invocation also fails when
+  `docs/benchmarks/canterbury.md` or `docs/benchmarks/silesia.md` embeds a
+  `bench/baseline.json` fingerprint (`crate::baseline::fingerprint`) that
+  no longer matches the committed file (issue #327): a baseline change is
+  a deliberate signal the codec's measured behavior changed, so the
+  held-out finals numbers can now be stale. A content check against the
+  committed reports, not a regeneration: those two reports fetch real
+  corpora over the network, too slow and non-hermetic to run on every PR.
