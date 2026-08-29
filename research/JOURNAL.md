@@ -226,6 +226,46 @@ record.
   unbuilt (S2-A51/S2-R3's stopping point). A fifth-plus round is not a
   standing lead on this evidence; the DP round count stays at three until
   something changes the mechanism, not just the parameter.
+- S2-R5 | REJECTED | S1-P2's own named remaining scope after S2-R3 (and
+  still open after S2-R4, an unrelated fourth-round variant): an
+  observation rule limited to tokens that survive to the final backtrace,
+  not every position's locally-finalized move. Implemented as a backward
+  walk over `state.parent` every `OBSERVE_INTERVAL` (4,096) positions,
+  from the current (already-finalized, per S2-A50) position back to the
+  previous checkpoint, feeding only the moves actually on that walk into
+  `PriceCounts::observe` — unlike S2-R3, a discarded `relax` candidate is
+  never counted, only a move the DP kept. Not the round's *true* final
+  backtrace either (that only exists once position `n` is reached, and an
+  intermediate checkpoint's chain to reach position `i` can differ from
+  the chain the eventual full backtrace uses to cross the same span), but
+  strictly closer to it than S2-R3's every-candidate sweep. Measured on
+  `bench::baseline`'s 11 train-tier cases and the two sealed-only kinds,
+  `CASE_LEN` 50,000, fixed seeds: net train effect ~0.000 b/B (five cases
+  improved, one flat, five regressed, no net direction —
+  `entropy_ladder_h4` −0.09184 the largest single mover, offset almost
+  exactly by `x86_dense_code` +0.032, `base64_wrapped` +0.01584,
+  `markov_h8_2_trap`/`entropy_ladder_h2` +0.0248 each,
+  `entropy_ladder_h1` +0.01152). Sealed split: `access_log` +0.00256
+  (regression), `gradient_image` −0.01264 (improvement). One validation
+  regression fails corpus policy's accept rule outright, independent of
+  the net train number (S2-R3's own ruling). S1-P2's named
+  sqlite/json/jsonl target was a wash, not a win: `sqlite_like_records`
+  −0.00208, `json_records` +0.00208, exactly offsetting. Mechanism: this
+  slice specifically removed S2-R3's diagnosed noise source (discarded
+  candidates), and the sealed regression persisted anyway — evidence
+  S2-R3's "candidate noise" diagnosis was not the complete explanation.
+  A better-supported read: each checkpoint's running counts are built
+  from only the file's own prefix consumed so far, a partial and
+  potentially unrepresentative sample once a source's structure varies
+  over its length the way literal-heavy log/record formats
+  (`access_log`, `json_records` — the two cases both this slice and
+  S2-R3 regressed) do; repricing mid-round pulls the table toward the
+  prefix's specific shape at the cost of the remainder, a recency bias
+  rather than a candidate-selection one. Candidate code (the `dp_round`
+  checkpoint walk, `OBSERVE_INTERVAL`, the `move_len`/`move_to_token`
+  extraction from `reconstruct`, and the added test) reverted in full,
+  matching every prior S1-P2 rejection; `PriceCounts::observe`/`tally`
+  themselves (S2-A50) are unaffected.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -2241,10 +2281,29 @@ record.
   validation regression (`access_log` +0.018 b/B), and the named target
   didn't move favorably either: the net train win was, again, entropy-
   ladder/markov statistical convergence, not sqlite/json/jsonl structure
-  (the same shape S2-A47 already flagged once). Remaining S1-P2 scope: an
-  observation rule that only counts tokens surviving to the final
-  backtrace, not every position's locally-finalized move, the actual
-  named sqlite/json/jsonl target remains unmoved by every slice so far.
+  (the same shape S2-A47 already flagged once). Eleventh slice, S2-A56:
+  a third `dp_round` round (own entry has the numbers), a different
+  thread from the intra-round pricing question this scope note is about
+  — S1-P2's remaining scope stayed the observation rule below throughout.
+  Twelfth slice, S2-R4: a fourth `dp_round`, same shape as S2-A56,
+  rejected on a small but real sealed regression, also not this thread.
+  Thirteenth slice, S2-R5: tried the
+  exact rule S2-R3 named as its remaining scope (observe only tokens
+  that survive a backtrace, not every locally-finalized move),
+  approximated as a checkpointed backward walk over `state.parent`
+  rather than every relax candidate. Also rejected: the same
+  `access_log` regression class, smaller (+0.00256) but still present,
+  and removing S2-R3's diagnosed candidate-noise source did not fix it,
+  pointing at a recency bias in what a partial file prefix's counts
+  represent instead. Intra-round adaptive pricing has now failed on two
+  different, deliberately-chosen observation rules; the next attempt, if
+  any, is not a third variant of the same idea. Remaining S1-P2 scope:
+  unclear — the sqlite/json/jsonl target has moved only slightly across
+  every slice tried since S2-A46 (S2-A56's three-round DP: json_records
+  −0.00256; S2-R5: json_records +0.00208, sqlite_like_records −0.00208,
+  a wash), so the DP-pricing angle on this lead may be near its ceiling;
+  a differently-shaped idea, not a pricing-cadence or observation-rule
+  tweak, is owed before spending another slice here.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
