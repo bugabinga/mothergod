@@ -41,6 +41,11 @@ const denied = [
   ["cargo x t\"e\"st", "quote glued inside a keyword"],
   ["cargo x \"test\"", "quoted constituent, no scope"],
   ["cargo \"test\"", "quoted unwrapped form, no scope"],
+  ["cargo run --manifest-path x/Cargo.toml -- test", "the alias expanded"],
+  ["cargo run --quiet --manifest-path x/Cargo.toml -- check", "with --quiet"],
+  ["cargo +stable x check", "toolchain selector is transparent (#333 r4)"],
+  ["cargo +stable test", "same on the unwrapped form"],
+  ["cargo +nightly x lint", "same, unscoped lint"],
 ];
 
 const allowed = [
@@ -55,6 +60,11 @@ const allowed = [
   ["git commit -m \"run cargo x check first\"", "quoted prose"],
   ["cargo x test -- \"src/lz\"", "a quoted scope still scopes (#333 round 2)"],
   ["cargo test -p mothergod -- 'roundtrip stored'", "quoted filter"],
+  ["cargo +stable test -p mothergod-bench", "toolchain plus scope"],
+  [
+    "cargo run --manifest-path x/Cargo.toml -- test -- src/lz",
+    "expanded alias, scoped",
+  ],
 ];
 
 for (const [command, why] of denied) {
