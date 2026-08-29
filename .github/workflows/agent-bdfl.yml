@@ -504,8 +504,9 @@ jobs:
                  armed (unsigned tip, GitHub reports blocked while the
                  REST merge succeeds; PR #84). Rescue per
                  agents/GOVERNANCE.md "Stalled auto-merge": dirty
-                 needs the mechanical merge of main, a deliberate push
-                 identity, then `.github/scripts/settle-push <pr>`;
+                 needs the mechanical merge of main pushed with
+                 `.github/scripts/push-branch <pr> --merge <sha>`,
+                 then `.github/scripts/settle-push <pr>`;
                  clean needs only the merge. Either way land it with
                  `.github/scripts/merge-pr <pr>` once the required
                  gates are green, blocked-on-human if still stuck.

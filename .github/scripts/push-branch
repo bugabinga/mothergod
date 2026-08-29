@@ -42,6 +42,7 @@ Prints the new commit SHA on stdout, which is the argument `settle-push <pr>
 --sha <that>` wants.
 
 Usage: push-branch <branch|pr-number> <path>... [--delete <path>...] < commit message
+       push-branch <branch|pr-number> --merge <sha> < commit message
 
 A number is read as a PR and resolved to its head ref, so a session pushing to
 a PR it did not open never has to name that branch and get it wrong (#133).
@@ -53,6 +54,18 @@ and a forgotten `git rm` cannot silently keep. Untracked is the test, not
 absent from disk: a gitignored file regenerated in place (site/status-data.json
 is deleted from the tree while its generated successor sits in the checkout)
 is legitimate. Renames are a push plus a delete of the old path, one commit.
+
+Merge mode (`--merge <sha>`) pushes the merge commit at local HEAD: the caller
+ran `git fetch origin && git merge <sha>`, resolved, committed, and this
+mirrors that commit through the API -- parents [branch head, <sha>], tree
+computed from HEAD's diff against the branch head, content read from HEAD's
+objects rather than the working tree. It exists because clearing a CONFLICTING
+PR (issue #200's class) requires a two-parent commit, which a single-parent
+push cannot express, and hand-rolling the four API calls is what the rescue
+cost before (issue #338). Merge mode takes no paths, deliberately: the merge
+commit already knows what changed, and a hand-named list that forgets one of
+main's files builds a tree whose eventual squash merge silently reverts that
+file.
 
 """
 
@@ -137,6 +150,37 @@ def record_push(branch, sha):
              "this run may report false staleness. Its recovery line would be wrong.")
 
 
+def merge_paths(merge_sha):
+    """Verify the merge commit at HEAD and return (full second-parent SHA,
+    changed paths, deleted paths), all read from git itself.
+
+    Merge mode never accepts a hand-named path list: a list that forgets one
+    of the merged side's files builds a tree that silently reverts that file,
+    the same revert class guard_not_stale stops in normal mode."""
+    head2 = git("rev-parse", "--verify", "--quiet", "HEAD^2")
+    if head2.returncode != 0:
+        die(
+            "HEAD is not a merge commit, so there is nothing for --merge to push.",
+            f"git fetch origin && git merge {merge_sha}, resolve mechanically "
+            "(append conflicts keep both sides), commit, then re-run this.",
+        )
+    head2_sha = head2.stdout.strip()
+    if not head2_sha.startswith(merge_sha):
+        die(
+            f"HEAD's second parent is {head2_sha[:7]}, not the {merge_sha[:7]} you named.",
+            "the SHA after --merge states which commit you merged; the "
+            "mismatch says this checkout holds some other merge.",
+        )
+    diff = git("diff", "--name-status", "--no-renames", "-z", "HEAD^1", "HEAD")
+    if diff.returncode != 0:
+        die(f"git diff HEAD^1 HEAD failed: {diff.stderr.strip()}")
+    fields = diff.stdout.split("\0")
+    paths, deletions = [], []
+    for status, path in zip(fields[::2], fields[1::2]):
+        (deletions if status == "D" else paths).append(path)
+    return head2_sha, paths, deletions
+
+
 def guard_not_stale(branch, base_sha, paths):
     """Refuse a push that would silently revert someone else's commit.
 
@@ -171,24 +215,35 @@ def main() -> int:
     if not REPO:
         die("GITHUB_REPOSITORY is unset; this runs inside the repo's workflows")
     target, rest = argv[0], argv[1:]
-    if "--delete" in rest:
+    merge_sha = None
+    if "--merge" in rest:
+        if len(rest) != 2 or rest[0] != "--merge":
+            die(
+                "--merge takes exactly the merged SHA and no paths: the merge "
+                "commit at HEAD is the source of what changed.",
+                "usage: push-branch <branch|pr-number> --merge <sha> < commit message",
+            )
+        merge_sha, paths, deletions = merge_paths(rest[1])
+    elif "--delete" in rest:
         cut = rest.index("--delete")
         paths, deletions = rest[:cut], rest[cut + 1 :]
         if not deletions:
             die("--delete names the paths to remove and none followed it")
     else:
         paths, deletions = rest, []
-    if not paths and not deletions:
+    if not merge_sha and not paths and not deletions:
         die("usage: push-branch <branch|pr-number> <path>... [--delete <path>...] < commit message")
 
-    for p in paths:
+    # In merge mode the paths come from HEAD's own diff, so the checkout
+    # checks below would test the wrong source.
+    for p in [] if merge_sha else paths:
         if not os.path.isfile(p):
             die(
                 f"{p} is not a file in this checkout.",
                 "paths are repo-relative and must exist; to remove a file from "
                 "the branch, name it after --delete.",
             )
-    for p in deletions:
+    for p in [] if merge_sha else deletions:
         if git("ls-files", "--error-unmatch", p).returncode == 0:
             die(
                 f"{p} is still tracked in this checkout but is listed after --delete.",
@@ -224,28 +279,64 @@ def main() -> int:
     else:
         base_sha, action = api("GET", "git/ref/heads/main", token)["object"]["sha"], "create"
 
-    guard_not_stale(branch, base_sha, paths + deletions)
+    if merge_sha:
+        # The parent check replaces guard_not_stale: HEAD's diff is only the
+        # merge's effect when HEAD sits exactly on the branch's current head.
+        if action == "create":
+            die(f"{branch} does not exist; --merge rescues an existing branch")
+        head1 = git("rev-parse", "HEAD^1").stdout.strip()
+        if head1 != base_sha:
+            die(
+                f"{branch} is at {base_sha[:7]} but HEAD's merge sits on {head1[:7]}.",
+                "the branch moved since this checkout: fetch, redo the merge "
+                "on the current head, retry.",
+            )
+        action = "merge"
+    else:
+        guard_not_stale(branch, base_sha, paths + deletions)
 
     base_tree = api("GET", f"git/commits/{base_sha}", token)["tree"]["sha"]
     tree = []
     for p in paths:
-        with open(p, "rb") as fh:
-            content = base64.b64encode(fh.read()).decode()
-        blob = api("POST", "git/blobs", token, {"content": content, "encoding": "base64"})
-        # The executable bit is content here: a script pushed 100644 lands
-        # unrunnable and fails at its first call site, not at this one.
-        mode = "100755" if os.access(p, os.X_OK) else "100644"
+        if merge_sha:
+            # HEAD is what the caller resolved; the working tree may have
+            # drifted since, so content and mode come from HEAD's objects.
+            raw = subprocess.run(("git", "cat-file", "blob", f"HEAD:{p}"), capture_output=True)
+            if raw.returncode != 0:
+                die(f"git cat-file blob HEAD:{p} failed: {raw.stderr.decode().strip()}")
+            data = raw.stdout
+            mode = git("ls-tree", "--format=%(objectmode)", "HEAD", "--", p).stdout.strip()
+        else:
+            with open(p, "rb") as fh:
+                data = fh.read()
+            # The executable bit is content here: a script pushed 100644 lands
+            # unrunnable and fails at its first call site, not at this one.
+            mode = "100755" if os.access(p, os.X_OK) else "100644"
+        blob = api(
+            "POST",
+            "git/blobs",
+            token,
+            {"content": base64.b64encode(data).decode(), "encoding": "base64"},
+        )
         tree.append({"path": p, "mode": mode, "type": "blob", "sha": blob["sha"]})
     # A null sha is the tree API's deletion marker: the entry removes `p`
     # from the base tree instead of writing a blob.
     tree.extend({"path": p, "mode": "100644", "type": "blob", "sha": None} for p in deletions)
 
-    new_tree = api("POST", "git/trees", token, {"base_tree": base_tree, "tree": tree})
+    # A merge resolved entirely to the branch's side changes no paths; the
+    # commit then reuses the base tree, because the tree API rejects an
+    # empty entry list.
+    tree_sha = (
+        api("POST", "git/trees", token, {"base_tree": base_tree, "tree": tree})["sha"]
+        if tree
+        else base_tree
+    )
+    parents = [base_sha] + ([merge_sha] if merge_sha else [])
     commit = api(
         "POST",
         "git/commits",
         token,
-        {"message": message, "tree": new_tree["sha"], "parents": [base_sha]},
+        {"message": message, "tree": tree_sha, "parents": parents},
     )
     sha = commit["sha"]
 
