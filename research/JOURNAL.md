@@ -2617,3 +2617,76 @@ record.
   little systematic bias left for SSE to correct, and this slice does
   not yet know whether a mixer-derived decision differs enough to change
   that verdict.
+- S2-A60 | ACCEPTED, closes S1-P1 | S2-A59's own remaining-scope note: the
+  wiring slice, `FORMAT_VERSION` 3 (ADR-0038). `literal::Literal` gained an
+  `sse: Sse` field (`Sse::new(bittree::SSE_CONTEXTS)`) and
+  `encode_sse`/`decode_sse`, coding the same mixed `cum` table
+  `encode`/`decode` already build through `bittree::encode_symbol_sse`/
+  `decode_symbol_sse` (new combinators next to `encode_symbol`/
+  `decode_symbol`, reusing their private `check_table_shape`/
+  `upper_half_probability` rather than duplicating the chain-rule walk):
+  each of the 8 levels refines the raw upper-half probability through
+  `sse.refine(sse_context(depth, prefix), raw_p)` before
+  `Encoder::encode_bit`/`Decoder::decode_bit`, then updates on the raw
+  probability. `Literal::update` still runs unconditionally after every
+  symbol regardless of path, so the six-expert mixer keeps adapting
+  identically. `codec::decode` gained a `version: u8` parameter (threaded
+  from `lib.rs::decompress`, which already had it in scope) and dispatches
+  the literal decode call on it (`codec::LITERAL_SSE_MIN_VERSION` = 3);
+  `EncodeSink::literal` always calls `encode_sse` (compression targets the
+  newest version); `tests/golden/v2-lz-repeated-text.mgdc` still decodes
+  unchanged, and a new `tests/golden/v3-lz-repeated-text` pair pins the
+  new shape. `codec::ideal_cost_bits`'s `CostSink` also switched to a new
+  `Literal::ideal_cost_bits_sse`/`bittree::ideal_cost_bits_sse` (pure
+  `-log2` sum through the same SSE-refined chain, no `Encoder`): the old
+  `ideal_cost_bits` still exists (`Literal`'s own tests use it against the
+  pre-SSE `encode`), but leaving `CostSink` on it would have silently
+  desynced ideal-cost pricing from what `EncodeSink` actually codes now,
+  exactly the hazard `codec.rs`'s own module docs warn `TokenSink`
+  exists to prevent — caught by
+  `ideal_cost_bits_tracks_real_encoded_length_within_one_percent` failing
+  at 1.33% before this fix. | Measured on `bench::baseline`'s 11
+  train-tier cases and the two sealed-only kinds (`access_log`,
+  `gradient_image`): net train **-0.36736 b/B**
+  (`interleaved_audio16` -0.36368 carried most of it; `base64_wrapped`
+  -0.01312, `x86_dense_code` -0.01760, `json_records` -0.01024,
+  `entropy_ladder_h1` -0.00512 also improved; `entropy_ladder_h2`
+  +0.00016 and `markov_h8_2_trap` +0.00016 flat, `entropy_ladder_h4`
+  +0.01040 and `sqlite_like_records` +0.00800 both inside
+  `TOLERANCE_BITS`). Sealed split both improved: `access_log` -0.01264,
+  `gradient_image` -0.13472. One case regressed past `TOLERANCE_BITS`
+  (0.02): `entropy_ladder_h6`, +0.02368 — iid random data at 6 bits/byte,
+  where the pre-SSE mixer already pays ~0.156 b/B of modeling noise above
+  the 6.0 floor, and SSE's per-context warm-up plus the 8-chained-binary-
+  decision path's own quantization add roughly another 0.024 on top, with
+  no real systematic bias there for SSE to correct. `research/corpus/
+  POLICY.md`'s accept rule (train improvement, no validation regression)
+  reads on the net numbers; the `entropy_ladder_h6` regression is declared
+  here as the accepted trade `baseline_gate check`'s own message asks
+  for, and `bench/baseline.json` updated to the new numbers in the same
+  PR (`baseline_gate write` + `cargo x fmt`). | Mechanism: unlike S2-R1's
+  lone order-0 `is_copy` counter, the six-expert mixer's blended
+  probability at each binary-tree node is a genuinely compound estimate
+  with real systematic bias for SSE to find and correct — largest where
+  the mixer's own six-way blend is noisiest relative to the true
+  structure (`interleaved_audio16`'s two-rate fast/slow byte-interleave
+  pattern, `gradient_image`'s smooth low-order drift), smallest to
+  negative where there is no structure to find (the entropy ladder, worst
+  at `h6`). `cargo x check`: 4 stages green, 206 lib tests (up from 192:
+  5 new round-trip/SSE-win tests in `bittree.rs`, 9 in `literal.rs`),
+  golden and adversarial suites green including a new
+  `tests/adversarial/lz-v3-truncated-literal-stream` seed (a real
+  `FORMAT_VERSION` 3 frame truncated mid-literal-stream, exercising
+  `decode_sse`'s panic-free-on-truncation path the same way
+  `literal::tests::decoding_truncated_stream_does_not_panic_through_sse`
+  already does at the `Literal` layer). `docs/adr/0038-wire-sse-into-the-
+  literal-mixer.md` records the decision; `docs/format/SPEC.md` updated
+  for the version-gated literal sub-stream shape. `bittree.rs`'s and
+  `sse.rs`'s "remaining scope" docs updated to point here instead of
+  restating the now-closed wiring question. Not S1-P1's originally named
+  target even now in a directly measured sense: the five zstd text
+  holdouts are held-out finals, never inside the experiment loop
+  (`research/corpus/POLICY.md`) — this PR's Canterbury/Silesia report
+  regeneration is a mechanical fingerprint refresh
+  (`bench/baseline.json` changed), not an accept signal.
+  `research/progress.jsonl` it105.

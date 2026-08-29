@@ -1,4 +1,4 @@
-# mothergod bitstream format — DRAFT (FORMAT_VERSION 2)
+# mothergod bitstream format — DRAFT (FORMAT_VERSION 3)
 
 Status: **unstable**. Anything may change until version 1 is frozen (ROADMAP
 M4). This document is normative for the current code; code and spec must
@@ -9,7 +9,7 @@ change in the same PR.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 2)
+4       1     format version (currently 3)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -20,7 +20,11 @@ unknown method (`UnknownMethod`). A `Method::Lz` payload additionally
 requires format version >= 2 (`codec::LZ_MIN_VERSION`): version 1 named a
 different, incompatible `Lz` payload layout (ADR-0026, superseded by
 ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
-rather than parsed under the current layout.
+rather than parsed under the current layout. Version 2 and version 3
+`Lz` frames share the same outer payload layout below; only the literal
+sub-stream's internal shape differs between them (see "Lz" below,
+ADR-0038) — a decoder dispatches on the declared version rather than
+rejecting either.
 
 ## Methods
 
@@ -29,7 +33,7 @@ rather than parsed under the current layout.
 | 0x00 | Stored | the original data, verbatim |
 | 0x01 | Lz     | see below |
 
-### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028)
+### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028, ADR-0038)
 
 A trial-selected filter (`src/filters.rs`: none, delta, BCJ, or
 transpose — `filters::select::pick` shortlists candidates,
@@ -46,6 +50,20 @@ offset  size  field
 6       4     token count, u32 LE
 10      ...   range-coded stream, of the FILTERED bytes
 ```
+
+**Literal sub-stream shape is version-gated (ADR-0038).** At format
+version 2, each literal byte is one direct 256-way range division over
+the six-expert mixer's cumulative table (`literal::Literal::encode`/
+`decode`). At format version 3 and above
+(`codec::LITERAL_SSE_MIN_VERSION`), each literal byte is instead 8
+chained binary decisions over the same table
+(`bittree::encode_symbol`/`decode_symbol`'s chain-rule decomposition),
+each calibrated by a secondary symbol estimation (SSE) stage keyed on
+tree position (`bittree::sse_context`, 255 contexts) before it drives the
+range coder (`literal::Literal::encode_sse`/`decode_sse`). Every other
+symbol in the stream (flag/length/offset/slot) is coded identically
+regardless of version; a decoder dispatches only the literal sub-stream
+on the frame's declared version.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for

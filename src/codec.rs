@@ -27,6 +27,17 @@
 //! before calling [`decode`] at all, rather than relying on this parser's
 //! own adversarial-input defenses to fail safely by coincidence.
 //!
+//! The outer layout above is unchanged since `FORMAT_VERSION` 2, but the
+//! range-coded stream's literal sub-stream is not: a version-3 frame codes
+//! each literal byte as 8 SSE-calibrated binary decisions
+//! ([`crate::literal::Literal::encode_sse`]/`decode_sse`,
+//! `docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
+//! S1-P1) where a version-2 frame codes it as one direct 256-way range
+//! division ([`crate::literal::Literal::encode`]/`decode`). [`decode`]
+//! takes the frame's declared `version` and picks the matching literal
+//! path; every other symbol (flag/length/offset/slot) is unaffected and
+//! coded identically at every version `LZ_MIN_VERSION` or above.
+//!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
 //! hostile payload can claim any token count or any match/rep length, but
@@ -55,6 +66,13 @@ use crate::model::Model;
 /// change that moved this from 1 to 2.
 pub(crate) const LZ_MIN_VERSION: u8 = 2;
 
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes its literal
+/// sub-stream through [`crate::literal::Literal::encode_sse`]/`decode_sse`
+/// rather than the older direct 256-way [`crate::literal::Literal::encode`]/
+/// `decode`: see the module docs' "Payload layout" section and [`decode`]'s
+/// own docs for the version dispatch this feeds.
+const LITERAL_SSE_MIN_VERSION: u8 = 3;
+
 /// Largest declared output length [`decode`] accepts, checked before any
 /// allocation or decode work: `rust-craft`'s allocation-discipline
 /// reference calls this the "against a configured ceiling" bound, needed
@@ -79,22 +97,30 @@ pub(crate) const LZ_MIN_VERSION: u8 = 2;
 /// corpus (Silesia's `mozilla`, ~51 MB) with headroom, while keeping a
 /// worst-case adversarial decode bounded rather than unbounded. That
 /// worst case is an all-literal stream (`research/JOURNAL.md` S2-A27):
-/// every literal byte pays [`crate::literal::Literal::decode`]'s full
-/// six-expert mix over the 256-symbol alphabet, the most expensive of the
-/// three token kinds per output byte (a match or rep byte, by contrast,
-/// is a single unmodeled array copy in this module's `copy_checked`) —
-/// the opposite of "cheapest branch" an earlier version of this comment
-/// claimed.
-/// Measured directly (release build, this project's CI runner class): a
-/// declared length of 256 MiB decodes in ~314s at a steady ~1170 ns/byte,
-/// linear in declared length with no polynomial or worse blowup found
-/// from 1 MiB to 256 MiB. Provisional: `ROADMAP.md` M4's streaming/block
-/// API is the real fix (bounded-memory decode without a single hardcoded
-/// file-size ceiling), and should widen or remove this once it lands;
-/// the ~1170 ns/byte constant itself is a `research/JOURNAL.md` S1-P6
-/// speed-tier target (`Literal::mix` rebuilds all 256 cumulative entries
-/// from scratch every byte instead of an incremental structure), not
-/// something to chase down here.
+/// every literal byte pays [`crate::literal::Literal::decode_sse`]'s full
+/// six-expert mix plus the 8-chained-binary-decision SSE-calibrated coding
+/// path (`FORMAT_VERSION` 3, ADR-0038) over the 256-symbol alphabet, the
+/// most expensive of the three token kinds per output byte (a match or
+/// rep byte, by contrast, is a single unmodeled array copy in this
+/// module's `copy_checked`) — the opposite of "cheapest branch" an
+/// earlier version of this comment claimed.
+/// A pre-ADR-0038 measurement (release build, this project's CI runner
+/// class) found a declared length of 256 MiB decoding in ~314s at a
+/// steady ~1170 ns/byte through the old direct-division
+/// `Literal::decode`, linear in declared length with no polynomial or
+/// worse blowup found from 1 MiB to 256 MiB. `decode_sse`'s own per-byte
+/// cost is a bounded constant more (8 `Sse::refine`/`Decoder::decode_bit`
+/// calls instead of one direct cumulative-table scan), not a new
+/// asymptotic shape: a smaller-scale check after this change (8 MiB of
+/// incompressible data, forced through `Method::Lz` so every byte hits
+/// `decode_sse`) measured ~1780 ns/byte, consistent with that bound.
+/// Provisional either way: `ROADMAP.md` M4's streaming/block API is the
+/// real fix (bounded-memory decode without a single hardcoded file-size
+/// ceiling), and should widen or remove this once it lands; the constant
+/// itself is a `research/JOURNAL.md` S1-P6 speed-tier target
+/// (`Literal::mix` rebuilds all 256 cumulative entries from scratch every
+/// byte instead of an incremental structure), not something to chase down
+/// here.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Flag symbols coded before every token, selecting which of the three
@@ -258,7 +284,10 @@ impl TokenSink for EncodeSink<'_> {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        models.literal.encode(self.ac, context, byte);
+        // Compression always targets the newest format version
+        // (`FORMAT_VERSION`), so encoding always takes the SSE-calibrated
+        // path; `decode` is the one that must still read older frames.
+        models.literal.encode_sse(self.ac, context, byte);
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
@@ -287,7 +316,11 @@ impl TokenSink for CostSink {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        self.bits += models.literal.ideal_cost_bits(context, byte);
+        // Matches EncodeSink::literal's encode_sse path (this trait's own
+        // docs: CostSink and EncodeSink must price and code the same
+        // thing), so ideal_cost_bits stays a true estimate of what
+        // encode_tokens's real Encoder pays.
+        self.bits += models.literal.ideal_cost_bits_sse(context, byte);
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
@@ -473,6 +506,15 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// not equal it: all adversarial or malformed input, never a bug in this
 /// decoder (`rust-craft` skill, panic-discipline).
 ///
+/// `version` is the frame's declared `FORMAT_VERSION` byte
+/// (`crate::decompress` already has it in scope at its one call site):
+/// versions below 3 decode the literal sub-stream through
+/// [`crate::literal::Literal::decode`] (the old direct 256-way division),
+/// version 3 and above through [`crate::literal::Literal::decode_sse`] (see
+/// the module docs' "Payload layout" section). Every other symbol decodes
+/// identically regardless of `version`, since only the literal sub-stream's
+/// internal shape changed.
+///
 /// # Panics
 ///
 /// Does not panic on adversarial `payload`. Two internal `.expect()`s
@@ -482,7 +524,7 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// docs), and casting a declared length already found `<=
 /// MAX_DECODED_LEN` (a `u32`) back down from the `usize` `read_header`
 /// widened it to.
-pub fn decode(payload: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn decode(payload: &[u8], version: u8) -> Result<Vec<u8>, Error> {
     let (filter_bytes, payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
     let candidate =
         Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
@@ -506,7 +548,11 @@ pub fn decode(payload: &[u8]) -> Result<Vec<u8>, Error> {
         match models.flag[flag_table].decode(&mut ac) {
             FLAG_LITERAL => {
                 ensure_room(output.len(), 1, declared_len)?;
-                let byte = models.literal.decode(&mut ac, context);
+                let byte = if version >= LITERAL_SSE_MIN_VERSION {
+                    models.literal.decode_sse(&mut ac, context)
+                } else {
+                    models.literal.decode(&mut ac, context)
+                };
                 output.push(byte);
                 context = context.after_literal(byte);
             }
@@ -550,7 +596,11 @@ mod tests {
 
     fn roundtrip(data: &[u8]) {
         let encoded = encode(data);
-        assert_eq!(decode(&encoded).as_deref(), Ok(data), "roundtrip mismatch");
+        assert_eq!(
+            decode(&encoded, crate::FORMAT_VERSION).as_deref(),
+            Ok(data),
+            "roundtrip mismatch"
+        );
     }
 
     #[test]
@@ -578,7 +628,10 @@ mod tests {
             data.len(),
             encoded.len()
         );
-        assert_eq!(decode(&encoded).as_deref(), Ok(data.as_slice()));
+        assert_eq!(
+            decode(&encoded, crate::FORMAT_VERSION).as_deref(),
+            Ok(data.as_slice())
+        );
     }
 
     #[test]
@@ -659,13 +712,19 @@ mod tests {
             "columnar drift data should select a non-identity filter, got kind byte {}",
             encoded[0]
         );
-        assert_eq!(decode(&encoded).as_deref(), Ok(data.as_slice()));
+        assert_eq!(
+            decode(&encoded, crate::FORMAT_VERSION).as_deref(),
+            Ok(data.as_slice())
+        );
     }
 
     #[test]
     fn truncated_header_is_rejected() {
-        assert_eq!(decode(&[0u8; 4]), Err(Error::Truncated));
-        assert_eq!(decode(&[]), Err(Error::Truncated));
+        assert_eq!(
+            decode(&[0u8; 4], crate::FORMAT_VERSION),
+            Err(Error::Truncated)
+        );
+        assert_eq!(decode(&[], crate::FORMAT_VERSION), Err(Error::Truncated));
     }
 
     #[test]
@@ -676,7 +735,7 @@ mod tests {
         let mut payload = vec![5u8, 0u8];
         payload.extend_from_slice(&1u32.to_le_bytes());
         payload.extend_from_slice(&0u32.to_le_bytes());
-        assert_eq!(decode(&payload), Err(Error::Corrupt));
+        assert_eq!(decode(&payload, crate::FORMAT_VERSION), Err(Error::Corrupt));
     }
 
     #[test]
@@ -692,7 +751,10 @@ mod tests {
         let mut payload = Candidate::Identity.to_header_bytes().to_vec();
         payload.extend_from_slice(&u32::MAX.to_le_bytes());
         payload.extend_from_slice(&0u32.to_le_bytes());
-        assert_eq!(decode(&payload), Err(Error::TooLarge(u32::MAX)));
+        assert_eq!(
+            decode(&payload, crate::FORMAT_VERSION),
+            Err(Error::TooLarge(u32::MAX))
+        );
     }
 
     #[test]
@@ -707,7 +769,10 @@ mod tests {
         let mut payload = Candidate::Identity.to_header_bytes().to_vec();
         payload.extend_from_slice(&over.to_le_bytes());
         payload.extend_from_slice(&over.to_le_bytes());
-        assert_eq!(decode(&payload), Err(Error::TooLarge(over)));
+        assert_eq!(
+            decode(&payload, crate::FORMAT_VERSION),
+            Err(Error::TooLarge(over))
+        );
     }
 
     #[test]
@@ -730,7 +795,7 @@ mod tests {
         payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
         payload.extend(ac_bytes);
 
-        assert_eq!(decode(&payload), Err(Error::Corrupt));
+        assert_eq!(decode(&payload, crate::FORMAT_VERSION), Err(Error::Corrupt));
     }
 
     #[test]

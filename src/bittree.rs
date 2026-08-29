@@ -1,16 +1,15 @@
 //! Binary decomposition of a 256-symbol cumulative-frequency table into a
-//! sequence of top-down binary split decisions ("bit tree"): ROADMAP M3's
-//! oldest standing lead's own next step (`research/JOURNAL.md` S1-P1,
-//! `crate::sse`'s module docs — "the literal mixer's own eventual binary
-//! decomposition is the obvious calibration candidate, not another raw
-//! `Model` split").
+//! sequence of top-down binary split decisions ("bit tree"): the shape
+//! ROADMAP M3's oldest standing lead needed to calibrate a compound
+//! estimate instead of a lone counter (`research/JOURNAL.md` S1-P1,
+//! S2-R1's postmortem, `crate::sse`'s module docs).
 //!
 //! Not a port: no archive precedent (`crate::sse`'s module docs record the
-//! same grep-clean result for S1-P1 generally). Standalone, like
-//! [`crate::sse::Sse`] and [`crate::coder::Encoder::encode_bit`]/
-//! [`crate::coder::Decoder::decode_bit`] before it (S2-A40/S2-A41): no
-//! caller in this crate drives this yet, and it is not wired into
-//! [`crate::literal::Literal`] or `crate::codec`.
+//! same grep-clean result for S1-P1 generally). [`encode_symbol`]/
+//! [`decode_symbol`] (the non-SSE pair) stay standalone, exercised only by
+//! this module's own tests; [`encode_symbol_sse`]/[`decode_symbol_sse`]
+//! are wired (`research/JOURNAL.md` S2-A60, ADR-0038,
+//! [`crate::literal::Literal::encode_sse`]/`decode_sse`).
 //!
 //! [`encode_symbol`]/[`decode_symbol`] code one byte as 8 chained binary
 //! decisions instead of [`crate::coder::Encoder::encode`]/
@@ -30,11 +29,21 @@
 //! through the real coder.
 //!
 //! [`sse_context`] answers S1-P1's other named prerequisite: which
-//! [`crate::sse::Sse`] context a given walk step should key on. Still not
-//! wired into [`crate::literal::Literal`] or `crate::codec` — this module
-//! stays a standalone primitive, same as before this addition.
+//! [`crate::sse::Sse`] context a given walk step should key on.
+//!
+//! [`encode_symbol_sse`]/[`decode_symbol_sse`] compose the two: the same
+//! chain-rule walk as [`encode_symbol`]/[`decode_symbol`], but each level's
+//! raw `cum`-derived probability is first refined through a caller-supplied
+//! [`crate::sse::Sse`] table (keyed by [`sse_context`]) before it reaches
+//! [`crate::coder::Encoder::encode_bit`]/[`crate::coder::Decoder::decode_bit`],
+//! and the table is updated on the raw probability afterward — the shape
+//! [`crate::sse::Sse`]'s own test suite already proves round-trips
+//! (`calibrated_probability_round_trips_and_costs_less_than_a_fixed_split`).
+//! `crate::literal::Literal::encode_sse`/`decode_sse` are the only callers,
+//! closing `research/JOURNAL.md` S1-P1.
 
 use crate::coder::{Decoder, Encoder};
+use crate::sse::Sse;
 
 /// Byte alphabet a cumulative table spans, matching
 /// [`crate::literal::Literal`]'s own alphabet size.
@@ -196,6 +205,84 @@ pub fn decode_symbol(decoder: &mut Decoder, cum: &[u64]) -> u8 {
     }
 }
 
+/// Codes `symbol` through `encoder` as `LEVELS` chained binary decisions
+/// over `cum`, same as [`encode_symbol`], except each level's raw
+/// `upper_half_probability` is first refined through `sse` (keyed by
+/// [`sse_context`]) before it drives [`Encoder::encode_bit`], and `sse` is
+/// updated on the raw probability afterward — the calibration step S1-P1
+/// exists for, applied to the mixer's own compound per-decision estimate
+/// rather than a lone frequency counter (`research/JOURNAL.md` S2-R1's
+/// mechanism reading).
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+pub fn encode_symbol_sse(encoder: &mut Encoder, cum: &[u64], symbol: u8, sse: &mut Sse) {
+    check_table_shape(cum);
+    let symbol = usize::from(symbol);
+    let mut lo = 0usize;
+    let mut hi = ALPHABET;
+    for depth in 0..LEVELS {
+        let mid = lo + (hi - lo) / 2;
+        let bit = symbol >= mid;
+        let context = sse_context(depth, lo / (hi - lo));
+        let raw_p = upper_half_probability(cum, lo, hi);
+        let refined_p = sse.refine(context, raw_p);
+        encoder.encode_bit(bit, refined_p);
+        sse.update(context, raw_p, bit);
+        if bit {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    debug_assert_eq!(
+        lo, symbol,
+        "8 halvings of [0, 256) must land exactly on symbol"
+    );
+    debug_assert_eq!(hi, symbol + 1);
+}
+
+/// Decodes one byte from `decoder` as `LEVELS` chained binary decisions
+/// over `cum`, the exact inverse of [`encode_symbol_sse`].
+///
+/// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`] is
+/// total over any coded bit pattern, same as [`decode_symbol`].
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`. `cum` and `sse` are both
+/// caller-supplied local state, never derived from `decoder`'s bytes.
+#[must_use]
+pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u8 {
+    check_table_shape(cum);
+    let mut lo = 0usize;
+    let mut hi = ALPHABET;
+    for depth in 0..LEVELS {
+        let mid = lo + (hi - lo) / 2;
+        let context = sse_context(depth, lo / (hi - lo));
+        let raw_p = upper_half_probability(cum, lo, hi);
+        let refined_p = sse.refine(context, raw_p);
+        let bit = decoder.decode_bit(refined_p);
+        sse.update(context, raw_p, bit);
+        if bit {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "lo is bounded to [0, ALPHABET) after LEVELS halvings of a 256-wide range, \
+                  always fits u8"
+    )]
+    {
+        lo as u8
+    }
+}
+
 /// Sum of the ideal (`-log2`) cost of each of the `LEVELS` binary
 /// decisions [`encode_symbol`] would pay coding `symbol` under `cum`,
 /// without driving a coder — the chain-rule identity the module docs
@@ -227,6 +314,55 @@ pub fn ideal_cost_bits(cum: &[u64], symbol: u8) -> f64 {
         let bit = symbol >= mid;
         let p = upper_half_probability(cum, lo, hi);
         bits -= if bit { p.log2() } else { (1.0 - p).log2() };
+        if bit {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    bits
+}
+
+/// [`ideal_cost_bits`]'s counterpart for [`encode_symbol_sse`]: sums the
+/// ideal (`-log2`) cost of each `sse`-refined binary decision
+/// [`encode_symbol_sse`] would pay coding `symbol` under `cum`, without
+/// driving a coder, updating `sse` on the raw probability exactly as
+/// [`encode_symbol_sse`] does — so a caller pricing a whole stream this way
+/// leaves `sse` in the same state a real `encode_symbol_sse` pass would
+/// have, and later prices reflect that adaptation.
+/// [`crate::literal::Literal::ideal_cost_bits_sse`]'s counterpart for this
+/// decomposition.
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+#[must_use]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends \
+              on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't \
+              apply off the coding path) — crate::literal::Literal::ideal_cost_bits_sse takes the \
+              same exemption"
+)]
+pub fn ideal_cost_bits_sse(cum: &[u64], symbol: u8, sse: &mut Sse) -> f64 {
+    check_table_shape(cum);
+    let symbol = usize::from(symbol);
+    let mut lo = 0usize;
+    let mut hi = ALPHABET;
+    let mut bits = 0.0f64;
+    for depth in 0..LEVELS {
+        let mid = lo + (hi - lo) / 2;
+        let bit = symbol >= mid;
+        let context = sse_context(depth, lo / (hi - lo));
+        let raw_p = upper_half_probability(cum, lo, hi);
+        let refined_p = sse.refine(context, raw_p);
+        bits -= if bit {
+            refined_p.log2()
+        } else {
+            (1.0 - refined_p).log2()
+        };
+        sse.update(context, raw_p, bit);
         if bit {
             lo = mid;
         } else {
@@ -403,6 +539,42 @@ mod tests {
     }
 
     #[test]
+    fn real_sse_coded_length_tracks_sse_ideal_cost_within_a_few_percent() {
+        // Same shape as real_coded_length_tracks_ideal_cost_within_a_few_percent,
+        // for the sse-calibrated path: ideal_cost_bits_sse must track
+        // encode_symbol_sse's real output, not just encode_symbol's.
+        let cum = skewed_table();
+        let symbols: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED_CAFE)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+
+        let mut cost_sse = Sse::new(SSE_CONTEXTS);
+        let ideal_bits: f64 = symbols
+            .iter()
+            .map(|&s| ideal_cost_bits_sse(&cum, s, &mut cost_sse))
+            .sum();
+
+        let mut coder_sse = Sse::new(SSE_CONTEXTS);
+        let mut enc = Encoder::new();
+        for &symbol in &symbols {
+            encode_symbol_sse(&mut enc, &cum, symbol, &mut coder_sse);
+        }
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "encoded length is far below f64's exact integer range (2^53)"
+        )]
+        let real_bits = (enc.finish().len() * 8) as f64;
+
+        let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
+        assert!(
+            relative_diff <= 0.05,
+            "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
+             {relative_diff:.4} relative difference exceeds the 5% budget"
+        );
+    }
+
+    #[test]
     fn sse_context_is_a_bijection_onto_0_sse_contexts() {
         use std::collections::HashSet;
         let mut seen = HashSet::new();
@@ -473,6 +645,93 @@ mod tests {
     #[test]
     fn sse_context_count_is_255() {
         assert_eq!(SSE_CONTEXTS, 255);
+    }
+
+    #[test]
+    fn every_symbol_round_trips_through_sse_on_a_uniform_table() {
+        let cum = uniform_table();
+        for symbol in 0..=u8::MAX {
+            let mut enc_sse = Sse::new(SSE_CONTEXTS);
+            let mut enc = Encoder::new();
+            encode_symbol_sse(&mut enc, &cum, symbol, &mut enc_sse);
+            let encoded = enc.finish();
+            let mut dec_sse = Sse::new(SSE_CONTEXTS);
+            let mut dec = Decoder::new(&encoded);
+            assert_eq!(decode_symbol_sse(&mut dec, &cum, &mut dec_sse), symbol);
+        }
+    }
+
+    #[test]
+    fn every_symbol_round_trips_through_sse_on_a_skewed_table() {
+        let cum = skewed_table();
+        for symbol in 0..=u8::MAX {
+            let mut enc_sse = Sse::new(SSE_CONTEXTS);
+            let mut enc = Encoder::new();
+            encode_symbol_sse(&mut enc, &cum, symbol, &mut enc_sse);
+            let encoded = enc.finish();
+            let mut dec_sse = Sse::new(SSE_CONTEXTS);
+            let mut dec = Decoder::new(&encoded);
+            assert_eq!(decode_symbol_sse(&mut dec, &cum, &mut dec_sse), symbol);
+        }
+    }
+
+    #[test]
+    fn a_sequence_of_symbols_round_trips_through_sse_over_one_stream() {
+        let cum = skewed_table();
+        let symbols: Vec<u8> = crate::test_support::Xorshift32::new(0xB17_7EEE)
+            .take(2000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+
+        let mut sse = Sse::new(SSE_CONTEXTS);
+        let mut enc = Encoder::new();
+        for &symbol in &symbols {
+            encode_symbol_sse(&mut enc, &cum, symbol, &mut sse);
+        }
+        let encoded = enc.finish();
+
+        let mut sse = Sse::new(SSE_CONTEXTS);
+        let mut dec = Decoder::new(&encoded);
+        let decoded: Vec<u8> = symbols
+            .iter()
+            .map(|_| decode_symbol_sse(&mut dec, &cum, &mut sse))
+            .collect();
+        assert_eq!(decoded, symbols);
+    }
+
+    #[test]
+    fn sse_calibration_wins_when_the_raw_table_is_systematically_biased() {
+        // Mirrors crate::sse's own
+        // calibrated_probability_round_trips_and_costs_less_than_a_fixed_split:
+        // an uninformative-ish cum (near-uniform) fed a stream that
+        // actually favors low symbols hard should cost less through
+        // encode_symbol_sse than encode_symbol, once Sse has adapted,
+        // because Sse is exactly what corrects a systematic gap between a
+        // primary estimate and the true observed rate.
+        let cum = uniform_table();
+        let symbols: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED_5EED)
+            .take(4000)
+            .map(|state| u8::try_from(state % 8).unwrap()) // heavily favors symbols 0..8
+            .collect();
+
+        let mut plain_enc = Encoder::new();
+        for &symbol in &symbols {
+            encode_symbol(&mut plain_enc, &cum, symbol);
+        }
+        let plain_bytes = plain_enc.finish().len();
+
+        let mut sse = Sse::new(SSE_CONTEXTS);
+        let mut sse_enc = Encoder::new();
+        for &symbol in &symbols {
+            encode_symbol_sse(&mut sse_enc, &cum, symbol, &mut sse);
+        }
+        let sse_bytes = sse_enc.finish().len();
+
+        assert!(
+            sse_bytes < plain_bytes,
+            "sse-calibrated {sse_bytes} bytes should beat uncalibrated {plain_bytes} bytes \
+             once Sse has adapted to the skew a uniform cum table can't see"
+        );
     }
 
     #[test]
