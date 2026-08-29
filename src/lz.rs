@@ -1402,7 +1402,10 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 ///
 /// # Panics
 ///
-/// Same as [`parse_optimal`].
+/// Same as [`parse_optimal`]. Also panics (via `dp_round`'s
+/// `debug_assert!` in debug, an out-of-range index in release) if
+/// `window`'s bucket does not stay under `OFFSET_BUCKETS`, i.e.
+/// `window >= 2^21`.
 #[must_use]
 pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
