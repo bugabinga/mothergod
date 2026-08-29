@@ -2427,10 +2427,13 @@ record.
   larger tree (SPEED, ROADMAP M5, untouched).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
-  `column::column_of`, not yet wired). Remaining scope: an actual
-  column-index-keyed expert bank in `Literal`, threading the `columns`
-  parameter filter selection already knows down to it, a `FORMAT_VERSION`
-  bump, and a real bpb measurement.
+  `column::column_of`, not yet wired). Second slice, S2-A66: `column::
+  column_bank`, wrapping `column_of`'s unbounded result into a fixed-size
+  bank space so a future expert's storage sizes from a constant rather
+  than the frame's declared `columns` (CLAUDE.md hard rule 2). Remaining
+  scope: an actual column-index-keyed expert bank in `Literal`, threading
+  the `columns` parameter filter selection already knows down to it, a
+  `FORMAT_VERSION` bump, and a real bpb measurement.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
   Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
@@ -3024,3 +3027,36 @@ record.
   S2-A62/S2-A64): standalone, not yet wired to a different value than
   today's — `progress.jsonl` records this as `kind: "patch"` with null
   bpb deltas. `research/progress.jsonl` it111.
+- S2-A66 | ACCEPTED | Second slice of ROADMAP M3's fifth standing lead
+  (S1-P5, per-column modeling after transpose): `column::column_bank
+  (column, max_banks)` (`column % max_banks.get()`), the bound
+  `column_of` (S2-A64) still lacked. A future column-index-keyed expert's
+  bank storage must size from a constant alone, never from the frame's
+  declared `columns`: a decoder reads `columns` from untrusted compressed
+  input, so sizing bank count to it directly would let a hostile frame
+  drive unbounded allocation, CLAUDE.md hard rule 2. `literal.rs`'s
+  existing five non-order0 experts already solve the identical unbounded-
+  context problem the same way — `ORDER2_BASE`'s `& 0xFFF`, `WORD_BASE`'s
+  `& 0xFFF`, `ALIGN_BASE`'s `position & 3` — so this borrows that
+  convention rather than inventing one: real per-column separation for
+  the common case this lead targets (structured data with a modest
+  column count), aliasing distant columns onto the same bank rather than
+  allocating one per column for an adversarial `columns` value. | 4 new
+  unit tests (220 lib tests total, up from 216): identity when `columns`
+  fits within `max_banks`; explicit wraparound arithmetic for 10 columns
+  into 4 banks; every result of 100 columns stays under a 3-bank cap; an
+  end-to-end check piping every position of a 37-column, 200-byte stream
+  through `column_of` then `column_bank` into a 5-bank space. `cargo x
+  check`: 4 stages green; `baseline_gate check`: 11 cases, no regression
+  — pure function, nothing wired in yet. | No bpb measurement, same
+  reason as S2-A64 and every other lead's non-wired slice: no `Method`
+  variant or mixer reads this yet, so there is no champion to diff
+  against — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas. `research/progress.jsonl` it113 (it112 is PR #353's S2-R7,
+  still open at this writing; picking it113 avoids a same-id collision
+  regardless of merge order). Remaining S1-P5 scope,
+  unchanged from S2-A64: an actual column-index-keyed expert bank wired
+  into `Literal`, threading `columns` down from filter selection, a
+  `FORMAT_VERSION` bump, and a real bpb measurement — `column_of` and
+  `column_bank` together are the arithmetic that wiring needs, still
+  neither one is called from `literal.rs` or `codec.rs`.
