@@ -2,7 +2,7 @@
   xmlns="http://www.w3.org/2000/svg"
   viewBox="0 0 560 386"
   role="img"
-  aria-label="mothergod bits/byte on the fixed baseline cases. as of 2026-08-28T14:47:23Z — own generator corpus (bench/baseline.json, research/JOURNAL.md S2-A35), not Silesia/Canterbury"
+  aria-label="mothergod bits/byte on the fixed baseline cases. as of 2026-08-29T01:03:34Z — own generator corpus (bench/baseline.json, research/JOURNAL.md S2-A35), not Silesia/Canterbury"
 >
   <title>mothergod bits/byte on the fixed baseline cases</title>
   <rect x="0" y="0" width="560" height="386" fill="#fcfcfb" />
@@ -20,7 +20,7 @@
     font-family="system-ui, sans-serif"
     font-size="11"
     fill="#52514e"
-  >as of 2026-08-28T14:47:23Z — own generator corpus (bench/baseline.json, research/JOURNAL.md S2-A35), not Silesia/Canterbury</text>
+  >as of 2026-08-29T01:03:34Z — own generator corpus (bench/baseline.json, research/JOURNAL.md S2-A35), not Silesia/Canterbury</text>
   <line
     x1="170.0"
     y1="64.0"
@@ -119,9 +119,9 @@
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >0.600</text>
+  >0.602</text>
   <path
-    d="M170.0,90.0 L186.9,90.0 A4.0,4.0 0 0 1 190.9,94.0 L190.9,106.0 A4.0,4.0 0 0 1 186.9,110.0 L170.0,110.0 Z"
+    d="M170.0,90.0 L186.8,90.0 A4.0,4.0 0 0 1 190.8,94.0 L190.8,106.0 A4.0,4.0 0 0 1 186.8,110.0 L170.0,110.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -133,14 +133,14 @@
     fill="#898781"
   >json_records</text>
   <text
-    x="198.9"
+    x="198.8"
     y="104.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >0.617</text>
+  >0.615</text>
   <path
-    d="M170.0,116.0 L208.9,116.0 A4.0,4.0 0 0 1 212.9,120.0 L212.9,132.0 A4.0,4.0 0 0 1 208.9,136.0 L170.0,136.0 Z"
+    d="M170.0,116.0 L208.8,116.0 A4.0,4.0 0 0 1 212.8,120.0 L212.8,132.0 A4.0,4.0 0 0 1 208.8,136.0 L170.0,136.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -152,14 +152,14 @@
     fill="#898781"
   >entropy_ladder_h1</text>
   <text
-    x="220.9"
+    x="220.8"
     y="130.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >1.269</text>
+  >1.267</text>
   <path
-    d="M170.0,142.0 L248.2,142.0 A4.0,4.0 0 0 1 252.2,146.0 L252.2,158.0 A4.0,4.0 0 0 1 248.2,162.0 L170.0,162.0 Z"
+    d="M170.0,142.0 L248.0,142.0 A4.0,4.0 0 0 1 252.0,146.0 L252.0,158.0 A4.0,4.0 0 0 1 248.0,162.0 L170.0,162.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -171,14 +171,14 @@
     fill="#898781"
   >entropy_ladder_h2</text>
   <text
-    x="260.2"
+    x="260.0"
     y="156.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >2.435</text>
+  >2.428</text>
   <path
-    d="M170.0,168.0 L248.2,168.0 A4.0,4.0 0 0 1 252.2,172.0 L252.2,184.0 A4.0,4.0 0 0 1 248.2,188.0 L170.0,188.0 Z"
+    d="M170.0,168.0 L248.0,168.0 A4.0,4.0 0 0 1 252.0,172.0 L252.0,184.0 A4.0,4.0 0 0 1 248.0,188.0 L170.0,188.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -190,14 +190,14 @@
     fill="#898781"
   >markov_h8_2_trap</text>
   <text
-    x="260.2"
+    x="260.0"
     y="182.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >2.435</text>
+  >2.429</text>
   <path
-    d="M170.0,194.0 L258.5,194.0 A4.0,4.0 0 0 1 262.5,198.0 L262.5,210.0 A4.0,4.0 0 0 1 258.5,214.0 L170.0,214.0 Z"
+    d="M170.0,194.0 L258.3,194.0 A4.0,4.0 0 0 1 262.3,198.0 L262.3,210.0 A4.0,4.0 0 0 1 258.3,214.0 L170.0,214.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -209,14 +209,14 @@
     fill="#898781"
   >x86_dense_code</text>
   <text
-    x="270.5"
+    x="270.3"
     y="208.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >2.737</text>
+  >2.734</text>
   <path
-    d="M170.0,220.0 L282.1,220.0 A4.0,4.0 0 0 1 286.1,224.0 L286.1,236.0 A4.0,4.0 0 0 1 282.1,240.0 L170.0,240.0 Z"
+    d="M170.0,220.0 L282.0,220.0 A4.0,4.0 0 0 1 286.0,224.0 L286.0,236.0 A4.0,4.0 0 0 1 282.0,240.0 L170.0,240.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -228,14 +228,14 @@
     fill="#898781"
   >sqlite_like_records</text>
   <text
-    x="294.1"
+    x="294.0"
     y="234.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >3.436</text>
+  >3.435</text>
   <path
-    d="M170.0,246.0 L317.1,246.0 A4.0,4.0 0 0 1 321.1,250.0 L321.1,262.0 A4.0,4.0 0 0 1 317.1,266.0 L170.0,266.0 Z"
+    d="M170.0,246.0 L316.9,246.0 A4.0,4.0 0 0 1 320.9,250.0 L320.9,262.0 A4.0,4.0 0 0 1 316.9,266.0 L170.0,266.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -247,14 +247,14 @@
     fill="#898781"
   >entropy_ladder_h4</text>
   <text
-    x="329.1"
+    x="328.9"
     y="260.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >4.474</text>
+  >4.466</text>
   <path
-    d="M170.0,272.0 L374.3,272.0 A4.0,4.0 0 0 1 378.3,276.0 L378.3,288.0 A4.0,4.0 0 0 1 374.3,292.0 L170.0,292.0 Z"
+    d="M170.0,272.0 L373.9,272.0 A4.0,4.0 0 0 1 377.9,276.0 L377.9,288.0 A4.0,4.0 0 0 1 373.9,292.0 L170.0,292.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -266,14 +266,14 @@
     fill="#898781"
   >entropy_ladder_h6</text>
   <text
-    x="386.3"
+    x="385.9"
     y="286.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >6.167</text>
+  >6.156</text>
   <path
-    d="M170.0,298.0 L375.6,298.0 A4.0,4.0 0 0 1 379.6,302.0 L379.6,314.0 A4.0,4.0 0 0 1 375.6,318.0 L170.0,318.0 Z"
+    d="M170.0,298.0 L375.5,298.0 A4.0,4.0 0 0 1 379.5,302.0 L379.5,314.0 A4.0,4.0 0 0 1 375.5,318.0 L170.0,318.0 Z"
     fill="#2a78d6"
   />
   <text
@@ -285,12 +285,12 @@
     fill="#898781"
   >interleaved_audio16</text>
   <text
-    x="387.6"
+    x="387.5"
     y="312.0"
     font-family="ui-monospace, monospace"
     font-size="11"
     fill="#52514e"
-  >6.204</text>
+  >6.203</text>
   <path
     d="M170.0,324.0 L436.3,324.0 A4.0,4.0 0 0 1 440.3,328.0 L440.3,340.0 A4.0,4.0 0 0 1 436.3,344.0 L170.0,344.0 Z"
     fill="#2a78d6"

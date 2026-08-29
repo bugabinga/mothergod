@@ -13,8 +13,10 @@
 //! the entropy coder to exist.
 //!
 //! [`parse_optimal`] is the follow-up slice: the archive's `lz_opt`, a
-//! two-round DP-priced optimal parse seeded by [`parse_greedy`]. See its
-//! docs for one deliberate correctness fix over the archive's own DP.
+//! DP-priced optimal parse seeded by [`parse_greedy`] and iterated a fixed
+//! number of rounds (S2-A56 raised the archive's original two to three).
+//! See its docs for one deliberate correctness fix over the archive's own
+//! DP.
 //!
 //! Behavior ported, not code, per ADR-0006: the archive's single `find`
 //! closure captured by both the rep-cache scan and the hash-chain search
@@ -786,7 +788,7 @@ pub fn replay(tokens: &[Token]) -> Vec<u8> {
     out
 }
 
-// ---- optimal parse: DP-priced, in-DP rep cache, 2-round price iteration ----
+// ---- optimal parse: DP-priced, in-DP rep cache, 3-round price iteration ----
 
 /// Below this input length [`parse_optimal`] falls back to [`parse_greedy`]:
 /// matches the archive's `n<64` short-circuit in `lz_opt` — the DP's fixed
@@ -1331,14 +1333,16 @@ fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
     tokens
 }
 
-/// Two-round DP-priced optimal parse (`JOURNAL` S1-A3, S2-D2's `lz_opt`
-/// slice): a first pass with [`parse_greedy`] seeds a price table; two
-/// rounds of `dp_round` each find the min-price path under the current
-/// table, and round 0's resulting tokens reseed a sharper table for round
-/// 1 (the archive re-derives its price tables from its own DP output
-/// exactly once, not iterating to convergence). Below `OPTIMAL_MIN_LEN`
-/// (64 bytes) the DP's fixed setup cost isn't worth paying: falls back to
-/// [`parse_greedy`] directly, matching the archive.
+/// Three-round DP-priced optimal parse (`JOURNAL` S1-A3, S2-D2's `lz_opt`
+/// slice; round count raised from the archive's original two by S2-A56): a
+/// first pass with [`parse_greedy`] seeds a price table, then each of three
+/// `dp_round` rounds finds the min-price path under the current table and
+/// reseeds a sharper one from its own output for the next round (the
+/// archive stopped after one reseed; S2-A56 measured a second reseed as a
+/// further net win with no sealed-validation regression, not yet iterated
+/// to full convergence). Below `OPTIMAL_MIN_LEN` (64 bytes) the DP's fixed
+/// setup cost isn't worth paying: falls back to [`parse_greedy`] directly,
+/// matching the archive.
 ///
 /// See `dp_round`'s docs for one deliberate correctness fix over the
 /// archive's own `lz_opt`: this DP's internal rep-cache bookkeeping always
@@ -1359,6 +1363,8 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
     let prices = PriceCounts::tally(&seed, data).prices(seed.len());
     let first_round = dp_round(data, &prices);
     let prices = PriceCounts::tally(&first_round, data).prices(first_round.len());
+    let second_round = dp_round(data, &prices);
+    let prices = PriceCounts::tally(&second_round, data).prices(second_round.len());
     dp_round(data, &prices)
 }
 

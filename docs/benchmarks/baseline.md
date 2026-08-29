@@ -2,20 +2,20 @@
 
 # Baseline snapshot
 
-As of 2026-08-28T14:47:23Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
+As of 2026-08-29T01:03:34Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
 
-![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-08-28T14:47:23Z](baseline.svg)
+![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-08-29T01:03:34Z](baseline.svg)
 
 | case | bits/byte |
 |---|---|
-| `base64_wrapped` | 0.600480 |
-| `json_records` | 0.617440 |
-| `entropy_ladder_h1` | 1.268960 |
-| `entropy_ladder_h2` | 2.434560 |
-| `markov_h8_2_trap` | 2.434880 |
-| `x86_dense_code` | 2.737280 |
-| `sqlite_like_records` | 3.436000 |
-| `entropy_ladder_h4` | 4.473760 |
-| `entropy_ladder_h6` | 6.166560 |
-| `interleaved_audio16` | 6.204320 |
+| `base64_wrapped` | 0.601920 |
+| `json_records` | 0.614880 |
+| `entropy_ladder_h1` | 1.267360 |
+| `entropy_ladder_h2` | 2.428480 |
+| `markov_h8_2_trap` | 2.428640 |
+| `x86_dense_code` | 2.733600 |
+| `sqlite_like_records` | 3.435040 |
+| `entropy_ladder_h4` | 4.466400 |
+| `entropy_ladder_h6` | 6.155520 |
+| `interleaved_audio16` | 6.203360 |
 | `entropy_ladder_h8` | 8.000960 |
