@@ -56,6 +56,10 @@ const denied = [
   ["cargo +stable x check", "toolchain selector is transparent (#333 r4)"],
   ["cargo +stable test", "same on the unwrapped form"],
   ["cargo +nightly x lint", "same, unscoped lint"],
+  ["cargo x \\\n  check", "line continuation splices out (#333 r6)"],
+  ["cargo \\\ntest", "same on the unwrapped form"],
+  ["cargo x che\\\nck", "mid-word splice is still one word"],
+  ["cargo x test \\\n--", "continued bare -- still passes no filter"],
 ];
 
 const allowed = [
@@ -83,6 +87,8 @@ const allowed = [
     "cargo run --manifest-path tools/unix/Cargo.toml -- test",
     "component ending in x is not the x crate",
   ],
+  ["cargo x test -- \\\nsrc/lz", "a continued scope argument still scopes"],
+  ["grep 'cargo x \\\ncheck' notes.md", "continuation inside quoted prose"],
 ];
 
 for (const [command, why] of denied) {
