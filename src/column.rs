@@ -17,7 +17,13 @@
 //! immediately at a column boundary, instead of only after re-adapting
 //! from a few bytes of the wrong column's evidence. [`column_of`] is the
 //! arithmetic that context needs: which column produced the byte at a
-//! given position in the transposed stream. Remaining S1-P5 scope: an
+//! given position in the transposed stream. [`column_bank`] is the second
+//! piece: a decoder reads `columns` from untrusted compressed input, so a
+//! future expert's bank storage must size from a constant, never from
+//! `columns` directly (CLAUDE.md hard rule 2) -- `column_bank` wraps
+//! [`column_of`]'s unbounded result into a fixed-size bank space, the same
+//! convention `literal.rs`'s existing experts already use (`ORDER2_BASE`'s
+//! `& 0xFFF`, `ALIGN_BASE`'s `position & 3`). Remaining S1-P5 scope: an
 //! actual column-index-keyed expert bank in `Literal`, threading the
 //! `columns` filter selection already knows down to it, a `FORMAT_VERSION`
 //! bump, and a real bpb measurement.
@@ -64,9 +70,28 @@ pub fn column_of(position: usize, columns: NonZeroUsize, len: usize) -> usize {
     }
 }
 
+/// Maps [`column_of`]'s unbounded column index into a fixed-size bank
+/// space, `column % max_banks.get()`.
+///
+/// A future column-index-keyed literal expert (`research/JOURNAL.md`
+/// S1-P5's remaining scope) must size its bank storage from a constant
+/// alone, never from the frame's declared `columns`: a decoder reads
+/// `columns` from untrusted compressed input, so sizing bank storage to
+/// it directly would let a hostile frame drive unbounded allocation
+/// (CLAUDE.md hard rule 2). Wrapping modulo a fixed `max_banks` is the
+/// same convention `literal.rs`'s existing experts already use to keep
+/// an unbounded context bounded (`ORDER2_BASE`'s `& 0xFFF`, `WORD_BASE`'s
+/// `& 0xFFF`, `ALIGN_BASE`'s `position & 3`): real separation for the
+/// common case this lead targets (structured data with a modest column
+/// count), aliasing rather than allocating for an adversarial one.
+#[must_use]
+pub fn column_bank(column: usize, max_banks: NonZeroUsize) -> usize {
+    column % max_banks.get()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::column_of;
+    use super::{column_bank, column_of};
     use crate::test_support::nz;
 
     /// Ground truth independent of [`column_of`]'s closed form: replays
@@ -148,5 +173,44 @@ mod tests {
     #[should_panic(expected = "position must be within the transposed stream")]
     fn position_at_len_panics() {
         let _ = column_of(5, nz(2), 5);
+    }
+
+    #[test]
+    fn column_bank_is_identity_when_columns_fit_within_max_banks() {
+        for column in 0..8 {
+            assert_eq!(column_bank(column, nz(8)), column);
+        }
+    }
+
+    #[test]
+    fn column_bank_wraps_columns_beyond_max_banks() {
+        // 10 columns, 4 banks: columns 4-9 alias onto banks 0-1-2-3-0-1,
+        // the same wraparound `% max_banks.get()` computes directly.
+        let max_banks = nz(4);
+        for column in 0..10 {
+            assert_eq!(column_bank(column, max_banks), column % 4);
+        }
+    }
+
+    #[test]
+    fn column_bank_never_exceeds_max_banks() {
+        let max_banks = nz(3);
+        for column in 0..100 {
+            assert!(column_bank(column, max_banks) < max_banks.get());
+        }
+    }
+
+    #[test]
+    fn column_bank_of_a_real_column_of_result_stays_bounded() {
+        // End-to-end: every position's real column (from column_of) maps
+        // into a fixed 5-bank space, regardless of how many columns the
+        // filter actually chose.
+        let columns = nz(37);
+        let len = 200;
+        let max_banks = nz(5);
+        for position in 0..len {
+            let column = column_of(position, columns, len);
+            assert!(column_bank(column, max_banks) < max_banks.get());
+        }
     }
 }
