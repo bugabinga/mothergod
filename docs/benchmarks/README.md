@@ -54,3 +54,10 @@ Silesia's counterpart, writes `silesia.md`. Measurement is parallel
 this finishes in single-digit minutes on a multi-core machine rather than
 the roughly half hour a serial pass over ~200 MB would take; also by
 hand, re-run under the same conditions as `finals_report`.
+
+Both `canterbury.md` and `silesia.md` embed the `bench/baseline.json`
+fingerprint (`<!-- baseline-fingerprint: ... -->`) they were generated
+against; `baseline_gate check` (the required `ratio` job) fails when a
+committed fingerprint no longer matches, catching a baseline change that
+left one of these stale (issue #327). Re-running either binary refreshes
+its fingerprint along with its numbers.
