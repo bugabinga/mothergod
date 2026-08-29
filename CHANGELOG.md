@@ -76,6 +76,15 @@ All notable changes to this project are documented here. Format follows
   this slice only frees the bound so a larger window is measurable on
   the standalone finder before any wiring or `FORMAT_VERSION` decision.
 
+- `bench::long_range_repeat` (`research/JOURNAL.md` S1-P4, S2-A62): a new
+  corpus generator that plants two byte-identical 4,096-byte blocks a
+  caller-chosen distance apart, filling the rest with 6-bit-entropy noise.
+  S2-A61 froze `lz::BinaryTreeMatchFinder`'s window bound but had no data
+  shaped to measure a larger window against; this closes that gap. Not
+  wired into `DatasetKind`/`bench::baseline`'s CI ratio gate (that gate's
+  cases are 50,000 bytes, far below `lz::WINDOW`) — standalone, covered by
+  focused unit tests only, no bpb change.
+
 - `baseline_gate check` (the required `ratio` job's own binary) now also
   fails when `docs/benchmarks/canterbury.md` or `docs/benchmarks/
   silesia.md` embeds a `bench/baseline.json` fingerprint that no longer

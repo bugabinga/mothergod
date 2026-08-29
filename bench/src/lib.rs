@@ -25,8 +25,12 @@
 //! - [`x86_dense_code`]: a synthetic instruction stream dense with
 //!   `call`/`jmp rel32` opcodes, the "x86-dense binaries" structured class.
 //!
-//! Ported by behavior (not code) from the founding session's Python
-//! generator, `git show 1a3b1c8:research/imports/session-1/corpus.py`.
+//! Those nine are ported by behavior (not code) from the founding
+//! session's Python generator, `git show
+//! 1a3b1c8:research/imports/session-1/corpus.py`. [`long_range_repeat`] is
+//! new, not ported: a probe for `research/JOURNAL.md` S1-P4's gap (repeats
+//! farther apart than `mothergod::lz::WINDOW`, which several Silesia
+//! finals contain and the founding session's corpus predates).
 //!
 //! The `corpus` module (behind the opt-in `corpus-fetch` feature, so it
 //! isn't in scope for this doc build's default features) fetches and
@@ -762,6 +766,61 @@ pub fn x86_dense_code(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// Bytes the repeated block [`long_range_repeat`] places at both of its
+/// occurrences.
+const LONG_RANGE_REPEAT_TEMPLATE_LEN: usize = 4_096;
+
+/// Generates `len` bytes containing two byte-identical
+/// `LONG_RANGE_REPEAT_TEMPLATE_LEN`-byte blocks, `distance` bytes apart
+/// (measured start to start), embedded in moderate-entropy filler
+/// otherwise. Not ported from the founding session; a new probe for the gap
+/// `research/JOURNAL.md` S1-P4 names: several Silesia finals (`mozilla`,
+/// `nci`, `samba`, `sao`, `webster`) are many times larger than
+/// `mothergod::lz::WINDOW` (1 MiB), so a repeat farther apart than the
+/// parse's window is structurally invisible to it regardless of pricing
+/// quality, and no generator in this module could put a repeat at a
+/// caller-chosen distance to measure that gap.
+///
+/// Construction: fill `len` bytes at 6 bits of order-0 entropy (the
+/// entropy-ladder rung between the mandatory 4- and 8-bit ones — dense
+/// enough that the planted repeat is the only long-range structure to
+/// find), then copy the first `LONG_RANGE_REPEAT_TEMPLATE_LEN` bytes
+/// (whatever the filler happened to generate there; no separate template
+/// draw) to `distance`, overwriting whatever filler was there. At 6 bits of
+/// entropy over a 4096-byte block, an incidental match of that length
+/// appearing anywhere else by chance is astronomically unlikely, so the
+/// planted repeat is the only one this data contains by construction.
+///
+/// # Panics
+///
+/// Panics if `distance` is shorter than the template length
+/// (`LONG_RANGE_REPEAT_TEMPLATE_LEN`, the two occurrences would overlap or
+/// coincide, defeating the point) or if `len` is too short to hold both
+/// occurrences (`distance + LONG_RANGE_REPEAT_TEMPLATE_LEN`).
+#[must_use]
+pub fn long_range_repeat(len: usize, seed: u64, distance: usize) -> Vec<u8> {
+    assert!(
+        distance >= LONG_RANGE_REPEAT_TEMPLATE_LEN,
+        "long_range_repeat: distance must be at least the template length \
+         ({LONG_RANGE_REPEAT_TEMPLATE_LEN}), got {distance}"
+    );
+    let end = distance + LONG_RANGE_REPEAT_TEMPLATE_LEN;
+    assert!(
+        len >= end,
+        "long_range_repeat: len must fit both occurrences \
+         (distance + template length = {end}), got {len}"
+    );
+
+    let mut rng = Rng::new(seed);
+    let weights = skewed_weights(6.0);
+    let mut out: Vec<u8> = (0..len)
+        .map(|_| sample_weighted(&weights, &mut rng))
+        .collect();
+    let template = out[..LONG_RANGE_REPEAT_TEMPLATE_LEN].to_vec();
+    out[distance..end].copy_from_slice(&template);
+    out
+}
+
 /// Order-0 (histogram) Shannon entropy of `data`, in bits/byte. `0.0` for
 /// empty input.
 ///
@@ -977,10 +1036,10 @@ pub fn regret(ours_bpb: f64, zstd_bpb: f64, xz_bpb: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DatasetKind, SQLITE_ROW_WIDTH, access_log, base64_encode, base64_wrapped, entropy_ladder,
-        gradient_image, interleaved_audio16, json_records, markov_h8_2_trap, order0_entropy_bits,
-        order1_conditional_entropy_bits, regret, sealed_seed, sqlite_like_records, train_window,
-        x86_dense_code,
+        DatasetKind, LONG_RANGE_REPEAT_TEMPLATE_LEN, SQLITE_ROW_WIDTH, access_log, base64_encode,
+        base64_wrapped, entropy_ladder, gradient_image, interleaved_audio16, json_records,
+        long_range_repeat, markov_h8_2_trap, order0_entropy_bits, order1_conditional_entropy_bits,
+        regret, sealed_seed, sqlite_like_records, train_window, x86_dense_code,
     };
 
     const LEN: usize = 200_000;
@@ -1383,9 +1442,85 @@ mod tests {
             gradient_image(5_000, SEED),
             sqlite_like_records(5_000, SEED),
             x86_dense_code(5_000, SEED),
+            long_range_repeat(10_000, SEED, 4_096),
         ] {
             assert_eq!(mothergod::decompress(&mothergod::compress(&data)), Ok(data));
         }
+    }
+
+    #[test]
+    fn long_range_repeat_is_exactly_the_requested_length() {
+        for (len, distance) in [(10_000, 4_096), (20_000, 10_000), (LEN, 100_000)] {
+            assert_eq!(long_range_repeat(len, SEED, distance).len(), len);
+        }
+    }
+
+    #[test]
+    fn long_range_repeat_is_deterministic() {
+        assert_eq!(
+            long_range_repeat(10_000, SEED, 4_096),
+            long_range_repeat(10_000, SEED, 4_096)
+        );
+    }
+
+    #[test]
+    fn long_range_repeat_seeds_are_independent() {
+        assert_ne!(
+            long_range_repeat(10_000, SEED, 4_096),
+            long_range_repeat(10_000, SEED + 1, 4_096)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "distance must be at least the template length")]
+    fn long_range_repeat_rejects_a_distance_shorter_than_the_template() {
+        let _ = long_range_repeat(10_000, SEED, LONG_RANGE_REPEAT_TEMPLATE_LEN - 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "len must fit both occurrences")]
+    fn long_range_repeat_rejects_a_len_too_short_for_both_occurrences() {
+        let _ = long_range_repeat(4_096, SEED, 4_096);
+    }
+
+    #[test]
+    fn long_range_repeat_places_an_identical_block_at_the_requested_distance() {
+        // Distances span a small case and one past the default LZ window
+        // (`mothergod::lz::WINDOW`, 1 MiB): the whole point (JOURNAL
+        // S1-P4) is making that farther, currently-invisible-to-the-parse
+        // repeat measurable at a caller-chosen distance.
+        for distance in [
+            LONG_RANGE_REPEAT_TEMPLATE_LEN,
+            50_000,
+            mothergod::lz::WINDOW + 4_096,
+        ] {
+            let end = distance + LONG_RANGE_REPEAT_TEMPLATE_LEN;
+            let data = long_range_repeat(end, SEED, distance);
+            assert_eq!(
+                data[..LONG_RANGE_REPEAT_TEMPLATE_LEN],
+                data[distance..end],
+                "distance {distance}"
+            );
+        }
+    }
+
+    #[test]
+    fn long_range_repeat_plants_exactly_one_repeated_pair() {
+        // The rest of the data is independent 6-bit-entropy filler; a
+        // second, coincidental 4096-byte match elsewhere would mean the
+        // filler isn't dense enough to isolate the planted repeat as the
+        // only long-range structure to find.
+        let distance = 20_000;
+        let data = long_range_repeat(distance + LONG_RANGE_REPEAT_TEMPLATE_LEN, SEED, distance);
+        let template = &data[..LONG_RANGE_REPEAT_TEMPLATE_LEN];
+        let occurrences = data
+            .windows(LONG_RANGE_REPEAT_TEMPLATE_LEN)
+            .filter(|window| *window == template)
+            .count();
+        assert_eq!(
+            occurrences, 2,
+            "expected exactly the planted pair, found {occurrences}"
+        );
     }
 
     #[test]

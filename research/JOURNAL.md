@@ -2406,12 +2406,16 @@ record.
   that distance are structurally invisible to the current parse regardless
   of how well it prices what it can see. First slice: S2-A61 (`window` a
   per-instance parameter on `BinaryTreeMatchFinder`, standalone, the wired
-  parse still always passes `WINDOW` unchanged). Remaining scope: measure
-  a real bpb delta at a larger window on train-tier data with long-range
-  repeat structure, decide how a larger window reaches `OFFSET_BUCKETS`
-  and the offset `Model`'s alphabet size without breaking `bucket()`'s
-  `u32`-fits assumption, wire it behind a real parse pass, bump
-  `FORMAT_VERSION`.
+  parse still always passes `WINDOW` unchanged). Second slice, S2-A62: the
+  `long_range_repeat` corpus generator S2-A61 flagged as possibly needed —
+  places a byte-identical repeat at a caller-chosen distance, standalone,
+  not yet used by any real experiment run. Remaining scope: measure a real
+  bpb delta at a larger window on train-tier data with long-range repeat
+  structure (the generator now exists to build that data; running the
+  measurement is still open), decide how a larger window reaches
+  `OFFSET_BUCKETS` and the offset `Model`'s alphabet size without breaking
+  `bucket()`'s `u32`-fits assumption, wire it behind a real parse pass,
+  bump `FORMAT_VERSION`.
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
@@ -2828,3 +2832,45 @@ record.
   `u32`-fits assumption caps any window this scheme could ever use at
   `u32::MAX`; wire the chosen window behind a real parse pass and bump
   `FORMAT_VERSION`. `research/progress.jsonl` it107.
+- S2-A62 | ACCEPTED | Second slice of ROADMAP M3's fourth standing lead
+  (S1-P4, LZMA-class windows for large files): a `long_range_repeat`
+  corpus generator added to `bench/` (`bench/src/lib.rs`), the capability
+  S2-A61's own remaining-scope note flagged as possibly needed first — no
+  existing generator in `bench`'s corpus could place a repeat at a
+  caller-chosen distance, so a larger window's train-tier effect (several
+  Silesia finals many times larger than `lz::WINDOW`) had nothing to
+  measure against. Not ported from the founding session (`corpus.py`
+  predates this need); a new "our own" generator per
+  `research/corpus/POLICY.md`. Fills `len` bytes at 6 bits of order-0
+  entropy (dense enough that a planted repeat is the only long-range
+  structure to find), then copies the first 4,096 bytes
+  (`LONG_RANGE_REPEAT_TEMPLATE_LEN`) to a caller-chosen `distance`, so the
+  two occurrences are byte-identical and exactly `distance` apart by
+  construction — no separate template draw, the filler's own first block
+  doubles as the template. | 7 new unit tests (108 bench tests total, up
+  from 101): exact length across three (len, distance) pairs, determinism,
+  seed independence, both panics (`distance` shorter than the template,
+  `len` too short for both occurrences), the planted-pair placement across
+  three distances including one past `lz::WINDOW` (1,052,672 bytes), and a
+  full 4,096-byte sliding-window scan over the output proving exactly two
+  occurrences exist — no incidental collision from the filler at that
+  entropy and length. A new case also joined
+  `generators_round_trip_through_the_frame_format`, the other nine
+  generators' existing lossless check. `cargo x check`: 4 stages green
+  (the doc stage first caught the same private-intra-doc-link class as
+  S2-A41/S2-A42/S2-A61 — two doc comments linked the private
+  `LONG_RANGE_REPEAT_TEMPLATE_LEN` constant via `` [`...`] ``, fixed by
+  dropping to plain code-span text). | No bpb measurement: not wired into
+  `DatasetKind`/`bench::baseline`'s CI ratio gate — that gate's `CASE_LEN`
+  is 50,000 bytes, far below `lz::WINDOW`, and folding a >1 MiB case into
+  every PR's regression gate is a separate sizing decision this capability
+  slice does not make — `progress.jsonl` records this as `kind: "patch"`
+  with null bpb deltas, same reason as S2-A40/S2-A42/S2-A57/S2-A61.
+  Remaining S1-P4 scope, unchanged from S2-A61 except the generator gap
+  now closed: run the actual experiment (a real `dp_round` pass at a
+  larger window against `long_range_repeat`-shaped train-tier data), decide
+  how a larger window reaches the coder (`lz::OFFSET_BUCKETS`/`bucket()`,
+  `codec.rs`'s `Model::new(lz::OFFSET_BUCKETS)`, both sized for the 1 MiB
+  bound today, and `to_u32`'s `u32`-fits ceiling on any window this scheme
+  could ever use), wire the chosen window behind a real parse pass, bump
+  `FORMAT_VERSION`. `research/progress.jsonl` it108.
