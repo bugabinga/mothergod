@@ -8,6 +8,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `lz::parse_greedy_with_window` (`research/JOURNAL.md` S1-P4, S2-A65,
+  ROADMAP M3's fourth standing lead): closes S2-A63's own remaining-scope
+  note that `parse_greedy`'s hash-chain `MatchFinder` was "still hardcoded
+  to WINDOW, unexamined" — the one match finder on the wired path not yet
+  parameterized (S2-A61 did `BinaryTreeMatchFinder`, S2-A63 did
+  `parse_optimal_with_window`). `parse_greedy` is now a thin wrapper
+  passing the wired `WINDOW` unchanged, mirroring
+  `parse_optimal`/`parse_optimal_with_window`'s own split — no effect on
+  any currently-encoded bitstream, no `FORMAT_VERSION` bump.
+
 - `column::column_of` (`research/JOURNAL.md` S1-P5, S2-A64, ROADMAP M3's
   fifth standing lead): given a position in `filters::transpose::encode`'s
   output, the pre-transpose data length, and the column count, returns
