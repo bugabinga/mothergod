@@ -25,11 +25,33 @@
 //! symbol; a well-trained context essentially never pays the escape cost.
 //!
 //! **Remaining scope.** This module is standalone and not yet reachable
-//! from [`crate::literal`] or [`crate::codec`]: wiring it in means picking
-//! where the escape's lower-order fallback lands (order-0? one of
-//! [`crate::literal::Literal`]'s other five experts? a fresh dedicated
-//! order-0 table?) and measuring the result against `bench::baseline`,
-//! left to the next slice.
+//! from [`crate::literal`] or [`crate::codec`]. "Order-0?" — one of this
+//! doc's three named fallback candidates — was tried and rejected
+//! (`JOURNAL` S2-R6): an expert's own frequency for a symbol it has never
+//! observed (`freq == 1`, [`crate::literal::Literal`]'s banks never reaching this
+//! struct's true-zero "unseen" signal) substituted with the order-0
+//! catch-all bank's own frequency for that symbol, measured as an ideal-
+//! cost pairing (never wired to the real bitstream). Net regression
+//! (+0.0458 b/B average over `bench::baseline`'s 11 train cases, S1-P3's
+//! own named target `sqlite_like_records` among the six that got worse,
+//! plus a severe sealed-validation regression on `gradient_image`,
+//! +0.541 b/B) — this doc's own S1-R5 distinction ("a well-trained
+//! context essentially never pays the escape cost") holds in principle
+//! but does not save this data: a context-specific bank stays sparse for
+//! a long time in exactly the structured formats this project targets
+//! (each individual order-2/align/word key recurs rarely), so the
+//! fallback fires often enough to matter, and order-0's *global* marginal
+//! is frequently the *wrong local* answer whenever a byte's likelihood
+//! depends on where it sits (`markov_h8_2_trap`, purpose-built to
+//! separate context modelers from histogram coders, was the single
+//! worst regression, +0.128 b/B). "One of [`crate::literal::Literal`]'s other five
+//! experts?" was not tried (a context-specific bank is exactly as likely
+//! to be sparse as whichever is escaping, per this doc's own reasoning
+//! above); "a fresh dedicated table?" was not tried either. Remaining
+//! S1-P3 scope: unclear, same shape S1-P2 reached after its own repeated
+//! rejections — a fallback target other than "the global marginal," not
+//! a third variant of "which existing bank," is owed before spending
+//! another slice here.
 
 use crate::coder::{Decoder, Encoder};
 
