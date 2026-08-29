@@ -2411,14 +2411,20 @@ record.
   window under the existing `2^21 - 1` offset-bucket ceiling costs zero
   format change (`bucket()` already covers it) and closes real bpb on a
   planted long-range repeat: train **-0.021443**, sealed **-0.021401**,
-  agreeing to four decimal places. Remaining S1-P4 scope: a window past
-  `2^21 - 1` needs `OFFSET_BUCKETS`/`bucket()` widened and a
+  agreeing to four decimal places. Fourth slice, S2-A65: closed the
+  `parse_greedy` half of S2-A63's remaining-scope note — its hash-chain
+  `MatchFinder` gained the same per-instance `window` parameter
+  `BinaryTreeMatchFinder` got in S2-A61, via a new
+  `parse_greedy_with_window`; `parse_greedy` and the wired
+  `parse_optimal_with_window` seed pass both still pass `WINDOW`
+  unchanged, so nothing currently encoded moves. Remaining S1-P4 scope: a
+  window past `2^21 - 1` needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable this way, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
   reach; decide whether the wired `WINDOW` itself should grow toward (or
-  to) that free `2^21 - 1` ceiling, including `parse_greedy`'s own
-  hash-chain finder (still hardcoded to `WINDOW`, unexamined) and the
-  encode-time cost of a larger tree (SPEED, ROADMAP M5, untouched).
+  to) that free `2^21 - 1` ceiling, now that both match finders on the
+  wired path accept a window parameter, and the encode-time cost of a
+  larger tree (SPEED, ROADMAP M5, untouched).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
   `column::column_of`, not yet wired). Remaining scope: an actual
@@ -2986,3 +2992,35 @@ record.
   `docs/benchmarks/silesia.md`, the largest of any file there — named
   here for target framing only, per `research/corpus/POLICY.md` held-out
   finals are never an accept/reject signal inside the experiment loop).
+- S2-A65 | ACCEPTED | Fourth slice of ROADMAP M3's fourth standing lead
+  (S1-P4, LZMA-class windows for large files): closed S2-A63's own
+  remaining-scope note that `parse_greedy`'s hash-chain finder was "still
+  hardcoded to WINDOW, unexamined", the one match finder on the wired
+  path S2-A61 (`BinaryTreeMatchFinder`) and S2-A63
+  (`parse_optimal_with_window`) had not yet parameterized. `MatchFinder`
+  (the hash chain `parse_greedy` and `parse_optimal`'s seed pass both
+  use) gained a `window: usize` field, stored by a new `MatchFinder::new
+  (data, window)` and read by `find_best` in place of the crate-wide
+  `WINDOW` constant. A new `parse_greedy_with_window(data, window)` is
+  the real function body; `parse_greedy` is now a thin wrapper passing
+  `WINDOW` unchanged, mirroring `parse_optimal`/`parse_optimal_with_window`'s
+  own split (S2-A63). `parse_optimal_with_window` does not call it: its
+  own docs already record, as a deliberate choice, that the seed pass
+  stays bound to the wired `WINDOW` regardless of the DP rounds' window —
+  this slice makes that choice measurable on its own, it does not revisit
+  it. | 1 new unit test (216 lib tests total, up from 215):
+  `greedy_with_window_reaches_a_repeat_a_smaller_window_would_miss`, the
+  same planted-repeat shape as S2-A63's own
+  `optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss`,
+  proving a small window never reports a match past it and a large one
+  finds the planted repeat, round-tripping either way. `cargo x check`:
+  4 stages green (lint first caught a `clippy::doc_markdown` finding on
+  an unbacktick'd `parse_greedy` in the new function's own doc comment,
+  fixed). `baseline_gate check`: 11 cases, no regression — `parse_greedy`
+  and `parse_optimal_with_window` both still pass `WINDOW` unchanged, so
+  no currently-encoded bitstream moves and no `FORMAT_VERSION` bump is
+  owed. | No bpb measurement, same reason as every other lead's
+  parameterize-the-primitive slice (S2-A40/S2-A42/S2-A57/S2-A58/S2-A61/
+  S2-A62/S2-A64): standalone, not yet wired to a different value than
+  today's — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas. `research/progress.jsonl` it111.

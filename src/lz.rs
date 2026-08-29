@@ -290,6 +290,14 @@ fn prefix_hash(data: &[u8], i: usize) -> usize {
 /// encode-only structure never reads).
 struct MatchFinder<'d> {
     data: &'d [u8],
+    /// Largest backward distance [`Self::find_best`] ever reports
+    /// (`JOURNAL` S1-P4): a per-instance parameter, not the global
+    /// [`WINDOW`], mirroring [`BinaryTreeMatchFinder`]'s own
+    /// parameterization (S2-A61) so a larger window can be measured
+    /// through [`parse_greedy`]'s seed pass standalone, without touching
+    /// the wired parse. Must fit `u32` ([`to_u32`]'s obligation), same as
+    /// `WINDOW` itself.
+    window: usize,
     /// `head[hash]` is the most recently inserted position with that
     /// hash, or [`NO_POSITION`].
     head: Vec<u32>,
@@ -300,9 +308,13 @@ struct MatchFinder<'d> {
 }
 
 impl<'d> MatchFinder<'d> {
-    fn new(data: &'d [u8]) -> Self {
+    /// A finder with no positions inserted yet, reporting no match past
+    /// `window`. The wired parse ([`parse_greedy`]) always passes
+    /// [`WINDOW`].
+    fn new(data: &'d [u8], window: usize) -> Self {
         Self {
             data,
+            window,
             head: vec![NO_POSITION; 1 << HASH_BITS],
             prev: vec![NO_POSITION; data.len().max(1)],
         }
@@ -338,13 +350,13 @@ impl<'d> MatchFinder<'d> {
         while j != NO_POSITION && tries < max_tries {
             let j_pos = j as usize;
             let offset = i - j_pos; // j was inserted at an earlier position: i > j_pos always.
-            if offset > WINDOW {
+            if offset > self.window {
                 break;
             }
             if offset > 0 {
-                // offset <= WINDOW (2^20) here, always fits u32.
+                // offset <= self.window here, always fits u32 (Self::window's obligation).
                 let offset_u32 =
-                    u32::try_from(offset).expect("offset <= WINDOW, checked above, fits u32");
+                    u32::try_from(offset).expect("offset <= self.window, checked above, fits u32");
                 let distance =
                     NonZeroU32::new(offset_u32).expect("offset > 0, checked by the branch above");
                 let len = match_len(self.data, i, distance);
@@ -692,6 +704,27 @@ impl<'d> BinaryTreeMatchFinder<'d> {
 /// under this bound rather than lift it.
 #[must_use]
 pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
+    parse_greedy_with_window(data, WINDOW)
+}
+
+/// [`parse_greedy`], with its match reach bound by `window` instead of the
+/// wired [`WINDOW`] (`research/JOURNAL.md` S1-P4: named remaining scope,
+/// "`parse_greedy`'s own hash-chain finder, still hardcoded to WINDOW,
+/// unexamined"; mirrors [`parse_optimal_with_window`]'s own
+/// parameterize-the-primitive pattern one level up the call stack). Lets a
+/// candidate window be measured through the seed pass [`parse_optimal`]
+/// actually runs, and through the short-input (`< OPTIMAL_MIN_LEN`) path
+/// that bypasses the DP entirely, before any wiring or `FORMAT_VERSION`
+/// decision is made. Not yet called by [`parse_optimal_with_window`]: its
+/// own docs already record that the seed pass stays bound to the wired
+/// [`WINDOW`] regardless of the DP rounds' window, a deliberate choice this
+/// function does not change, only makes measurable on its own.
+///
+/// # Panics
+///
+/// Same as [`parse_greedy`].
+#[must_use]
+pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
     let n = data.len();
     assert!(
         u32::try_from(n).is_ok(),
@@ -699,7 +732,7 @@ pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
     );
     let mut tokens = Vec::new();
     let mut reps = RepCache::initial();
-    let mut finder = MatchFinder::new(data);
+    let mut finder = MatchFinder::new(data, window);
     let mut i = 0usize;
     while i < n {
         finder.insert(i);
@@ -1686,6 +1719,49 @@ mod tests {
         );
 
         let large = parse_optimal_with_window(&data, large_window);
+        assert_eq!(replay(&large), data);
+        assert!(
+            large.iter().any(|t| matches!(
+                t,
+                Token::Match { distance: d, .. } if d.get() as usize == distance
+            )),
+            "a window of {large_window} must find the planted repeat at distance {distance}, \
+             unreachable through {small_window}"
+        );
+    }
+
+    #[test]
+    fn greedy_with_window_reaches_a_repeat_a_smaller_window_would_miss() {
+        // research/JOURNAL.md S1-P4's remaining scope named parse_greedy's
+        // own hash-chain finder as "still hardcoded to WINDOW, unexamined";
+        // same shape as optimal_with_window_reaches_a_repeat_a_smaller_
+        // window_would_miss above, proving the parameter actually gates
+        // parse_greedy_with_window's reach end to end, losslessly either way.
+        let template: Vec<u8> = (0u8..80).collect();
+        let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
+            .take(420)
+            .map(|s| 128 + u8::try_from(s % 128).unwrap())
+            .collect();
+        let mut data = template.clone();
+        data.extend_from_slice(&filler);
+        data.extend_from_slice(&template);
+        let distance = filler.len() + template.len();
+
+        let small_window = 300;
+        let large_window = 700;
+        assert!(small_window < distance && distance <= large_window);
+
+        let small = parse_greedy_with_window(&data, small_window);
+        assert_eq!(replay(&small), data);
+        assert!(
+            small.iter().all(|t| !matches!(
+                t,
+                Token::Match { distance: d, .. } if d.get() as usize > small_window
+            )),
+            "a window of {small_window} must never produce a fresh match past it"
+        );
+
+        let large = parse_greedy_with_window(&data, large_window);
         assert_eq!(replay(&large), data);
         assert!(
             large.iter().any(|t| matches!(
