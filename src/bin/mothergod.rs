@@ -151,16 +151,20 @@ fn write_stdout(bytes: &[u8]) -> ExitCode {
 /// Writes `bytes` to `path`, refusing to clobber an existing file (`compress`
 /// re-run over an already-compressed file, or a `decompress` target that
 /// already exists, must not silently destroy it).
+///
+/// A write failure after `create_new` succeeded (disk full, interrupted)
+/// removes the partial file: otherwise it survives as a corrupt file that
+/// `create_new` refuses to retry over, permanently blocking a re-run.
 fn write_new_file(path: &Path, bytes: &[u8]) -> ExitCode {
-    let result = File::options()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .and_then(|mut file| file.write_all(bytes));
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => fail(&format!("writing {}: {err}", path.display())),
+    let mut file = match File::options().write(true).create_new(true).open(path) {
+        Ok(file) => file,
+        Err(err) => return fail(&format!("writing {}: {err}", path.display())),
+    };
+    if let Err(err) = file.write_all(bytes) {
+        let _ = fs::remove_file(path);
+        return fail(&format!("writing {}: {err}", path.display()));
     }
+    ExitCode::SUCCESS
 }
 
 fn fail(message: &str) -> ExitCode {
