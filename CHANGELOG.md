@@ -6,6 +6,22 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Library public API surface trimmed for 0.1 (ROADMAP M6): `bittree`,
+  `codec`, `coder`, `column`, `literal`, `lz`, `model`, `ppm`, and `sse` are
+  now `#[doc(hidden)]`. They stay `pub` (the `bench` crate depends on them
+  by path for measurement, `mothergod::compress`/`decompress`), just off the
+  rendered docs. `filters` stays fully documented (`research/JOURNAL.md`
+  S2-A2 already judged it a standalone library surface in its own right).
+  Downstream crates now see `MAGIC`, `FORMAT_VERSION`, `Method`, `Error`,
+  `compress`, `decompress`, and `filters` on docs.rs — the crate's actual
+  contract — instead of every internal module the M1 port left `pub`
+  in-progress. Added a crate-root doctest (`src/lib.rs`) showing a
+  compress/decompress round trip, ROADMAP M6's "examples in rustdoc" item.
+  No behavior change; `decompress(compress(x)) == x` and every existing
+  test is untouched.
+
 ### Added
 
 - `mothergod` CLI binary (`src/bin/mothergod.rs`, ROADMAP M6): `compress`

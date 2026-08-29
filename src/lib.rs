@@ -9,16 +9,40 @@
 //! how the payload is encoded: `Stored` (no compression) or `Lz`
 //! (optimal-parse LZ over an adaptive range coder, `research/JOURNAL.md`
 //! S2-D2). [`compress`] always picks whichever produces the smaller frame.
+//!
+//! ```
+//! let original = b"the quick brown fox jumps over the lazy dog".repeat(100);
+//! let frame = mothergod::compress(&original);
+//! assert!(frame.len() < original.len());
+//! assert_eq!(mothergod::decompress(&frame), Ok(original));
+//! ```
 
+// `bittree`/`codec`/`coder`/`column`/`literal`/`lz`/`model`/`ppm`/`sse` are
+// the compression engine's internals, not a surface downstream crates are
+// meant to call directly: `#[doc(hidden)]` keeps them out of the published
+// API a 0.1 consumer sees (ROADMAP M6) without dropping them to
+// `pub(crate)`, which would break `bench`'s path dependency on them for
+// measurement (`Cargo.toml`'s `[workspace]`). `filters` stays fully
+// documented: S2-A2 already judged it "a defensible standalone library
+// surface on their own merits" (`research/JOURNAL.md`).
+#[doc(hidden)]
 pub mod bittree;
+#[doc(hidden)]
 pub mod codec;
+#[doc(hidden)]
 pub mod coder;
+#[doc(hidden)]
 pub mod column;
 pub mod filters;
+#[doc(hidden)]
 pub mod literal;
+#[doc(hidden)]
 pub mod lz;
+#[doc(hidden)]
 pub mod model;
+#[doc(hidden)]
 pub mod ppm;
+#[doc(hidden)]
 pub mod sse;
 
 /// First bytes of every mothergod frame.
