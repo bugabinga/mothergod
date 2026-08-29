@@ -77,23 +77,40 @@ test("denies a setsid fork, allows setsid used as a waiter", () => {
   assert.equal(run(waiting).status, 0);
 });
 
-test("denies a coprocess, allows word idioms as mid-sentence prose", () => {
+test("denies a coprocess, allows the mere substring", () => {
   for (
     const command of ["coproc cargo test", "cd /tmp && coproc watch { cargo test; }"]
   ) {
     const call = { tool_name: "Bash", tool_input: { command } };
     assert.equal(run(call).status, 2, command);
   }
-  // Command-position anchoring: mentioning an idiom is not using it.
-  for (
-    const command of [
-      "echo coprocessor ready",
-      "git commit -m 'guard: mention the setsid -f trap in prose'",
-    ]
-  ) {
+  const prose = { tool_name: "Bash", tool_input: { command: "echo coprocessor ready" } };
+  assert.equal(run(prose).status, 0);
+});
+
+test("denies idioms nested past quoting the scan cannot see", () => {
+  // #355's review: command-position anchoring missed all four of
+  // these live detaches, because the character before the idiom is a
+  // quote or a template brace. The guard stays blunt instead.
+  const nested = [
+    "sh -c 'setsid -f cargo test'",
+    'bash -c "setsid --fork cargo test"',
+    'eval "setsid -f cargo test"',
+    "echo cargo | xargs -I{} setsid -f {} test",
+    "bash -c 'coproc cargo test'",
+  ];
+  for (const command of nested) {
     const call = { tool_name: "Bash", tool_input: { command } };
-    assert.equal(run(call).status, 0, command);
+    assert.equal(run(call).status, 2, command);
   }
+});
+
+test("a prose mention of setsid -f denies: the accepted cost, pinned", () => {
+  const call = {
+    tool_name: "Bash",
+    tool_input: { command: "git commit -m 'guard: mention the setsid -f trap'" },
+  };
+  assert.equal(run(call).status, 2);
 });
 
 test("allows &&, fd duplication, |&, and embedded ampersands", () => {

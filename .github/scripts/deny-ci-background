@@ -49,16 +49,14 @@ import sys
 DEFAULT_FOREGROUND = ("Bash",)
 DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 
-# Word idioms are anchored to command position (string start or after a
-# separator), so inert prose in a commit message or posted comment does
-# not pay the deny; the suffix operator `&` cannot be anchored that way.
-CMD_POS = r"(?:^|[;|&({`]|\n)\s*"
-
-# The scan has no notion of quoting, so an idiom that is inert data (a
-# -c payload, a heredoc, prose after a separator) still trips it: an
+# The scan has no notion of quoting or nesting, so an idiom that is
+# inert data (prose, a -c payload, a heredoc) still trips it: an
 # accepted cost, because a quote-aware shell parser in a hook is
 # entanglement this guard refuses, and the deny message names the
-# rewrite. Each entry: (pattern, step-summary reason).
+# rewrite. The same bluntness is what catches a live idiom inside
+# `sh -c '...'`, after `eval`, or in an `xargs -I{}` template; #355's
+# review showed any anchoring cheap enough for a hook opens those
+# holes. Each entry: (pattern, step-summary reason).
 SHELL_DETACH = (
     # Bare `&` control operator. The lookbehind clears `&&`, `>&`,
     # `<&`, `|&`; the lookahead clears `&&`, `&>`, and ampersands
@@ -67,9 +65,9 @@ SHELL_DETACH = (
     # setsid's fork flag daemonizes with no `&` anywhere, and setsid
     # ships on the Actions runner. Bundled short flags count; the
     # wait flag would block anyway, denied conservatively.
-    (re.compile(CMD_POS + r"setsid\s+(-\w*f\w*\b|--fork\b)"), "via setsid fork"),
+    (re.compile(r"\bsetsid\s+(-\w*f\w*\b|--fork\b)"), "via setsid fork"),
     # bash's coprocess keyword detaches by definition (PR #354 review).
-    (re.compile(CMD_POS + r"coproc\b"), "via coproc"),
+    (re.compile(r"\bcoproc\b"), "via coproc"),
 )
 
 DETACH_MESSAGE = (
