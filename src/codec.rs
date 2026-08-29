@@ -380,7 +380,19 @@ fn encode_tokens(data: &[u8]) -> Vec<u8> {
 /// it).
 #[must_use]
 pub fn ideal_cost_bits(data: &[u8]) -> f64 {
-    let tokens = lz::parse_optimal(data);
+    ideal_cost_bits_with_window(data, lz::WINDOW)
+}
+
+/// Same as [`ideal_cost_bits`], but parses `data` with [`lz::parse_optimal_with_window`]
+/// under `window` instead of the wired [`lz::WINDOW`] (`research/JOURNAL.md`
+/// S1-P4): measures a candidate window's real coding-cost effect through
+/// this crate's actual adaptive models, without wiring it into
+/// [`encode`] or bumping `FORMAT_VERSION`. See
+/// [`lz::parse_optimal_with_window`]'s docs for the bucket ceiling
+/// `window` must stay under.
+#[must_use]
+pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
+    let tokens = lz::parse_optimal_with_window(data, window);
     let mut models = Models::new();
     let mut sink = CostSink::default();
     walk_tokens(&tokens, data, &mut models, &mut sink);
@@ -860,6 +872,35 @@ mod tests {
             repetitive_bpb < random_bpb / 2.0,
             "repetitive data's ideal cost ({repetitive_bpb} bits/byte) should be far below \
              random data's ({random_bpb} bits/byte)"
+        );
+    }
+
+    #[test]
+    fn ideal_cost_bits_with_window_drops_once_a_repeat_becomes_reachable() {
+        // research/JOURNAL.md S1-P4: a repeat past the window is priced as
+        // fresh literals; the same repeat within a larger window is priced
+        // as a match, so the real adaptive models must report meaningfully
+        // fewer bits once `window` grows to reach it. Same disjoint
+        // template/filler byte ranges as lz::tests::
+        // optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss,
+        // so the only structure in `data` is the planted repeat itself.
+        let template: Vec<u8> = (0u8..80).collect();
+        let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
+            .take(420)
+            .map(|s| 128 + u8::try_from(s % 128).unwrap())
+            .collect();
+        let mut data = template.clone();
+        data.extend_from_slice(&filler);
+        data.extend_from_slice(&template);
+
+        let small_window = 300;
+        let large_window = 700;
+        let small_bits = ideal_cost_bits_with_window(&data, small_window);
+        let large_bits = ideal_cost_bits_with_window(&data, large_window);
+        assert!(
+            large_bits < small_bits - f64::from(u16::try_from(template.len()).unwrap()),
+            "a window reaching the planted repeat ({large_bits} bits) should cost at least a \
+             template's worth of bits less than one that cannot ({small_bits} bits)"
         );
     }
 }
