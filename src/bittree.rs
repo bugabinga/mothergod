@@ -28,6 +28,11 @@
 //! [`crate::sse::Sse`] calibrates. [`ideal_cost_bits`] checks the
 //! identity directly; the round-trip tests below check it end to end
 //! through the real coder.
+//!
+//! [`sse_context`] answers S1-P1's other named prerequisite: which
+//! [`crate::sse::Sse`] context a given walk step should key on. Still not
+//! wired into [`crate::literal::Literal`] or `crate::codec` — this module
+//! stays a standalone primitive, same as before this addition.
 
 use crate::coder::{Decoder, Encoder};
 
@@ -38,6 +43,51 @@ const ALPHABET: usize = 256;
 /// `log2(ALPHABET)`: number of binary decisions that pin down one
 /// symbol out of 256.
 const LEVELS: u32 = 8;
+
+/// Number of distinct `(depth, prefix)` pairs [`sse_context`] can be
+/// called with: one per internal node of the depth-`LEVELS` binary tree
+/// [`encode_symbol`]/[`decode_symbol`] walk, `2^LEVELS - 1` (255 for
+/// `LEVELS = 8`) — a full binary tree with `2^LEVELS` leaves has exactly
+/// that many internal nodes. `crate::sse::Sse::new`'s `contexts`
+/// argument for a table keyed on this scheme.
+pub const SSE_CONTEXTS: usize = (1 << LEVELS) - 1;
+
+/// Maps one step of [`encode_symbol`]/[`decode_symbol`]'s walk — the
+/// decision at tree depth `depth` (`0..LEVELS`, `0` is the first,
+/// coarsest split) having already decided `prefix` (the `depth` bits
+/// chosen so far, i.e. `lo` divided by that depth's range width,
+/// `0..2^depth`) — to a unique index in `0..SSE_CONTEXTS`, for
+/// [`crate::sse::Sse::refine`]/[`crate::sse::Sse::update`] to key on.
+/// `S1-P1`'s own remaining-scope decision (`research/JOURNAL.md`):
+/// keying purely on tree position, the cheapest scheme that still gives
+/// every node its own calibration, no coarser (folding two nodes
+/// together loses the distinction the walk actually observed) and no
+/// finer (there is no more context available per node than its position
+/// — the symbol identity itself is exactly what has not been decided
+/// yet at that node). Same numbering LZMA's literal coder uses for its
+/// own binary-tree probability array (`probs[(1 << depth) | prefix]`,
+/// 1-indexed there; `- 1` here to land in `0..SSE_CONTEXTS` instead).
+///
+/// # Panics
+///
+/// Panics if `depth >= LEVELS` or `prefix >= 1 << depth`: both are
+/// derived from this module's own walk (`depth` counts loop iterations
+/// bounded by `LEVELS`, `prefix` is `lo` divided by the current range
+/// width), never from adversarial input — the same caller-code
+/// invariant `cum`'s own shape check documents for [`encode_symbol`]/
+/// [`decode_symbol`].
+#[must_use]
+pub fn sse_context(depth: u32, prefix: usize) -> usize {
+    assert!(
+        depth < LEVELS,
+        "depth must be < LEVELS ({LEVELS}), got {depth}"
+    );
+    assert!(
+        prefix < (1usize << depth),
+        "prefix must be < 2^depth (2^{depth}), got {prefix}"
+    );
+    (1usize << depth) + prefix - 1
+}
 
 /// Panics if `cum` is not shaped like a cumulative-frequency table over
 /// `ALPHABET` symbols: `ALPHABET + 1` entries, monotonically
@@ -350,6 +400,79 @@ mod tests {
             "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
              {relative_diff:.4} relative difference exceeds the 5% budget"
         );
+    }
+
+    #[test]
+    fn sse_context_is_a_bijection_onto_0_sse_contexts() {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        for depth in 0..LEVELS {
+            for prefix in 0..(1usize << depth) {
+                let context = sse_context(depth, prefix);
+                assert!(
+                    context < SSE_CONTEXTS,
+                    "depth={depth}, prefix={prefix}: context {context} must be < {SSE_CONTEXTS}"
+                );
+                assert!(
+                    seen.insert(context),
+                    "depth={depth}, prefix={prefix}: context {context} collides with an earlier pair"
+                );
+            }
+        }
+        assert_eq!(
+            seen.len(),
+            SSE_CONTEXTS,
+            "every one of the {SSE_CONTEXTS} contexts must be reachable"
+        );
+    }
+
+    #[test]
+    fn sse_context_along_one_symbol_path_visits_eight_distinct_nodes() {
+        // sse_context's documented "prefix = lo / width" identity, exercised
+        // against encode_symbol's own walk (not asserted in isolation): every
+        // symbol's root-to-leaf path must visit LEVELS distinct tree nodes,
+        // one per depth, since a real Sse calibration wired behind this walk
+        // must never conflate two different decisions under one context.
+        for symbol in 0..=u8::MAX {
+            let symbol = usize::from(symbol);
+            let mut lo = 0usize;
+            let mut hi = ALPHABET;
+            let mut path = Vec::with_capacity(LEVELS as usize);
+            for depth in 0..LEVELS {
+                let width = hi - lo;
+                let prefix = lo / width;
+                path.push(sse_context(depth, prefix));
+                let mid = lo + width / 2;
+                if symbol >= mid {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            let distinct: std::collections::HashSet<_> = path.iter().copied().collect();
+            assert_eq!(
+                distinct.len(),
+                LEVELS as usize,
+                "symbol {symbol}: path {path:?} must visit {LEVELS} distinct contexts"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "depth must be < LEVELS")]
+    fn sse_context_depth_out_of_range_panics() {
+        let _ = sse_context(LEVELS, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "prefix must be")]
+    fn sse_context_prefix_out_of_range_panics() {
+        let _ = sse_context(2, 4);
+    }
+
+    #[test]
+    fn sse_context_count_is_255() {
+        assert_eq!(SSE_CONTEXTS, 255);
     }
 
     #[test]
