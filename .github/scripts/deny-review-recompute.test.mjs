@@ -35,6 +35,12 @@ const denied = [
   ["cargo x test --", "bare -- passes no filter, full suite (#333 review)"],
   ["cargo test --", "same bypass on the unwrapped form"],
   ["cargo test -- ''", "an empty quoted filter scopes nothing"],
+  ["cargo x \"check\"", "quoting one token is a shell no-op (#333 round 3)"],
+  ["cargo \"x\" check", "same, middle token"],
+  ["\"cargo\" x check", "same, first token"],
+  ["cargo x t\"e\"st", "quote glued inside a keyword"],
+  ["cargo x \"test\"", "quoted constituent, no scope"],
+  ["cargo \"test\"", "quoted unwrapped form, no scope"],
 ];
 
 const allowed = [
