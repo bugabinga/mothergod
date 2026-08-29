@@ -357,9 +357,9 @@ record.
   far under `WINDOW` itself regardless of which window is wired, so this
   needed its own, much larger, ad hoc length): train seed
   `0xC0FFEE123456789A` (S2-A63's own key) across `bench::baseline`'s four
-  train-eligible non-ladder kinds, mean **-0.062378 b/B**
-  (`sqlite_like_records` -0.052338, `markov_h8_2_trap` -0.203392,
-  `x86_dense_code` +0.004036, `json_records` +0.002181 — the two
+  train-eligible non-ladder kinds, mean **-0.007797 b/B**
+  (`sqlite_like_records` -0.006542, `markov_h8_2_trap` -0.025424,
+  `x86_dense_code` +0.000505, `json_records` +0.000273 — the two
   improvements come from incidental multi-megabyte-scale recurrence
   `long_range_repeat` engineers on purpose, `markov_h8_2_trap`'s bounded
   low-conditional-entropy state space revisiting old states, `sqlite_like_
@@ -368,10 +368,14 @@ record.
   represents). Sealed check at `sealed_seed(0xC0FFEE123456789A)`, the same
   pairing S2-A63/S2-R4 use, on both actual sealed-only kinds
   (`bench::baseline` excludes `access_log`/`gradient_image` from the train
-  gate for exactly this reason): both regressed — `access_log` +0.001515
-  b/B, `gradient_image` +0.000737 b/B. Small in absolute terms (an order
-  of magnitude below S2-R4's own deciding regression), but real and
-  consistent in direction across both sealed kinds, not a coin flip.
+  gate for exactly this reason): both regressed — `access_log` +0.000189
+  b/B, `gradient_image` +0.000092 b/B. Small in absolute terms — roughly
+  0.6x and 0.3x of S2-R4's own deciding regression (`access_log`
+  +0.00032), not an order of magnitude below it as an earlier draft of
+  this entry miscalculated (a stray byte-to-bit conversion inflated every
+  delta in this paragraph 8x; corrected 2026-08-29, PR #353 review) — but
+  real and consistent in direction across both sealed kinds, not a coin
+  flip.
   Encode time (the same `ideal_cost_bits_with_window` calls, wall clock)
   grew 1.05x-1.41x at `new_window` across every case measured, consistent
   with `insert_and_find`'s own docs: a smaller window lets the
@@ -384,7 +388,7 @@ record.
   pass of this same slice: a `bench::long_range_repeat` case with its
   planted repeat moved out to `new_window - 4,096` (near the candidate
   ceiling itself, rather than S2-A63's 150,000-byte-past-`WINDOW` case),
-  **-0.091814 b/B**, confirming the win still holds at the far edge of the
+  **-0.012543 b/B**, confirming the win still holds at the far edge of the
   candidate window. **Rejected**, applying the same rule S2-R3/S2-R4
   named explicitly: a validation regression fails corpus policy's accept
   rule independent of the net train number, and both sealed-only kinds
@@ -2479,10 +2483,10 @@ record.
   `parse_optimal_with_window` seed pass both still pass `WINDOW`
   unchanged, so nothing currently encoded moves. Fifth slice, S2-R7:
   answered that decision, rejected — despite a net-improving train mean
-  (-0.062378 b/B, driven by incidental multi-megabyte-scale recurrence,
+  (-0.007797 b/B, driven by incidental multi-megabyte-scale recurrence,
   not the Silesia-shaped structure this lead targets), both real sealed-
-  only kinds regressed (`access_log` +0.001515, `gradient_image`
-  +0.000737), the same "any real validation regression fails accept, net
+  only kinds regressed (`access_log` +0.000189, `gradient_image`
+  +0.000092), the same "any real validation regression fails accept, net
   number or not" rule S2-R3/S2-R4 applied, on top of a real encode-time
   cost (1.05x-1.41x across every case measured). Remaining S1-P4 scope: a
   blanket `WINDOW` bump is closed off;
