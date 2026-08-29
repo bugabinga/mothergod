@@ -2,9 +2,9 @@
 //! primitive for ROADMAP M3's third standing lead (`JOURNAL` S1-P3, "PPM
 //! escape for literal contexts"). Not a port: the founding session never
 //! implemented PPM-style escape coding (grepped
-//! `research/imports/session-1/` clean of any escape/PPM code), so there is
-//! no archive behavior to carry forward, same situation [`crate::sse`]
-//! documented for S1-P1 (ADR-0006).
+//! `research/imports/session-1/mothergod.rs` clean of any escape/PPM code),
+//! so there is no archive behavior to carry forward, same situation
+//! [`crate::sse`] documented for S1-P1 (ADR-0006).
 //!
 //! **The gap this closes.** [`crate::model::Model`] and
 //! [`crate::literal::Literal`]'s six expert banks all Laplace-smooth every

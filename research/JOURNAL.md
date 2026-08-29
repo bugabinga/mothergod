@@ -2516,7 +2516,7 @@ record.
   unconditionally toward order-0, damaging the best-trained contexts
   most; `Ppm` only escapes a genuinely never-seen symbol, so a
   well-trained context essentially never pays the escape cost — the
-  distinction S1-R4's diagnosis called for. | 16 unit tests: fresh-table
+  distinction S1-R4's diagnosis called for. | 12 unit tests: fresh-table
   escape is free and universal, observing a symbol clears only that
   symbol's own escape flag, `distinct` counts each symbol once regardless
   of repeats, a symbol's price falls as it recurs, escape price rises as
