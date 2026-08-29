@@ -499,10 +499,10 @@ fn to_u32(i: usize) -> u32 {
 /// passes the issue #179 guard at ~0.1s release / ~1s debug, well inside
 /// its 15s budget.
 ///
-/// Crate-private: `dp_round` is its only caller, matching [`MatchFinder`]'s
-/// own visibility for the same once-per-parse-position role in
-/// [`parse_greedy`].
-pub(crate) struct BinaryTreeMatchFinder<'d> {
+/// Private to this module: `dp_round` is its only caller, matching
+/// [`MatchFinder`]'s own visibility for the same once-per-parse-position
+/// role in [`parse_greedy`].
+struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// `head[hash]` is the current tree root for that hash bucket, or
     /// [`NO_POSITION`].
@@ -518,7 +518,7 @@ pub(crate) struct BinaryTreeMatchFinder<'d> {
 impl<'d> BinaryTreeMatchFinder<'d> {
     /// A finder with no positions inserted yet.
     #[must_use]
-    pub(crate) fn new(data: &'d [u8]) -> Self {
+    fn new(data: &'d [u8]) -> Self {
         Self {
             data,
             head: vec![NO_POSITION; 1 << HASH_BITS],
@@ -562,7 +562,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
     /// past the end would be a caller bug, never something adversarial
     /// input can trigger.
     #[must_use]
-    pub(crate) fn insert_and_find(
+    fn insert_and_find(
         &mut self,
         i: usize,
         max_depth: usize,
