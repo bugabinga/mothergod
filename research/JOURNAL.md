@@ -2229,10 +2229,12 @@ record.
   eventual binary decomposition is the obvious one), not another raw
   `Model` split. Fourth slice, S2-A58: built that decomposition
   (`src/bittree.rs`) as its own standalone primitive, not yet wired.
-  Remaining S1-P1 scope: pick the `Sse` context keying for a (bit
-  position, decided-prefix) pair, wire the decomposition behind
+  Fifth slice, S2-A59: picked the `Sse` context keying (`bittree::
+  sse_context`, tree-position-only, 255 contexts), also standalone.
+  Remaining S1-P1 scope: wire the decomposition + context scheme behind
   `Literal::encode`/`decode`, bump `FORMAT_VERSION`, measure a real bpb
-  delta.
+  delta — S2-R1's risk (little systematic bias left for SSE to correct
+  on a near-order-0 binary decision) is still open until that slice runs.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue. First slice: S2-A42 (standalone
@@ -2574,12 +2576,44 @@ record.
   measurement, same reason S2-A40/S2-A42/S2-A50/S2-A57 recorded null
   deltas for their own first slices: not yet wired to any `Method`
   variant, no champion to diff against. `research/progress.jsonl` it103.
-  Remaining S1-P1 scope: decide which `Sse` context a bit position and
-  decided-prefix should key (a naive 256-context-per-bit-position scheme
-  is one option, cheaper hashed contexts another), wire the decomposition
-  behind `Literal::encode`/`decode` in place of the direct 256-way
-  `mix`/scan, bump `FORMAT_VERSION`, measure a real bpb delta on the
-  corpus policy's train/sealed split — S2-R1's whole postmortem was that
-  this wiring decision is where the last attempt's raw-`Model`-split
-  approach failed, so it wants its own dedicated slice, not a rushed
-  extension of this one.
+  Remaining S1-P1 scope after this slice: see S2-A59.
+- S2-A59 | ACCEPTED | S2-A58's own remaining-scope note named the first
+  open item as picking the `Sse` context keying for a (bit position,
+  decided-prefix) pair; this slice decides it, as a standalone function,
+  same pattern S2-A40/S2-A58 used for their own first slices rather than
+  bundling the decision into the riskier wiring slice. `bittree::sse_context(depth,
+  prefix)` maps one step of `encode_symbol`/`decode_symbol`'s walk (tree
+  depth `0..8`, decided prefix `0..2^depth`) to a unique index in
+  `0..255`, the classic LZMA-literal-coder node numbering
+  (`(1 << depth) + prefix`, shifted to be 0-indexed): the cheapest scheme
+  that still gives every one of the walk's 255 internal nodes its own
+  calibration context, no coarser (folding nodes loses exactly the
+  distinction the walk observed) and no finer (nothing more than tree
+  position is available per node — the symbol identity is what has not
+  been decided yet). Passes on the "256-context-per-bit-position" and
+  hashed-context alternatives S2-A58's note raised: both would key on
+  more than tree position alone (an order-1 dependency on the previous
+  decoded byte), a genuinely different design question from "which
+  context does this walk step address," left for the wiring slice to
+  raise again if the plain scheme underperforms. | 5 new unit tests (14
+  total in `bittree.rs`, up from 9): every `(depth, prefix)` pair the
+  walk can reach maps into a bijection onto `0..255` (`SSE_CONTEXTS`);
+  every one of the 256 symbols' root-to-leaf paths through
+  `encode_symbol`'s own walk visits 8 distinct contexts, checked against
+  the walk's real `lo`/width arithmetic rather than asserted in
+  isolation; both out-of-range panics (`depth >= LEVELS`, `prefix >=
+  2^depth`); `SSE_CONTEXTS == 255`. `cargo x check` 4 stages green;
+  `baseline_gate check` unaffected (pure function, no coding path
+  touched, nothing wired in yet). | No bpb measurement, same reason
+  S2-A58 recorded a null delta: not yet wired to any `Method` variant, no
+  champion to diff against. `research/progress.jsonl` it104. Remaining
+  S1-P1 scope: wire `bittree::encode_symbol`/`decode_symbol` +
+  `sse_context` behind `Literal::encode`/`decode` in place of the direct
+  256-way `mix`/scan, with one `Sse` table of `bittree::SSE_CONTEXTS`
+  contexts calibrating the mixer's own per-decision probability, bump
+  `FORMAT_VERSION`, measure a real bpb delta on the corpus policy's
+  train/sealed split — S2-R1's postmortem is still the live risk here:
+  the prior wiring attempt showed a raw order-0 binary decision has
+  little systematic bias left for SSE to correct, and this slice does
+  not yet know whether a mixer-derived decision differs enough to change
+  that verdict.

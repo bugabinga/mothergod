@@ -17,6 +17,13 @@ All notable changes to this project are documented here. Format follows
   into `Literal` or `codec.rs` yet — standalone primitive only, no
   format or ratio effect.
 
+- `bittree::sse_context` (`research/JOURNAL.md` S2-A59, S2-A58's own
+  remaining-scope note): maps a bit-tree walk step (depth, decided
+  prefix) to one of 255 `sse::Sse` calibration contexts, the classic
+  LZMA-literal-coder node numbering. Picks S1-P1's context-keying
+  question; still not wired into `Literal` or `codec.rs` — standalone
+  primitive only, no format or ratio effect.
+
 - `mothergod_bench::baseline::load_and_fingerprint`, a shared helper for
   the read-`bench/baseline.json`-parse-fingerprint sequence `finals_report`
   and `silesia_report` each pasted a copy of (issue #330: this exact block
