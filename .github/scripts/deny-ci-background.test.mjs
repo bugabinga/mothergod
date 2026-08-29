@@ -66,6 +66,8 @@ test("denies a setsid fork, allows setsid used as a waiter", () => {
     const command of [
       "setsid -f cargo test > /tmp/o 2>&1 < /dev/null",
       "setsid --fork cargo test",
+      "setsid -cf cargo test",
+      "cd /tmp && setsid -f cargo test",
     ]
   ) {
     const call = { tool_name: "Bash", tool_input: { command } };
@@ -73,6 +75,25 @@ test("denies a setsid fork, allows setsid used as a waiter", () => {
   }
   const waiting = { tool_name: "Bash", tool_input: { command: "setsid -w cargo test" } };
   assert.equal(run(waiting).status, 0);
+});
+
+test("denies a coprocess, allows word idioms as mid-sentence prose", () => {
+  for (
+    const command of ["coproc cargo test", "cd /tmp && coproc watch { cargo test; }"]
+  ) {
+    const call = { tool_name: "Bash", tool_input: { command } };
+    assert.equal(run(call).status, 2, command);
+  }
+  // Command-position anchoring: mentioning an idiom is not using it.
+  for (
+    const command of [
+      "echo coprocessor ready",
+      "git commit -m 'guard: mention the setsid -f trap in prose'",
+    ]
+  ) {
+    const call = { tool_name: "Bash", tool_input: { command } };
+    assert.equal(run(call).status, 0, command);
+  }
 });
 
 test("allows &&, fd duplication, |&, and embedded ampersands", () => {
