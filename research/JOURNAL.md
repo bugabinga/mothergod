@@ -2401,6 +2401,17 @@ record.
   repeated rejections; a fallback target other than the global marginal is
   owed before spending another slice here.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
+  Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
+  many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
+  that distance are structurally invisible to the current parse regardless
+  of how well it prices what it can see. First slice: S2-A61 (`window` a
+  per-instance parameter on `BinaryTreeMatchFinder`, standalone, the wired
+  parse still always passes `WINDOW` unchanged). Remaining scope: measure
+  a real bpb delta at a larger window on train-tier data with long-range
+  repeat structure, decide how a larger window reaches `OFFSET_BUCKETS`
+  and the offset `Model`'s alphabet size without breaking `bucket()`'s
+  `u32`-fits assumption, wire it behind a real parse pass, bump
+  `FORMAT_VERSION`.
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
@@ -2775,3 +2786,45 @@ record.
   regeneration is a mechanical fingerprint refresh
   (`bench/baseline.json` changed), not an accept signal.
   `research/progress.jsonl` it105.
+- S2-A61 | ACCEPTED | First slice of ROADMAP M3's fourth standing lead
+  (S1-P4, LZMA-class windows for large files): `lz::BinaryTreeMatchFinder`
+  now takes `window: usize` as a constructor parameter instead of reading
+  the crate-wide `lz::WINDOW` constant (1 MiB) directly, the same
+  standalone-primitive-first order S1-P1/S1-P2/S1-P3 each opened with
+  (S2-A40, S2-A42, S2-A57) — except here the primitive already exists and
+  is wired; this slice only frees the one hardcoded bound
+  `insert_and_find`'s eviction check (`distance > WINDOW`) used, so a
+  larger window is measurable on the standalone finder before any of the
+  real decisions (offset-bucket count, `Model` alphabet size,
+  `FORMAT_VERSION`) get made. `dp_round`, the wired parse `codec.rs`
+  actually calls, still constructs its finder with `WINDOW` explicitly —
+  bit-for-bit identical output, no format or ratio effect. Motivation:
+  several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
+  many times larger than 1 MiB, so long-range repeats past that distance
+  are currently invisible to the parse regardless of pricing quality —
+  `research/corpus/POLICY.md` already names enwik8/9 as "relevant once
+  large windows land (M3+)". | 1 new unit test
+  (`binary_tree_larger_window_finds_matches_the_default_window_would_miss`,
+  207 lib tests total, up from 206): a finder constructed with `WINDOW * 2`
+  finds a match at that distance, and a finder constructed with the
+  default `WINDOW` on the same data does not — proving the parameter
+  actually gates reach rather than being threaded through unused. The 12
+  existing call sites (the wired `dp_round` plus 11 test finders) all pass
+  `WINDOW` explicitly, so none of them changed behavior. `cargo x check`:
+  4 stages green (the doc stage first caught a private-intra-doc-link
+  warning from `WINDOW`'s public doc comment naming the now-parameterized
+  private `BinaryTreeMatchFinder::new`, fixed by dropping the link, same
+  class as S2-A41/S2-A42). | No bpb measurement: `dp_round`'s own call is
+  unchanged, so there is no champion to diff against —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
+  same reason as S2-A40/S2-A42/S2-A57. Remaining S1-P4 scope: measure
+  whether a larger window actually helps on train-tier data shaped like
+  the named Silesia targets (a long-range-repeat generator does not yet
+  exist in `bench/`'s corpus — may itself need a capability slice first,
+  `research/corpus/POLICY.md`'s "our own" generator class); decide how a
+  larger window reaches the coder — `lz::OFFSET_BUCKETS`/`bucket()` and
+  `codec.rs`'s `Model::new(lz::OFFSET_BUCKETS)` currently assume 21
+  buckets (`bucket(WINDOW) == 20`) sized for a 1 MiB bound, and `to_u32`'s
+  `u32`-fits assumption caps any window this scheme could ever use at
+  `u32::MAX`; wire the chosen window behind a real parse pass and bump
+  `FORMAT_VERSION`. `research/progress.jsonl` it107.

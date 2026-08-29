@@ -65,6 +65,17 @@ All notable changes to this project are documented here. Format follows
   finder (S2-A42) shipped in. No bpb change: private, unwired, and
   covered by focused unit tests only.
 
+- `lz::BinaryTreeMatchFinder::new` takes a `window: usize` parameter
+  instead of reading the crate-wide `lz::WINDOW` constant (1 MiB)
+  directly (`research/JOURNAL.md` S1-P4, S2-A61, ROADMAP M3's fourth
+  standing lead): several Silesia finals (`mozilla`, `nci`, `samba`,
+  `sao`, `webster`) are many times larger than 1 MiB, so long-range
+  repeats past that distance are currently invisible to the parse. The
+  wired parse (`dp_round`) still always constructs its finder with
+  `WINDOW` — bit-for-bit identical output, no format or ratio effect —
+  this slice only frees the bound so a larger window is measurable on
+  the standalone finder before any wiring or `FORMAT_VERSION` decision.
+
 - `baseline_gate check` (the required `ratio` job's own binary) now also
   fails when `docs/benchmarks/canterbury.md` or `docs/benchmarks/
   silesia.md` embeds a `bench/baseline.json` fingerprint that no longer

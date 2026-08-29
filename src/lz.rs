@@ -30,7 +30,11 @@
 use std::num::NonZeroU32;
 
 /// Largest backward distance a match may reference (`JOURNAL` S1-A3: 1 MiB
-/// window).
+/// window). The wired parse (`dp_round`) always uses this value; the
+/// crate's internal binary-tree match finder takes the window as a
+/// parameter instead of reading this constant directly, so a larger one
+/// can be measured standalone before any wiring or format change
+/// (`JOURNAL` S1-P4).
 pub const WINDOW: usize = 1 << 20;
 
 /// Shortest run [`parse_greedy`] emits as [`Token::Match`]. Below this a
@@ -383,12 +387,15 @@ fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize, limit: usize
     len
 }
 
-/// `i`, or a `WINDOW`-bounded distance derived from it, as a `u32`. Every
+/// `i`, or a window-bounded distance derived from it, as a `u32`. Every
 /// caller in this module already bounds its argument below `u32::MAX`
 /// (a position by `data.len()` fitting `u32` per [`parse_greedy`]'s own
-/// precondition, a distance by [`WINDOW`]), so this never truncates.
+/// precondition, a distance by [`WINDOW`] or
+/// [`BinaryTreeMatchFinder`]'s configured window), so this never
+/// truncates as long as that window itself fits `u32` — the caller's
+/// obligation, same as `WINDOW` itself already fitting by construction.
 fn to_u32(i: usize) -> u32 {
-    u32::try_from(i).expect("bounded by data.len() or WINDOW, both well under u32::MAX")
+    u32::try_from(i).expect("bounded by data.len() or the finder's window, both under u32::MAX")
 }
 
 /// Binary-tree match finder (`JOURNAL` S1-P2, "btultra2-class parse"'s
@@ -506,6 +513,12 @@ fn to_u32(i: usize) -> u32 {
 /// role in [`parse_greedy`].
 struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
+    /// Largest backward distance [`Self::insert_and_find`] ever reports
+    /// or keeps linked in the tree (`JOURNAL` S1-P4): a per-instance
+    /// parameter, not the global [`WINDOW`], so a larger window can be
+    /// measured standalone without touching the wired parse. Must fit
+    /// `u32` ([`to_u32`]'s obligation), same as `WINDOW` itself.
+    window: usize,
     /// `head[hash]` is the current tree root for that hash bucket, or
     /// [`NO_POSITION`].
     head: Vec<u32>,
@@ -518,11 +531,13 @@ struct BinaryTreeMatchFinder<'d> {
 }
 
 impl<'d> BinaryTreeMatchFinder<'d> {
-    /// A finder with no positions inserted yet.
+    /// A finder with no positions inserted yet, reporting no match past
+    /// `window`. The wired parse (`dp_round`) always passes [`WINDOW`].
     #[must_use]
-    fn new(data: &'d [u8]) -> Self {
+    fn new(data: &'d [u8], window: usize) -> Self {
         Self {
             data,
+            window,
             head: vec![NO_POSITION; 1 << HASH_BITS],
             left: vec![NO_POSITION; data.len().max(1)],
             right: vec![NO_POSITION; data.len().max(1)],
@@ -535,10 +550,10 @@ impl<'d> BinaryTreeMatchFinder<'d> {
     /// `max_depth` trades off — notably, unlike a hash chain's
     /// `max_tries`, a shallow `max_depth` here permanently prunes the
     /// bucket for every later call, not just this one). The match's
-    /// distance is always within
-    /// [`WINDOW`]; a candidate farther than that still participates in
-    /// the tree's structure (it may still separate other candidates) but
-    /// is never reported as a match.
+    /// distance is always within the finder's configured window; a
+    /// candidate farther than that still participates in the tree's
+    /// structure (it may still separate other candidates) but is never
+    /// reported as a match.
     ///
     /// Each position must be inserted at most once, in increasing order
     /// — an LZ parse's own shape, not checked here: this type is
@@ -604,7 +619,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         while cur != NO_POSITION && depth < max_depth && best_len < nice_len {
             let cur_pos = cur as usize;
             let distance = i - cur_pos; // cur_pos was inserted earlier: i > cur_pos always.
-            if distance > WINDOW {
+            if distance > self.window {
                 // cur_pos and its whole subtree are out of window and can
                 // only get farther as `i` grows (struct docs): stop the
                 // walk here rather than linking cur_pos back into either
@@ -1209,7 +1224,7 @@ impl DpState {
 fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
     let n = data.len();
     let mut state = DpState::new(n);
-    let mut finder = BinaryTreeMatchFinder::new(data);
+    let mut finder = BinaryTreeMatchFinder::new(data, WINDOW);
     // Per-slot carry for `relax_rep_candidates`' match_len scan (issue
     // #179): unlike parse_greedy, which jumps ahead by a chosen token's
     // length, this loop visits every position, so a long run's rep-length
@@ -1640,14 +1655,14 @@ mod tests {
     #[test]
     fn binary_tree_no_prior_positions_returns_none() {
         let data = b"abcdef";
-        let mut finder = BinaryTreeMatchFinder::new(data);
+        let mut finder = BinaryTreeMatchFinder::new(data, WINDOW);
         assert_eq!(finder.insert_and_find(0, data.len(), MAX_MATCH_LEN), None);
     }
 
     #[test]
     fn binary_tree_finds_an_exact_repeat() {
         let data = b"abcabcabc";
-        let mut finder = BinaryTreeMatchFinder::new(data);
+        let mut finder = BinaryTreeMatchFinder::new(data, WINDOW);
         let mut found_at_6 = None;
         for i in 0..data.len() {
             let found = finder.insert_and_find(i, data.len(), MAX_MATCH_LEN);
@@ -1676,7 +1691,7 @@ mod tests {
             .take(400)
             .map(|state| u8::try_from(state % 5).unwrap())
             .collect();
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         for i in 0..data.len() {
             // max_depth covers every possible candidate in the bucket
             // (at most i of them), so the walk cannot be truncated before
@@ -1701,7 +1716,7 @@ mod tests {
     #[test]
     fn binary_tree_zero_max_depth_finds_nothing_but_stays_consistent() {
         let data = b"abcabcabc";
-        let mut finder = BinaryTreeMatchFinder::new(data);
+        let mut finder = BinaryTreeMatchFinder::new(data, WINDOW);
         let _ = finder.insert_and_find(0, data.len(), MAX_MATCH_LEN);
         let _ = finder.insert_and_find(1, data.len(), MAX_MATCH_LEN);
         let _ = finder.insert_and_find(2, data.len(), MAX_MATCH_LEN);
@@ -1722,7 +1737,7 @@ mod tests {
     fn binary_tree_caps_match_length_at_max_match_len() {
         let mut data = vec![b'x'; MAX_MATCH_LEN + 50];
         data.push(b'y');
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         let _ = finder.insert_and_find(0, 8, MAX_MATCH_LEN);
         let (len, _distance) = finder
             .insert_and_find(1, 8, MAX_MATCH_LEN)
@@ -1756,7 +1771,7 @@ mod tests {
             block[100] = u8::try_from(copy % 256).expect("copy % 256 fits u8");
             data.extend_from_slice(&block);
         }
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         let start = std::time::Instant::now();
         for i in 0..data.len() {
             let _ = finder.insert_and_find(i, data.len(), 50);
@@ -1778,7 +1793,7 @@ mod tests {
         // paying to confirm more" trade the struct docs describe.
         let mut data = vec![b'x'; 300];
         data.push(b'y');
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         let _ = finder.insert_and_find(0, data.len(), MAX_MATCH_LEN);
         let (len, distance) = finder
             .insert_and_find(1, data.len(), 50)
@@ -1801,7 +1816,7 @@ mod tests {
         // O(MAX_MATCH_LEN), and the walk stops immediately after (its
         // capped common length already reaches nice_len).
         let data = vec![b'z'; 200_000];
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         let start = std::time::Instant::now();
         for i in 0..data.len() {
             let _ = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL);
@@ -1841,7 +1856,7 @@ mod tests {
             block[100] = u8::try_from(copy % 256).expect("copy % 256 fits u8");
             data.extend_from_slice(&block);
         }
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         let start = std::time::Instant::now();
         for i in 0..data.len() {
             let _ = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
@@ -1859,7 +1874,7 @@ mod tests {
         let mut at_boundary = vec![0xAAu8; WINDOW + 3];
         at_boundary[0..3].copy_from_slice(b"xyz");
         at_boundary[WINDOW..WINDOW + 3].copy_from_slice(b"xyz");
-        let mut finder = BinaryTreeMatchFinder::new(&at_boundary);
+        let mut finder = BinaryTreeMatchFinder::new(&at_boundary, WINDOW);
         let _ = finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
         let (_, distance) = finder
             .insert_and_find(WINDOW, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN)
@@ -1869,12 +1884,42 @@ mod tests {
         let mut past_boundary = vec![0xAAu8; WINDOW + 4];
         past_boundary[0..3].copy_from_slice(b"xyz");
         past_boundary[WINDOW + 1..WINDOW + 4].copy_from_slice(b"xyz");
-        let mut finder = BinaryTreeMatchFinder::new(&past_boundary);
+        let mut finder = BinaryTreeMatchFinder::new(&past_boundary, WINDOW);
         let _ = finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
         assert_eq!(
             finder.insert_and_find(WINDOW + 1, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN),
             None,
             "distance == WINDOW + 1 must never be reported"
+        );
+    }
+
+    #[test]
+    fn binary_tree_larger_window_finds_matches_the_default_window_would_miss() {
+        // S1-P4's first slice: window is now a per-instance parameter,
+        // not just the wired WINDOW constant. A distance past WINDOW but
+        // within a caller-chosen larger window must be found when the
+        // finder is configured with that larger window, and still
+        // rejected when it is not -- proving the parameter actually
+        // gates reach rather than being plumbed through unused.
+        let larger_window = WINDOW * 2;
+        let mut data = vec![0xAAu8; larger_window + 3];
+        data[0..3].copy_from_slice(b"xyz");
+        data[larger_window..larger_window + 3].copy_from_slice(b"xyz");
+
+        let mut wide_finder = BinaryTreeMatchFinder::new(&data, larger_window);
+        let _ = wide_finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
+        let (_, distance) = wide_finder
+            .insert_and_find(larger_window, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN)
+            .expect("distance == larger_window is in range for a finder configured with it");
+        assert_eq!(distance.get() as usize, larger_window);
+
+        let mut default_finder = BinaryTreeMatchFinder::new(&data, WINDOW);
+        let _ = default_finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
+        assert_eq!(
+            default_finder.insert_and_find(larger_window, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN),
+            None,
+            "distance == larger_window must stay unreachable through the default-WINDOW finder \
+             the wired parse actually uses"
         );
     }
 
@@ -1889,7 +1934,7 @@ mod tests {
         let mut data = vec![0xAAu8; WINDOW + 4];
         data[0..3].copy_from_slice(b"xyz");
         data[WINDOW + 1..WINDOW + 4].copy_from_slice(b"xyz");
-        let mut finder = BinaryTreeMatchFinder::new(&data);
+        let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
         let _ = finder.insert_and_find(0, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
         let _ = finder.insert_and_find(WINDOW + 1, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
 
