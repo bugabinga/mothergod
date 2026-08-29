@@ -26,19 +26,27 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Container format version written into frames produced by this crate.
 ///
 /// Bumped to 1 when [`Method::Lz`] was added
-/// (`docs/adr/0026-wire-the-lz-context-mixing-method.md`), and to 2 when
+/// (`docs/adr/0026-wire-the-lz-context-mixing-method.md`), to 2 when
 /// filter selection was wired into its payload
-/// (`docs/adr/0028-wire-filter-selection.md`): both are bitstream format
-/// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
-/// [`Method::Stored`], which decodes identically under this build, so no
-/// separate version-0 decode path is needed. A version-1 frame can
-/// contain a `Method::Lz` payload in a layout this build no longer
-/// parses (see [`codec`]'s module docs); [`decompress`] rejects that
-/// combination explicitly (`codec::LZ_MIN_VERSION`) rather than silently
-/// misreading it, so hard rule 5's "decode support for all previous
-/// versions, unless an ADR drops one" is satisfied by an explicit
-/// rejection, not by parsing it.
-pub const FORMAT_VERSION: u8 = 2;
+/// (`docs/adr/0028-wire-filter-selection.md`), and to 3 when the literal
+/// sub-stream switched to SSE-calibrated binary-tree coding
+/// (`docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
+/// S1-P1): all three are bitstream format changes (CLAUDE.md hard rule 5).
+/// A version-0 frame only ever contains [`Method::Stored`], which decodes
+/// identically under this build, so no separate version-0 decode path is
+/// needed. A version-1 frame can contain a `Method::Lz` payload in a
+/// layout this build no longer parses (see [`codec`]'s module docs);
+/// [`decompress`] rejects that combination explicitly
+/// (`codec::LZ_MIN_VERSION`) rather than silently misreading it. A
+/// version-2 frame's `Method::Lz` payload has the same outer layout as
+/// version 3 but a different literal sub-stream shape (the old direct
+/// 256-way mix, [`literal::Literal::decode`], instead of
+/// [`literal::Literal::decode_sse`]); [`codec::decode`] takes the frame's
+/// declared version and picks between them, so hard rule 5's "decode
+/// support for all previous versions, unless an ADR drops one" is
+/// satisfied by dispatch, not by dropping the old path
+/// (`tests/golden/v2-lz-repeated-text.mgdc` pins that forever).
+pub const FORMAT_VERSION: u8 = 3;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,7 +171,7 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     match method {
         Method::Stored => Ok(payload.to_vec()),
         Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
-        Method::Lz => codec::decode(payload),
+        Method::Lz => codec::decode(payload, version),
     }
 }
 

@@ -22,6 +22,23 @@
 //! scope): sums `-log2(p)` against the mixed distribution instead of
 //! driving [`crate::coder::Encoder`].
 //!
+//! **SSE-calibrated coding (`JOURNAL` S1-P1, S2-A58, S2-A59, `FORMAT_VERSION`
+//! 3).** [`Literal::encode_sse`]/[`Literal::decode_sse`] code the same mixed
+//! `cum` table [`Literal::encode`]/[`Literal::decode`] do, but through
+//! [`crate::bittree::encode_symbol_sse`]/[`crate::bittree::decode_symbol_sse`]
+//! instead of one direct 256-way range division: 8 chained binary decisions,
+//! each refined by [`Literal`]'s own [`Sse`] table
+//! (`crate::bittree::SSE_CONTEXTS` contexts, keyed by tree position only,
+//! `crate::bittree::sse_context`) before it reaches the coder. This
+//! calibrates the six-expert mixer's own blended probability at each
+//! binary-tree node, a compound estimate — unlike `JOURNAL` S2-R1's
+//! rejected attempt, which SSE-calibrated an already order-0-adaptive lone
+//! frequency counter (the flag model's `is_copy` bit) and found nothing to
+//! correct. The old [`Literal::encode`]/[`Literal::decode`] pair stays,
+//! unchanged, for decoding `FORMAT_VERSION` 2 frames
+//! (`tests/golden/v2-lz-repeated-text.mgdc` pins that forever); `codec.rs`
+//! picks between the two paths by the frame's declared version.
+//!
 //! **Decode-path determinism (`JOURNAL` S2-D3, resolved by ADR-0024).**
 //! The exponentiated-gradient weight update runs on both the encode and
 //! decode path, so anything it calls must produce a bit-identical result
@@ -35,7 +52,9 @@
 //! demotes it to an M5 speed lead, since its speed claim is unmeasured
 //! in this codebase.
 
+use crate::bittree;
 use crate::coder::{Decoder, Encoder};
+use crate::sse::Sse;
 
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
@@ -275,6 +294,10 @@ pub struct Literal {
     /// Per-weight-context mixing weights, one `[f64; EXPERTS]` per
     /// [`WEIGHT_CONTEXTS`] key.
     weights: Vec<[f64; EXPERTS]>,
+    /// Calibrates [`Self::encode_sse`]/[`Self::decode_sse`]'s per-node
+    /// binary decisions, keyed by [`bittree::sse_context`]
+    /// (`research/JOURNAL.md` S1-P1's remaining scope, `FORMAT_VERSION` 3).
+    sse: Sse,
 }
 
 impl Default for Literal {
@@ -293,6 +316,7 @@ impl Literal {
             freq: vec![1u32; BANKS * ALPHABET],
             total: vec![ALPHABET_U32; BANKS],
             weights: vec![[1.0; EXPERTS]; WEIGHT_CONTEXTS],
+            sse: Sse::new(bittree::SSE_CONTEXTS),
         }
     }
 
@@ -395,6 +419,38 @@ impl Literal {
         self.update(&bank_indices, weight_index, symbol, exp);
     }
 
+    /// Codes `byte` through `encoder` under `context`, same as
+    /// [`Self::encode`], except the mixed `cum` table is coded as 8 chained
+    /// binary decisions through [`bittree::encode_symbol_sse`], each
+    /// calibrated by this model's own [`Sse`] table, instead of one direct
+    /// 256-way range division (`research/JOURNAL.md` S1-P1, `FORMAT_VERSION`
+    /// 3). The underlying six-expert mixer still adapts exactly as
+    /// [`Self::encode`] leaves it: `update` runs unconditionally after the
+    /// symbol is coded, regardless of which coding path chose it.
+    pub fn encode_sse(&mut self, encoder: &mut Encoder, context: Context, byte: u8) {
+        let (bank_indices, weight_index) = banks(context);
+        let cum = self.mix(&bank_indices, weight_index);
+        bittree::encode_symbol_sse(encoder, &cum, byte, &mut self.sse);
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+    }
+
+    /// Decodes one byte from `decoder` under `context`, the exact inverse
+    /// of [`Self::encode_sse`], then updates the model the same way
+    /// [`Self::decode`] did.
+    ///
+    /// Never panics on adversarial `decoder` state: [`bittree::decode_symbol_sse`]
+    /// is total over any coded bit pattern (its own `Decoder::decode_bit`
+    /// calls are), and `cum`'s shape is this model's own invariant
+    /// (`mix`'s Laplace floor), never derived from `decoder`'s bytes.
+    #[must_use]
+    pub fn decode_sse(&mut self, decoder: &mut Decoder, context: Context) -> u8 {
+        let (bank_indices, weight_index) = banks(context);
+        let cum = self.mix(&bank_indices, weight_index);
+        let byte = bittree::decode_symbol_sse(decoder, &cum, &mut self.sse);
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        byte
+    }
+
     /// Bits it would cost to code `byte` under `context`'s current mixed
     /// distribution — `-log2((cum[symbol+1] - cum[symbol]) /
     /// cum[ALPHABET])` — then updates the model the same way
@@ -418,6 +474,28 @@ impl Literal {
         let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
         self.update(&bank_indices, weight_index, symbol, exp);
         -probability.log2()
+    }
+
+    /// [`Self::ideal_cost_bits`]'s counterpart for [`Self::encode_sse`]:
+    /// sums the ideal cost of `byte`'s 8 `sse`-refined binary decisions
+    /// through [`bittree::ideal_cost_bits_sse`] instead of pricing the
+    /// direct 256-way division, so a caller pricing a whole stream this way
+    /// reflects what `Self::encode_sse` actually pays, including this
+    /// model's own [`Sse`] table adapting call over call
+    /// (`crate::codec`'s `CostSink`/`EncodeSink` must price and code the
+    /// same thing, per that module's docs). Updates the mixer state the
+    /// same way [`Self::ideal_cost_bits`] does.
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits_sse(&mut self, context: Context, byte: u8) -> f64 {
+        let (bank_indices, weight_index) = banks(context);
+        let cum = self.mix(&bank_indices, weight_index);
+        let bits = bittree::ideal_cost_bits_sse(&cum, byte, &mut self.sse);
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        bits
     }
 
     /// Decodes one byte from `decoder` under `context`, then updates the
@@ -472,6 +550,28 @@ mod tests {
         let mut got = Vec::with_capacity(bytes.len());
         for _ in bytes {
             let b = model.decode(&mut dec, context);
+            context = context.after_literal(b);
+            got.push(b);
+        }
+        assert_eq!(got, bytes);
+    }
+
+    fn roundtrip_bytes_sse(bytes: &[u8]) {
+        let mut model = Literal::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in bytes {
+            model.encode_sse(&mut enc, context, b);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+
+        let mut model = Literal::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(&encoded);
+        let mut got = Vec::with_capacity(bytes.len());
+        for _ in bytes {
+            let b = model.decode_sse(&mut dec, context);
             context = context.after_literal(b);
             got.push(b);
         }
@@ -557,6 +657,65 @@ mod tests {
     }
 
     #[test]
+    fn empty_stream_round_trips_through_sse() {
+        roundtrip_bytes_sse(&[]);
+    }
+
+    #[test]
+    fn single_byte_round_trips_through_sse() {
+        roundtrip_bytes_sse(b"x");
+    }
+
+    #[test]
+    fn skewed_repeat_round_trips_through_sse() {
+        roundtrip_bytes_sse(&b"aaaaaaaaaaaaaaaaaaaaaaaaaab".repeat(20));
+    }
+
+    #[test]
+    fn full_alphabet_cycles_round_trip_through_sse() {
+        let bytes: Vec<u8> = (0..2000).map(|i| u8::try_from(i % 256).unwrap()).collect();
+        roundtrip_bytes_sse(&bytes);
+    }
+
+    #[test]
+    fn ascii_text_round_trips_through_sse() {
+        let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
+        roundtrip_bytes_sse(&text);
+    }
+
+    #[test]
+    fn pseudo_random_bytes_round_trip_through_sse() {
+        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+        roundtrip_bytes_sse(&bytes);
+    }
+
+    #[test]
+    fn decoding_truncated_stream_does_not_panic_through_sse() {
+        let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
+        let mut model = Literal::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in &bytes {
+            model.encode_sse(&mut enc, context, b);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+        let truncated = &encoded[..encoded.len() / 2];
+
+        let mut model = Literal::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(truncated);
+        for _ in &bytes {
+            let b = model.decode_sse(&mut dec, context);
+            context = context.after_literal(b);
+        }
+        // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
+    }
+
+    #[test]
     fn context_after_literal_tracks_previous_bytes_and_position() {
         let context = Context::default();
         let context = context.after_literal(b'a');
@@ -621,6 +780,48 @@ mod tests {
         let third = model.ideal_cost_bits(context, b'a');
         assert!(second < first);
         assert!(third < second);
+    }
+
+    #[test]
+    fn ideal_cost_bits_sse_drops_as_a_byte_gets_more_likely() {
+        // Same shape as ideal_cost_drops_as_a_byte_gets_more_likely, for
+        // the SSE-calibrated path.
+        let mut model = Literal::new();
+        let context = Context::default().after_literal(b'a');
+        let first = model.ideal_cost_bits_sse(context, b'a');
+        let second = model.ideal_cost_bits_sse(context, b'a');
+        let third = model.ideal_cost_bits_sse(context, b'a');
+        assert!(second < first);
+        assert!(third < second);
+    }
+
+    #[test]
+    fn ideal_cost_bits_sse_updates_state_same_as_encode_sse() {
+        // Same shape as ideal_cost_updates_state_same_as_encode, for the
+        // SSE-calibrated path: encode_sse and ideal_cost_bits_sse must
+        // leave both the mixer and this model's own Sse table in the same
+        // state.
+        let bytes = b"hello world hello again";
+        let mut via_encode = Literal::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in bytes {
+            via_encode.encode_sse(&mut enc, context, b);
+            context = context.after_literal(b);
+        }
+        let mut via_ideal_cost = Literal::new();
+        let mut ideal_context = Context::default();
+        for &b in bytes {
+            let _ = via_ideal_cost.ideal_cost_bits_sse(ideal_context, b);
+            ideal_context = ideal_context.after_literal(b);
+        }
+        assert_eq!(context, ideal_context);
+        assert!(
+            (via_encode.ideal_cost_bits_sse(context, b'!')
+                - via_ideal_cost.ideal_cost_bits_sse(context, b'!'))
+            .abs()
+                < 1e-9
+        );
     }
 
     #[test]

@@ -33,31 +33,26 @@
 //! exact reproducibility (`+ - * /` and [`f64::clamp`] only) matters more
 //! here than that resolution, so this crate takes the trade.
 //!
-//! **Remaining scope.** This module is not yet reachable from
-//! [`crate::codec`]: nothing in this crate has a binary (two-outcome)
-//! probability stream to calibrate yet. The flag stream `codec.rs` codes
-//! (literal / match / rep) is three-ary, and the six-expert literal mixer
-//! ([`crate::literal::Literal`]) codes a 256-ary symbol directly rather
-//! than a sequence of binary decisions, so wiring [`Sse`] against either
-//! needs a decomposition this port does not build. This slice also closes
-//! a second prerequisite: [`crate::coder::Encoder::encode_bit`]/
-//! [`crate::coder::Decoder::decode_bit`] now let a caller drive the range
+//! **Wired (`JOURNAL` S1-P1 closed, ADR-0038).** This slice also closed a
+//! prerequisite: [`crate::coder::Encoder::encode_bit`]/
+//! [`crate::coder::Decoder::decode_bit`] let a caller drive the range
 //! coder from an arbitrary probability instead of only a
 //! [`crate::model::Model`]-derived frequency, and this module's own test
 //! suite proves the two work together — an `Sse`-calibrated probability,
 //! coded through that primitive, round-trips exactly and costs far fewer
-//! bits than a fixed 50/50 split on the same skewed sequence.
-//!
-//! Decomposing the flag model's binary "is this a copy, not a literal"
-//! sub-decision and wiring `Sse` behind it was tried and reverted
-//! (`research/JOURNAL.md` S2-R1): measured on the train/sealed corpus, an
-//! `Sse` stage over an already order-0-adaptive binary decision showed no
-//! train improvement and one sealed regression, rather than the hoped-for
-//! move toward the five zstd text holdouts S1-P1 names. `research/JOURNAL.md`
-//! S1-P1's entry has the numbers and the mechanism read; the next attempt,
-//! if any, wants a compound estimate to calibrate (the literal mixer's own
-//! eventual binary decomposition is the obvious candidate), not another raw
-//! `Model` split.
+//! bits than a fixed 50/50 split on the same skewed sequence. Decomposing
+//! the flag model's binary "is this a copy, not a literal" sub-decision
+//! and wiring `Sse` behind it was tried and reverted (`research/JOURNAL.md`
+//! S2-R1): an `Sse` stage over an already order-0-adaptive binary decision
+//! showed no train improvement and one sealed regression — SSE earns its
+//! keep calibrating a compound estimate, not a lone counter already
+//! tracking its own rate. The next attempt calibrated exactly that: the
+//! six-expert literal mixer's own blended probability at each node of
+//! [`crate::bittree`]'s binary decomposition
+//! ([`crate::literal::Literal::encode_sse`]/`decode_sse`, `research/JOURNAL.md`
+//! S2-A60), which won on the train/sealed split (net train -0.36736 b/B,
+//! both sealed kinds improved). `research/JOURNAL.md` S2-A60 has the full
+//! numbers and mechanism read.
 
 /// Number of probability bins per context: 33 evenly spaced points across
 /// `[0.0, 1.0]` (32 intervals), the classic PAQ/APM bin count (Mahoney

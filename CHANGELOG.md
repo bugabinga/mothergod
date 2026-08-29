@@ -8,6 +8,30 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- SSE wired into the literal mixer's binary decomposition
+  (`research/JOURNAL.md` S1-P1 closed, ADR-0038, `FORMAT_VERSION` 2 → 3):
+  `literal::Literal::encode_sse`/`decode_sse` code every literal byte as 8
+  chained binary decisions (`bittree::encode_symbol_sse`/`decode_symbol_sse`),
+  each calibrated by an `sse::Sse` table keyed on tree position
+  (`bittree::sse_context`, 255 contexts) before it drives the range coder.
+  `codec::decode` dispatches on the frame's declared version: below 3, the
+  old direct 256-way `Literal::decode`; 3 and above, `decode_sse` —
+  `tests/golden/v2-lz-repeated-text.mgdc` still decodes, unchanged, and a
+  new `tests/golden/v3-lz-repeated-text` pair pins the new shape. Measured
+  on `bench::baseline`'s 11 train cases and the two sealed-only kinds:
+  net train -0.36736 bits/byte (`interleaved_audio16` -0.36368 carried
+  most of it), both sealed kinds improved (`access_log` -0.01264,
+  `gradient_image` -0.13472). One case regressed past `TOLERANCE_BITS`:
+  `entropy_ladder_h6` +0.02368 (iid random data — SSE warm-up and the
+  8-decision coding path's own overhead have no real bias to correct
+  there), declared as an accepted trade per corpus policy's accept rule
+  (train improvement, no validation regression); `bench/baseline.json`
+  updated to the new numbers. A prior slice (S2-R1) rejected SSE behind
+  the flag model's `is_copy` bit, a lone already-adaptive counter with no
+  systematic bias to correct; this slice calibrates the literal mixer's
+  own compound blended probability instead, the compound-estimate
+  candidate S2-R1's postmortem named.
+
 - `bittree::encode_symbol`/`decode_symbol` (`research/JOURNAL.md`
   S2-A58, S1-P1's own remaining-scope note): a standalone binary
   decomposition of a 256-symbol cumulative-frequency table into 8
