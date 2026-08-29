@@ -20,11 +20,18 @@
 // `bittree`/`codec`/`coder`/`column`/`literal`/`lz`/`model`/`ppm`/`sse` are
 // the compression engine's internals, not a surface downstream crates are
 // meant to call directly: `#[doc(hidden)]` keeps them out of the published
-// API a 0.1 consumer sees (ROADMAP M6) without dropping them to
-// `pub(crate)`, which would break `bench`'s path dependency on them for
-// measurement (`Cargo.toml`'s `[workspace]`). `filters` stays fully
-// documented: S2-A2 already judged it "a defensible standalone library
-// surface on their own merits" (`research/JOURNAL.md`).
+// API a 0.1 consumer sees (ROADMAP M6). Of the nine, only `lz` has a real
+// external call site today (`mothergod::lz::WINDOW`, `bench/src/lib.rs`);
+// the other eight are still `pub` rather than `pub(crate)` because several
+// of their items (`Ppm`, `Sse::contexts`, `Model::ideal_cost_bits`) are
+// research surface for standing leads not yet wired into the live codec
+// path (S1-P1, S1-P3) and have no in-crate caller either — `pub(crate)`
+// would turn them into `dead_code` lint errors under this crate's `-D
+// warnings` gate. Narrowing them stays future work, done together with
+// wiring or removing that research code, not as a side effect of a
+// docs-only pass. `filters` stays fully documented: S2-A2 already judged it
+// "a defensible standalone library surface on their own merits"
+// (`research/JOURNAL.md`).
 #[doc(hidden)]
 pub mod bittree;
 #[doc(hidden)]
