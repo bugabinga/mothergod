@@ -2956,7 +2956,7 @@ record.
   first `long_columns` columns (each `rows + 1` wide) sit at the front of
   the output, the rest (each `rows` wide) after, so a closed-form
   division locates any position's column without replaying the filter's
-  own loop. | 6 unit tests (213 lib tests total, up from 207): a property
+  own loop. | 6 unit tests (215 lib tests total, up from 209): a property
   test across 11 lengths (0 to 1000) times 11 column counts comparing
   every position's `column_of` result against
   `naive_column_of_each_position`, an independent replay of `transpose::
