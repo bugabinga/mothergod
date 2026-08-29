@@ -95,6 +95,18 @@ All notable changes to this project are documented here. Format follows
   cases are 50,000 bytes, far below `lz::WINDOW`) — standalone, covered by
   focused unit tests only, no bpb change.
 
+- `lz::parse_optimal_with_window`/`codec::ideal_cost_bits_with_window`
+  (`research/JOURNAL.md` S1-P4, S2-A63): thread a `window: usize`
+  parameter down through `dp_round` to `BinaryTreeMatchFinder`, S2-A61's
+  parameterize-the-primitive pattern carried one level up the call
+  stack. `parse_optimal`/`ideal_cost_bits` are now thin wrappers passing
+  the wired `WINDOW` unchanged — no effect on any currently-encoded
+  bitstream, no `FORMAT_VERSION` bump. Measured with `bench::
+  long_range_repeat` (S2-A62): a window reaching a planted 4,096-byte
+  repeat 150,000 bytes past `WINDOW` drops bits/byte by -0.0214 on both
+  the train and sealed seeds, matching the expected magnitude of trading
+  a literal run for one match token.
+
 - `baseline_gate check` (the required `ratio` job's own binary) now also
   fails when `docs/benchmarks/canterbury.md` or `docs/benchmarks/
   silesia.md` embeds a `bench/baseline.json` fingerprint that no longer

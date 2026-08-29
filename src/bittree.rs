@@ -205,58 +205,28 @@ pub fn decode_symbol(decoder: &mut Decoder, cum: &[u64]) -> u8 {
     }
 }
 
-/// Codes `symbol` through `encoder` as `LEVELS` chained binary decisions
-/// over `cum`, same as [`encode_symbol`], except each level's raw
-/// `upper_half_probability` is first refined through `sse` (keyed by
-/// [`sse_context`]) before it drives [`Encoder::encode_bit`], and `sse` is
-/// updated on the raw probability afterward — the calibration step S1-P1
-/// exists for, applied to the mixer's own compound per-decision estimate
-/// rather than a lone frequency counter (`research/JOURNAL.md` S2-R1's
-/// mechanism reading).
+/// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
+/// [`ideal_cost_bits_sse`]: walks the same `LEVELS`-level binary-tree
+/// decomposition of `cum`, computing each level's SSE context and refined
+/// probability and updating `sse` on the raw one, identically for all three
+/// callers. `code_bit` receives the level's midpoint and refined
+/// probability and returns the bit that level resolved to — already known
+/// from a caller's own `symbol` for [`encode_symbol_sse`] and
+/// [`ideal_cost_bits_sse`], decoded from [`Decoder::decode_bit`] for
+/// [`decode_symbol_sse`] — so the three callers differ only in what they do
+/// with that bit and probability, never in the SSE walk itself. Matches
+/// [`crate::codec::walk_tokens`]'s reasoning: keeping the walk in one place
+/// is what stops the encode, decode, and cost-pricing paths from silently
+/// drifting apart.
+///
+/// Returns the final `lo`, which after `LEVELS` halvings of `[0, ALPHABET)`
+/// is exactly the coded symbol.
 ///
 /// # Panics
 ///
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
-pub fn encode_symbol_sse(encoder: &mut Encoder, cum: &[u64], symbol: u8, sse: &mut Sse) {
-    check_table_shape(cum);
-    let symbol = usize::from(symbol);
-    let mut lo = 0usize;
-    let mut hi = ALPHABET;
-    for depth in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let bit = symbol >= mid;
-        let context = sse_context(depth, lo / (hi - lo));
-        let raw_p = upper_half_probability(cum, lo, hi);
-        let refined_p = sse.refine(context, raw_p);
-        encoder.encode_bit(bit, refined_p);
-        sse.update(context, raw_p, bit);
-        if bit {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    debug_assert_eq!(
-        lo, symbol,
-        "8 halvings of [0, 256) must land exactly on symbol"
-    );
-    debug_assert_eq!(hi, symbol + 1);
-}
-
-/// Decodes one byte from `decoder` as `LEVELS` chained binary decisions
-/// over `cum`, the exact inverse of [`encode_symbol_sse`].
-///
-/// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`] is
-/// total over any coded bit pattern, same as [`decode_symbol`].
-///
-/// # Panics
-///
-/// Panics if `cum` is not shaped like a 257-entry cumulative table over
-/// `ALPHABET` symbols; see `check_table_shape`. `cum` and `sse` are both
-/// caller-supplied local state, never derived from `decoder`'s bytes.
-#[must_use]
-pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u8 {
+fn walk_sse(cum: &[u64], sse: &mut Sse, mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
     check_table_shape(cum);
     let mut lo = 0usize;
     let mut hi = ALPHABET;
@@ -265,7 +235,7 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
         let context = sse_context(depth, lo / (hi - lo));
         let raw_p = upper_half_probability(cum, lo, hi);
         let refined_p = sse.refine(context, raw_p);
-        let bit = decoder.decode_bit(refined_p);
+        let bit = code_bit(mid, refined_p);
         sse.update(context, raw_p, bit);
         if bit {
             lo = mid;
@@ -281,6 +251,48 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
     {
         lo as u8
     }
+}
+
+/// Codes `symbol` through `encoder` as `LEVELS` chained binary decisions
+/// over `cum`, same as [`encode_symbol`], except each level's raw
+/// `upper_half_probability` is first refined through `sse` (keyed by
+/// [`sse_context`]) before it drives [`Encoder::encode_bit`], and `sse` is
+/// updated on the raw probability afterward — the calibration step S1-P1
+/// exists for, applied to the mixer's own compound per-decision estimate
+/// rather than a lone frequency counter (`research/JOURNAL.md` S2-R1's
+/// mechanism reading).
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+pub fn encode_symbol_sse(encoder: &mut Encoder, cum: &[u64], symbol: u8, sse: &mut Sse) {
+    let symbol_index = usize::from(symbol);
+    let landed = walk_sse(cum, sse, |mid, refined_p| {
+        let bit = symbol_index >= mid;
+        encoder.encode_bit(bit, refined_p);
+        bit
+    });
+    debug_assert_eq!(
+        landed, symbol,
+        "8 halvings of [0, 256) must land exactly on symbol"
+    );
+}
+
+/// Decodes one byte from `decoder` as `LEVELS` chained binary decisions
+/// over `cum`, the exact inverse of [`encode_symbol_sse`].
+///
+/// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`] is
+/// total over any coded bit pattern, same as [`decode_symbol`].
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`. `cum` and `sse` are both
+/// caller-supplied local state, never derived from `decoder`'s bytes.
+#[must_use]
+pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u8 {
+    walk_sse(cum, sse, |_mid, refined_p| decoder.decode_bit(refined_p))
 }
 
 /// Sum of the ideal (`-log2`) cost of each of the `LEVELS` binary
@@ -346,29 +358,17 @@ pub fn ideal_cost_bits(cum: &[u64], symbol: u8) -> f64 {
               same exemption"
 )]
 pub fn ideal_cost_bits_sse(cum: &[u64], symbol: u8, sse: &mut Sse) -> f64 {
-    check_table_shape(cum);
-    let symbol = usize::from(symbol);
-    let mut lo = 0usize;
-    let mut hi = ALPHABET;
+    let symbol_index = usize::from(symbol);
     let mut bits = 0.0f64;
-    for depth in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let bit = symbol >= mid;
-        let context = sse_context(depth, lo / (hi - lo));
-        let raw_p = upper_half_probability(cum, lo, hi);
-        let refined_p = sse.refine(context, raw_p);
+    walk_sse(cum, sse, |mid, refined_p| {
+        let bit = symbol_index >= mid;
         bits -= if bit {
             refined_p.log2()
         } else {
             (1.0 - refined_p).log2()
         };
-        sse.update(context, raw_p, bit);
-        if bit {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
+        bit
+    });
     bits
 }
 

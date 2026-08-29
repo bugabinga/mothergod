@@ -1221,10 +1221,24 @@ impl DpState {
 /// exactly when a fresh match's distance happens to coincide with an
 /// already-cached one. Hard rule 1 makes that not a judgment call: this
 /// DP's cache bookkeeping matches [`replay`] unconditionally instead.
-fn dp_round(data: &[u8], prices: &PriceTable) -> Vec<Token> {
+/// `window` bounds [`BinaryTreeMatchFinder`]'s reach, same parameter
+/// [`BinaryTreeMatchFinder::new`] itself takes (`research/JOURNAL.md`
+/// S2-A61). Must keep `bucket(window as u32) < OFFSET_BUCKETS`, i.e.
+/// `window < 2^21`: `prices.offset` has exactly [`OFFSET_BUCKETS`] entries,
+/// and a distance whose bucket falls outside that range panics on the
+/// index below rather than silently mispricing. [`parse_optimal`] passes
+/// [`WINDOW`] (`bucket(WINDOW) == 20`, in range with headroom to `2^21 -
+/// 1`); a caller measuring a larger window (S1-P4) must stay under that
+/// ceiling too, until a window past it is wired behind its own
+/// `FORMAT_VERSION` bump.
+fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
+    debug_assert!(
+        window < (1usize << OFFSET_BUCKETS),
+        "window's bucket must stay within OFFSET_BUCKETS or offset pricing indexes out of range"
+    );
     let n = data.len();
     let mut state = DpState::new(n);
-    let mut finder = BinaryTreeMatchFinder::new(data, WINDOW);
+    let mut finder = BinaryTreeMatchFinder::new(data, window);
     // Per-slot carry for `relax_rep_candidates`' match_len scan (issue
     // #179): unlike parse_greedy, which jumps ahead by a chosen token's
     // length, this loop visits every position, so a long run's rep-length
@@ -1371,16 +1385,39 @@ fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
 /// price-seeding first pass).
 #[must_use]
 pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
+    parse_optimal_with_window(data, WINDOW)
+}
+
+/// [`parse_optimal`], with the `dp_round` rounds' match reach bound by
+/// `window` instead of the wired [`WINDOW`] (`research/JOURNAL.md` S1-P4,
+/// S2-A61's own primitive-parameterization pattern carried one level up
+/// the call stack): lets a candidate window be measured through the real
+/// three-round DP before any wiring or `FORMAT_VERSION` decision is made.
+/// [`parse_greedy`]'s own seed pass stays bound by the wired [`WINDOW`]
+/// regardless of `window`: it only informs the first round's starting
+/// price table, so a seed that cannot see as far as `window` costs the DP
+/// a worse initial guess, not correctness. Every `dp_round` round after it
+/// searches at `window`. See `dp_round`'s docs for the bucket ceiling
+/// `window` must stay under.
+///
+/// # Panics
+///
+/// Same as [`parse_optimal`]. Also panics (via `dp_round`'s
+/// `debug_assert!` in debug, an out-of-range index in release) if
+/// `window`'s bucket does not stay under `OFFSET_BUCKETS`, i.e.
+/// `window >= 2^21`.
+#[must_use]
+pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
     let seed = parse_greedy(data);
     let prices = PriceCounts::tally(&seed, data).prices(seed.len());
-    let first_round = dp_round(data, &prices);
+    let first_round = dp_round(data, &prices, window);
     let prices = PriceCounts::tally(&first_round, data).prices(first_round.len());
-    let second_round = dp_round(data, &prices);
+    let second_round = dp_round(data, &prices, window);
     let prices = PriceCounts::tally(&second_round, data).prices(second_round.len());
-    dp_round(data, &prices)
+    dp_round(data, &prices, window)
 }
 
 #[cfg(test)]
@@ -1614,6 +1651,50 @@ mod tests {
         let data = b"xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz".to_vec();
         assert!(data.len() >= OPTIMAL_MIN_LEN);
         roundtrip_optimal(&data);
+    }
+
+    #[test]
+    fn optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss() {
+        // research/JOURNAL.md S1-P4: parse_optimal_with_window must thread
+        // its window parameter through all three dp_round rounds, not just
+        // the first, and produce a lossless parse either way. Template
+        // (low-range bytes) and filler (high-range pseudo-random bytes)
+        // stay in disjoint byte ranges so no accidental cross-half match
+        // confounds the planted repeat's distance.
+        let template: Vec<u8> = (0u8..80).collect();
+        let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
+            .take(420)
+            .map(|s| 128 + u8::try_from(s % 128).unwrap())
+            .collect();
+        let mut data = template.clone();
+        data.extend_from_slice(&filler);
+        data.extend_from_slice(&template);
+        let distance = filler.len() + template.len();
+
+        let small_window = 300;
+        let large_window = 700;
+        assert!(small_window < distance && distance <= large_window);
+
+        let small = parse_optimal_with_window(&data, small_window);
+        assert_eq!(replay(&small), data);
+        assert!(
+            small.iter().all(|t| !matches!(
+                t,
+                Token::Match { distance: d, .. } if d.get() as usize > small_window
+            )),
+            "a window of {small_window} must never produce a fresh match past it"
+        );
+
+        let large = parse_optimal_with_window(&data, large_window);
+        assert_eq!(replay(&large), data);
+        assert!(
+            large.iter().any(|t| matches!(
+                t,
+                Token::Match { distance: d, .. } if d.get() as usize == distance
+            )),
+            "a window of {large_window} must find the planted repeat at distance {distance}, \
+             unreachable through {small_window}"
+        );
     }
 
     #[test]

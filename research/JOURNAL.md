@@ -2878,6 +2878,64 @@ record.
   bound today, and `to_u32`'s `u32`-fits ceiling on any window this scheme
   could ever use), wire the chosen window behind a real parse pass, bump
   `FORMAT_VERSION`. `research/progress.jsonl` it108.
+- S2-A63 | ACCEPTED | Third slice of ROADMAP M3's fourth standing lead
+  (S1-P4, LZMA-class windows for large files): ran the experiment
+  S2-A62's own remaining-scope note named, and closed the piece of it
+  that needs no wiring or `FORMAT_VERSION` decision. `bucket()` is
+  `floor(log2(v))`, so every distance up to `2^21 - 1` already falls
+  inside `OFFSET_BUCKETS`'s existing 21 slots (`bucket(WINDOW)` is 20,
+  the same slot every value up to `2^21 - 1` shares); a window anywhere
+  under that ceiling is measurable through the crate's real adaptive
+  models today, no bitstream change needed. Two new functions carry
+  `window` down to where `dp_round` was hardcoded to the wired `WINDOW`:
+  `lz::parse_optimal_with_window(data, window)` (`parse_optimal` is now a
+  thin wrapper passing `WINDOW`; `parse_greedy`'s seed pass stays bound by
+  the wired `WINDOW` regardless, since it only shapes the first round's
+  starting price table, not correctness) and
+  `codec::ideal_cost_bits_with_window(data, window)` (`ideal_cost_bits`
+  likewise now wraps it), mirroring S2-A61's parameterize-the-primitive
+  pattern one level up the call stack. `dp_round` itself gained a
+  `debug_assert!` that `window`'s bucket stays inside `OFFSET_BUCKETS`,
+  since `prices.offset` has exactly that many entries and an
+  out-of-range bucket panics on the index rather than mispricing
+  silently. | Measured with a throwaway `#[ignore]`d test (run locally,
+  not committed, per S2-A62's own note that folding a >1 MiB case into
+  every PR's gate is a separate sizing decision): `bench::long_range_repeat(len:
+  1,222,672, seed, distance: 1,198,576)` (template 4,096 B past
+  `lz::WINDOW`, well under the `2^21 - 1` ceiling), `old_window =
+  lz::WINDOW` (1,048,576) vs `new_window = 1,248,576`. Train seed
+  (`0xC0FFEE123456789A`): 6.295301 -> 6.273858 bpb, **-0.021443**. Sealed
+  seed (`sealed_seed` of the same key): 6.295546 -> 6.274145 bpb,
+  **-0.021401**. Both seeds agree to four decimal places: no
+  seed-specific fluke. | Mechanism: at `old_window` the far occurrence of
+  the 4,096-byte template is invisible to the parse (evicted past
+  `WINDOW`), so those bytes cost the dense 6-bit-entropy filler's own
+  floor; at `new_window` `dp_round`'s `BinaryTreeMatchFinder` reaches the
+  first occurrence and a single match token replaces roughly
+  `4,096 * 6` bits of literal coding, matching the measured delta's
+  order of magnitude (`24,576 bits / 1,222,672 bytes ~= 0.0201 bpb`,
+  close to the ~0.0214 measured once match/flag overhead is included).
+  The win scales with the repeat's share of the file: proportionally
+  larger on a file with more long-range structure than this one
+  generator config plants, proportionally smaller on one with less.
+  `cargo x check`: 4 stages green, 209 lib tests (up from 207: one new
+  `lz::tests::optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss`
+  proving `window` gates `parse_optimal_with_window`'s reach end to end,
+  round-trip included; one new
+  `codec::tests::ideal_cost_bits_with_window_drops_once_a_repeat_becomes_reachable`
+  proving the real Models pipeline reports the cost drop, not just the DP's
+  own price heuristic). Both new public functions are additive: the
+  wired `parse_optimal`/`ideal_cost_bits` call sites are unchanged, so
+  this ships zero effect on any currently-encoded bitstream and no
+  `FORMAT_VERSION` bump. Remaining S1-P4 scope: a window past `2^21 - 1`
+  needs `OFFSET_BUCKETS`/`bucket()` widened and a `FORMAT_VERSION` bump
+  before it is measurable this way, which still leaves the Silesia
+  finals named in S2-A61 (several 10s of MiB) far out of reach; decide
+  whether the wired `WINDOW` itself should grow to (or toward) the
+  `2^21 - 1` ceiling this slice proved free of format cost, including
+  `parse_greedy`'s own hash-chain finder (still hardcoded to `WINDOW`,
+  unexamined here) and the encode-time cost of a larger tree (SPEED,
+  ROADMAP M5, untouched by this slice). `research/progress.jsonl` it109.
 - S2-A64 | ACCEPTED | First slice of ROADMAP M3's fifth standing lead
   (S1-P5, per-column modeling after transpose): a standalone
   `column::column_of(position, columns, len)` in a new `src/column.rs`,
@@ -2917,7 +2975,7 @@ record.
   (S2-A40/S2-A42/S2-A57/S2-A58/S2-A61/S2-A62): not yet wired to any
   `Method` variant or reachable from `Literal`/`codec.rs`, no champion to
   diff against — `progress.jsonl` records this as `kind: "patch"` with
-  null bpb deltas. `research/progress.jsonl` it109. Remaining S1-P5
+  null bpb deltas. `research/progress.jsonl` it110. Remaining S1-P5
   scope: see the updated S1-P5 entry above — an actual column-index-keyed
   expert bank in `Literal`, threading `columns` down from filter
   selection, a `FORMAT_VERSION` bump, and a real bpb measurement (`sao`'s
