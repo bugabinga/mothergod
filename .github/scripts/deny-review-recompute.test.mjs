@@ -1,0 +1,90 @@
+// Table tests for the recompute guard: the deny/allow boundary is a
+// regex matcher, and a matcher's contract only exists as its cases.
+// Each case spawns the real script with the real PreToolUse stdin
+// shape, because the hook's failure modes (#324's null tool_input,
+// malformed JSON) live in the plumbing, not the regex.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+const script = new URL("deny-review-recompute", import.meta.url).pathname;
+
+const reviewEnv = {
+  PATH: process.env.PATH,
+  GITHUB_ACTIONS: "true",
+  GITHUB_EVENT_NAME: "pull_request",
+};
+
+function run(stdin, env = reviewEnv) {
+  return spawnSync(script, [], { input: stdin, env, encoding: "utf8" });
+}
+
+const bash = (command) => JSON.stringify({ tool_name: "Bash", tool_input: { command } });
+
+const denied = [
+  ["cargo x test", "the observed recompute, run 33229032665"],
+  ["cargo x check", "the whole gate"],
+  ["cargo x doc", "unscoped constituent"],
+  [".github/scripts/probe cargo x test", "probe prefix changes nothing"],
+  ["cd /tmp/w && cargo x check", "second shell segment"],
+  ["cargo test --workspace", "the required check unwrapped"],
+  ["timeout 600 cargo x test 2>&1", "wrapper and redirection"],
+];
+
+const allowed = [
+  ["cargo x test -- src/lz", "path-scoped constituent"],
+  ["cargo x fmt --check -- src", "scoped fmt"],
+  ["cargo test -p mothergod-bench", "targeted crate test"],
+  ["cargo test -p mothergod -- roundtrip", "scoped with filter"],
+  ["cargo clippy --features corpus-fetch", "feature build CI skips"],
+  ["cargo x test --help", "usage lookup"],
+  ["gh pr checks 332", "reading CI instead of re-running"],
+];
+
+for (const [command, why] of denied) {
+  test(`denies: ${command} (${why})`, () => {
+    const r = run(bash(command));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /adds no signal/);
+  });
+}
+
+for (const [command, why] of allowed) {
+  test(`allows: ${command} (${why})`, () => {
+    assert.equal(run(bash(command)).status, 0);
+  });
+}
+
+test("allows everything outside a pull_request event", () => {
+  const env = { ...reviewEnv, GITHUB_EVENT_NAME: "schedule" };
+  assert.equal(run(bash("cargo x test"), env).status, 0);
+});
+
+test("allows everything outside GitHub Actions", () => {
+  const env = { PATH: process.env.PATH, GITHUB_EVENT_NAME: "pull_request" };
+  assert.equal(run(bash("cargo x test"), env).status, 0);
+});
+
+test("allows non-Bash tools, null tool_input, malformed JSON", () => {
+  const read = JSON.stringify({
+    tool_name: "Read",
+    tool_input: { file_path: "cargo x test" },
+  });
+  const nullInput = JSON.stringify({ tool_name: "Bash", tool_input: null });
+  for (const stdin of [read, nullInput, "not json"]) {
+    assert.equal(run(stdin).status, 0);
+  }
+});
+
+test("a deny writes its class to GITHUB_STEP_SUMMARY", () => {
+  const summary = join(mkdtempSync(join(tmpdir(), "deny-")), "summary.md");
+  const env = { ...reviewEnv, GITHUB_STEP_SUMMARY: summary };
+  assert.equal(run(bash("cargo x test"), env).status, 2);
+  assert.match(
+    readFileSync(summary, "utf8"),
+    /^deny-review-recompute: denied unscoped cargo x test\/lint\/doc\/fmt$/m,
+  );
+});

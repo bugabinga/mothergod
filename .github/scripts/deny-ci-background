@@ -22,9 +22,10 @@ the model) for Bash with run_in_background true, and for Agent, Task, or
 Workflow calls unless run_in_background is explicitly false, because
 background is those tools' default. Everything else exits 0.
 
-Liveness: a deny's stderr lands in the transcript inside the audit
-artifact retrospect prints every run, and a broken hook reference errors
-loudly in-session.
+Liveness: every deny appends a line to GITHUB_STEP_SUMMARY, the durable
+trace, because the audit artifact excludes transcripts by design
+(agent-review.yml's audit step) and would never show one; a broken hook
+reference errors loudly in-session.
 """
 
 import json
@@ -56,6 +57,10 @@ def main() -> int:
         return 0
     if tool not in DEFAULT_FOREGROUND + DEFAULT_BACKGROUND:
         return 0
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"deny-ci-background: denied {tool} in background\n")
     print(
         "Background execution does not survive a CI session: the run ends "
         "the moment your turn ends, and the completion notification never "
