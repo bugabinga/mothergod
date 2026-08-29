@@ -2227,7 +2227,12 @@ record.
   systematic bias left for SSE to correct. Next attempt, if any, wants a
   compound/mixed estimate to calibrate instead (the literal mixer's
   eventual binary decomposition is the obvious one), not another raw
-  `Model` split.
+  `Model` split. Fourth slice, S2-A58: built that decomposition
+  (`src/bittree.rs`) as its own standalone primitive, not yet wired.
+  Remaining S1-P1 scope: pick the `Sse` context keying for a (bit
+  position, decided-prefix) pair, wire the decomposition behind
+  `Literal::encode`/`decode`, bump `FORMAT_VERSION`, measure a real bpb
+  delta.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue. First slice: S2-A42 (standalone
@@ -2537,3 +2542,44 @@ record.
   lower-order fallback lands (order-0? one of `Literal`'s other five
   experts? a fresh dedicated table?) and measuring the wired result
   against `bench::baseline`.
+- S2-A58 | ACCEPTED | First implementable slice of S1-P1's own named next
+  step: S2-R1's postmortem (`sse.rs` module docs) says the next SSE
+  attempt "wants a compound/mixed estimate to calibrate instead (the
+  literal mixer's eventual binary decomposition is the obvious one), not
+  another raw `Model` split" — this builds that decomposition as a
+  standalone primitive, the same pattern S2-A40/S2-A41/S2-A42/S2-A50/
+  S2-A57 already used for their own first slices. New `src/bittree.rs`:
+  `encode_symbol`/`decode_symbol` code one byte as 8 chained binary
+  decisions over a caller-supplied 257-entry cumulative table (shaped
+  like `Literal::mix`'s own output), each step splitting the current
+  candidate symbol range at its midpoint and asking whether the true
+  symbol falls in the upper half, at the probability that split has
+  under the table. The chain rule of probability makes the product of
+  those 8 binary probabilities equal the direct
+  `(cum[symbol+1]-cum[symbol])/cum[ALPHABET]` ratio exactly, so this is
+  the same partition `crate::coder::Encoder::encode`/`decode` already
+  perform, reshaped into a sequence of binary decisions instead of one
+  256-way division — the shape `crate::sse::Sse` calibrates, one context
+  per (bit position, decided-prefix) pair, once wired. `ideal_cost_bits`
+  checks that identity directly. | 9 unit tests: every symbol round-trips
+  exactly on both a uniform and a heavily skewed synthetic table (not
+  `Literal`'s own tables — this module is fully standalone, no dependency
+  on `literal.rs`), a 2,000/5,000-symbol sequence round-trips through one
+  real coded stream, ideal cost matches the direct symbol cost to
+  `1e-9`, and real coded length tracks summed ideal cost within 5%
+  (looser than `Literal::ideal_cost_bits`'s 1%, since this pays 8 chained
+  16-bit-quantized `encode_bit` calls per symbol instead of one direct
+  range division); `cargo x check` 4 stages green; `baseline_gate check`
+  unaffected (no coding path changed, nothing wired in yet). | No bpb
+  measurement, same reason S2-A40/S2-A42/S2-A50/S2-A57 recorded null
+  deltas for their own first slices: not yet wired to any `Method`
+  variant, no champion to diff against. `research/progress.jsonl` it103.
+  Remaining S1-P1 scope: decide which `Sse` context a bit position and
+  decided-prefix should key (a naive 256-context-per-bit-position scheme
+  is one option, cheaper hashed contexts another), wire the decomposition
+  behind `Literal::encode`/`decode` in place of the direct 256-way
+  `mix`/scan, bump `FORMAT_VERSION`, measure a real bpb delta on the
+  corpus policy's train/sealed split — S2-R1's whole postmortem was that
+  this wiring decision is where the last attempt's raw-`Model`-split
+  approach failed, so it wants its own dedicated slice, not a rushed
+  extension of this one.

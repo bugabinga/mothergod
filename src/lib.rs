@@ -10,6 +10,7 @@
 //! (optimal-parse LZ over an adaptive range coder, `research/JOURNAL.md`
 //! S2-D2). [`compress`] always picks whichever produces the smaller frame.
 
+pub mod bittree;
 pub mod codec;
 pub mod coder;
 pub mod filters;
