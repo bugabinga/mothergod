@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `bittree::encode_symbol`/`decode_symbol` (`research/JOURNAL.md`
+  S2-A58, S1-P1's own remaining-scope note): a standalone binary
+  decomposition of a 256-symbol cumulative-frequency table into 8
+  chained binary decisions, the shape `sse::Sse` needs to calibrate the
+  literal mixer once wired (S2-R1's postmortem named this as the next
+  SSE attempt's prerequisite, not another raw `Model` split). Not wired
+  into `Literal` or `codec.rs` yet — standalone primitive only, no
+  format or ratio effect.
+
 - `mothergod_bench::baseline::load_and_fingerprint`, a shared helper for
   the read-`bench/baseline.json`-parse-fingerprint sequence `finals_report`
   and `silesia_report` each pasted a copy of (issue #330: this exact block
