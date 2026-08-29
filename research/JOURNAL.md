@@ -343,6 +343,66 @@ record.
   same shape S1-P2 reached after its own repeated rejections — a fallback
   target other than "the global marginal," not a third variant of "which
   existing bank," is owed before spending another slice here.
+- S2-R7 | REJECTED | S1-P4's own remaining scope (S2-A63's closing note):
+  decide whether the wired `WINDOW` (`lz::WINDOW`, 1 MiB) should itself
+  grow toward the `2^21 - 1` offset-bucket ceiling S2-A63 proved free of
+  format cost, given both a real bpb effect and the encode-time cost of a
+  larger tree named as still open. Measured with a throwaway (uncommitted)
+  scratch binary, `bench/src/bin/window_experiment.rs` (deleted after this
+  measurement, per S2-R6's own convention), `codec::
+  ideal_cost_bits_with_window` at `old_window = lz::WINDOW` (1,048,576)
+  vs `new_window = 2,097,151` (`2^21 - 1`), release build, at 4,000,000
+  bytes per case (`bench::baseline`'s own `CASE_LEN`, 50,000, cannot show
+  any window effect at all — every distance in a case that small sits
+  far under `WINDOW` itself regardless of which window is wired, so this
+  needed its own, much larger, ad hoc length): train seed
+  `0xC0FFEE123456789A` (S2-A63's own key) across `bench::baseline`'s four
+  train-eligible non-ladder kinds, mean **-0.062378 b/B**
+  (`sqlite_like_records` -0.052338, `markov_h8_2_trap` -0.203392,
+  `x86_dense_code` +0.004036, `json_records` +0.002181 — the two
+  improvements come from incidental multi-megabyte-scale recurrence
+  `long_range_repeat` engineers on purpose, `markov_h8_2_trap`'s bounded
+  low-conditional-entropy state space revisiting old states, `sqlite_like_
+  records`'s synthetic record structure repeating widely by chance at this
+  length; neither is the kind of structure the two-generator regression
+  represents). Sealed check at `sealed_seed(0xC0FFEE123456789A)`, the same
+  pairing S2-A63/S2-R4 use, on both actual sealed-only kinds
+  (`bench::baseline` excludes `access_log`/`gradient_image` from the train
+  gate for exactly this reason): both regressed — `access_log` +0.001515
+  b/B, `gradient_image` +0.000737 b/B. Small in absolute terms (an order
+  of magnitude below S2-R4's own deciding regression), but real and
+  consistent in direction across both sealed kinds, not a coin flip.
+  Encode time (the same `ideal_cost_bits_with_window` calls, wall clock)
+  grew 1.05x-1.41x at `new_window` across every case measured, consistent
+  with `insert_and_find`'s own docs: a smaller window lets the
+  distance-eviction check (`distance > self.window`) cut a tree walk short
+  before `max_depth` every time it hits an out-of-window node, so growing
+  the window mostly removes that early exit rather than adding new work —
+  bounded by `MAX_TREE_DEPTH_OPTIMAL`/`NICE_LEN_OPTIMAL` regardless (no
+  case here reached 1.5x), but real, and paid on every position, not just
+  ones near a genuine repeat. Also measured, unchanged from an earlier
+  pass of this same slice: a `bench::long_range_repeat` case with its
+  planted repeat moved out to `new_window - 4,096` (near the candidate
+  ceiling itself, rather than S2-A63's 150,000-byte-past-`WINDOW` case),
+  **-0.091814 b/B**, confirming the win still holds at the far edge of the
+  candidate window. **Rejected**, applying the same rule S2-R3/S2-R4
+  named explicitly: a validation regression fails corpus policy's accept
+  rule independent of the net train number, and both sealed-only kinds
+  regressed, consistently, not as noise — despite a net-improving train
+  mean, itself driven by incidental recurrence rather than the structure
+  the lead's own named targets (Silesia's `mozilla`/`nci`/`samba`/`sao`/
+  `webster`) actually have. A blanket bump of the wired `WINDOW` costs
+  the sealed set real bpb and every measured case real encode time to win
+  only on content with recurrence the current window already can't see,
+  which is exactly the trade a global constant cannot make conditionally.
+  `research/progress.jsonl` it112. Remaining S1-P4 scope: growing
+  `WINDOW` unconditionally is closed off by this result; what is left is
+  either a content-adaptive trigger (grow the window only when a cheap
+  pre-pass suggests recurrence past it exists, paying the encode-time
+  cost only where the bpb win is real) or accepting the bpb/speed cost as
+  a deliberate large-file mode distinct from the default (ROADMAP M5
+  SPEED territory, not this lead's own scope) — neither designed nor
+  measured here.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -2417,14 +2477,24 @@ record.
   `BinaryTreeMatchFinder` got in S2-A61, via a new
   `parse_greedy_with_window`; `parse_greedy` and the wired
   `parse_optimal_with_window` seed pass both still pass `WINDOW`
-  unchanged, so nothing currently encoded moves. Remaining S1-P4 scope: a
-  window past `2^21 - 1` needs `OFFSET_BUCKETS`/`bucket()` widened and a
-  `FORMAT_VERSION` bump before it is measurable this way, which still
+  unchanged, so nothing currently encoded moves. Fifth slice, S2-R7:
+  answered that decision, rejected — despite a net-improving train mean
+  (-0.062378 b/B, driven by incidental multi-megabyte-scale recurrence,
+  not the Silesia-shaped structure this lead targets), both real sealed-
+  only kinds regressed (`access_log` +0.001515, `gradient_image`
+  +0.000737), the same "any real validation regression fails accept, net
+  number or not" rule S2-R3/S2-R4 applied, on top of a real encode-time
+  cost (1.05x-1.41x across every case measured). Remaining S1-P4 scope: a
+  blanket `WINDOW` bump is closed off;
+  what is left is either a content-adaptive trigger (grow only when a
+  cheap pre-pass suggests recurrence past the current window exists, so
+  the encode-time cost is paid only where the bpb win is real) or a
+  deliberate large-file mode distinct from the default (ROADMAP M5 SPEED
+  territory) — neither designed here. A window past `2^21 - 1` itself
+  still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
+  `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
-  reach; decide whether the wired `WINDOW` itself should grow toward (or
-  to) that free `2^21 - 1` ceiling, now that both match finders on the
-  wired path accept a window parameter, and the encode-time cost of a
-  larger tree (SPEED, ROADMAP M5, untouched).
+  reach regardless of this slice's verdict.
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
   `column::column_of`, not yet wired). Remaining scope: an actual
