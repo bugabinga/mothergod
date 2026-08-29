@@ -6,14 +6,16 @@ shift
 remote_dir="/data/local/tmp/mothergod-test-${RANDOM}-$$"
 remote="$remote_dir/test"
 corpus="$remote_dir/adversarial"
+golden="$remote_dir/golden"
 
 cleanup() {
   adb shell rm -rf "$remote_dir" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-adb shell mkdir -p "$corpus"
+adb shell mkdir -p "$corpus" "$golden"
 adb push "$executable" "$remote" >/dev/null
 adb push "$GITHUB_WORKSPACE/tests/adversarial/." "$corpus/" >/dev/null
+adb push "$GITHUB_WORKSPACE/tests/golden/." "$golden/" >/dev/null
 adb shell chmod 755 "$remote"
-adb shell env MOTHERGOD_ADVERSARIAL_DIR="$corpus" "$remote" "$@"
+adb shell env MOTHERGOD_ADVERSARIAL_DIR="$corpus" MOTHERGOD_GOLDEN_DIR="$golden" "$remote" "$@"
