@@ -8,6 +8,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `mothergod` CLI binary (`src/bin/mothergod.rs`, ROADMAP M6): `compress`
+  and `decompress` subcommands reading stdin and writing stdout, mirroring
+  `gzip -c`/`zstd -c`'s shape. First slice only: no file arguments, output
+  suffix, or streaming I/O yet (buffers the whole input, matching
+  `mothergod::compress`/`decompress`'s own whole-buffer signatures). Zero
+  new dependencies. Covered by `tests/cli.rs`, driving the compiled binary
+  as a real subprocess: round-trip on arbitrary bytes and on empty input,
+  clean non-zero exit (no panic) on truncated/garbage input, and usage/help
+  handling.
+
 - `lz::parse_greedy_with_window` (`research/JOURNAL.md` S1-P4, S2-A65,
   ROADMAP M3's fourth standing lead): closes S2-A63's own remaining-scope
   note that `parse_greedy`'s hash-chain `MatchFinder` was "still hardcoded

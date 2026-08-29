@@ -161,7 +161,10 @@ blend, measured multi-core scaling (S1-P6).
 
 ## M6 — Release 0.1
 
-- [ ] CLI binary (`mothergod` compress/decompress).
+- [x] CLI binary (`mothergod` compress/decompress), first slice: stdin-in,
+      stdout-out subcommands (`src/bin/mothergod.rs`), zero dependencies.
+      Remaining scope: file arguments, an output-suffix convention, and
+      streaming I/O (the last shared with M4's streaming/block API item).
 - [ ] Library surface reviewed for 0.1: minimal public API, examples in
       rustdoc, docs.rs rendering checked.
 - [ ] GitHub release with binaries, agent-drafted changelog.
