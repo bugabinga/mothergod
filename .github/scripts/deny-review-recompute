@@ -20,11 +20,14 @@ Denied, per shell segment (split on `;`, `&`, `|`): `cargo x check` in
 any form, `cargo x test|lint|doc|fmt` without a ` -- <arg>` scope, and
 `cargo test` without `-p`/`--package` or a ` -- <arg>` filter. The
 escape demands a real argument after the `--`, because a bare trailing
-`--` passes no filter and runs the whole suite. Quoted text is stripped
-before matching, so mentioning a command (`grep 'cargo x check'`) is
-not running it; the symmetric cost, that `bash -c 'cargo x test'`
-slips through, is accepted for a guardrail aimed at a forgetful model,
-not an adversary. Scoped runs are the reviewer's real job and stay
+`--` passes no filter and runs the whole suite. Quote contents are
+blanked before matching, so mentioning a command (`grep 'cargo x
+check'`) is not running it; a non-empty quoted span leaves a
+placeholder argument, so a quoted scope (`cargo x test -- 'src/lz'`)
+still scopes, while empty quotes vanish, so `cargo test -- ''` stays
+bare and denied (#333 review, round two). The symmetric cost, that
+`bash -c 'cargo x test'` slips through, is accepted for a guardrail
+aimed at a forgetful model, not an adversary. Scoped runs are the reviewer's real job and stay
 allowed: `cargo test -p <crate>`, `cargo x test -- <path>`,
 feature-flagged builds CI does not cover, and any segment carrying
 `--help`. Matching keys on our own task names and GitHub's
@@ -67,6 +70,13 @@ DENIED = (
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 
+
+def blank_quotes(command: str) -> str:
+    """Replace each quoted span: non-empty becomes a placeholder argument
+    (a quoted scope must still satisfy the escape), empty disappears (an
+    empty filter scopes nothing, so `-- ''` must read as bare)."""
+    return QUOTED.sub(lambda m: "q" if len(m.group(0)) > 2 else "", command)
+
 MESSAGE = (
     "fmt, clippy, test, doc and ratio already ran on this exact commit "
     "as required checks; an unscoped re-run recomputes an identical "
@@ -81,7 +91,7 @@ MESSAGE = (
 
 def denied_class(command: str) -> str | None:
     """Name the denied class the command falls in, or None if allowed."""
-    for segment in re.split(r"[;&|]+", QUOTED.sub(" ", command)):
+    for segment in re.split(r"[;&|]+", blank_quotes(command)):
         if "--help" in segment:
             continue
         for name, trigger, escape in DENIED:

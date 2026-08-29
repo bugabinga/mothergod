@@ -34,6 +34,7 @@ const denied = [
   ["timeout 600 cargo x test 2>&1", "wrapper and redirection"],
   ["cargo x test --", "bare -- passes no filter, full suite (#333 review)"],
   ["cargo test --", "same bypass on the unwrapped form"],
+  ["cargo test -- ''", "an empty quoted filter scopes nothing"],
 ];
 
 const allowed = [
@@ -46,6 +47,8 @@ const allowed = [
   ["gh pr checks 332", "reading CI instead of re-running"],
   ["gh pr diff 333 | grep 'cargo x check'", "mentioning is not running"],
   ["git commit -m \"run cargo x check first\"", "quoted prose"],
+  ["cargo x test -- \"src/lz\"", "a quoted scope still scopes (#333 round 2)"],
+  ["cargo test -p mothergod -- 'roundtrip stored'", "quoted filter"],
 ];
 
 for (const [command, why] of denied) {
