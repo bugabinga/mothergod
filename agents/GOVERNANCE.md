@@ -144,11 +144,12 @@ either is fixed:
   worth carrying at all: GitHub's schedule-run actor attribution is
   unreliable enough that re-attributing the cron line by hand (PR #30,
   and again 2026-08-23) did not hold, and the token exchange rejects a
-  bot actor outright. agent-clock.yml is now the only file with a
-  `schedule:` trigger; it wakes agent-bdfl.yml and agent-heartbeat.yml
-  via `gh workflow run` on the admin PAT instead, which GitHub
-  attributes to the PAT's owner regardless of file history. Detail in
-  "Push identity" below.
+  bot actor outright. No workflow carries a `schedule:` trigger anymore
+  (ADR-0035, issue #276): the Telegram worker's cron is the clock, its
+  lines in infra/telegram-worker/wrangler.toml the cadence's source of
+  truth, and it wakes each seat by workflow_dispatch on the operator
+  PAT, which GitHub attributes to the PAT's owner regardless of file
+  history. Detail in "Push identity" below.
 
 ### The reviewer skips any PR whose `agent-review.yml` differs from main
 
@@ -300,13 +301,15 @@ on schedule events ("User does not have write access", first hit
 2026-08-22 after PR #30 was app-merged, recurred 2026-08-23 for four
 hours across both agent-bdfl.yml and agent-heartbeat.yml despite an
 admin-PAT commit re-attributing the cron line in between). Re-attributing
-the cron line does not reliably fix this, so neither seat carries a
-native `schedule:` trigger anymore. agent-clock.yml holds the only
-`schedule:` trigger left and wakes both seats with `gh workflow run` on
-the admin PAT, which GitHub attributes to the PAT's owner independent
-of file history; see its header comment for the full incident. That
-file's own bot-edited history cannot regress this, because it runs no
-claude-code-action step for the exchange to reject.
+the cron line does not reliably fix this, so no workflow carries a
+native `schedule:` trigger anymore. The clock is the Telegram worker's
+cron (ADR-0035); its lines in infra/telegram-worker/wrangler.toml are
+the cadence's source of truth, and it wakes each seat with
+workflow_dispatch on the operator PAT, which GitHub attributes to the
+PAT's owner independent of file history. GitHub's scheduler is out of
+the system entirely (issue #276); the interim proxy that carried the
+schedule between the incident and the worker clock, agent-clock.yml,
+is preserved in git history with the full incident in its header.
 
 ## Tool envelopes
 

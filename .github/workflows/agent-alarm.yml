@@ -1,7 +1,7 @@
-# The clock's sibling: agent-clock.yml wakes seats on schedule, this
-# file wakes the fixer on failure, cutting failure detection from the
-# next scheduled BDFL wake (up to an hour, issue #191) to about a
-# minute. It runs no model. Design, scope, and rejected alternatives:
+# The clock's sibling: the worker clock (ADR-0035) wakes seats on
+# schedule, this file wakes the fixer on failure, cutting failure
+# detection from the next scheduled BDFL wake (up to an hour,
+# issue #191) to about a minute. It runs no model. Design, scope, and rejected alternatives:
 # ADR-0034.
 #
 # Invariants the steps below cannot show:
@@ -20,7 +20,6 @@ name: agent-alarm
 on:
   workflow_run:
     workflows:
-      - agent-clock
       - agent-bdfl
       - agent-heartbeat
       - agent-review
