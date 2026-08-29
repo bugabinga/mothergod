@@ -8,6 +8,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `column::column_of` (`research/JOURNAL.md` S1-P5, S2-A64, ROADMAP M3's
+  fifth standing lead): given a position in `filters::transpose::encode`'s
+  output, the pre-transpose data length, and the column count, returns
+  which column produced that byte — the arithmetic a future column-index-
+  keyed literal context needs, verified against an independent replay of
+  `transpose::encode`'s own grouping loop rather than asserted from the
+  closed form alone. Standalone primitive, not yet wired into
+  `literal::Literal` or `codec.rs`: no bpb change, covered by focused unit
+  tests only.
+
 - SSE wired into the literal mixer's binary decomposition
   (`research/JOURNAL.md` S1-P1 closed, ADR-0038, `FORMAT_VERSION` 2 → 3):
   `literal::Literal::encode_sse`/`decode_sse` code every literal byte as 8

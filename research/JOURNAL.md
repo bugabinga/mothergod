@@ -2417,7 +2417,11 @@ record.
   `bucket()`'s `u32`-fits assumption, wire it behind a real parse pass,
   bump `FORMAT_VERSION`.
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
-  OpenZL direction). Target: sao.
+  OpenZL direction). Target: sao. First slice: S2-A64 (standalone
+  `column::column_of`, not yet wired). Remaining scope: an actual
+  column-index-keyed expert bank in `Literal`, threading the `columns`
+  parameter filter selection already knows down to it, a `FORMAT_VERSION`
+  bump, and a real bpb measurement.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
   Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
@@ -2932,3 +2936,50 @@ record.
   `parse_greedy`'s own hash-chain finder (still hardcoded to `WINDOW`,
   unexamined here) and the encode-time cost of a larger tree (SPEED,
   ROADMAP M5, untouched by this slice). `research/progress.jsonl` it109.
+- S2-A64 | ACCEPTED | First slice of ROADMAP M3's fifth standing lead
+  (S1-P5, per-column modeling after transpose): a standalone
+  `column::column_of(position, columns, len)` in a new `src/column.rs`,
+  the same "pure mapping function, standalone, not yet wired" shape
+  S2-A59's `bittree::sse_context` took for its own lead. `filters::
+  transpose::encode` already regroups a row-major stream into column-major
+  order (`JOURNAL` S1-A2) so a downstream model with only short-range
+  context can see a column's own regularity as byte adjacency, but
+  `literal.rs`'s "alignment" expert only keys on `position & 3`, a fixed
+  period-4 phase useful for interleaved fixed-width records — it has no
+  notion of *which* transposed column a byte belongs to, so it cannot
+  give a column its own distribution at the instant a column boundary is
+  crossed, only after re-adapting from a few bytes of the wrong column's
+  evidence. `column_of` is the arithmetic a future column-index-keyed
+  expert needs: `transpose::encode` groups column `c` into `len /
+  columns` bytes (`rows`), plus one more for the first `len % columns`
+  columns (`long_columns`, the row remainder's leftover bytes) — the
+  first `long_columns` columns (each `rows + 1` wide) sit at the front of
+  the output, the rest (each `rows` wide) after, so a closed-form
+  division locates any position's column without replaying the filter's
+  own loop. | 6 unit tests (215 lib tests total, up from 209): a property
+  test across 11 lengths (0 to 1000) times 11 column counts comparing
+  every position's `column_of` result against
+  `naive_column_of_each_position`, an independent replay of `transpose::
+  encode`'s own nested loop that records column index instead of copying
+  a byte (so a divergence would mean the closed form disagrees with the
+  filter it describes, not just with itself); single-column identity;
+  exact-division equal-width columns; the remainder case matched directly
+  against `filters::transpose`'s own `encode_groups_by_column` fixture
+  (`[a,A,b,B,c]` -> `[a,b,c,A,B]` under 2 columns); columns wider than the
+  data (every position its own column, mirroring `transpose`'s own
+  `roundtrip_fewer_rows_than_columns`); the documented
+  `position >= len` panic. `cargo x check`: 4 stages green;
+  `baseline_gate check` unaffected (11 cases, no regression — pure
+  function, no coding path touched, nothing wired in yet). | No bpb
+  measurement, same reason as every other lead's first slice
+  (S2-A40/S2-A42/S2-A57/S2-A58/S2-A61/S2-A62): not yet wired to any
+  `Method` variant or reachable from `Literal`/`codec.rs`, no champion to
+  diff against — `progress.jsonl` records this as `kind: "patch"` with
+  null bpb deltas. `research/progress.jsonl` it110. Remaining S1-P5
+  scope: see the updated S1-P5 entry above — an actual column-index-keyed
+  expert bank in `Literal`, threading `columns` down from filter
+  selection, a `FORMAT_VERSION` bump, and a real bpb measurement (`sao`'s
+  regret is currently +0.656965 b/B on the Silesia held-out final,
+  `docs/benchmarks/silesia.md`, the largest of any file there — named
+  here for target framing only, per `research/corpus/POLICY.md` held-out
+  finals are never an accept/reject signal inside the experiment loop).

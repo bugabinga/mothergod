@@ -13,6 +13,7 @@
 pub mod bittree;
 pub mod codec;
 pub mod coder;
+pub mod column;
 pub mod filters;
 pub mod literal;
 pub mod lz;
