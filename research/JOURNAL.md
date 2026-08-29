@@ -266,6 +266,83 @@ record.
   extraction from `reconstruct`, and the added test) reverted in full,
   matching every prior S1-P2 rejection; `PriceCounts::observe`/`tally`
   themselves (S2-A50) are unaffected.
+- S2-R6 | REJECTED | S1-P3's own remaining scope (S2-A57's module doc):
+  pick where the PPM escape's lower-order fallback lands. Tried "order-0"
+  — [`crate::literal::Literal`] already has one non-context-keyed bank
+  (`ORDER0_BASE`) with strictly more evidence than any of its five
+  context-specific experts, and every one of those five is exactly as
+  likely to be sparse as whichever one is escaping, so order-0 was the
+  best-reasoned of the doc's three named candidates. Measured before
+  committing to a wiring: a new pairing method,
+  `Literal::ideal_cost_bits_escape_fallback_experiment`, computed each
+  literal byte's ideal cost twice from the same pre-update model state —
+  once under the shipped mix, once with a substitution rule (an expert
+  whose own bank has never observed this exact symbol beyond its initial
+  Laplace floor, `freq == 1`, contributes order-0's own frequency/total
+  for that symbol instead) — updating the model only once, from the real
+  frequencies, so the pair shares one adaptation trajectory and differs
+  only in what it's priced at. `Literal::mix`'s own weighted-average
+  identity guarantees the baseline side sums to `1.0` across all 256
+  symbols; the substituted side generally does not (a bank's 256 entries
+  become a mix of its own normalized mass and order-0's, two
+  differently-normalized sources), so the pairing method builds the full
+  256-symbol distribution both ways and divides by each one's own true
+  sum rather than assuming one — caught by a test that initially asserted
+  the wrong invariant (see the accepted code, `mixed_distribution`'s own
+  doc). Not wired into `Method`/`FORMAT_VERSION`; a matching whole-file
+  pairing, `codec::ideal_cost_bits_escape_fallback_experiment`, priced
+  every non-literal symbol identically into both totals (the hypothesis
+  names literal contexts only) and let a scratch bin
+  (`bench/src/bin/scratch_ppm_fallback.rs`, deleted after this
+  measurement per `research/README.md`'s convention) run it over
+  `bench::baseline`'s 11 train cases and the two sealed-only kinds, fixed
+  seeds, `CASE_LEN` 50,000, matching S2-A56's methodology. Net regression:
+  +0.0458 b/B average across the 11 train cases (5 improved, 6
+  regressed), dominated by `interleaved_audio16` (+0.243097),
+  `markov_h8_2_trap` (+0.128494), `x86_dense_code` (+0.078521), and
+  S1-P3's own named target `sqlite_like_records` (+0.039703, the wrong
+  direction). Sealed split: `access_log` −0.001425 (mild improvement),
+  `gradient_image` +0.541159 (severe regression) — one validation
+  regression fails corpus policy's accept rule outright, independent of
+  the net train number. Only the entropy ladder's lower-order points and
+  `json_records` improved (`entropy_ladder_h1` −0.002357 through `_h6`
+  −0.007524, `json_records` −0.002649), `entropy_ladder_h8` flipped
+  positive (+0.019302). Mechanism: order-0's fallback helps exactly when
+  a byte's likelihood does not depend on context — true by construction
+  for the entropy ladder (IID sources), where the global marginal and any
+  local one coincide — and actively hurts whenever it does, which is
+  every other case tested, including two purpose-built or real-world
+  classes: `markov_h8_2_trap` is specifically constructed so the global
+  histogram is uniform and uninformative while conditional structure
+  carries all the signal, so substituting the global marginal into a
+  sparse context destroys exactly the information the mixer needs; the
+  four structured generators (`interleaved_audio16`, `gradient_image`,
+  `sqlite_like_records`, `x86_dense_code`) each have systematically
+  different local distributions across positions/contexts by
+  construction (interleaved channels, image rows, fixed-width records,
+  opcode patterns), so a fresh context's "never seen here" usually means
+  "hasn't recurred yet," not "globally rare," and order-0's confidently-
+  skewed global answer is worse than the neutral floor it replaced. This
+  doc's own distinction from `JOURNAL` S1-R5 ("this primitive escapes
+  only a genuinely never-seen symbol; a well-trained context essentially
+  never pays the escape cost") holds in principle but does not save the
+  result: a context-specific bank stays sparse for a long time in exactly
+  the structured formats this project targets, so the fallback fires
+  often enough to matter — a milder version of S1-R5's own failure mode
+  (leaning on order-0 damages the contexts that most need to stay
+  confident), reached by a different, more conditional route. Candidate
+  code (`Literal::mixed_distribution`,
+  `Literal::ideal_cost_bits_escape_fallback_experiment`, their five unit
+  tests, and `codec::EscapeFallbackExperimentSink`/
+  `ideal_cost_bits_escape_fallback_experiment`) reverted in full; `Ppm`
+  itself (S2-A57) is unaffected — this slice never routed through it (see
+  its own module doc for why: `Literal`'s "unseen" signal is `freq == 1`,
+  one level up from `Ppm`'s `freq == 0`, so a second copy of `Ppm`'s
+  bookkeeping would have duplicated state `Literal` already carries).
+  `research/progress.jsonl` it106. Remaining S1-P3 scope: unclear, the
+  same shape S1-P2 reached after its own repeated rejections — a fallback
+  target other than "the global marginal," not a third variant of "which
+  existing bank," is owed before spending another slice here.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -2313,8 +2390,16 @@ record.
   tweak, is owed before spending another slice here.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4). First
   slice: S2-A57 (standalone `Ppm` primitive, PPM Method C escape pricing,
-  not yet wired). Remaining scope: where the escape's lower-order fallback
-  lands, and measuring the wired result.
+  not yet wired). Second slice, S2-R6: measured the most-reasoned fallback
+  target (order-0, the mixer's one non-context-keyed bank) via an
+  ideal-cost pairing, before committing to a real wiring. Rejected: net
+  regression on `bench::baseline` (+0.0458 b/B train average, a severe
+  `gradient_image` sealed regression), worst on data where a byte's
+  likelihood genuinely depends on context — `markov_h8_2_trap` and every
+  structured generator tested — which order-0's global marginal cannot
+  represent. Remaining scope: unclear, the same shape S1-P2 reached after
+  repeated rejections; a fallback target other than the global marginal is
+  owed before spending another slice here.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao.
