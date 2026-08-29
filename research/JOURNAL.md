@@ -192,6 +192,40 @@ record.
   code (the `dp_round`/`parse_optimal` wiring, `move_to_token`,
   `PRICE_REBUILD_INTERVAL`) reverted in full; `PriceCounts::observe`/
   `tally` themselves (S2-A50) are unaffected.
+- S2-R4 | REJECTED | S2-A56's own closing line named the next candidate
+  slice: whether a fourth `dp_round` keeps paying. It does on train but not
+  on sealed, so it is rejected on the same rule that sank S2-R3, at a much
+  smaller magnitude. Wiring: identical pattern to S2-A56's own addition,
+  reseeding a fourth round's price table from the third round's own token
+  sequence; no new DP machinery. Measured on `bench::baseline`'s 11 train
+  cases and the two sealed-only kinds (`access_log`, `gradient_image`),
+  `CASE_LEN` 50,000, fixed seeds: train net effect ~−0.0197 b/B, nine of
+  eleven cases improved (`entropy_ladder_h6` −0.00736, `entropy_ladder_h2`
+  −0.00432, `markov_h8_2_trap` −0.00416 carried most of it), two flat
+  (`entropy_ladder_h8`, `interleaved_audio16`), one regression within
+  `TOLERANCE_BITS` (`base64_wrapped` +0.00208, its second round in a row
+  moving the wrong way, now S2-A56 and S2-R4 both). Sealed split: one
+  regression, `access_log` +0.00032; one improvement, `gradient_image`
+  −0.00288. The `access_log` regression is two orders of magnitude smaller
+  than S2-R3's (+0.0178) but the corpus policy's accept rule draws no
+  tolerance line for the sealed set the way `TOLERANCE_BITS` does for the
+  CI gate: "no validation regression" is binary, and S2-R3's own text
+  already ruled a validation regression fails the accept rule "independent
+  of the net train number." Applying a magnitude carve-out here that S2-R3
+  did not get would be tuning the accept rule against the outcome, not
+  applying it. Mechanism not diagnosed further (unlike S2-R3, this is not a
+  new sampling rule, just one more reseed of an already-converging table;
+  a plausible read is the DP approaching a fixed point where each
+  subsequent round's price table overfits the previous round's specific
+  token sequence rather than the source, with `access_log`'s literal-heavy
+  structure the first to show it). `dp_round`/`parse_optimal` unchanged
+  from S2-A56's three-round shape; candidate code (the fourth `dp_round`
+  call and its reseed) never committed, only exercised via a local
+  scratch example, deleted after measurement. Remaining S1-P2 scope
+  unchanged: an observation rule limited to backtrace survivors, still
+  unbuilt (S2-A51/S2-R3's stopping point). A fifth-plus round is not a
+  standing lead on this evidence; the DP round count stays at three until
+  something changes the mechanism, not just the parameter.
 
 ## Standing leads (ordered; heartbeat/researcher pick from the top)
 
@@ -2395,4 +2429,5 @@ record.
   +0.239178) — both finals move the same direction as train/sealed, a
   small real win, not a regression the gate would have caught either way.
   Whether a fourth round keeps paying, and at what compress-time cost,
-  is untested and a candidate next slice.
+  is untested and a candidate next slice. Tested: see S2-R4, rejected on a
+  sealed-validation regression despite a train win.
