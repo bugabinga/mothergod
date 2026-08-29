@@ -7,15 +7,13 @@ on:
   # hour and off :11/:37 so it collides with neither the BDFL's cadence
   # nor the deslopper's. #186 wakes this seat whenever a review verdict
   # lands, so the clock only has to cover the case where nothing
-  # happened at all. The clock itself lives in agent-clock.yml, not a
-  # native `schedule:` trigger here: a bot-authored commit to this file
-  # (which happens most days) flips the schedule-run's actor to
-  # `claude[bot]`, and the OIDC app-token exchange hard-rejects that
-  # actor before the job even starts (write-access check, PR #30). Two
-  # attempts to fix this by re-attributing just the cron line both
-  # silently failed to hold, because the failure does not depend on
-  # this file's history once the clock lives elsewhere. See
-  # agent-clock.yml's header for the incident and the fix.
+  # happened at all. The clock is the Telegram worker's cron
+  # (ADR-0035); the lines in infra/telegram-worker/wrangler.toml are
+  # the cadence's source of truth. Never a native `schedule:` trigger
+  # here: a bot-authored commit to this file (which happens most days)
+  # flips the schedule-run's actor to `claude[bot]`, and the OIDC
+  # app-token exchange hard-rejects that actor before the job even
+  # starts. Incident record: GOVERNANCE.md "Push identity".
   workflow_dispatch:
 
 permissions: {}

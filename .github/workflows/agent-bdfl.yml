@@ -6,28 +6,24 @@
 name: agent-bdfl
 
 on:
-  # Hourly (ADR-0015), 06:11 UTC Sunday is the deep run. The clock lives
-  # in agent-clock.yml, not here: a native `schedule:` trigger on this
-  # file ties the run's actor to whatever GitHub decides last touched
-  # the file, and a bot-authored PR merge flips that to `claude[bot]`,
-  # which the OIDC app-token exchange then hard-rejects
-  # ("does not have write access") before a single line of this prompt
-  # runs. Two "line-level re-attribution" patches (PR #30, and again
-  # 2026-08-23 20:00 UTC) both assumed only the cron line's blame
-  # mattered and both silently failed to hold: this file is bot-edited
-  # daily, so the fix had to stop depending on this file's git history
-  # at all. agent-clock.yml carries the only `schedule:` trigger left
-  # and wakes this seat with `gh workflow run` on the operator's PAT,
-  # which GitHub always attributes to the PAT's owner, never to a
-  # committer. See its header comment for the incident.
+  # Hourly (ADR-0015), 06:11 UTC Sunday is the deep run. The clock is
+  # the Telegram worker's cron (ADR-0035); the lines in
+  # infra/telegram-worker/wrangler.toml are the cadence's source of
+  # truth. Never a native `schedule:` trigger here: GitHub attributes a
+  # schedule run to whoever it decides last touched this bot-edited
+  # file, and the OIDC app-token exchange hard-rejects a bot actor
+  # before a single line of this prompt runs. The worker dispatches on
+  # the operator's PAT, which GitHub attributes to the PAT's owner,
+  # never to a committer. Incident record: GOVERNANCE.md
+  # "Push identity".
   workflow_dispatch:
     inputs:
       source:
         description: >-
-          'cron' when agent-clock.yml's proxy dispatched this run;
-          'alarm' when agent-alarm.yml woke this seat on a red agent
-          run (ADR-0034); left at the default for a human or the
-          Telegram worker.
+          'cron' when the worker clock's tick dispatched this run
+          (ADR-0035); 'alarm' when agent-alarm.yml woke this seat on a
+          red agent run (ADR-0034); left at the default for a human or
+          a Telegram inbox wake.
         required: false
         default: manual
   # Operator-priority wake: any personal repo activity by the operator
@@ -52,9 +48,9 @@ on:
 
 permissions: {}
 
-# Real wakes (operator-attributed activity — in person, via the
-# Telegram worker's operator-issued PAT, or agent-clock.yml's hourly
-# dispatch on that same PAT) share one lane and debounce (ADR-0014).
+# Real wakes (operator-attributed activity — in person, or the Telegram
+# worker's inbox and clock dispatches on the operator-issued PAT) share
+# one lane and debounce (ADR-0014).
 # Events the job condition would skip anyway get a throwaway per-run
 # group, because concurrency is evaluated before the job-level actor
 # filter: a shared group would let a guaranteed no-op evict a queued
@@ -80,8 +76,8 @@ jobs:
     # This condition MUST mirror the concurrency group predicate above;
     # change them together (issue #46). Two guards against self-trigger
     # (issue #50): workflow_dispatch is admitted only when attributed to
-    # the operator — that covers manual dispatch, the Telegram worker,
-    # and agent-clock.yml's cron proxy, all of which carry the
+    # the operator — that covers manual dispatch and the Telegram
+    # worker's inbox and clock dispatches, all of which carry the
     # operator-issued PAT, while a dispatch from an agent token carries a
     # bot actor and is skipped. And the body
     # that CAUSED this event never wakes a run if it carries the agent
@@ -195,10 +191,10 @@ jobs:
           # Read by .github/scripts/gh-comment to assemble the footer
           # (issue #138, #206): "bdfl · [Claude Code](...)".
           ROLE: bdfl
-          # Why this run woke: 'schedule' (agent-clock.yml's cron proxy,
+          # Why this run woke: 'schedule' (the worker clock's tick,
           # folded back from workflow_dispatch since that is the only
           # trigger left that can carry it — see the `on:` comment),
-          # 'workflow_dispatch' (a human or the Telegram worker), or an
+          # 'workflow_dispatch' (a human or a Telegram inbox wake), or an
           # operator event (issues, issue_comment, pull_request, ...).
           TRIGGER_EVENT: ${{ (github.event_name == 'workflow_dispatch' && inputs.source == 'cron') && 'schedule' || github.event_name }}
           TRIGGER_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number || '' }}

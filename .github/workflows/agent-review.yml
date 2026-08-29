@@ -267,9 +267,10 @@ jobs:
               "unconditionally", merge identity: if the diff touches any
               file under `.github/workflows/`, do NOT merge, whatever
               your verdict. Those PRs are the BDFL's to land by operator
-              ruling (issue #136): your token is refused there, and a
-              bot-landed cron line kills that schedule (GOVERNANCE.md
-              "Merging"). Reviewing them is still your job and it is the
+              ruling (issue #136), so workflow merges keep one deliberate
+              identity (GOVERNANCE.md "Merging"; the original token-refusal
+              and cron-attribution rationales retired, #289 and ADR-0035).
+              Reviewing them is still your job and it is the
               only review they get. Post your verdict and the label as
               usual, say the merge is the BDFL's under the workflow
               carve-out, and stop. Do not watch checks first

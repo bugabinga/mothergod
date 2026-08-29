@@ -9,13 +9,11 @@
 name: agent-deslop
 
 on:
-  schedule:
-    # 00:37 and 12:37 UTC. Off the hour and off the heartbeat's :52 on
-    # purpose. Cron edits must land admin-PAT-attributed: an app-merged
-    # cron edit flips the schedule actor to claude[bot], the token
-    # exchange rejects bot actors, and every scheduled run dies
-    # (GOVERNANCE.md "Push identity").
-    - cron: "37 */12 * * *"
+  # Woken at 00:37 and 12:37 UTC by the worker clock (ADR-0035); the
+  # cron lines in infra/telegram-worker/wrangler.toml are the cadence's
+  # source of truth. Never a native `schedule:` trigger here: GitHub's
+  # schedule-actor attribution breaks the app-token exchange on
+  # bot-edited files (GOVERNANCE.md "Push identity").
   workflow_dispatch:
 
 permissions: {}
