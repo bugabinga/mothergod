@@ -2309,7 +2309,10 @@ record.
   a wash), so the DP-pricing angle on this lead may be near its ceiling;
   a differently-shaped idea, not a pricing-cadence or observation-rule
   tweak, is owed before spending another slice here.
-- S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4).
+- S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4). First
+  slice: S2-A57 (standalone `Ppm` primitive, PPM Method C escape pricing,
+  not yet wired). Remaining scope: where the escape's lower-order fallback
+  lands, and measuring the wired result.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao.
@@ -2495,6 +2498,50 @@ record.
   Whether a fourth round keeps paying, and at what compress-time cost,
   is untested and a candidate next slice. Tested: see S2-R4, rejected on a
   sealed-validation regression despite a train win.
+- S2-A57 | ACCEPTED | First slice of ROADMAP M3's third standing lead
+  (S1-P3, PPM-style escape for literal contexts): a standalone
+  `Ppm` primitive (`src/ppm.rs`), not yet wired into
+  [`Literal`](crate::literal::Literal) or `codec.rs`, same shape S1-P1's
+  first slice (S2-A40) and S1-P2's first slice (S2-A42) both took. Closes
+  the gap `JOURNAL` S1-R4's near-miss diagnosis named: every adaptive
+  table in this crate (`Model`, `Literal`'s six expert banks) Laplace-
+  smooths every symbol to frequency 1 at construction, so "never observed
+  in this context" and "observed once, decayed back near the floor" are
+  indistinguishable in the table's own state — there is no representable
+  escape signal a caller could act on. `Ppm` starts every symbol at
+  frequency 0 instead, tracks the count of distinct symbols seen
+  (`distinct`), and prices an unseen symbol's context as an explicit
+  escape event under classic PPM Method C (escape frequency = distinct
+  symbols so far, coding space `total + distinct`), with `encode`/
+  `decode`/`encode_escape` driving the real range coder
+  (`crate::coder`) the same way `Model::encode`/`decode` do, plus
+  advisory `price_symbol`/`price_escape` (`-log2`, off the coding path,
+  same `disallowed_methods` carve-out as `lz.rs`'s `PriceCounts::price`).
+  Different from `JOURNAL` S1-R5 (rejected): S1-R5 blended every context
+  unconditionally toward order-0, damaging the best-trained contexts
+  most; `Ppm` only escapes a genuinely never-seen symbol, so a
+  well-trained context essentially never pays the escape cost — the
+  distinction S1-R4's diagnosis called for. | 12 unit tests: fresh-table
+  escape is free and universal, observing a symbol clears only that
+  symbol's own escape flag, `distinct` counts each symbol once regardless
+  of repeats, a symbol's price falls as it recurs, escape price rises as
+  one symbol dominates uncontested and is lower for a context that keeps
+  discovering new symbols than one that stopped after its first (Method
+  C's qualitative shape, proven, not just asserted), `encode`/
+  `encode_escape`/`decode` panic on their documented misuse (coding an
+  unseen symbol as real, escaping or decoding an empty table), a mixed
+  real-symbol-and-escape sequence round-trips exactly through the real
+  coder, and rescaling never turns a zero entry nonzero across 10,000
+  repeats. `cargo x check` 4 stages green. | No bpb measurement: this
+  primitive is not yet wired to any `Method` variant or reachable from
+  `Literal`/`codec.rs`, so there is no champion to diff against —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
+  same reason S2-A40/S2-A42 did for their own first slices.
+  `baseline_gate check` confirms no regression (unaffected, no coding
+  path changed). Remaining S1-P3 scope: picking where the escape's
+  lower-order fallback lands (order-0? one of `Literal`'s other five
+  experts? a fresh dedicated table?) and measuring the wired result
+  against `bench::baseline`.
 - S2-A58 | ACCEPTED | First implementable slice of S1-P1's own named next
   step: S2-R1's postmortem (`sse.rs` module docs) says the next SSE
   attempt "wants a compound/mixed estimate to calibrate instead (the

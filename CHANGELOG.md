@@ -23,6 +23,17 @@ All notable changes to this project are documented here. Format follows
   regrew once already after it95 first consolidated it). Encoder-side
   tooling only, no format or ratio effect.
 
+- `src/ppm.rs`: standalone PPM-style escape primitive for ROADMAP M3's
+  third standing lead (`research/JOURNAL.md` S1-P3, S2-A57) — an adaptive
+  frequency table that starts every symbol unseen (frequency 0, unlike
+  `Model`'s Laplace-smoothed 1) and prices "never observed in this
+  context" as its own explicit escape event (PPM Method C), closing the
+  gap S1-R4's near-miss diagnosis named. Not yet wired to `Literal` or
+  `codec`: this slice builds and tests the primitive standalone first,
+  the same order S1-P1's `Sse` (S2-A40) and S1-P2's binary-tree match
+  finder (S2-A42) shipped in. No bpb change: private, unwired, and
+  covered by focused unit tests only.
+
 - `baseline_gate check` (the required `ratio` job's own binary) now also
   fails when `docs/benchmarks/canterbury.md` or `docs/benchmarks/
   silesia.md` embeds a `bench/baseline.json` fingerprint that no longer
