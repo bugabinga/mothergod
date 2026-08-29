@@ -8,6 +8,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `mothergod_bench::baseline::load_and_fingerprint`, a shared helper for
+  the read-`bench/baseline.json`-parse-fingerprint sequence `finals_report`
+  and `silesia_report` each pasted a copy of (issue #330: this exact block
+  regrew once already after it95 first consolidated it). Encoder-side
+  tooling only, no format or ratio effect.
+
 - `baseline_gate check` (the required `ratio` job's own binary) now also
   fails when `docs/benchmarks/canterbury.md` or `docs/benchmarks/
   silesia.md` embeds a `bench/baseline.json` fingerprint that no longer
