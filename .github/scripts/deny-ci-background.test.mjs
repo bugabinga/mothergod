@@ -94,8 +94,8 @@ test("denies idioms nested past quoting the scan cannot see", () => {
   // quote or a template brace. The guard stays blunt instead.
   const nested = [
     "sh -c 'setsid -f cargo test'",
-    'bash -c "setsid --fork cargo test"',
-    'eval "setsid -f cargo test"',
+    "bash -c \"setsid --fork cargo test\"",
+    "eval \"setsid -f cargo test\"",
     "echo cargo | xargs -I{} setsid -f {} test",
     "bash -c 'coproc cargo test'",
   ];
