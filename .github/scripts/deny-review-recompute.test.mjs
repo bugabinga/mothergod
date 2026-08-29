@@ -60,6 +60,18 @@ const denied = [
   ["cargo \\\ntest", "same on the unwrapped form"],
   ["cargo x che\\\nck", "mid-word splice is still one word"],
   ["cargo x test \\\n--", "continued bare -- still passes no filter"],
+  ["cargo --offline x check", "global flag is transparent (#333 r7)"],
+  ["cargo -q x check", "short global flag"],
+  ["cargo --locked x test", "same, unscoped constituent"],
+  ["cargo --offline test", "global flag on the unwrapped form"],
+  ["cargo -q --offline x check", "stacked global flags"],
+  ["cargo --color always x check", "space-valued global eats its value"],
+  ["cargo --config net.offline=true test", "space-valued config"],
+  ["cargo +stable --offline x check", "toolchain then global flag"],
+  [
+    "cargo -q run --manifest-path x/Cargo.toml -- test",
+    "global flag before the alias expansion",
+  ],
 ];
 
 const allowed = [
@@ -89,6 +101,8 @@ const allowed = [
   ],
   ["cargo x test -- \\\nsrc/lz", "a continued scope argument still scopes"],
   ["grep 'cargo x \\\ncheck' notes.md", "continuation inside quoted prose"],
+  ["cargo --offline test -p mothergod-bench", "global flag plus scope"],
+  ["cargo -q x test -- src/lz", "global flag, scoped constituent"],
 ];
 
 for (const [command, why] of denied) {
@@ -101,7 +115,12 @@ for (const [command, why] of denied) {
 
 for (const [command, why] of allowed) {
   test(`allows: ${command} (${why})`, () => {
-    assert.equal(run(bash(command)).status, 0);
+    const r = run(bash(command));
+    assert.equal(r.status, 0);
+    // Silence on allow is part of the contract: an interpreter warning
+    // (the round-seven SyntaxWarning) lands ahead of every real deny
+    // message and teaches the model noise.
+    assert.equal(r.stderr, "");
   });
 }
 
