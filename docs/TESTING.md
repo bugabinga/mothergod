@@ -52,10 +52,9 @@ failure.
 Mutation, C ABI, and external E2E surfaces
 are not part of current automation; their layers below remain plans owned
 by their respective issues, and the monster workflow does not invent empty
-targets for them. Golden determinism is a partial exception: single-platform
-golden-frame tests run in the existing `test` required check (layer 5), but
-the multi-platform matrix that would prove cross-platform determinism is
-still a plan.
+targets for them. Golden determinism is covered twice: golden-frame tests
+run in the existing `test` required check on every PR (layer 5), and the
+weekly monster matrix runs them on every runtime target.
 
 ## 1. Round-trip and unit tests (Rust-input PRs)
 
@@ -100,20 +99,21 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - `tests/golden/` (`JOURNAL` S2-A39) pins known input → known output per
   `FORMAT_VERSION`: `decompress(golden) == plaintext` and, for the
   current `FORMAT_VERSION`, `compress(plaintext) == golden`. Runs on
-  every PR through the existing `test` required check, on the one
-  runner that check already uses.
+  every PR through the existing `test` required check, and weekly on
+  every runtime target through the monster matrix; the Android lane gets
+  the fixtures pushed to the emulator and pointed at via
+  `MOTHERGOD_GOLDEN_DIR` (`.github/scripts/android-runner`).
 - What that does and does not prove: decode is integer-only end to end
   (JOURNAL S1-A5), so the decode half of this test is a real
   cross-platform guarantee. The encoder is not — `lz.rs` pricing and
   `filters.rs` filter scoring keep `f64::log2` as encoder-only floats
   (`docs/adr/0024-no-libm-on-the-decode-path.md` decision 3), which
   libm does not promise bit-identical across targets — so the re-encode
-  half only pins today's toolchain/runner, not "every platform" as this
-  section once claimed without a test to back it. Still planned: a
-  multi-platform CI matrix actually comparing encoder output across
-  `docs/TESTING.md`'s runtime table, which needs a `.github/workflows/`
-  change reserved for whoever holds `GH_ADMIN_TOKEN`
-  (`agents/GOVERNANCE.md`, "Push identity").
+  half is a regression pin per libm, not a guarantee. The monster matrix
+  runs it anyway, and every libm tried so far (glibc, musl, MSVC CRT,
+  mingw, Darwin) agrees on the committed fixtures; a re-encode failure on
+  one platform only is that platform's libm disagreeing, a finding to
+  record against ADR-0024's boundary, not a decode regression.
 - Old-version frames stay decodable (CLAUDE.md rule 5): every historical
   `FORMAT_VERSION`'s golden pair is kept, never replaced, so this is a
   running test rather than a claim in a doc comment.

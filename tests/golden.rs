@@ -11,16 +11,21 @@
 //!   in `docs/TESTING.md`'s runtime matrix, not just the runner these
 //!   fixtures were generated on. Every fixture ever committed, current or
 //!   superseded, carries this claim forever.
-//! - **Re-encoding is pinned on this toolchain only, and only for the
-//!   fixture in `tests/golden/` itself.** `compress(plaintext) == golden`
-//!   is a same-platform regression pin, not a cross-platform claim: `lz.rs`'s
-//!   match pricing and `filters.rs`'s filter scoring keep `f64::log2`
-//!   (ADR-0024 decision 3, encoder-only), which libm does not guarantee
-//!   bit-identical across targets. A future multi-platform CI matrix
-//!   (`docs/TESTING.md` layer 5's other half) needs a `.github/workflows/`
-//!   change reserved for whoever holds `GH_ADMIN_TOKEN`
-//!   (`agents/GOVERNANCE.md`, "Push identity"); this test only ever runs on
-//!   the one runner that already executes `cargo test`.
+//! - **Re-encoding is pinned per libm as a regression check, not
+//!   guaranteed across platforms.** `compress(plaintext) == golden` holds
+//!   only as far as `f64::log2` agrees between libms: `lz.rs`'s match
+//!   pricing and `filters.rs`'s filter scoring keep it (ADR-0024
+//!   decision 3, encoder-only), and libm does not promise bit-identical
+//!   results across targets. The weekly monster matrix
+//!   (`.github/workflows/monster.yml`) runs this test on every runtime
+//!   target anyway, and every libm tried so far (glibc, musl, MSVC CRT,
+//!   mingw, Darwin) agrees on these fixtures. A re-encode failure on one
+//!   platform only is that platform's libm disagreeing: a finding to
+//!   record against ADR-0024's boundary, not a decode regression.
+//!
+//! Off the build host (the Android emulator lane), `MOTHERGOD_GOLDEN_DIR`
+//! overrides the fixture directory; `.github/scripts/android-runner` pushes
+//! `tests/golden/` to the device and sets it.
 //!
 //! `FORMAT_VERSION` versions the decode contract, nothing else (issue #290's
 //! ruling). Two different kinds of change trip the re-encode assertion below,
@@ -50,7 +55,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn golden_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
+    std::env::var_os("MOTHERGOD_GOLDEN_DIR").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
+        PathBuf::from,
+    )
 }
 
 fn superseded_dir() -> PathBuf {
