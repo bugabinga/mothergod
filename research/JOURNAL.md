@@ -2808,8 +2808,8 @@ record.
   207 lib tests total, up from 206): a finder constructed with `WINDOW * 2`
   finds a match at that distance, and a finder constructed with the
   default `WINDOW` on the same data does not — proving the parameter
-  actually gates reach rather than being threaded through unused. The 12
-  existing call sites (the wired `dp_round` plus 11 test finders) all pass
+  actually gates reach rather than being threaded through unused. The 13
+  existing call sites (the wired `dp_round` plus 12 test finders) all pass
   `WINDOW` explicitly, so none of them changed behavior. `cargo x check`:
   4 stages green (the doc stage first caught a private-intra-doc-link
   warning from `WINDOW`'s public doc comment naming the now-parameterized
