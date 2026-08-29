@@ -28,6 +28,17 @@ All notable changes to this project are documented here. Format follows
   `literal::Literal` or `codec.rs`: no bpb change, covered by focused unit
   tests only.
 
+- `column::column_bank` (`research/JOURNAL.md` S1-P5, S2-A66): wraps
+  `column_of`'s unbounded column index into a fixed-size bank space
+  (`column % max_banks`), so a future column-index-keyed expert can size
+  its storage from a constant instead of the frame's declared `columns` —
+  a decoder reads `columns` from untrusted compressed input, so sizing
+  bank storage to it directly would risk unbounded allocation on a
+  hostile frame (CLAUDE.md hard rule 2). Same fixed-bank convention
+  `literal.rs`'s existing experts already use. Standalone primitive, not
+  yet wired into `literal::Literal` or `codec.rs`: no bpb change, covered
+  by focused unit tests only.
+
 - SSE wired into the literal mixer's binary decomposition
   (`research/JOURNAL.md` S1-P1 closed, ADR-0038, `FORMAT_VERSION` 2 → 3):
   `literal::Literal::encode_sse`/`decode_sse` code every literal byte as 8
