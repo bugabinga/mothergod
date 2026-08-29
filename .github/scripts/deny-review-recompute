@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Deny full-gate recomputes inside PR-review CI sessions (PreToolUse hook).
+"""Deny full-gate recomputes inside pull_request CI sessions (PreToolUse hook).
 
-The reviewer session (the only pull_request-triggered agent) verifies a
-commit that already carries the required checks: fmt, clippy, test, doc,
-ratio (ci.yml). Re-running the same unscoped command locally recomputes
+A pull_request-triggered session sits on a commit that already carries
+the required checks: fmt, clippy, test, doc, ratio (ci.yml). That is
+the reviewer on every PR, and also the BDFL's opened/reopened wakes
+(agent-bdfl.yml); binding both is decided, not incidental, because the
+no-signal argument keys on the commit's checks, not on the seat
+(PR #333 review thread). Re-running the same unscoped command locally recomputes
 an identical result at cold-build runner cost and adds no signal. Prompt
 prose has said so since #237 (af0bdc5); run 33229032665 re-ran `cargo x
 test` anyway, detached it with a shell `&`, deleted the worktree under
@@ -14,13 +17,19 @@ backgrounding only paid because the recompute was long, so denying the
 recompute removes the reason to detach.
 
 Denied, per shell segment (split on `;`, `&`, `|`): `cargo x check` in
-any form, `cargo x test|lint|doc|fmt` without a ` -- ` scope, and
-`cargo test` without `-p`/`--package` or a ` -- ` filter. Scoped runs
-are the reviewer's real job and stay allowed: `cargo test -p <crate>`,
-`cargo x test -- <path>`, feature-flagged builds CI does not cover, and
-any segment carrying `--help`. Matching keys on our own task names and
-GitHub's GITHUB_EVENT_NAME, so only our own renames break it, and a
-false deny teaches its own correction in stderr.
+any form, `cargo x test|lint|doc|fmt` without a ` -- <arg>` scope, and
+`cargo test` without `-p`/`--package` or a ` -- <arg>` filter. The
+escape demands a real argument after the `--`, because a bare trailing
+`--` passes no filter and runs the whole suite. Quoted text is stripped
+before matching, so mentioning a command (`grep 'cargo x check'`) is
+not running it; the symmetric cost, that `bash -c 'cargo x test'`
+slips through, is accepted for a guardrail aimed at a forgetful model,
+not an adversary. Scoped runs are the reviewer's real job and stay
+allowed: `cargo test -p <crate>`, `cargo x test -- <path>`,
+feature-flagged builds CI does not cover, and any segment carrying
+`--help`. Matching keys on our own task names and GitHub's
+GITHUB_EVENT_NAME, so only our own renames break it, and a false deny
+teaches its own correction in stderr.
 
 Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions,
 outside a pull_request event, or for any tool but Bash, everything is
@@ -47,14 +56,16 @@ DENIED = (
     (
         "unscoped cargo x test/lint/doc/fmt",
         re.compile(r"\bcargo\s+x\s+(?:test|lint|doc|fmt)\b"),
-        re.compile(r"\s--(?:\s|$)"),
+        re.compile(r"\s--\s+\S"),
     ),
     (
         "unscoped cargo test",
         re.compile(r"\bcargo\s+test\b"),
-        re.compile(r"(?:^|\s)(?:-p\b|--package\b)|\s--(?:\s|$)"),
+        re.compile(r"(?:^|\s)(?:-p\b|--package\b)|\s--\s+\S"),
     ),
 )
+
+QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 MESSAGE = (
     "fmt, clippy, test, doc and ratio already ran on this exact commit "
@@ -70,7 +81,7 @@ MESSAGE = (
 
 def denied_class(command: str) -> str | None:
     """Name the denied class the command falls in, or None if allowed."""
-    for segment in re.split(r"[;&|]+", command):
+    for segment in re.split(r"[;&|]+", QUOTED.sub(" ", command)):
         if "--help" in segment:
             continue
         for name, trigger, escape in DENIED:

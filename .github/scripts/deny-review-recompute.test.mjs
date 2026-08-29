@@ -32,6 +32,8 @@ const denied = [
   ["cd /tmp/w && cargo x check", "second shell segment"],
   ["cargo test --workspace", "the required check unwrapped"],
   ["timeout 600 cargo x test 2>&1", "wrapper and redirection"],
+  ["cargo x test --", "bare -- passes no filter, full suite (#333 review)"],
+  ["cargo test --", "same bypass on the unwrapped form"],
 ];
 
 const allowed = [
@@ -42,6 +44,8 @@ const allowed = [
   ["cargo clippy --features corpus-fetch", "feature build CI skips"],
   ["cargo x test --help", "usage lookup"],
   ["gh pr checks 332", "reading CI instead of re-running"],
+  ["gh pr diff 333 | grep 'cargo x check'", "mentioning is not running"],
+  ["git commit -m \"run cargo x check first\"", "quoted prose"],
 ];
 
 for (const [command, why] of denied) {
