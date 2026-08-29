@@ -2294,24 +2294,22 @@ record.
   survive to the final backtrace, not every position's locally-finalized
   move, the actual named sqlite/json/jsonl target, still unmoved by every
   slice so far.
-- S1-P1 | LEAD | SSE (secondary symbol estimation) — oldest unmerged
-  literature lead; targets the five zstd text holdouts (combined deficit
-  0.11 b/B: alice .019, lcet .044, dickens .054, plrabn .086, sao .109).
-  First slice: S2-A40 (standalone primitive). Second slice: S2-A41
-  (probability-driven bit-coding primitive, proven together with `Sse`).
-  Third slice, wiring `Sse` behind the flag model's literal/copy split:
-  tried and rejected, S2-R1 — a raw order-0 binary decision has little
-  systematic bias left for SSE to correct. Next attempt, if any, wants a
-  compound/mixed estimate to calibrate instead (the literal mixer's
-  eventual binary decomposition is the obvious one), not another raw
-  `Model` split. Fourth slice, S2-A58: built that decomposition
-  (`src/bittree.rs`) as its own standalone primitive, not yet wired.
-  Fifth slice, S2-A59: picked the `Sse` context keying (`bittree::
-  sse_context`, tree-position-only, 255 contexts), also standalone.
-  Remaining S1-P1 scope: wire the decomposition + context scheme behind
-  `Literal::encode`/`decode`, bump `FORMAT_VERSION`, measure a real bpb
-  delta — S2-R1's risk (little systematic bias left for SSE to correct
-  on a near-order-0 binary decision) is still open until that slice runs.
+- S1-P1 | RESOLVED 2026-08-29, closed by S2-A60 (`FORMAT_VERSION` 3,
+  ADR-0038) | SSE (secondary symbol estimation), oldest standing lead —
+  wired behind the literal mixer's binary decomposition
+  (`bittree::encode_symbol_sse`/`decode_symbol_sse`, keyed by
+  `bittree::sse_context`, refining the six-expert mixer's own blended
+  probability at each of the 8 chained binary decisions instead of a lone
+  counter). Net train **-0.36736 b/B**, both sealed kinds (`access_log`,
+  `gradient_image`) improved, one case (`entropy_ladder_h6`) regressed
+  inside the accepted trade. S2-R1's earlier attempt (an SSE stage over
+  the flag model's lone order-0 `is_copy` counter) had failed for lack of
+  a compound estimate to calibrate; that was the fix. Not the lead's
+  originally-named target in a directly measured sense — the five zstd
+  text holdouts are held-out finals, never inside the experiment loop
+  (`research/corpus/POLICY.md`). Full mechanism, numbers, and the five
+  slices that built it (S2-A40/S2-A41/S2-A58/S2-A59/S2-A60): S2-A60's own
+  entry below.
 - S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue. First slice: S2-A42 (standalone
@@ -2408,14 +2406,19 @@ record.
   per-instance parameter on `BinaryTreeMatchFinder`, standalone, the wired
   parse still always passes `WINDOW` unchanged). Second slice, S2-A62: the
   `long_range_repeat` corpus generator S2-A61 flagged as possibly needed —
-  places a byte-identical repeat at a caller-chosen distance, standalone,
-  not yet used by any real experiment run. Remaining scope: measure a real
-  bpb delta at a larger window on train-tier data with long-range repeat
-  structure (the generator now exists to build that data; running the
-  measurement is still open), decide how a larger window reaches
-  `OFFSET_BUCKETS` and the offset `Model`'s alphabet size without breaking
-  `bucket()`'s `u32`-fits assumption, wire it behind a real parse pass,
-  bump `FORMAT_VERSION`.
+  places a byte-identical repeat at a caller-chosen distance, standalone.
+  Third slice, S2-A63: ran the measurement the generator enabled — a
+  window under the existing `2^21 - 1` offset-bucket ceiling costs zero
+  format change (`bucket()` already covers it) and closes real bpb on a
+  planted long-range repeat: train **-0.021443**, sealed **-0.021401**,
+  agreeing to four decimal places. Remaining S1-P4 scope: a window past
+  `2^21 - 1` needs `OFFSET_BUCKETS`/`bucket()` widened and a
+  `FORMAT_VERSION` bump before it is measurable this way, which still
+  leaves the Silesia finals named above (several 10s of MiB) out of
+  reach; decide whether the wired `WINDOW` itself should grow toward (or
+  to) that free `2^21 - 1` ceiling, including `parse_greedy`'s own
+  hash-chain finder (still hardcoded to `WINDOW`, unexamined) and the
+  encode-time cost of a larger tree (SPEED, ROADMAP M5, untouched).
 - S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
   `column::column_of`, not yet wired). Remaining scope: an actual
