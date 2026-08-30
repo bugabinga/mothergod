@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 
 /// One held-out-final file's original size plus every compressor's
 /// compressed size, all measured on the exact same bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FileMeasurement {
     /// File name inside its corpus, e.g. `"alice29.txt"`.
     pub name: String,
@@ -32,6 +32,15 @@ pub struct FileMeasurement {
     pub zstd_len: usize,
     /// Compressed length under `xz -9e`.
     pub xz_len: usize,
+    /// Wall-clock seconds `mothergod::compress(data)` took, single-thread
+    /// (the measurement thread itself; `measure_all` parallelizes across
+    /// files, not within one). SPEED scorecard input (ROADMAP.md).
+    pub encode_secs: f64,
+    /// Wall-clock seconds `mothergod::decompress` took on the bytes
+    /// `mothergod::compress` produced. Below-floor decode (ROADMAP.md:
+    /// `>=1 MB/s`) is a finding this report surfaces, not a check it
+    /// enforces.
+    pub decode_secs: f64,
 }
 
 /// Reference-compressor version strings, named in the report so a reader
@@ -63,6 +72,35 @@ fn aggregate_bpb(
     let total_original: usize = measurements.iter().map(|m| m.original_len).sum();
     let total_compressed: usize = measurements.iter().map(compressed_len).sum();
     bits_per_byte(total_compressed, total_original)
+}
+
+/// Decimal MB/s (`10^6` bytes, matching this crate's existing "5.3 MB"
+/// file-size convention), `bytes` over `secs`. `0.0` for a non-positive
+/// `secs` rather than an infinity a markdown table can't render sensibly;
+/// real measurements never hit that path since every measured
+/// compress/decompress call takes strictly positive wall-clock time.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts here stay far below 2^53"
+)]
+fn mb_per_sec(bytes: usize, secs: f64) -> f64 {
+    if secs <= 0.0 {
+        0.0
+    } else {
+        bytes as f64 / 1_000_000.0 / secs
+    }
+}
+
+/// Aggregate MB/s across `measurements`: total original bytes over total
+/// wall-clock seconds, the same byte-weighted-not-averaged shape
+/// [`aggregate_bpb`] uses and for the same reason (CLAUDE.md rule 4).
+fn aggregate_mb_per_sec(
+    measurements: &[FileMeasurement],
+    secs: impl Fn(&FileMeasurement) -> f64,
+) -> f64 {
+    let total_original: usize = measurements.iter().map(|m| m.original_len).sum();
+    let total_secs: f64 = measurements.iter().map(secs).sum();
+    mb_per_sec(total_original, total_secs)
 }
 
 /// Renders `measurements` (any order; sorted internally by file name) as a
@@ -126,18 +164,23 @@ pub fn format_report(
 
     writeln!(
         out,
-        "| file | bytes | mothergod b/B | gzip -9 b/B | zstd -19 b/B | xz -9e b/B | regret |"
+        "| file | bytes | mothergod b/B | gzip -9 b/B | zstd -19 b/B | xz -9e b/B | regret | \
+         mothergod encode MB/s | mothergod decode MB/s |"
     )
     .expect("writing to a String never fails");
-    writeln!(out, "|---|---|---|---|---|---|---|").expect("writing to a String never fails");
+    writeln!(out, "|---|---|---|---|---|---|---|---|---|")
+        .expect("writing to a String never fails");
     for m in &ordered {
         let mg = bits_per_byte(m.mothergod_len, m.original_len);
         let gz = bits_per_byte(m.gzip_len, m.original_len);
         let zs = bits_per_byte(m.zstd_len, m.original_len);
         let xz = bits_per_byte(m.xz_len, m.original_len);
+        let encode_mbps = mb_per_sec(m.original_len, m.encode_secs);
+        let decode_mbps = mb_per_sec(m.original_len, m.decode_secs);
         writeln!(
             out,
-            "| `{}` | {} | {mg:.6} | {gz:.6} | {zs:.6} | {xz:.6} | {:+.6} |",
+            "| `{}` | {} | {mg:.6} | {gz:.6} | {zs:.6} | {xz:.6} | {:+.6} | {encode_mbps:.3} | \
+             {decode_mbps:.3} |",
             escape_markdown_cell(&m.name),
             m.original_len,
             regret(mg, zs, xz),
@@ -150,10 +193,13 @@ pub fn format_report(
     let aggregate_gzip = aggregate_bpb(measurements, |m| m.gzip_len);
     let aggregate_zstd = aggregate_bpb(measurements, |m| m.zstd_len);
     let aggregate_xz = aggregate_bpb(measurements, |m| m.xz_len);
+    let aggregate_encode_mbps = aggregate_mb_per_sec(measurements, |m| m.encode_secs);
+    let aggregate_decode_mbps = aggregate_mb_per_sec(measurements, |m| m.decode_secs);
     writeln!(
         out,
         "| **aggregate ({} files)** | {total_original} | **{aggregate_mothergod:.6}** | \
-         **{aggregate_gzip:.6}** | **{aggregate_zstd:.6}** | **{aggregate_xz:.6}** | **{:+.6}** |",
+         **{aggregate_gzip:.6}** | **{aggregate_zstd:.6}** | **{aggregate_xz:.6}** | **{:+.6}** | \
+         **{aggregate_encode_mbps:.3}** | **{aggregate_decode_mbps:.3}** |",
         ordered.len(),
         regret(aggregate_mothergod, aggregate_zstd, aggregate_xz),
     )
@@ -204,6 +250,8 @@ mod tests {
                 gzip_len: 500,
                 zstd_len: 450,
                 xz_len: 420,
+                encode_secs: 0.001,
+                decode_secs: 0.0005,
             },
             FileMeasurement {
                 name: "alpha.txt".to_string(),
@@ -212,6 +260,8 @@ mod tests {
                 gzip_len: 1000,
                 zstd_len: 950,
                 xz_len: 920,
+                encode_secs: 0.002,
+                decode_secs: 0.001,
             },
         ]
     }
@@ -339,6 +389,8 @@ mod tests {
             gzip_len: 6,
             zstd_len: 6,
             xz_len: 6,
+            encode_secs: 0.001,
+            decode_secs: 0.0005,
         }];
         let report = format_report(
             "Canterbury",

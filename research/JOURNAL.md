@@ -3197,3 +3197,39 @@ record.
   (S2-A64/S2-A66) are unaffected, standalone primitives outside this
   slice's scope. `research/progress.jsonl` it114. Remaining S1-P5 scope:
   see the updated S1-P5 entry above.
+- S2-A67 | ACCEPTED | ROADMAP SPEED scorecard (issue #364): unmeasurable
+  on two weekly scorecards because neither `docs/benchmarks/silesia.md`
+  nor `canterbury.md` carried a throughput column and nothing measured
+  decode at all. `bench::finals::FileMeasurement` gained `encode_secs`/
+  `decode_secs`, timed with `std::time::Instant` around
+  `mothergod::compress`/`mothergod::decompress` inside
+  `reference::measure_one` — single-thread, the same measurement thread
+  `measure_all` already spawns one-per-file, not a new source of
+  parallelism. `mothergod::decompress` is now called on this path for the
+  first time (previously only `mothergod_len` was read off the compressed
+  `Vec`); its output is compared against the original bytes, so a corpus
+  round-trip failure now surfaces as a measurement error instead of an
+  unverified compressed length silently entering a report. `format_report`
+  gained two decimal-MB/s columns (`mothergod encode MB/s`, `mothergod
+  decode MB/s`), per-file and aggregate — the aggregate is total original
+  bytes over total wall-clock seconds, the same byte-weighted-not-averaged
+  shape `aggregate_bpb` already uses (CLAUDE.md rule 4). `canterbury.md`
+  regenerated with real numbers (11 files, 11.5s wall). `silesia.md`'s
+  regeneration is a fast-follow: the full ~200 MB corpus is on the order
+  of half an hour even parallelized across cores (S2-A54), bounded below
+  by its single largest file — too slow for one agent turn, the same call
+  S2-A52 already made for Silesia. | `cargo x check`: 4 stages green (129
+  `mothergod-bench` tests under `--features corpus-fetch
+  --include-ignored`, up from 108 default-feature, including the
+  real-network `fetch_and_cache_smoke_tests_the_real_pins`); `cargo
+  clippy -p mothergod-bench --all-targets --features corpus-fetch --
+  --deny warnings` clean; `baseline_gate check`: 11 cases, no regression,
+  finals reports fresh — no codec code changed. | Finding, not fixed
+  here: Canterbury's smallest file, `xargs.1` (4227 bytes), decodes at
+  0.775 MB/s, under the ROADMAP SPEED floor (`>=1 MB/s`) — consistent
+  with S1-P6's already-recorded `Literal::decode` worst case (~854 KB/s),
+  amplified on a small file where fixed per-call overhead dominates. |
+  No bpb measurement: measurement-capability patch, not a ratio
+  experiment; `research/progress.jsonl` records this as `kind: "patch"`
+  with null deltas, it115. Remaining scope: run `silesia_report` and
+  commit `silesia.md`'s regeneration (issue to file).
