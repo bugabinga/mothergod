@@ -15,6 +15,16 @@ on:
   # app-token exchange hard-rejects that actor before the job even
   # starts. Incident record: GOVERNANCE.md "Push identity".
   workflow_dispatch:
+    inputs:
+      source:
+        description: >-
+          'cron' when the worker clock's tick dispatched this run
+          (ADR-0035); left at the default for a human dispatch and for
+          the wake agent-review chains off a landed verdict (#186).
+          Only the clock's tick is discretionary, so only it can be
+          skipped by the allowance governor (ADR-0039).
+        required: false
+        default: manual
 
 permissions: {}
 
@@ -44,6 +54,7 @@ jobs:
         with:
           token: ${{ github.token }}
           role: maintainer
+          discretionary: ${{ inputs.source == 'cron' }}
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.guard.outputs.paused != 'true'
