@@ -768,7 +768,7 @@ async function commandResult(env, updateId, parsed) {
 // (incidents 2026-08-23 and 2026-08-27). A dispatch below is
 // attributed to the PAT's owner by API semantics, immune to git blame.
 const CLOCK = {
-  "11 */2 * * *": [
+  "11 */4 * * *": [
     // agent-bdfl. `source: cron` lets the seat report
     // TRIGGER_EVENT=schedule downstream, telling a tick from an
     // operator dispatch.

@@ -38,4 +38,4 @@ GITHUB_REPO = "bugabinga/mothergod"
 # values move with ADR-0027's allowance lever: down when the budget
 # footer says SLOW DOWN, back up when it shows slack.
 [triggers]
-crons = ["11 */2 * * *", "22 */3 * * *", "37 */12 * * *"]
+crons = ["11 */4 * * *", "22 */3 * * *", "37 */12 * * *"]
