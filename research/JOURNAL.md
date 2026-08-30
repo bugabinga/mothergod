@@ -3238,14 +3238,22 @@ record.
   silesia_report`, the same S2-A54-parallelized (`measure_all`, one OS
   thread per file) command that produced `silesia.md`'s existing numbers,
   now exercising the `encode_secs`/`decode_secs` timing S2-A67 added. No
-  code changed; this is a report regeneration only. | Measured: 12-file,
-  ~212 MB Silesia corpus in well under 10 minutes wall clock on 4 cores
-  this run (S2-A54 recorded 8m20s on the same core count; the gap between
-  that and the S2-A67-deferred "half an hour" estimate was S2-A54's own
-  parallelization, already landed — S2-A52's serial estimate was the stale
-  number, not a new result). `cargo x check`: 4 stages green; `baseline_gate
-  check`: 11 cases, no regression, both finals reports' embedded
-  fingerprints fresh against `bench/baseline.json`. | bits/byte unchanged
+  code changed; this is a report regeneration only. | This entry originally
+  claimed "well under 10 minutes wall clock on 4 cores," copied from
+  S2-A54's 8m20s without a fresh stopwatch. Review (PR #367) caught the
+  claim as arithmetically impossible against this same run's own numbers:
+  211,938,580 bytes at the reported 0.062 MB/s aggregate encode alone is
+  ~3418s of work, ~880s best case spread over 4 cores, before fetch or
+  reference-compressor time is counted. A same-session re-run attempt
+  confirmed it empirically: `fetch_silesia_files` fetches one file at a
+  time (serial, network-bound), and 10 of 12 files alone took 6m48s before
+  a connection reset, with `measure_all`'s compute not yet started.
+  S2-A54's 8m20s measured compress-only, pre-dating both S2-A67's decode
+  timing and this fetch instrumentation, so it is not a valid stand-in for
+  this run's total; S2-A52's original "half an hour" estimate is the
+  right order of magnitude, not the stale number this entry accused it of
+  being. Corrected: no wall-clock number is asserted for this run. |
+  bits/byte unchanged
   within measurement (aggregate 2.060705, identical to the pre-existing
   report): confirms the new timing instrumentation reads but does not
   perturb the compressed bytes. New columns: aggregate 0.062 MB/s encode,
