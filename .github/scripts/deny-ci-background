@@ -25,13 +25,13 @@ Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions
 (GITHUB_ACTIONS != "true") everything is allowed; an interactive session
 really does get notifications. In CI, exit 2 (deny; stderr is shown to
 the model) for Bash with run_in_background true or a command string
-carrying a listed detach idiom (bare `&` control operator, `setsid
--f/--fork`), and for Agent, Task, or Workflow calls unless
-run_in_background is explicitly false, because background is those
-tools' default. Everything else exits 0. The idiom list is a blocklist
-of what sessions have done or the runner hands them for free, not a
-proof of coverage: the shell offers more ways to daemonize, and a new
-one observed in the wild gets appended here, not to prose.
+carrying a listed detach idiom (bare `&` control operator, a setsid
+fork flag, bash's coprocess keyword), and for Agent, Task, or Workflow
+calls unless run_in_background is explicitly false, because background
+is those tools' default. Everything else exits 0. The idiom list is a
+blocklist of what sessions have done or the runner hands them for free,
+not a proof of coverage: the shell offers more ways to daemonize, and a
+new one observed in the wild gets appended here, not to prose.
 
 Liveness: every deny appends a line to GITHUB_STEP_SUMMARY, the durable
 trace, because the audit artifact excludes transcripts by design
@@ -49,18 +49,26 @@ import sys
 DEFAULT_FOREGROUND = ("Bash",)
 DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 
-# A bare `&` control operator detaches like run_in_background does.
-# The lookbehind clears `&&`, `>&`, `<&`, `|&`; the lookahead clears
-# `&&`, `&>`, and ampersands embedded in tokens (`?a=1&b=2`). The scan
-# has no notion of quoting, so a `&` that is inert data (prose, a -c
-# payload, a heredoc) still trips it: an accepted cost, because a
-# quote-aware shell parser in a hook is entanglement this guard refuses,
-# and the deny message names the rewrite.
-SHELL_BACKGROUND = re.compile(r"(?<![&<>|])&(?=[\s;)]|$)")
-
-# `setsid -f`/`--fork` daemonizes with no `&` anywhere, and setsid
-# ships on the Actions runner. Same hazard, second listed idiom.
-SETSID_FORK = re.compile(r"\bsetsid\s+(-f\b|--fork\b)")
+# The scan has no notion of quoting or nesting, so an idiom that is
+# inert data (prose, a -c payload, a heredoc) still trips it: an
+# accepted cost, because a quote-aware shell parser in a hook is
+# entanglement this guard refuses, and the deny message names the
+# rewrite. The same bluntness is what catches a live idiom inside
+# `sh -c '...'`, after `eval`, or in an `xargs -I{}` template; #355's
+# review showed any anchoring cheap enough for a hook opens those
+# holes. Each entry: (pattern, step-summary reason).
+SHELL_DETACH = (
+    # Bare `&` control operator. The lookbehind clears `&&`, `>&`,
+    # `<&`, `|&`; the lookahead clears `&&`, `&>`, and ampersands
+    # embedded in tokens (`?a=1&b=2`).
+    (re.compile(r"(?<![&<>|])&(?=[\s;)]|$)"), "via shell &"),
+    # setsid's fork flag daemonizes with no `&` anywhere, and setsid
+    # ships on the Actions runner. Bundled short flags count; the
+    # wait flag would block anyway, denied conservatively.
+    (re.compile(r"\bsetsid\s+(-\w*f\w*\b|--fork\b)"), "via setsid fork"),
+    # bash's coprocess keyword detaches by definition (PR #354 review).
+    (re.compile(r"\bcoproc\b"), "via coproc"),
+)
 
 DETACH_MESSAGE = (
     "Background execution does not survive a CI session: the run ends "
@@ -73,12 +81,13 @@ DETACH_MESSAGE = (
 )
 
 SHELL_DETACH_MESSAGE = (
-    "A shell-level detach (bare `&`, or setsid --fork) does not survive "
-    "a CI session: the run ends the moment your turn ends and orphan "
-    "cleanup kills the process (runs 33207936812, 33269388206). Drop "
-    "the detach and run the command in the foreground (timeout goes up "
-    "to 600000 ms). If the `&` is literal text, not shell syntax, "
-    "rewrite it, for example as 'and'."
+    "A shell-level detach (bare `&`, a setsid fork, a coprocess) does "
+    "not survive a CI session: the run ends the moment your turn ends "
+    "and orphan cleanup kills the process (runs 33207936812, "
+    "33269388206). Drop the detach and run the command in the "
+    "foreground (timeout goes up to 600000 ms). If the flagged idiom "
+    "is literal text, not shell syntax, reword it, for example `&` "
+    "as 'and'."
 )
 
 
@@ -101,10 +110,10 @@ def main() -> int:
         if background is True:
             reason = "in background"
         elif isinstance(command, str):
-            if SHELL_BACKGROUND.search(command):
-                reason = "via shell &"
-            elif SETSID_FORK.search(command):
-                reason = "via setsid --fork"
+            for pattern, why in SHELL_DETACH:
+                if pattern.search(command):
+                    reason = why
+                    break
     elif tool in DEFAULT_BACKGROUND and background is not False:
         reason = "in background"
     if reason is None:
