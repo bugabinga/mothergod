@@ -3233,3 +3233,25 @@ record.
   experiment; `research/progress.jsonl` records this as `kind: "patch"`
   with null deltas, it115. Remaining scope: run `silesia_report` and
   commit `silesia.md`'s regeneration (issue to file).
+- S2-A68 | ACCEPTED | Issue #366: S2-A67's fast-follow closed. Ran
+  `cargo run -p mothergod-bench --release --features corpus-fetch --bin
+  silesia_report`, the same S2-A54-parallelized (`measure_all`, one OS
+  thread per file) command that produced `silesia.md`'s existing numbers,
+  now exercising the `encode_secs`/`decode_secs` timing S2-A67 added. No
+  code changed; this is a report regeneration only. | Measured: 12-file,
+  ~212 MB Silesia corpus in well under 10 minutes wall clock on 4 cores
+  this run (S2-A54 recorded 8m20s on the same core count; the gap between
+  that and the S2-A67-deferred "half an hour" estimate was S2-A54's own
+  parallelization, already landed — S2-A52's serial estimate was the stale
+  number, not a new result). `cargo x check`: 4 stages green; `baseline_gate
+  check`: 11 cases, no regression, both finals reports' embedded
+  fingerprints fresh against `bench/baseline.json`. | bits/byte unchanged
+  within measurement (aggregate 2.060705, identical to the pre-existing
+  report): confirms the new timing instrumentation reads but does not
+  perturb the compressed bytes. New columns: aggregate 0.062 MB/s encode,
+  2.084 MB/s decode; slowest decode `x-ray` at 0.392 MB/s and `sao` at
+  0.428 MB/s, both under the ROADMAP SPEED floor (`>=1 MB/s`), same
+  small/dense-file amplification pattern S2-A67 found on Canterbury's
+  `xargs.1`. Finding, not fixed here. No bpb measurement:
+  `research/progress.jsonl` records this as `kind: "patch"` with null
+  deltas, it116.
