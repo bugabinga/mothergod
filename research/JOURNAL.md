@@ -2664,18 +2664,27 @@ record.
   bit-for-bit. `Method::Stored`, which `codec::decode` never sees
   (`decompress`/`decompress_bounded` handle it directly, since it has no
   declared-length field of its own), gained its own `max_len` check
-  against the payload's own byte count: without it, a caller-requested
-  memory ceiling would be honored for `Method::Lz` frames only, silently
-  not for `Method::Stored` ones. No `FORMAT_VERSION` bump and no ADR:
+  against the payload's own byte count, but only when a caller's `max_len`
+  is strictly tighter than `MAX_DECODED_LEN`: unlike `Method::Lz`'s
+  declared-length field, a stored payload's length is read straight from
+  `input` and is never spoofable past it, so `MAX_DECODED_LEN` itself buys
+  it no safety margin, only a compatibility break — review caught a first
+  version that bounded it unconditionally, which would have made
+  `decompress` reject any incompressible input at or past 256 MiB that
+  round-tripped on `main`, violating hard rule 1 for a real, reachable
+  input class (PR #377 review thread). No `FORMAT_VERSION` bump and no ADR:
   `docs/format/SPEC.md` already names this ceiling "a decoder policy, not
   a wire-format field," and this slice only makes that policy
   caller-configurable within the one value already proven safe, changing
-  no bit on the wire. | 6 new unit tests (`codec.rs`'s
+  no bit on the wire. | 7 new unit tests (`codec.rs`'s
   `caller_supplied_max_len_below_max_decoded_len_is_honored`; `lib.rs`'s
   `decompress_matches_decompress_bounded_at_the_max`,
   `decompress_bounded_rejects_an_lz_frame_over_its_own_tighter_bound`,
   `decompress_bounded_rejects_a_stored_frame_over_its_own_tighter_bound`,
-  `decompress_bounded_clamps_a_max_len_above_max_decoded_len`, plus every
+  `decompress_bounded_clamps_a_max_len_above_max_decoded_len`,
+  `decompress_roundtrips_a_stored_payload_past_max_decoded_len` (the
+  review-flagged boundary, built via `build_frame` directly rather than
+  `compress` to avoid running the LZ encoder over 256+ MiB), plus every
   existing `codec::decode` call site updated for the new parameter,
   including S2-A70's own new `match_distance_beyond_window_is_rejected`
   test landed just ahead of this slice); the bench crate's

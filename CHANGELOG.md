@@ -29,11 +29,15 @@ All notable changes to this project are documented here. Format follows
   raised past it, since that constant is the only value this decoder's
   worst-case decode time has been measured against. `mothergod::decompress`
   is now a thin wrapper around it (`decompress_bounded(input,
-  codec::MAX_DECODED_LEN)`), bit-for-bit unchanged. A first, additive
-  slice of M4's "bounded-memory decode guarantees" line, not the
-  streaming/block API itself, which remains open. No `FORMAT_VERSION`
-  bump: `docs/format/SPEC.md` already documents this ceiling as decoder
-  policy, not a wire-format field.
+  codec::MAX_DECODED_LEN)`), bit-for-bit unchanged: a `Method::Stored`
+  frame is bounded by the new `max_len` check only when a caller opts into
+  a tighter budget than `MAX_DECODED_LEN`, never by the default ceiling
+  alone, since a stored payload's length is read from `input` directly and
+  is never spoofable past it. A first, additive slice of M4's
+  "bounded-memory decode guarantees" line, not the streaming/block API
+  itself, which remains open. No `FORMAT_VERSION` bump:
+  `docs/format/SPEC.md` already documents this ceiling as decoder policy,
+  not a wire-format field.
 
 - `literal::Literal::ideal_cost_bits_column_expert_pair` and
   `codec::ideal_cost_bits_column_expert_experiment`
