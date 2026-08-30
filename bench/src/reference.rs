@@ -120,7 +120,21 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
 /// Returns an error naming `name` if any reference compressor fails on it.
 fn measure_one(name: &str, data: &[u8]) -> Result<FileMeasurement, String> {
     println!("measuring {name} ({} bytes)...", data.len());
-    let mothergod_len = mothergod::compress(data).len();
+    let encode_start = std::time::Instant::now();
+    let mothergod_compressed = mothergod::compress(data);
+    let encode_secs = encode_start.elapsed().as_secs_f64();
+    let mothergod_len = mothergod_compressed.len();
+
+    let decode_start = std::time::Instant::now();
+    let decoded = mothergod::decompress(&mothergod_compressed)
+        .map_err(|err| format!("mothergod::decompress failed on {name}: {err}"))?;
+    let decode_secs = decode_start.elapsed().as_secs_f64();
+    if decoded != data {
+        return Err(format!(
+            "mothergod round-trip mismatch on {name}: decompress(compress(x)) != x"
+        ));
+    }
+
     let gzip_len = compressed_len("gzip", &["-9", "-c"], data)
         .map_err(|err| format!("gzip failed on {name}: {err}"))?;
     let zstd_len = compressed_len("zstd", &["-19", "-c"], data)
@@ -134,6 +148,8 @@ fn measure_one(name: &str, data: &[u8]) -> Result<FileMeasurement, String> {
         gzip_len,
         zstd_len,
         xz_len,
+        encode_secs,
+        decode_secs,
     })
 }
 
@@ -287,6 +303,8 @@ mod tests {
             assert!(m.gzip_len > 0);
             assert!(m.zstd_len > 0);
             assert!(m.xz_len > 0);
+            assert!(m.encode_secs >= 0.0);
+            assert!(m.decode_secs >= 0.0);
         }
     }
 }

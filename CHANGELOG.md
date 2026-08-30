@@ -6,6 +6,20 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `bench`'s held-out-final reports (`docs/benchmarks/canterbury.md`,
+  `silesia.md`) now carry `mothergod encode MB/s` and `mothergod decode
+  MB/s` columns, wall-clock, single-thread, measured on the same run and
+  the same bytes as the existing size columns (issue #364, ROADMAP SPEED
+  scorecard). Decode timing also round-trips `mothergod::decompress` over
+  every measured file, catching a corpus round-trip failure as a measurement
+  error instead of silently reporting on unverified bytes.
+  `docs/benchmarks/canterbury.md` is regenerated with real numbers;
+  `silesia.md` regeneration is a fast-follow (full-corpus run is too slow
+  for a single agent turn, same call `research/JOURNAL.md` S2-A52 already
+  made for Silesia).
+
 ### Changed
 
 - Library public API surface trimmed for 0.1 (ROADMAP M6): `bittree`,
