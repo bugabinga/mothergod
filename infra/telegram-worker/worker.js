@@ -761,14 +761,18 @@ async function commandResult(env, updateId, parsed) {
 // value names the seats that tick wakes. Cadence values move with
 // ADR-0027's allowance lever; a new seat needs both files in one PR,
 // and a changed cadence needs both keys in one PR, because a wrangler
-// cron with no CLOCK key wakes nobody, silently. GitHub's own
+// cron with no CLOCK key wakes nobody, silently. That pairing is a
+// test, not a promise: worker.test.mjs reads wrangler.toml and asserts
+// its crons are exactly these keys. Exported for that test, which
+// derives every cadence fixture from here so moving the lever never
+// edits a third copy of the value. GitHub's own
 // `schedule:` trigger is not an alternative: its runs are attributed
 // to whoever last committed the cron line, a bot actor kills them
 // silently, and most clock edits here are bot-authored by design
 // (incidents 2026-08-23 and 2026-08-27). A dispatch below is
 // attributed to the PAT's owner by API semantics, immune to git blame.
-const CLOCK = {
-  "11 */2 * * *": [
+export const CLOCK = {
+  "11 */4 * * *": [
     // agent-bdfl. `source: cron` lets the seat report
     // TRIGGER_EVENT=schedule downstream, telling a tick from an
     // operator dispatch.
