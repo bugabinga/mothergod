@@ -1,8 +1,8 @@
 name: agent-guard
 description: >-
-  Run gate for all agent workflows. Three independent reasons an agent must
+  Run gate for all agent workflows. Four independent reasons an agent must
   not run this cycle, all reported through the single `paused` output
-  because all three mean the same thing to a workflow step: do not run.
+  because all four mean the same thing to a workflow step: do not run.
 
   1. Global pause (ADR-0004): an open issue labeled `agents-paused` whose
      body may contain `RESUME-AT: <ISO-8601 UTC>`. While such an issue is
@@ -23,6 +23,13 @@ description: >-
      event where "closed" reliably means "already handled" rather than,
      say, an operator closing in disagreement.
 
+  4. Second gear (issue #375, ADR-0039): the allowance projection below
+     misses the reset AND this wake is discretionary, meaning the clock
+     started it because nothing else did. A computed share of those wakes
+     is skipped, evenly spread. Never an operator wake, an alarm, or a
+     reviewer run: those pass `discretionary: false` and are not budget
+     levers.
+
   The same file carries each role's effort level (ADR-0021), emitted as
   `effort_flag`. Empty means the session default. An unrecognized value is
   dropped with a log line rather than failing the run: a typo in a data
@@ -33,7 +40,10 @@ description: >-
   projects the week-average seven-day burn, one reading's utilization over
   the window elapsed so far, against the next reset. When the projection
   misses the reset, it resolves this role's `thrift` block instead of its
-  normal ladder/effort, if `agents/models.json` has one.
+  normal ladder/effort, if `agents/models.json` has one, and skips the wake
+  outright when reason 4 also applies. Thrift is a discount, the skip is the
+  brake: a cheaper model on the same number of wakes does not reduce the
+  number of wakes, and that is what costs (ADR-0039).
   No restore step needed either direction: every wake re-projects from the
   latest reading, so a role graduates back to its normal tier on its own
   once the allowance shows slack, with no PR and no run remembering to do it.
@@ -51,9 +61,17 @@ inputs:
       resolution entirely (emits an empty model_flag).
     required: false
     default: ""
+  discretionary:
+    description: >-
+      'true' when nothing but the clock asked for this run, so the
+      allowance governor may skip it (reason 4). The calling workflow
+      decides, because only it knows what woke it. Default false: a seat
+      that says nothing is on the responsive path.
+    required: false
+    default: "false"
 outputs:
   paused:
-    description: "'true' when this agent must not run: global pause, or no model left"
+    description: "'true' when this agent must not run: pause, stale wake, no model left, or throttled"
     value: ${{ steps.check.outputs.paused }}
   model_flag:
     description: "'--model <id>' for the first available rung, or '' for the action default"
@@ -72,6 +90,8 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         EVENT_ACTION: ${{ github.event.action }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
+        DISCRETIONARY: ${{ inputs.discretionary }}
+        RUN_NUMBER: ${{ github.run_number }}
       run: |
         set -euo pipefail
         paused=false
@@ -115,116 +135,25 @@ runs:
         if [ "$paused" = false ] && [ -n "$ROLE" ]; then
           ledger_body="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-limits --state open --json body --limit 1 --jq '.[0].body // ""')"
           allowance_body="$(gh issue list --repo "$GITHUB_REPOSITORY" --label allowance-state --state open --json body --limit 1 --jq '.[0].body // ""')"
-          resolved="$(ROLE="$ROLE" LEDGER="$ledger_body" ALLOWANCE="$allowance_body" python3 - <<'PY'
-        import json, os, re, sys, time
-
-        role = os.environ["ROLE"]
-        try:
-            roles = json.load(open("agents/models.json"))["roles"]
-        except (OSError, ValueError, KeyError) as exc:
-            # A missing or broken file must not stop the fleet: fall back to
-            # the action defaults, which is the pre-ADR-0018 behavior.
-            print(f"ok|||models.json unreadable ({exc}); using action defaults")
-            sys.exit()
-
-        entry = roles.get(role) or {}
-
-        # Allowance projection (#202, #369): pick this role's `thrift`
-        # ladder/effort when the week-average burn rate would exhaust the
-        # seven-day allowance before it resets. Week-average from ONE
-        # reading, utilization over window elapsed, because a two-reading
-        # delta reads zero exactly during session bursts: back-to-back
-        # sessions space the readings under a minute apart, the utilization
-        # delta falls below reporting precision, and the governor goes
-        # blind when burn peaks (#369). Fails open on any missing or
-        # malformed reading (non-positive rate, lapsed window, no thrift
-        # block for this role) by leaving `entry` as the normal one: a bad
-        # reading must cost one thin cycle at worst, never a stuck one.
-        thrift_reason = ""
-        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("ALLOWANCE", ""), re.S)
-        try:
-            ledger = json.loads(m.group(1)) if m else {}
-            # Pre-#369 ledgers nest the reading under "current"; the flat
-            # object IS the reading now. One .get carries the transition.
-            reading = ledger.get("current", ledger)
-            elapsed = reading["observedAt"] - (reading["resetsAt"] - 604800)
-            rate = reading["utilization"] / elapsed if elapsed > 0 else 0
-            if rate > 0:
-                exhausts_at = reading["observedAt"] + (1.0 - reading["utilization"]) / rate
-                # A reading from a lapsed window has exhausts_at >=
-                # observedAt > resetsAt, so stale ledgers fail open here.
-                if exhausts_at < reading["resetsAt"]:
-                    thrift_reason = (
-                        f"projected exhaustion {time.strftime('%Y-%m-%d %H:%M', time.gmtime(exhausts_at))} UTC "
-                        f"misses reset {time.strftime('%Y-%m-%d %H:%M', time.gmtime(reading['resetsAt']))} UTC "
-                        f"at week-average {rate * 3600 * 100:.2f}%/h"
-                    )
-        except (TypeError, KeyError, ValueError, ZeroDivisionError, AttributeError):
-            pass  # No usable reading yet; run this role at its normal tier.
-
-        if thrift_reason and entry.get("thrift"):
-            entry = entry["thrift"]
-            thrift_reason = f"THRIFT ({thrift_reason})"
-        else:
-            thrift_reason = ""
-
-        ladder = entry.get("ladder") or []
-        # Levels per the Claude Code CLI --effort flag, verified against
-        # `claude --help` on 2026-08-23: low, medium, high, xhigh, max.
-        # "ultracode" was on this list and is NOT a --effort value, so the
-        # guard would have passed it through for the CLI to reject, which
-        # is exactly the "typo takes an agent offline" case the next line
-        # exists to prevent.
-        effort = entry.get("effort") or ""
-        if effort and effort not in ("low", "medium", "high", "xhigh", "max"):
-            print(f"ok|||unknown effort {effort!r} for {role}; ignoring it", file=sys.stderr)
-            effort = ""
-
-        if not ladder:
-            note = "no ladder for this role; using action default model"
-            print(f"ok||{effort}|{note}{' [' + thrift_reason + ']' if thrift_reason else ''}")
-            sys.exit()
-
-        # The ledger is a fenced JSON object mapping model id -> epoch
-        # seconds at which the limit resets. Anything unparseable is
-        # treated as an empty ledger: failing open costs one 429, failing
-        # closed idles an agent for days.
-        limits = {}
-        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("LEDGER", ""), re.S)
-        if m:
-            try:
-                limits = {k: int(v) for k, v in json.loads(m.group(1)).items()}
-            except (ValueError, TypeError, AttributeError):
-                limits = {}
-
-        now = int(time.time())
-        blocked = {k: v for k, v in limits.items() if v > now}
-        for model in ladder:
-            if model not in blocked:
-                note = f"{model} (ladder: {' > '.join(ladder)})"
-                if blocked:
-                    note += f"; limited: {', '.join(sorted(blocked))}"
-                if thrift_reason:
-                    note += f" [{thrift_reason}]"
-                print(f"ok|{model}|{effort}|{note}")
-                sys.exit()
-
-        resets = min(blocked[m] for m in ladder if m in blocked)
-        note = f"every rung limited ({' > '.join(ladder)}); earliest reset {resets}"
-        if thrift_reason:
-            note += f" [{thrift_reason}]"
-        print(f"exhausted|||{note}")
-        PY
-        )"
+          resolved="$(ROLE="$ROLE" LEDGER="$ledger_body" ALLOWANCE="$allowance_body" \
+            python3 .github/scripts/guard-decide.py)"
           IFS='|' read -r status model effort note <<<"$resolved"
-          echo "model: $note"
-          if [ "$status" = exhausted ]; then
-            paused=true
-          else
-            [ -n "$model" ] && model_flag="--model $model"
-            [ -n "$effort" ] && effort_flag="--effort $effort"
-          fi
-          echo "effort: ${effort:-session default}"
+          case "$status" in
+            skip)
+              paused=true
+              echo "$note"
+              ;;
+            exhausted)
+              paused=true
+              echo "model: $note"
+              ;;
+            *)
+              [ -n "$model" ] && model_flag="--model $model"
+              [ -n "$effort" ] && effort_flag="--effort $effort"
+              echo "model: $note"
+              echo "effort: ${effort:-session default}"
+              ;;
+          esac
         fi
 
         echo "paused=$paused" >> "$GITHUB_OUTPUT"

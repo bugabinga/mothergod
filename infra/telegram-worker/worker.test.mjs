@@ -624,36 +624,38 @@ test("Clock ticks (ADR-0035)", async (t) => {
     assert.deepEqual(crons.slice().sort(), Object.keys(CLOCK).sort());
   });
 
-  await t.test("the BDFL tick wakes the seat as a cron wake and logs it", async () => {
-    const setup = harness(() => new Response(null, { status: 204 }));
-    const cron = cronFor("agent-bdfl.yml");
-    await tick(setup, cron);
-    const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
-    assert.match(dispatch.url, /agent-bdfl\.yml/);
-    assert.deepEqual(JSON.parse(dispatch.init.body), {
-      ref: "main",
-      inputs: { source: "cron" },
-    });
-    assert.deepEqual(clocklog(setup), [
-      {
-        cron,
-        at: "2023-11-14T22:13:20.000Z",
-        woke: ["agent-bdfl.yml"],
-        failed: [],
-      },
-    ]);
-  });
-
-  await t.test("heartbeat and deslop ticks dispatch without inputs", async () => {
-    for (const workflow of ["agent-heartbeat.yml", "agent-deslop.yml"]) {
+  await t.test("a tick that wakes a governed seat says it was the clock", async () => {
+    // `source: cron` is load-bearing twice over: the seat reports
+    // TRIGGER_EVENT=schedule downstream, and agent-guard reads it to decide
+    // whether the allowance governor may skip this wake (ADR-0039). Both
+    // seats the governor throttles must carry it, or the second gear is
+    // wired to a lever nothing pulls.
+    for (const workflow of ["agent-bdfl.yml", "agent-heartbeat.yml"]) {
       const setup = harness(() => new Response(null, { status: 204 }));
       const cron = cronFor(workflow);
       await tick(setup, cron);
       const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
       assert.ok(dispatch.url.includes(workflow), `${cron} must wake ${workflow}`);
-      assert.deepEqual(JSON.parse(dispatch.init.body), { ref: "main" });
-      assert.deepEqual(clocklog(setup)[0].woke, [workflow]);
+      assert.deepEqual(JSON.parse(dispatch.init.body), {
+        ref: "main",
+        inputs: { source: "cron" },
+      });
+      assert.deepEqual(clocklog(setup), [
+        { cron, at: "2023-11-14T22:13:20.000Z", woke: [workflow], failed: [] },
+      ]);
     }
+  });
+
+  await t.test("the deslop tick dispatches without inputs", async () => {
+    // Ungoverned by choice: two wakes a day is not where the allowance goes,
+    // and a seat with no `source` input would reject one (ADR-0039).
+    const setup = harness(() => new Response(null, { status: 204 }));
+    const cron = cronFor("agent-deslop.yml");
+    await tick(setup, cron);
+    const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
+    assert.ok(dispatch.url.includes("agent-deslop.yml"), `${cron} must wake the deslopper`);
+    assert.deepEqual(JSON.parse(dispatch.init.body), { ref: "main" });
+    assert.deepEqual(clocklog(setup)[0].woke, ["agent-deslop.yml"]);
   });
 
   await t.test("a failed dispatch is logged as failed, never thrown", async () => {

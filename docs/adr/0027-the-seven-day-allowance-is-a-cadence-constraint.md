@@ -1,6 +1,6 @@
 # ADR-0027: The seven-day allowance is a cadence constraint
 
-Status: accepted · Date: 2026-08-23 · Prompted by the first budget reading (PR #187)
+Status: accepted · Extended by ADR-0039 · Date: 2026-08-23 · Prompted by the first budget reading (PR #187)
 Operational history: [issue #197 migration comment](https://github.com/bugabinga/mothergod/issues/197#issuecomment-5398496944)
 
 ## Context

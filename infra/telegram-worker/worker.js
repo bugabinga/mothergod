@@ -779,8 +779,10 @@ export const CLOCK = {
     { workflow: "agent-bdfl.yml", inputs: { source: "cron" } },
   ],
   "22 */3 * * *": [
-    // agent-heartbeat.
-    { workflow: "agent-heartbeat.yml" },
+    // agent-heartbeat. `source: cron` marks the wake discretionary, so the
+    // allowance governor may skip it (ADR-0039); a human dispatch has no
+    // input and is never skipped.
+    { workflow: "agent-heartbeat.yml", inputs: { source: "cron" } },
   ],
   "37 */12 * * *": [
     // agent-deslop, twice daily, off the other seats' minutes.

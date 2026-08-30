@@ -157,6 +157,11 @@ jobs:
         with:
           token: ${{ github.token }}
           role: bdfl
+          # Only the clock's own tick is the governor's to skip (ADR-0039).
+          # An operator event wake, a Telegram dispatch and an alarm wake all
+          # arrive with a different `source`, and none of them is a budget
+          # lever. Same predicate as TRIGGER_EVENT below, for the same reason.
+          discretionary: ${{ github.event_name == 'workflow_dispatch' && inputs.source == 'cron' }}
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.guard.outputs.paused != 'true'
@@ -223,7 +228,13 @@ jobs:
 
             Cadence (ADR-0015 values, ADR-0035 mechanism): the cron
             lines in infra/telegram-worker/wrangler.toml are the single
-            source of truth for how often you run.
+            source of truth for how often you are woken. They are
+            the ceiling, not the rate: while the allowance
+            projection misses the reset, agent-guard skips a
+            computed share of your clock ticks and says so in the
+            run log (ADR-0039). Operator wakes are never skipped.
+            Do not pull the cron by hand for budget; that lever is
+            the guard's now.
 
             Run modes (operator directive, Telegram, 2026-08-23): decide
             your mode first; it sets the priority order for everything
