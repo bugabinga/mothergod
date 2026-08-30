@@ -2618,7 +2618,10 @@ record.
   with a bounded output buffer, a second obstacle beyond S2-A70's LZ-loop
   precondition, per S2-D4 — decided 2026-08-30: scope the ring-buffer
   decoder to `Identity`/`Delta`/`Bcj` frames, `Transpose` keeps today's
-  whole-buffer path, no `transpose` redesign required.
+  whole-buffer path, no `transpose` redesign required. The decision's own
+  prerequisite (a public predicate so a caller can reason about the split,
+  not a silent fallback) landed as S2-A72. Remaining S1-P7 streaming-mode
+  scope: the ring-buffer decoder itself.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2762,6 +2765,32 @@ record.
   still open: the ring-buffer decoder itself, scoped to
   `Identity`/`Delta`/`Bcj` per the decision above, `Transpose` frames
   keeping today's whole-buffer `undo_filter` path.
+- S2-A72 | ACCEPTED | S2-D4's own named prerequisite: `mothergod::
+  decodes_incrementally(input)`, a new public function that reads a
+  frame's header and (for `Method::Lz`) its 2-byte filter selector, and
+  reports whether the frame's filter choice is one the future ring-buffer
+  decoder will handle (`Identity`/`Delta`/`Bcj`) or not (`Transpose`) —
+  without decoding any of the payload. Ported no archive behavior; this
+  predicate has no precedent, since the archive never bounded decode
+  memory at all. `Method::Stored` always answers `true`: it has no filter
+  step, so nothing about it depends on the split S2-D4 decided. Shares its
+  header parsing with `decompress_bounded` via a new private `parse_header`
+  helper (`MAGIC`/`FORMAT_VERSION`/`Method` dispatch, previously inlined
+  in `decompress_bounded` alone), so the two functions' idea of a
+  well-formed header cannot drift apart. No `FORMAT_VERSION` bump: reads
+  an existing wire field, writes nothing, changes no bit any encoder
+  produces. | 6 new unit tests (`lib.rs`): a `Method::Stored` frame, each
+  of `Identity`/`Delta`/`Bcj` hand-built via a new `lz_frame_header` test
+  helper (which also de-duplicated two existing tests' identical inline
+  header-building), `Transpose`, a malformed filter selector
+  (`Error::Corrupt`), a payload truncated before the filter selector
+  (`Error::Truncated`), and a bad-magic frame proving the shared
+  `parse_header` errors propagate. `cargo x check`: 4 stages green,
+  240 lib tests (up from 234); `baseline_gate check`: 11 cases, no
+  regression, both finals reports fresh — no codec or bitstream path
+  touched. | No bpb measurement: `research/progress.jsonl` records this
+  as `kind: "patch"` with null deltas, it120. Remaining S1-P7
+  streaming-mode scope, unchanged: the ring-buffer decoder itself.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing

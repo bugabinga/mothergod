@@ -38,6 +38,17 @@ All notable changes to this project are documented here. Format follows
   itself, which remains open. No `FORMAT_VERSION` bump:
   `docs/format/SPEC.md` already documents this ceiling as decoder policy,
   not a wire-format field.
+- `mothergod::decodes_incrementally(input)` (`research/JOURNAL.md` S1-P7,
+  S2-D4, ROADMAP M4): reports whether a frame's filter choice would let a
+  future streaming/block decoder produce output in address order with
+  bounded lookback, without decoding anything. `Method::Stored` and
+  `Method::Lz` frames using `Identity`/`Delta`/`Bcj` answer `true`;
+  `Method::Lz` frames using `Transpose` answer `false`, since its decode
+  writes scattered across the whole buffer in column-major order and needs
+  it fully resident. The streaming/block API itself remains open; this is
+  the queryable predicate S2-D4's scoping decision named as a prerequisite,
+  so that API can surface the split explicitly instead of a silent
+  fallback.
 
 ### Changed
 
