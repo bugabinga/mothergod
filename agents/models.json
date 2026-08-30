@@ -44,9 +44,9 @@
       "effort": "xhigh",
       "thrift": {
         "ladder": [
-          "claude-sonnet-5"
+          "claude-opus-5"
         ],
-        "effort": "medium"
+        "effort": "high"
       }
     },
     "deslopper": {
