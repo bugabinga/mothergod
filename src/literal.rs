@@ -283,26 +283,6 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     )
 }
 
-/// Increments `freq[symbol]`/`*total` by `increment`, then halves every
-/// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
-/// rescales down to an impossible-to-code symbol) once `*total` exceeds
-/// `limit`, recomputing `*total` from the halved counts. Shared by
-/// [`Literal::update`]'s six real banks and [`ColumnExpertState`]'s own
-/// bank (`research/JOURNAL.md` S1-P5), so the two never drift on what
-/// "one observation" does to a bank.
-fn rescale_bank(freq: &mut [u32], total: &mut u32, symbol: usize, increment: u32, limit: u32) {
-    freq[symbol] += increment;
-    *total += increment;
-    if *total > limit {
-        let mut new_total = 0u32;
-        for f in freq.iter_mut() {
-            *f = (*f + 1) >> 1;
-            new_total += *f;
-        }
-        *total = new_total;
-    }
-}
-
 /// Measurement-only seventh expert for `research/JOURNAL.md` S1-P5's "does
 /// column identity help, blended in alongside the shipped six" hypothesis
 /// (`crate::codec::ideal_cost_bits_column_expert_experiment`'s only
@@ -466,7 +446,7 @@ impl Literal {
             } else {
                 (DEFAULT_INCREMENT, DEFAULT_LIMIT)
             };
-            rescale_bank(
+            crate::rescale_bank(
                 &mut self.freq[bank * ALPHABET..bank * ALPHABET + ALPHABET],
                 &mut self.total[bank],
                 symbol,
@@ -662,7 +642,7 @@ impl Literal {
         let gradient = LEARNING_RATE * (column_estimate - mixed_estimate) / denominator;
         column_state.weight[weight_index] = (w7 * exp(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT);
 
-        rescale_bank(
+        crate::rescale_bank(
             &mut column_state.freq[column_bank * ALPHABET..column_bank * ALPHABET + ALPHABET],
             &mut column_state.total[column_bank],
             symbol,
