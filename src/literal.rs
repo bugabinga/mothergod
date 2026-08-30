@@ -52,6 +52,8 @@
 //! demotes it to an M5 speed lead, since its speed claim is unmeasured
 //! in this codebase.
 
+use std::num::NonZeroUsize;
+
 use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::sse::Sse;
@@ -281,6 +283,61 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     )
 }
 
+/// Increments `freq[symbol]`/`*total` by `increment`, then halves every
+/// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
+/// rescales down to an impossible-to-code symbol) once `*total` exceeds
+/// `limit`, recomputing `*total` from the halved counts. Shared by
+/// [`Literal::update`]'s six real banks and [`ColumnExpertState`]'s own
+/// bank (`research/JOURNAL.md` S1-P5), so the two never drift on what
+/// "one observation" does to a bank.
+fn rescale_bank(freq: &mut [u32], total: &mut u32, symbol: usize, increment: u32, limit: u32) {
+    freq[symbol] += increment;
+    *total += increment;
+    if *total > limit {
+        let mut new_total = 0u32;
+        for f in freq.iter_mut() {
+            *f = (*f + 1) >> 1;
+            new_total += *f;
+        }
+        *total = new_total;
+    }
+}
+
+/// Measurement-only seventh expert for `research/JOURNAL.md` S1-P5's "does
+/// column identity help, blended in alongside the shipped six" hypothesis
+/// (`crate::codec::ideal_cost_bits_column_expert_experiment`'s only
+/// caller, via [`Literal::ideal_cost_bits_column_expert_pair`]). Not part
+/// of [`Literal`]'s own persisted state and never constructed by
+/// `encode`/`decode`: a column-keyed frequency bank plus its own single
+/// mixing weight per weight-context key (the same key `Literal`'s own six
+/// weight vectors are indexed by), adapting on its own trajectory
+/// alongside, never inside, the six real experts' weights.
+#[derive(Debug, Clone)]
+pub struct ColumnExpertState {
+    /// `max_banks * ALPHABET` frequencies, bank-major (same convention as
+    /// [`Literal::freq`]).
+    freq: Vec<u32>,
+    /// Per-bank frequency totals, same invariant as [`Literal::total`].
+    total: Vec<u32>,
+    /// This one expert's own mixing weight, one per [`WEIGHT_CONTEXTS`]
+    /// key.
+    weight: Vec<f64>,
+}
+
+impl ColumnExpertState {
+    /// A fresh column-expert state: every bank starts at frequency 1 per
+    /// symbol (the same Laplace floor [`Literal::new`] starts its six
+    /// experts at), every weight starts at 1.0 (equally trusted).
+    #[must_use]
+    pub fn new(max_banks: NonZeroUsize) -> Self {
+        Self {
+            freq: vec![1u32; max_banks.get() * ALPHABET],
+            total: vec![ALPHABET_U32; max_banks.get()],
+            weight: vec![1.0; WEIGHT_CONTEXTS],
+        }
+    }
+}
+
 /// Six-expert context-mixing model over literal bytes. See the module
 /// docs for the port source and the open `f64` determinism question.
 #[derive(Debug, Clone)]
@@ -409,16 +466,13 @@ impl Literal {
             } else {
                 (DEFAULT_INCREMENT, DEFAULT_LIMIT)
             };
-            self.freq[bank * ALPHABET + symbol] += increment;
-            self.total[bank] += increment;
-            if self.total[bank] > limit {
-                let mut total = 0u32;
-                for f in &mut self.freq[bank * ALPHABET..bank * ALPHABET + ALPHABET] {
-                    *f = (*f + 1) >> 1;
-                    total += *f;
-                }
-                self.total[bank] = total;
-            }
+            rescale_bank(
+                &mut self.freq[bank * ALPHABET..bank * ALPHABET + ALPHABET],
+                &mut self.total[bank],
+                symbol,
+                increment,
+                limit,
+            );
         }
     }
 
@@ -504,6 +558,121 @@ impl Literal {
         let bits = bittree::ideal_cost_bits_sse(&cum, byte, &mut self.sse);
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
         bits
+    }
+
+    /// `research/JOURNAL.md` S1-P5, before-wiring measurement: prices
+    /// `byte` twice from the same pre-update six-expert state, the paired
+    /// methodology S2-R6 used for S1-P3's escape fallback — once under the
+    /// shipped mix ([`Self::ideal_cost_bits`] exactly, including its own
+    /// `update` call, so the six real experts adapt on their one real
+    /// trajectory regardless of this method ever being called), once with
+    /// `column_state`'s bank blended in as a seventh expert. `column_state`
+    /// adapts on its own trajectory: its bank observes `byte` the same way
+    /// [`Self::update`]'s five default-rate experts do, and its one mixing
+    /// weight adapts toward whichever side — its own local estimate vs. the
+    /// seven-expert blend — predicted `byte` better, independent of the six
+    /// real weights (never written back into `self.weights`).
+    ///
+    /// Returns `(baseline_bits, with_column_bits)`.
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits_column_expert_pair(
+        &mut self,
+        context: Context,
+        byte: u8,
+        column_bank: usize,
+        column_state: &mut ColumnExpertState,
+    ) -> (f64, f64) {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+
+        let weights6 = self.weights[weight_index];
+        let w7 = column_state.weight[weight_index];
+        let weight_sum = weights6.iter().sum::<f64>() + w7;
+
+        // Seven-wide fixed-point blend, mirroring `mix`'s own shape with
+        // one more expert, over the pre-update state both prices below
+        // share.
+        let mut scale6 = [0u64; EXPERTS];
+        for expert in 0..EXPERTS {
+            let normalized = weights6[expert] / weight_sum;
+            let bank_total = f64::from(self.total[bank_indices[expert]]);
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "same fixed-point scale factor mix() uses: normalized weight is in (0,1], bank_total > 0"
+            )]
+            {
+                scale6[expert] = ((normalized * FIXED_POINT_SCALE) / bank_total) as u64;
+            }
+        }
+        let column_total = f64::from(column_state.total[column_bank]);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "same fixed-point scale factor mix() uses: normalized weight is in (0,1], column_total > 0"
+        )]
+        let scale7 = (((w7 / weight_sum) * FIXED_POINT_SCALE) / column_total) as u64;
+
+        let mut total_mixed = 0u64;
+        let mut symbol_mixed = 0u64;
+        for s in 0..ALPHABET {
+            let mut mixed = 0u64;
+            for expert in 0..EXPERTS {
+                let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + s]);
+                mixed += scale6[expert] * freq;
+            }
+            let freq7 = u64::from(column_state.freq[column_bank * ALPHABET + s]);
+            mixed += scale7 * freq7;
+            let contribution = (mixed >> 16) + 1;
+            total_mixed += contribution;
+            if s == symbol {
+                symbol_mixed = contribution;
+            }
+        }
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "same bound as ideal_cost_bits: fixed-point sums stay well under 2^53"
+        )]
+        let with_column_probability = symbol_mixed as f64 / total_mixed as f64;
+        let with_column_bits = -with_column_probability.log2();
+
+        // The column expert's own weight adapts on the same continuous-
+        // probability-space rule Self::update uses for the six real
+        // weights, restricted to this one component: how well its own
+        // local estimate did against the seven-expert blend.
+        let column_estimate =
+            f64::from(column_state.freq[column_bank * ALPHABET + symbol]) / column_total;
+        let mut estimate6 = [0f64; EXPERTS];
+        for (expert, &bank) in bank_indices.iter().enumerate() {
+            estimate6[expert] =
+                f64::from(self.freq[bank * ALPHABET + symbol]) / f64::from(self.total[bank]);
+        }
+        let mixed_estimate = (weights6
+            .iter()
+            .zip(estimate6.iter())
+            .map(|(&w, &e)| w * e)
+            .sum::<f64>()
+            + w7 * column_estimate)
+            / weight_sum;
+        let denominator = mixed_estimate.max(MIN_DENOMINATOR);
+        let gradient = LEARNING_RATE * (column_estimate - mixed_estimate) / denominator;
+        column_state.weight[weight_index] = (w7 * exp(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT);
+
+        rescale_bank(
+            &mut column_state.freq[column_bank * ALPHABET..column_bank * ALPHABET + ALPHABET],
+            &mut column_state.total[column_bank],
+            symbol,
+            DEFAULT_INCREMENT,
+            DEFAULT_LIMIT,
+        );
+
+        let baseline_bits = self.ideal_cost_bits(context, byte);
+
+        (baseline_bits, with_column_bits)
     }
 
     /// Decodes one byte from `decoder` under `context`, then updates the
@@ -977,5 +1146,82 @@ mod tests {
             "vendored exp: {vendored_bytes} bytes vs f64::exp reference: {reference_bytes} \
              bytes, {relative_diff:.4} relative difference exceeds the 1% budget (ADR-0024)"
         );
+    }
+
+    #[test]
+    fn column_expert_state_new_starts_at_the_laplace_floor() {
+        let state = ColumnExpertState::new(crate::test_support::nz(4));
+        assert_eq!(state.freq.len(), 4 * ALPHABET);
+        assert!(state.freq.iter().all(|&f| f == 1));
+        assert_eq!(state.total, vec![ALPHABET_U32; 4]);
+        assert_eq!(state.weight, vec![1.0; WEIGHT_CONTEXTS]);
+    }
+
+    #[test]
+    fn column_expert_pair_baseline_matches_plain_ideal_cost_bits() {
+        // The pair's baseline side is Self::ideal_cost_bits verbatim
+        // (`Self::ideal_cost_bits_column_expert_pair`'s own docs): walking
+        // a model through the paired method must land on exactly the same
+        // per-byte costs and exactly the same six-expert state a model
+        // walked through plain `ideal_cost_bits` alone would, byte for
+        // byte, with column_state along for the ride.
+        let mut paired = Literal::new();
+        let mut plain = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
+        let mut context = Context::default();
+        for &b in b"the quick brown fox jumps over the lazy dog" {
+            let (baseline, _) =
+                paired.ideal_cost_bits_column_expert_pair(context, b, 0, &mut column_state);
+            let expected = plain.ideal_cost_bits(context, b);
+            assert!(
+                (baseline - expected).abs() < 1e-9,
+                "byte {b:?}: paired baseline {baseline} vs plain {expected}"
+            );
+            context = context.after_literal(b);
+        }
+    }
+
+    #[test]
+    fn column_expert_pair_updates_only_its_own_column_bank() {
+        let mut model = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
+        let context = Context::default();
+        let _ = model.ideal_cost_bits_column_expert_pair(context, b'x', 2, &mut column_state);
+
+        let bank2_total: u32 = column_state.freq[2 * ALPHABET..3 * ALPHABET].iter().sum();
+        assert_eq!(bank2_total, column_state.total[2]);
+        assert_eq!(
+            column_state.freq[2 * ALPHABET + usize::from(b'x')],
+            1 + DEFAULT_INCREMENT
+        );
+        for other in [0usize, 1, 3] {
+            assert!(
+                column_state.freq[other * ALPHABET..(other + 1) * ALPHABET]
+                    .iter()
+                    .all(|&f| f == 1)
+            );
+            assert_eq!(column_state.total[other], ALPHABET_U32);
+        }
+    }
+
+    #[test]
+    fn column_expert_pair_costs_stay_finite_and_positive() {
+        let mut model = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(8));
+        let mut context = Context::default();
+        for (i, &b) in b"0123456789abcdefghijklmnopqrstuvwxyz".iter().enumerate() {
+            let bank = i % 8;
+            let (baseline, with_column) =
+                model.ideal_cost_bits_column_expert_pair(context, b, bank, &mut column_state);
+            assert!(
+                baseline.is_finite() && baseline > 0.0,
+                "baseline={baseline}"
+            );
+            assert!(
+                with_column.is_finite() && with_column > 0.0,
+                "with_column={with_column}"
+            );
+            context = context.after_literal(b);
+        }
     }
 }

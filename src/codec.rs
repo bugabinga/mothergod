@@ -52,12 +52,13 @@
 //! sums): the whole-codec `-log2(p)` pass across the flag/length/offset/slot
 //! streams and literal bytes together, without touching an [`Encoder`].
 
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::Error;
 use crate::coder::{Decoder, Encoder};
+use crate::column;
 use crate::filters::{self, select::Candidate};
-use crate::literal::{Context, Literal};
+use crate::literal::{ColumnExpertState, Context, Literal};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
 
@@ -397,6 +398,97 @@ pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
     let mut sink = CostSink::default();
     walk_tokens(&tokens, data, &mut models, &mut sink);
     sink.bits
+}
+
+/// `research/JOURNAL.md` S1-P5's paired measurement, [`walk_tokens`]'s use
+/// in [`ideal_cost_bits_column_expert_experiment`]: sums the same
+/// flag/length/offset/slot costs [`CostSink`] does, so any delta between
+/// `baseline_bits` and `with_column_bits` is attributable to the literal
+/// model alone, and prices every literal byte twice via
+/// [`Literal::ideal_cost_bits_column_expert_pair`] — the shipped six-expert
+/// mix, and the same mix with `column_state`'s bank blended in as a
+/// seventh expert, keyed by [`column::column_bank`] of
+/// [`column::column_of`]'s result for that byte's position in `data`.
+struct ColumnExpertCostSink<'a> {
+    data: &'a [u8],
+    columns: NonZeroUsize,
+    max_banks: NonZeroUsize,
+    column_state: &'a mut ColumnExpertState,
+    baseline_bits: f64,
+    with_column_bits: f64,
+}
+
+impl TokenSink for ColumnExpertCostSink<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
+        let bits = models.flag[flag_table].ideal_cost_bits(kind);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        let column = column::column_of(context.position, self.columns, self.data.len());
+        let bank = column::column_bank(column, self.max_banks);
+        let (baseline, with_column) = models.literal.ideal_cost_bits_column_expert_pair(
+            context,
+            byte,
+            bank,
+            self.column_state,
+        );
+        self.baseline_bits += baseline;
+        self.with_column_bits += with_column;
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        let bits = ideal_cost_bucketed(&mut models.length, value);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        let bits = ideal_cost_bucketed(&mut models.offset, value);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        let bits = models.slot.ideal_cost_bits(symbol);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+}
+
+/// `research/JOURNAL.md` S1-P5's before-wiring measurement: pairs a
+/// baseline ideal cost against the same walk with a seventh, column-keyed
+/// literal expert blended in
+/// ([`Literal::ideal_cost_bits_column_expert_pair`]), isolating any delta
+/// to the literal model alone (flag/length/offset/slot price identically
+/// on both sides). `columns`/`max_banks` mirror
+/// [`column::column_of`]/[`column::column_bank`]'s own parameters; `data`
+/// is already-filtered, the same contract [`ideal_cost_bits`] has — if the
+/// candidate under test is [`Candidate::Transpose`], `data` is the
+/// already-transposed bytes. Not reachable from [`encode`]/[`decode`]: no
+/// `Method`/`FORMAT_VERSION` wiring, measurement only.
+///
+/// Returns `(baseline_bits, with_column_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_column_expert_experiment(
+    data: &[u8],
+    columns: NonZeroUsize,
+    max_banks: NonZeroUsize,
+) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut column_state = ColumnExpertState::new(max_banks);
+    let mut sink = ColumnExpertCostSink {
+        data,
+        columns,
+        max_banks,
+        column_state: &mut column_state,
+        baseline_bits: 0.0,
+        with_column_bits: 0.0,
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.baseline_bits, sink.with_column_bits)
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
@@ -872,6 +964,39 @@ mod tests {
             repetitive_bpb < random_bpb / 2.0,
             "repetitive data's ideal cost ({repetitive_bpb} bits/byte) should be far below \
              random data's ({random_bpb} bits/byte)"
+        );
+    }
+
+    #[test]
+    fn ideal_cost_bits_column_expert_experiment_is_zero_on_empty_input() {
+        let (baseline, with_column) = ideal_cost_bits_column_expert_experiment(
+            b"",
+            crate::test_support::nz(4),
+            crate::test_support::nz(4),
+        );
+        assert!(baseline.abs() < 1e-9);
+        assert!(with_column.abs() < 1e-9);
+    }
+
+    #[test]
+    fn ideal_cost_bits_column_expert_experiment_stays_finite_and_positive() {
+        // research/JOURNAL.md S1-P5: no accuracy claim here, just that the
+        // paired walk runs to completion and both totals land somewhere
+        // sane — the actual accept/reject verdict is a train/sealed
+        // measurement recorded in the journal, not a unit test assertion.
+        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+        let (baseline, with_column) = ideal_cost_bits_column_expert_experiment(
+            data,
+            crate::test_support::nz(16),
+            crate::test_support::nz(16),
+        );
+        assert!(
+            baseline.is_finite() && baseline > 0.0,
+            "baseline={baseline}"
+        );
+        assert!(
+            with_column.is_finite() && with_column > 0.0,
+            "with_column={with_column}"
         );
     }
 

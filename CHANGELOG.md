@@ -8,6 +8,23 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `literal::Literal::ideal_cost_bits_column_expert_pair` and
+  `codec::ideal_cost_bits_column_expert_experiment`
+  (`research/JOURNAL.md` S1-P5, S2-A69, ROADMAP M3's fifth standing
+  lead): before-wiring measurement of whether a column-index-keyed
+  literal expert helps blended into the shipped six-expert mix as a
+  seventh, rather than replacing it (S2-R8 falsified the replacement).
+  Prices every literal byte twice from the same pre-update six-expert
+  state, so the six real experts adapt on their one real trajectory
+  regardless of whether this path runs; the new `ColumnExpertState`
+  adapts a column-keyed bank and its own single mixing weight on an
+  independent trajectory. Deliberately pre-SSE, a separable question for
+  the real wiring slice. Not wired into `Method`/`FORMAT_VERSION`:
+  measurement only, no bpb change to the shipped codec, covered by
+  focused unit tests. `Literal::update`'s inline frequency-rescale loop
+  is now the shared `rescale_bank` free function this new method also
+  uses, behavior-preserving.
+
 - `bench`'s held-out-final reports (`docs/benchmarks/canterbury.md`,
   `silesia.md`) now carry `mothergod encode MB/s` and `mothergod decode
   MB/s` columns, wall-clock, single-thread, measured on the same run and

@@ -2509,11 +2509,96 @@ record.
   the shipped mixer before spending the wiring slice — rejected, a
   column-keyed model *replacing* `Literal` loses more from discarding
   order-1/SSE adjacency than a column-boundary signal alone gains.
-  Remaining scope: whether column identity helps as one *more* expert
-  blended alongside the existing six, not a replacement for them, is
-  still untested — that needs the actual column-index-keyed expert bank
-  in `Literal`, threading the `columns` parameter filter selection
-  already knows down to it, and a `FORMAT_VERSION` bump.
+  Remaining scope, at the time: whether column identity helps as one
+  *more* expert blended alongside the existing six, not a replacement for
+  them, is still untested — that needs the actual column-index-keyed
+  expert bank in `Literal`, threading the `columns` parameter filter
+  selection already knows down to it, and a `FORMAT_VERSION` bump.
+  Fourth slice, S2-A69: answered that question via the same
+  before-wiring ideal-cost pairing methodology S2-R6/S2-R8 used, this
+  time blending a column-keyed seventh expert *into* the shipped mix
+  (`Literal::ideal_cost_bits_column_expert_pair`) instead of replacing
+  it, sharing the six real experts' one adaptation trajectory
+  ([`Literal::ideal_cost_bits`] runs unmodified inside the paired call)
+  and letting the seventh expert's own bank and single mixing weight
+  adapt on an independent trajectory. Deliberately scoped pre-SSE: this
+  measures the raw seven-expert mix, not its interaction with the
+  `FORMAT_VERSION` 3 SSE calibration stage (S1-P1), a separable question
+  for the real wiring slice. Accepted, at this pre-wiring, pre-SSE
+  measurement layer: train improved on both cases, sealed did not
+  regress (numbers in S2-A69's own entry). Remaining S1-P5 scope: the
+  real wiring (`FORMAT_VERSION` bump, threading `columns` from filter
+  selection into `Literal`, deciding how the seventh expert interacts
+  with SSE calibration) and a real-bitstream measurement to confirm this
+  ideal-cost signal survives contact with the actual coder.
+- S2-A69 | ACCEPTED | Fourth slice of ROADMAP M3's fifth standing lead
+  (S1-P5, per-column modeling after transpose): before spending the real
+  `Literal`/`Method`/`FORMAT_VERSION` wiring slice S2-A64/S2-A66 left as
+  remaining scope, and after S2-R8 falsified "column identity alone beats
+  the shipped mixer" (not "column identity, blended in as a seventh
+  expert alongside the other six, ever helps"), measured the narrower
+  hypothesis S2-R8's own entry named. Hypothesis: blending a
+  `column::column_bank(column::column_of(position, columns, len),
+  max_banks)`-keyed expert into `Literal`'s six-expert mix as a seventh,
+  rather than replacing it, reduces ideal-cost bits/byte on
+  already-transposed column-structured data without regressing the
+  sealed case. New `Literal::ideal_cost_bits_column_expert_pair`: prices
+  each literal byte twice from the same pre-update six-expert state —
+  once as `Self::ideal_cost_bits` exactly (shared trajectory, including
+  its own `update` call, so the six real experts adapt identically to
+  production regardless of this method ever running), once with a new
+  `ColumnExpertState`'s bank blended in via a seven-wide fixed-point mix
+  mirroring `mix`'s own shape. `ColumnExpertState` adapts on its own
+  trajectory: its bank observes the byte the same `rescale_bank` free
+  function (extracted from `Literal::update`'s previously inline rescale
+  loop, behavior-preserving, existing tests unchanged) uses for the five
+  default-rate real experts, and its one mixing weight adapts via the
+  same continuous-probability-space exponentiated-gradient rule
+  `Literal::update` uses, restricted to this one component, never written
+  back into the six real weights. `codec::
+  ideal_cost_bits_column_expert_experiment` pairs this against the shared
+  flag/length/offset/slot costs the same way `CostSink` prices them, so
+  any delta is attributable to the literal model alone. Deliberately
+  pre-SSE (measures the raw seven-expert mix, not its interaction with
+  `FORMAT_VERSION` 3's SSE calibration stage): a separable question left
+  for the real wiring slice, not this one. | Measured (model-cost, not
+  real-bitstream; `bench` crate generators; git revision at time of run):
+  train, the same rotated-window shape S2-R8 used (150,000 generated
+  bytes, 50,000-byte window at offset 50,000, train seed
+  `0xC01D_BEEF_1234_5678`) — `sqlite_like_records` (columns=20): baseline
+  3.285756 -> with-column 3.253262 bpb, **-0.032494**. `interleaved_audio16`
+  (columns=2): baseline 5.796946 -> with-column 5.775128 bpb,
+  **-0.021819**. Sealed: `gradient_image` (columns=200, `sealed_seed` of
+  the same train seed, not rotated, 50,000 bytes): baseline 6.069871 ->
+  with-column 6.068199 bpb, **-0.001672** (an improvement, not a
+  regression). Every case improved; corpus policy's accept rule (train
+  improvement AND no validation regression) passes on both halves.
+  Baseline numbers here are not directly comparable to S2-R8's own quoted
+  baseline (that measurement went through the SSE-calibrated whole-codec
+  `codec::ideal_cost_bits`; this one is deliberately pre-SSE, per the
+  scoping note above) — same order of magnitude (sqlite_like_records
+  3.285756 here vs 3.266457 there), which is a sanity check on the
+  harness, not a claim of equivalence. | Mechanism: unlike S2-R8's
+  histogram-only replacement, this seventh expert never displaces the
+  six real experts' order-1/SSE-adjacent evidence — it only adds one more
+  signal the exponentiated-gradient mixer is free to downweight if it is
+  not useful at a given context. The gradient_image case, which paid the
+  worst tax in S2-R8's replacement (+2.075129 bpb), essentially breaks
+  even here (-0.001672), consistent with "the column-boundary signal is
+  real but narrow" — small enough to add for free once it does not have
+  to compete for the whole prediction, not large enough to move a case
+  dominated by within-column order-1 drift. Candidate code (`ColumnExpertState`,
+  `Literal::ideal_cost_bits_column_expert_pair`, the `rescale_bank`
+  extraction, `codec::ideal_cost_bits_column_expert_experiment`, their
+  unit tests) kept: this is an accepted step at the ideal-cost-pairing
+  layer, the same status S2-A58 held for S1-P1 before its own SSE wiring
+  landed. The manual driver
+  (`bench/src/bin/scratch_column_expert_experiment.rs`) that ran this
+  measurement is not: deleted after recording these numbers, same as
+  every prior scratch driver regardless of verdict, since the numbers it
+  produced are now this entry, not a rerunnable tool. `research/
+  progress.jsonl` it117. Remaining S1-P5 scope: see the updated S1-P5
+  entry above.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
   Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
