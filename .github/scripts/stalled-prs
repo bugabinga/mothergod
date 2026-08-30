@@ -36,9 +36,13 @@ Signatures, most specific first, at most one reported per PR:
                          evaluates `blocked` while the REST merge succeeds
                          (first hit PR #84).
 
-Each line names its rescue by reference. The recipes themselves stay in
-agents/GOVERNANCE.md "Stalled auto-merge", because a procedure kept in two
-places drifts in one of them.
+A rescue of more than a command or two names its recipe by reference, and
+that recipe lives in agents/GOVERNANCE.md "Stalled auto-merge" and nowhere
+else, because a multi-step procedure kept in two places drifts in one of
+them. The two single-command rescues state the command inline instead:
+sending a reader to a document to be told `gh pr reopen` is ceremony, and
+GOVERNANCE's copy of those two is the explanation of why the PR stalled,
+not a second copy of the command.
 
 Deliberately NOT reported, said plainly so nothing claims a completeness it
 lacks. A PR labeled `blocked-on-human` is parked on purpose, and suppressing
