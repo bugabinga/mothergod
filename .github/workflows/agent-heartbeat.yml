@@ -3,13 +3,13 @@
 name: agent-heartbeat
 
 on:
-  # Two-hourly (ADR-0015; ADR-0027 restated the revert target), off the
-  # hour and off :11/:37 so it collides with neither the BDFL's cadence
-  # nor the deslopper's. #186 wakes this seat whenever a review verdict
-  # lands, so the clock only has to cover the case where nothing
-  # happened at all. The clock is the Telegram worker's cron
-  # (ADR-0035); the lines in infra/telegram-worker/wrangler.toml are
-  # the cadence's source of truth. Never a native `schedule:` trigger
+  # Scheduled off the hour and off :11/:37 so it collides with neither
+  # the BDFL's minutes nor the deslopper's. #186 wakes this seat
+  # whenever a review verdict lands, so the clock only has to cover
+  # the case where nothing happened at all. The clock is the Telegram
+  # worker's cron (ADR-0035); the lines in
+  # infra/telegram-worker/wrangler.toml are the cadence's source of
+  # truth, moved by ADR-0027's allowance lever. Never a native `schedule:` trigger
   # here: a bot-authored commit to this file (which happens most days)
   # flips the schedule-run's actor to `claude[bot]`, and the OIDC
   # app-token exchange hard-rejects that actor before the job even

@@ -904,7 +904,7 @@ export default {
     // Wake the BDFL. The dispatch carries no message text (issue #36
     // principle): it says "wake up", the run reads KV for the prose.
     // Dispatch failure is tolerable: the update is already in KV and
-    // the hourly schedule (ADR-0015) is the backstop.
+    // the next scheduled tick (ADR-0035) is the backstop.
     const res = await fetch(
       `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/agent-bdfl.yml/dispatches`,
       {

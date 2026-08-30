@@ -1,15 +1,15 @@
 # BDFL driver: the project director (ADR-0005, cadence ADR-0007).
 # Unblocks, prunes, reprioritizes, and evolves the processes themselves —
-# without approval ceremony, but always with a written record. Runs every
-# hour; most runs are cheap delta checks, the Sunday-morning run is
-# the weekly deep survey with the full scorecard.
+# without approval ceremony, but always with a written record. Most
+# scheduled runs are cheap delta checks; the first Sunday wake without
+# a digest runs the weekly deep survey with the full scorecard.
 name: agent-bdfl
 
 on:
-  # Hourly (ADR-0015), 06:11 UTC Sunday is the deep run. The clock is
-  # the Telegram worker's cron (ADR-0035); the lines in
+  # The clock is the Telegram worker's cron (ADR-0035); the lines in
   # infra/telegram-worker/wrangler.toml are the cadence's source of
-  # truth. Never a native `schedule:` trigger here: GitHub attributes a
+  # truth, moved by ADR-0027's allowance lever. Never a native
+  # `schedule:` trigger here: GitHub attributes a
   # schedule run to whoever it decides last touched this bot-edited
   # file, and the OIDC app-token exchange hard-rejects a bot actor
   # before a single line of this prompt runs. The worker dispatches on
