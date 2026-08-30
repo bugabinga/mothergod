@@ -358,6 +358,19 @@ impl Literal {
         cum
     }
 
+    /// [`banks`] plus [`Self::mix`] in one call: every coding/pricing method
+    /// below starts by selecting `context`'s bank indices and weight
+    /// context, then blending them into a mixed cumulative-frequency table,
+    /// before doing whatever is specific to that method and, eventually,
+    /// calling [`Self::update`] with the same `bank_indices`/`weight_index`.
+    /// One place for that shared prelude keeps the six call sites from
+    /// drifting if `banks` or `mix` ever change.
+    fn banks_and_cum(&self, context: Context) -> ([usize; EXPERTS], usize, [u64; ALPHABET + 1]) {
+        let (bank_indices, weight_index) = banks(context);
+        let cum = self.mix(&bank_indices, weight_index);
+        (bank_indices, weight_index, cum)
+    }
+
     /// Adapts mixing weights toward whichever experts predicted `symbol`
     /// best (exponentiated gradient, Mahoney 2005), then updates every
     /// expert's own frequency table the same way
@@ -412,8 +425,7 @@ impl Literal {
     /// Codes `byte` through `encoder` under `context`, then updates
     /// every expert bank and the mixing weights.
     pub fn encode(&mut self, encoder: &mut Encoder, context: Context, byte: u8) {
-        let (bank_indices, weight_index) = banks(context);
-        let cum = self.mix(&bank_indices, weight_index);
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let symbol = usize::from(byte);
         encoder.encode(cum[symbol], cum[symbol + 1], cum[ALPHABET]);
         self.update(&bank_indices, weight_index, symbol, exp);
@@ -428,8 +440,7 @@ impl Literal {
     /// [`Self::encode`] leaves it: `update` runs unconditionally after the
     /// symbol is coded, regardless of which coding path chose it.
     pub fn encode_sse(&mut self, encoder: &mut Encoder, context: Context, byte: u8) {
-        let (bank_indices, weight_index) = banks(context);
-        let cum = self.mix(&bank_indices, weight_index);
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         bittree::encode_symbol_sse(encoder, &cum, byte, &mut self.sse);
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
     }
@@ -444,8 +455,7 @@ impl Literal {
     /// (`mix`'s Laplace floor), never derived from `decoder`'s bytes.
     #[must_use]
     pub fn decode_sse(&mut self, decoder: &mut Decoder, context: Context) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let cum = self.mix(&bank_indices, weight_index);
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let byte = bittree::decode_symbol_sse(decoder, &cum, &mut self.sse);
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
         byte
@@ -464,8 +474,7 @@ impl Literal {
         reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
     )]
     pub fn ideal_cost_bits(&mut self, context: Context, byte: u8) -> f64 {
-        let (bank_indices, weight_index) = banks(context);
-        let cum = self.mix(&bank_indices, weight_index);
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let symbol = usize::from(byte);
         #[allow(
             clippy::cast_precision_loss,
@@ -491,8 +500,7 @@ impl Literal {
         reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
     )]
     pub fn ideal_cost_bits_sse(&mut self, context: Context, byte: u8) -> f64 {
-        let (bank_indices, weight_index) = banks(context);
-        let cum = self.mix(&bank_indices, weight_index);
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let bits = bittree::ideal_cost_bits_sse(&cum, byte, &mut self.sse);
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
         bits
@@ -510,8 +518,7 @@ impl Literal {
     /// past the table.
     #[must_use]
     pub fn decode(&mut self, decoder: &mut Decoder, context: Context) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let cum = self.mix(&bank_indices, weight_index);
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let total = cum[ALPHABET];
         let target = decoder.target(total);
         let mut symbol = 0usize;
@@ -946,8 +953,7 @@ mod tests {
             let mut context = Context::default();
             let mut enc = Encoder::new();
             for &b in corpus {
-                let (bank_indices, weight_index) = banks(context);
-                let cum = model.mix(&bank_indices, weight_index);
+                let (bank_indices, weight_index, cum) = model.banks_and_cum(context);
                 let symbol = usize::from(b);
                 enc.encode(cum[symbol], cum[symbol + 1], cum[ALPHABET]);
                 model.update(&bank_indices, weight_index, symbol, exp_fn);
