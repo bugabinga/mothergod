@@ -2613,7 +2613,10 @@ record.
   thread from S2-A70's ring-buffer precondition: S2-A71
   (`mothergod::decompress_bounded`, a caller-configurable ceiling below
   `codec::MAX_DECODED_LEN`, not the streaming/block API itself either).
-  Streaming mode and frozen format spec v1 remain untouched.
+  Streaming mode and frozen format spec v1 remain untouched; streaming
+  mode's ring-buffer design also depends on how filter-undo interacts
+  with a bounded output buffer, a second obstacle beyond S2-A70's LZ-loop
+  precondition, per S2-D4.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2712,6 +2715,34 @@ record.
   itself (this slice is bounded-memory-decode only, still a single-shot
   whole-buffer call, same as S2-A70's ring-buffer precondition being
   unwired) and the frozen format spec v1.
+- S2-D4 | DEBT | Issue #380: streaming decode (S1-P7's streaming-mode
+  half, ROADMAP M4) is blocked by more than the LZ token loop. `codec::
+  decode` calls `undo_filter(candidate, output)` once, after the token
+  loop finishes, over the complete buffer. S2-A70's `WINDOW` guard makes
+  the token loop itself close to streamable — nothing before
+  `output.len() - WINDOW` can ever be referenced again — but
+  `undo_filter`'s four candidates aren't uniformly streaming-compatible:
+  `filters::delta::decode` and `filters::bcj::decode` are sequential with
+  small fixed lookback (a stride, or the 5-byte call/jmp instruction),
+  but `filters::transpose::decode` writes `out[i]` scattered across the
+  *entire* buffer in column-major order (`for start in 0..columns { ...
+  out[i] = data[pos]; i += columns }`) — output isn't produced in address
+  order even though the total length is known upfront, so a sequential
+  `Write` sink can't consume it incrementally; it needs either full
+  buffering or a seekable sink. `Candidate::Transpose` isn't a rare
+  corner case: `filters::select::pick` shortlists it whenever a probe's
+  column-wise order-1 entropy beats identity/delta/BCJ (fixed-record-width
+  data, `JOURNAL` S1-A2's x-ray dataset), so a streaming design that only
+  handles the LZ loop would silently stop bounding memory whenever the
+  encoder picked `Transpose` — a leaky guarantee a caller can't reason
+  about, since filter choice is an internal encoder heuristic. Named fix,
+  either: (1) redesign `transpose` to decode against a seekable/blocked
+  sink, or (2) scope true streaming decode to `Identity`/`Delta`/`Bcj`
+  frames only, falling back to today's whole-buffer path for `Transpose`
+  and documenting the split precisely in the public API. No code changed;
+  investigation only, while scoping S1-P7's top-of-list slice before
+  committing to one. | Remaining S1-P7 streaming-mode scope, in addition
+  to S2-A70's named ring-buffer decoder: this filter-undo obstacle.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
