@@ -2609,7 +2609,11 @@ record.
   spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
   streaming-mode half: S2-A70 (a precondition, not the streaming API
-  itself).
+  itself). First slice of the bounded-memory-decode half, a separate
+  thread from S2-A70's ring-buffer precondition: S2-A71
+  (`mothergod::decompress_bounded`, a caller-configurable ceiling below
+  `codec::MAX_DECODED_LEN`, not the streaming/block API itself either).
+  Streaming mode and frozen format spec v1 remain untouched.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2640,6 +2644,49 @@ record.
   `output: Vec<u8>` with a fixed `WINDOW`-sized buffer and a sink for
   bytes that fall out of it) and the frozen format spec v1 half, both
   untouched by this slice.
+- S2-A71 | ACCEPTED | First slice of ROADMAP M3's seventh standing lead
+  (S1-P7, production hardening: streaming mode, frozen format spec v1)
+  addressing the bounded-memory-decode half by a different mechanism than
+  S2-A70's ring-buffer precondition: `mothergod::decompress_bounded(input,
+  max_len)`, a new public function alongside the unchanged
+  `mothergod::decompress`, lets a caller supply its own output-size
+  ceiling instead of always accepting `codec::MAX_DECODED_LEN`'s 256 MiB.
+  `max_len` is clamped to `MAX_DECODED_LEN`, never raised past it: that
+  constant is the only ceiling this decoder's worst-case decode time has
+  been measured against (S2-A27), so a caller can tighten its own memory
+  budget but cannot use this function to relax the safety-tested bound.
+  `codec::decode` gained the same `max_len: u32` parameter, replacing its
+  internal use of the `MAX_DECODED_LEN` constant directly (`decode`'s
+  sole external call site, `decompress_bounded`, passes the
+  already-clamped value); its one internal call site inside
+  `mothergod::decompress` is now a thin wrapper calling `decompress_bounded`
+  with `codec::MAX_DECODED_LEN`, so existing behavior is unchanged
+  bit-for-bit. `Method::Stored`, which `codec::decode` never sees
+  (`decompress`/`decompress_bounded` handle it directly, since it has no
+  declared-length field of its own), gained its own `max_len` check
+  against the payload's own byte count: without it, a caller-requested
+  memory ceiling would be honored for `Method::Lz` frames only, silently
+  not for `Method::Stored` ones. No `FORMAT_VERSION` bump and no ADR:
+  `docs/format/SPEC.md` already names this ceiling "a decoder policy, not
+  a wire-format field," and this slice only makes that policy
+  caller-configurable within the one value already proven safe, changing
+  no bit on the wire. | 6 new unit tests (`codec.rs`'s
+  `caller_supplied_max_len_below_max_decoded_len_is_honored`; `lib.rs`'s
+  `decompress_matches_decompress_bounded_at_the_max`,
+  `decompress_bounded_rejects_an_lz_frame_over_its_own_tighter_bound`,
+  `decompress_bounded_rejects_a_stored_frame_over_its_own_tighter_bound`,
+  `decompress_bounded_clamps_a_max_len_above_max_decoded_len`, plus every
+  existing `codec::decode` call site updated for the new parameter,
+  including S2-A70's own new `match_distance_beyond_window_is_rejected`
+  test landed just ahead of this slice); the bench crate's
+  `baseline_gate check` still reports the existing 11 cases with no
+  regression and both finals reports fresh, confirming this change
+  touches no encoded bitstream. `cargo x check`: 4 stages green. | No bpb
+  measurement: `research/progress.jsonl` records this as `kind: "patch"`
+  with null deltas, it119. Remaining S1-P7 scope: the streaming/block API
+  itself (this slice is bounded-memory-decode only, still a single-shot
+  whole-buffer call, same as S2-A70's ring-buffer precondition being
+  unwired) and the frozen format spec v1.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing

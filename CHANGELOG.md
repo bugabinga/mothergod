@@ -21,6 +21,20 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `mothergod::decompress_bounded(input, max_len)` (`research/JOURNAL.md`
+  S1-P7, S2-A71, ROADMAP M4): lets a caller reject an over-budget frame
+  before any allocation or decode work, using a ceiling below the crate's
+  own `codec::MAX_DECODED_LEN` (256 MiB) — for an embedder with a smaller
+  known memory budget. `max_len` is clamped to `MAX_DECODED_LEN`, never
+  raised past it, since that constant is the only value this decoder's
+  worst-case decode time has been measured against. `mothergod::decompress`
+  is now a thin wrapper around it (`decompress_bounded(input,
+  codec::MAX_DECODED_LEN)`), bit-for-bit unchanged. A first, additive
+  slice of M4's "bounded-memory decode guarantees" line, not the
+  streaming/block API itself, which remains open. No `FORMAT_VERSION`
+  bump: `docs/format/SPEC.md` already documents this ceiling as decoder
+  policy, not a wire-format field.
+
 - `literal::Literal::ideal_cost_bits_column_expert_pair` and
   `codec::ideal_cost_bits_column_expert_experiment`
   (`research/JOURNAL.md` S1-P5, S2-A69, ROADMAP M3's fifth standing

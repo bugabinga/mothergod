@@ -102,6 +102,11 @@ founding port bug this section's invariant exists to rule out.
   wire-format field, so raising it is not a `FORMAT_VERSION` bump; it is
   provisional pending `ROADMAP.md` M4's streaming/block API, the intended
   real fix for bounded-memory decode without a single hardcoded ceiling.
+  `mothergod::decompress_bounded` lets a caller tighten this ceiling to its
+  own memory budget (clamped, never raised, since 256 MiB is the only value
+  this decoder's worst-case decode time has been measured against) — a
+  first, additive slice of M4's bounded-memory decode guarantee, not the
+  streaming/block API itself (`research/JOURNAL.md` S1-P7, S2-A71).
 - Bit-identical output across platforms for the same input and version:
   IEEE-754 basic float operations (`+ - * /`) are correctly rounded and
   reproducible, but libm transcendentals are not, so nothing on the decode
