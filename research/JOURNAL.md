@@ -2607,7 +2607,39 @@ record.
   from scratch every byte instead of an incremental structure.
 - S1-P7 | LEAD | Production hardening: streaming mode, frozen format
   spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
-  S2-A53, remaining fuzz scope named in S2-A53.
+  S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
+  streaming-mode half: S2-A70 (a precondition, not the streaming API
+  itself).
+- S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
+  `lz::WINDOW`, not just beyond the output written so far
+  (ROADMAP M4's bounded-memory decode guarantee, a precondition for
+  S1-P7's streaming-mode half). `OFFSET_BUCKETS` (21) lets the offset
+  model's bucket-20 residual bits represent a decoded value up to
+  `2 * WINDOW - 1`; the encoder's match finder (`insert_and_find`) never
+  searches past `WINDOW`, so any real bitstream's distance already fits,
+  but nothing in `copy_checked`'s `distance <= output.len()` check ever
+  enforced the tighter bound. Left unrejected, an adversarial payload
+  could force this decoder to keep output far past what any real
+  bitstream needs to reference — the actual blocker for ever making
+  decode's memory O(window) instead of O(declared_len): a future
+  ring-buffer decoder physically cannot satisfy a request the wire
+  format didn't already guarantee stays in-window. Checked once, at the
+  match-token's own distance decode (before `RepCache::push_front`), not
+  again on the rep path: `RepCache::initial()`'s defaults ([1, 4, 8]) and
+  every value `push_front`/`promote` ever place in it originate from a
+  match distance that already passed this check, so the invariant holds
+  by construction. | No bpb measurement: rejects input no real encoder
+  produces, so `bench::baseline`'s 11 cases are unchanged (`baseline_gate
+  check`: no regression, finals reports fresh); `research/progress.jsonl`
+  records this as `kind: "patch"` with null deltas, it118. | New unit
+  test `match_distance_beyond_window_is_rejected`, hand-crafted the same
+  way `bad_match_distance_is_rejected_not_panicking` already is: a single
+  match token coded through a real `Encoder`, distance one past `WINDOW`,
+  asserting `Error::Corrupt`. `cargo x check`: 4 stages green. Remaining
+  S1-P7 streaming-mode scope: the ring-buffer decoder itself (replacing
+  `output: Vec<u8>` with a fixed `WINDOW`-sized buffer and a sink for
+  bytes that fall out of it) and the frozen format spec v1 half, both
+  untouched by this slice.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
