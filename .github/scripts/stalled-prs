@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Report every open PR whose progress has stopped, and name the rescue.
+
+Extensionless and executable because agents type it as a command mid-session,
+like operator-sweep and retrospect.
+
+Armed auto-merge waits forever and nobody is told. So does a reviewer that
+never renders a verdict. Both were carried as prose in the BDFL prompt: three
+signatures the agent had to recall on every wake and match by eye against
+`gh pr list`. Prose cannot notice that it is incomplete, and it was. PR #377
+sat with every required gate green and a reviewer killed mid-review by a
+runner shutdown (exit 143, run 33307410525). None of the three remembered
+signatures covered it, because two of them key off the `agent-approved` label
+a dead reviewer never applies, and the third off an empty check list this PR
+did not have. A stalled PR is hardest to see exactly when the machinery that
+would have spoken is the machinery that died.
+
+Signatures, most specific first, at most one reported per PR:
+
+    never-fired          no required gate ran on the head SHA, past the
+                         grace. Conflicted at birth, so GitHub built no
+                         merge ref and `ci`/`agent-review` never fired --
+                         not failed, not skipped, never fired (issue #200).
+    dirty                mergeable state DIRTY: `main` moved and conflicted
+                         the branch (first hit PR #34).
+    reviewer-died        the `review` check ended failure, cancelled, or
+                         timed out, and no verdict label landed. Nothing
+                         retries it: agent-review triggers on pushes and
+                         open/reopen only (first hit PR #377).
+    verdict-missing      the `review` check SUCCEEDED and left no verdict
+                         label. The reviewer finished without deciding,
+                         which no other signature can distinguish from a
+                         review still in flight.
+    approved-not-landing agent-approved, required gates green, PR still
+                         open: the unsigned-tip asymmetry, where GitHub
+                         evaluates `blocked` while the REST merge succeeds
+                         (first hit PR #84).
+
+Each line names its rescue by reference. The recipes themselves stay in
+agents/GOVERNANCE.md "Stalled auto-merge", because a procedure kept in two
+places drifts in one of them.
+
+Deliberately NOT reported, said plainly so nothing claims a completeness it
+lacks. A PR labeled `blocked-on-human` is parked on purpose, and suppressing
+it is what that label is for. A draft is a human's work-in-progress signal
+(CLAUDE.md rule 11); agent-review's `undraft` job owns bot drafts. A fork PR
+carries no secrets and belongs to the heartbeat. A PR with a red or still
+running gate is not stalled: its author owns the next move. An open PR that
+is simply old and abandoned is a different class, and this detector does not
+pretend to find it.
+
+Liveness: the footer always prints how many PRs were read, how many stalled,
+and how many were suppressed, so a detector that has silently stopped
+matching is distinguishable from a quiet queue.
+
+Usage: stalled-prs
+Exits 0 whether or not anything stalled. A stall is a finding, not an error.
+"""
+
+import json
+from datetime import datetime, timedelta, timezone
+
+from anchor import STAMP, gh, iso
+
+# The required checks, from CLAUDE.md "Commands (run before any push)". A gate
+# renamed in branch protection and not here reads as `never-fired` on every
+# PR, which is loud on the first run rather than silent forever.
+REQUIRED_GATES = ("fmt", "clippy", "test", "doc", "ratio")
+
+# The reviewer's own check, addressed by workflow AND job name because `changes`
+# proves a bare job name is not unique across workflows in this repository.
+REVIEW_CHECK = ("agent-review", "review")
+
+# Exactly one of these, never both, is the reviewer's verdict (CLAUDE.md).
+VERDICT_LABELS = frozenset({"agent-approved", "changes-requested"})
+
+PARKED_LABEL = "blocked-on-human"
+
+# Conclusions that mean the job will not speak again. STALE and SKIPPED are
+# separated on purpose: STALE is a job GitHub abandoned, SKIPPED is an `if:`
+# that correctly declined, and only the first is a stall.
+DEAD = frozenset({"FAILURE", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "STALE"})
+
+# How long a fresh PR gets before an absent gate counts as absent forever.
+# Long enough for GitHub to schedule a queued job, short enough that a wake
+# on the next four-hourly cron still catches a birth conflict the same day.
+GRACE = timedelta(minutes=15)
+
+FIELDS = (
+    "number,title,labels,mergeStateStatus,headRefName,createdAt,"
+    "isDraft,isCrossRepository,statusCheckRollup"
+)
+
+
+def latest(rollup, key):
+    """Collapse a rollup to the newest run per key.
+
+    A re-run leaves its predecessor in the rollup: PR #377 carried two `review`
+    entries, the cancelled one and its replacement. Reading the first match
+    would report a stall that was already being rescued.
+    """
+    newest = {}
+    for check in rollup:
+        if check.get("__typename") != "CheckRun":
+            continue
+        seen = newest.get(key(check))
+        if seen is None or check.get("startedAt", "") >= seen.get("startedAt", ""):
+            newest[key(check)] = check
+    return newest
+
+
+def finding(kind, detail, rescue):
+    return {"kind": kind, "detail": detail, "rescue": rescue}
+
+
+def suppress(pr):
+    """True when this PR is somebody else's by construction, not a stall."""
+    labels = {label["name"] for label in pr["labels"]}
+    return PARKED_LABEL in labels or pr["isDraft"] or pr["isCrossRepository"]
+
+
+def classify(pr, now):
+    """Return the one finding for this PR, or None. Pure: no network, no clock.
+
+    Order is specificity, not severity. A dirty PR whose reviewer also died
+    needs the merge first; reporting both would be two lines describing one
+    move.
+    """
+    if suppress(pr):
+        return None
+    labels = {label["name"] for label in pr["labels"]}
+
+    rollup = pr["statusCheckRollup"] or []
+    by_name = latest(rollup, lambda c: c["name"])
+    by_job = latest(rollup, lambda c: (c.get("workflowName"), c["name"]))
+    gates = [by_name[name] for name in REQUIRED_GATES if name in by_name]
+
+    if not gates:
+        born = datetime.strptime(iso(pr["createdAt"]), STAMP).replace(
+            tzinfo=timezone.utc
+        )
+        if now - born < GRACE:
+            return None
+        return finding(
+            "never-fired",
+            f"no required gate ran on {pr['headRefName']}; GitHub built no merge ref",
+            "GOVERNANCE 'Stalled auto-merge', third signature: mechanical merge of "
+            f"main, then push-branch {pr['number']} --merge <sha>, settle-push, merge-pr",
+        )
+
+    if pr["mergeStateStatus"] == "DIRTY":
+        return finding(
+            "dirty",
+            "main moved and conflicted the branch",
+            "GOVERNANCE 'Stalled auto-merge', first signature: merge main into the "
+            f"branch, push-branch {pr['number']} --merge <sha>, settle-push, merge-pr",
+        )
+
+    if any(gate["status"] != "COMPLETED" for gate in gates):
+        return None
+    if any(gate["conclusion"] in DEAD for gate in gates):
+        return None
+    if len(gates) < len(REQUIRED_GATES):
+        missing = ", ".join(n for n in REQUIRED_GATES if n not in by_name)
+        return finding(
+            "never-fired",
+            f"required gate(s) absent on the head SHA: {missing}",
+            "confirm the gate was not renamed in branch protection before rescuing; "
+            "REQUIRED_GATES in this script is the copy that goes stale",
+        )
+
+    review = by_job.get(REVIEW_CHECK)
+    if review is None or review["status"] != "COMPLETED":
+        return None
+
+    if not labels & VERDICT_LABELS:
+        if review["conclusion"] in DEAD:
+            return finding(
+                "reviewer-died",
+                f"the review check ended {review['conclusion']} at "
+                f"{review.get('completedAt', 'unknown')}; no verdict is coming",
+                f"close then reopen: `gh pr close {pr['number']}`, "
+                f"`gh pr reopen {pr['number']}`. agent-review has no "
+                "workflow_dispatch, so reopen is the only refire",
+            )
+        if review["conclusion"] == "SUCCESS":
+            return finding(
+                "verdict-missing",
+                "the review check succeeded and applied no verdict label",
+                f"read {review.get('detailsUrl', 'the review run')}, then apply the "
+                "verdict it reached, or reopen to review again",
+            )
+        return None
+
+    if "agent-approved" in labels:
+        return finding(
+            "approved-not-landing",
+            "approved with every required gate green, still open",
+            "GOVERNANCE 'Stalled auto-merge', second signature: "
+            f"merge-pr {pr['number']} --sha <reviewed-head>",
+        )
+    return None
+
+
+def render(rows, read, suppressed):
+    for pr, found in rows:
+        print(f"#{pr['number']:<5} {found['kind']:<21} {pr['title'][:52]}")
+        print(f"        {found['detail']}")
+        print(f"        rescue: {found['rescue']}")
+        print()
+    print(
+        f"stalled-prs: open {read} | stalled {len(rows)} | suppressed {suppressed}"
+        f" | grace {int(GRACE.total_seconds() // 60)}m"
+    )
+
+
+def main():
+    pulls = json.loads(
+        gh("pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS)
+    )
+    now = datetime.now(timezone.utc)
+    rows = [(pr, classify(pr, now)) for pr in pulls]
+    render(
+        [(pr, found) for pr, found in rows if found],
+        len(pulls),
+        sum(1 for pr in pulls if suppress(pr)),
+    )
+
+
+if __name__ == "__main__":
+    main()

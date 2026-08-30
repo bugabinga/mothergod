@@ -1,0 +1,202 @@
+// Fixtures for stalled-prs, the detector that replaced three prose signatures
+// in the BDFL prompt. The first fixture is PR #377's real rollup shape at
+// 2026-08-30T12:11Z: every required gate green, the `review` check CANCELLED
+// by a runner shutdown, no verdict label. That state was invisible to all
+// three remembered signatures, and it is the reason this script exists, so it
+// is the first thing the suite asserts.
+//
+// classify() is pure by construction (no network, no clock) precisely so these
+// can exist. A detector nobody can make fire is decoration.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { test } from "node:test";
+
+const scriptsDir = new URL(".", import.meta.url).pathname;
+
+const driver = `
+import importlib.machinery, importlib.util, json, sys
+from datetime import datetime
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+print(json.dumps(mod.classify(json.loads(sys.argv[3]), now)))
+`;
+
+const NOW = "2026-08-30T12:11:00Z";
+
+function classify(pr, now = NOW) {
+  const run = spawnSync(
+    "python3",
+    ["-c", driver, scriptsDir, now, JSON.stringify(pr)],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+function check(name, conclusion, extra = {}) {
+  return {
+    __typename: "CheckRun",
+    name,
+    workflowName: "ci",
+    status: "COMPLETED",
+    conclusion,
+    startedAt: "2026-08-30T10:50:00Z",
+    completedAt: "2026-08-30T10:53:00Z",
+    ...extra,
+  };
+}
+
+const GREEN_GATES = ["fmt", "clippy", "test", "doc", "ratio"].map((n) => check(n, "SUCCESS"));
+
+function review(conclusion, extra = {}) {
+  return check("review", conclusion, {
+    workflowName: "agent-review",
+    completedAt: "2026-08-30T10:54:26Z",
+    ...extra,
+  });
+}
+
+function pr(overrides = {}) {
+  return {
+    number: 377,
+    title: "codec: add decompress_bounded",
+    labels: [],
+    mergeStateStatus: "UNSTABLE",
+    headRefName: "claude/decompress-bounded-decode",
+    createdAt: "2026-08-30T10:49:32Z",
+    isDraft: false,
+    isCrossRepository: false,
+    statusCheckRollup: [...GREEN_GATES],
+    ...overrides,
+  };
+}
+
+test("PR #377: gates green, review cancelled by a runner shutdown, no verdict", () => {
+  const found = classify(
+    pr({ statusCheckRollup: [...GREEN_GATES, review("CANCELLED")] }),
+  );
+  assert.equal(found.kind, "reviewer-died");
+  assert.match(found.detail, /CANCELLED at 2026-08-30T10:54:26Z/);
+  assert.match(found.rescue, /gh pr reopen 377/);
+});
+
+test("a replacement review already in flight supersedes the dead one", () => {
+  // The rollup keeps both entries after a rescue. Reading the first match
+  // would report a stall that is actively being fixed.
+  const found = classify(
+    pr({
+      statusCheckRollup: [
+        ...GREEN_GATES,
+        review("CANCELLED"),
+        review(null, {
+          status: "IN_PROGRESS",
+          startedAt: "2026-08-30T12:14:50Z",
+          completedAt: null,
+        }),
+      ],
+    }),
+  );
+  assert.equal(found, null);
+});
+
+test("a review that succeeded and applied no verdict label is a stall too", () => {
+  const found = classify(
+    pr({ statusCheckRollup: [...GREEN_GATES, review("SUCCESS")] }),
+  );
+  assert.equal(found.kind, "verdict-missing");
+});
+
+test("approved with green gates and still open is the unsigned-tip stall", () => {
+  const found = classify(
+    pr({
+      labels: [{ name: "agent-approved" }],
+      statusCheckRollup: [...GREEN_GATES, review("SUCCESS")],
+    }),
+  );
+  assert.equal(found.kind, "approved-not-landing");
+  assert.match(found.rescue, /merge-pr 377/);
+});
+
+test("changes-requested is a verdict, not a stall: the author owns the move", () => {
+  const found = classify(
+    pr({
+      labels: [{ name: "changes-requested" }],
+      statusCheckRollup: [...GREEN_GATES, review("SUCCESS")],
+    }),
+  );
+  assert.equal(found, null);
+});
+
+test("a dirty merge state outranks whatever the reviewer did", () => {
+  const found = classify(
+    pr({
+      mergeStateStatus: "DIRTY",
+      statusCheckRollup: [...GREEN_GATES, review("CANCELLED")],
+    }),
+  );
+  assert.equal(found.kind, "dirty");
+});
+
+test("no checks at all, past the grace, is conflicted at birth", () => {
+  const found = classify(pr({ statusCheckRollup: [] }));
+  assert.equal(found.kind, "never-fired");
+  assert.match(found.detail, /no merge ref/);
+});
+
+test("no checks yet, inside the grace, is a PR that was just opened", () => {
+  const found = classify(pr({ statusCheckRollup: [] }), "2026-08-30T10:55:00Z");
+  assert.equal(found, null);
+});
+
+test("a required gate missing by name names it, and doubts itself first", () => {
+  const found = classify(
+    pr({ statusCheckRollup: GREEN_GATES.filter((c) => c.name !== "ratio") }),
+  );
+  assert.equal(found.kind, "never-fired");
+  assert.match(found.detail, /ratio/);
+  assert.match(found.rescue, /renamed in branch protection/);
+});
+
+test("a red gate is not a stall: its author owns the next move", () => {
+  const found = classify(
+    pr({
+      statusCheckRollup: [
+        ...GREEN_GATES.filter((c) => c.name !== "test"),
+        check("test", "FAILURE"),
+        review("CANCELLED"),
+      ],
+    }),
+  );
+  assert.equal(found, null);
+});
+
+test("a gate still running is not a stall", () => {
+  const found = classify(
+    pr({
+      statusCheckRollup: [
+        ...GREEN_GATES.filter((c) => c.name !== "test"),
+        check("test", null, { status: "IN_PROGRESS", completedAt: null }),
+      ],
+    }),
+  );
+  assert.equal(found, null);
+});
+
+for (
+  const [why, overrides] of [
+    ["blocked-on-human is parked on purpose", { labels: [{ name: "blocked-on-human" }] }],
+    ["a draft is a human's work-in-progress signal", { isDraft: true }],
+    ["a fork PR belongs to the heartbeat", { isCrossRepository: true }],
+  ]
+) {
+  test(`suppressed: ${why}`, () => {
+    const found = classify(
+      pr({ statusCheckRollup: [...GREEN_GATES, review("CANCELLED")], ...overrides }),
+    );
+    assert.equal(found, null);
+  });
+}

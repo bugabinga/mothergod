@@ -187,8 +187,15 @@ than adding a gate.
 
 ### Stalled auto-merge
 
-Armed auto-merge waits forever and nobody is told. Two signatures,
-both swept by the BDFL every run on open `agent-approved` PRs:
+Armed auto-merge waits forever and nobody is told. So does a reviewer
+that dies before it renders a verdict. Detection is machinery, not
+recall: `.github/scripts/stalled-prs` reads every open PR each BDFL
+run and prints the stalled ones with the rescue named. Its docstring
+is the list of signatures it matches and the ones it deliberately
+skips. The rescues stay here, because a procedure kept in two places
+drifts in one of them.
+
+The first two signatures are found on open `agent-approved` PRs:
 
 - Mergeable state `dirty`: `main` moved and conflicted the branch
   (first hit PR #34, a CHANGELOG append collision). Rescue: merge
@@ -222,7 +229,19 @@ a PR names the class and prints this rescue instead of reporting
 missing runs (issue #338). Rescue is the same mechanical merge as the
 `dirty` case above, just reached by a different detection path.
 
-A fourth signature is machine-owned and needs no sweep: an
+A fourth signature is the reviewer's own death. The `review` check
+ends failure, cancelled, or timed out, so no verdict label is ever
+applied, and the two label-keyed signatures above cannot see it while
+the gates sit green (first hit PR #377: exit 143, a runner shutdown
+mid-review, run 33307410525). Nothing retries it on its own, because
+`agent-review.yml` triggers on pushes and open/reopen only. Rescue:
+close the PR, then reopen it, which fires `reopened` and starts a
+fresh review of the same head. A `review` check that SUCCEEDED and
+left no verdict label is the same stall reached differently: read the
+run before reopening, since the reviewer may have decided and failed
+only to label.
+
+A fifth signature is machine-owned and needs no sweep: an
 `agent-review.yml` change landing on main leaves every open PR with a
 stale copy that claude-code-action refuses to run (issue #132).
 `propagate-review.yml` merges the change into each stale branch the
