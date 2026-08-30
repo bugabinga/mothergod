@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Print CHANGELOG.md's Unreleased section, for use as a GitHub Release body.
+
+Extensionless and executable because agents type it as a command mid-session,
+like stalled-prs and retrospect.
+
+release.yml drafts a release from whatever CHANGELOG.md's `## [Unreleased]`
+section holds at the moment the operator or BDFL triggers it (agent-drafted
+changelog, ROADMAP M6): this is the extraction, kept separate from the
+workflow so it can be run and checked by hand before a release is cut.
+
+Usage: changelog-notes [CHANGELOG_PATH]
+Reads CHANGELOG.md (or the given path) and writes the Unreleased section's
+body to stdout. Exits 1 if the section is missing or empty: an empty
+release body almost always means the changelog was not updated for the
+change being released, not that there is nothing to say.
+"""
+
+import sys
+
+HEADING = "## [Unreleased]"
+
+
+def extract(text):
+    start = text.find(HEADING)
+    if start == -1:
+        return None
+    body_start = start + len(HEADING)
+    end = text.find("\n## ", body_start)
+    body = text[body_start:end if end != -1 else len(text)]
+    return body.strip("\n")
+
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else "CHANGELOG.md"
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    body = extract(text)
+    if body is None:
+        print(f"{path}: no {HEADING!r} heading found", file=sys.stderr)
+        return 1
+    if not body.strip():
+        print(f"{path}: {HEADING!r} section is empty; update the changelog before releasing", file=sys.stderr)
+        return 1
+
+    print(body)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
