@@ -2616,7 +2616,9 @@ record.
   Streaming mode and frozen format spec v1 remain untouched; streaming
   mode's ring-buffer design also depends on how filter-undo interacts
   with a bounded output buffer, a second obstacle beyond S2-A70's LZ-loop
-  precondition, per S2-D4.
+  precondition, per S2-D4 — decided 2026-08-30: scope the ring-buffer
+  decoder to `Identity`/`Delta`/`Bcj` frames, `Transpose` keeps today's
+  whole-buffer path, no `transpose` redesign required.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2741,8 +2743,25 @@ record.
   frames only, falling back to today's whole-buffer path for `Transpose`
   and documenting the split precisely in the public API. No code changed;
   investigation only, while scoping S1-P7's top-of-list slice before
-  committing to one. | Remaining S1-P7 streaming-mode scope, in addition
-  to S2-A70's named ring-buffer decoder: this filter-undo obstacle.
+  committing to one.
+  **Decision (2026-08-30): (2).** Redesigning `transpose` around a
+  seekable or blocked sink (option 1) makes every future streaming caller
+  either provide seekable output or accept the block-size/complexity cost
+  of a second decode strategy for one filter, to buy a guarantee real
+  frames may not even need — `filters::select::pick` chooses `Transpose`
+  only when it wins probe entropy, so most frames already qualify for
+  streaming under option 2 with no redesign. Option 2 also decomposes:
+  the ring-buffer decoder (S2-A70's named remaining piece) can be built
+  and tested against `Identity`/`Delta`/`Bcj` alone, with `Transpose`
+  unchanged, rather than gating that work on a `transpose` rewrite first.
+  The public streaming API MUST surface this split explicitly (e.g. a
+  queryable "does this frame decode incrementally" predicate derived from
+  the frame's stored `Candidate`, not a silent fallback) so a caller can
+  reason about its own memory bound; no code implements this yet. |
+  Remaining S1-P7 streaming-mode scope, decision made, implementation
+  still open: the ring-buffer decoder itself, scoped to
+  `Identity`/`Delta`/`Bcj` per the decision above, `Transpose` frames
+  keeping today's whole-buffer `undo_filter` path.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
