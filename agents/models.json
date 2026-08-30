@@ -23,7 +23,7 @@
     "",
     "thrift (issue #202): optional per-role ladder/effort override. Absent",
     "means unchanged. agent-guard reads the allowance-state ledger issue",
-    "(written by agent-audit) and projects the observed burn rate against",
+    "(written by agent-audit) and projects its week-average burn rate against",
     "the next seven-day reset; when the projection misses the reset, it runs",
     "this role at 'thrift' instead of its normal ladder/effort for that one",
     "cycle. No file edit needed either direction: the guard re-projects on",
