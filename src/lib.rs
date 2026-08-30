@@ -122,14 +122,23 @@ pub enum Error {
     /// reaching before the start of decoded output, or similar):
     /// adversarial or corrupted input, never a bug in this decoder.
     Corrupt,
-    /// Payload declares an output length larger than this decoder accepts
-    /// (`codec::MAX_DECODED_LEN`). A declared length alone is not bounded
-    /// by the bytes that encode it: this format's adaptive models can make
-    /// a handful of real payload bytes and a few million padding-decoded
-    /// bytes indistinguishable by size, so the only sound bound is an
-    /// explicit ceiling, checked before any allocation or decode work
-    /// happens (`rust-craft` skill, allocation-discipline).
-    TooLarge(u32),
+    /// Payload's declared ([`Method::Lz`]) or actual ([`Method::Stored`])
+    /// output length exceeds the bound in effect: [`codec::MAX_DECODED_LEN`]
+    /// under [`decompress`], or a caller's own tighter `max_len` under
+    /// [`decompress_bounded`]. `max` names whichever bound was actually
+    /// violated, since the two can differ. A declared length alone is not
+    /// bounded by the bytes that encode it: this format's adaptive models
+    /// can make a handful of real payload bytes and a few million
+    /// padding-decoded bytes indistinguishable by size, so the only sound
+    /// bound is an explicit ceiling, checked before any allocation or
+    /// decode work happens (`rust-craft` skill, allocation-discipline).
+    TooLarge {
+        /// The length that exceeded the bound.
+        len: u32,
+        /// The bound it exceeded (not always [`codec::MAX_DECODED_LEN`];
+        /// see the variant's docs).
+        max: u32,
+    },
 }
 
 impl core::fmt::Display for Error {
@@ -140,11 +149,12 @@ impl core::fmt::Display for Error {
             Self::UnsupportedVersion(v) => write!(f, "unsupported format version {v}"),
             Self::UnknownMethod(m) => write!(f, "unknown compression method {m}"),
             Self::Corrupt => write!(f, "compressed payload is corrupt"),
-            Self::TooLarge(len) => write!(
-                f,
-                "declared output length {len} exceeds this decoder's maximum ({} bytes)",
-                codec::MAX_DECODED_LEN
-            ),
+            Self::TooLarge { len, max } => {
+                write!(
+                    f,
+                    "output length {len} exceeds the decoder's bound ({max} bytes)"
+                )
+            }
         }
     }
 }
@@ -246,10 +256,13 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     let method = Method::try_from(header[METHOD_OFFSET])?;
     match method {
         Method::Stored => {
-            if stored_bound.is_some_and(|bound| payload.len() > bound as usize) {
-                return Err(Error::TooLarge(
-                    u32::try_from(payload.len()).unwrap_or(u32::MAX),
-                ));
+            if let Some(bound) = stored_bound
+                && payload.len() > bound as usize
+            {
+                return Err(Error::TooLarge {
+                    len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
+                    max: bound,
+                });
             }
             Ok(payload.to_vec())
         }
@@ -420,7 +433,13 @@ mod tests {
         frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
-        assert_eq!(decompress(&frame), Err(Error::TooLarge(over)));
+        assert_eq!(
+            decompress(&frame),
+            Err(Error::TooLarge {
+                len: over,
+                max: codec::MAX_DECODED_LEN
+            })
+        );
     }
 
     #[test]
@@ -444,7 +463,10 @@ mod tests {
         let declared_len = u32::try_from(input.len()).unwrap();
         assert_eq!(
             decompress_bounded(&frame, declared_len - 1),
-            Err(Error::TooLarge(declared_len))
+            Err(Error::TooLarge {
+                len: declared_len,
+                max: declared_len - 1
+            })
         );
         assert_eq!(decompress_bounded(&frame, declared_len), Ok(input));
     }
@@ -459,7 +481,10 @@ mod tests {
         assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
         assert_eq!(
             decompress_bounded(&frame, 1),
-            Err(Error::TooLarge(u32::try_from(input.len()).unwrap()))
+            Err(Error::TooLarge {
+                len: u32::try_from(input.len()).unwrap(),
+                max: 1
+            })
         );
         assert_eq!(
             decompress_bounded(&frame, u32::try_from(input.len()).unwrap()),
@@ -485,7 +510,10 @@ mod tests {
         frame.extend_from_slice(&over.to_le_bytes());
         assert_eq!(
             decompress_bounded(&frame, u32::MAX),
-            Err(Error::TooLarge(over))
+            Err(Error::TooLarge {
+                len: over,
+                max: codec::MAX_DECODED_LEN
+            })
         );
     }
 

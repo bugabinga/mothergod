@@ -2676,18 +2676,34 @@ record.
   `docs/format/SPEC.md` already names this ceiling "a decoder policy, not
   a wire-format field," and this slice only makes that policy
   caller-configurable within the one value already proven safe, changing
-  no bit on the wire. | 7 new unit tests (`codec.rs`'s
-  `caller_supplied_max_len_below_max_decoded_len_is_honored`; `lib.rs`'s
+  no bit on the wire. A second review round caught two more gaps in the
+  same PR: `Error::TooLarge(u32)`'s `Display` impl still named
+  `codec::MAX_DECODED_LEN` unconditionally as "this decoder's maximum,"
+  false the moment `decompress_bounded` rejects at a caller's tighter
+  bound instead; and `codec::decode`'s `max_len` parameter went
+  unclamped internally, relying entirely on `decompress_bounded` (its
+  only in-crate caller) to have clamped first, a guarantee that lived
+  only in a doc comment for a `#[doc(hidden)]`-but-`pub` function any
+  dependent crate can call directly. Fixed by widening `Error::TooLarge`
+  to `{ len: u32, max: u32 }` (source-level break, pre-1.0, no
+  `FORMAT_VERSION` implication) so the message names the bound actually
+  violated, and by adding `let max_len = max_len.min(MAX_DECODED_LEN);`
+  as `decode`'s first line, a no-op at its one sanctioned call site and
+  a real guarantee for any other. | 7 new unit tests (`codec.rs`'s
+  `caller_supplied_max_len_below_max_decoded_len_is_honored`,
+  `decode_clamps_a_max_len_above_max_decoded_len` (the second round's
+  finding); `lib.rs`'s
   `decompress_matches_decompress_bounded_at_the_max`,
   `decompress_bounded_rejects_an_lz_frame_over_its_own_tighter_bound`,
   `decompress_bounded_rejects_a_stored_frame_over_its_own_tighter_bound`,
   `decompress_bounded_clamps_a_max_len_above_max_decoded_len`,
   `decompress_roundtrips_a_stored_payload_past_max_decoded_len` (the
-  review-flagged boundary, built via `build_frame` directly rather than
-  `compress` to avoid running the LZ encoder over 256+ MiB), plus every
-  existing `codec::decode` call site updated for the new parameter,
-  including S2-A70's own new `match_distance_beyond_window_is_rejected`
-  test landed just ahead of this slice); the bench crate's
+  first round's boundary finding, built via `build_frame` directly
+  rather than `compress` to avoid running the LZ encoder over 256+ MiB),
+  plus every existing `codec::decode` call site and `Error::TooLarge`
+  construction updated for the new parameter/shape, including S2-A70's
+  own new `match_distance_beyond_window_is_rejected` test landed just
+  ahead of this slice); the bench crate's
   `baseline_gate check` still reports the existing 11 cases with no
   regression and both finals reports fresh, confirming this change
   touches no encoded bitstream. `cargo x check`: 4 stages green. | No bpb

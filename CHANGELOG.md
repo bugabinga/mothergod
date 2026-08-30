@@ -39,6 +39,19 @@ All notable changes to this project are documented here. Format follows
   `docs/format/SPEC.md` already documents this ceiling as decoder policy,
   not a wire-format field.
 
+### Changed
+
+- `Error::TooLarge(u32)` is now `Error::TooLarge { len: u32, max: u32 }`
+  (`research/JOURNAL.md` S2-A71): `decompress_bounded`'s caller-supplied
+  `max_len` means the bound a `TooLarge` error names is no longer always
+  `codec::MAX_DECODED_LEN`, so the error now carries the bound it actually
+  violated instead of the `Display` impl assuming that constant. Source-
+  level break, no `FORMAT_VERSION` bump (the wire format carries no error
+  values). `codec::decode` also now clamps its own `max_len` parameter to
+  `MAX_DECODED_LEN` internally rather than trusting every caller to have
+  clamped first: it is `#[doc(hidden)]` but still `pub`, reachable
+  directly by any crate depending on this one.
+
 - `literal::Literal::ideal_cost_bits_column_expert_pair` and
   `codec::ideal_cost_bits_column_expert_experiment`
   (`research/JOURNAL.md` S1-P5, S2-A69, ROADMAP M3's fifth standing

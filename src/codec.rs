@@ -593,13 +593,15 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// `output` past that length — so a payload lying about either the
 /// declared length or the token count cannot make this function do more
 /// work, or allocate more memory, than the length it declared allows, and
-/// `max_len` bounds what it is allowed to declare in the first place.
-/// Callers should never pass a `max_len` above [`MAX_DECODED_LEN`]: that
-/// is the only ceiling this decoder's worst-case decode time has been
-/// measured against (see its docs), and [`crate::decompress_bounded`]
-/// clamps to it before calling this function. See [`MAX_DECODED_LEN`]'s
-/// docs for why a fixed ceiling, not a ratio check against the payload's
-/// own size, is the sound bound here.
+/// `max_len` bounds what it is allowed to declare in the first place, itself
+/// clamped to [`MAX_DECODED_LEN`] regardless of what is passed in: that
+/// constant is the only ceiling this decoder's worst-case decode time has
+/// been measured against (see its docs). [`crate::decompress_bounded`]
+/// clamps before calling this function too, so the clamp here is a second,
+/// redundant guarantee for any other caller reaching this `#[doc(hidden)]`
+/// but still `pub` function directly. See [`MAX_DECODED_LEN`]'s docs for why
+/// a fixed ceiling, not a ratio check against the payload's own size, is the
+/// sound bound here.
 ///
 /// # Errors
 ///
@@ -638,6 +640,7 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// docs), and casting a declared length already found `<= max_len` (a
 /// `u32`) back down from the `usize` `read_header` widened it to.
 pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Error> {
+    let max_len = max_len.min(MAX_DECODED_LEN);
     let (filter_bytes, payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
     let candidate =
         Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
@@ -645,9 +648,12 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     if declared_len > max_len as usize {
         // declared_len was cast up from the header's u32 field (read_header),
         // so casting back down here is always exact.
-        return Err(Error::TooLarge(u32::try_from(declared_len).expect(
-            "declared_len came from a u32 header field, so it always fits back into one",
-        )));
+        return Err(Error::TooLarge {
+            len: u32::try_from(declared_len).expect(
+                "declared_len came from a u32 header field, so it always fits back into one",
+            ),
+            max: max_len,
+        });
     }
 
     let mut ac = Decoder::new(ac_bytes);
@@ -882,7 +888,10 @@ mod tests {
         payload.extend_from_slice(&0u32.to_le_bytes());
         assert_eq!(
             decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
-            Err(Error::TooLarge(u32::MAX))
+            Err(Error::TooLarge {
+                len: u32::MAX,
+                max: MAX_DECODED_LEN
+            })
         );
     }
 
@@ -900,7 +909,31 @@ mod tests {
         payload.extend_from_slice(&over.to_le_bytes());
         assert_eq!(
             decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
-            Err(Error::TooLarge(over))
+            Err(Error::TooLarge {
+                len: over,
+                max: MAX_DECODED_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn decode_clamps_a_max_len_above_max_decoded_len() {
+        // decode is `#[doc(hidden)]` but still `pub`, reachable directly by
+        // anything depending on this crate, not just decompress_bounded
+        // (which always pre-clamps before calling in). Without decode's own
+        // clamp, a caller passing u32::MAX here would relax the ceiling
+        // past MAX_DECODED_LEN, the only value this decoder's worst-case
+        // decode time has been measured against (S2-A27).
+        let over = MAX_DECODED_LEN + 1;
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&over.to_le_bytes());
+        payload.extend_from_slice(&over.to_le_bytes());
+        assert_eq!(
+            decode(&payload, crate::FORMAT_VERSION, u32::MAX),
+            Err(Error::TooLarge {
+                len: over,
+                max: MAX_DECODED_LEN
+            })
         );
     }
 
@@ -966,7 +999,10 @@ mod tests {
         let declared_len = u32::try_from(data.len()).unwrap();
         assert_eq!(
             decode(&encoded, crate::FORMAT_VERSION, declared_len - 1),
-            Err(Error::TooLarge(declared_len))
+            Err(Error::TooLarge {
+                len: declared_len,
+                max: declared_len - 1
+            })
         );
         assert_eq!(
             decode(&encoded, crate::FORMAT_VERSION, declared_len).as_deref(),
