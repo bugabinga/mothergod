@@ -606,8 +606,7 @@ test("Telegram command and prose routes", async (t) => {
 // one is a third copy of a value that already lives in wrangler.toml and
 // CLOCK, and it fails on the next allowance lever instead of on a defect.
 // Fixtures name a seat and look up its expression.
-const cronFor = (workflow) =>
-  Object.keys(CLOCK).find((cron) => CLOCK[cron].some((seat) => seat.workflow === workflow));
+const cronFor = (workflow) => Object.keys(CLOCK).find((cron) => CLOCK[cron].some((seat) => seat.workflow === workflow));
 
 test("Clock ticks (ADR-0035)", async (t) => {
   const tick = (setup, cron) => worker.scheduled({ cron, scheduledTime: 1_700_000_000_000 }, setup.env);
