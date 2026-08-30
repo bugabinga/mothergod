@@ -165,6 +165,24 @@ const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
+/// Splits `input` into its declared version, [`Method`], and the payload
+/// past the header, checked against [`MAGIC`] and [`FORMAT_VERSION`] but
+/// nothing past that: shared by every function that dispatches on a
+/// frame's method before deciding how much of the payload it actually
+/// needs, so the two never drift on what counts as a well-formed header.
+fn parse_header(input: &[u8]) -> Result<(u8, Method, &[u8]), Error> {
+    let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
+    if header[..MAGIC.len()] != MAGIC {
+        return Err(Error::BadMagic);
+    }
+    let version = header[VERSION_OFFSET];
+    if version > FORMAT_VERSION {
+        return Err(Error::UnsupportedVersion(version));
+    }
+    let method = Method::try_from(header[METHOD_OFFSET])?;
+    Ok((version, method, payload))
+}
+
 /// Increments `freq[symbol]`/`*total` by `increment`, then halves every
 /// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
 /// rescales down to an impossible-to-code symbol) once `*total` exceeds
@@ -275,15 +293,7 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     // was, so incompressible input at or past 256 MiB keeps round-tripping.
     let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
     let max_len = max_len.min(codec::MAX_DECODED_LEN);
-    let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
-    if header[..MAGIC.len()] != MAGIC {
-        return Err(Error::BadMagic);
-    }
-    let version = header[VERSION_OFFSET];
-    if version > FORMAT_VERSION {
-        return Err(Error::UnsupportedVersion(version));
-    }
-    let method = Method::try_from(header[METHOD_OFFSET])?;
+    let (version, method, payload) = parse_header(input)?;
     match method {
         Method::Stored => {
             if let Some(bound) = stored_bound
@@ -298,6 +308,50 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
         }
         Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
         Method::Lz => codec::decode(payload, version, max_len),
+    }
+}
+
+/// Reports whether `input`'s frame can decode with the output produced in
+/// address order and bounded lookback, without doing any of that decode
+/// work itself: a precondition a future streaming/block API needs, checked
+/// here first because it does not have one uniform answer
+/// (`research/JOURNAL.md` S2-D4, ROADMAP M4).
+///
+/// [`Method::Stored`] always answers `true`: there is no filter step, so
+/// nothing about a bound on resident memory depends on its content.
+/// [`Method::Lz`]'s answer depends on which filter its encoder picked —
+/// [`filters::select::Candidate::Identity`], `Delta`, and `Bcj` all undo
+/// sequentially with small fixed lookback (a stride, or a 5-byte
+/// call/jmp instruction), but `Candidate::Transpose`'s decode writes
+/// scattered across the *entire* buffer in column-major order, so it needs
+/// the whole buffer resident regardless of how a future streaming decoder
+/// is otherwise built. No streaming decoder exists yet to consult this
+/// predicate; it exists so that API, when it lands, has a real answer to
+/// hand a caller instead of a silent fallback that quietly stops bounding
+/// memory whenever the encoder happened to pick `Transpose`.
+///
+/// # Errors
+///
+/// Same as [`decompress`]'s header-parsing errors
+/// ([`Error::Truncated`], [`Error::BadMagic`], [`Error::UnsupportedVersion`],
+/// [`Error::UnknownMethod`]), plus [`Error::Corrupt`] when a [`Method::Lz`]
+/// frame's filter selector does not name a real [`filters::select::Candidate`]
+/// — everything short of actually decoding the payload.
+pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
+    let (version, method, payload) = parse_header(input)?;
+    match method {
+        Method::Stored => Ok(true),
+        Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
+        Method::Lz => {
+            let filter_bytes = payload.get(0..2).ok_or(Error::Truncated)?;
+            let candidate =
+                filters::select::Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]])
+                    .ok_or(Error::Corrupt)?;
+            Ok(!matches!(
+                candidate,
+                filters::select::Candidate::Transpose(_)
+            ))
+        }
     }
 }
 
@@ -352,6 +406,21 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `MAGIC` + `FORMAT_VERSION` + `Method::Lz` as a fresh `Vec<u8>`, for
+    /// tests that hand-craft a payload past it rather than going through
+    /// [`compress`]: several need a specific declared length or filter
+    /// selector `compress` itself would never choose.
+    fn lz_frame_header() -> Vec<u8> {
+        vec![
+            MAGIC[0],
+            MAGIC[1],
+            MAGIC[2],
+            MAGIC[3],
+            FORMAT_VERSION,
+            Method::Lz as u8,
+        ]
+    }
 
     #[test]
     fn roundtrip_empty() {
@@ -452,14 +521,7 @@ mod tests {
         // regression for the amplification hazard codec.rs's unit tests
         // cover directly.
         let over = codec::MAX_DECODED_LEN + 1;
-        let mut frame = vec![
-            MAGIC[0],
-            MAGIC[1],
-            MAGIC[2],
-            MAGIC[3],
-            FORMAT_VERSION,
-            Method::Lz as u8,
-        ];
+        let mut frame = lz_frame_header();
         frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
@@ -527,14 +589,7 @@ mod tests {
         // A caller passing u32::MAX must not bypass MAX_DECODED_LEN: the
         // clamp, not the caller's value, is the real ceiling.
         let over = codec::MAX_DECODED_LEN + 1;
-        let mut frame = vec![
-            MAGIC[0],
-            MAGIC[1],
-            MAGIC[2],
-            MAGIC[3],
-            FORMAT_VERSION,
-            Method::Lz as u8,
-        ];
+        let mut frame = lz_frame_header();
         frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
@@ -559,5 +614,60 @@ mod tests {
         let payload = vec![0xA5u8; (codec::MAX_DECODED_LEN + 1) as usize];
         let frame = build_frame(Method::Stored, &payload);
         assert_eq!(decompress(&frame), Ok(payload));
+    }
+
+    #[test]
+    fn stored_frame_decodes_incrementally() {
+        assert_eq!(decodes_incrementally(&compress(b"hi")), Ok(true));
+    }
+
+    #[test]
+    fn non_transpose_candidates_decode_incrementally() {
+        for candidate in [
+            filters::select::Candidate::Identity,
+            filters::select::Candidate::Delta(test_support::nz(4)),
+            filters::select::Candidate::Bcj,
+        ] {
+            let mut frame = lz_frame_header();
+            frame.extend_from_slice(&candidate.to_header_bytes());
+            assert_eq!(
+                decodes_incrementally(&frame),
+                Ok(true),
+                "{candidate:?} should decode incrementally"
+            );
+        }
+    }
+
+    #[test]
+    fn transpose_candidate_does_not_decode_incrementally() {
+        let mut frame = lz_frame_header();
+        frame.extend_from_slice(
+            &filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
+        );
+        assert_eq!(decodes_incrementally(&frame), Ok(false));
+    }
+
+    #[test]
+    fn malformed_filter_selector_is_rejected_as_corrupt() {
+        // [0, 1]: kind 0 (Identity) never carries a nonzero param, so
+        // Candidate::from_header_bytes names no real candidate for it
+        // (filters.rs's own unit tests cover the same byte pair).
+        let mut frame = lz_frame_header();
+        frame.extend_from_slice(&[0, 1]);
+        assert_eq!(decodes_incrementally(&frame), Err(Error::Corrupt));
+    }
+
+    #[test]
+    fn truncated_filter_selector_is_rejected() {
+        let mut frame = lz_frame_header();
+        frame.push(0);
+        assert_eq!(decodes_incrementally(&frame), Err(Error::Truncated));
+    }
+
+    #[test]
+    fn decodes_incrementally_shares_header_errors_with_decompress() {
+        let mut frame = compress(b"hi");
+        frame[0] = frame[0].wrapping_add(1);
+        assert_eq!(decodes_incrementally(&frame), Err(Error::BadMagic));
     }
 }
