@@ -21,6 +21,10 @@ manual dispatch: both `fuzz/` targets, 30 seconds each, Linux x64 only
 (layer 3). A found crasher fails the job, uploads `fuzz/artifacts/`,
 and wakes the fixer through the alarm (ADR-0036).
 
+The advisory `mutants-check` workflow runs on pull requests that touch
+`src/` or the crate's build inputs, mutating only the changed lines
+(layer 4). A whole-crate sweep runs on manual dispatch only.
+
 The advisory `monster` workflow runs Saturdays at 03:17 UTC and on manual
 dispatch, never on pull requests. Every runtime lane runs
 `cargo test --all-targets` and `cargo test --doc` on stable and the root
@@ -89,10 +93,19 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - Still planned: an explicit allocation-limiter target beyond
   `MAX_DECODED_LEN`'s bound, and cross-OS fuzz coverage in `monster`.
 
-## 4. Mutation testing (planned, not implemented)
+## 4. Mutation testing (`mutants-check`, per PR)
 
-- `cargo-mutants` on the codec modules; surviving mutants become issues —
-  a surviving mutant is a missing test by definition.
+- `cargo-mutants` on the codec package, scoped to the lines a PR changed
+  (`--in-diff` against the merge base). A surviving mutant is a missing test
+  by definition, so the PR that created one goes red and names it, rather
+  than a later sweep filing an issue about it.
+- Timeouts do not red a PR: a mutant whose test run hangs is undecided, not
+  evidence of a missing test. The verdict reads `mutants.out/missed.txt`,
+  never the exit code, which conflates the two.
+- Advisory, not a required check, until four weeks pass with no false
+  positive. Missed mutants appear as annotations on the changed lines.
+- Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
+  at ~3.8h is a one-time backlog measurement, not weekly news.
 
 ## 5. Determinism
 

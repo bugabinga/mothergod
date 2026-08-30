@@ -149,8 +149,11 @@ real bitstreams; then xz -9e.
 
 ## M4 — Production hardening
 
-- [ ] cargo-fuzz targets and cargo-mutants in scheduled CI
-      (`docs/TESTING.md` layers 3–4); surviving mutants become issues.
+- [x] cargo-fuzz targets in scheduled CI and cargo-mutants in the PR gate
+      (`docs/TESTING.md` layers 3–4): `fuzz-check` runs both targets
+      weekly, `mutants-check` mutates a PR's own changed lines and reds the
+      PR that leaves one alive. Survivors surface where they are made
+      instead of becoming issues later.
 - [x] Cross-platform determinism CI + golden frames per `FORMAT_VERSION`
       (layer 5): `tests/golden/` pins a decode+re-encode pair per version
       (v2, v3, `superseded/` for retired pairs), runs in the `test`
