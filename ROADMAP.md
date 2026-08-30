@@ -56,10 +56,12 @@ Outcome metrics (the product):
 - **RATIO** — aggregate bits/byte on the held-out finals (whole-file
   Silesia + Canterbury, real bitstreams) vs pinned `gzip -9`, `zstd -19`,
   `xz -9e`. Success ladder: (1) reclaim the founding v0.6 standing —
-  aggregate below zstd -19 (archive reference: 31.63 vs 32.65 over 13 files,
-  partly 256 KB slices — whole-file numbers must be re-established);
-  (2) win or tie every file vs zstd -19; (3) aggregate below xz -9e;
-  (4) hold all of it as the corpus grows adversarially.
+  aggregate below zstd -19. Whole-file numbers are established in
+  `docs/benchmarks/` (2026-08-29): Canterbury aggregate beats both zstd -19
+  and xz -9e; Silesia aggregate trails zstd -19 (2.061 vs 1.997 b/B), so
+  rung 1 is Silesia's to close. (2) win or tie every file vs zstd -19;
+  (3) aggregate below xz -9e; (4) hold all of it as the corpus grows
+  adversarially.
 - **TRUST** — zero known round-trip violations and zero decoder
   panics/overallocations, ever; adversarial suite green; cumulative clean
   fuzzing hours growing week over week once M4 lands.
@@ -163,9 +165,10 @@ blend, measured multi-core scaling (S1-P6).
 
 - [x] CLI binary (`mothergod` compress/decompress), first slice: stdin-in,
       stdout-out subcommands (`src/bin/mothergod.rs`), zero dependencies.
-      Remaining scope: file arguments, an output-suffix convention, and
-      streaming I/O (the last shared with M4's streaming/block API item).
-- [ ] Library surface reviewed for 0.1: minimal public API, examples in
-      rustdoc, docs.rs rendering checked.
+      File arguments and the `.mgdc` suffix landed in #359; remaining scope
+      is streaming I/O, shared with M4's streaming/block API item.
+- [x] Library surface reviewed for 0.1 (#360): internals `#[doc(hidden)]`,
+      documented API is `MAGIC`, `FORMAT_VERSION`, `Method`, `Error`,
+      `compress`, `decompress`, `filters`, with a crate-root doctest.
 - [ ] GitHub release with binaries, agent-drafted changelog.
 - [ ] `blocked-on-human` crates.io publish (operator holds the token).
