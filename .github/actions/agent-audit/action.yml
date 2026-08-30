@@ -78,9 +78,10 @@ runs:
     # (cadence, effort, model tier) needed a human-shaped act every time
     # (#198, #203, #213, #241, all hand-pulled, none self-reversing).
     # Mirrors agent-pause's model-limits ledger: machinery writes here,
-    # agent-guard reads it, nobody hand-edits it. Keeps the last two
-    # observations only, enough for a burn-rate projection; older history
-    # lives in audit artifacts, not here.
+    # agent-guard reads it, nobody hand-edits it. Keeps ONE observation,
+    # the whole projection state, because the guard projects week-average
+    # burn from a single reading (#369: two-reading deltas read zero
+    # during session bursts); older history lives in audit artifacts.
     - if: steps.extract.outputs.utilization != '' && inputs.token != ''
       shell: bash
       env:
@@ -93,52 +94,32 @@ runs:
         gh label create allowance-state --repo "$GITHUB_REPOSITORY" \
           --color 0E8A16 --description "Rolling seven-day allowance observations (issue #202)" 2>/dev/null || true
         n="$(gh issue list --repo "$GITHUB_REPOSITORY" --label allowance-state --state open --json number --jq '.[0].number // empty')"
-        old=''
-        [ -n "$n" ] && old="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
-        body="$(UTILIZATION="$UTILIZATION" RESETS_AT="$RESETS_AT" OLD="$old" RUN="$RUN_URL" python3 - <<'PY'
-        import json, os, re, time
+        body="$(UTILIZATION="$UTILIZATION" RESETS_AT="$RESETS_AT" RUN="$RUN_URL" python3 - <<'PY'
+        import json, os, time
 
-        m = re.search(r"```json\s*(\{.*?\})\s*```", os.environ.get("OLD", ""), re.S)
-        try:
-            prior = json.loads(m.group(1)) if m else {}
-        except (ValueError, TypeError, AttributeError):
-            prior = {}
-
-        current = {
+        reading = {
             "utilization": float(os.environ["UTILIZATION"]),
             "resetsAt": int(os.environ["RESETS_AT"]),
             "observedAt": int(time.time()),
         }
-        # Shift current -> prev unless this is the same instant repeating
-        # (two audit steps in one run economy window): a zero-duration gap
-        # makes the rate undefined, and dividing by it is the bug, not the
-        # data.
-        prev = prior.get("current")
-        if not prev or prev.get("observedAt") == current["observedAt"]:
-            prev = prior.get("prev")
-        ledger = {"prev": prev, "current": current}
 
-        def row(label, obs):
-            if not obs:
-                return f"| {label} | (none yet) | | |"
-            when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(obs["observedAt"]))
-            return f"| {label} | {obs['utilization']*100:.1f}% | {when} | {obs['observedAt']} |"
-
+        when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(reading["observedAt"]))
+        reset = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(reading["resetsAt"]))
         print("\n".join([
-            "Rolling seven-day allowance observations. agent-guard reads this to",
-            "project whether the current burn rate reaches the next reset, and",
-            "picks a role's `thrift` ladder/effort in `agents/models.json` when it",
-            "would not. Two readings only; older history lives in audit artifacts.",
+            "Rolling seven-day allowance observation. agent-guard projects the",
+            "week-average burn, utilization over the window elapsed so far,",
+            "against the next reset, and picks a role's `thrift` ladder/effort in",
+            "`agents/models.json` when the projection misses it. One reading is",
+            "the whole state (#369); older history lives in audit artifacts.",
             "",
-            "| Reading | Utilization | Observed | Epoch |",
-            "|---|---|---|---|",
-            row("previous", prev),
-            row("current", current),
+            "| Utilization | Observed | Epoch |",
+            "|---|---|---|",
+            f"| {reading['utilization']*100:.1f}% | {when} | {reading['observedAt']} |",
             "",
-            f"Next reset: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(current['resetsAt']))} ({current['resetsAt']})",
+            f"Next reset: {reset} ({reading['resetsAt']})",
             "",
             "```json",
-            json.dumps(ledger, indent=2, sort_keys=True),
+            json.dumps(reading, indent=2, sort_keys=True),
             "```",
             "",
             f"Last written by {os.environ['RUN']}",
