@@ -2620,8 +2620,11 @@ record.
   decoder to `Identity`/`Delta`/`Bcj` frames, `Transpose` keeps today's
   whole-buffer path, no `transpose` redesign required. The decision's own
   prerequisite (a public predicate so a caller can reason about the split,
-  not a silent fallback) landed as S2-A72. Remaining S1-P7 streaming-mode
-  scope: the ring-buffer decoder itself.
+  not a silent fallback) landed as S2-A72. Scoping the ring-buffer decoder
+  itself before writing it found it is not decomposable into a small
+  standalone primitive the way S2-A70/S2-A71/S2-A72 were: S2-D5. Remaining
+  S1-P7 streaming-mode scope: the sink abstraction and a real caller,
+  together, per S2-D5's finding.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2791,6 +2794,70 @@ record.
   touched. | No bpb measurement: `research/progress.jsonl` records this
   as `kind: "patch"` with null deltas, it120. Remaining S1-P7
   streaming-mode scope, unchanged: the ring-buffer decoder itself.
+- S2-D5 | DEBT | Scoped S1-P7's named remaining piece (the ring-buffer
+  decoder itself) before writing it, the same "primitive first" order
+  S2-A64/S2-A70/S2-A71/S2-A72 each took for their own leads. It does not
+  decompose the same way. Built a standalone `Window` type in `src/lz.rs`
+  (fixed-capacity ring buffer over `WINDOW` bytes, tracking an absolute
+  write position, handing each byte to a caller-supplied sink the instant
+  it is produced so nothing is retained past what a future match/rep
+  distance could still reference) plus differential unit tests against
+  `copy_checked`'s overlapping-run semantics (distance shorter than
+  length, the max-distance boundary case, before-the-start rejection,
+  many wraps past a small test capacity). `cargo x lint` rejected it
+  outright: `dead_code` fires on the plain `lib` clippy target (not just
+  `--all-targets`, which also runs the `lib test` target where
+  `#[cfg(test)]` usage does count) because nothing in non-test code ever
+  constructs a `Window` — S2-A2's escape (`pub mod filters`, reachable as
+  external library surface without any in-crate caller) does not apply
+  here, since an internal ring buffer is not a defensible standalone
+  surface for 0.1 the way a reversible filter transform is (`library-
+  surface-0-1`, PR #360), and every other lead's "unwired" first slice
+  (S2-A2/A3/A4's filters aside) was in fact wired to a real caller
+  immediately: S2-A70 modified `decode`'s existing check in place,
+  S2-A71/S2-A72 are new `pub` functions `decompress`/`decompress_bounded`
+  or a real embedder can call directly and this crate's own tests
+  exercise as such. `Window` had neither.
+  Tried making it real by wiring it into today's `codec::decode` as a
+  drop-in replacement for `copy_checked`, reading match/rep copy sources
+  through the ring buffer instead of `output[start + k]`. This is worse
+  than dead code, not better: `decode`'s public contract still returns a
+  fully-resident `Vec<u8>` (nothing about this slice changes that), so
+  every call would carry `output` (already retaining everything) *and* a
+  redundant `WINDOW`-sized (1 MiB) `Window` buffer duplicating output's
+  own tail, for zero benefit — a straight memory regression on the one
+  path real callers use today, the opposite of `rust-craft`'s mechanical-
+  sympathy discipline. A ring buffer only pays for itself once something
+  downstream actually stops retaining the bytes it evicts; short of that
+  pairing, it is pure overhead.
+  Mechanism, stated generally: S1-P7's remaining piece is not "a ring
+  buffer" plus "wire it in" as two separate slices, because the first
+  half has no honest standalone value — the value only exists at the
+  seam between the ring buffer and a real sink that discards old bytes,
+  and today's `decode`/`decompress`/`decompress_bounded` all promise a
+  complete `Vec<u8>` result, so none of them has such a seam yet. The
+  next real slice has to land the ring buffer and a genuine bounded-
+  memory caller together, not as a tested-but-unused primitive first.
+  Narrowest honest shape for that combined slice, given `filters::delta`
+  and `filters::bcj` are still whole-slice functions today (S2-A2/S2-A4's
+  own "forward accumulation"/"never re-examined" descriptions say the
+  *algorithms* are streaming-compatible, but the current code is not
+  chunked): a new sink-based decode path scoped to `Candidate::Identity`
+  only (`undo_filter`'s no-op case — the LZ loop's own output already
+  is the final byte stream, nothing to buffer after it), exposed as a
+  real public function real callers can reach (e.g. a `Write`-targeting
+  `decompress_to_writer`, falling back to today's whole-buffer `decode`
+  then one bulk write for every other `Candidate`, matching S2-D4's
+  `Identity`/`Delta`/`Bcj`-streams/`Transpose`-buffers split at least for
+  the one candidate that needs no filter-chunking work first). Streaming
+  `Delta`/`Bcj` is separate, smaller follow-on scope once each filter
+  gains an incremental decode form; `Transpose` stays excluded per
+  S2-D4. No code merged from this investigation: the `Window` type and
+  its tests were reverted in full, `research/progress.jsonl` gains no
+  row (an obstacle-only investigation, same as S2-D4's own). Remaining
+  S1-P7 streaming-mode scope: the combined sink-abstraction-plus-real-
+  caller slice above, sized for its own dedicated PR rather than a
+  heartbeat aside.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
