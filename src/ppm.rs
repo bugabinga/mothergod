@@ -133,16 +133,13 @@ impl Ppm {
         if self.freq[symbol] == 0 {
             self.distinct += 1;
         }
-        self.freq[symbol] += INCREMENT;
-        self.total += INCREMENT;
-        if self.total > RESCALE_LIMIT {
-            let mut total = 0u32;
-            for f in &mut self.freq {
-                *f = (*f + 1) >> 1;
-                total += *f;
-            }
-            self.total = total;
-        }
+        crate::rescale_bank(
+            &mut self.freq,
+            &mut self.total,
+            symbol,
+            INCREMENT,
+            RESCALE_LIMIT,
+        );
     }
 
     /// `-log2` price, in bits, of coding `symbol` under this table's

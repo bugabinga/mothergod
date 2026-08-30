@@ -155,6 +155,36 @@ const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
+/// Increments `freq[symbol]`/`*total` by `increment`, then halves every
+/// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
+/// rescales down to an impossible-to-code symbol) once `*total` exceeds
+/// `limit`, recomputing `*total` from the halved counts.
+///
+/// Shared by every adaptive frequency table in the crate —
+/// [`model::Model`], [`ppm::Ppm`], and [`literal::Literal`]'s six banks
+/// plus its `ColumnExpertState` experiment bank — so none of them can
+/// drift on what "one observation" does to a bank; each had independently
+/// ported the archive's identical `INC`/`LIM` update rule before this was
+/// pulled out from under them.
+pub(crate) fn rescale_bank(
+    freq: &mut [u32],
+    total: &mut u32,
+    symbol: usize,
+    increment: u32,
+    limit: u32,
+) {
+    freq[symbol] += increment;
+    *total += increment;
+    if *total > limit {
+        let mut new_total = 0u32;
+        for f in freq.iter_mut() {
+            *f = (*f + 1) >> 1;
+            new_total += *f;
+        }
+        *total = new_total;
+    }
+}
+
 /// Assembles a complete frame from `method` and its `payload`.
 fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(HEADER_LEN + payload.len());
