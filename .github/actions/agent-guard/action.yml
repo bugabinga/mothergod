@@ -26,9 +26,10 @@ description: >-
   4. Second gear (issue #375, ADR-0039): the allowance projection below
      misses the reset AND this wake is discretionary, meaning the clock
      started it because nothing else did. A computed share of those wakes
-     is skipped, evenly spread. Never an operator wake, an alarm, or a
-     reviewer run: those pass `discretionary: false` and are not budget
-     levers.
+     is skipped: the wakes falling outside the day's keep window, whose
+     width is what the allowance can still pay for. Never an operator
+     wake, an alarm, or a reviewer run: those pass `discretionary: false`
+     and are not budget levers.
 
   The same file carries each role's effort level (ADR-0021), emitted as
   `effort_flag`. Empty means the session default. An unrecognized value is
@@ -91,7 +92,6 @@ runs:
         EVENT_ACTION: ${{ github.event.action }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         DISCRETIONARY: ${{ inputs.discretionary }}
-        RUN_NUMBER: ${{ github.run_number }}
       run: |
         set -euo pipefail
         paused=false

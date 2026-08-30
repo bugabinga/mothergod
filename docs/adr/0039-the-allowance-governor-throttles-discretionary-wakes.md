@@ -51,13 +51,28 @@ every reviewer run are never skipped, because operator responsiveness and
 independent review are not budget levers.
 
 The share kept is the ratio of the sustainable rate to the observed rate,
-floored at one wake in four, and applied by Bresenham decimation over the
-workflow's run number. Proportional, so a 1% overshoot costs 1% of wakes rather
-than half of them. Evenly spread, so the gap between surviving wakes stays
-bounded where a random draw would sometimes skip eight in a row. Counted by run
-number rather than by the clock because a clock-derived index aliases against a
-cron: four-hourly ticks all land on even hours, so an `hour % 2` rule would keep
-every one of them and skip nothing.
+floored at a quarter, and applied in the time domain: a wake runs if it lands
+in the first `share` of the current UTC day, and does not otherwise.
+Proportional, so a 1% overshoot costs the last 15 minutes of the day rather
+than half the wakes.
+
+Decimating on time rather than on a count is the load-bearing choice, and the
+first draft of this decision got it backwards. It counted wakes, using the
+workflow's run number, on the reasoning that a counter cannot alias against a
+cron the way an hour-derived index can. But that counter advances on every wake
+of a workflow, not just the discretionary ones, so a single interleaved
+operator wake per tick puts the whole cron on odd run numbers, where a
+keep-every-fourth rule keeps none of them. Review of PR #383 ran it: total
+starvation of the seat, presented as a 25% floor. A time-domain rule cannot
+have that failure because it never reads the wake stream. It asks one question
+of one wake, and a run that never happened changes nothing.
+
+What the floor guarantees is therefore a bound on the gap, not on the count: at
+a quarter the keep window is six hours wide, so any seat ticking faster than
+six-hourly gets at least one wake a day. That precondition is not left to
+prose. The test suite reads the live crons out of `wrangler.toml` and asserts
+it for each governed seat, so a future pull of the cadence lever that would
+starve one fails a check instead of going quiet.
 
 Both gears are stateless and self-restoring. Every wake re-projects from the
 latest reading, so full cadence returns on its own once the allowance shows
@@ -80,10 +95,15 @@ makes safe.
 
 **Availability drops before the model does.** Where thrift degraded quality
 quietly, the second gear degrades presence visibly: a skipped wake leaves a run
-log saying so, with the numbers. The keep floor of one wake in four is the
-guarantee underneath it, because the stall sweep, the inbox drain and the
-operator sweep only happen on a wake that runs. A governor that starved them
-for days would have traded a budget problem for a liveness problem.
+log saying so, with the numbers. The keep floor is the guarantee underneath it,
+because the stall sweep, the inbox drain and the operator sweep only happen on a
+wake that runs. A governor that starved them for days would have traded a budget
+problem for a liveness problem.
+
+**Autonomous work concentrates in the early UTC day** while the governor is
+engaged, that being where the keep window sits. This is a side effect of the
+window having to start somewhere, not a schedule anyone designed. It costs
+nothing on the responsive path, which is not windowed at all.
 
 **The seat with no thrift block is now governed anyway.** The maintainer's runs
 are the most expensive the factory makes and the first gear does nothing for
@@ -107,6 +127,9 @@ input a caller sets, so a mistake there silently removes a seat from the
 governor or, worse, throttles a responsive path. That risk is why the decider
 moved out of the guard's YAML heredoc into `.github/scripts/guard-decide.py`,
 where three of its tests assert only that the responsive path is never touched.
+The starvation bug above is the argument in one example: it was invisible to
+reading and obvious to running, and it lived in the file for as long as the
+file could not be run.
 
 **The budget footer keeps its job.** The governor reacts to the projection; the
 footer is still how a human, and a BDFL, learn the number. An automatic

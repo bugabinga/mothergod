@@ -42,11 +42,19 @@ import time
 
 WEEK = 604800
 
-# Never skip more than three discretionary wakes in four, however badly the
-# projection misses. The stall sweep, the inbox drain and the operator sweep
-# only happen on a wake that runs, and a governor that starves them for days
-# has traded a budget problem for a liveness problem.
+# Never keep less than this share of the day, however badly the projection
+# misses. The stall sweep, the inbox drain and the operator sweep only happen
+# on a wake that runs, and a governor that starves them for days has traded a
+# budget problem for a liveness problem.
 KEEP_FLOOR = 0.25
+
+# The decimation window. Wakes landing in the first KEEP fraction of each
+# window run; the rest do not. One day, so the floor above is a six-hour
+# window every twenty-four, which any cadence faster than six-hourly is
+# guaranteed to land in at least once. Both governed seats tick far faster
+# than that, and `guard-decide.test.mjs` asserts it against the real crons in
+# wrangler.toml so moving the cadence lever cannot silently starve a seat.
+WINDOW = 86400
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
@@ -131,24 +139,36 @@ def keep_fraction(projection):
     return min(1.0, max(KEEP_FLOOR, projection["sustainable"] / projection["rate"]))
 
 
-def keeps(n, fraction):
-    """Bresenham decimation: keep `fraction` of ticks, evenly spread, stateless.
+def keeps(now, fraction):
+    """Keep every wake landing in the first `fraction` of the current window.
 
-    Counting ticks by run number rather than by the clock is the whole trick. A
-    clock-derived index aliases against a cron: four-hourly ticks all land on
-    even hours, so `hour % 2` keeps every one of them and skips nothing. A run
-    counter increments once per run whatever the hour, so no cadence can hide
-    inside its period.
+    Decimation in the time domain, which is the only kind that cannot be
+    aliased by the shape of the wake stream, because it never looks at the
+    stream. It asks one question of one wake: what time is it. Two wakes a
+    second apart get the same answer and a run that never happened changes
+    nothing.
 
-    Evenly spread, not sampled: at 25% this keeps every fourth wake, where a
-    random draw would sometimes skip eight in a row.
+    Counting wakes instead is the trap, and this function did it first. It
+    decimated on `github.run_number`, reasoning that a run counter increments
+    whatever the hour so no cadence could hide inside its period. But that
+    counter advances on EVERY wake of the workflow, discretionary or not, so
+    one interleaved operator wake per tick puts the whole cron on odd run
+    numbers, where a keep-every-fourth rule keeps exactly none of them: total
+    starvation of the seat, wearing the label of a 25% floor. Found in review
+    of PR #383 by running it, which is the only way anyone was going to.
+
+    The guarantee this gives instead is a hard bound on the gap rather than on
+    the count: at KEEP_FLOOR the keep window is six hours wide, so no seat
+    ticking faster than six-hourly goes more than a day without a wake. The
+    share kept is approximate, landing near `fraction` for any cadence that
+    divides the window into several ticks, and exact for none of them.
     """
-    if n < 1 or fraction >= 1.0:
+    if fraction >= 1.0:
         return True
-    return int(n * fraction) != int((n - 1) * fraction)
+    return (now % WINDOW) / WINDOW < fraction
 
 
-def decide(role, roles, ledger, allowance, run_number=0, discretionary=False):
+def decide(role, roles, ledger, allowance, now=0, discretionary=False):
     """One seat's run decision as (status, model, effort, note).
 
     Status is `ok` (run it), `skip` (second gear) or `exhausted` (no rung
@@ -160,14 +180,14 @@ def decide(role, roles, ledger, allowance, run_number=0, discretionary=False):
 
     if projection and discretionary:
         fraction = keep_fraction(projection)
-        if not keeps(run_number, fraction):
+        if not keeps(now, fraction):
             return (
                 "skip",
                 "",
                 "",
                 f"SKIP: discretionary wake and {miss(projection)}; "
-                f"keeping {fraction * 100:.0f}% of these wakes, "
-                f"and run {run_number} is not one of them",
+                f"keeping the first {fraction * 100:.0f}% of each day and "
+                f"this wake is at {_utc(now)}",
             )
 
     thrift = ""
@@ -217,10 +237,6 @@ def main():
         # action defaults, which is the pre-ADR-0018 behavior.
         print(f"ok|||models.json unreadable ({exc}); using action defaults")
         return
-    try:
-        run_number = int(os.environ.get("RUN_NUMBER", "0"))
-    except ValueError:
-        run_number = 0
     print(
         "|".join(
             decide(
@@ -228,7 +244,7 @@ def main():
                 roles,
                 os.environ.get("LEDGER", ""),
                 os.environ.get("ALLOWANCE", ""),
-                run_number,
+                time.time(),
                 os.environ.get("DISCRETIONARY", "") == "true",
             )
         )
