@@ -496,29 +496,20 @@ jobs:
                anything (#147).
             2. Inbox drain (above).
             3. State check: ops-log tail, gh run list, open PRs/issues,
-               recent commits. Known stalls to sweep for, each silent
-               by construction:
-               - An open PR labeled agent-approved that auto-merge is
-                 not landing — mergeable_state dirty (conflict), or
-                 clean with the required gates green and auto-merge still
-                 armed (unsigned tip, GitHub reports blocked while the
-                 REST merge succeeds; PR #84). Rescue per
-                 agents/GOVERNANCE.md "Stalled auto-merge": dirty
-                 needs the mechanical merge of main pushed with
-                 `.github/scripts/push-branch <pr> --merge <sha>`,
-                 then `.github/scripts/settle-push <pr>`;
-                 clean needs only the merge. Either way land it with
-                 `.github/scripts/merge-pr <pr>` once the required
-                 gates are green, blocked-on-human if still stuck.
-               - An open PR, ANY label, with zero check runs on its
-                 head SHA and older than a few minutes: conflicted at
-                 birth, so no merge ref ever formed and `ci`/
-                 `agent-review` never fired (issue #200). It cannot
-                 carry `agent-approved`, so it will not show up in
-                 the bullet above; scan all open PRs for this
-                 signature, not just labeled ones. Rescue per
-                 agents/GOVERNANCE.md "Stalled auto-merge": same
-                 mechanical merge-and-push as the dirty case.
+               recent commits. Then run
+               `.github/scripts/stalled-prs`: it reads every open PR
+               and prints the ones whose progress has stopped, each
+               with its rescue named, and its docstring is the list of
+               signatures it matches plus the ones it deliberately
+               skips. This was three prose signatures you had to
+               recall and match by eye against `gh pr list`, and prose
+               cannot notice that it is incomplete. It was: PR #377
+               stalled with every gate green and a reviewer killed
+               mid-run, and no remembered signature covered it,
+               because the dead reviewer never applied the label two
+               of them keyed off. Rescue recipes live in
+               agents/GOVERNANCE.md "Stalled auto-merge"; a stall the
+               named rescue does not clear gets blocked-on-human.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
                run `.github/scripts/retrospect`. It shares the
                sweep's anchor, reads the audit artifact every
