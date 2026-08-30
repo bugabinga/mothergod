@@ -21,6 +21,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `.github/scripts/changelog-notes` (ROADMAP M6): extracts this file's own
+  `[Unreleased]` section, the agent-drafted body a future release-drafting
+  workflow needs. Standalone and runnable by hand for now: the workflow
+  that would call it lives under `.github/workflows/`, which needs the
+  admin PAT and is a process change (GOVERNANCE.md's decision table), so
+  wiring it in is left for the BDFL.
 - `mothergod::decompress_bounded(input, max_len)` (`research/JOURNAL.md`
   S1-P7, S2-A71, ROADMAP M4): lets a caller reject an over-budget frame
   before any allocation or decode work, using a ceiling below the crate's
