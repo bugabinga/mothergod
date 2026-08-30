@@ -35,7 +35,7 @@ Guiding principles:
   posted to by the system; any thread there is organic or the operator's
   own doing.
 
-The BDFL owns this mission; it runs hourly (ADR-0015), judges the
+The BDFL owns this mission; it runs on the agent clock (ADR-0035), judges the
 project against the scorecard below — in full on its weekly deep run — and
 reports in the ops-log digest. Its default is to solve problems by improving
 the agent system itself, not by one-off work. A metric that cannot yet be

@@ -758,22 +758,24 @@ async function commandResult(env, updateId, parsed) {
 
 // The agent clock (ADR-0035). Each expression in wrangler.toml's
 // [triggers] crons fires `scheduled` with the matching key here; the
-// value names the seats that tick wakes. Cadence values are
-// ADR-0015/0027's; a new seat needs both files in one PR. GitHub's own
+// value names the seats that tick wakes. Cadence values move with
+// ADR-0027's allowance lever; a new seat needs both files in one PR,
+// and a changed cadence needs both keys in one PR, because a wrangler
+// cron with no CLOCK key wakes nobody, silently. GitHub's own
 // `schedule:` trigger is not an alternative: its runs are attributed
 // to whoever last committed the cron line, a bot actor kills them
 // silently, and most clock edits here are bot-authored by design
 // (incidents 2026-08-23 and 2026-08-27). A dispatch below is
 // attributed to the PAT's owner by API semantics, immune to git blame.
 const CLOCK = {
-  "11 * * * *": [
-    // agent-bdfl, hourly (ADR-0015). `source: cron` lets the seat
-    // report TRIGGER_EVENT=schedule downstream, telling a tick from an
+  "11 */2 * * *": [
+    // agent-bdfl. `source: cron` lets the seat report
+    // TRIGGER_EVENT=schedule downstream, telling a tick from an
     // operator dispatch.
     { workflow: "agent-bdfl.yml", inputs: { source: "cron" } },
   ],
-  "22 */2 * * *": [
-    // agent-heartbeat, two-hourly (ADR-0015/0027).
+  "22 */3 * * *": [
+    // agent-heartbeat.
     { workflow: "agent-heartbeat.yml" },
   ],
   "37 */12 * * *": [
@@ -902,7 +904,7 @@ export default {
     // Wake the BDFL. The dispatch carries no message text (issue #36
     // principle): it says "wake up", the run reads KV for the prose.
     // Dispatch failure is tolerable: the update is already in KV and
-    // the hourly schedule (ADR-0015) is the backstop.
+    // the next scheduled tick (ADR-0035) is the backstop.
     const res = await fetch(
       `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/agent-bdfl.yml/dispatches`,
       {

@@ -34,7 +34,8 @@ GITHUB_REPO = "bugabinga/mothergod"
 
 # The agent clock (ADR-0035): these lines are the single source of
 # truth for how often the seats run. Each expression fires worker.js's
-# `scheduled`, whose CLOCK table maps it to the seats it wakes; the
-# values are ADR-0015/0027's cadences.
+# `scheduled`, whose CLOCK table maps it to the seats it wakes. The
+# values move with ADR-0027's allowance lever: down when the budget
+# footer says SLOW DOWN, back up when it shows slack.
 [triggers]
-crons = ["11 * * * *", "22 */2 * * *", "37 */12 * * *"]
+crons = ["11 */2 * * *", "22 */3 * * *", "37 */12 * * *"]
