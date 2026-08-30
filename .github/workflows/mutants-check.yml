@@ -1,0 +1,127 @@
+# Mutation testing: a surviving mutant is a missing test by definition.
+#
+# ROADMAP M4's "cargo-mutants in CI" (docs/TESTING.md layer 4). It runs on
+# the PR's own changed lines, not on a weekly sweep of the whole crate,
+# because the two shapes carry different signal. Measured 2026-08-30 on
+# `src/` at 9,086 lines: the crate generates 1,531 mutants at roughly 9s
+# each with `-j 4`, so a full sweep is ~3.8h and re-reports a survivor list
+# that only changes when someone changes `src/`. A weekly report nobody
+# reads manufactures the appearance of coverage. `--in-diff` instead reds
+# the PR that created the survivor, at the moment fixing it is cheapest,
+# in single-digit minutes. The same run on merged PR #384's diff found 3
+# missed mutants in `decodes_incrementally` in 2m45s, one of which that
+# PR's review had already flagged by eye.
+#
+# The full sweep survives as `workflow_dispatch`: the backlog in code that
+# predates this gate is a one-time measurement, so it gets a button, not a
+# cron.
+#
+# Both modes mutate `--package mothergod` alone: `bench` and `x` measure and
+# orchestrate, they are not the codec under test.
+#
+# Not required by the ruleset. cargo-mutants emits `::warning file=...`
+# annotations, so a missed mutant lands on the changed line in the PR diff
+# where a reviewer already looks. Promote it to a required check once four
+# weeks pass with no false positive.
+name: mutants-check
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/mutants-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mutants:
+    runs-on: ubuntu-24.04
+    # The ceiling for the dispatched full sweep; each mode's real budget is
+    # its own step timeout below, so a hung PR gate never holds a runner for
+    # the sweep's allowance.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # --merge-base needs the base branch present, not just the merge ref.
+          fetch-depth: 0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ runner.os }}-27.1.0
+      # Guarded by the binary, not by `cargo install`'s own check: the cache
+      # restores the binary without ~/.cargo/.crates.toml, so an unguarded
+      # install rebuilds from source on every hit (fuzz-check learned this).
+      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version 27.1.0 --locked
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: mutants
+          workspaces: . -> target
+
+      - name: Mutate the changed lines
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 25
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git diff --merge-base "origin/$BASE_REF" HEAD -- src > pr.diff
+          set +e
+          cargo mutants --package mothergod --in-diff pr.diff -j 4
+          status=$?
+          set -e
+          # 2 and 3 are outcomes cargo-mutants reports, not a broken run; the
+          # verdict step below judges them from missed.txt. Exiting here on
+          # either would red a PR for a timeout, which is an undecided mutant
+          # and not evidence of a missing test.
+          case $status in
+            0 | 2 | 3) ;;
+            *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
+          esac
+
+      - name: Mutate the whole codec
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 330
+        run: |
+          set +e
+          cargo mutants --package mothergod -j 4
+          status=$?
+          set -e
+          case $status in
+            0 | 2 | 3) ;;
+            *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
+          esac
+
+      - name: Verdict
+        run: |
+          if [ -s mutants.out/timeout.txt ]; then
+            echo "::notice::$(grep -c . mutants.out/timeout.txt) mutant(s) timed out: undecided, not counted against this diff"
+          fi
+          if [ ! -s mutants.out/missed.txt ]; then
+            echo "No missed mutants."
+            exit 0
+          fi
+          echo "Missed mutants. Each is a line no test distinguishes from its mutation:"
+          cat mutants.out/missed.txt
+          echo
+          echo "Add a test that fails under the mutation, or explain on the PR why the line is not worth distinguishing."
+          exit 1
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutants-report
+          path: mutants.out/
+          if-no-files-found: ignore
