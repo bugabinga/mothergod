@@ -12,7 +12,10 @@ delta checks that exit silently, so the cadence is the only knob.
 ## Decision
 
 The BDFL runs hourly: cron `11 * * * *`, twenty-four scheduled runs/day,
-plus operator-priority wakes and on-demand dispatch. Run economy and
+plus operator-priority wakes and on-demand dispatch. (Correction,
+2026-08-30, PR #368: the value has since moved under ADR-0027's
+allowance lever; the cron line in `infra/telegram-worker/wrangler.toml`
+is the current cadence.) Run economy and
 agentic bias from ADR-0007 are unchanged and matter more at this cadence:
 a routine run with no delta exits without posting.
 
