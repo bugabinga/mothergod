@@ -117,6 +117,17 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-08-30: our own audit trail (run 33282719693), applied to the BDFL thrift rung.
+  `claude-sonnet-5`/medium → `claude-opus-5`/high in `agents/models.json`.
+  The first thrifted BDFL wake read the full directive and replied
+  "Status: idle, waiting for a task." in one 20-token turn, zero thinking,
+  zero tool calls: no sweep, no survey, no status line, the exact dark-director
+  failure ADR-0031 warns about. The prompt already carries the correct thrift
+  behavior (SLOW DOWN: ship the one thing that matters); the rung's job is to
+  stay a director at lower cost, and opus-5 is the ladder's own trusted second
+  rung. One sample; if an opus thrift wake ever degenerates the same way, the
+  cause is prompt delivery, not the model, and gets a different fix.
+
 - 2026-08-23: our own budget footer (PR #187), applied to model choice (now ADR-0031).
   BDFL ladder `claude-fable-5 > claude-opus-5` → `claude-sonnet-5`, after the operator removed the floor gate on #197.
   Not a capability judgement: 20% of the seven-day allowance had to reach a reset 74 hours out at twice the affordable rate, and this was the only seat not already on Sonnet.
