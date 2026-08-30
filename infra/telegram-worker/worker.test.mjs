@@ -4,8 +4,9 @@
 //
 // Run: node --test infra/telegram-worker/*.test.mjs
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
-import worker, { Typing } from "./worker.js";
+import worker, { CLOCK, Typing } from "./worker.js";
 
 const originalFetch = globalThis.fetch;
 const originalNow = Date.now;
@@ -600,13 +601,34 @@ test("Telegram command and prose routes", async (t) => {
   });
 });
 
+// Cadence is a budget-governed quantity (ADR-0027) that moves without
+// warning, so no test may spell a cron expression: a test that hardcodes
+// one is a third copy of a value that already lives in wrangler.toml and
+// CLOCK, and it fails on the next allowance lever instead of on a defect.
+// Fixtures name a seat and look up its expression.
+const cronFor = (workflow) =>
+  Object.keys(CLOCK).find((cron) => CLOCK[cron].some((seat) => seat.workflow === workflow));
+
 test("Clock ticks (ADR-0035)", async (t) => {
   const tick = (setup, cron) => worker.scheduled({ cron, scheduledTime: 1_700_000_000_000 }, setup.env);
   const clocklog = (setup) => JSON.parse(setup.kv.get("clocklog"));
 
+  await t.test("every wrangler trigger has a CLOCK entry, and none is orphaned", () => {
+    // The one invariant the CLOCK comment states and nothing enforced: a
+    // cron in wrangler.toml with no CLOCK key wakes nobody, silently, and
+    // a CLOCK key with no trigger never fires. Both halves are the same
+    // typo, found here rather than by a seat that stops running.
+    const wrangler = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
+    const crons = wrangler.match(/^crons\s*=\s*\[(.*)\]/m)[1]
+      .split(",")
+      .map((entry) => entry.trim().replace(/^["']|["']$/g, ""));
+    assert.deepEqual(crons.slice().sort(), Object.keys(CLOCK).sort());
+  });
+
   await t.test("the BDFL tick wakes the seat as a cron wake and logs it", async () => {
     const setup = harness(() => new Response(null, { status: 204 }));
-    await tick(setup, "11 */2 * * *");
+    const cron = cronFor("agent-bdfl.yml");
+    await tick(setup, cron);
     const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
     assert.match(dispatch.url, /agent-bdfl\.yml/);
     assert.deepEqual(JSON.parse(dispatch.init.body), {
@@ -615,7 +637,7 @@ test("Clock ticks (ADR-0035)", async (t) => {
     });
     assert.deepEqual(clocklog(setup), [
       {
-        cron: "11 */2 * * *",
+        cron,
         at: "2023-11-14T22:13:20.000Z",
         woke: ["agent-bdfl.yml"],
         failed: [],
@@ -624,13 +646,9 @@ test("Clock ticks (ADR-0035)", async (t) => {
   });
 
   await t.test("heartbeat and deslop ticks dispatch without inputs", async () => {
-    for (
-      const [cron, workflow] of [
-        ["22 */3 * * *", "agent-heartbeat.yml"],
-        ["37 */12 * * *", "agent-deslop.yml"],
-      ]
-    ) {
+    for (const workflow of ["agent-heartbeat.yml", "agent-deslop.yml"]) {
       const setup = harness(() => new Response(null, { status: 204 }));
+      const cron = cronFor(workflow);
       await tick(setup, cron);
       const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
       assert.ok(dispatch.url.includes(workflow), `${cron} must wake ${workflow}`);
@@ -641,7 +659,7 @@ test("Clock ticks (ADR-0035)", async (t) => {
 
   await t.test("a failed dispatch is logged as failed, never thrown", async () => {
     const setup = harness(() => json({ message: "down" }, 503));
-    await tick(setup, "11 */2 * * *");
+    await tick(setup, cronFor("agent-bdfl.yml"));
     assert.deepEqual(clocklog(setup)[0].failed, ["agent-bdfl.yml"]);
     assert.deepEqual(clocklog(setup)[0].woke, []);
   });
@@ -664,14 +682,15 @@ test("Clock ticks (ADR-0035)", async (t) => {
       "clocklog",
       JSON.stringify(Array.from({ length: 48 }, (_, i) => ({ cron: String(i) }))),
     );
-    await tick(setup, "11 */2 * * *");
+    const cron = cronFor("agent-bdfl.yml");
+    await tick(setup, cron);
     const log = clocklog(setup);
     assert.equal(log.length, 48);
     assert.equal(log[0].cron, "1");
-    assert.equal(log.at(-1).cron, "11 */2 * * *");
+    assert.equal(log.at(-1).cron, cron);
 
     setup.kv.set("clocklog", "not json");
-    await tick(setup, "11 */2 * * *");
+    await tick(setup, cron);
     assert.equal(clocklog(setup).length, 1);
   });
 });
