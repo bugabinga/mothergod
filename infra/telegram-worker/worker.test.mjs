@@ -604,9 +604,9 @@ test("Clock ticks (ADR-0035)", async (t) => {
   const tick = (setup, cron) => worker.scheduled({ cron, scheduledTime: 1_700_000_000_000 }, setup.env);
   const clocklog = (setup) => JSON.parse(setup.kv.get("clocklog"));
 
-  await t.test("the hourly tick wakes the BDFL as a cron wake and logs it", async () => {
+  await t.test("the BDFL tick wakes the seat as a cron wake and logs it", async () => {
     const setup = harness(() => new Response(null, { status: 204 }));
-    await tick(setup, "11 * * * *");
+    await tick(setup, "11 */2 * * *");
     const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
     assert.match(dispatch.url, /agent-bdfl\.yml/);
     assert.deepEqual(JSON.parse(dispatch.init.body), {
@@ -615,7 +615,7 @@ test("Clock ticks (ADR-0035)", async (t) => {
     });
     assert.deepEqual(clocklog(setup), [
       {
-        cron: "11 * * * *",
+        cron: "11 */2 * * *",
         at: "2023-11-14T22:13:20.000Z",
         woke: ["agent-bdfl.yml"],
         failed: [],
@@ -626,7 +626,7 @@ test("Clock ticks (ADR-0035)", async (t) => {
   await t.test("heartbeat and deslop ticks dispatch without inputs", async () => {
     for (
       const [cron, workflow] of [
-        ["22 */2 * * *", "agent-heartbeat.yml"],
+        ["22 */3 * * *", "agent-heartbeat.yml"],
         ["37 */12 * * *", "agent-deslop.yml"],
       ]
     ) {
@@ -641,7 +641,7 @@ test("Clock ticks (ADR-0035)", async (t) => {
 
   await t.test("a failed dispatch is logged as failed, never thrown", async () => {
     const setup = harness(() => json({ message: "down" }, 503));
-    await tick(setup, "11 * * * *");
+    await tick(setup, "11 */2 * * *");
     assert.deepEqual(clocklog(setup)[0].failed, ["agent-bdfl.yml"]);
     assert.deepEqual(clocklog(setup)[0].woke, []);
   });
@@ -664,14 +664,14 @@ test("Clock ticks (ADR-0035)", async (t) => {
       "clocklog",
       JSON.stringify(Array.from({ length: 48 }, (_, i) => ({ cron: String(i) }))),
     );
-    await tick(setup, "11 * * * *");
+    await tick(setup, "11 */2 * * *");
     const log = clocklog(setup);
     assert.equal(log.length, 48);
     assert.equal(log[0].cron, "1");
-    assert.equal(log.at(-1).cron, "11 * * * *");
+    assert.equal(log.at(-1).cron, "11 */2 * * *");
 
     setup.kv.set("clocklog", "not json");
-    await tick(setup, "11 * * * *");
+    await tick(setup, "11 */2 * * *");
     assert.equal(clocklog(setup).length, 1);
   });
 });
