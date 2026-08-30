@@ -94,7 +94,7 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - `cargo-mutants` on the codec modules; surviving mutants become issues —
   a surviving mutant is a missing test by definition.
 
-## 5. Determinism (partial: single-platform golden files exist)
+## 5. Determinism
 
 - `tests/golden/` (`JOURNAL` S2-A39) pins known input → known output per
   `FORMAT_VERSION`: `decompress(golden) == plaintext` and, for the

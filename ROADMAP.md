@@ -151,8 +151,11 @@ real bitstreams; then xz -9e.
 
 - [ ] cargo-fuzz targets and cargo-mutants in scheduled CI
       (`docs/TESTING.md` layers 3–4); surviving mutants become issues.
-- [ ] Cross-platform determinism CI + golden frames per `FORMAT_VERSION`
-      (layer 5).
+- [x] Cross-platform determinism CI + golden frames per `FORMAT_VERSION`
+      (layer 5): `tests/golden/` pins a decode+re-encode pair per version
+      (v2, v3, `superseded/` for retired pairs), runs in the `test`
+      required check on every PR, and the weekly `monster` matrix runs the
+      same suite across all 10 hosted runtime/ABI lanes plus Android.
 - [ ] Streaming/block API, bounded-memory decode guarantees.
 - [ ] Frozen format spec v1 (`docs/format/SPEC.md`) + `FORMAT_VERSION` 1.
 
