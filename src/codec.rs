@@ -604,11 +604,16 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// [`Candidate::from_header_bytes`] recognizes. Returns
 /// [`Error::TooLarge`] if the declared length exceeds
 /// [`MAX_DECODED_LEN`], checked before any allocation or decode work.
-/// Returns [`Error::Corrupt`] if a match or rep token's distance reaches
-/// before the start of decoded output, if a token would grow decoded
-/// output past the declared length, or if the final decoded length does
-/// not equal it: all adversarial or malformed input, never a bug in this
-/// decoder (`rust-craft` skill, panic-discipline).
+/// Returns [`Error::Corrupt`] if a match token's distance exceeds
+/// [`lz::WINDOW`] (the real encoder's match finder never searches past it,
+/// `research/JOURNAL.md` M4's bounded-memory decode guarantee: a distance
+/// beyond `WINDOW` is never legitimate and, left unrejected, would force
+/// this decoder to retain output far past what any real bitstream needs),
+/// if a match or rep token's distance reaches before the start of decoded
+/// output, if a token would grow decoded output past the declared length,
+/// or if the final decoded length does not equal it: all adversarial or
+/// malformed input, never a bug in this decoder (`rust-craft` skill,
+/// panic-discipline).
 ///
 /// `version` is the frame's declared `FORMAT_VERSION` byte
 /// (`crate::decompress` already has it in scope at its one call site):
@@ -667,6 +672,16 @@ pub fn decode(payload: &[u8], version: u8) -> Result<Vec<u8>, Error> {
                 // regardless of the residual bits: never zero.
                 let distance =
                     NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
+                // OFFSET_BUCKETS lets decode_bucketed return values up to
+                // 2 * WINDOW - 1 (bucket(WINDOW) == 20's residual bits),
+                // but the encoder's match finder never searches past
+                // WINDOW: a wider distance is adversarial, and rejecting
+                // it here (before it ever reaches RepCache) keeps every
+                // cached rep distance within WINDOW too, so this is the
+                // only place that needs the check.
+                if distance.get() as usize > lz::WINDOW {
+                    return Err(Error::Corrupt);
+                }
                 ensure_room(output.len(), len as usize, declared_len)?;
                 copy_checked(&mut output, len, distance)?;
                 reps.push_front(distance);
@@ -892,6 +907,29 @@ mod tests {
         encode_bucketed(&mut models.length, &mut ac, 4);
         encode_bucketed(&mut models.offset, &mut ac, 1);
         let _ = context;
+        let ac_bytes = ac.finish();
+
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&4u32.to_le_bytes()); // declared_len
+        payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
+        payload.extend(ac_bytes);
+
+        assert_eq!(decode(&payload, crate::FORMAT_VERSION), Err(Error::Corrupt));
+    }
+
+    #[test]
+    fn match_distance_beyond_window_is_rejected() {
+        // OFFSET_BUCKETS (21) lets decode_bucketed represent distances up
+        // to 2 * lz::WINDOW - 1, wider than any real encoder ever emits
+        // (its match finder never searches past lz::WINDOW): a distance
+        // one past the window must be rejected on its own, before
+        // ensure_room or copy_checked's own bounds checks even run.
+        let over_window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32") + 1;
+        let mut models = Models::new();
+        let mut ac = Encoder::new();
+        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        encode_bucketed(&mut models.length, &mut ac, 4);
+        encode_bucketed(&mut models.offset, &mut ac, over_window);
         let ac_bytes = ac.finish();
 
         let mut payload = Candidate::Identity.to_header_bytes().to_vec();

@@ -6,6 +6,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `codec::decode` now rejects a match distance beyond `lz::WINDOW`
+  (ROADMAP M4, bounded-memory decode guarantee): `OFFSET_BUCKETS` lets the
+  offset model represent distances up to `2 * WINDOW - 1`, wider than any
+  real encoder ever emits (its match finder never searches past `WINDOW`),
+  and the decoder only checked a distance against the output written so
+  far, not against `WINDOW` itself. Adversarial input could exploit the
+  gap to force retention of output the encoder's own window guarantee
+  never requires; no real bitstream is affected, since this codec's
+  encoder never produces such a distance. New unit test
+  `match_distance_beyond_window_is_rejected`.
+
 ### Added
 
 - `literal::Literal::ideal_cost_bits_column_expert_pair` and
