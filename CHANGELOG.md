@@ -15,10 +15,11 @@ All notable changes to this project are documented here. Format follows
   scorecard). Decode timing also round-trips `mothergod::decompress` over
   every measured file, catching a corpus round-trip failure as a measurement
   error instead of silently reporting on unverified bytes.
-  `docs/benchmarks/canterbury.md` is regenerated with real numbers;
-  `silesia.md` regeneration is a fast-follow (full-corpus run is too slow
-  for a single agent turn, same call `research/JOURNAL.md` S2-A52 already
-  made for Silesia).
+  Both `docs/benchmarks/canterbury.md` and `silesia.md` are regenerated
+  with real numbers (issue #366). Silesia's full-corpus run is not a
+  single-turn operation on ordinary hardware: serial per-file fetch alone
+  ran past 6m48s for 10 of 12 files in one attempt, before `measure_all`'s
+  parallel compress/decompress even starts (`research/JOURNAL.md` S2-A68).
 
 ### Changed
 
