@@ -21,6 +21,37 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `mothergod::decompress_bounded(input, max_len)` (`research/JOURNAL.md`
+  S1-P7, S2-A71, ROADMAP M4): lets a caller reject an over-budget frame
+  before any allocation or decode work, using a ceiling below the crate's
+  own `codec::MAX_DECODED_LEN` (256 MiB) — for an embedder with a smaller
+  known memory budget. `max_len` is clamped to `MAX_DECODED_LEN`, never
+  raised past it, since that constant is the only value this decoder's
+  worst-case decode time has been measured against. `mothergod::decompress`
+  is now a thin wrapper around it (`decompress_bounded(input,
+  codec::MAX_DECODED_LEN)`), bit-for-bit unchanged: a `Method::Stored`
+  frame is bounded by the new `max_len` check only when a caller opts into
+  a tighter budget than `MAX_DECODED_LEN`, never by the default ceiling
+  alone, since a stored payload's length is read from `input` directly and
+  is never spoofable past it. A first, additive slice of M4's
+  "bounded-memory decode guarantees" line, not the streaming/block API
+  itself, which remains open. No `FORMAT_VERSION` bump:
+  `docs/format/SPEC.md` already documents this ceiling as decoder policy,
+  not a wire-format field.
+
+### Changed
+
+- `Error::TooLarge(u32)` is now `Error::TooLarge { len: u32, max: u32 }`
+  (`research/JOURNAL.md` S2-A71): `decompress_bounded`'s caller-supplied
+  `max_len` means the bound a `TooLarge` error names is no longer always
+  `codec::MAX_DECODED_LEN`, so the error now carries the bound it actually
+  violated instead of the `Display` impl assuming that constant. Source-
+  level break, no `FORMAT_VERSION` bump (the wire format carries no error
+  values). `codec::decode` also now clamps its own `max_len` parameter to
+  `MAX_DECODED_LEN` internally rather than trusting every caller to have
+  clamped first: it is `#[doc(hidden)]` but still `pub`, reachable
+  directly by any crate depending on this one.
+
 - `literal::Literal::ideal_cost_bits_column_expert_pair` and
   `codec::ideal_cost_bits_column_expert_experiment`
   (`research/JOURNAL.md` S1-P5, S2-A69, ROADMAP M3's fifth standing

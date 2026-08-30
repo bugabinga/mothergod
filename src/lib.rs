@@ -122,14 +122,23 @@ pub enum Error {
     /// reaching before the start of decoded output, or similar):
     /// adversarial or corrupted input, never a bug in this decoder.
     Corrupt,
-    /// Payload declares an output length larger than this decoder accepts
-    /// (`codec::MAX_DECODED_LEN`). A declared length alone is not bounded
-    /// by the bytes that encode it: this format's adaptive models can make
-    /// a handful of real payload bytes and a few million padding-decoded
-    /// bytes indistinguishable by size, so the only sound bound is an
-    /// explicit ceiling, checked before any allocation or decode work
-    /// happens (`rust-craft` skill, allocation-discipline).
-    TooLarge(u32),
+    /// Payload's declared ([`Method::Lz`]) or actual ([`Method::Stored`])
+    /// output length exceeds the bound in effect: [`codec::MAX_DECODED_LEN`]
+    /// under [`decompress`], or a caller's own tighter `max_len` under
+    /// [`decompress_bounded`]. `max` names whichever bound was actually
+    /// violated, since the two can differ. A declared length alone is not
+    /// bounded by the bytes that encode it: this format's adaptive models
+    /// can make a handful of real payload bytes and a few million
+    /// padding-decoded bytes indistinguishable by size, so the only sound
+    /// bound is an explicit ceiling, checked before any allocation or
+    /// decode work happens (`rust-craft` skill, allocation-discipline).
+    TooLarge {
+        /// The length that exceeded the bound.
+        len: u32,
+        /// The bound it exceeded (not always [`codec::MAX_DECODED_LEN`];
+        /// see the variant's docs).
+        max: u32,
+    },
 }
 
 impl core::fmt::Display for Error {
@@ -140,11 +149,12 @@ impl core::fmt::Display for Error {
             Self::UnsupportedVersion(v) => write!(f, "unsupported format version {v}"),
             Self::UnknownMethod(m) => write!(f, "unknown compression method {m}"),
             Self::Corrupt => write!(f, "compressed payload is corrupt"),
-            Self::TooLarge(len) => write!(
-                f,
-                "declared output length {len} exceeds this decoder's maximum ({} bytes)",
-                codec::MAX_DECODED_LEN
-            ),
+            Self::TooLarge { len, max } => {
+                write!(
+                    f,
+                    "output length {len} exceeds the decoder's bound ({max} bytes)"
+                )
+            }
         }
     }
 }
@@ -185,12 +195,56 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 
 /// Decodes a frame produced by [`compress`] back into the original bytes.
 ///
+/// Equivalent to [`decompress_bounded`] with [`codec::MAX_DECODED_LEN`] as
+/// the bound, the largest output this decoder's worst-case decode time has
+/// been measured against.
+///
 /// # Errors
 ///
 /// Returns an [`Error`] when `input` is truncated, is not a mothergod
 /// frame, uses a version or method this build does not understand, or (for
 /// [`Method::Lz`]) is not internally consistent — see [`codec::decode`].
 pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decompress_bounded(input, codec::MAX_DECODED_LEN)
+}
+
+/// Like [`decompress`], but rejects any frame whose output would exceed
+/// `max_len` bytes, checked before any allocation or decode work
+/// (`rust-craft` skill's allocation-discipline). `max_len` is clamped to
+/// [`codec::MAX_DECODED_LEN`] regardless of what is passed in: that
+/// constant is the only ceiling this decoder's worst-case decode time has
+/// been measured against (see its docs), so a caller can tighten the bound
+/// for its own memory budget but never loosen it past what has been
+/// proven safe.
+///
+/// A caller embedding mothergod under a known memory budget (well below
+/// [`codec::MAX_DECODED_LEN`]'s 256 MiB) should call this instead of
+/// [`decompress`] directly: ROADMAP M4's bounded-memory decode guarantee,
+/// ahead of and independent from a future streaming/block API.
+///
+/// # Errors
+///
+/// Same as [`decompress`], plus [`Error::TooLarge`] whenever [`Method::Lz`]'s
+/// declared output length exceeds the effective bound (`max_len` clamped to
+/// [`codec::MAX_DECODED_LEN`]), or a [`Method::Stored`] frame's payload
+/// exceeds a `max_len` strictly below [`codec::MAX_DECODED_LEN`] (an
+/// explicit opt-in to a smaller memory budget). `max_len` at or above
+/// [`codec::MAX_DECODED_LEN`] never rejects a [`Method::Stored`] frame on
+/// size alone: its payload length is read directly from `input`, never
+/// spoofable past what was already loaded, so unlike [`Method::Lz`]'s
+/// declared-length field, [`codec::MAX_DECODED_LEN`] buys it no safety
+/// margin, only a compatibility break for large incompressible input.
+pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
+    // Method::Stored's payload length is read directly from `input`, never
+    // spoofable past what was already loaded into memory, so unlike
+    // Method::Lz's declared-length field (docs/format/SPEC.md lines 91-94)
+    // MAX_DECODED_LEN itself buys it no safety margin. Only a caller-chosen
+    // bound strictly tighter than MAX_DECODED_LEN is worth enforcing here;
+    // at or above it this arm stays exactly as unbounded as `decompress`
+    // (equivalent to calling this with max_len == MAX_DECODED_LEN) always
+    // was, so incompressible input at or past 256 MiB keeps round-tripping.
+    let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
+    let max_len = max_len.min(codec::MAX_DECODED_LEN);
     let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
     if header[..MAGIC.len()] != MAGIC {
         return Err(Error::BadMagic);
@@ -201,9 +255,19 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     }
     let method = Method::try_from(header[METHOD_OFFSET])?;
     match method {
-        Method::Stored => Ok(payload.to_vec()),
+        Method::Stored => {
+            if let Some(bound) = stored_bound
+                && payload.len() > bound as usize
+            {
+                return Err(Error::TooLarge {
+                    len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
+                    max: bound,
+                });
+            }
+            Ok(payload.to_vec())
+        }
         Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
-        Method::Lz => codec::decode(payload, version),
+        Method::Lz => codec::decode(payload, version, max_len),
     }
 }
 
@@ -369,6 +433,101 @@ mod tests {
         frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
         frame.extend_from_slice(&over.to_le_bytes());
-        assert_eq!(decompress(&frame), Err(Error::TooLarge(over)));
+        assert_eq!(
+            decompress(&frame),
+            Err(Error::TooLarge {
+                len: over,
+                max: codec::MAX_DECODED_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn decompress_matches_decompress_bounded_at_the_max() {
+        let input = b"the quick brown fox jumps over the lazy dog".repeat(100);
+        let frame = compress(&input);
+        assert_eq!(
+            decompress(&frame),
+            decompress_bounded(&frame, codec::MAX_DECODED_LEN)
+        );
+    }
+
+    #[test]
+    fn decompress_bounded_rejects_an_lz_frame_over_its_own_tighter_bound() {
+        // Legal under codec::MAX_DECODED_LEN, but a caller with a smaller
+        // memory budget must still be able to reject it before any decode
+        // work (ROADMAP M4's bounded-memory decode guarantee).
+        let input = b"the quick brown fox jumps over the lazy dog".repeat(100);
+        let frame = compress(&input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+        let declared_len = u32::try_from(input.len()).unwrap();
+        assert_eq!(
+            decompress_bounded(&frame, declared_len - 1),
+            Err(Error::TooLarge {
+                len: declared_len,
+                max: declared_len - 1
+            })
+        );
+        assert_eq!(decompress_bounded(&frame, declared_len), Ok(input));
+    }
+
+    #[test]
+    fn decompress_bounded_rejects_a_stored_frame_over_its_own_tighter_bound() {
+        // Method::Stored has no declared-length field to check against;
+        // decompress_bounded must still bound it by the payload's own
+        // length rather than only ever bounding Method::Lz.
+        let input = b"hi";
+        let frame = compress(input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+        assert_eq!(
+            decompress_bounded(&frame, 1),
+            Err(Error::TooLarge {
+                len: u32::try_from(input.len()).unwrap(),
+                max: 1
+            })
+        );
+        assert_eq!(
+            decompress_bounded(&frame, u32::try_from(input.len()).unwrap()),
+            Ok(input.to_vec())
+        );
+    }
+
+    #[test]
+    fn decompress_bounded_clamps_a_max_len_above_max_decoded_len() {
+        // A caller passing u32::MAX must not bypass MAX_DECODED_LEN: the
+        // clamp, not the caller's value, is the real ceiling.
+        let over = codec::MAX_DECODED_LEN + 1;
+        let mut frame = vec![
+            MAGIC[0],
+            MAGIC[1],
+            MAGIC[2],
+            MAGIC[3],
+            FORMAT_VERSION,
+            Method::Lz as u8,
+        ];
+        frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
+        frame.extend_from_slice(&over.to_le_bytes());
+        frame.extend_from_slice(&over.to_le_bytes());
+        assert_eq!(
+            decompress_bounded(&frame, u32::MAX),
+            Err(Error::TooLarge {
+                len: over,
+                max: codec::MAX_DECODED_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn decompress_roundtrips_a_stored_payload_past_max_decoded_len() {
+        // The regression this guards: decompress must stay exactly as
+        // unbounded for Method::Stored as it was before decompress_bounded
+        // existed, since the payload length is read from `input` itself,
+        // never spoofable past it (see decompress_bounded's docs). Builds
+        // the frame directly rather than via compress(), which would run
+        // the full LZ encoder over 256+ MiB just to hit the Stored
+        // fallback; this test's target is decompress, not compress.
+        let payload = vec![0xA5u8; (codec::MAX_DECODED_LEN + 1) as usize];
+        let frame = build_frame(Method::Stored, &payload);
+        assert_eq!(decompress(&frame), Ok(payload));
     }
 }
