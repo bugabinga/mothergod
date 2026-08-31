@@ -2622,9 +2622,14 @@ record.
   prerequisite (a public predicate so a caller can reason about the split,
   not a silent fallback) landed as S2-A72. Scoping the ring-buffer decoder
   itself before writing it found it is not decomposable into a small
-  standalone primitive the way S2-A70/S2-A71/S2-A72 were: S2-D5. Remaining
-  S1-P7 streaming-mode scope: the sink abstraction and a real caller,
-  together, per S2-D5's finding.
+  standalone primitive the way S2-A70/S2-A71/S2-A72 were: S2-D5. S2-D5's
+  combined sink-abstraction-plus-real-caller slice, narrowed to
+  `Candidate::Identity` (the one candidate needing no filter-chunking work
+  first), landed as S2-A73: `mothergod::decompress_to_writer`. Remaining
+  S1-P7 streaming-mode scope: extending the ring buffer to
+  `Delta`/`Bcj` frames (needs each filter's decode given an incremental
+  form first, `Transpose` staying excluded per S2-D4) and the frozen
+  format spec v1 half, both untouched by S2-A73.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2858,6 +2863,65 @@ record.
   S1-P7 streaming-mode scope: the combined sink-abstraction-plus-real-
   caller slice above, sized for its own dedicated PR rather than a
   heartbeat aside.
+- S2-A73 | ACCEPTED | S2-D5's combined sink-abstraction-plus-real-caller
+  slice, narrowed to the one candidate it named as needing no
+  filter-chunking work first: `mothergod::decompress_to_writer(input,
+  max_len, writer)`, writing decoded bytes to any `std::io::Write`
+  incrementally instead of collecting a `Vec<u8>`. `lz::Window`, a
+  fixed-`WINDOW`-capacity ring buffer (absolute write position mod
+  `WINDOW`, so a byte older than `WINDOW` pushes is silently overwritten —
+  sound because `ensure_within_window` already rejects any legitimate
+  reference to it), replaces `codec::decode`'s `output: Vec<u8>` on a new
+  `codec::decode_identity_streaming` path taken only when the frame's
+  filter selector is `Candidate::Identity`: the one candidate whose
+  `undo_filter` step is the identity transform, so the raw LZ token stream
+  this path replays *is* the final output, nothing left to buffer
+  afterward. Every other candidate (and `Method::Stored`) falls back to a
+  whole-buffer `decode` plus one bulk `write_all`, matching S2-D4's
+  `Identity`/`Delta`/`Bcj`-streams/`Transpose`-buffers split for exactly
+  the slice that needs no further filter work — `Delta`/`Bcj` streaming
+  remains open, named in the S1-P7 lead entry above. | No bpb measurement:
+  capability patch, no codec/bitstream change (`encode`/`decode` both
+  untouched; `decode_to_writer`'s Identity path is new code alongside
+  them, not a modification to either) — `baseline_gate check`: 11 cases,
+  no regression, finals reports fresh, confirming it. | Mechanism proving
+  the ring buffer's per-byte updates match `decode`'s batch ones: a
+  match/rep copy's `Context::after_copy(&output[start..])` folds
+  `word_hash` over the whole copied run and takes `prev1`/`prev2` from its
+  last two bytes; calling the existing public `after_copy` once per byte
+  with a one-element slice, in order, is exactly equivalent (each call's
+  output feeds the next call's `self`, so the fold and the last-two-bytes
+  tracking both telescope to the same final state a single multi-byte call
+  would reach) — verified by inspection, not by adding a second
+  parallel-but-separate implementation to keep in sync. A copy's source
+  distance from the *current* write position stays constant through its
+  own loop even for an overlapping run (distance < length): both the
+  current and source position advance by one per byte, so their
+  difference never changes, the same identity `copy_checked`'s
+  one-byte-at-a-time loop already relies on. `cargo x lint`'s
+  `dead_code` objection that sank S2-D5's standalone `Window` does not
+  apply here: `Window` has a real in-crate caller
+  (`decode_identity_streaming`) from the same commit that introduces it.
+  | 21 new tests: `lz::Window`'s own (push/get, an overlapping-run replay
+  matching `copy_checked`'s doc-comment shape, wraparound past `WINDOW`
+  capacity leaving in-range bytes undisturbed); `codec`'s existing
+  `roundtrip` fixtures (empty, single byte, all-literals, a long
+  single-byte run, cyclic data, pseudo-random bytes, binary data with
+  zero bytes, the founding archive source, the 50x-repeat shrink case)
+  extended to also assert `decode_to_writer`'s output byte-for-byte
+  against `decode`'s, plus the columnar-drift fixture proving the
+  non-Identity fallback; `decode_to_writer`-level adversarial tests
+  (bad match distance, distance beyond `lz::WINDOW`, declared length past
+  `MAX_DECODED_LEN` on both the Identity and fallback paths, a writer
+  that always fails proving its error comes back unwrapped rather than
+  folded into the decode-error wrapping); `decompress_to_writer`-level
+  tests mirroring `decompress_bounded`'s own (Stored/Lz parity with
+  `decompress`, a Stored frame over a tighter bound, an unsupported
+  version, a failing writer). None of the 1 MiB wraparound path is
+  exercised through the full codec (a real round trip that size is
+  minutes-scale per S2-A17's own note on `parse_optimal`); it is
+  unit-tested directly on `Window` instead. `research/progress.jsonl`
+  it121. Full record: this entry, S1-P7 lead entry updated above.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing

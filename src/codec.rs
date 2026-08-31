@@ -732,9 +732,192 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     Ok(undo_filter(candidate, output))
 }
 
+/// Streaming counterpart to [`decode`], reached only through
+/// [`crate::decompress_to_writer`].
+///
+/// [`filters::select::Candidate::Identity`] is the only candidate whose
+/// undo step (`undo_filter`) is the identity transform, so for it the raw
+/// LZ token stream this replays *is* the final output, with nothing left
+/// to buffer afterward: [`decode_identity_streaming`] takes that path,
+/// bounding resident memory to [`lz::WINDOW`] via [`lz::Window`] regardless
+/// of `declared_len` (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP M4's
+/// bounded-memory decode guarantee). Every other candidate needs its
+/// filter undone over the complete buffer regardless of how the LZ loop
+/// itself is decoded (`research/JOURNAL.md` S2-D4's `Transpose` finding,
+/// which generalizes: `Delta`/`Bcj` are sequential and streaming-shaped in
+/// principle but `undo_filter` does not chunk them today either), so this
+/// function falls back to [`decode`]'s whole-buffer path for them,
+/// unchanged from what a caller who ignored streaming entirely would get.
+///
+/// # Errors
+///
+/// Same as [`decode`], wrapped in [`std::io::Error::other`] so this
+/// function has one error type instead of two; plus whatever `writer`'s
+/// own `write_all` returns, unwrapped, since that is already the right
+/// type.
+pub(crate) fn decode_to_writer<W: std::io::Write>(
+    payload: &[u8],
+    version: u8,
+    max_len: u32,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    let (filter_bytes, filtered_payload) = payload
+        .split_at_checked(2)
+        .ok_or(Error::Truncated)
+        .map_err(std::io::Error::other)?;
+    let candidate = Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]])
+        .ok_or(Error::Corrupt)
+        .map_err(std::io::Error::other)?;
+    match candidate {
+        Candidate::Identity => {
+            decode_identity_streaming(filtered_payload, version, max_len, writer)
+        }
+        Candidate::Delta(_) | Candidate::Bcj | Candidate::Transpose(_) => {
+            let decoded = decode(payload, version, max_len).map_err(std::io::Error::other)?;
+            writer.write_all(&decoded)
+        }
+    }
+}
+
+/// [`decode_to_writer`]'s streaming path for [`filters::select::Candidate::Identity`]
+/// frames: the same token loop as [`decode`], replaying matches and reps
+/// through a fixed-capacity [`lz::Window`] instead of a fully-resident
+/// `Vec<u8>`, writing each decoded byte to `writer` the instant it is
+/// produced. `payload` here has already had its 2-byte filter selector
+/// stripped by [`decode_to_writer`], matching [`read_header`]'s expected
+/// input.
+fn decode_identity_streaming<W: std::io::Write>(
+    payload: &[u8],
+    version: u8,
+    max_len: u32,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    let max_len = max_len.min(MAX_DECODED_LEN);
+    let (declared_len, token_count, ac_bytes) =
+        read_header(payload).map_err(std::io::Error::other)?;
+    if declared_len > max_len as usize {
+        return Err(std::io::Error::other(Error::TooLarge {
+            len: u32::try_from(declared_len).expect(
+                "declared_len came from a u32 header field, so it always fits back into one",
+            ),
+            max: max_len,
+        }));
+    }
+
+    let mut ac = Decoder::new(ac_bytes);
+    let mut models = Models::new();
+    let mut context = Context::default();
+    let mut reps = RepCache::initial();
+    let mut window = lz::Window::new();
+
+    for _ in 0..token_count {
+        let flag_table = usize::from(context.after_copy);
+        match models.flag[flag_table].decode(&mut ac) {
+            FLAG_LITERAL => {
+                ensure_room(window.written_len(), 1, declared_len)
+                    .map_err(std::io::Error::other)?;
+                let byte = if version >= LITERAL_SSE_MIN_VERSION {
+                    models.literal.decode_sse(&mut ac, context)
+                } else {
+                    models.literal.decode(&mut ac, context)
+                };
+                window.push(byte);
+                writer.write_all(std::slice::from_ref(&byte))?;
+                context = context.after_literal(byte);
+            }
+            FLAG_MATCH => {
+                let len = decode_bucketed(&mut models.length, &mut ac);
+                let distance = decode_bucketed(&mut models.offset, &mut ac);
+                // decode_bucketed always ORs in `1 << bits`, which is >= 1
+                // regardless of the residual bits: never zero.
+                let distance =
+                    NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
+                ensure_within_window(distance).map_err(std::io::Error::other)?;
+                ensure_room(window.written_len(), len as usize, declared_len)
+                    .map_err(std::io::Error::other)?;
+                context = copy_streamed(&mut window, writer, len, distance, context)?;
+                reps.push_front(distance);
+            }
+            _ => {
+                // models.flag's alphabet is FLAG_ALPHABET (3), so this arm
+                // is FLAG_REP (2), never a fourth flag value.
+                let slot = RepSlot::from_index(models.slot.decode(&mut ac));
+                let len = decode_bucketed(&mut models.length, &mut ac);
+                let distance = reps.get(slot);
+                ensure_room(window.written_len(), len as usize, declared_len)
+                    .map_err(std::io::Error::other)?;
+                context = copy_streamed(&mut window, writer, len, distance, context)?;
+                reps.promote(slot);
+            }
+        }
+    }
+
+    if window.written_len() != declared_len {
+        return Err(std::io::Error::other(Error::Corrupt));
+    }
+    Ok(())
+}
+
+/// Replays a match/rep copy of `len` bytes from `distance` bytes back
+/// through `window`, writing each byte to `writer` as it is produced and
+/// returning the context updated the same way [`decode`]'s batch
+/// `context.after_copy(&output[start..])` does. Splitting the run into
+/// per-byte [`Context::after_copy`] calls instead of one batch call is
+/// exactly equivalent: each call folds `word_hash` over its slice and sets
+/// `prev1`/`prev2` from its last (up to) two bytes, so chaining single-byte
+/// calls reproduces the same final state a single multi-byte call would —
+/// `window`'s ring buffer never holds the whole run contiguously when it
+/// wraps, so a batch call is not an option here the way it is in [`decode`].
+///
+/// Mirrors [`copy_checked`]'s distance-before-the-start rejection: even a
+/// zero-length copy validates `distance` against what has actually been
+/// written so far.
+fn copy_streamed<W: std::io::Write>(
+    window: &mut lz::Window,
+    writer: &mut W,
+    len: u32,
+    distance: NonZeroU32,
+    mut context: Context,
+) -> std::io::Result<Context> {
+    let distance = distance.get() as usize;
+    window
+        .written_len()
+        .checked_sub(distance)
+        .ok_or(Error::Corrupt)
+        .map_err(std::io::Error::other)?;
+    if len == 0 {
+        return Ok(context.after_copy(&[]));
+    }
+    for _ in 0..len {
+        let byte = window.get(distance);
+        window.push(byte);
+        writer.write_all(std::slice::from_ref(&byte))?;
+        context = context.after_copy(std::slice::from_ref(&byte));
+    }
+    Ok(context)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
+    /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
+    /// compare its output byte for byte against [`decode`]'s.
+    fn decode_streaming(payload: &[u8], version: u8, max_len: u32) -> std::io::Result<Vec<u8>> {
+        let mut out = Vec::new();
+        decode_to_writer(payload, version, max_len, &mut out)?;
+        Ok(out)
+    }
+
+    /// Downcasts an [`std::io::Error`] produced by [`decode_to_writer`]
+    /// back to the [`Error`] it wrapped via [`std::io::Error::other`], for
+    /// tests asserting exactly which decode error occurred rather than
+    /// just that some error did.
+    fn as_codec_error(err: &std::io::Error) -> Option<&Error> {
+        err.get_ref()
+            .and_then(|inner| inner.downcast_ref::<Error>())
+    }
 
     fn roundtrip(data: &[u8]) {
         let encoded = encode(data);
@@ -742,6 +925,13 @@ mod tests {
             decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
             Ok(data),
             "roundtrip mismatch"
+        );
+        assert_eq!(
+            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .as_deref()
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            data,
+            "streaming roundtrip mismatch"
         );
     }
 
@@ -773,6 +963,12 @@ mod tests {
         assert_eq!(
             decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
             Ok(data.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            data,
+            "streaming roundtrip mismatch"
         );
     }
 
@@ -823,17 +1019,13 @@ mod tests {
         roundtrip(data);
     }
 
-    #[test]
-    fn roundtrip_columnar_drift_data_uses_a_non_identity_filter() {
-        // Four independent small-step random walks, one per column, laid
-        // out row-major with a 4-byte stride: consecutive same-column
-        // bytes drift by a small step (filters::select::pick ranks
-        // Candidate::Delta(4) top for exactly this shape — mirrors its
-        // own pick_selects_delta_for_columnar_drift test), but
-        // consecutive raw bytes belong to different, unrelated walks.
-        // Proves encode() actually wires a trial-selected filter into the
-        // frame, not just plumbs pick() through unused, and that decode()
-        // correctly reverses it.
+    /// Four independent small-step random walks, one per column, laid out
+    /// row-major with a 4-byte stride: consecutive same-column bytes drift
+    /// by a small step (`filters::select::pick` ranks `Candidate::Delta(4)`
+    /// top for exactly this shape — mirrors its own
+    /// `pick_selects_delta_for_columnar_drift` test), but consecutive raw
+    /// bytes belong to different, unrelated walks.
+    fn columnar_drift_data() -> Vec<u8> {
         const STEPS: [u8; 5] = [0u8.wrapping_sub(2), 0u8.wrapping_sub(1), 0, 1, 2];
         let mut rng = crate::test_support::Xorshift32::new(0x1234_5678);
         let mut walk = [64u8, 96, 160, 200];
@@ -847,7 +1039,15 @@ mod tests {
                 data.push(*col);
             }
         }
+        data
+    }
 
+    #[test]
+    fn roundtrip_columnar_drift_data_uses_a_non_identity_filter() {
+        // Proves encode() actually wires a trial-selected filter into the
+        // frame, not just plumbs pick() through unused, and that decode()
+        // correctly reverses it.
+        let data = columnar_drift_data();
         let encoded = encode(&data);
         assert_ne!(
             encoded[0], 0,
@@ -857,6 +1057,12 @@ mod tests {
         assert_eq!(
             decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
             Ok(data.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            data,
+            "streaming roundtrip mismatch: decode_to_writer's non-Identity fallback"
         );
     }
 
@@ -1206,6 +1412,126 @@ mod tests {
             large_bits < small_bits - f64::from(u16::try_from(template.len()).unwrap()),
             "a window reaching the planted repeat ({large_bits} bits) should cost at least a \
              template's worth of bits less than one that cannot ({small_bits} bits)"
+        );
+    }
+
+    #[test]
+    fn streaming_rejects_bad_match_distance_not_panicking() {
+        // Same hand-crafted single-Match-token payload as
+        // bad_match_distance_is_rejected_not_panicking, driven through
+        // decode_to_writer's own loop instead of decode's: the two loops
+        // are separate code, so this checks the new one's wiring directly
+        // rather than trusting decode's coverage to also prove it.
+        let mut models = Models::new();
+        let mut ac = Encoder::new();
+        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        encode_bucketed(&mut models.length, &mut ac, 4);
+        encode_bucketed(&mut models.offset, &mut ac, 1);
+        let ac_bytes = ac.finish();
+
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&4u32.to_le_bytes());
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        payload.extend(ac_bytes);
+
+        let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+            .expect_err("distance reaching before the start of output must be rejected");
+        assert_eq!(as_codec_error(&err), Some(&Error::Corrupt));
+    }
+
+    #[test]
+    fn streaming_rejects_match_distance_beyond_window() {
+        let over_window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32") + 1;
+        let mut models = Models::new();
+        let mut ac = Encoder::new();
+        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        encode_bucketed(&mut models.length, &mut ac, 4);
+        encode_bucketed(&mut models.offset, &mut ac, over_window);
+        let ac_bytes = ac.finish();
+
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&4u32.to_le_bytes());
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        payload.extend(ac_bytes);
+
+        let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+            .expect_err("a distance past lz::WINDOW must be rejected");
+        assert_eq!(as_codec_error(&err), Some(&Error::Corrupt));
+    }
+
+    #[test]
+    fn streaming_rejects_declared_length_over_the_max_before_any_work() {
+        let over = MAX_DECODED_LEN + 1;
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&over.to_le_bytes());
+        payload.extend_from_slice(&over.to_le_bytes());
+        let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+            .expect_err("declared length past MAX_DECODED_LEN must be rejected");
+        assert_eq!(
+            as_codec_error(&err),
+            Some(&Error::TooLarge {
+                len: over,
+                max: MAX_DECODED_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn streaming_falls_back_to_decode_for_non_identity_declared_length_over_the_max() {
+        // Same amplification-hazard shape as the Identity case above, but
+        // routed through decode_to_writer's fallback branch (a non-Identity
+        // filter selector), which must reject before calling decode's own
+        // whole-buffer path, not after.
+        let over = MAX_DECODED_LEN + 1;
+        let mut payload = Candidate::Bcj.to_header_bytes().to_vec();
+        payload.extend_from_slice(&over.to_le_bytes());
+        payload.extend_from_slice(&over.to_le_bytes());
+        let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+            .expect_err("declared length past MAX_DECODED_LEN must be rejected");
+        assert_eq!(
+            as_codec_error(&err),
+            Some(&Error::TooLarge {
+                len: over,
+                max: MAX_DECODED_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn streaming_propagates_the_writer_error_unwrapped() {
+        // Distinguishes the two error origins decode_to_writer's docs
+        // promise: a decode error comes back wrapped in
+        // std::io::Error::other (as_codec_error downcasts it above), but a
+        // failure from the writer itself must come back exactly as the
+        // writer produced it, not re-wrapped.
+        struct FailingWriter;
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let data = b"abcdefgh".repeat(50);
+        let encoded = encode(&data);
+        assert_eq!(
+            encoded[0], 0,
+            "expected Candidate::Identity for this fixture"
+        );
+        let mut writer = FailingWriter;
+        let err = decode_to_writer(
+            &encoded,
+            crate::FORMAT_VERSION,
+            MAX_DECODED_LEN,
+            &mut writer,
+        )
+        .expect_err("a writer that always fails must surface its error");
+        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(
+            as_codec_error(&err).is_none(),
+            "a writer failure is not a decode Error and must not downcast to one"
         );
     }
 }

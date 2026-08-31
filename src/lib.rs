@@ -320,6 +320,65 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     }
 }
 
+/// Like [`decompress_bounded`], but writes the decoded bytes to `writer`
+/// incrementally instead of collecting them into one returned `Vec<u8>`.
+/// Same frame-level checks, in the same order, so keep the two in sync if
+/// either changes; header parsing and the `max_len`/`stored_bound` rules
+/// are duplicated rather than shared because they return through two
+/// different error types ([`Error`] here needs wrapping into
+/// [`std::io::Error`], [`decompress_bounded`] does not).
+///
+/// Only bounds resident memory better than [`decompress_bounded`] for a
+/// [`Method::Lz`] frame whose encoder picked
+/// [`filters::select::Candidate::Identity`]: the only candidate whose
+/// filter-undo step is a no-op, so the decoded LZ token stream needs no
+/// buffering pass afterward, and `codec::decode_to_writer` bounds memory
+/// to [`lz::WINDOW`] (1 MiB) for it regardless of the frame's declared
+/// length (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP M4's bounded-memory
+/// decode guarantee). [`Method::Stored`] and every other
+/// [`filters::select::Candidate`] fall back to a whole-buffer decode
+/// followed by one bulk write: no worse than [`decompress_bounded`], just
+/// never streamed. [`decodes_incrementally`] tells a caller which case a
+/// frame is without decoding it, though this function does not require
+/// calling it first.
+///
+/// # Errors
+///
+/// An [`std::io::Error`] wrapping an [`Error`] (retrievable via
+/// [`std::io::Error::get_ref`] and a downcast) for anything
+/// [`decompress_bounded`] would itself return as an `Err`, or an
+/// unwrapped [`std::io::Error`] if `writer` itself fails.
+pub fn decompress_to_writer<W: std::io::Write>(
+    input: &[u8],
+    max_len: u32,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
+    let max_len = max_len.min(codec::MAX_DECODED_LEN);
+    let (version, method, payload) = parse_header(input).map_err(std::io::Error::other)?;
+    let mut writer = std::io::BufWriter::new(writer);
+    match method {
+        Method::Stored => {
+            if let Some(bound) = stored_bound
+                && payload.len() > bound as usize
+            {
+                return Err(std::io::Error::other(Error::TooLarge {
+                    len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
+                    max: bound,
+                }));
+            }
+            writer.write_all(payload)?;
+        }
+        Method::Lz if version < codec::LZ_MIN_VERSION => {
+            return Err(std::io::Error::other(Error::UnsupportedVersion(version)));
+        }
+        Method::Lz => codec::decode_to_writer(payload, version, max_len, &mut writer)?,
+    }
+    writer.flush()
+}
+
 /// Reports whether `input`'s frame can decode with the output produced in
 /// address order and bounded lookback, without doing any of that decode
 /// work itself: a precondition a future streaming/block API needs, checked
@@ -698,5 +757,102 @@ mod tests {
         let mut frame = compress(b"hi");
         frame[0] = frame[0].wrapping_add(1);
         assert_eq!(decodes_incrementally(&frame), Err(Error::BadMagic));
+    }
+
+    /// Downcasts an [`std::io::Error`] produced by [`decompress_to_writer`]
+    /// back to the [`Error`] it wrapped via [`std::io::Error::other`], for
+    /// tests asserting exactly which decode error occurred.
+    fn as_codec_error(err: &std::io::Error) -> Option<&Error> {
+        err.get_ref()
+            .and_then(|inner| inner.downcast_ref::<Error>())
+    }
+
+    #[test]
+    fn decompress_to_writer_matches_decompress_for_stored_and_lz_frames() {
+        for input in [
+            b"hi".to_vec(),
+            b"the quick brown fox jumps over the lazy dog".repeat(100),
+        ] {
+            let frame = compress(&input);
+            let via_decompress = decompress(&frame).unwrap();
+            let mut out = Vec::new();
+            decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out).unwrap();
+            assert_eq!(out, via_decompress);
+        }
+    }
+
+    #[test]
+    fn decompress_to_writer_rejects_an_lz_frame_over_the_max() {
+        let over = codec::MAX_DECODED_LEN + 1;
+        let mut frame = lz_frame_header();
+        frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
+        frame.extend_from_slice(&over.to_le_bytes());
+        frame.extend_from_slice(&over.to_le_bytes());
+        let mut out = Vec::new();
+        let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out)
+            .expect_err("declared length past MAX_DECODED_LEN must be rejected");
+        assert_eq!(
+            as_codec_error(&err),
+            Some(&Error::TooLarge {
+                len: over,
+                max: codec::MAX_DECODED_LEN
+            })
+        );
+    }
+
+    #[test]
+    fn decompress_to_writer_rejects_a_stored_frame_over_its_own_tighter_bound() {
+        let input = b"hi";
+        let frame = compress(input);
+        assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+        let mut out = Vec::new();
+        let err = decompress_to_writer(&frame, 1, &mut out)
+            .expect_err("a Stored payload over a caller's tighter bound must be rejected");
+        assert_eq!(
+            as_codec_error(&err),
+            Some(&Error::TooLarge {
+                len: u32::try_from(input.len()).unwrap(),
+                max: 1
+            })
+        );
+        let mut out = Vec::new();
+        decompress_to_writer(&frame, u32::try_from(input.len()).unwrap(), &mut out).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn decompress_to_writer_rejects_unsupported_version() {
+        let mut frame = compress(b"hi");
+        frame[VERSION_OFFSET] = FORMAT_VERSION + 1;
+        let mut out = Vec::new();
+        let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out)
+            .expect_err("a newer format version must be rejected");
+        assert_eq!(
+            as_codec_error(&err),
+            Some(&Error::UnsupportedVersion(FORMAT_VERSION + 1))
+        );
+    }
+
+    #[test]
+    fn decompress_to_writer_propagates_writer_errors_unwrapped() {
+        struct FailingWriter;
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+        }
+
+        let frame = compress(b"hi");
+        let mut writer = FailingWriter;
+        let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut writer)
+            .expect_err("a writer that always fails must surface its error");
+        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(
+            as_codec_error(&err).is_none(),
+            "a writer failure is not a decode Error and must not downcast to one"
+        );
     }
 }

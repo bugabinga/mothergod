@@ -55,6 +55,18 @@ All notable changes to this project are documented here. Format follows
   the queryable predicate S2-D4's scoping decision named as a prerequisite,
   so that API can surface the split explicitly instead of a silent
   fallback.
+- `mothergod::decompress_to_writer(input, max_len, writer)`
+  (`research/JOURNAL.md` S1-P7, S2-D5, ROADMAP M4): the first real slice
+  of the streaming/block API. Writes decoded bytes to any `std::io::Write`
+  incrementally instead of collecting a `Vec<u8>`. Actually bounds resident
+  memory to `lz::WINDOW` (1 MiB), regardless of the frame's declared
+  length, for a `Method::Lz` frame whose encoder picked
+  `filters::select::Candidate::Identity` — the only candidate whose
+  filter-undo step is a no-op, so the decoded LZ token stream needs no
+  buffering pass afterward. Every other candidate, and `Method::Stored`,
+  falls back to a whole-buffer decode plus one bulk write: no worse than
+  `decompress_bounded`, just not streamed yet. `decodes_incrementally`
+  tells a caller which case a frame is ahead of time.
 
 ### Changed
 
