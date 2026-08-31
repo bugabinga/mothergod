@@ -76,6 +76,18 @@ All notable changes to this project are documented here. Format follows
   did. `Bcj` and `Transpose` are unchanged, still falling back to a
   whole-buffer decode; `decodes_incrementally`'s answer is unaffected,
   since it already reported `Delta` as incremental ahead of this change.
+- `mothergod::decompress_to_writer` now also streams
+  `filters::select::Candidate::Bcj` frames (`research/JOURNAL.md` S1-P7,
+  S2-A75, ROADMAP M4): a new `filters::bcj::Undo` type undoes the bcj
+  transform as filtered bytes arrive, buffering up to 4 bytes while a
+  candidate `call`/`jmp` instruction's operand is still incoming (lookahead,
+  where `Delta`'s `Undo` needed lookback), so a `Method::Lz` frame whose
+  encoder picked `Bcj` now bounds resident memory to `lz::WINDOW` too. Only
+  `Transpose` still falls back to a whole-buffer decode, by design
+  (`research/JOURNAL.md` S2-D4): its column-major write order needs the
+  whole buffer resident regardless of how the rest of decode is built.
+  `decodes_incrementally`'s answer is unaffected, since it already reported
+  `Bcj` as incremental ahead of this change.
 
 ### Changed
 

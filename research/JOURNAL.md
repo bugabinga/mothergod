@@ -2628,10 +2628,12 @@ record.
   first), landed as S2-A73: `mothergod::decompress_to_writer`. `Delta`'s
   turn, S2-A74: `filters::delta::Undo` gives the delta transform its own
   incremental decode form, wired into the same streaming path Identity
-  uses. Remaining S1-P7 streaming-mode scope: extending the ring buffer to
-  `Bcj` frames (needs its own incremental decode form first, `Transpose`
-  staying excluded per S2-D4) and the frozen format spec v1 half, both
-  untouched by S2-A74.
+  uses. `Bcj`'s turn, S2-A75: `filters::bcj::Undo` gives the bcj transform
+  its own incremental decode form (lookahead, not lookback, unlike
+  `Delta`), wired into the same streaming path. Streaming-mode scope is now
+  closed for every candidate but `Transpose`, excluded by design per S2-D4.
+  Remaining S1-P7 scope: the frozen format spec v1 half, untouched since
+  the fuzzing half (S2-A25/S2-A53) landed.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2965,6 +2967,51 @@ record.
   measurement: capability patch, no codec/bitstream change.
   `research/progress.jsonl` it122. Full record: this entry, S1-P7 lead
   entry updated above.
+- S2-A75 | ACCEPTED | `Bcj`'s turn at S2-A74's remaining scope (`Transpose`
+  staying excluded per S2-D4). Unlike `Delta`'s fixed lookback, `Bcj`'s
+  `undo_filter` step needs fixed *lookahead*: whether a filtered byte starts
+  an instruction is decidable the instant it arrives (`0xE8`/`0xE9` or not),
+  but rewriting that instruction's operand needs the four bytes that follow
+  it — not yet available when the opcode byte itself reaches the streaming
+  decoder. New `filters::bcj::Undo`: `apply(filtered_byte) -> Resolved`, a
+  fixed-capacity (`INSTRUCTION_LEN`, 5) buffer type avoiding a heap
+  allocation per byte in the hot loop (`rust-craft` skill), resolving to
+  zero bytes while buffering a candidate instruction's still-incoming
+  operand, one byte immediately for a non-opcode byte, or all 5 the instant
+  an operand completes; `finish() -> Resolved` flushes a trailing opcode
+  byte seen too close to the stream's end to resolve, the same
+  too-short-for-any-instruction case `rewrite`'s own scan bound leaves
+  untouched. Differentially tested against `decode` by feeding `encode`'s
+  output through `apply` one byte at a time (plus a trailing `finish`)
+  across empty/too-short/no-opcode/adjacent-instructions/wrapping-overflow/
+  jmp fixtures. Wired into `codec.rs`: `StreamUndo` gained a
+  `Bcj(bcj::Undo)` variant, and its `apply` method changed shape — it now
+  takes the writer directly (`apply(byte, writer) -> io::Result<()>`)
+  rather than returning a byte for the caller to write, since `Bcj`'s
+  output length per call varies (0/1/5) where `Identity`/`Delta`'s is
+  always 1; this unifies all three under one call shape without a shared
+  buffer type crossing the `filters`/`codec` boundary. A new
+  `StreamUndo::finish(writer)` call after `decode_undoable_streaming`'s
+  token loop flushes `Bcj`'s trailing bytes (a no-op for
+  `Identity`/`Delta`). `decode_to_writer` now dispatches `Candidate::Bcj`
+  to the streaming path instead of the whole-buffer fallback; only
+  `Transpose` still falls back. `decompress_to_writer`'s and
+  `decodes_incrementally`'s doc comments, stale since S2-A74 shipped Delta
+  streaming without updating them, now name all three streaming candidates.
+  | `cargo x check`: 4 stages green, 276 lib tests (up from 267).
+  `baseline_gate check`: 11 cases, no regression, both finals reports fresh
+  — `encode`/`decode` both untouched. 2 new codec-level tests: a call-dense
+  fixture (many `call rel32` instructions targeting the same absolute
+  address, mirroring `filters::select::pick`'s own opcode-density fixture)
+  proving `encode()` actually selects `Candidate::Bcj` and the streaming
+  path reproduces `decode()`'s output; a hand-built `Candidate::Bcj` frame
+  from a repeating filtered instruction, exercising `copy_streamed`'s own
+  undo call the same way S2-A74's `Delta` fixture did.
+  `streaming_falls_back_to_decode_for_non_identity_declared_length_over_the_max`
+  renamed and repointed at `Candidate::Transpose`, the one candidate still
+  on the fallback path, since `Bcj` no longer is. | No bpb measurement:
+  capability patch, no codec/bitstream change. `research/progress.jsonl`
+  it123. Full record: this entry, S1-P7 lead entry updated above.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
