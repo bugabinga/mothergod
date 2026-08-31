@@ -21,6 +21,15 @@ guard, live and confirmed working, saw a foreground call and the job's
 orphan cleanup killed the command anyway (PR #354). The command string
 is part of the attack surface; the guard scans it too.
 
+A fifth session (run 33363960344, 2026-08-31) made no denied call at
+all: the harness itself moves a foreground command that outlives its
+timeout to the background, after PreToolUse approval and with no
+run_in_background field, then promises a notification headless mode
+never delivers. No PreToolUse hook can see that path. The timeout env
+in .claude/settings.json keeps real commands foreground (default 10
+minutes, ceiling 30), and the deny-parked-turn Stop hook catches
+whatever still detaches, at the boundary every variant shares.
+
 Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions
 (GITHUB_ACTIONS != "true") everything is allowed; an interactive session
 really does get notifications. In CI, exit 2 (deny; stderr is shown to
@@ -74,7 +83,8 @@ DETACH_MESSAGE = (
     "Background execution does not survive a CI session: the run ends "
     "the moment your turn ends, and the completion notification never "
     "arrives (PR #271, run 33207936812). Run the command in the "
-    "foreground (timeout goes up to 600000 ms); for a subagent pass "
+    "foreground (default timeout 10 minutes, ceiling 30 via the "
+    "timeout parameter); for a subagent pass "
     "run_in_background: false; a Workflow cannot run in CI at all. "
     "Work that cannot finish inside this run belongs to the next "
     "wake, stated where that wake will read it."
@@ -85,7 +95,8 @@ SHELL_DETACH_MESSAGE = (
     "not survive a CI session: the run ends the moment your turn ends "
     "and orphan cleanup kills the process (runs 33207936812, "
     "33269388206). Drop the detach and run the command in the "
-    "foreground (timeout goes up to 600000 ms). If the flagged idiom "
+    "foreground (default timeout 10 minutes, ceiling 30 via the "
+    "timeout parameter). If the flagged idiom "
     "is literal text, not shell syntax, reword it, for example `&` "
     "as 'and'. If it has to stay verbatim, as bitwise code inside a "
     "heredoc does, write the file with the Write tool and pass the "
