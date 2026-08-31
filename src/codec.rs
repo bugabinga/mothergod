@@ -735,17 +735,18 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
 /// Streaming counterpart to [`decode`], reached only through
 /// [`crate::decompress_to_writer`].
 ///
-/// [`filters::select::Candidate::Identity`] is the only candidate whose
-/// undo step (`undo_filter`) is the identity transform, so for it the raw
-/// LZ token stream this replays *is* the final output, with nothing left
-/// to buffer afterward: [`decode_identity_streaming`] takes that path,
-/// bounding resident memory to [`lz::WINDOW`] via [`lz::Window`] regardless
-/// of `declared_len` (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP M4's
-/// bounded-memory decode guarantee). Every other candidate needs its
+/// [`filters::select::Candidate::Identity`]'s undo step (`undo_filter`) is
+/// the identity transform, and [`filters::select::Candidate::Delta`]'s is a
+/// small fixed-lookback accumulate ([`filters::delta::Undo`]): both undo the
+/// LZ token stream one byte at a time as it is produced, so
+/// [`decode_undoable_streaming`] takes that path for either, bounding
+/// resident memory to [`lz::WINDOW`] via [`lz::Window`] regardless of
+/// `declared_len` (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP M4's
+/// bounded-memory decode guarantee). `Bcj` and `Transpose` need their
 /// filter undone over the complete buffer regardless of how the LZ loop
 /// itself is decoded (`research/JOURNAL.md` S2-D4's `Transpose` finding,
-/// which generalizes: `Delta`/`Bcj` are sequential and streaming-shaped in
-/// principle but `undo_filter` does not chunk them today either), so this
+/// which generalizes: `Bcj` is sequential and streaming-shaped in
+/// principle but `undo_filter` does not chunk it today either), so this
 /// function falls back to [`decode`]'s whole-buffer path for them,
 /// unchanged from what a caller who ignored streaming entirely would get.
 ///
@@ -769,28 +770,65 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
         .ok_or(Error::Corrupt)
         .map_err(std::io::Error::other)?;
     match candidate {
-        Candidate::Identity => {
-            decode_identity_streaming(filtered_payload, version, max_len, writer)
-        }
-        Candidate::Delta(_) | Candidate::Bcj | Candidate::Transpose(_) => {
+        Candidate::Identity => decode_undoable_streaming(
+            filtered_payload,
+            version,
+            max_len,
+            writer,
+            &mut StreamUndo::Identity,
+        ),
+        Candidate::Delta(stride) => decode_undoable_streaming(
+            filtered_payload,
+            version,
+            max_len,
+            writer,
+            &mut StreamUndo::Delta(filters::delta::Undo::new(stride)),
+        ),
+        Candidate::Bcj | Candidate::Transpose(_) => {
             let decoded = decode(payload, version, max_len).map_err(std::io::Error::other)?;
             writer.write_all(&decoded)
         }
     }
 }
 
-/// [`decode_to_writer`]'s streaming path for [`filters::select::Candidate::Identity`]
-/// frames: the same token loop as [`decode`], replaying matches and reps
-/// through a fixed-capacity [`lz::Window`] instead of a fully-resident
-/// `Vec<u8>`, writing each decoded byte to `writer` the instant it is
-/// produced. `payload` here has already had its 2-byte filter selector
-/// stripped by [`decode_to_writer`], matching [`read_header`]'s expected
-/// input.
-fn decode_identity_streaming<W: std::io::Write>(
+/// Per-byte filter undo for [`decode_undoable_streaming`], one variant per
+/// [`filters::select::Candidate`] this function's caller streams.
+enum StreamUndo {
+    /// `undo_filter` is the identity transform: pass the byte through.
+    Identity,
+    /// `undo_filter` is [`filters::delta::decode`]; undone one byte at a
+    /// time by [`filters::delta::Undo`].
+    Delta(filters::delta::Undo),
+}
+
+impl StreamUndo {
+    /// Undoes one more filtered byte, in stream order.
+    fn apply(&mut self, filtered_byte: u8) -> u8 {
+        match self {
+            Self::Identity => filtered_byte,
+            Self::Delta(undo) => undo.apply(filtered_byte),
+        }
+    }
+}
+
+/// [`decode_to_writer`]'s streaming path for candidates whose `undo_filter`
+/// step can run one byte at a time ([`StreamUndo`]): the same token loop as
+/// [`decode`], replaying matches and reps through a fixed-capacity
+/// [`lz::Window`] instead of a fully-resident `Vec<u8>`, undoing each byte
+/// through `undo` and writing the result to `writer` the instant it is
+/// produced. `window` holds the *filtered* byte stream throughout — matches
+/// and reps reference positions in what the encoder's LZ pass actually saw,
+/// which is filtered data (`apply_filter` runs before `encode_tokens`) — so
+/// only the byte handed to `writer` differs per candidate, never what goes
+/// into `window` or `context`. `payload` here has already had its 2-byte
+/// filter selector stripped by [`decode_to_writer`], matching
+/// [`read_header`]'s expected input.
+fn decode_undoable_streaming<W: std::io::Write>(
     payload: &[u8],
     version: u8,
     max_len: u32,
     writer: &mut W,
+    undo: &mut StreamUndo,
 ) -> std::io::Result<()> {
     let max_len = max_len.min(MAX_DECODED_LEN);
     let (declared_len, token_count, ac_bytes) =
@@ -822,7 +860,8 @@ fn decode_identity_streaming<W: std::io::Write>(
                     models.literal.decode(&mut ac, context)
                 };
                 window.push(byte);
-                writer.write_all(std::slice::from_ref(&byte))?;
+                let raw = undo.apply(byte);
+                writer.write_all(std::slice::from_ref(&raw))?;
                 context = context.after_literal(byte);
             }
             FLAG_MATCH => {
@@ -835,7 +874,7 @@ fn decode_identity_streaming<W: std::io::Write>(
                 ensure_within_window(distance).map_err(std::io::Error::other)?;
                 ensure_room(window.written_len(), len as usize, declared_len)
                     .map_err(std::io::Error::other)?;
-                context = copy_streamed(&mut window, writer, len, distance, context)?;
+                context = copy_streamed(&mut window, undo, writer, len, distance, context)?;
                 reps.push_front(distance);
             }
             _ => {
@@ -846,7 +885,7 @@ fn decode_identity_streaming<W: std::io::Write>(
                 let distance = reps.get(slot);
                 ensure_room(window.written_len(), len as usize, declared_len)
                     .map_err(std::io::Error::other)?;
-                context = copy_streamed(&mut window, writer, len, distance, context)?;
+                context = copy_streamed(&mut window, undo, writer, len, distance, context)?;
                 reps.promote(slot);
             }
         }
@@ -859,9 +898,12 @@ fn decode_identity_streaming<W: std::io::Write>(
 }
 
 /// Replays a match/rep copy of `len` bytes from `distance` bytes back
-/// through `window`, writing each byte to `writer` as it is produced and
-/// returning the context updated the same way [`decode`]'s batch
-/// `context.after_copy(&output[start..])` does. Splitting the run into
+/// through `window` (the filtered stream), undoing each byte through `undo`
+/// and writing the result to `writer` as it is produced, returning the
+/// context updated the same way [`decode`]'s batch
+/// `context.after_copy(&output[start..])` does — `context` folds over the
+/// *filtered* bytes `window` holds, never `undo`'s output, matching
+/// [`decode_undoable_streaming`]'s own split. Splitting the run into
 /// per-byte [`Context::after_copy`] calls instead of one batch call is
 /// exactly equivalent: each call folds `word_hash` over its slice and sets
 /// `prev1`/`prev2` from its last (up to) two bytes, so chaining single-byte
@@ -874,6 +916,7 @@ fn decode_identity_streaming<W: std::io::Write>(
 /// written so far.
 fn copy_streamed<W: std::io::Write>(
     window: &mut lz::Window,
+    undo: &mut StreamUndo,
     writer: &mut W,
     len: u32,
     distance: NonZeroU32,
@@ -891,7 +934,8 @@ fn copy_streamed<W: std::io::Write>(
     for _ in 0..len {
         let byte = window.get(distance);
         window.push(byte);
-        writer.write_all(std::slice::from_ref(&byte))?;
+        let raw = undo.apply(byte);
+        writer.write_all(std::slice::from_ref(&raw))?;
         context = context.after_copy(std::slice::from_ref(&byte));
     }
     Ok(context)
@@ -1043,15 +1087,19 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_columnar_drift_data_uses_a_non_identity_filter() {
+    fn roundtrip_columnar_drift_data_selects_delta_and_streams_it() {
         // Proves encode() actually wires a trial-selected filter into the
-        // frame, not just plumbs pick() through unused, and that decode()
-        // correctly reverses it.
+        // frame, not just plumbs pick() through unused; pins the kind byte
+        // to 1 (Delta) rather than just non-identity, since this fixture is
+        // also decode_undoable_streaming's only regression coverage for
+        // Candidate::Delta (`research/JOURNAL.md` S1-P7) — a future trial-
+        // cost change that made encode() prefer a different candidate here
+        // would silently drop that coverage without this pin.
         let data = columnar_drift_data();
         let encoded = encode(&data);
-        assert_ne!(
-            encoded[0], 0,
-            "columnar drift data should select a non-identity filter, got kind byte {}",
+        assert_eq!(
+            encoded[0], 1,
+            "columnar drift data should select Delta, got kind byte {}",
             encoded[0]
         );
         assert_eq!(
@@ -1062,7 +1110,34 @@ mod tests {
             decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
                 .expect("decode_to_writer must succeed whenever decode does, same payload"),
             data,
-            "streaming roundtrip mismatch: decode_to_writer's non-Identity fallback"
+            "streaming roundtrip mismatch: decode_undoable_streaming's Delta path"
+        );
+    }
+
+    #[test]
+    fn decode_undoable_streaming_delta_path_covers_copy_streamed_too() {
+        // columnar_drift_data's random walk gives decode_undoable_streaming's
+        // Delta path literal-only coverage: no fixed-distance repeat in that
+        // fixture is long enough for lz::parse_optimal to price a match over
+        // literals. Crafted directly against Candidate::Delta (bypassing
+        // encode()'s trial selection) so copy_streamed's own undo call gets
+        // exercised: a filtered stream built from a short repeating pattern
+        // guarantees parse_optimal finds match/rep tokens for the repeats.
+        let stride = crate::test_support::nz(4);
+        let filtered: Vec<u8> = [1u8, 2, 3, 4].iter().copied().cycle().take(200).collect();
+        let raw = filters::delta::decode(&filtered, stride);
+        let mut frame = Candidate::Delta(stride).to_header_bytes().to_vec();
+        frame.extend(encode_tokens(&filtered));
+
+        assert_eq!(
+            decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(raw.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            raw,
+            "streaming roundtrip mismatch: Delta path with match/rep copies"
         );
     }
 
