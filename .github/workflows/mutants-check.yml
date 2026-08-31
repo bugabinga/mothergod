@@ -20,25 +20,34 @@
 # orchestrate, they are not the codec under test.
 #
 # `--timeout-multiplier 10` doubles cargo-mutants' default of 5x the baseline
-# test duration. On the 2026-08-30 full sweep (run 33334414262) 56 of 1,531
-# mutants came back `timeout`, and their logs show tests that had already
-# failed when the clock ran out, not tests hanging under mutation: `cargo
-# test` has no fail-fast within a binary, so a caught mutant still runs the
-# rest of the suite after the failure that decided it.
+# test duration, because the default's anchor is measured under conditions it
+# is not spent under. On the 2026-08-30 full sweep (run 33334414262) the
+# baseline test phase ran alone and took 8.0s, so cargo-mutants auto-set a
+# 40s wall; the mutants then ran four-wide at `-j 4`, where that same suite
+# took 24.6s (`log/src__coder.rs_line_271_col_26_001.log`). 40s over 24.6s
+# is 1.6x of real margin, and 56 of 1,531 mutants crossed it.
 #
-# The default under-budgets because its anchor is measured under conditions
-# it is not spent under. That sweep's baseline test phase ran alone and took
-# 8.0s, so cargo-mutants auto-set a 40s wall; the mutants then ran four-wide
-# at `-j 4`, where the same suite took 24.6s (`log/src__coder.rs_line_271_
-# col_26_001.log`). Roughly 3x contention against a 5x budget leaves 1.7x of
-# margin, and 56 mutants crossed it, concentrated in the slowest files
-# (`lz.rs` 17, `lib.rs` 15, `coder.rs` 11). The gate was filing `undecided`
-# for mutants its own log proves caught: under-reporting coverage on exactly
-# the files where coverage matters most.
+# Those 56 are three outcomes, not one. Counted from the sweep's artifact:
 #
-# 10x is a doubling, not a measurement. What the tail past 40s really looks
-# like is unknown until the next full sweep reports it, and the flag is cheap
-# to raise again.
+#   28  a test had already reported `FAILED` when the clock ran out.
+#       `cargo test` has no fail-fast within a binary, so a caught mutant
+#       keeps running the rest of the suite after the failure that decided
+#       it. A bigger budget recovers these as `caught`, which is coverage
+#       the gate already had and was throwing away.
+#   20  progress but no failure yet. Undecided in the honest sense. A
+#       bigger budget resolves them either way, and some will resolve as
+#       genuine survivors.
+#    8  zero completed tests in the whole 40s, every one in `coder.rs`'s
+#       renormalization (lines 23, 26, 133, 134, 287). Mutating a mask or
+#       a shift inside a loop whose only exit is `low` and `high` crossing
+#       HALF or QUARTER can leave the loop with no exit at all. These do
+#       not time out because the budget is tight, they time out because
+#       the mutant does not terminate, and a bigger budget buys 80s of
+#       hanging instead of 40s. #391 owns that class.
+#
+# So the flag recovers 28, decides 20, and wastes time on 8. 10x is a
+# doubling, not a measurement: the tail past 40s stays unknown until the
+# next dispatched sweep reports it, and the flag is cheap to raise again.
 #
 # Not required by the ruleset. cargo-mutants emits `::warning file=...`
 # annotations, so a missed mutant lands on the changed line in the PR diff
