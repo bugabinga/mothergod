@@ -1248,6 +1248,38 @@ mod tests {
     }
 
     #[test]
+    fn decode_undoable_streaming_bcj_path_flushes_a_trailing_opcode_on_finish() {
+        // The filtered stream ends on an 0xE8 opcode byte followed by only
+        // 3 more bytes: one short of INSTRUCTION_LEN (5), so
+        // filters::bcj::Undo::apply never resolves it and StreamUndo::Bcj's
+        // `pending` is still non-empty when the token loop ends. Those 4
+        // bytes only reach `writer` through StreamUndo::finish's flush
+        // (codec.rs's own call, not filters::bcj::Undo::finish, which
+        // undo_tests::matches_decode_too_short_for_any_instruction already
+        // covers one layer below this one): turning that call into a no-op
+        // silently drops them, a losslessness violation invisible to every
+        // other Bcj fixture here because they all end on an instruction
+        // boundary.
+        let unit = [0xE8u8, 0x00, 0x00, 0x00, 0x00];
+        let mut filtered: Vec<u8> = unit.iter().copied().cycle().take(200).collect();
+        filtered.extend_from_slice(&[0xE8, 0x01, 0x02, 0x03]);
+        let raw = filters::bcj::decode(&filtered);
+        let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
+        frame.extend(encode_tokens(&filtered));
+
+        assert_eq!(
+            decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(raw.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            raw,
+            "streaming roundtrip mismatch: StreamUndo::finish must flush a trailing buffered Bcj opcode"
+        );
+    }
+
+    #[test]
     fn truncated_header_is_rejected() {
         assert_eq!(
             decode(&[0u8; 4], crate::FORMAT_VERSION, MAX_DECODED_LEN),
