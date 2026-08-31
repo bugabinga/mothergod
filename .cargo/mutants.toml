@@ -45,8 +45,10 @@ exclude_re = [
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or
   # shrinking it monotonically (`<< 1` to `>> 1` drives `high` to 1 via
   # the `| 1`) makes the exit unreachable; encode also grows `out`
-  # without bound. Encode's only `&` and `<<` sites are these lines, so
-  # function scope is exact there. 8 mutants.
+  # without bound. Encoder::encode's only `&` and `<<` sites are its two
+  # shift lines, so function scope is exact there; Decoder<'a>::decode
+  # also carries catchable `&` and `<<` mutants on its `value` line
+  # (coder.rs:289), so its two shift lines are pinned instead. 8 mutants.
   "replace & with \\| in Encoder::encode$",
   "replace << with >> in Encoder::encode$",
   "^src/coder\\.rs:286:34: replace << with >>",
