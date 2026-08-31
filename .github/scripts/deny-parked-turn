@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Block ending the turn while detached toolchain work is alive (Stop hook).
+
+`.claude/settings.json` wires this as a Stop hook; the harness runs it
+each time the model tries to end its turn.
+
+A GitHub Actions session ends the moment the model's turn ends, and
+backgrounded Bash tasks are killed about five seconds after the final
+result (headless-mode docs, "Background tasks at exit").
+deny-ci-background closes every path a session can ask detachment for,
+and run 33363960344 (2026-08-31) found the path nobody asks for: the
+harness moved a foreground `cargo x check` that outlived the 120 s
+default timeout to the background on its own, after PreToolUse approval
+and with no run_in_background field for a PreToolUse hook to see, then
+told the model a completion notification would arrive. The model
+believed the harness over CLAUDE.md rule 12 and ended a 43-turn run
+"waiting"; the work evaporated. Fifth detach variant, the first
+initiated by the harness rather than the model, and the reason this
+guard blocks at the turn boundary instead of the call boundary.
+
+Two mechanisms answer it. The env block in .claude/settings.json raises
+the default Bash timeout to 10 minutes (ceiling 30), so real commands
+finish in the foreground instead of tripping the 2-minute
+auto-background. This hook is the class-level catch for whatever still
+detaches, keyed on the one substrate every variant shares: a live
+rust-toolchain process at stop time. A foreground command cannot span a
+turn boundary, so any cargo or rustc alive when the model stops IS
+detached work, however it got there.
+
+One warning only: on stop_hook_active (the retry after our own block)
+the stop is allowed even with live processes, because a hook that
+re-blocks forever holds a dead session open. The residual loss is
+recorded, not prevented.
+
+Contract: reads the Stop JSON on stdin. Outside GitHub Actions
+(GITHUB_ACTIONS != "true") everything is allowed; an interactive
+session really does get notifications. Malformed JSON allows. In CI, a
+live toolchain process blocks with {"decision": "block"} and a reason
+naming the pids and both exits: rerun the command in the foreground
+(cargo's build-dir lock makes the rerun join the detached run, not
+repeat it), or kill the pids and hand the work off to the next wake.
+The name list is a blocklist grown on observation, not a proof of
+coverage, like deny-ci-background's idiom list.
+
+Liveness: every decision that mattered appends a line to
+GITHUB_STEP_SUMMARY, the durable trace: a block, or a second-stop
+allow that carried live processes out the door. A broken hook
+reference errors loudly in-session.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+# The build system's process names: the only work an agent session
+# legitimately runs long, so the only names worth scanning for. `cargo`
+# is a prefix, because subcommand binaries (cargo-mutants,
+# cargo-clippy) report their own comm.
+TOOLCHAIN = ("rustc", "rustdoc", "clippy-driver")
+TOOLCHAIN_PREFIX = "cargo"
+
+MESSAGE = (
+    "Detached work is still running: {names}. The run ends the moment "
+    "your turn ends: these processes are killed seconds later, and the "
+    "completion notification a backgrounded task promises never arrives "
+    "in CI (run 33363960344). If you need the result, rerun the command "
+    "in the foreground with enough timeout (default 10 minutes, ceiling "
+    "30 via the timeout parameter): cargo waits on the build-dir lock "
+    "until the detached run finishes, so the rerun joins it rather than "
+    "repeating it. If the work belongs to the next wake, kill the "
+    "listed pids, write the handoff where that wake will read it, and "
+    "stop."
+)
+
+
+def live_toolchain() -> list[tuple[int, str]]:
+    """Return (pid, comm) for every live rust-toolchain process."""
+    try:
+        table = subprocess.run(
+            ["ps", "-eo", "pid=,state=,comm="],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        # No process table means no evidence; a guard that cannot see
+        # fails open, same posture as its siblings.
+        return []
+    found = []
+    for line in table.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) != 3 or not parts[0].isdigit():
+            continue
+        pid, state, comm = int(parts[0]), parts[1], parts[2].strip()
+        # A zombie is dead work awaiting reaping, not live work; it can
+        # produce no result, so blocking on it would be a false alarm.
+        if state.startswith("Z"):
+            continue
+        if comm in TOOLCHAIN or comm.startswith(TOOLCHAIN_PREFIX):
+            found.append((pid, comm))
+    return found
+
+
+def main() -> int:
+    """Allow (empty) or block (decision JSON) the stop described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(call, dict):
+        return 0
+    live = live_toolchain()
+    if not live:
+        return 0
+    names = ", ".join(f"{comm}({pid})" for pid, comm in live)
+    second = bool(call.get("stop_hook_active"))
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        verdict = "allowed second stop with live" if second else "blocked stop; live"
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"deny-parked-turn: {verdict} {names}\n")
+    if second:
+        return 0
+    print(json.dumps({"decision": "block", "reason": MESSAGE.format(names=names)}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
