@@ -16,8 +16,8 @@ here — kept strictly apart from the classical software project (ADR-0010).
 Two agent-system pieces cannot live here, by platform requirement:
 
 - **`/.github/workflows/` and `/.github/actions/`** — the executable agent
-  processes (heartbeat, reviewer, researcher, BDFL, deslopper, pause
-  machinery), plus `agent-model-intel`, which is a plain script rather
+  processes (heartbeat, reviewer, researcher, BDFL, deslopper, herald,
+  pause machinery), plus `agent-model-intel`, which is a plain script rather
   than an agent (ADR-0019) and reports model capability alongside our own
   run economics (ADR-0023). GitHub only runs workflows from `.github/`.
 - **`/CLAUDE.md`** — the agent contract. The Claude Code harness loads it
@@ -34,8 +34,8 @@ Two agent-system pieces cannot live here, by platform requirement:
   The Claude Code harness only discovers skills there.
 
 Everything else in the repository — `src/`, `docs/`, `research/`,
-`assets/`, the community files at root — is the classical open-source
-project the agents work *on*. The one shared artifact: `docs/adr/` is a
+`marketing/`, `assets/`, the community files at root — is the classical
+open-source project the agents work *on*. The one shared artifact: `docs/adr/` is a
 single decision series covering both realms, because a project keeps one
 history of its decisions, not two.
 

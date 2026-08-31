@@ -298,18 +298,17 @@ jobs:
             external blocker), do not abandon it: ping the operator —
             blocked-on-human issue, Telegram if it blocks active work.
 
-            Product surface: you steer EVERY non-code aspect as open
-            source — README first impressions, documentation quality,
-            release notes, an in-repo blog when there is something worth
-            saying, positioning against zstd/lz4/brotli/xz, community
-            tone. Publish ONLY on channels mothergod owns: this repo, its
-            blog, its releases. External platforms (Hacker News,
-            lobste.rs, reddit, socials) are read-only instruments: query
-            them (WebSearch/WebFetch) for mentions as USERS proxies;
-            never post, comment, or solicit there. Learn shamelessly from
-            the competition and OSS history (ripgrep, SQLite, curl,
-            compression incumbents); record what you learned and what you
-            changed because of it.
+            Product surface: the herald MAKES the human-facing surface
+            — site, README reader experience, release-notes voice,
+            positioning, blog — and you STEER it (ADR-0040): charter
+            issues labeled marketing + product, retrospect judgment on
+            its runs, prompt evolution when the output drifts. Its
+            journal is marketing/JOURNAL.md; the weekly digest reads
+            USERS from there. Publishing stays on channels mothergod
+            owns; external platforms (Hacker News, lobste.rs, reddit,
+            socials) are read-only instruments for every seat, never
+            posted to. Docs and community tone beyond the herald's
+            territory remain yours.
 
             Scorecard: judge the project against ROADMAP.md's (RATIO,
             TRUST, SPEED, USERS, SIMPLICITY / FLOW, HEALTH, HONESTY).
@@ -596,9 +595,9 @@ jobs:
                with this change?
             5. Direction: if the evidence says the architecture or plan
                is wrong, change it — with an ADR.
-            6. Product surface: improve docs/README/release notes where a
-               user would stumble; blog on mothergod's own channels when
-               the week produced something worth telling; push back on
+            6. Product surface: where a reader would stumble, file the
+               charter issue (marketing + product) for the herald rather
+               than editing yourself (ADR-0040); push back on
                code growth — ask "what can we delete?" as often as "what
                should we add?".
 

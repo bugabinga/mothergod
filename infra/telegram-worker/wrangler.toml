@@ -40,4 +40,4 @@ GITHUB_REPO = "bugabinga/mothergod"
 # the reset (ADR-0039), so tune these for how fast the factory should
 # react and let the governor decide what it can afford.
 [triggers]
-crons = ["11 */4 * * *", "22 */3 * * *", "37 */12 * * *"]
+crons = ["11 */4 * * *", "22 */3 * * *", "37 */12 * * *", "49 6,18 * * *"]

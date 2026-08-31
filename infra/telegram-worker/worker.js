@@ -788,6 +788,12 @@ export const CLOCK = {
     // agent-deslop, twice daily, off the other seats' minutes.
     { workflow: "agent-deslop.yml" },
   ],
+  "49 6,18 * * *": [
+    // agent-herald, twice daily (ADR-0040), off the other seats'
+    // minutes. `source: cron` marks the wake discretionary, so the
+    // allowance governor may skip it (ADR-0039).
+    { workflow: "agent-herald.yml", inputs: { source: "cron" } },
+  ],
 };
 
 /**

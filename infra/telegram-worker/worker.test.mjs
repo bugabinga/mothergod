@@ -618,9 +618,12 @@ test("Clock ticks (ADR-0035)", async (t) => {
     // a CLOCK key with no trigger never fires. Both halves are the same
     // typo, found here rather than by a seat that stops running.
     const wrangler = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
-    const crons = wrangler.match(/^crons\s*=\s*\[(.*)\]/m)[1]
-      .split(",")
-      .map((entry) => entry.trim().replace(/^["']|["']$/g, ""));
+    // Pull the quoted strings, never split on commas: a cron expression
+    // may carry one inside its quotes ("49 6,18 * * *").
+    const crons = [
+      ...wrangler.match(/^crons\s*=\s*\[(.*)\]/m)[1]
+        .matchAll(/"([^"]*)"/g),
+    ].map((m) => m[1]);
     assert.deepEqual(crons.slice().sort(), Object.keys(CLOCK).sort());
   });
 
@@ -630,7 +633,7 @@ test("Clock ticks (ADR-0035)", async (t) => {
     // whether the allowance governor may skip this wake (ADR-0039). Both
     // seats the governor throttles must carry it, or the second gear is
     // wired to a lever nothing pulls.
-    for (const workflow of ["agent-bdfl.yml", "agent-heartbeat.yml"]) {
+    for (const workflow of ["agent-bdfl.yml", "agent-heartbeat.yml", "agent-herald.yml"]) {
       const setup = harness(() => new Response(null, { status: 204 }));
       const cron = cronFor(workflow);
       await tick(setup, cron);
