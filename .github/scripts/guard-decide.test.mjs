@@ -95,19 +95,26 @@ test("second gear: a discretionary wake under a missing projection (#375)", asyn
     }
   });
 
-  await t.test("no governed seat can go a day without a wake", () => {
+  await t.test("no sweep-carrying seat can go a day without a wake", () => {
     // The keep floor is a bound on the GAP, and that bound only holds while
     // the seats tick faster than the keep window is wide. The cadence lives
     // in wrangler.toml and moves with the allowance lever, so the invariant
     // is asserted against the real crons rather than against a fixture: a
     // lever pull that would starve a seat fails here instead of in silence.
+    // Governed seats without intra-day cadence (herald, researcher) sit
+    // outside this guarantee by design: their wakes carry no sweeps, and a
+    // floor week skipping them costs postponable work only.
     const wrangler = readFileSync(
       new URL("../../infra/telegram-worker/wrangler.toml", import.meta.url),
       "utf8",
     );
-    const crons = wrangler.match(/^crons\s*=\s*\[(.*)\]/m)[1]
-      .split(",")
-      .map((entry) => entry.trim().replace(/^["']|["']$/g, ""));
+    // Pull the quoted strings, never split on commas ("49 6,18 * * *"
+    // carries one inside its quotes) and never assume one line: the
+    // formatter reflows the array once it outgrows the line width.
+    const crons = [
+      ...wrangler.match(/crons\s*=\s*\[([^\]]*)\]/)[1]
+        .matchAll(/"([^"]*)"/g),
+    ].map((m) => m[1]);
     // "<minute> */<n> * * *" is the only shape the clock uses; a governed seat
     // written any other way needs this test taught how to read it.
     const governed = ["11 */4 * * *", "22 */3 * * *"];

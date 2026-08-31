@@ -153,8 +153,11 @@ either is fixed:
   worth carrying at all: GitHub's schedule-run actor attribution is
   unreliable enough that re-attributing the cron line by hand (PR #30,
   and again 2026-08-23) did not hold, and the token exchange rejects a
-  bot actor outright. No workflow carries a `schedule:` trigger anymore
-  (ADR-0035, issue #276): the Telegram worker's cron is the clock, its
+  bot actor outright. No claude-code-action seat carries a `schedule:`
+  trigger anymore (ADR-0035, issue #276; the last straggler,
+  agent-research, fell with #413; script-only workflows keep native
+  schedules because nothing in them exchanges a token on the actor):
+  the Telegram worker's cron is the clock, its
   lines in infra/telegram-worker/wrangler.toml the cadence's source of
   truth, and it wakes each seat by workflow_dispatch on the operator
   PAT, which GitHub attributes to the PAT's owner regardless of file

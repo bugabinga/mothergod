@@ -37,7 +37,11 @@ that expression and records each attempt in the `clocklog` KV key, last
 Cloudflare console access. The wrangler.toml cron lines are the single
 source of truth for cadence; the values remain ADR-0015/0027's.
 
-No agent workflow may carry a native `schedule:` trigger. The GitHub
+No agent workflow may carry a native `schedule:` trigger.
+(Correction, PR #419: the rule's scope is claude-code-action seats,
+whose token exchange the schedule actor can kill; script-only
+workflows such as agent-model-intel keep native schedules safely.
+The original text stated the ban unqualified.) The GitHub
 schedules in agent-clock.yml and agent-deslop.yml shadow the worker for
 one day of recorded ticks as a reversion path, then issue #276 deletes
 agent-clock.yml and deslop's `schedule:` block; duplicate wakes during

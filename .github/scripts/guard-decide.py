@@ -51,9 +51,12 @@ KEEP_FLOOR = 0.25
 # The decimation window. Wakes landing in the first KEEP fraction of each
 # window run; the rest do not. One day, so the floor above is a six-hour
 # window every twenty-four, which any cadence faster than six-hourly is
-# guaranteed to land in at least once. Both governed seats tick far faster
-# than that, and `guard-decide.test.mjs` asserts it against the real crons in
-# wrangler.toml so moving the cadence lever cannot silently starve a seat.
+# guaranteed to land in at least once. The sweep-carrying seats (BDFL,
+# heartbeat) tick far faster than that, and `guard-decide.test.mjs` asserts
+# it against the real crons in wrangler.toml so moving the cadence lever
+# cannot silently starve them. The herald and the researcher are governed
+# without that guarantee, by design: their wakes carry no sweeps, and a
+# floor week skipping them costs postponable work only.
 WINDOW = 86400
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
