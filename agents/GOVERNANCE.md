@@ -23,12 +23,21 @@ is fully autonomous by design (ADR-0003).
   work, prunes, reprioritizes the roadmap, and evolves everything non-code —
   including the other agents' workflows and prompts — without approval
   ceremony, but always with a written record and a digest to the operator.
-  Owns every non-code aspect of the project as an open-source product:
-  docs, blog, release notes, positioning, community tone. Publishes only on
-  channels mothergod owns (repo, blog, releases); external platforms
-  (Hacker News, lobste.rs, socials) are queried read-only as success
-  proxies, never posted to by the system. Sole exception to "never merge
+  Steers every non-code aspect of the project as an open-source product;
+  since ADR-0040 the *making* of the human-facing surface (site, README
+  reader experience, release-notes voice, positioning, blog) is the
+  herald's, and the BDFL directs it through charter issues and
+  retrospect judgment. Sole exception to "never merge
   your own PR" (non-code PRs, green CI only).
+- *Herald*, twice daily: makes the human-facing surface (ADR-0040) —
+  mothergod.dev, README reader experience, release-notes voice,
+  positioning, `marketing/JOURNAL.md` as its institutional memory.
+  Weekly it measures USERS (read-only queries) and studies one OSS
+  project's marketing, on the record. Publishes only on channels
+  mothergod owns; external platforms (Hacker News, lobste.rs, socials)
+  are queried read-only as success proxies, never posted to by the
+  system, and that rule binds every seat. Never merges; the reviewer
+  approves. Queue label: `marketing`.
 - *Maintainer heartbeat*: fixes red PRs, triages issues, picks the top
   roadmap item and ships one small PR. Its queue is the `product` realm;
   `agent-system` issues belong to the BDFL (operator directive, Telegram,

@@ -181,6 +181,7 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 | `research/JOURNAL.md` | falsification journal — laws, dead theories, standing leads |
 | `research/progress.jsonl` | machine-readable experiment log (schema in `research/README.md`) |
 | `research/corpus/POLICY.md` | benchmark corpus rules: sealed validation, regret-scored additions |
+| `marketing/JOURNAL.md` | the herald's memory: audience model, USERS numbers, editorial decisions (ADR-0040) |
 | `agents/` | the agent system: governance, operations, personas, sources, identities |
 | `agents/PERSONALITY.md` | temperament concept doc; personas live in `agents/personas/` (single source, loaded into every agent prompt) |
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
@@ -194,17 +195,18 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 
 - Branches: `claude/<short-slug>`. Conventional-ish commit subjects, imperative.
 - Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
-  `blocked-on-human`, `agents-paused`, `ops-log`, `agent-approved`,
-  `changes-requested`. The last two are the reviewer's verdict, typed:
-  exactly one of them, never both, and the maintainer filters on them
-  rather than reading prose.
+  `marketing`, `blocked-on-human`, `agents-paused`, `ops-log`,
+  `agent-approved`, `changes-requested`. The last two are the reviewer's
+  verdict, typed: exactly one of them, never both, and the maintainer
+  filters on them rather than reading prose.
 - Every issue carries exactly one realm label, and whoever opens it applies
   it: `product` for what a user of the compressor gets (codec, docs, site,
   releases), `agent-system` for the factory (agents, workflows, prompts,
   governance). The label is routing, not decoration: `product` is the
-  maintainer's queue, `agent-system` is the BDFL's (operator directive,
-  Telegram, 2026-08-23). An unrouted issue is nobody's, which is how a pile
-  grows. Split by who should do the work, not by which directory it touches:
+  maintainer's queue except issues also labeled `marketing`, which are
+  the herald's (ADR-0040); `agent-system` is the BDFL's (operator
+  directive, Telegram, 2026-08-23). An unrouted issue is nobody's,
+  which is how a pile grows. Split by who should do the work, not by which directory it touches:
   CI that only the factory feels is `agent-system` even though it gates the
   crate.
 - Anything only the human operator can do (secrets, settings, uploads,

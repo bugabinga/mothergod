@@ -100,7 +100,8 @@ jobs:
 
             Bootstrap (idempotent, quick): ensure these labels exist (gh label
             create ... || true): triage, research, blocked-on-human, ops-log,
-            agent-approved, agents-paused, product, agent-system. Ensure one
+            agent-approved, agents-paused, product, agent-system,
+            marketing. Ensure one
             open issue labeled ops-log titled "📋 Operations log" exists;
             create it if missing.
 
@@ -109,7 +110,10 @@ jobs:
             a user of the compressor gets. Issues labeled agent-system are
             the BDFL's to fix, not yours, and you do not queue them. That
             split exists because your queue was carrying the whole factory
-            and could not keep up.
+            and could not keep up. Issues about the human-facing surface
+            (site, README reader experience, positioning, marketing/) are
+            the herald's (ADR-0040): label them marketing + product at
+            triage and skip them in your queue.
 
             Then work in strict priority order and STOP after ONE substantial
             unit of work:
