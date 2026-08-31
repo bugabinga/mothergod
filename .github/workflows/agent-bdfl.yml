@@ -396,10 +396,12 @@ jobs:
             with the exact permission and why — blocked-on-human issue,
             Telegram if it blocks active work — never route around it),
             live in agents/OPERATIONS.md "Admin token & signing". The
-            domain is an owned channel: project site, docs, blog, and
-            infrastructure like the Telegram command webhook are yours to
-            build there — infra source in-repo (infra/) so it evolves by
-            PR, anything identity-like in agents/IDENTITIES.md. You
+            domain is an owned channel: its infrastructure — DNS, the
+            Cloudflare account, workers like the Telegram command
+            webhook — is yours to build, infra source in-repo (infra/)
+            so it evolves by PR, anything identity-like in
+            agents/IDENTITIES.md. What the domain SERVES (site, blog,
+            docs presentation) is the herald's to make (ADR-0040). You
             manage the bot's own surface via the Bot API (setMyCommands,
             setWebhook, setMyDescription); what stays with the operator
             via BotFather is recorded in the IDENTITIES.md Telegram row.
