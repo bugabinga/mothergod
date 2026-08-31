@@ -223,6 +223,15 @@ fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
     frame
 }
 
+/// Whether an [`Method::Lz`] body of `body_len` bytes beats a
+/// [`Method::Stored`] frame of `input_len` bytes. Strict: a tie keeps
+/// `Stored`. This is `compress`'s own convention, not something
+/// `docs/format/SPEC.md` requires — the spec only bounds the frame from
+/// above (`header + len(x)`), which either method satisfies on a tie.
+fn lz_beats_stored(body_len: usize, input_len: usize) -> bool {
+    body_len < input_len
+}
+
 /// Compresses `input` into a self-describing frame.
 ///
 /// Tries [`Method::Lz`] and falls back to [`Method::Stored`] whenever that
@@ -234,7 +243,7 @@ fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
 pub fn compress(input: &[u8]) -> Vec<u8> {
     if u32::try_from(input.len()).is_ok() {
         let body = codec::encode(input);
-        if body.len() < input.len() {
+        if lz_beats_stored(body.len(), input.len()) {
             return build_frame(Method::Lz, &body);
         }
     }
@@ -445,6 +454,26 @@ mod tests {
             frame.len()
         );
         assert_eq!(decompress(&frame), Ok(input));
+    }
+
+    #[test]
+    fn lz_beats_stored_keeps_the_strictly_smaller_body_only() {
+        // #390's mutation sweep found `<` -> `<=` surviving the full suite:
+        // `compress`'s own round-trip tests never observe which method was
+        // chosen on a tie, since both frame a losslessly. Unit testing the
+        // extracted comparison directly is the only way to pin the
+        // Stored-floor invariant ("Lz wins outright, never on a tie")
+        // without constructing an input whose encoded Lz body happens to
+        // land exactly at input.len().
+        assert!(lz_beats_stored(3, 5), "a strictly smaller body must win");
+        assert!(
+            !lz_beats_stored(5, 5),
+            "a tied body must fall back to Stored"
+        );
+        assert!(
+            !lz_beats_stored(6, 5),
+            "a larger body must fall back to Stored"
+        );
     }
 
     #[test]
