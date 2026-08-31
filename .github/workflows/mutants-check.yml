@@ -24,7 +24,7 @@
 # is not spent under. On the 2026-08-30 full sweep (run 33334414262) the
 # baseline test phase ran alone and took 8.0s, so cargo-mutants auto-set a
 # 40s wall; the mutants then ran four-wide at `-j 4`, where that same suite
-# took 24.6s (`log/src__coder.rs_line_271_col_26_001.log`). 40s over 24.6s
+# took 24.8s (`log/src__coder.rs_line_271_col_26_001.log`). 40s over 24.8s
 # is 1.6x of real margin, and 56 of 1,531 mutants crossed it.
 #
 # Those 56 are three outcomes, not one. Counted from the sweep's artifact:
