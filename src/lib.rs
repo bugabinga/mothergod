@@ -736,6 +736,23 @@ mod tests {
     }
 
     #[test]
+    fn decodes_incrementally_pins_the_lz_min_version_boundary() {
+        // #388: three mutants survived on this guard (`< false`, `<` -> `==`,
+        // `<` -> `<=`) because no test distinguished it from a version-blind
+        // one. Both sides of the boundary, on the same frame shape so only
+        // the version byte differs.
+        let mut frame = lz_frame_header();
+        frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
+        frame[MAGIC.len()] = codec::LZ_MIN_VERSION - 1;
+        assert_eq!(
+            decodes_incrementally(&frame),
+            Err(Error::UnsupportedVersion(codec::LZ_MIN_VERSION - 1))
+        );
+        frame[MAGIC.len()] = codec::LZ_MIN_VERSION;
+        assert_eq!(decodes_incrementally(&frame), Ok(true));
+    }
+
+    #[test]
     fn malformed_filter_selector_is_rejected_as_corrupt() {
         // [0, 1]: kind 0 (Identity) never carries a nonzero param, so
         // Candidate::from_header_bytes names no real candidate for it
