@@ -179,6 +179,40 @@ fn pow2(k: i32) -> f64 {
 /// of two well inside `f64`'s 53-bit mantissa.
 const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
 
+/// `weight`'s share of `weight_sum`, scaled into [`FIXED_POINT_SCALE`]'s
+/// fixed-point space and normalized by `bank_total` so an expert's raw
+/// frequency count converts into that same fixed-point unit before
+/// summing. Shared by [`Literal::mix`] and
+/// [`Literal::ideal_cost_bits_column_expert_pair`]'s own seven-wide blend
+/// (`research/JOURNAL.md` S1-P5): both need the identical scale-factor
+/// formula, only the `weight_sum` they normalize against differs (six
+/// experts' worth vs. seven).
+fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
+    let normalized = weight / weight_sum;
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "fixed-point scale factor: normalized weight is in (0,1], bank_total > 0, the product is always non-negative and truncation is the intended floor"
+    )]
+    {
+        ((normalized * FIXED_POINT_SCALE) / bank_total) as u64
+    }
+}
+
+/// Exponentiated-gradient weight update (Mahoney 2005): how far `weight`
+/// moves given `estimate` (this expert's own prediction) versus `mixed`
+/// (the blend's prediction), clamped to `[MIN_WEIGHT, MAX_WEIGHT]`.
+/// Shared by [`Literal::update`]'s six real experts and
+/// [`Literal::ideal_cost_bits_column_expert_pair`]'s seventh: that
+/// method's own docs already claim its column weight adapts "the same
+/// ... rule `Self::update` uses" — this makes that claim true by
+/// construction instead of by two independently written copies.
+fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) -> f64 {
+    let denominator = mixed.max(MIN_DENOMINATOR);
+    let gradient = LEARNING_RATE * (estimate - mixed) / denominator;
+    (weight * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT)
+}
+
 /// Per-byte modeling context [`Literal::encode`]/[`Literal::decode`]
 /// read to select which banks blend at this position: the previous two
 /// bytes (`0` before the start of output, matching the archive's
@@ -370,16 +404,8 @@ impl Literal {
         let weight_sum: f64 = weights.iter().sum();
         let mut scale = [0u64; EXPERTS];
         for expert in 0..EXPERTS {
-            let normalized = weights[expert] / weight_sum;
             let bank_total = f64::from(self.total[bank_indices[expert]]);
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "fixed-point scale factor: normalized weight is in (0,1], bank_total > 0, the product is always non-negative and truncation is the intended floor"
-            )]
-            {
-                scale[expert] = ((normalized * FIXED_POINT_SCALE) / bank_total) as u64;
-            }
+            scale[expert] = fixed_point_scale(weights[expert], weight_sum, bank_total);
         }
         let mut cum = [0u64; ALPHABET + 1];
         let mut acc = 0u64;
@@ -435,10 +461,8 @@ impl Literal {
             .map(|expert| weights[expert] * estimate[expert])
             .sum::<f64>()
             / weight_sum;
-        let denominator = mixed.max(MIN_DENOMINATOR);
         for expert in 0..EXPERTS {
-            let gradient = LEARNING_RATE * (estimate[expert] - mixed) / denominator;
-            weights[expert] = (weights[expert] * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT);
+            weights[expert] = adapt_weight(weights[expert], estimate[expert], mixed, exp_fn);
         }
         for (expert, &bank) in bank_indices.iter().enumerate() {
             let (increment, limit) = if expert == 0 {
@@ -578,24 +602,11 @@ impl Literal {
         // share.
         let mut scale6 = [0u64; EXPERTS];
         for expert in 0..EXPERTS {
-            let normalized = weights6[expert] / weight_sum;
             let bank_total = f64::from(self.total[bank_indices[expert]]);
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "same fixed-point scale factor mix() uses: normalized weight is in (0,1], bank_total > 0"
-            )]
-            {
-                scale6[expert] = ((normalized * FIXED_POINT_SCALE) / bank_total) as u64;
-            }
+            scale6[expert] = fixed_point_scale(weights6[expert], weight_sum, bank_total);
         }
         let column_total = f64::from(column_state.total[column_bank]);
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "same fixed-point scale factor mix() uses: normalized weight is in (0,1], column_total > 0"
-        )]
-        let scale7 = (((w7 / weight_sum) * FIXED_POINT_SCALE) / column_total) as u64;
+        let scale7 = fixed_point_scale(w7, weight_sum, column_total);
 
         let mut total_mixed = 0u64;
         let mut symbol_mixed = 0u64;
@@ -638,9 +649,7 @@ impl Literal {
             .sum::<f64>()
             + w7 * column_estimate)
             / weight_sum;
-        let denominator = mixed_estimate.max(MIN_DENOMINATOR);
-        let gradient = LEARNING_RATE * (column_estimate - mixed_estimate) / denominator;
-        column_state.weight[weight_index] = (w7 * exp(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT);
+        column_state.weight[weight_index] = adapt_weight(w7, column_estimate, mixed_estimate, exp);
 
         crate::rescale_bank(
             &mut column_state.freq[column_bank * ALPHABET..column_bank * ALPHABET + ALPHABET],
