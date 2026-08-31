@@ -1,0 +1,66 @@
+# Mutants no test can decide, excluded so that a mutation warning always
+# means a missing test (issue #391's ruling; sweep evidence in run
+# 33334414262). Two classes, both born from the property that makes the
+# range coder fast, arithmetic modulo TOP under MASK:
+#
+#   equivalent        the mutant is the same program mod TOP, so no test
+#                     can fail on it
+#   non-terminating   the mutation destroys the renorm loop's only exit
+#                     condition, so the mutant hangs instead of failing
+#
+# The fail direction is chosen deliberately. An entry that drifts out of
+# match lets noise resurface in the next sweep, which is visible and
+# self-healing; an entry that over-matches hides a real mutant silently.
+# So entries scope to function + operator only where every current match
+# is proven, and pin file:line:col where the same function also contains
+# catchable mutants of that operator (decode's `value` line, coder.rs:289,
+# is catchable garbage, not a hang, and stays live).
+#
+# After editing src/coder.rs's constants or renormalization, re-verify:
+# diff `cargo mutants --package mothergod --list --colors=never` from
+# before and after the edit; every newly excluded or re-appearing mutant
+# must be explainable against this list.
+
+exclude_re = [
+  # Equivalent: every renorm branch ends in `(x << 1) & MASK`, so the
+  # preceding `-= HALF` vs `+= HALF` differ by 2*HALF = TOP, which the
+  # mask erases; QUARTER likewise (the shift doubles the 2*QUARTER gap
+  # to TOP). Proof in #391. 10 mutants.
+  "replace -= with \\+= in Encoder::encode$",
+  "replace -= with \\+= in Decoder<'a>::decode$",
+
+  # Equivalent: `(x << 1) | b` ORs into a bit position the shift just
+  # cleared, so `|` and `^` agree. Same shape at every `|` in these four
+  # functions. 5 mutants.
+  "replace \\| with \\^ in Encoder::emit$",
+  "replace \\| with \\^ in Encoder::encode$",
+  "replace \\| with \\^ in Decoder<'a>::decode$",
+  "replace \\| with \\^ in Decoder<'a>::decode_bits$",
+
+  # Equivalent: base64 assembles disjoint 6-bit fields, so `|` on
+  # non-overlapping bits equals `^`. 5 mutants.
+  "replace \\| with \\^ in base64_unwrap::(try_decode|b64_encode)$",
+
+  # Non-terminating: the renorm loops exit only when `low` and `high`
+  # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or
+  # shrinking it monotonically (`<< 1` to `>> 1` drives `high` to 1 via
+  # the `| 1`) makes the exit unreachable; encode also grows `out`
+  # without bound. Encoder::encode's only `&` and `<<` sites are its two
+  # shift lines, so function scope is exact there; Decoder<'a>::decode
+  # also carries catchable `&` and `<<` mutants on its `value` line
+  # (coder.rs:289), so its two shift lines are pinned instead. 8 mutants.
+  "replace & with \\| in Encoder::encode$",
+  "replace << with >> in Encoder::encode$",
+  "^src/coder\\.rs:286:34: replace << with >>",
+  "^src/coder\\.rs:286:40: replace & with \\|",
+  "^src/coder\\.rs:287:37: replace << with >>",
+  "^src/coder\\.rs:287:48: replace & with \\|",
+
+  # Non-terminating, constant geometry: HALF doubled past TOP makes
+  # `high < HALF` a tautology; MASK = TOP + 1 or TOP pins the interval
+  # to {0, TOP} through the `& MASK` shifts. QUARTER's and
+  # THREE_QUARTERS' mutants misprice the underflow branch but still
+  # terminate, so they stay live. 3 mutants.
+  "^src/coder\\.rs:23:23: replace >> with <<$",
+  "^src/coder\\.rs:26:23: replace - with [+/]$",
+]

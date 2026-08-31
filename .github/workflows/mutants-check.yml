@@ -43,7 +43,8 @@
 #       HALF or QUARTER can leave the loop with no exit at all. These do
 #       not time out because the budget is tight, they time out because
 #       the mutant does not terminate, and a bigger budget buys 80s of
-#       hanging instead of 40s. #391 owns that class.
+#       hanging instead of 40s. `.cargo/mutants.toml` excludes that class
+#       and the equivalent mutants, each with its proof (#391's ruling).
 #
 # So the flag recovers 28, decides 20, and wastes time on 8. 10x is a
 # doubling, not a measurement: the tail past 40s stays unknown until the
@@ -52,7 +53,8 @@
 # Not required by the ruleset. cargo-mutants emits `::warning file=...`
 # annotations, so a missed mutant lands on the changed line in the PR diff
 # where a reviewer already looks. Promote it to a required check once four
-# weeks pass with no false positive.
+# weeks pass with no false positive, counted from the exclusion baseline
+# (.cargo/mutants.toml, merged 2026-08-31).
 name: mutants-check
 
 on:
@@ -62,6 +64,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
+      - ".cargo/mutants.toml"
       - ".github/workflows/mutants-check.yml"
   workflow_dispatch:
 
