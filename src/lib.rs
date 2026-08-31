@@ -225,8 +225,9 @@ fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
 
 /// Whether an [`Method::Lz`] body of `body_len` bytes beats a
 /// [`Method::Stored`] frame of `input_len` bytes. Strict: a tie keeps
-/// `Stored`, per `docs/format/SPEC.md`'s Stored-floor invariant — `Lz`
-/// only ever wins outright, never on equal size.
+/// `Stored`. This is `compress`'s own convention, not something
+/// `docs/format/SPEC.md` requires — the spec only bounds the frame from
+/// above (`header + len(x)`), which either method satisfies on a tie.
 fn lz_beats_stored(body_len: usize, input_len: usize) -> bool {
     body_len < input_len
 }
