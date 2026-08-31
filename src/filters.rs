@@ -581,6 +581,35 @@ pub mod base64_unwrap {
             assert_eq!(encoded[0], 1);
             assert_eq!(decode(&encoded), wrapped);
         }
+
+        #[test]
+        fn is_base64_byte_rejects_non_alphabet_characters() {
+            assert!(is_base64_byte(b'A'));
+            assert!(is_base64_byte(b'='));
+            assert!(!is_base64_byte(b'!'));
+        }
+
+        #[test]
+        fn try_decode_rejects_empty_input() {
+            assert_eq!(try_decode(&[]), None);
+        }
+
+        #[test]
+        fn try_decode_rejects_length_not_a_multiple_of_four() {
+            assert_eq!(try_decode(b"abc"), None);
+        }
+
+        #[test]
+        fn try_decode_rejects_padding_in_a_non_final_group() {
+            // Same fixture as `encode_passes_through_invalid_padding_placement`,
+            // asserted directly against `try_decode`. `encode`'s outer
+            // round-trip check (`b64_encode(&decoded) == data`) independently
+            // rejects a wrongly-decoded result here, so it masks a mutant
+            // that drops this guard (`||` -> `&&`, or `pad > 0` -> `pad < 0`,
+            // both collapsing the guard to `pad > 2` alone) from any test
+            // that only observes `encode`'s output.
+            assert_eq!(try_decode(b"AB==CDEF"), None);
+        }
     }
 }
 
