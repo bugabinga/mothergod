@@ -258,11 +258,8 @@ jobs:
               itself (GOVERNANCE.md "Merging"). Only if it exits 2,
               required gates are still pending: arm
               `gh pr merge <n> --squash --auto` and stop; the BDFL
-              sweep rescues it if it stalls. Stop means stop: do not try
-              to wait for the gates yourself with any tool, watched or
-              not (PR #255's review died mid-run trying a `Monitor` call
-              this seat has no access to, denied twice, leaving the PR
-              unreviewed with a stalled filler line as the only output).
+              sweep rescues it if it stalls. Stop means stop: the gates
+              are not yours to wait on (hard rule 12).
               One carve-out outranks
               "unconditionally", merge identity: if the diff touches any
               file under `.github/workflows/`, do NOT merge, whatever
