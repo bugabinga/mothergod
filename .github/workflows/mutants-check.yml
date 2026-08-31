@@ -22,13 +22,23 @@
 # `--timeout-multiplier 10` doubles cargo-mutants' default of 5x the baseline
 # test duration. On the 2026-08-30 full sweep (run 33334414262) 56 of 1,531
 # mutants came back `timeout`, and their logs show tests that had already
-# failed when the clock ran out, not tests hanging under mutation. `cargo
+# failed when the clock ran out, not tests hanging under mutation: `cargo
 # test` has no fail-fast within a binary, so a caught mutant still runs the
-# other 239 tests, and four concurrent test binaries at `-j 4` on a 4-core
-# runner stretch a 25s baseline past its 125s budget. The gate recorded
-# `undecided` for mutants its own log proves caught, concentrated in the
-# slowest files (`lib.rs` 15, `lz.rs` 17, `coder.rs` 11): under-reporting
-# its own coverage, on exactly the files where coverage matters most.
+# rest of the suite after the failure that decided it.
+#
+# The default under-budgets because its anchor is measured under conditions
+# it is not spent under. That sweep's baseline test phase ran alone and took
+# 8.0s, so cargo-mutants auto-set a 40s wall; the mutants then ran four-wide
+# at `-j 4`, where the same suite took 24.6s (`log/src__coder.rs_line_271_
+# col_26_001.log`). Roughly 3x contention against a 5x budget leaves 1.7x of
+# margin, and 56 mutants crossed it, concentrated in the slowest files
+# (`lz.rs` 17, `lib.rs` 15, `coder.rs` 11). The gate was filing `undecided`
+# for mutants its own log proves caught: under-reporting coverage on exactly
+# the files where coverage matters most.
+#
+# 10x is a doubling, not a measurement. What the tail past 40s really looks
+# like is unknown until the next full sweep reports it, and the flag is cheap
+# to raise again.
 #
 # Not required by the ruleset. cargo-mutants emits `::warning file=...`
 # annotations, so a missed mutant lands on the changed line in the PR diff
