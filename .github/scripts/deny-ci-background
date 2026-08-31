@@ -87,7 +87,9 @@ SHELL_DETACH_MESSAGE = (
     "33269388206). Drop the detach and run the command in the "
     "foreground (timeout goes up to 600000 ms). If the flagged idiom "
     "is literal text, not shell syntax, reword it, for example `&` "
-    "as 'and'."
+    "as 'and'. If it has to stay verbatim, as bitwise code inside a "
+    "heredoc does, write the file with the Write tool and pass the "
+    "path to the command instead."
 )
 
 
