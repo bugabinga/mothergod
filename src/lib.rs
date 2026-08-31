@@ -330,17 +330,18 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
 ///
 /// Only bounds resident memory better than [`decompress_bounded`] for a
 /// [`Method::Lz`] frame whose encoder picked
-/// [`filters::select::Candidate::Identity`]: the only candidate whose
-/// filter-undo step is a no-op, so the decoded LZ token stream needs no
-/// buffering pass afterward, and `codec::decode_to_writer` bounds memory
-/// to [`lz::WINDOW`] (1 MiB) for it regardless of the frame's declared
-/// length (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP M4's bounded-memory
-/// decode guarantee). [`Method::Stored`] and every other
-/// [`filters::select::Candidate`] fall back to a whole-buffer decode
-/// followed by one bulk write: no worse than [`decompress_bounded`], just
-/// never streamed. [`decodes_incrementally`] tells a caller which case a
-/// frame is without decoding it, though this function does not require
-/// calling it first.
+/// [`filters::select::Candidate::Identity`], `Delta`, or `Bcj`: filters
+/// whose undo step runs sequentially with small fixed lookback or lookahead
+/// (a no-op, a stride, or a 5-byte call/jmp instruction), so the decoded LZ
+/// token stream needs no whole-buffer pass afterward, and
+/// `codec::decode_to_writer` bounds memory to [`lz::WINDOW`] (1 MiB) for any
+/// of them regardless of the frame's declared length (`research/JOURNAL.md`
+/// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee).
+/// [`Method::Stored`] and [`filters::select::Candidate::Transpose`] fall
+/// back to a whole-buffer decode followed by one bulk write: no worse than
+/// [`decompress_bounded`], just never streamed. [`decodes_incrementally`]
+/// tells a caller which case a frame is without decoding it, though this
+/// function does not require calling it first.
 ///
 /// # Errors
 ///
@@ -389,14 +390,16 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// nothing about a bound on resident memory depends on its content.
 /// [`Method::Lz`]'s answer depends on which filter its encoder picked —
 /// [`filters::select::Candidate::Identity`], `Delta`, and `Bcj` all undo
-/// sequentially with small fixed lookback (a stride, or a 5-byte
-/// call/jmp instruction), but `Candidate::Transpose`'s decode writes
-/// scattered across the *entire* buffer in column-major order, so it needs
-/// the whole buffer resident regardless of how a future streaming decoder
-/// is otherwise built. No streaming decoder exists yet to consult this
-/// predicate; it exists so that API, when it lands, has a real answer to
-/// hand a caller instead of a silent fallback that quietly stops bounding
-/// memory whenever the encoder happened to pick `Transpose`.
+/// sequentially with small fixed lookback or lookahead (a no-op, a stride,
+/// or a 5-byte call/jmp instruction), and [`decompress_to_writer`] streams
+/// all three, but `Candidate::Transpose`'s decode writes scattered across
+/// the *entire* buffer in column-major order, so it needs the whole buffer
+/// resident regardless of how a streaming decoder is otherwise built. This
+/// predicate is checked independently of [`decompress_to_writer`]'s own
+/// dispatch rather than the two sharing one classification, so a caller can
+/// ask the question before committing to either API, and the two staying in
+/// sync is a property tests can verify rather than an invariant the code
+/// silently assumes.
 ///
 /// # Errors
 ///

@@ -311,8 +311,10 @@ pub mod transpose {
 pub mod bcj {
     /// Byte length of an opcode plus its rel32 operand: the unit the scan
     /// advances by on a match, and the position `encode`/`decode` measure
-    /// the call/jmp target's absolute address from.
-    const INSTRUCTION_LEN: usize = 5;
+    /// the call/jmp target's absolute address from. `pub(crate)` rather
+    /// than private: `codec`'s own test fixtures build hand-crafted
+    /// instructions and need the same constant, not a second copy of `5`.
+    pub(crate) const INSTRUCTION_LEN: usize = 5;
 
     /// Walks `data`, rewriting each `0xE8`/`0xE9` opcode's operand through
     /// `rewrite_operand`.
@@ -362,6 +364,184 @@ pub mod bcj {
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
         rewrite(data, u32::wrapping_sub)
+    }
+
+    /// Bytes [`Undo::apply`]/[`Undo::finish`] resolved from stream data so
+    /// far, in order. Fixed [`INSTRUCTION_LEN`] capacity avoids a heap
+    /// allocation per filtered byte in the streaming decode's hot loop
+    /// (`rust-craft` skill, mechanical sympathy).
+    pub(crate) struct Resolved {
+        buf: [u8; INSTRUCTION_LEN],
+        len: u8,
+    }
+
+    impl Resolved {
+        const NONE: Self = Self {
+            buf: [0; INSTRUCTION_LEN],
+            len: 0,
+        };
+
+        fn one(byte: u8) -> Self {
+            let mut buf = [0; INSTRUCTION_LEN];
+            buf[0] = byte;
+            Self { buf, len: 1 }
+        }
+
+        /// `bytes.len()` must be at most [`INSTRUCTION_LEN`]: the only
+        /// caller, [`Undo`], never accumulates more than that many pending
+        /// bytes before resolving or flushing them.
+        fn from_slice(bytes: &[u8]) -> Self {
+            let mut buf = [0; INSTRUCTION_LEN];
+            buf[..bytes.len()].copy_from_slice(bytes);
+            // Undo's pending buffer never exceeds INSTRUCTION_LEN (5).
+            #[allow(clippy::cast_possible_truncation)]
+            let len = bytes.len() as u8;
+            Self { buf, len }
+        }
+
+        pub(crate) fn as_slice(&self) -> &[u8] {
+            &self.buf[..self.len as usize]
+        }
+    }
+
+    /// Streaming counterpart to [`decode`]: undoes the transform as filtered
+    /// bytes arrive instead of over a complete buffer (`research/JOURNAL.md`
+    /// S1-P7, ROADMAP M4's bounded-memory decode guarantee), mirroring
+    /// [`delta::Undo`]'s role for this filter.
+    ///
+    /// Unlike delta's fixed lookback, bcj's [`rewrite`] scan needs
+    /// *lookahead*: whether the byte at position `i` starts an instruction
+    /// is decidable the instant it arrives (opcode byte or not), but
+    /// transforming that instruction's operand needs the
+    /// `INSTRUCTION_LEN - 1` bytes that follow it, not yet available when
+    /// the opcode byte itself reaches [`Self::apply`]. `pending` holds those
+    /// not-yet-resolved bytes; `position` is the same absolute stream index
+    /// [`rewrite`]'s own `i` tracks, advancing only once a byte is resolved
+    /// one way or the other, never while `pending` is still filling.
+    pub(crate) struct Undo {
+        pending: Vec<u8>,
+        position: usize,
+    }
+
+    impl Undo {
+        pub(crate) fn new() -> Self {
+            Self {
+                pending: Vec::with_capacity(INSTRUCTION_LEN),
+                position: 0,
+            }
+        }
+
+        /// Feeds one more filtered byte, in stream order, returning any
+        /// bytes this call resolved: empty while still buffering a
+        /// candidate instruction's operand, one immediately for a
+        /// non-opcode byte (no lookahead needed to know it is not
+        /// `0xE8`/`0xE9`), or all [`INSTRUCTION_LEN`] the instant a full
+        /// instruction's operand has arrived.
+        pub(crate) fn apply(&mut self, filtered_byte: u8) -> Resolved {
+            if self.pending.is_empty() {
+                if filtered_byte == 0xE8 || filtered_byte == 0xE9 {
+                    self.pending.push(filtered_byte);
+                    return Resolved::NONE;
+                }
+                self.position += 1;
+                return Resolved::one(filtered_byte);
+            }
+            self.pending.push(filtered_byte);
+            if self.pending.len() < INSTRUCTION_LEN {
+                return Resolved::NONE;
+            }
+            // rewrite's own truncating cast: post_addr matches encode's
+            // (i as u32).wrapping_add(INSTRUCTION_LEN as u32) exactly, so a
+            // stream past 4 GiB still round-trips the same address a batch
+            // decode would compute.
+            #[allow(clippy::cast_possible_truncation)]
+            let post_addr = (self.position as u32).wrapping_add(INSTRUCTION_LEN as u32);
+            let operand = u32::from_le_bytes([
+                self.pending[1],
+                self.pending[2],
+                self.pending[3],
+                self.pending[4],
+            ]);
+            let new_operand = operand.wrapping_sub(post_addr);
+            self.pending[1..].copy_from_slice(&new_operand.to_le_bytes());
+            self.position += INSTRUCTION_LEN;
+            let resolved = Resolved::from_slice(&self.pending);
+            self.pending.clear();
+            resolved
+        }
+
+        /// Flushes any bytes still buffered at end of stream: a candidate
+        /// instruction seen too close to the end to resolve (fewer than
+        /// [`INSTRUCTION_LEN`] bytes followed its opcode byte), passed
+        /// through unchanged — the same "too short for any instruction"
+        /// case [`rewrite`]'s own scan bound (`i + INSTRUCTION_LEN <= n`)
+        /// leaves untouched.
+        pub(crate) fn finish(&mut self) -> Resolved {
+            let resolved = Resolved::from_slice(&self.pending);
+            self.pending.clear();
+            resolved
+        }
+    }
+
+    #[cfg(test)]
+    mod undo_tests {
+        use super::*;
+
+        /// Feeding [`Undo`] the output of [`encode`] one byte at a time,
+        /// then [`Undo::finish`], must reproduce the original input exactly,
+        /// differentially against the batch [`decode`] this type shadows.
+        fn undo_matches_decode(data: &[u8]) {
+            let encoded = encode(data);
+            let mut undo = Undo::new();
+            let mut streamed = Vec::with_capacity(data.len());
+            for &byte in &encoded {
+                streamed.extend_from_slice(undo.apply(byte).as_slice());
+            }
+            streamed.extend_from_slice(undo.finish().as_slice());
+            assert_eq!(streamed, decode(&encoded));
+            assert_eq!(streamed, data);
+        }
+
+        #[test]
+        fn matches_decode_empty() {
+            undo_matches_decode(&[]);
+        }
+
+        #[test]
+        fn matches_decode_too_short_for_any_instruction() {
+            undo_matches_decode(&[0xE8, 0x01, 0x02, 0x03]);
+        }
+
+        #[test]
+        fn matches_decode_no_opcode_present() {
+            undo_matches_decode(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        }
+
+        #[test]
+        fn matches_decode_various_data() {
+            let data: Vec<u8> = (0..=255u8).cycle().take(2000).collect();
+            undo_matches_decode(&data);
+        }
+
+        #[test]
+        fn matches_decode_adjacent_instructions() {
+            let mut data = vec![];
+            for _ in 0..20 {
+                data.push(0xE8);
+                data.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
+            }
+            undo_matches_decode(&data);
+        }
+
+        #[test]
+        fn matches_decode_wrapping_overflow() {
+            undo_matches_decode(&[0xE8, 0xFF, 0xFF, 0xFF, 0xFF]);
+        }
+
+        #[test]
+        fn matches_decode_e9_jmp() {
+            undo_matches_decode(&[0xE9, 0x10, 0x00, 0x00, 0x00]);
+        }
     }
 
     #[cfg(test)]

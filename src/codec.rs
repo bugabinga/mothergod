@@ -736,18 +736,17 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
 /// [`crate::decompress_to_writer`].
 ///
 /// [`filters::select::Candidate::Identity`]'s undo step (`undo_filter`) is
-/// the identity transform, and [`filters::select::Candidate::Delta`]'s is a
-/// small fixed-lookback accumulate ([`filters::delta::Undo`]): both undo the
-/// LZ token stream one byte at a time as it is produced, so
-/// [`decode_undoable_streaming`] takes that path for either, bounding
-/// resident memory to [`lz::WINDOW`] via [`lz::Window`] regardless of
-/// `declared_len` (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP M4's
-/// bounded-memory decode guarantee). `Bcj` and `Transpose` need their
-/// filter undone over the complete buffer regardless of how the LZ loop
-/// itself is decoded (`research/JOURNAL.md` S2-D4's `Transpose` finding,
-/// which generalizes: `Bcj` is sequential and streaming-shaped in
-/// principle but `undo_filter` does not chunk it today either), so this
-/// function falls back to [`decode`]'s whole-buffer path for them,
+/// the identity transform, [`filters::select::Candidate::Delta`]'s is a
+/// small fixed-lookback accumulate ([`filters::delta::Undo`]), and
+/// [`filters::select::Candidate::Bcj`]'s is a small fixed-lookahead rewrite
+/// ([`filters::bcj::Undo`]): all three undo the LZ token stream one filtered
+/// byte at a time as it is produced, so [`decode_undoable_streaming`] takes
+/// that path for any of them, bounding resident memory to [`lz::WINDOW`] via
+/// [`lz::Window`] regardless of `declared_len` (`research/JOURNAL.md`
+/// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee).
+/// `Transpose` needs its filter undone over the complete buffer regardless
+/// of how the LZ loop itself is decoded (`research/JOURNAL.md` S2-D4), so
+/// this function falls back to [`decode`]'s whole-buffer path for it,
 /// unchanged from what a caller who ignored streaming entirely would get.
 ///
 /// # Errors
@@ -784,7 +783,14 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             writer,
             &mut StreamUndo::Delta(filters::delta::Undo::new(stride)),
         ),
-        Candidate::Bcj | Candidate::Transpose(_) => {
+        Candidate::Bcj => decode_undoable_streaming(
+            filtered_payload,
+            version,
+            max_len,
+            writer,
+            &mut StreamUndo::Bcj(filters::bcj::Undo::new()),
+        ),
+        Candidate::Transpose(_) => {
             let decoded = decode(payload, version, max_len).map_err(std::io::Error::other)?;
             writer.write_all(&decoded)
         }
@@ -799,15 +805,41 @@ enum StreamUndo {
     /// `undo_filter` is [`filters::delta::decode`]; undone one byte at a
     /// time by [`filters::delta::Undo`].
     Delta(filters::delta::Undo),
+    /// `undo_filter` is [`filters::bcj::decode`]; undone one filtered byte
+    /// at a time by [`filters::bcj::Undo`], which may buffer a few bytes
+    /// before a call resolves any output (see its own docs).
+    Bcj(filters::bcj::Undo),
 }
 
 impl StreamUndo {
-    /// Undoes one more filtered byte, in stream order.
-    fn apply(&mut self, filtered_byte: u8) -> u8 {
+    /// Undoes one more filtered byte, in stream order, writing whatever
+    /// bytes that resolves to `writer` immediately (zero for
+    /// [`Self::Bcj`] while it is still buffering a candidate instruction,
+    /// exactly one otherwise).
+    fn apply<W: std::io::Write>(
+        &mut self,
+        filtered_byte: u8,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
         match self {
-            Self::Identity => filtered_byte,
-            Self::Delta(undo) => undo.apply(filtered_byte),
+            Self::Identity => writer.write_all(std::slice::from_ref(&filtered_byte)),
+            Self::Delta(undo) => {
+                let raw = undo.apply(filtered_byte);
+                writer.write_all(std::slice::from_ref(&raw))
+            }
+            Self::Bcj(undo) => writer.write_all(undo.apply(filtered_byte).as_slice()),
         }
+    }
+
+    /// Flushes any bytes an undo step is still buffering at end of stream.
+    /// A no-op for [`Self::Identity`]/[`Self::Delta`], which never buffer;
+    /// [`Self::Bcj`] may hold up to `INSTRUCTION_LEN - 1` unresolved bytes
+    /// ([`filters::bcj::Undo::finish`]).
+    fn finish<W: std::io::Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
+        if let Self::Bcj(undo) = self {
+            writer.write_all(undo.finish().as_slice())?;
+        }
+        Ok(())
     }
 }
 
@@ -860,8 +892,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
                     models.literal.decode(&mut ac, context)
                 };
                 window.push(byte);
-                let raw = undo.apply(byte);
-                writer.write_all(std::slice::from_ref(&raw))?;
+                undo.apply(byte, writer)?;
                 context = context.after_literal(byte);
             }
             FLAG_MATCH => {
@@ -890,6 +921,8 @@ fn decode_undoable_streaming<W: std::io::Write>(
             }
         }
     }
+
+    undo.finish(writer)?;
 
     if window.written_len() != declared_len {
         return Err(std::io::Error::other(Error::Corrupt));
@@ -934,8 +967,7 @@ fn copy_streamed<W: std::io::Write>(
     for _ in 0..len {
         let byte = window.get(distance);
         window.push(byte);
-        let raw = undo.apply(byte);
-        writer.write_all(std::slice::from_ref(&raw))?;
+        undo.apply(byte, writer)?;
         context = context.after_copy(std::slice::from_ref(&byte));
     }
     Ok(context)
@@ -1138,6 +1170,80 @@ mod tests {
                 .expect("decode_to_writer must succeed whenever decode does, same payload"),
             raw,
             "streaming roundtrip mismatch: Delta path with match/rep copies"
+        );
+    }
+
+    /// Many `call rel32` instructions, 20 bytes apart (room for a full
+    /// 5-byte instruction with no overlap), all targeting the same absolute
+    /// address (0): as raw relative offsets each instance's operand differs
+    /// by position, but `Candidate::Bcj` rewrites every one of them to the
+    /// same absolute bytes, which is what gives `encode()`'s trial a real
+    /// win to find here (mirrors `filters::select::pick`'s own
+    /// `pick_shortlists_bcj_for_opcode_dense_data` density fixture, but
+    /// with real operands instead of zeros so the rewrite actually creates
+    /// the repetition rather than leaving it accidentally already there).
+    fn bcj_call_dense_data() -> Vec<u8> {
+        let mut data = vec![0x90u8; 4000];
+        for (idx, chunk) in data.chunks_mut(20).enumerate() {
+            chunk[0] = 0xE8;
+            let post_addr = u32::try_from(idx * 20 + filters::bcj::INSTRUCTION_LEN)
+                .expect("idx * 20 + 5 fits u32 for this fixture's size (4000)");
+            let rel = 0u32.wrapping_sub(post_addr);
+            chunk[1..filters::bcj::INSTRUCTION_LEN].copy_from_slice(&rel.to_le_bytes());
+        }
+        data
+    }
+
+    #[test]
+    fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
+        // Same shape as roundtrip_columnar_drift_data_selects_delta_and_
+        // streams_it: proves encode() actually selects Candidate::Bcj for a
+        // real fixture (kind byte 2), not just that filters::bcj round-trips
+        // in isolation, and that decode_to_writer's Bcj path
+        // (research/JOURNAL.md S1-P7) reproduces decode()'s output exactly.
+        let data = bcj_call_dense_data();
+        let encoded = encode(&data);
+        assert_eq!(
+            encoded[0], 2,
+            "call-dense data should select Bcj, got kind byte {}",
+            encoded[0]
+        );
+        assert_eq!(
+            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(data.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            data,
+            "streaming roundtrip mismatch: decode_undoable_streaming's Bcj path"
+        );
+    }
+
+    #[test]
+    fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
+        // A run of identical 5-byte instructions in the *filtered* stream
+        // gives lz::parse_optimal real match/rep tokens to find, exercising
+        // copy_streamed's own undo call — the raw (pre-filter) bytes this
+        // decodes to are not themselves repetitive, since each instance's
+        // absolute-to-relative rewrite depends on its own position, proving
+        // filters::bcj::Undo recomputes that per position rather than
+        // replaying whatever the first instance resolved to.
+        let unit = [0xE8u8, 0x00, 0x00, 0x00, 0x00];
+        let filtered: Vec<u8> = unit.iter().copied().cycle().take(200).collect();
+        let raw = filters::bcj::decode(&filtered);
+        let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
+        frame.extend(encode_tokens(&filtered));
+
+        assert_eq!(
+            decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(raw.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            raw,
+            "streaming roundtrip mismatch: Bcj path with match/rep copies"
         );
     }
 
@@ -1552,13 +1658,16 @@ mod tests {
     }
 
     #[test]
-    fn streaming_falls_back_to_decode_for_non_identity_declared_length_over_the_max() {
+    fn streaming_falls_back_to_decode_for_transpose_declared_length_over_the_max() {
         // Same amplification-hazard shape as the Identity case above, but
-        // routed through decode_to_writer's fallback branch (a non-Identity
-        // filter selector), which must reject before calling decode's own
-        // whole-buffer path, not after.
+        // routed through decode_to_writer's fallback branch (the one
+        // candidate, Transpose, that still needs decode's own whole-buffer
+        // path), which must reject before calling it, not after. Identity,
+        // Delta, and Bcj all stream instead (research/JOURNAL.md S1-P7).
         let over = MAX_DECODED_LEN + 1;
-        let mut payload = Candidate::Bcj.to_header_bytes().to_vec();
+        let mut payload = Candidate::Transpose(crate::test_support::nz(2))
+            .to_header_bytes()
+            .to_vec();
         payload.extend_from_slice(&over.to_le_bytes());
         payload.extend_from_slice(&over.to_le_bytes());
         let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
