@@ -558,6 +558,20 @@ fn ensure_room(output_len: usize, additional: usize, declared_len: usize) -> Res
     }
 }
 
+/// Rejects a match distance past [`lz::WINDOW`]. `decode_bucketed` can
+/// return distances up to `2 * WINDOW - 1` (`OFFSET_BUCKETS`'s docs, bucket
+/// 20's residual bits), but the encoder's match finder never searches past
+/// `WINDOW`: a wider distance is adversarial, and rejecting it here, before
+/// it ever reaches `RepCache`, keeps every cached rep distance within
+/// `WINDOW` too, so this is the only place that needs the check.
+fn ensure_within_window(distance: NonZeroU32) -> Result<(), Error> {
+    if distance.get() as usize > lz::WINDOW {
+        Err(Error::Corrupt)
+    } else {
+        Ok(())
+    }
+}
+
 /// Copies `len` bytes to the end of `output` from `distance` bytes before
 /// its current end, one byte at a time so a distance shorter than `len` (a
 /// run, not a disjoint repeat) still reproduces the source correctly.
@@ -682,16 +696,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
                 // regardless of the residual bits: never zero.
                 let distance =
                     NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
-                // OFFSET_BUCKETS lets decode_bucketed return values up to
-                // 2 * WINDOW - 1 (bucket(WINDOW) == 20's residual bits),
-                // but the encoder's match finder never searches past
-                // WINDOW: a wider distance is adversarial, and rejecting
-                // it here (before it ever reaches RepCache) keeps every
-                // cached rep distance within WINDOW too, so this is the
-                // only place that needs the check.
-                if distance.get() as usize > lz::WINDOW {
-                    return Err(Error::Corrupt);
-                }
+                ensure_within_window(distance)?;
                 ensure_room(output.len(), len as usize, declared_len)?;
                 copy_checked(&mut output, len, distance)?;
                 reps.push_front(distance);
@@ -1003,6 +1008,29 @@ mod tests {
         assert_eq!(
             decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
             Err(Error::Corrupt)
+        );
+    }
+
+    #[test]
+    fn ensure_within_window_accepts_the_boundary_and_rejects_one_past() {
+        // The decode-level test above only ever exercises a distance one
+        // past the window against an empty output, where copy_checked's own
+        // bounds check (distance > output.len()) independently produces the
+        // identical Err(Corrupt): #390's mutation sweep found `>` -> `==`
+        // and `>` -> `>=` both survive the full suite because of it. Unit
+        // testing the extracted comparison directly, at exactly the
+        // boundary in both directions, is the only way to tell `>` apart
+        // from its neighbors without driving a WINDOW-sized decode.
+        let window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32");
+        assert_eq!(
+            ensure_within_window(NonZeroU32::new(window).expect("WINDOW is not zero")),
+            Ok(()),
+            "a distance exactly at the window edge is legal"
+        );
+        assert_eq!(
+            ensure_within_window(NonZeroU32::new(window + 1).expect("WINDOW + 1 is not zero")),
+            Err(Error::Corrupt),
+            "one past the window edge must be rejected"
         );
     }
 
