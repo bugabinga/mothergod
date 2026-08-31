@@ -74,6 +74,12 @@ them wastes a cycle.
     (issue #70). The reviewer workflow now undrafts bot-authored PRs
     automatically, so drafting only costs a round trip. Merge interlocks
     belong in the reviewer's prompt, not in PR state.
+12. Your session is headless and single-shot: when you stop, the run ends,
+    whatever you were waiting on. What you need the result of, you run in
+    the foreground, to completion, under a timeout you chose. Nothing else
+    is waitable: not a background command, not a check, not a queued run,
+    not another agent. A session that waits on one of those posts a filler
+    line and dies with its work undone (PR #255, #398).
 
 ## Style
 
