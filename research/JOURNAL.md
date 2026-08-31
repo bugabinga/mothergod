@@ -2625,11 +2625,13 @@ record.
   standalone primitive the way S2-A70/S2-A71/S2-A72 were: S2-D5. S2-D5's
   combined sink-abstraction-plus-real-caller slice, narrowed to
   `Candidate::Identity` (the one candidate needing no filter-chunking work
-  first), landed as S2-A73: `mothergod::decompress_to_writer`. Remaining
-  S1-P7 streaming-mode scope: extending the ring buffer to
-  `Delta`/`Bcj` frames (needs each filter's decode given an incremental
-  form first, `Transpose` staying excluded per S2-D4) and the frozen
-  format spec v1 half, both untouched by S2-A73.
+  first), landed as S2-A73: `mothergod::decompress_to_writer`. `Delta`'s
+  turn, S2-A74: `filters::delta::Undo` gives the delta transform its own
+  incremental decode form, wired into the same streaming path Identity
+  uses. Remaining S1-P7 streaming-mode scope: extending the ring buffer to
+  `Bcj` frames (needs its own incremental decode form first, `Transpose`
+  staying excluded per S2-D4) and the frozen format spec v1 half, both
+  untouched by S2-A74.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for
@@ -2922,6 +2924,47 @@ record.
   minutes-scale per S2-A17's own note on `parse_optimal`); it is
   unit-tested directly on `Window` instead. `research/progress.jsonl`
   it121. Full record: this entry, S1-P7 lead entry updated above.
+- S2-A74 | ACCEPTED | `Delta`'s turn at S2-A73's remaining scope
+  (`Delta`/`Bcj` streaming, `Transpose` staying excluded per S2-D4).
+  Unlike `Identity`, `Delta`'s `undo_filter` step is not a no-op, but it
+  is a small fixed-lookback accumulate (`out[i] = out[i-stride] +
+  data[i]`), so it undoes one byte at a time with no more state than the
+  last `stride` bytes it has itself produced — new `filters::delta::Undo`,
+  differentially tested against the batch `decode` it shadows (feeding it
+  `encode`'s output one byte at a time must reproduce the original
+  input, across strides 1 through 255, the full range an adversarial
+  header byte can request, not just `pick`'s own `MAX_DELTA_STRIDE` (96)
+  ceiling). Wired into `codec::decode_to_writer`'s existing streaming
+  path (S2-A73's `decode_identity_streaming`, renamed
+  `decode_undoable_streaming` and generalized over a new `StreamUndo`
+  enum) rather than adding a parallel path: `window` still holds the
+  *filtered* byte stream throughout, since match/rep distances reference
+  positions in what the encoder's LZ pass actually saw (`apply_filter`
+  runs before `encode_tokens`) — only the byte handed to `writer` differs
+  per candidate, threaded through both the literal branch and
+  `copy_streamed`'s per-byte loop, never `window` or `context`, which stay
+  on the filtered stream unchanged. `Bcj` and `Transpose` are unaffected,
+  still routed to `decode`'s whole-buffer path. | `cargo x check`: 4
+  stages green. `baseline_gate check`: 11 cases, no regression, both
+  finals reports fresh — `encode`/`decode` both untouched, this only adds
+  a second streaming path alongside them. 8 new `Undo` unit tests
+  (differential against `decode`, matching its own empty/shorter-than-
+  stride/wrapping-overflow/various-strides cases); one existing
+  integration test renamed and tightened
+  (`roundtrip_columnar_drift_data_selects_delta_and_streams_it`, now
+  pinning the kind byte to 1 (`Delta`) rather than just non-identity,
+  since this fixture is the only regression coverage of
+  `decode_undoable_streaming`'s `Delta` path through a real `encode()`
+  trial); one new crafted test
+  (`decode_undoable_streaming_delta_path_covers_copy_streamed_too`)
+  building a `Candidate::Delta` frame directly from a short repeating
+  filtered pattern, bypassing `pick`'s trial selection, because
+  `columnar_drift_data`'s random walk gives `parse_optimal` no repeat
+  long enough to price a match over literals — without it, `copy_streamed`'s
+  own `undo.apply` call would have shipped unexercised. | No bpb
+  measurement: capability patch, no codec/bitstream change.
+  `research/progress.jsonl` it122. Full record: this entry, S1-P7 lead
+  entry updated above.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
   entries) — only after SSE.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing

@@ -67,6 +67,15 @@ All notable changes to this project are documented here. Format follows
   falls back to a whole-buffer decode plus one bulk write: no worse than
   `decompress_bounded`, just not streamed yet. `decodes_incrementally`
   tells a caller which case a frame is ahead of time.
+- `mothergod::decompress_to_writer` now also streams
+  `filters::select::Candidate::Delta` frames (`research/JOURNAL.md`
+  S1-P7, S2-A74, ROADMAP M4), not just `Identity`: a new
+  `filters::delta::Undo` type undoes the delta transform one filtered byte
+  at a time, so a `Method::Lz` frame whose encoder picked `Delta` now
+  bounds resident memory to `lz::WINDOW` the same way `Identity` already
+  did. `Bcj` and `Transpose` are unchanged, still falling back to a
+  whole-buffer decode; `decodes_incrementally`'s answer is unaffected,
+  since it already reported `Delta` as incremental ahead of this change.
 
 ### Changed
 

@@ -47,6 +47,93 @@ pub mod delta {
         out
     }
 
+    /// Streaming counterpart to [`decode`]: undoes the transform one
+    /// filtered byte at a time instead of over a complete buffer, so a
+    /// caller never needs the whole filtered stream resident to recover the
+    /// original bytes (`research/JOURNAL.md` S1-P7, ROADMAP M4's
+    /// bounded-memory decode guarantee).
+    ///
+    /// `history` holds the last `stride` bytes this instance has itself
+    /// undone, not `decode`'s raw output directly — the two never diverge,
+    /// because each undone byte is exactly what a future [`Self::apply`]
+    /// call `stride` positions later needs, matching `decode`'s
+    /// `out[i] = out[i-stride] + data[i]` reading `out`, not `data`, on its
+    /// right-hand side. Bounded by `stride` (at most 255, since it comes off
+    /// an 8-bit header field), never by input length.
+    pub(crate) struct Undo {
+        stride: usize,
+        history: Vec<u8>,
+        count: usize,
+    }
+
+    impl Undo {
+        /// An undo state ready to accept the first filtered byte.
+        pub(crate) fn new(stride: NonZeroUsize) -> Self {
+            let stride = stride.get();
+            Self {
+                stride,
+                history: vec![0u8; stride],
+                count: 0,
+            }
+        }
+
+        /// Undoes one more filtered byte, returning the raw byte [`decode`]
+        /// would produce at this same stream position. Calls must be in
+        /// stream order: each call's result feeds the one `stride` calls
+        /// later, the same dependency [`decode`]'s loop has on `out`.
+        pub(crate) fn apply(&mut self, filtered_byte: u8) -> u8 {
+            let slot = self.count % self.stride;
+            let raw = if self.count < self.stride {
+                filtered_byte
+            } else {
+                filtered_byte.wrapping_add(self.history[slot])
+            };
+            self.history[slot] = raw;
+            self.count += 1;
+            raw
+        }
+    }
+
+    #[cfg(test)]
+    mod undo_tests {
+        use super::*;
+        use crate::test_support::nz;
+
+        /// Feeding [`Undo`] the output of [`encode`] one byte at a time
+        /// must reproduce the original input exactly, differentially
+        /// against the batch [`decode`] this type shadows.
+        fn undo_matches_decode(data: &[u8], stride: NonZeroUsize) {
+            let encoded = encode(data, stride);
+            let mut undo = Undo::new(stride);
+            let streamed: Vec<u8> = encoded.iter().map(|&byte| undo.apply(byte)).collect();
+            assert_eq!(streamed, decode(&encoded, stride));
+            assert_eq!(streamed, data);
+        }
+
+        #[test]
+        fn matches_decode_empty() {
+            undo_matches_decode(&[], nz(1));
+        }
+
+        #[test]
+        fn matches_decode_shorter_than_stride() {
+            undo_matches_decode(&[1, 2, 3], nz(8));
+        }
+
+        #[test]
+        fn matches_decode_various_strides() {
+            let data: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+            for stride in [1usize, 2, 3, 4, 8, 16, 96, 255] {
+                undo_matches_decode(&data, nz(stride));
+            }
+        }
+
+        #[test]
+        fn matches_decode_wrapping_overflow() {
+            undo_matches_decode(&[0u8, 255, 1, 254, 2], nz(1));
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
