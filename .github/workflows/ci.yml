@@ -75,7 +75,10 @@ jobs:
           else
             echo "quality=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
+          # .mgdc/.plaintext: golden fixture pairs, discovered by extension
+          # scan in tests/golden.rs, so the test binary is their only
+          # consumer; they gate `rust` (test/doc), not quality/ratio (#407).
+          if echo "$files" | grep -qE '\.(rs|mgdc|plaintext)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
