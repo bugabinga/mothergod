@@ -137,6 +137,46 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
     }
 }
 
+/// Shared skeleton behind [`encode_symbol`], [`decode_symbol`], and
+/// [`ideal_cost_bits`]: walks the same `LEVELS`-level binary-tree
+/// decomposition of `cum`. `code_bit` receives each level's midpoint and
+/// raw `upper_half_probability` and returns the bit that level resolved
+/// to — already known from a caller's own `symbol` for [`encode_symbol`]
+/// and [`ideal_cost_bits`], decoded from [`Decoder::decode_bit`] for
+/// [`decode_symbol`] — so the three callers differ only in what they do
+/// with that bit and probability, never in the walk itself. Mirrors
+/// [`walk_sse`] for this module's non-SSE trio.
+///
+/// Returns the final `lo`, which after `LEVELS` halvings of `[0, ALPHABET)`
+/// is exactly the coded symbol.
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+fn walk(cum: &[u64], mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
+    check_table_shape(cum);
+    let mut lo = 0usize;
+    let mut hi = ALPHABET;
+    for _ in 0..LEVELS {
+        let mid = lo + (hi - lo) / 2;
+        let bit = code_bit(mid, upper_half_probability(cum, lo, hi));
+        if bit {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "lo is bounded to [0, ALPHABET) after LEVELS halvings of a 256-wide range, \
+                  always fits u8"
+    )]
+    {
+        lo as u8
+    }
+}
+
 /// Codes `symbol` through `encoder` as `LEVELS` chained binary
 /// decisions over `cum`. See the module docs for the identity this
 /// implements.
@@ -146,25 +186,16 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
 pub fn encode_symbol(encoder: &mut Encoder, cum: &[u64], symbol: u8) {
-    check_table_shape(cum);
-    let symbol = usize::from(symbol);
-    let mut lo = 0usize;
-    let mut hi = ALPHABET;
-    for _ in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let bit = symbol >= mid;
-        encoder.encode_bit(bit, upper_half_probability(cum, lo, hi));
-        if bit {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
+    let symbol_index = usize::from(symbol);
+    let landed = walk(cum, |mid, p| {
+        let bit = symbol_index >= mid;
+        encoder.encode_bit(bit, p);
+        bit
+    });
     debug_assert_eq!(
-        lo, symbol,
+        landed, symbol,
         "8 halvings of [0, 256) must land exactly on symbol"
     );
-    debug_assert_eq!(hi, symbol + 1);
 }
 
 /// Decodes one byte from `decoder` as `LEVELS` chained binary
@@ -183,26 +214,7 @@ pub fn encode_symbol(encoder: &mut Encoder, cum: &[u64], symbol: u8) {
 /// not an adversarial-input hazard.
 #[must_use]
 pub fn decode_symbol(decoder: &mut Decoder, cum: &[u64]) -> u8 {
-    check_table_shape(cum);
-    let mut lo = 0usize;
-    let mut hi = ALPHABET;
-    for _ in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let bit = decoder.decode_bit(upper_half_probability(cum, lo, hi));
-        if bit {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "lo is bounded to [0, ALPHABET) after LEVELS halvings of a 256-wide range, \
-                  always fits u8"
-    )]
-    {
-        lo as u8
-    }
+    walk(cum, |_mid, p| decoder.decode_bit(p))
 }
 
 /// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
@@ -316,22 +328,13 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
               same exemption"
 )]
 pub fn ideal_cost_bits(cum: &[u64], symbol: u8) -> f64 {
-    check_table_shape(cum);
-    let symbol = usize::from(symbol);
-    let mut lo = 0usize;
-    let mut hi = ALPHABET;
+    let symbol_index = usize::from(symbol);
     let mut bits = 0.0f64;
-    for _ in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let bit = symbol >= mid;
-        let p = upper_half_probability(cum, lo, hi);
+    walk(cum, |mid, p| {
+        let bit = symbol_index >= mid;
         bits -= if bit { p.log2() } else { (1.0 - p).log2() };
-        if bit {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
+        bit
+    });
     bits
 }
 
