@@ -964,6 +964,23 @@ mod tests {
     }
 
     #[test]
+    fn ensure_room_rejects_growth_past_declared_len() {
+        // Direct, not routed through decode(): output only ever grows, so
+        // by the time a full decode loop finishes, the final `output.len()
+        // != declared_len` check alone would already reject any payload
+        // whose mid-stream growth ensure_room should have caught earlier,
+        // with the exact same Err(Corrupt) — a decode()-level test can
+        // never tell the two checks apart. This is the only place that
+        // pins ensure_room itself is the one doing the rejecting (hard
+        // rule 2, its own doc comment: "checked before every write rather
+        // than trusted from the header").
+        assert_eq!(ensure_room(6, 5, 10), Err(Error::Corrupt));
+        assert_eq!(ensure_room(0, 1, 0), Err(Error::Corrupt));
+        assert_eq!(ensure_room(5, 5, 10), Ok(()));
+        assert_eq!(ensure_room(0, 0, 0), Ok(()));
+    }
+
+    #[test]
     fn match_distance_beyond_window_is_rejected() {
         // OFFSET_BUCKETS (21) lets decode_bucketed represent distances up
         // to 2 * lz::WINDOW - 1, wider than any real encoder ever emits
