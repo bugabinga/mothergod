@@ -492,6 +492,14 @@ pub fn ideal_cost_bits_column_expert_experiment(
     (sink.baseline_bits, sink.with_column_bits)
 }
 
+/// Whether `body_len` beats `best_len` in `encode`'s shortest-wins
+/// candidate search. Strict: a tie keeps the earlier (lower-indexed)
+/// candidate, so filter order in [`filters::select::pick`] is a stable
+/// tie-break, not an accident of iteration.
+fn shorter_than(body_len: usize, best_len: usize) -> bool {
+    body_len < best_len
+}
+
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
 /// filter [`filters::select::pick`] shortlists, keeps whichever produces
 /// the smallest `encode_tokens` body, and prefixes that body with the
@@ -511,7 +519,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
         let body = encode_tokens(&filtered);
         if best
             .as_ref()
-            .is_none_or(|(_, existing)| body.len() < existing.len())
+            .is_none_or(|(_, existing)| shorter_than(body.len(), existing.len()))
         {
             best = Some((candidate, body));
         }
@@ -1032,6 +1040,25 @@ mod tests {
             Err(Error::Corrupt),
             "one past the window edge must be rejected"
         );
+    }
+
+    #[test]
+    fn shorter_than_keeps_the_strictly_smaller_candidate_only() {
+        // #390's mutation sweep found `<` -> `==` and `<` -> `<=` both
+        // survive the full suite: `encode`'s outer round-trip and
+        // filter-selection tests only ever observe the *winning* body, and
+        // a wrong tie-break or wrong-direction comparison still produces
+        // some valid, round-trippable encoding, just not necessarily the
+        // smallest one. Unit testing the extracted comparison directly is
+        // the only way to pin "strictly smaller, not tied or larger"
+        // without constructing filter candidates whose encoded sizes land
+        // on an exact boundary.
+        assert!(shorter_than(3, 5), "a strictly smaller body must win");
+        assert!(
+            !shorter_than(5, 5),
+            "a tied body must not displace the earlier candidate"
+        );
+        assert!(!shorter_than(6, 5), "a larger body must not win");
     }
 
     #[test]
