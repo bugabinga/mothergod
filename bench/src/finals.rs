@@ -59,6 +59,27 @@ pub struct Versions {
     pub xz: String,
 }
 
+/// The report-header facts that aren't the corpus or the measurements
+/// themselves, grouped so [`format_report`] takes one argument for "what
+/// conditions produced this report" instead of three loose strings
+/// (`clippy::too_many_arguments`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance<'a> {
+    /// Reference-compressor version strings.
+    pub versions: &'a Versions,
+    /// `crate::baseline::fingerprint`'s digest of the `bench/baseline.json`
+    /// this report was generated against; embedded so `baseline_gate` can
+    /// tell when a later baseline change left this report behind (issue
+    /// #327's [`stale_reason`]).
+    pub baseline_fingerprint: &'a str,
+    /// `crate::reference::machine_info()`'s description of the hardware
+    /// the encode/decode MB/s columns were measured on (issue #432): a
+    /// throughput number is only comparable to another number from the
+    /// same line, never to one from the internet, so the report says which
+    /// machine it is.
+    pub machine: &'a str,
+}
+
 /// One compressor's bits/byte across all of `measurements`, aggregated as
 /// total compressed bytes over total original bytes — not an average of
 /// per-file ratios, which would over-weight small files relative to their
@@ -114,20 +135,21 @@ fn aggregate_mb_per_sec(
 /// `"finals_report"`), so the header's regeneration command matches
 /// whichever caller actually ran — one `format_report` shared across every
 /// held-out-final corpus, per corpus its own binary and command line.
-/// `baseline_fingerprint` is `crate::baseline::fingerprint`'s digest of the
-/// `bench/baseline.json` this report was generated against; embedded so
-/// `baseline_gate` can tell when a later baseline change left this report
-/// behind (issue #327's [`stale_reason`]).
+/// `provenance` carries the report-conditions facts ([`Provenance`]).
 #[must_use]
 pub fn format_report(
     corpus_name: &str,
     corpus_provenance: &str,
     generated_at: &str,
-    versions: &Versions,
     measurements: &[FileMeasurement],
     generator_bin: &str,
-    baseline_fingerprint: &str,
+    provenance: &Provenance<'_>,
 ) -> String {
+    let Provenance {
+        versions,
+        baseline_fingerprint,
+        machine,
+    } = provenance;
     let mut ordered: Vec<&FileMeasurement> = measurements.iter().collect();
     ordered.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -157,7 +179,10 @@ pub fn format_report(
          record CLAUDE.md rule 4 asks for. `regret` is mothergod's \
          bits/byte minus the stronger (lower) of zstd/xz on the same \
          file, positive meaning mothergod does worse \
-         (`research/corpus/POLICY.md`, \"Growing the corpus\").\n",
+         (`research/corpus/POLICY.md`, \"Growing the corpus\").\n\n\
+         The `mothergod encode MB/s`/`mothergod decode MB/s` columns are \
+         indicative of this one machine only, not a cross-machine claim: \
+         {machine}.\n",
         versions.gzip, versions.zstd, versions.xz
     )
     .expect("writing to a String never fails");
@@ -239,7 +264,7 @@ pub fn stale_reason(report_text: &str, current_baseline_fingerprint: &str) -> Op
 
 #[cfg(test)]
 mod tests {
-    use super::{FileMeasurement, Versions, format_report, stale_reason};
+    use super::{FileMeasurement, Provenance, Versions, format_report, stale_reason};
 
     fn sample_measurements() -> Vec<FileMeasurement> {
         vec![
@@ -266,11 +291,20 @@ mod tests {
         ]
     }
 
-    fn sample_versions() -> Versions {
-        Versions {
+    fn sample_versions() -> &'static Versions {
+        static VERSIONS: std::sync::OnceLock<Versions> = std::sync::OnceLock::new();
+        VERSIONS.get_or_init(|| Versions {
             gzip: "gzip 1.12".to_string(),
             zstd: "*** Zstandard CLI (64-bit) v1.5.7 ***".to_string(),
             xz: "xz (XZ Utils) 5.4.5".to_string(),
+        })
+    }
+
+    fn sample_provenance() -> Provenance<'static> {
+        Provenance {
+            versions: sample_versions(),
+            baseline_fingerprint: "deadbeefcafef00d",
+            machine: "test machine, 1 logical core(s)",
         }
     }
 
@@ -280,10 +314,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(
             report.find("alpha.txt").unwrap() < report.find("zeta.txt").unwrap(),
@@ -297,10 +330,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(report.contains("Canterbury"));
         assert!(report.contains("corpus.canterbury.ac.nz"));
@@ -310,15 +342,30 @@ mod tests {
     }
 
     #[test]
+    fn format_report_names_the_machine_the_throughput_columns_ran_on() {
+        let report = format_report(
+            "Canterbury",
+            "corpus.canterbury.ac.nz",
+            "2026-08-25T00:00:00Z",
+            &sample_measurements(),
+            "finals_report",
+            &sample_provenance(),
+        );
+        assert!(
+            report.contains("test machine, 1 logical core(s)"),
+            "expected the machine description next to the MB/s columns: {report}"
+        );
+    }
+
+    #[test]
     fn format_report_names_its_generator_binary() {
         let report = format_report(
             "Silesia",
             "sun.aei.polsl.pl",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "silesia_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(
             report.contains("--bin silesia_report`"),
@@ -335,10 +382,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(
             report.contains("3.466667"),
@@ -356,10 +402,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(report.contains("aggregate (2 files)"));
     }
@@ -370,10 +415,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &[],
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(report.contains("aggregate (0 files)"));
         // 0/0 bytes: `bits_per_byte` returns 0.0 for a zero original length.
@@ -396,10 +440,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &measurements,
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(report.contains(r"weird\|name.txt"));
     }
@@ -410,10 +453,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert!(report.contains("<!-- baseline-fingerprint: deadbeefcafef00d -->"));
     }
@@ -424,10 +466,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         assert_eq!(stale_reason(&report, "deadbeefcafef00d"), None);
     }
@@ -438,10 +479,9 @@ mod tests {
             "Canterbury",
             "corpus.canterbury.ac.nz",
             "2026-08-25T00:00:00Z",
-            &sample_versions(),
             &sample_measurements(),
             "finals_report",
-            "deadbeefcafef00d",
+            &sample_provenance(),
         );
         let reason = stale_reason(&report, "0000000000000000")
             .expect("a moved baseline must be reported stale");
