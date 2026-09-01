@@ -36,7 +36,10 @@ API, not a bill, and every surface labels it so. Until 2026-09-01 USD
 was deliberately absent as risking a dishonest read; the operator
 overruled that: the projection is the signal a reader can compare
 against their own compute, and labeling beats omission (Telegram,
-2026-09-01).
+2026-09-01). From the same sums, each seat's share of the window's
+projected cost is published as its burn share (issue #439): the
+measurable proxy for its share of the seven-day allowance, which
+nothing attributes to seats directly.
 
 Both outputs also carry the self-wake audit (issue #144): every admitted
 thread-event bdfl wake in the recent window, re-derived from the API as
@@ -319,6 +322,20 @@ def self_wake_line():
             "in the window were our own output (issue #144; measured, "
             "not assumed).")
 
+
+# Per-seat burn share (issue #439): each seat's slice of the window's
+# projected cost, computed once here so every consumer shows the same
+# number. It proxies the seat's share of the seven-day allowance on the
+# assumption that the allowance weighs usage roughly as list pricing
+# does, by model-weighted tokens; the proxy's error is whatever that
+# assumption misses. None, not 0, when the window priced nothing.
+recent_sums = {role: summarize(recent.get(role, [])) for role in roles}
+costed_total = sum(s["cost_total"] for s in recent_sums.values() if s)
+for s in recent_sums.values():
+    if s:
+        s["cost_share"] = (100.0 * s["cost_total"] / costed_total
+                           if costed_total else None)
+
 if JSON_MODE:
     def portable(summary):
         """Counter to pairs; everything else in a summary is already JSON."""
@@ -333,7 +350,7 @@ if JSON_MODE:
         "truncated": truncated,
         "self_wakes": self_wakes,
         "roles": [{"role": role,
-                   "recent": portable(summarize(recent.get(role, []))),
+                   "recent": portable(recent_sums[role]),
                    "prior": portable(summarize(prior.get(role, [])))}
                   for role in roles],
         "runs": rows[:25],
@@ -364,23 +381,25 @@ lines = [
     f"Arrows mark a move over 10%. Source: {len(runs)} audit artifacts, "
     "our own workload.",
     "",
-    "| role | model actually run | runs | out tok | $/run | think% | turns |"
-    " min | denials | errors |",
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| role | model actually run | runs | out tok | $/run | burn% | think% |"
+    " turns | min | denials | errors |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
 ]
 
 for role in roles:
-    new, old = summarize(recent.get(role, [])), summarize(prior.get(role, []))
+    new, old = recent_sums[role], summarize(prior.get(role, []))
     if new is None:
         n = len(recent.get(role, []))
         note = f"{n} unmeasured" if n else "no runs"
-        lines.append(f"| {role} | - | 0 | - | - | - | - | - | - | ({note}) |")
+        lines.append(f"| {role} | - | 0 | - | - | - | - | - | - | - | ({note}) |")
         continue
     models = ", ".join(f"`{m}`×{c}" for m, c in new["models"].most_common(3)) or "-"
+    share = "-" if new["cost_share"] is None else f"{new['cost_share']:.0f}%"
     lines.append(
         f"| {role} | {models} | {new['n']} "
         f"| {cell(new['out'], old and old['out'])} "
         f"| {cell(new['cost'], old and old['cost'], '{:.2f}')} "
+        f"| {share} "
         f"| {cell(new['think'], old and old['think'], '{:.0f}')} "
         f"| {cell(new['turns'], old and old['turns'])} "
         f"| {cell(new['mins'], old and old['mins'], '{:.1f}')} "
@@ -388,7 +407,7 @@ for role in roles:
         f"| {new['errors']}/{new['n']} |"
     )
 
-summaries = [s for s in (summarize(v) for v in recent.values()) if s]
+summaries = [s for s in recent_sums.values() if s]
 total_out = sum(s["out_total"] for s in summaries)
 total_cost = sum(s["cost_total"] for s in summaries)
 uncosted = sum(s["uncosted"] for s in summaries)
@@ -411,7 +430,11 @@ lines += [
     "rates, the SDK's own per-run figure. The agents run on "
     "subscription auth, so this is what the same work would have cost "
     "on the API, not a bill; the subscription and the contributor's "
-    f"wait are what is actually paid.{cost_note}",
+    f"wait are what is actually paid.{cost_note} The burn% column is "
+    "each seat's slice of that projected cost, the measurable proxy "
+    "for its share of the seven-day allowance (issue #439); it assumes "
+    "the allowance weighs usage roughly as list pricing does, by "
+    "model-weighted tokens.",
 ]
 
 notes = []
