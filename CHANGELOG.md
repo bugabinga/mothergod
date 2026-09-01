@@ -8,6 +8,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- The status page's "lines in src/" tile counted inline `#[cfg(test)]`
+  modules as product code, 4453 of 10564 lines on the day of the fix
+  (operator report, Telegram): the page now shows code lines and test
+  lines as separate tiles, split by `status-data.py`.
+
 - `docs/benchmarks/canterbury.md` and `silesia.md` published `mothergod
   encode MB/s`/`mothergod decode MB/s` columns without naming the machine
   they ran on (issue #432): a throughput number is only comparable to
