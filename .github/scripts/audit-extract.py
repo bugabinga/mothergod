@@ -19,6 +19,7 @@ downgrades that to a warning.
 import hashlib
 import json
 import os
+import re
 import sys
 
 from allowance import valid_fraction, valid_reset, window_readings
@@ -238,6 +239,26 @@ files = {
 }
 
 secrets = [v.strip() for v in os.environ.get("REDACT", "").splitlines() if len(v.strip()) >= 8]
+
+# Token-shaped scrubbing (issue #425): REDACT can only name secrets
+# the workflow could enumerate, but run 33435174432 leaked a token
+# minted at runtime (the app installation token inside the git remote
+# URL, echoed by `git remote -v`). Patterns catch the class at the one
+# point where session text leaves the machine. Prefixed formats only:
+# an unprefixed secret (Cloudflare's bare-alnum token) is
+# indistinguishable from ordinary text and must ride REDACT.
+token_patterns = [
+    # GitHub: ghp_ personal, gho_ OAuth, ghu_/ghs_ app, ghr_ refresh.
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    # Anthropic API keys.
+    re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+    # Telegram bot tokens, bare or in the /bot<token>/ URL form the
+    # Bot API forces (hard rule 10). Lookbehind, not \b: `t` to digit
+    # in `bot123...` is no word boundary, and that URL form is the
+    # documented leak shape.
+    re.compile(r"(?<!\d)\d{6,}:[A-Za-z0-9_-]{30,}"),
+]
 redactions = 0
 scrubbed = {}
 for name, body in files.items():
@@ -245,6 +266,9 @@ for name, body in files.items():
         if value in body:
             body = body.replace(value, "***REDACTED***")
             redactions += 1
+    for pattern in token_patterns:
+        body, count = pattern.subn("***REDACTED***", body)
+        redactions += count
     scrubbed[name] = body
     with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
         fh.write(body)
