@@ -2526,11 +2526,21 @@ record.
   `FORMAT_VERSION` 3 SSE calibration stage (S1-P1), a separable question
   for the real wiring slice. Accepted, at this pre-wiring, pre-SSE
   measurement layer: train improved on both cases, sealed did not
-  regress (numbers in S2-A69's own entry). Remaining S1-P5 scope: the
-  real wiring (`FORMAT_VERSION` bump, threading `columns` from filter
-  selection into `Literal`, deciding how the seventh expert interacts
-  with SSE calibration) and a real-bitstream measurement to confirm this
-  ideal-cost signal survives contact with the actual coder.
+  regress (numbers in S2-A69's own entry). Fifth slice, S2-A76: answered
+  the SSE-interaction question this entry named as remaining scope —
+  accepted, net train improved and sealed did not regress, but the win is
+  smaller than the pre-SSE numbers suggested and uneven across cases: SSE
+  calibration already recovers part of what the column signal was worth
+  (`sqlite_like_records`'s pre-SSE −0.032494 shrinks to −0.012452
+  post-SSE), and fully absorbs it for `interleaved_audio16` (pre-SSE
+  −0.021819 flips to a +0.000604 wash post-SSE); `gradient_image`
+  (sealed) improved more post-SSE (−0.005562 vs pre-SSE's −0.001672).
+  Remaining S1-P5 scope: the real wiring itself (`FORMAT_VERSION` bump,
+  threading `columns` from filter selection into `Literal`) and a
+  real-bitstream measurement to confirm this ideal-cost signal survives
+  contact with the actual coder — expect a real-bitstream win closer to
+  S2-A76's post-SSE numbers than S2-A69's pre-SSE ones, and no
+  improvement from audio-shaped column structure specifically.
 - S2-A69 | ACCEPTED | Fourth slice of ROADMAP M3's fifth standing lead
   (S1-P5, per-column modeling after transpose): before spending the real
   `Literal`/`Method`/`FORMAT_VERSION` wiring slice S2-A64/S2-A66 left as
@@ -2598,6 +2608,78 @@ record.
   every prior scratch driver regardless of verdict, since the numbers it
   produced are now this entry, not a rerunnable tool. `research/
   progress.jsonl` it117. Remaining S1-P5 scope: see the updated S1-P5
+  entry above.
+- S2-A76 | ACCEPTED | Fifth slice of ROADMAP M3's fifth standing lead
+  (S1-P5, per-column modeling after transpose): S2-A69's own deliberately
+  deferred question, whether the seventh column-keyed expert's win
+  survives once the mixed probability is calibrated by
+  `Literal::encode_sse`'s SSE stage instead of priced directly, the
+  refinement every real byte already pays under `FORMAT_VERSION` 3.
+  Hypothesis: blending `column_state`'s bank into the seven-expert mix
+  and calibrating the result through the same bittree/SSE decomposition
+  `Literal::encode_sse` uses reduces ideal-cost bits/byte on
+  already-transposed column-structured data without regressing the
+  sealed case, the same accept bar S2-A69 cleared pre-SSE. New
+  `Literal::ideal_cost_bits_column_expert_pair_sse`: prices `byte` twice
+  through the SSE-calibrated path — once as `Self::ideal_cost_bits_sse`
+  exactly (so `self.sse`'s one real trajectory adapts identically to
+  production regardless of this method running), once with the same
+  seven-expert `cum` table `ideal_cost_bits_column_expert_pair` builds
+  (factored out as `Self::mix7`, shared by both, behavior-preserving),
+  calibrated through `bittree::ideal_cost_bits_sse` against a new
+  independent `Sse` table on `ColumnExpertState` — its own trajectory,
+  never `self.sse`'s, so probing the with-column path never perturbs the
+  six-expert model's real calibration state. The column expert's own
+  weight/bank adaptation (`Self::update_column_expert`, the other half of
+  the same extraction) is unchanged from S2-A69, shared verbatim by both
+  pairing methods. `codec::ideal_cost_bits_column_expert_experiment_sse`
+  mirrors `ideal_cost_bits_column_expert_experiment`'s flag/length/
+  offset/slot pass-through, differing only in routing the literal price
+  through the SSE-paired method. | Measured (model-cost, not
+  real-bitstream; `bench` crate generators; same rotated-window shape,
+  train seed `0xC01D_BEEF_1234_5678`, and generators S2-A69 used, this
+  time transposing each window with `filters::transpose::encode` before
+  measuring — S2-A69's own "already-transposed column-structured data"
+  precondition, made explicit here): train, `sqlite_like_records`
+  (columns=20): baseline (SSE) 3.266457 -> with-column (SSE) 3.254005
+  bpb, **-0.012452** (baseline reproduces S2-R8's own SSE-calibrated
+  baseline number exactly, a harness sanity check).
+  `interleaved_audio16` (columns=2): baseline 5.765049 -> with-column
+  5.765653 bpb, **+0.000604**, a wash inside noise. Sealed:
+  `gradient_image` (columns=200, `sealed_seed` of the same train seed,
+  not rotated): baseline 5.916617 -> with-column 5.911055 bpb,
+  **-0.005562** (an improvement, larger than S2-A69's pre-SSE
+  -0.001672). Net train (mean of the two cases): **-0.005924**. Corpus
+  policy's accept rule (train improvement AND no validation regression)
+  passes: net train improved, sealed improved, the same "individual
+  cases may mix, net and sealed decide" reading S1-P1's own accept
+  applied to its one in-trade regression. | Mechanism: SSE calibrates the
+  six-expert mix's own blended probability at each binary-tree node
+  using only tree-position context (`bittree::sse_context`), not column
+  identity — it corrects *systematic* bias in that probability, and some
+  of the bias a missing column signal causes is systematic enough for
+  SSE to partially correct without ever seeing the column index
+  directly. That explains why the pre-SSE win shrinks rather than
+  vanishing on `sqlite_like_records` (a real column-boundary effect SSE
+  cannot fully substitute for) and why it fully vanishes on
+  `interleaved_audio16` (a two-column low/high-byte split apparently is
+  exactly the kind of bias SSE's own calibration already captures).
+  `gradient_image` improving *more* post-SSE than pre-SSE suggests SSE
+  and the column signal interact favorably there rather than competing —
+  not explained further here, a candidate thread for a future slice, not
+  this one. Candidate code (`ColumnExpertState`'s new `sse` field,
+  `Literal::mix7`, `Literal::update_column_expert`,
+  `Literal::ideal_cost_bits_column_expert_pair_sse`,
+  `codec::ideal_cost_bits_column_expert_experiment_sse`, their unit
+  tests) kept, same status as S2-A69's own candidate code: an accepted
+  step at the ideal-cost-pairing layer. `Literal::mix7`/
+  `update_column_expert` also replace `ideal_cost_bits_column_expert_pair`'s
+  previously-inline blend and weight-update logic, behavior-preserving
+  (its own existing unit tests pass unchanged). The manual driver
+  (`bench/src/bin/scratch_column_expert_sse_experiment.rs`) that ran this
+  measurement is not: deleted after recording these numbers, same as
+  every prior scratch driver regardless of verdict. `research/
+  progress.jsonl` it125. Remaining S1-P5 scope: see the updated S1-P5
   entry above.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
