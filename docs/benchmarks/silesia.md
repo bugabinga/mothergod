@@ -3,20 +3,22 @@
 
 # Silesia held-out-final snapshot
 
-As of 2026-08-30T04:35:26Z. Corpus: sun.aei.polsl.pl/~sdeor/corpus, 12 files pinned by URL + SHA-256 in `bench/corpus.toml` (`research/corpus/POLICY.md`'s held-out finals, fetched and pin-verified by `bench::corpus`, never committed). Reference compressors, versions as actually run: `gzip 1.12` (gzip -9), `*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***` (zstd -19), `xz (XZ Utils) 5.4.5` (xz -9e) — `research/corpus/POLICY.md` pins the flags, not the installed binary, so this line is the version record CLAUDE.md rule 4 asks for. `regret` is mothergod's bits/byte minus the stronger (lower) of zstd/xz on the same file, positive meaning mothergod does worse (`research/corpus/POLICY.md`, "Growing the corpus").
+As of 2026-09-01T09:44:03Z. Corpus: sun.aei.polsl.pl/~sdeor/corpus, 12 files pinned by URL + SHA-256 in `bench/corpus.toml` (`research/corpus/POLICY.md`'s held-out finals, fetched and pin-verified by `bench::corpus`, never committed). Reference compressors, versions as actually run: `gzip 1.12` (gzip -9), `*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***` (zstd -19), `xz (XZ Utils) 5.4.5` (xz -9e) — `research/corpus/POLICY.md` pins the flags, not the installed binary, so this line is the version record CLAUDE.md rule 4 asks for. `regret` is mothergod's bits/byte minus the stronger (lower) of zstd/xz on the same file, positive meaning mothergod does worse (`research/corpus/POLICY.md`, "Growing the corpus").
+
+The `mothergod encode MB/s`/`mothergod decode MB/s` columns are indicative of this one machine only, not a cross-machine claim: AMD EPYC 9V74 80-Core Processor, 4 logical core(s), CI runner, one thread per file (`reference::measure_all`).
 
 | file | bytes | mothergod b/B | gzip -9 b/B | zstd -19 b/B | xz -9e b/B | regret | mothergod encode MB/s | mothergod decode MB/s |
 |---|---|---|---|---|---|---|---|---|
-| `dickens` | 10192446 | 2.350407 | 3.023297 | 2.236908 | 2.222204 | +0.128203 | 0.039 | 2.705 |
-| `mozilla` | 51220480 | 2.466911 | 2.966652 | 2.354007 | 2.089202 | +0.377709 | 0.106 | 3.272 |
-| `mr` | 9970564 | 2.509172 | 2.947853 | 2.492727 | 2.208013 | +0.301159 | 0.051 | 1.180 |
-| `nci` | 33553445 | 0.486700 | 0.712311 | 0.396976 | 0.345544 | +0.141157 | 0.095 | 12.418 |
-| `ooffice` | 6152192 | 2.969764 | 4.018687 | 3.374897 | 3.156240 | -0.186475 | 0.030 | 0.953 |
-| `osdb` | 10085684 | 2.385354 | 2.947839 | 2.459071 | 2.256312 | +0.129042 | 0.038 | 0.886 |
-| `reymont` | 6627202 | 1.701703 | 2.198043 | 1.627790 | 1.588112 | +0.113591 | 0.037 | 2.512 |
-| `samba` | 21606400 | 1.595347 | 2.002481 | 1.442045 | 1.384599 | +0.210748 | 0.061 | 4.121 |
-| `sao` | 7251944 | 5.539147 | 5.876572 | 5.516398 | 4.882182 | +0.656965 | 0.026 | 0.428 |
-| `webster` | 41458703 | 1.808331 | 2.327453 | 1.674863 | 1.614845 | +0.193486 | 0.086 | 7.701 |
-| `x-ray` | 8474240 | 4.492727 | 5.699854 | 4.842749 | 4.239921 | +0.252806 | 0.031 | 0.392 |
-| `xml` | 5345280 | 0.709588 | 0.991249 | 0.678294 | 0.650880 | +0.058707 | 0.090 | 3.721 |
-| **aggregate (12 files)** | 211938580 | **2.060705** | **2.552903** | **1.996629** | **1.829058** | **+0.231646** | **0.062** | **2.084** |
+| `dickens` | 10192446 | 2.350407 | 3.023297 | 2.236908 | 2.222204 | +0.128203 | 0.034 | 2.035 |
+| `mozilla` | 51220480 | 2.466911 | 2.966652 | 2.354007 | 2.089202 | +0.377709 | 0.098 | 2.894 |
+| `mr` | 9970564 | 2.509172 | 2.947853 | 2.492727 | 2.208013 | +0.301159 | 0.048 | 0.981 |
+| `nci` | 33553445 | 0.486700 | 0.712311 | 0.396976 | 0.345544 | +0.141157 | 0.093 | 11.339 |
+| `ooffice` | 6152192 | 2.969764 | 4.018687 | 3.374897 | 3.156240 | -0.186475 | 0.028 | 0.809 |
+| `osdb` | 10085684 | 2.385354 | 2.947839 | 2.459071 | 2.256312 | +0.129042 | 0.036 | 0.959 |
+| `reymont` | 6627202 | 1.701703 | 2.198043 | 1.627790 | 1.588112 | +0.113591 | 0.035 | 1.991 |
+| `samba` | 21606400 | 1.595347 | 2.002481 | 1.442045 | 1.384599 | +0.210748 | 0.058 | 3.813 |
+| `sao` | 7251944 | 5.539147 | 5.876572 | 5.516398 | 4.882182 | +0.656965 | 0.025 | 0.441 |
+| `webster` | 41458703 | 1.808331 | 2.327453 | 1.674863 | 1.614845 | +0.193486 | 0.081 | 6.936 |
+| `x-ray` | 8474240 | 4.492727 | 5.699854 | 4.842749 | 4.239921 | +0.252806 | 0.030 | 0.323 |
+| `xml` | 5345280 | 0.709588 | 0.991249 | 0.678294 | 0.650880 | +0.058707 | 0.102 | 4.685 |
+| **aggregate (12 files)** | 211938580 | **2.060705** | **2.552903** | **1.996629** | **1.829058** | **+0.231646** | **0.059** | **1.879** |

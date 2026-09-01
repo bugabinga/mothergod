@@ -8,6 +8,20 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `docs/benchmarks/canterbury.md` and `silesia.md` published `mothergod
+  encode MB/s`/`mothergod decode MB/s` columns without naming the machine
+  they ran on (issue #432): a throughput number is only comparable to
+  another number from the same line, the same defect CLAUDE.md rule 4
+  already forbids for a bits/byte number without its corpus. Both report
+  generators (`finals_report`, `silesia_report`) now call
+  `bench::reference::machine_info()` and print its CPU model, logical core
+  count, CI-runner detection, and the one-thread-per-file measurement
+  shape in the conditions sentence next to the throughput columns.
+  `finals::format_report` grouped its version/fingerprint/machine
+  arguments into a new `Provenance` struct to stay under
+  `clippy::too_many_arguments`. Both reports regenerated; only the
+  throughput columns changed (measured on a different machine than the
+  prior run), bits/byte numbers are bit-for-bit unchanged.
 - `README.md` and `site/index.html` still said the container format was
   `FORMAT_VERSION` 2 and that "no Silesia/Canterbury benchmark-suite number
   exists yet for this Rust build". Both were stale: the format is at version

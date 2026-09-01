@@ -87,6 +87,68 @@ pub fn generated_at() -> io::Result<String> {
         .map_err(|err| io::Error::other(format!("date produced non-UTF-8 output: {err}")))
 }
 
+/// Best-effort description of the machine [`measure_all`] ran on: CPU
+/// model, logical core count, whether the process looks like it ran on a
+/// CI runner, and the one-thread-per-file measurement shape. Named in the
+/// report next to the throughput columns (issue #432): an MB/s number
+/// without its hardware is the same defect CLAUDE.md rule 4 already
+/// forbids for a bits/byte number without its corpus, so a reader compares
+/// mothergod runs to each other, never to a number from an unnamed
+/// machine.
+///
+/// `CI` is the convention every major CI system exports (GitHub Actions,
+/// GitLab, Travis, CircleCI); its absence just means "not detected as CI",
+/// not "definitely a developer machine".
+#[must_use]
+pub fn machine_info() -> String {
+    let cpu = cpu_model().unwrap_or_else(|| "unknown CPU".to_string());
+    let cores = std::thread::available_parallelism().map_or(0, std::num::NonZeroUsize::get);
+    let runner = if std::env::var_os("CI").is_some() {
+        "CI runner"
+    } else {
+        "non-CI machine"
+    };
+    format!(
+        "{cpu}, {cores} logical core(s), {runner}, one thread per file \
+         (`reference::measure_all`)"
+    )
+}
+
+/// `/proc/cpuinfo`'s `model name` field. `None` if unreadable or absent
+/// (e.g. a non-x86 kernel that doesn't populate the field), in which case
+/// [`machine_info`] falls back to a plain "unknown CPU" rather than
+/// failing the whole report over a cosmetic field.
+#[cfg(target_os = "linux")]
+fn cpu_model() -> Option<String> {
+    let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
+    text.lines()
+        .find(|line| line.starts_with("model name"))
+        .and_then(|line| line.split_once(':'))
+        .map(|(_, value)| value.trim().to_string())
+}
+
+/// `sysctl -n machdep.cpu.brand_string`, macOS's equivalent of Linux's
+/// `/proc/cpuinfo` model name.
+#[cfg(target_os = "macos")]
+fn cpu_model() -> Option<String> {
+    let output = Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// Every other target: `PROCESSOR_IDENTIFIER` (set by Windows) if present,
+/// else `None`.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn cpu_model() -> Option<String> {
+    std::env::var("PROCESSOR_IDENTIFIER").ok()
+}
+
 /// First line of `cmd --version`'s output (stdout, falling back to stderr
 /// if stdout is empty), trimmed. Names which build produced a reference
 /// number: `research/corpus/POLICY.md` pins the flags (`zstd -19`,
@@ -190,7 +252,7 @@ pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, 
 
 #[cfg(test)]
 mod tests {
-    use super::{compressed_len, generated_at, measure_all, tool_version};
+    use super::{compressed_len, generated_at, machine_info, measure_all, tool_version};
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger
@@ -281,6 +343,19 @@ mod tests {
             stamp.matches('-').count(),
             2,
             "expected two date separators, got {stamp:?}"
+        );
+    }
+
+    #[test]
+    fn machine_info_names_a_core_count_and_the_measurement_shape() {
+        let info = machine_info();
+        assert!(
+            info.contains("logical core"),
+            "expected a logical core count, got {info:?}"
+        );
+        assert!(
+            info.contains("measure_all"),
+            "expected the one-thread-per-file shape named, got {info:?}"
         );
     }
 

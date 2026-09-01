@@ -29,8 +29,8 @@
 
 use mothergod_bench::baseline::load_and_fingerprint;
 use mothergod_bench::corpus::{ManifestEntry, decompress_silesia, fetch_and_cache, parse_manifest};
-use mothergod_bench::finals::{Versions, format_report};
-use mothergod_bench::reference::{generated_at, measure_all, tool_version};
+use mothergod_bench::finals::{Provenance, Versions, format_report};
+use mothergod_bench::reference::{generated_at, machine_info, measure_all, tool_version};
 use mothergod_bench::repo_root;
 use std::path::Path;
 use std::process::ExitCode;
@@ -123,14 +123,18 @@ fn main() -> ExitCode {
         }
     };
 
+    let machine = machine_info();
     let report = format_report(
         "Silesia",
         "sun.aei.polsl.pl/~sdeor/corpus, 12 files pinned by URL + SHA-256 in `bench/corpus.toml`",
         &generated_at,
-        &versions,
         &measurements,
         "silesia_report",
-        &baseline_fingerprint,
+        &Provenance {
+            versions: &versions,
+            baseline_fingerprint: &baseline_fingerprint,
+            machine: &machine,
+        },
     );
 
     let out_path = root.join("docs/benchmarks/silesia.md");
