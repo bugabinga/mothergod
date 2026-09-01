@@ -1,12 +1,11 @@
 #![forbid(unsafe_code)]
 //! `mothergod` — command-line compressor/decompressor (ROADMAP M6).
 //!
-//! Reads the whole input and writes the whole output, chosen by a
-//! `compress`/`decompress` subcommand. With no file argument it uses
-//! stdin/stdout, mirroring the `gzip -c`/`zstd -c` shape users already
-//! know. With a file argument it follows the `.mgdc` suffix convention
-//! already used by `tests/golden/`, and never deletes the input or
-//! overwrites an existing output file:
+//! Reads the whole input into memory, chosen by a `compress`/`decompress`
+//! subcommand. With no file argument it uses stdin/stdout, mirroring the
+//! `gzip -c`/`zstd -c` shape users already know. With a file argument it
+//! follows the `.mgdc` suffix convention already used by `tests/golden/`,
+//! and never deletes the input or overwrites an existing output file:
 //!
 //! ```text
 //! mothergod compress   < input       > input.mgdc   # stdin/stdout
@@ -16,11 +15,25 @@
 //! mothergod decompress input.mgdc                    # writes input
 //! ```
 //!
-//! Streaming I/O is follow-on scope, not built here. Buffering the whole
-//! input in memory before transforming it matches
-//! [`mothergod::compress`]/[`mothergod::decompress`]'s own whole-buffer
-//! signatures; a streaming API is ROADMAP M4 scope, not this binary's to
-//! add on its own.
+//! `compress` still builds the whole output [`Vec<u8>`] before writing it
+//! ([`mothergod::compress`]'s own whole-buffer signature; the optimal-parse
+//! encoder needs the full input regardless). `decompress` writes its output
+//! incrementally via [`mothergod::decompress_to_writer`] instead, bounding
+//! resident memory on the output side (ROADMAP M4's bounded-memory decode
+//! guarantee) even for a small frame that decodes to a much larger buffer.
+//! Input is still read whole into memory either way: the library has a
+//! streaming *writer*, not yet a streaming *reader*.
+//!
+//! Streaming trades away the old all-or-nothing output guarantee for a
+//! corrupt frame. To stdout, a decode failure now surfaces after whatever
+//! prefix `decompress_to_writer` already emitted, so a pipeline consuming
+//! incrementally (`| tar x`) sees truncated bytes ahead of the nonzero exit
+//! code, where a whole-buffer decode used to guarantee zero bytes reached
+//! stdout before the error. To a file argument, the same failure instead
+//! removes the partial file `create_new` had to open before decoding could
+//! start, so the on-disk case still sees nothing survive a failed run.
+//! Stdout has no equivalent mitigation: bytes already written cannot be
+//! unwritten.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -51,7 +64,7 @@ fn main() -> ExitCode {
             |input| Ok(mothergod::compress(input)),
             |path| Ok(add_suffix(path)),
         ),
-        Some("decompress") => run(path.as_ref(), checked_decompress, strip_suffix),
+        Some("decompress") => run_decompress(path.as_ref()),
         Some("-h" | "--help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -104,8 +117,68 @@ fn run(
     }
 }
 
-fn checked_decompress(input: &[u8]) -> Result<Vec<u8>, String> {
-    mothergod::decompress(input).map_err(|err| err.to_string())
+/// Like [`run`], but for `decompress`: streams the decoded bytes straight to
+/// the destination writer via [`mothergod::decompress_to_writer`] instead of
+/// collecting them into a `Vec<u8>` first, bounding resident memory on the
+/// output side even when a small frame decodes to a much larger buffer.
+/// Not built on [`run`] itself: `run`'s `transform` returns a whole
+/// `Vec<u8>` for its caller to write, which is exactly the buffering this
+/// function exists to avoid.
+fn run_decompress(path: Option<&OsString>) -> ExitCode {
+    let input = match path {
+        None => read_stdin(),
+        Some(path) => {
+            fs::read(path).map_err(|err| format!("reading {}: {err}", Path::new(path).display()))
+        }
+    };
+    let input = match input {
+        Ok(input) => input,
+        Err(err) => return fail(&err),
+    };
+
+    match path {
+        None => decompress_into(&input, &mut io::stdout().lock(), "stdout"),
+        Some(path) => {
+            let out_path = match strip_suffix(Path::new(path)) {
+                Ok(out_path) => out_path,
+                Err(err) => return fail(&err),
+            };
+            let mut file = match File::options().write(true).create_new(true).open(&out_path) {
+                Ok(file) => file,
+                Err(err) => return fail(&format!("writing {}: {err}", out_path.display())),
+            };
+            let code = decompress_into(&input, &mut file, &out_path.display().to_string());
+            if code == ExitCode::FAILURE {
+                // Mirrors write_new_file's own partial-file cleanup: a file
+                // that create_new just made but decompress_into failed to
+                // finish writing would otherwise survive as a corrupt file
+                // create_new refuses to retry over.
+                let _ = fs::remove_file(&out_path);
+            }
+            code
+        }
+    }
+}
+
+/// Runs [`mothergod::decompress_to_writer`] into `writer`, telling a write
+/// failure (reported with `dest_name`) apart from a decode failure (a
+/// corrupt or oversized frame, reported plainly): the two arrived through
+/// separate calls before streaming merged them into one `Result`, and
+/// callers still want the old distinction in the error message.
+fn decompress_into<W: Write>(input: &[u8], writer: &mut W, dest_name: &str) -> ExitCode {
+    match mothergod::decompress_to_writer(input, u32::MAX, writer) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            if let Some(decode_err) = err
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<mothergod::Error>())
+            {
+                fail(&decode_err.to_string())
+            } else {
+                fail(&format!("writing {dest_name}: {err}"))
+            }
+        }
+    }
 }
 
 fn add_suffix(path: &Path) -> PathBuf {

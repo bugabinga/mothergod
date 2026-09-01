@@ -121,6 +121,49 @@ fn compress_refuses_to_overwrite_an_existing_output_file() {
 }
 
 #[test]
+fn decompress_refuses_to_overwrite_an_existing_output_file() {
+    let dir = std::env::temp_dir().join(format!(
+        "mothergod-cli-test-decompress-clobber-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let original = b"hello";
+    let (compressed, compress_code) = run(bin().arg("compress"), original);
+    assert_eq!(compress_code, 0);
+    let input_path = dir.join("payload.mgdc");
+    std::fs::write(&input_path, &compressed).expect("write compressed input file");
+    let output_path = dir.join("payload");
+    std::fs::write(&output_path, b"already here").expect("write pre-existing output");
+
+    let (_stdout, code) = run(bin().arg("decompress").arg(&input_path), b"");
+    assert_ne!(code, 0);
+    assert_eq!(std::fs::read(&output_path).unwrap(), b"already here");
+
+    std::fs::remove_dir_all(&dir).expect("clean up temp dir");
+}
+
+#[test]
+fn decompress_of_a_corrupt_file_argument_leaves_no_output_file() {
+    let dir = std::env::temp_dir().join(format!(
+        "mothergod-cli-test-decompress-corrupt-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let input_path = dir.join("payload.mgdc");
+    std::fs::write(&input_path, b"not a mothergod frame").expect("write corrupt input file");
+    let output_path = dir.join("payload");
+
+    let (_stdout, code) = run(bin().arg("decompress").arg(&input_path), b"");
+    assert_ne!(code, 0);
+    assert!(
+        !output_path.exists(),
+        "decode failure must not leave a partial output file behind"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("clean up temp dir");
+}
+
+#[test]
 fn decompress_of_a_file_without_the_mgdc_suffix_fails_cleanly() {
     let dir =
         std::env::temp_dir().join(format!("mothergod-cli-test-suffix-{}", std::process::id()));
