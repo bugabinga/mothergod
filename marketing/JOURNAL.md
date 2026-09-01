@@ -18,6 +18,86 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-01 — Editorial: the ratio arrived a day before I said it would
+
+Yesterday's survey concluded "when you have no ratio, sell the property
+you can prove, and name the date the ratio arrives." That was wrong on
+the premise, not the principle. **The ratio already existed.**
+`docs/benchmarks/canterbury.md` and `silesia.md` were both generated
+2026-08-30, hold whole-file numbers for this Rust build
+against pinned `gzip -9`, `zstd -19` and `xz -9e`, and `ROADMAP.md`'s
+scorecard already quoted them. Three human-facing surfaces still said
+no such number existed: `README.md`, `site/index.html`, and
+`site/status.html`'s baseline caption.
+
+How I missed it: I read the site and the README as the statement of
+where the project stands, and checked them against each other rather
+than against a run. Both agreed, and both were stale, which reads
+exactly like consensus. CLAUDE.md's truth value names this failure
+mode in advance: a document records what was true when someone wrote
+it, and when a document and a run disagree, the run wins. The run here
+was `baseline_gate check`, which prints `finals reports fresh` because
+the required `ratio` job fails when a committed report's
+`baseline-fingerprint` no longer matches `bench/baseline.json` (issue
+#327). That one command is the freshness oracle for every number I
+publish, and it takes twelve seconds.
+
+**Standing rule, adopted: before writing any claim about where the
+project stands, run `baseline_gate check` and read
+`docs/benchmarks/*.md`, never the previous version of my own copy.**
+The surface is downstream of the evidence, and reading it as evidence
+is a loop that preserves whatever was last true.
+
+The structural cause is not my reading, though; it is that the status
+paragraph is hand-copied into three places while `format_version` and
+the benchmark rows already exist as generated data in
+`site/status-data.json`. Every codec advance silently falsifies all
+three copies, and this is the second recorded occurrence: commit
+`878a3a8` (PR #243, 2026-08-25) fixed the same paragraph in the same
+two files when `Method::Lz` had landed and the copy still said
+`Stored` was the only method.
+Twice is the threshold at which a recurring correction should stop
+being a decision. Filed as a guard rather than a generator, because
+`site/index.html` is JavaScript-free and its central claim should not
+start depending on a fetch: issue #431.
+
+Not published today, and the reason is itself a finding: **encode and
+decode throughput.** Both reports carry MB/s columns and neither names
+the machine they ran on. A speed number without its hardware is the
+same defect as a ratio without its corpus, so the surface says speed is
+recorded but not yet worked on, and links the reports instead of
+quoting them. Filed against the generator: issue #432.
+
+What shipped, applying yesterday's zstd study directly:
+
+- **Conditions inline** (study principle 2): corpus, file count, total
+  bytes, pinning method, measurement date, and the three reference
+  compressors' exact versions sit in the sentence above the table, not
+  behind a link.
+- **The losing row is printed** (principle 3), and named in prose so a
+  scanner cannot miss it: Canterbury wins against both references,
+  Silesia loses to both, and per file it is 5 of 11 and 1 of 12 against
+  whichever reference is stronger on that file. Publishing the loss is
+  what makes the win readable as measurement.
+- **Bold marks our column only** (principle 4), on both the site table
+  and the README table, including on the row we lose.
+
+Rejected: quoting the founding Python prototype's `zstd -19` win
+anywhere on the surface. It was the strongest-sounding sentence we had
+and it is now the weakest: the artifact is not in the tree, its number
+is not reproducible from this repository, and it sits directly above a
+table showing this build losing Silesia to that same reference. A
+claim a reader cannot check, contradicted by one they can, costs more
+trust than it buys attention.
+
+Also corrected on `site/index.html`: "bitstream format unstable" is
+false since ADR-0041 froze `FORMAT_VERSION` 3. What is pre-alpha is the
+software, not the format, and the distinction is worth the words: the
+project's rules forbid ever dropping decode support for a version 2 or
+3 frame, so a frame written today stays readable. That is a real answer
+to the visitor's "can I trust it", and it was being thrown away by a
+sentence that overstated our own instability.
+
 ## 2026-08-31 — Survey: the baseline row
 
 First survey. Every number below is a first observation, so nothing

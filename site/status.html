@@ -230,8 +230,10 @@
               The CI regression baseline (${escapeHtml(data.benchmarks.source)}):
               mothergod's bits per byte on the in-repo generated corpora, lower
               is better; a PR that regresses these fails the required ratio
-              check. The gzip/zstd/xz comparison on Silesia and Canterbury is
-              ROADMAP M2's last open box.
+              check. These are mothergod against itself, not against anything
+              else: the gzip/zstd/xz comparison on the real Silesia and
+              Canterbury corpora is on the <a href="/">home page</a> and, per
+              file, in <code>docs/benchmarks/</code>.
             </caption>
             <thead><tr><th scope="col">corpus</th><th scope="col">bits/byte</th></tr></thead>
             <tbody>${rows}</tbody>
