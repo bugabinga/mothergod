@@ -149,6 +149,59 @@ const fixtures = [
   },
 ];
 
+// Liveness for the pattern scrub (issue #425): plant token-shaped
+// fakes in the transcript and prompt, assert none survive into the
+// published files. Fakes are built by concatenation so no
+// token-shaped literal lives in the repo to trip secret scanning.
+test("token-shaped strings are scrubbed from every audit file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
+  try {
+    const out = join(directory, "agent-audit");
+    mkdirSync(out);
+    const execution = join(directory, "execution.json");
+    const output = join(directory, "github-output");
+    const fakes = [
+      "ghs_" + "A1".repeat(18),
+      "github_pat_" + "B2".repeat(15),
+      "sk-ant-" + "c3".repeat(15),
+      "123456789:" + "Dd_-".repeat(9),
+    ];
+    const transcript = `pushed via https://x-access-token:${fakes[0]}@github.com/x/y, `
+      + `called https://api.telegram.org/bot${fakes[3]}/sendMessage, `
+      + `saw ${fakes[1]} and ${fakes[2]} in the environment`;
+    writeFileSync(execution, JSON.stringify([{ type: "result", result: transcript }]));
+    mkdirSync(join(directory, "claude-prompts"));
+    writeFileSync(
+      join(directory, "claude-prompts", "claude-prompt.txt"),
+      `prompt carrying ${fakes[0]} too`,
+    );
+    const result = spawnSync("python3", [script, out], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EXEC_FILE: execution,
+        GITHUB_OUTPUT: output,
+        GITHUB_WORKSPACE: new URL("../../../", import.meta.url).pathname,
+        RUNNER_TEMP: directory,
+        ROLE: "bdfl",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    for (const name of ["output-response.md", "input-prompt.md"]) {
+      const body = readFileSync(join(out, name), "utf8");
+      for (const fake of fakes) {
+        assert.ok(!body.includes(fake), `${name} leaks ${fake}`);
+      }
+    }
+    assert.ok(
+      readFileSync(join(out, "output-response.md"), "utf8").includes("***REDACTED***"),
+      "scrub marker missing: the patterns matched nothing",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("agent-audit allowance index fixtures", async (t) => {
   for (const fixture of fixtures) {
     await t.test(fixture.name, () => {
