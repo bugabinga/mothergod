@@ -1,0 +1,110 @@
+# GitHub forgets repo traffic after 14 days; this job is the memory
+# (issue #417). Deliberately NOT an agent: reading two fixed endpoints
+# and merging by date is arithmetic, a script does it for free, and a
+# fixed-schema merge has no injection surface.
+#
+# Credential split, and why it is load-bearing:
+# - The READ runs on the admin PAT, the only credential the traffic
+#   endpoints answer (403 on the app token and github.token, #417).
+#   A read creates no operator-attributed event, so the #50
+#   self-trigger trap does not apply.
+# - The WRITE runs on github.token. The PAT's writes are attributed to
+#   the operator personally and operator-attributed events wake the
+#   BDFL (issue #50); a ledger refresh must never cost a wake.
+#
+# Failure is loud by design, unlike model-intel's quiet skip: a non-200
+# fails the run and agent-alarm wakes the fixer, because third-party
+# flakiness is expected there and a permission regression here loses
+# data forever with no second source. Weekly cadence tolerates one
+# missed Sunday (14-day window, 7-day overlap); two in a row lose days,
+# which is another reason red must be visible.
+#
+# The ledger issue is the single home for the series
+# (information-placement; precedent #110, #309). A committed file would
+# never be read: nothing wakes on it, and agents/PERSONALITY.md records
+# that a pointer to a file demonstrably does not shape behavior. The
+# herald's survey reads the issue by label; the issue's edit history is
+# the audit trail. A closed ledger issue stays closed: its data carries
+# forward into a fresh issue, so closure is cosmetic and never loses
+# the series.
+name: traffic-snapshot
+
+on:
+  schedule:
+    # Sundays 04:23 UTC, clear of the other Sunday crons (codeql 04:07,
+    # model-intel 05:07, corpus-fetch-check 05:41, fuzz-check 06:13)
+    # and ahead of the Sunday survey wakes that read the result.
+    - cron: "23 4 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: traffic-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout, for the merge script
+      issues: write # the ledger issue
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: guard
+        uses: ./.github/actions/agent-guard
+        with:
+          token: ${{ github.token }}
+
+      - if: steps.guard.outputs.paused != 'true'
+        shell: bash
+        env:
+          # Read-only use; hard rule 10 keeps it in the variable and out
+          # of every echo.
+          GH_ADMIN_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for ep in views clones; do
+            code="$(curl -sS --retry 3 -o "$RUNNER_TEMP/$ep.json" -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_ADMIN_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/traffic/$ep" || echo 000)"
+            if [ "$code" != 200 ]; then
+              echo "traffic/$ep returned HTTP $code; failing loudly, the data ages out in 14 days." >&2
+              exit 1
+            fi
+          done
+
+          gh label create traffic-data --repo "$GITHUB_REPOSITORY" \
+            --color 1D76DB --description "Machinery-written repo traffic ledger (issue #417)" 2>/dev/null || true
+
+          # Any state, not just open: a closed ledger's series still
+          # carries forward, closure only retires the issue number.
+          prior="$(gh issue list --repo "$GITHUB_REPOSITORY" --label traffic-data --state all --json number,state --limit 1)"
+          n="$(jq -r '.[0].number // empty' <<<"$prior")"
+          state="$(jq -r '.[0].state // empty' <<<"$prior")"
+          if [ -n "$n" ]; then
+            gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/prior.md"
+          else
+            : > "$RUNNER_TEMP/prior.md"
+          fi
+
+          python3 .github/scripts/traffic-snapshot.py \
+            "$RUNNER_TEMP/views.json" "$RUNNER_TEMP/clones.json" \
+            "$RUNNER_TEMP/prior.md" "$RUNNER_TEMP/body.md"
+          cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$state" = OPEN ]; then
+            gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+            echo "Refreshed ledger issue #$n."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "📊 Repo traffic ledger" \
+              --label traffic-data --label agent-system \
+              --body-file "$RUNNER_TEMP/body.md"
+            echo "Opened a fresh ledger issue."
+          fi

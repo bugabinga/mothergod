@@ -104,7 +104,9 @@ jobs:
                now. Three parts, one journal entry: (a) measure the
                audience — GitHub stars/forks/watchers, external
                (non-agent, non-operator) issue and PR authors,
-               mothergod.dev analytics via the Cloudflare API, mentions
+               mothergod.dev analytics via the Cloudflare API, repo
+               traffic from the issue labeled traffic-data (the
+               machinery accumulates it weekly, issue #417), mentions
                on Hacker News/lobste.rs/reddit via WebSearch, all
                read-only; every number names its source and sits next
                to last week's. (b) study ONE successful OSS project's
