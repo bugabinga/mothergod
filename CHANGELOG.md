@@ -6,6 +6,14 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- The agent telemetry page and run-economics report publish projected
+  API cost, the SDK's own list-rate figure per run, per seat and as a
+  window total, labeled as a projection because the agents run on
+  subscription auth (operator direction, Telegram; reverses the
+  earlier deliberate omission of USD).
+
 ### Fixed
 
 - The status page's "lines in src/" tile counted inline `#[cfg(test)]`

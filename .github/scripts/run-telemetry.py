@@ -24,8 +24,15 @@ report (ADR-0023). A `.json` output is the site's public telemetry feed
 (issue #64, rendered by site/agents.html): the same per-role summaries plus
 per-run rows for the recent-runs table. The format follows the output file's
 extension because that is the one dispatch a call site cannot state wrongly.
-USD stays absent from both, per the honesty note in the report: under
-subscription auth the figure is notional, not a bill.
+Both carry a projected API cost: the SDK prices every run at API list
+rates (modelUsage costUSD, costBasis "list") and that sum is published
+per run and per seat. The project runs on subscription auth, so the
+figure is a projection of what the same work would have cost on the
+API, not a bill, and every surface labels it so. Until 2026-09-01 USD
+was deliberately absent as risking a dishonest read; the operator
+overruled that: the projection is the signal a reader can compare
+against their own compute, and labeling beats omission (Telegram,
+2026-09-01).
 
 Both outputs also carry the self-wake audit (issue #144): every admitted
 thread-event bdfl wake in the recent window, re-derived from the API as
@@ -151,6 +158,12 @@ def facts(meta):
         model = max(model_usage.items(),
                     key=lambda kv: (kv[1] or {}).get("outputTokens", 0))[0]
     thinking = details.get("thinking_tokens")
+    # Projected API cost at list rates, straight from the SDK's own
+    # per-model figure. None, not 0, when the field is missing: an
+    # unpriced run excluded from sums beats a total that quietly
+    # undercounts.
+    costs = [v["costUSD"] for v in model_usage.values()
+             if isinstance(v, dict) and isinstance(v.get("costUSD"), (int, float))]
     trigger = meta.get("trigger") if isinstance(meta.get("trigger"), dict) else {}
     return {
         # Artifact creation instant and run id: identifiers, not numbers,
@@ -174,6 +187,7 @@ def facts(meta):
         "measured": bool(tele),
         "model": model,
         "out": out,
+        "cost": sum(costs) if costs else None,
         # Share of output spent thinking: the direct read on whether an
         # effort level is doing anything (ADR-0021).
         "think": (100.0 * thinking / out) if thinking is not None and out else None,
@@ -198,6 +212,11 @@ def summarize(all_rows):
         "unmeasured": len(all_rows) - len(rows),
         "out": med([r["out"] for r in rows]),
         "out_total": sum(r["out"] for r in rows),
+        "cost": med([r["cost"] for r in rows]),
+        "cost_total": sum(r["cost"] for r in rows if r["cost"] is not None),
+        # Measured runs the SDK did not price; a non-zero means the
+        # cost totals undercount and every consumer says so.
+        "uncosted": sum(1 for r in rows if r["cost"] is None),
         "think": med([r["think"] for r in rows]),
         "turns": med([r["turns"] for r in rows]),
         "mins": med([r["mins"] for r in rows]),
@@ -340,9 +359,9 @@ lines = [
     f"Arrows mark a move over 10%. Source: {len(runs)} audit artifacts, "
     "our own workload.",
     "",
-    "| role | model actually run | runs | out tok | think% | turns | min |"
-    " denials | errors |",
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    "| role | model actually run | runs | out tok | $/run | think% | turns |"
+    " min | denials | errors |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
 ]
 
 for role in roles:
@@ -350,12 +369,13 @@ for role in roles:
     if new is None:
         n = len(recent.get(role, []))
         note = f"{n} unmeasured" if n else "no runs"
-        lines.append(f"| {role} | - | 0 | - | - | - | - | - | ({note}) |")
+        lines.append(f"| {role} | - | 0 | - | - | - | - | - | - | ({note}) |")
         continue
     models = ", ".join(f"`{m}`×{c}" for m, c in new["models"].most_common(3)) or "-"
     lines.append(
         f"| {role} | {models} | {new['n']} "
         f"| {cell(new['out'], old and old['out'])} "
+        f"| {cell(new['cost'], old and old['cost'], '{:.2f}')} "
         f"| {cell(new['think'], old and old['think'], '{:.0f}')} "
         f"| {cell(new['turns'], old and old['turns'])} "
         f"| {cell(new['mins'], old and old['mins'], '{:.1f}')} "
@@ -365,8 +385,14 @@ for role in roles:
 
 summaries = [s for s in (summarize(v) for v in recent.values()) if s]
 total_out = sum(s["out_total"] for s in summaries)
+total_cost = sum(s["cost_total"] for s in summaries)
+uncosted = sum(s["uncosted"] for s in summaries)
 measured = sum(s["n"] for s in summaries)
 unmeasured = sum(s["unmeasured"] for s in summaries)
+cost_note = (
+    f" {uncosted} measured runs carried no price and are missing from "
+    "that total." if uncosted else ""
+)
 lines += [
     "",
     f"Window total: {total_out:,} output tokens across {measured} measured "
@@ -376,11 +402,11 @@ lines += [
     "",
     self_wake_line(),
     "",
-    "Cost in USD is deliberately absent: under subscription auth the "
-    "action's figure is notional, not a bill, and a public number that "
-    "reads as spend but is not fails honesty. Output tokens, turns and "
-    "minutes are what the subscription and the contributor's wait "
-    "actually pay.",
+    f"Projected API cost for the window: ${total_cost:,.2f} at list "
+    "rates, the SDK's own per-run figure. The agents run on "
+    "subscription auth, so this is what the same work would have cost "
+    "on the API, not a bill; the subscription and the contributor's "
+    f"wait are what is actually paid.{cost_note}",
 ]
 
 notes = []

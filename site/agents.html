@@ -6,7 +6,7 @@
     <title>Agent telemetry — mothergod</title>
     <meta
       name="description"
-      content="Run economics of the Claude agents that build mothergod: output tokens, turns, minutes, denials and errors per seat, aggregated from public audit artifacts."
+      content="Run economics of the Claude agents that build mothergod: output tokens, projected API cost, turns, minutes, denials and errors per seat, aggregated from public audit artifacts."
     >
     <link rel="icon" href="/logo.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -136,11 +136,11 @@
         <p id="window-line" data-loading>Loading…</p>
         <div class="stats" id="stats-grid" data-loading>Loading…</div>
         <p class="note">
-          No dollars here, on purpose: the agents run on subscription auth, so
-          the API's cost figure is notional, not a bill, and a public number
-          that reads as spend but is not would be dishonest. Output tokens,
-          turns and minutes are what the subscription and the contributor's wait
-          actually pay.
+          The dollar figures are projected API cost: what each run would have
+          cost at API list rates, priced per run by the SDK itself. The agents
+          actually run on subscription auth, so this is a projection for scale,
+          not a bill; the subscription and the contributor's wait are what is
+          actually paid.
         </p>
       </section>
 
@@ -206,12 +206,16 @@
       const measured = recents.reduce((a, s) => a + s.n, 0);
       const unmeasured = recents.reduce((a, s) => a + s.unmeasured, 0);
       const outTotal = recents.reduce((a, s) => a + s.out_total, 0);
+      const costTotal = recents.reduce((a, s) => a + (s.cost_total ?? 0), 0);
+      const uncosted = recents.reduce((a, s) => a + (s.uncosted ?? 0), 0);
       const errors = recents.reduce((a, s) => a + s.errors, 0);
       const stats = document.getElementById('stats-grid');
       stats.removeAttribute('data-loading');
       stats.innerHTML = [
         [measured.toLocaleString('en-US'), 'measured runs'],
         [outTotal.toLocaleString('en-US'), 'output tokens'],
+        ['$' + costTotal.toFixed(2),
+          'projected API cost' + (uncosted ? ` (${uncosted} runs unpriced)` : '')],
         [errors.toLocaleString('en-US'), 'errored runs'],
         [unmeasured.toLocaleString('en-US'), 'unmeasured runs'],
       ].map(([n, label]) =>
@@ -225,6 +229,7 @@
         <thead><tr>
           <th scope="col">seat</th><th scope="col">model</th>
           <th scope="col">runs</th><th scope="col">out tok</th>
+          <th scope="col">$ / run</th>
           <th scope="col">think %</th><th scope="col">turns</th>
           <th scope="col">min</th><th scope="col">denials</th>
           <th scope="col">errors</th>
@@ -236,7 +241,8 @@
         <caption>newest first; each row links to its run and artifact</caption>
         <thead><tr>
           <th scope="col">when (UTC)</th><th scope="col">seat</th>
-          <th scope="col">out tok</th><th scope="col">turns</th>
+          <th scope="col">out tok</th><th scope="col">$</th>
+          <th scope="col">turns</th>
           <th scope="col">min</th><th scope="col">result</th>
         </tr></thead><tbody>` +
         data.runs.map((r) => runRow(r)).join('') + '</tbody>';
@@ -247,15 +253,17 @@
     function seatRow(r) {
       const s = r.recent;
       if (!s) {
-        return `<tr><td>${esc(r.role)}</td><td class="dim" colspan="8">no runs in window</td></tr>`;
+        return `<tr><td>${esc(r.role)}</td><td class="dim" colspan="9">no runs in window</td></tr>`;
       }
-      const model = s.models.length ? s.models[0][0] : '-';
+      const model = (s.models.length ? s.models[0][0] : '-')
+        .replace(/^claude-/, '');
       const p = r.prior;
       return `<tr>
         <td>${esc(r.role)}</td>
         <td class="dim">${esc(model)}</td>
         <td>${s.n}</td>
         <td>${trend(s.out, p && p.out, 0)}</td>
+        <td>${s.cost == null ? '-' : '$' + trend(s.cost, p && p.cost, 2)}</td>
         <td>${trend(s.think, p && p.think, 0)}</td>
         <td>${trend(s.turns, p && p.turns, 0)}</td>
         <td>${trend(s.mins, p && p.mins, 1)}</td>
@@ -274,6 +282,7 @@
         <td>${link}</td>
         <td>${esc(r.role)}</td>
         <td>${r.measured ? Number(r.out).toLocaleString('en-US') : '-'}</td>
+        <td>${r.measured && r.cost != null ? '$' + Number(r.cost).toFixed(2) : '-'}</td>
         <td>${r.measured && r.turns != null ? r.turns : '-'}</td>
         <td>${r.measured && r.mins != null ? Number(r.mins).toFixed(1) : '-'}</td>
         <td>${result}</td>
