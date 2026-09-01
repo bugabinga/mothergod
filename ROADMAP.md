@@ -160,12 +160,9 @@ real bitstreams; then xz -9e.
       required check on every PR, and the weekly `monster` matrix runs the
       same suite across all 10 hosted runtime/ABI lanes plus Android.
 - [ ] Streaming/block API, bounded-memory decode guarantees.
-- [ ] Frozen format spec v1: declare `docs/format/SPEC.md` stable at the
-      current `FORMAT_VERSION`, committing every wire version the frozen
-      spec covers to decode-forever. An ADR plus the spec's status flip,
-      no wire change; evolution continues by version bump per hard rule 5.
-      Ruling in #422: a live model-class lead (S1-P8) never gates the
-      freeze, because it would land as a new version anyway.
+- [x] Frozen format spec v1: `docs/format/SPEC.md` declared stable at
+      `FORMAT_VERSION` 3 (ADR-0041); versions 2 and 3 decode forever,
+      evolution continues by version bump per hard rule 5.
 
 ## M5 — Speed tiers
 
