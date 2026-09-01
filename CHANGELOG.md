@@ -91,6 +91,19 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- The `mothergod` CLI's `decompress` subcommand (ROADMAP M4/M6) now writes
+  its output incrementally via `mothergod::decompress_to_writer` instead of
+  buffering the whole decoded output in a `Vec<u8>` before writing it,
+  bounding resident memory on the output side for the binary itself, not
+  just the library — closing part of M6's CLI item's named remaining scope
+  ("streaming I/O"). `compress` is unchanged: the optimal-parse encoder
+  needs the whole input regardless, so there is nothing to stream there
+  yet, and input is still read whole into memory on both sides — the
+  library has a streaming writer, not yet a streaming reader. A decode
+  failure partway through a file-argument run still removes the partial
+  output file, the same cleanup `write_new_file` already did for a
+  mid-write I/O failure.
+
 - `Error::TooLarge(u32)` is now `Error::TooLarge { len: u32, max: u32 }`
   (`research/JOURNAL.md` S2-A71): `decompress_bounded`'s caller-supplied
   `max_len` means the bound a `TooLarge` error names is no longer always
