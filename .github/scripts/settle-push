@@ -20,9 +20,13 @@ claude[bot], whose runs start unheld), so per-workflow liveness is the honest
 question, not "is any run held".
 
 Settled is a claim about ONE commit: the one the caller pushed. The PR's head
-is not that commit until it catches up, so the SHA is taken from the checkout
-(`git rev-parse HEAD`, the thing you just pushed) and `--sha` overrides it.
-Where neither is available the answer is reported unverified, never settled.
+is not that commit until it catches up, so the SHA is taken from push-branch's
+own record of what it pushed from this checkout (push-branch-refs.json, per
+branch) and `--sha` overrides it. Where neither is available the answer is
+reported unverified, never settled. Local HEAD is never consulted: push-branch
+writes through the git data API and does not advance the checkout, so on the
+documented flow HEAD is the branch BASE, the exact SHA the head-mismatch
+check exists to alarm on, and inferring it alarmed on every push (issue #421).
 
 Silence is never success. A push whose runs never appear looks exactly like a
 push whose runs are fine, so no-runs-within-the-timeout is a loud, distinct,
@@ -58,6 +62,25 @@ def git(*args):
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
+# push-branch records every push per branch under this name (its OWN_PUSHES).
+# The filename is the interface between the two scripts; settle-push.test.mjs
+# pins them together, because a silent split would demote every no---sha run
+# to "unverified" forever with no failure anywhere.
+OWN_PUSHES = "push-branch-refs.json"
+
+
+def pushed_sha(branch):
+    """What push-branch pushed to `branch` from this checkout, or None."""
+    path = git("rev-parse", "--git-path", OWN_PUSHES)
+    if not path:
+        return None
+    try:
+        with open(path) as fh:
+            return json.load(fh).get(branch)
+    except (OSError, ValueError):
+        return None
+
+
 def same(sha, other):
     """SHAs match if either is a prefix of the other; callers abbreviate."""
     return sha.startswith(other) or other.startswith(sha)
@@ -91,7 +114,7 @@ def report(pr, sha, branch, grouped, expected):
         return
     print(f"unverified: PR #{pr} head {sha[:9]} has live runs for {live}."
           f" Nothing here says {sha[:9]} is the commit you pushed: no --sha,"
-          f" and this checkout is not on `{branch}`."
+          f" and push-branch recorded no push to `{branch}` from this checkout."
           " Re-run with --sha <pushed-sha> to certify.")
 
 
@@ -134,21 +157,20 @@ def main():
     if not pr:
         die("usage: .github/scripts/settle-push <pr-number> [--sha <pushed-sha>]",
             "Run it right after pushing to that PR's branch;"
-            " --sha defaults to this checkout's HEAD.")
+            " --sha defaults to push-branch's recorded push to that branch.")
     expected = args[args.index("--sha") + 1] if "--sha" in args else None
 
     repo = os.environ.get("GITHUB_REPOSITORY") or gh(
         "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
     pull = json.loads(gh("pr", "view", pr, "--json", "headRefOid,state,headRefName,mergeable"))
     branch = pull["headRefName"]
-    # Every documented caller runs this straight after `git push` from a
-    # checkout of the PR branch, so local HEAD is the commit they mean.
-    # Inferring it is what gives the wait below anything to wait for: with no
-    # expected SHA the loop broke on its first read and certified whatever the
-    # API happened to return, which was the pre-push commit on PRs #143 and
-    # #155 (issues #146, #158).
-    if expected is None and git("symbolic-ref", "--quiet", "--short", "HEAD") == branch:
-        expected = git("rev-parse", "HEAD")
+    # An expected SHA is what gives the wait below anything to wait for: with
+    # none, the loop broke on its first read and certified whatever the API
+    # returned, the pre-push commit on PRs #143 and #155 (issues #146, #158).
+    # push-branch's record is the commit the caller means; local HEAD was the
+    # previous default and is the branch BASE on the documented flow (#421).
+    if expected is None:
+        expected = pushed_sha(branch)
 
     # The PR's head lags the push by a second or two, so a mismatch is only
     # news once it has had time to settle. Diagnosing a healthy push as a lost
@@ -213,4 +235,5 @@ def main():
     report(pr, sha, branch, grouped, expected)
 
 
-main()
+if __name__ == "__main__":
+    main()

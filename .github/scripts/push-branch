@@ -38,8 +38,10 @@ so `gh pr create` rides the app token even when the commits needed the PAT, and
 a PAT-opened PR is operator-attributed and wakes a full BDFL run on its own PR
 (issue #141). Open it yourself, on the default credential.
 
-Prints the new commit SHA on stdout, which is the argument `settle-push <pr>
---sha <that>` wants.
+Prints the new commit SHA on stdout and records it per branch
+(push-branch-refs.json), where `settle-push` reads its default, so the pair
+composes without the caller repeating the SHA (issue #421). `--sha` on
+settle-push is for certifying a push made from some other checkout.
 
 Usage: push-branch <branch|pr-number> <path>... [--delete <path>...] < commit message
        push-branch <branch|pr-number> --merge <sha> < commit message
@@ -79,8 +81,10 @@ import time
 # The one path prefix the app token cannot write (issue #24).
 ADMIN_PREFIX = ".github/workflows/"
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
-# What this run has already pushed, per branch. Appending to your own commit
-# from the same checkout is not the staleness the guard below is looking for.
+# What this run has already pushed, per branch. Two readers: guard_not_stale
+# (appending to your own commit is not staleness) and settle-push, whose
+# no---sha default is this record (issue #421). settle-push.test.mjs pins the
+# filename across both scripts.
 OWN_PUSHES = "push-branch-refs.json"
 
 
@@ -147,7 +151,8 @@ def record_push(branch, sha):
         # Never silent: an unrecorded push makes the next one report staleness
         # against itself, and the recovery line then says to discard your work.
         note(f"could not record this push ({err}); a second push to {branch} "
-             "this run may report false staleness. Its recovery line would be wrong.")
+             "this run may report false staleness (its recovery line would be "
+             "wrong), and settle-push will need --sha.")
 
 
 def merge_paths(merge_sha):
