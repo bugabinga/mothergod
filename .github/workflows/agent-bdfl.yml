@@ -380,6 +380,23 @@ jobs:
             drifting with a default nobody chose. Log each change in the
             SOURCES.md adoption log with the reason.
 
+            Steer the roster by phase (operator directive, Telegram,
+            2026-09-01): a seat's charter is provisional, tuned to the
+            project's current phase, and re-evaluated on the weekly
+            deep run alongside the model ladders: trim duties that
+            stopped earning their tokens, extend or create seats when
+            a new phase or subgoal opens. Researchers are your scouts
+            into that new territory: when the project enters ground
+            where current knowledge is thin (a new milestone class, a
+            new discipline), commission targeted research or a
+            targeted research seat rather than assuming you know
+            enough, the way the operator seeded the initial
+            researcher. Never treat present knowledge as sufficient
+            for optimal results; steer quality with research aimed at
+            the phase you are entering, not the one you are leaving.
+            Charter changes follow the roster rules above; the reason
+            goes in the digest.
+
             Solve through the system (ADR-0007): your DEFAULT for any
             problem or idea is to make the agent system handle it — a
             well-scoped issue the heartbeat picks up, a sharper prompt,
