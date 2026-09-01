@@ -159,7 +159,18 @@ real bitstreams; then xz -9e.
       (v2, v3, `superseded/` for retired pairs), runs in the `test`
       required check on every PR, and the weekly `monster` matrix runs the
       same suite across all 10 hosted runtime/ABI lanes plus Android.
-- [ ] Streaming/block API, bounded-memory decode guarantees.
+- [x] Streaming/block API, bounded-memory decode guarantees:
+      `mothergod::decompress_bounded` (caller ceiling below
+      `codec::MAX_DECODED_LEN`), `decode` rejects a match distance beyond
+      `lz::WINDOW`, and `decompress_to_writer` streams `Identity`/`Delta`/
+      `Bcj` frames to any `Write` sink bounded to `lz::WINDOW` resident
+      memory. `Transpose` keeps a whole-buffer decode by design
+      (`research/JOURNAL.md` S2-D4: its column-major write order needs the
+      full buffer regardless of decoder shape); `decodes_incrementally`
+      lets a caller ask which case a frame is. Closes `research/JOURNAL.md`
+      S1-P7. Encode still takes a whole buffer (the optimal-parse encoder
+      needs the full input regardless) and the CLI still reads its whole
+      input up front; only decode's memory bound was this item's target.
 - [x] Frozen format spec v1: `docs/format/SPEC.md` declared stable at
       `FORMAT_VERSION` 3 (ADR-0041); versions 2 and 3 decode forever,
       evolution continues by version bump per hard rule 5.
