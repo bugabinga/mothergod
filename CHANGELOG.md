@@ -6,6 +6,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `README.md` and `site/index.html` restated `FORMAT_VERSION` and the
+  published aggregate bits/byte numbers instead of computing them, and had
+  gone stale against their sources twice in seven days with nothing
+  catching it (issue #431, following PR #243's fix of the same class). A
+  new test, `tests/claims.rs`, compares every restated claim against its
+  single source of truth on every `cargo test` run — `FORMAT_VERSION`
+  against `src/lib.rs`'s own constant, the aggregate figures against the
+  matching generated `docs/benchmarks/*.md` report — and fails naming the
+  file, the claimed value, and the true value.
+
 ### Added
 
 - The agent telemetry page and run-economics report publish projected
