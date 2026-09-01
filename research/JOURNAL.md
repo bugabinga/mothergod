@@ -2605,8 +2605,8 @@ record.
   case measures ~1170 ns/byte (~854 KB/s), under the ROADMAP SPEED floor
   (≥1 MB/s decode) — `Literal::mix` rebuilds all 256 cumulative entries
   from scratch every byte instead of an incremental structure.
-- S1-P7 | LEAD | Production hardening: streaming mode, frozen format
-  spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
+- S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
+  hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
   streaming-mode half: S2-A70 (a precondition, not the streaming API
   itself). First slice of the bounded-memory-decode half, a separate
@@ -2632,8 +2632,18 @@ record.
   its own incremental decode form (lookahead, not lookback, unlike
   `Delta`), wired into the same streaming path. Streaming-mode scope is now
   closed for every candidate but `Transpose`, excluded by design per S2-D4.
-  Remaining S1-P7 scope: the frozen format spec v1 half, untouched since
-  the fuzzing half (S2-A25/S2-A53) landed.
+  Remaining S1-P7 scope, closed here: the frozen format spec v1 half.
+  ADR-0041 rules on issue #422's two questions — the format is ready to
+  freeze now (a live research lead never gates it, since a model-class
+  change lands as a new `FORMAT_VERSION` under hard rule 5 regardless),
+  and freezing means a stability commitment at the current version, not
+  reverting the wire byte to 1. `docs/format/SPEC.md`'s status flips from
+  "DRAFT/unstable" to "stable, frozen": every version it documents (2, 3)
+  decodes forever, and CLAUDE.md hard rule 5's "unless an ADR drops one"
+  carve-out is retired for those versions (version 1's retirement,
+  ADR-0026/ADR-0028, predates the freeze and stands). No `FORMAT_VERSION`
+  bump, no code change — a policy commitment about future ADRs, not a
+  wire change. Both halves of this lead are now closed.
 - S2-A70 | ACCEPTED | `codec::decode` now rejects a match distance beyond
   `lz::WINDOW`, not just beyond the output written so far
   (ROADMAP M4's bounded-memory decode guarantee, a precondition for

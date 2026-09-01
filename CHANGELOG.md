@@ -102,6 +102,13 @@ All notable changes to this project are documented here. Format follows
   clamped first: it is `#[doc(hidden)]` but still `pub`, reachable
   directly by any crate depending on this one.
 
+- `docs/format/SPEC.md` is now stable, frozen at `FORMAT_VERSION` 3
+  (ADR-0041, ROADMAP M4, closing `research/JOURNAL.md` S1-P7): every
+  version it documents (2, 3) decodes forever. CLAUDE.md hard rule 5's
+  "unless an ADR drops one" carve-out no longer applies to version 2 or
+  later; format evolution continues only by adding a new version. No
+  `FORMAT_VERSION` bump, no code change.
+
 - `literal::Literal::ideal_cost_bits_column_expert_pair` and
   `codec::ideal_cost_bits_column_expert_experiment`
   (`research/JOURNAL.md` S1-P5, S2-A69, ROADMAP M3's fifth standing

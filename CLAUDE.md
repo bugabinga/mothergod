@@ -49,11 +49,14 @@ them wastes a cycle.
    meaningless and gets rejected in review.
 5. Format changes (frame layout, method bytes, model semantics visible in the
    bitstream) require: bump `FORMAT_VERSION`, an ADR in `docs/adr/`, and
-   decode support for all previous versions unless an ADR drops one. An
-   encoder-only change (a parse or pricing heuristic that picks a different
-   valid token sequence, with `decode` unchanged) is not a format change and
-   does not bump the version; it regenerates the current-version golden
-   fixture instead, per `tests/golden.rs` (issue #290's ruling).
+   decode support for all previous versions. Before ADR-0041 froze
+   `docs/format/SPEC.md`, an ADR could drop a previous version (version 1's
+   retirement, ADR-0026/ADR-0028); that carve-out is retired for version 2
+   and later, which decode forever. An encoder-only change (a parse or
+   pricing heuristic that picks a different valid token sequence, with
+   `decode` unchanged) is not a format change and does not bump the
+   version; it regenerates the current-version golden fixture instead, per
+   `tests/golden.rs` (issue #290's ruling).
 6. Every experiment — accepted or rejected — gets a `research/JOURNAL.md`
    entry and a `research/progress.jsonl` line. Rejections are as valuable as
    accepts; record the mechanism of failure, not just the score.

@@ -1,8 +1,11 @@
-# mothergod bitstream format — DRAFT (FORMAT_VERSION 3)
+# mothergod bitstream format (FORMAT_VERSION 3, frozen)
 
-Status: **unstable**. Anything may change until version 1 is frozen (ROADMAP
-M4). This document is normative for the current code; code and spec must
-change in the same PR.
+Status: **stable, frozen** (ADR-0041). Every version this document
+covers — 2 and 3 — decodes forever: no future ADR may drop decode
+support for either one (CLAUDE.md hard rule 5). Evolution continues
+only by adding a new version via a `FORMAT_VERSION` bump; this
+document is normative for the current code, and code and spec change
+in the same PR.
 
 ## Frame layout
 
