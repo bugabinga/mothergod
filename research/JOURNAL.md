@@ -2686,7 +2686,11 @@ record.
   Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
   case measures ~1170 ns/byte (~854 KB/s), under the ROADMAP SPEED floor
   (≥1 MB/s decode) — `Literal::mix` rebuilds all 256 cumulative entries
-  from scratch every byte instead of an incremental structure.
+  from scratch every byte instead of an incremental structure. S2-A67/
+  S2-A68 later measured the same floor violation on real corpus files
+  (Canterbury's `xargs.1` 0.775 MB/s, Silesia's `x-ray` 0.392 MB/s and
+  `sao` 0.428 MB/s), a finding that sat unlinked until issue #447 gave
+  it a queue entry.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
