@@ -34,7 +34,7 @@
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-08-31",
+  "reviewed": "2026-09-01",
   "roles": {
     "bdfl": {
       "ladder": [
@@ -75,12 +75,21 @@
       "effort": ""
     },
     "researcher": {
+      "$comment": "Opus first: the weekly Saturday wake is the fleet's judgment-densest single session, so the raise costs one sonnet-to-opus delta a week (operator directive, Telegram, 2026-09-01).",
       "ladder": [
+        "claude-opus-5",
         "claude-sonnet-5"
       ],
-      "effort": ""
+      "effort": "",
+      "thrift": {
+        "ladder": [
+          "claude-sonnet-5"
+        ],
+        "effort": ""
+      }
     },
     "reviewer": {
+      "$comment": "Sonnet held deliberately: highest session count in the fleet and per-seat burn share is unmeasured (#439), so a raise cannot be priced yet. SOURCES.md adoption log, 2026-09-01.",
       "ladder": [
         "claude-sonnet-5"
       ],

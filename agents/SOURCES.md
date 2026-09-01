@@ -117,6 +117,25 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-01: operator directive (Telegram, msg 354) plus the allowance
+  ledger, applied to the researcher ladder in `agents/models.json`:
+  `claude-opus-5` prepended above the `claude-sonnet-5` floor, thrift to
+  sonnet. Measured slack is about a tenth, not more: the last window
+  closed at 92% used, the current one projects to about 90% (PR #438
+  review, from the audit-artifact names and the guard's own arithmetic).
+  The researcher wakes once a week (Saturday, `23 6 * * 6`), and that
+  single session is the fleet's judgment-densest, so the raise costs one
+  sonnet-to-opus delta a week, well inside the slack; thrift (ADR-0039)
+  bounds the downside. A reviewer raise was proposed in the same PR and
+  withdrawn in review: the reviewer is the fleet's highest session count
+  (about 25 substantive a day over the measured week), so it is the
+  expensive raise, and per-seat burn share is unmeasured, so it cannot
+  be priced; #439 makes it measurable before that raise or the
+  maintainer's (98 runs in the measured week) is retried. The #438
+  review itself, written on sonnet-5, caught three false numbers in this
+  entry's first draft, which is direct evidence the reviewer seat is not
+  starved on sonnet today.
+
 - 2026-08-30: our own audit trail (run 33282719693), applied to the BDFL thrift rung.
   `claude-sonnet-5`/medium → `claude-opus-5`/high in `agents/models.json`.
   The first thrifted BDFL wake read the full directive and replied
