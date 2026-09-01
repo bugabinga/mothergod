@@ -8,6 +8,20 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `README.md` and `site/index.html` still said the container format was
+  `FORMAT_VERSION` 2 and that "no Silesia/Canterbury benchmark-suite number
+  exists yet for this Rust build". Both were stale: the format is at version
+  3 and frozen (ADR-0041), and `docs/benchmarks/canterbury.md` and
+  `silesia.md` have carried whole-file numbers against pinned `gzip -9`,
+  `zstd -19` and `xz -9e` since 2026-08-30, with the required `ratio` check
+  failing if either report goes stale against `bench/baseline.json`. Both
+  surfaces now publish the aggregate table, name its corpora, versions and
+  date, and state the Silesia loss as plainly as the Canterbury win.
+  `site/index.html` also dropped a claim that this build was "validated on
+  the Silesia and Canterbury corpora", which described the founding Python
+  prototype that lives only in git history (issue #415), and
+  `site/status.html`'s baseline caption no longer calls the comparison an
+  open roadmap box.
 - `codec::decode` now rejects a match distance beyond `lz::WINDOW`
   (ROADMAP M4, bounded-memory decode guarantee): `OFFSET_BUCKETS` lets the
   offset model represent distances up to `2 * WINDOW - 1`, wider than any

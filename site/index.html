@@ -6,7 +6,7 @@
     <title>mothergod — general-purpose lossless compression</title>
     <meta
       name="description"
-      content="A general-purpose lossless compressor built in public by an autonomous AI development team. Pre-alpha, format unstable."
+      content="A general-purpose lossless compressor in Rust, built in public by an autonomous AI development team. Beats zstd -19 on Canterbury, trails it on Silesia. Pre-alpha."
     >
     <link rel="icon" href="/logo.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -68,6 +68,23 @@
     a { color: var(--gold); }
     a:hover, a:focus-visible { color: var(--gold-deep); }
 
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
+    .scroll { overflow-x: auto; }
+    .scroll:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+    .bench { width: 100%; max-width: 34rem; border-collapse: collapse; font-size: .85rem; }
+    .bench th, .bench td {
+      text-align: right; padding: .35rem .5rem; border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    .bench thead th { color: var(--muted); font-weight: 500; font-size: .78rem; }
+    .bench thead th:first-child, .bench tbody th { text-align: left; }
+    .bench tbody th { color: var(--starlight); font-weight: 500; }
+    .bench td { font-family: "JetBrains Mono", monospace; color: var(--muted); }
+    .bench .ours, .bench thead th.ours { color: var(--gold); font-weight: 500; }
+
     .principles { list-style: none; display: flex; flex-direction: column; gap: .6rem; padding: 0; }
     .principles li { color: var(--muted); padding-left: 1.4rem; position: relative; }
     .principles li::before { content: "—"; position: absolute; left: 0; color: var(--gold); }
@@ -101,19 +118,16 @@
       <div class="status">
         <b>Status</b>
         <p>
-          <strong>Pre-alpha, bitstream format unstable.</strong> The container
-          format (<code>FORMAT_VERSION</code> 2) now supports
-          <code>Stored</code> and <code>Lz</code>: optimal-parse LZ over an
-          adaptive, context-mixing range coder. The research prototype that beat
-          <code>zstd -19</code> in a single derivation session is ported into
-          reviewable, adversarial-input-safe modules; no Silesia/Canterbury
-          benchmark-suite number exists yet for this Rust build; that is tracked
-          live on the
-          <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
-          >roadmap</a>'s M2. See
-          <code>research/JOURNAL.md</code> S2-A17 for a dev-time spot-check, not
-          the aggregate claim the scorecard wants. Do not use this for data you
-          care about yet.
+          <strong>Pre-alpha: no release, no packaged binary, no version
+            tag.</strong> The container format (<code>FORMAT_VERSION</code> 3)
+          carries <code>Stored</code> and
+          <code>Lz</code>: optimal-parse LZ over an adaptive, context-mixing
+          range coder. That format is frozen, and the project's rules forbid
+          ever dropping decode support for a version 2 or 3 frame, so a frame
+          written today stays readable (<a
+            href="https://github.com/bugabinga/mothergod/blob/main/docs/format/SPEC.md"
+          >format spec</a>). Everything around it still moves: the API, the CLI,
+          and the ratio below. Do not use this for data you care about yet.
         </p>
       </div>
 
@@ -121,12 +135,9 @@
         <h2>What this is</h2>
         <p>
           mothergod is two experiments in one repository. <strong>A
-            compressor:</strong> a context-mixing LZ hybrid in Rust, filter
-          bank, optimal-parse LZ with in-DP repeat offsets, adaptive arithmetic
-          coding with gradient-mixed experts, designed from first principles and
-          validated on the Silesia and Canterbury corpora with real,
-          losslessly-verified bitstreams. Every design decision traces to a
-          recorded experiment in the <a
+            compressor:</strong> a context-mixing LZ hybrid in Rust, designed
+          from first principles. Every design decision traces to a recorded
+          experiment in the <a
             href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md"
           >research journal</a>. <strong>A development team:</strong> triage,
           implementation, adversarial code review, research, and releases are
@@ -136,6 +147,70 @@
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/agents/GOVERNANCE.md"
           >agents/GOVERNANCE.md</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Measured</h2>
+        <p>
+          Aggregate bits per byte on the two named corpora, lower is better.
+          Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
+          both are pinned by URL and SHA-256, fetched at measurement time and
+          never committed. Measured 2026-08-30 against <code>gzip 1.12</code>,
+          <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
+          flags in the header row.
+        </p>
+        <div
+          class="scroll"
+          tabindex="0"
+          role="region"
+          aria-labelledby="measured-caption"
+        >
+          <table class="bench">
+            <caption id="measured-caption" class="visually-hidden">
+              Aggregate bits per byte by corpus and compressor
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">corpus</th>
+                <th scope="col" class="ours">mothergod</th>
+                <th scope="col">gzip -9</th>
+                <th scope="col">zstd -19</th>
+                <th scope="col">xz -9e</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Canterbury</th>
+                <td class="ours">1.374</td>
+                <td>2.081</td>
+                <td>1.470</td>
+                <td>1.403</td>
+              </tr>
+              <tr>
+                <th scope="row">Silesia</th>
+                <td class="ours">2.061</td>
+                <td>2.553</td>
+                <td>1.997</td>
+                <td>1.829</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Read it honestly: mothergod beats both <code>zstd -19</code> and
+          <code>xz -9e</code> in aggregate on Canterbury, and loses to both in
+          aggregate on Silesia. Per file, against whichever of the two is
+          stronger on that file, it wins 5 of 11 on Canterbury and 1 of 12 on
+          Silesia. Closing Silesia is the current milestone. Speed is recorded
+          but not yet worked on. The per-file tables, the throughput columns,
+          and the one command that regenerates each report are in
+          <a
+            href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/canterbury.md"
+          ><code>docs/benchmarks/canterbury.md</code></a> and
+          <a
+            href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/silesia.md"
+          ><code>silesia.md</code></a>.
         </p>
       </section>
 
