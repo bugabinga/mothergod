@@ -75,7 +75,7 @@
       "effort": ""
     },
     "researcher": {
-      "$comment": "Opus first: experiment choice and interpretation is the project's judgment-densest work, and at two runs a day the raise is cheap (operator directive, Telegram, 2026-09-01).",
+      "$comment": "Opus first: the weekly Saturday wake is the fleet's judgment-densest single session, so the raise costs one sonnet-to-opus delta a week (operator directive, Telegram, 2026-09-01).",
       "ladder": [
         "claude-opus-5",
         "claude-sonnet-5"
@@ -89,18 +89,11 @@
       }
     },
     "reviewer": {
-      "$comment": "Opus first: the reviewer is the trust anchor (hard rule 3), and verification quality caps what every other seat's work is worth (operator directive, Telegram, 2026-09-01).",
+      "$comment": "Sonnet held deliberately: highest session count in the fleet and per-seat burn share is unmeasured (#439), so a raise cannot be priced yet. SOURCES.md adoption log, 2026-09-01.",
       "ladder": [
-        "claude-opus-5",
         "claude-sonnet-5"
       ],
-      "effort": "",
-      "thrift": {
-        "ladder": [
-          "claude-sonnet-5"
-        ],
-        "effort": ""
-      }
+      "effort": ""
     }
   }
 }
