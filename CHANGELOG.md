@@ -14,6 +14,12 @@ All notable changes to this project are documented here. Format follows
   subscription auth (operator direction, Telegram; reverses the
   earlier deliberate omission of USD).
 
+- The run-economics report adds a burn% column and the telemetry feed
+  a `cost_share` field: each seat's slice of the window's projected
+  cost, the measurable proxy for its share of the seven-day allowance
+  (issue #439). A seat whose runs carried no price shows no share
+  rather than 0%.
+
 ### Fixed
 
 - The status page's "lines in src/" tile counted inline `#[cfg(test)]`
