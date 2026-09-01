@@ -34,7 +34,7 @@
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-08-31",
+  "reviewed": "2026-09-01",
   "roles": {
     "bdfl": {
       "ladder": [
@@ -75,16 +75,32 @@
       "effort": ""
     },
     "researcher": {
+      "$comment": "Opus first: experiment choice and interpretation is the project's judgment-densest work, and at two runs a day the raise is cheap (operator directive, Telegram, 2026-09-01).",
       "ladder": [
+        "claude-opus-5",
         "claude-sonnet-5"
       ],
-      "effort": ""
+      "effort": "",
+      "thrift": {
+        "ladder": [
+          "claude-sonnet-5"
+        ],
+        "effort": ""
+      }
     },
     "reviewer": {
+      "$comment": "Opus first: the reviewer is the trust anchor (hard rule 3), and verification quality caps what every other seat's work is worth (operator directive, Telegram, 2026-09-01).",
       "ladder": [
+        "claude-opus-5",
         "claude-sonnet-5"
       ],
-      "effort": ""
+      "effort": "",
+      "thrift": {
+        "ladder": [
+          "claude-sonnet-5"
+        ],
+        "effort": ""
+      }
     }
   }
 }

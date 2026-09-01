@@ -117,6 +117,19 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-01: operator directive (Telegram, msg 354) plus the budget footer,
+  applied to the researcher and reviewer ladders in `agents/models.json`:
+  `claude-opus-5` prepended above the `claude-sonnet-5` floor, thrift to
+  sonnet. The footer has ended weeks with roughly a quarter of the seven-day
+  allowance unspent, which is affordance going unused under ADR-0031's
+  "most capable this project can afford". The two raised seats are where
+  judgment concentrates: the researcher's experiment choices carry RATIO,
+  the reviewer's verification carries TRUST, and both are low-volume
+  (two runs a day; per-PR). The maintainer stays on sonnet deliberately:
+  six runs a day makes it the expensive raise, and it is next in line if
+  the footer still shows slack after this beds in. Downside is bounded by
+  thrift (ADR-0039): a missed projection thins both back for the cycle.
+
 - 2026-08-30: our own audit trail (run 33282719693), applied to the BDFL thrift rung.
   `claude-sonnet-5`/medium → `claude-opus-5`/high in `agents/models.json`.
   The first thrifted BDFL wake read the full directive and replied
