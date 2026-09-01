@@ -18,7 +18,7 @@ else:
 - benchmarks             bench/baseline.json (the CI ratio gate's baseline)
 - experiments            research/progress.jsonl
 - merged_commits_7d      git history (deploy checks out full depth)
-- sloc_src, test_functions_src  the src/ tree
+- sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
 
 Self-diagnosing, per run-telemetry.py's rule that observability does not
 get to break the thing it observes: a field whose source cannot be read
@@ -194,12 +194,47 @@ def _merged_commits_7d():
     return sum(bool(re.search(r" \(#\d+\)$", s.strip())) for s in subjects)
 
 
-@field("sloc_src")
-def _sloc_src():
-    return sum(
-        len(p.read_text(encoding="utf-8").splitlines())
-        for p in (ROOT / "src").rglob("*.rs")
-    )
+def _split_sloc():
+    """Split src/ lines into code and inline-test lines.
+
+    A single total counted unit tests as product code, 4453 of 10564
+    lines on 2026-09-01, and the operator called the published number
+    misleading. Every test line in src/ lives in a `#[cfg(test)] mod`
+    block, and `cargo x fmt --check` gates every merge, so the block
+    reliably ends at a lone `}` on the attribute's own indentation; no
+    brace counting through string literals needed. A `#[cfg(test)]` on
+    anything but a `mod` counts as code, which today matches reality
+    (there are none) and fails toward the smaller test number.
+    """
+    code = test = 0
+    for p in (ROOT / "src").rglob("*.rs"):
+        lines = p.read_text(encoding="utf-8").splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.strip() == "#[cfg(test)]" and i + 1 < len(lines) and re.match(
+                r"\s*(pub(\([^)]*\))?\s+)?mod\s", lines[i + 1]
+            ):
+                close = line[: len(line) - len(line.lstrip())] + "}"
+                j = i + 1
+                while j < len(lines) and lines[j].rstrip() != close:
+                    j += 1
+                test += j - i + 1
+                i = j + 1
+            else:
+                code += 1
+                i += 1
+    return code, test
+
+
+@field("sloc_code_src")
+def _sloc_code_src():
+    return _split_sloc()[0]
+
+
+@field("sloc_test_src")
+def _sloc_test_src():
+    return _split_sloc()[1]
 
 
 @field("test_functions_src")

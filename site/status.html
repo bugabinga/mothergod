@@ -262,7 +262,8 @@
         [data.experiments?.rejected, 'rejected'],
         [data.merged_commits_7d, 'commits merged, 7d'],
         [data.experiments?.recent_7d, 'experiments, 7d'],
-        [data.sloc_src, 'lines in src/'],
+        [data.sloc_code_src, 'code lines in src/'],
+        [data.sloc_test_src, 'test lines in src/'],
         [data.test_functions_src, 'unit tests in src/'],
       ];
       stats.innerHTML = statEntries.map(([n, label]) => `
