@@ -26,8 +26,12 @@ per-run rows for the recent-runs table. The format follows the output file's
 extension because that is the one dispatch a call site cannot state wrongly.
 Both carry a projected API cost: the SDK prices every run at API list
 rates (modelUsage costUSD, costBasis "list") and that sum is published
-per run and per seat. The project runs on subscription auth, so the
-figure is a projection of what the same work would have cost on the
+per run and per seat. A modelUsage entry whose costBasis is anything
+other than "list" or absent (the SDK allows "managed" or "unknown", an
+explicit guess) is excluded from the sum and the run counts toward
+`uncosted` instead, so the label stays true even if a future model
+alias ever prices that way. The project runs on subscription auth, so
+the figure is a projection of what the same work would have cost on the
 API, not a bill, and every surface labels it so. Until 2026-09-01 USD
 was deliberately absent as risking a dishonest read; the operator
 overruled that: the projection is the signal a reader can compare
@@ -163,7 +167,8 @@ def facts(meta):
     # unpriced run excluded from sums beats a total that quietly
     # undercounts.
     costs = [v["costUSD"] for v in model_usage.values()
-             if isinstance(v, dict) and isinstance(v.get("costUSD"), (int, float))]
+             if isinstance(v, dict) and isinstance(v.get("costUSD"), (int, float))
+             and v.get("costBasis") in (None, "list")]
     trigger = meta.get("trigger") if isinstance(meta.get("trigger"), dict) else {}
     return {
         # Artifact creation instant and run id: identifiers, not numbers,

@@ -1,6 +1,6 @@
 # ADR-0023: Run economics joins model intel, and the report is its own store
 
-Status: accepted · Date: 2026-08-23 · Serves ADR-0012, ADR-0021 · Extends ADR-0019
+Status: superseded by ADR-0042 (cost exclusion only) · Date: 2026-08-23 · Serves ADR-0012, ADR-0021 · Extends ADR-0019
 
 ## Context
 
