@@ -46,7 +46,11 @@ fn main() -> ExitCode {
     }
 
     match command.as_deref().and_then(OsStr::to_str) {
-        Some("compress") => run(path.as_ref(), checked_compress, add_suffix),
+        Some("compress") => run(
+            path.as_ref(),
+            |input| Ok(mothergod::compress(input)),
+            |path| Ok(add_suffix(path)),
+        ),
         Some("decompress") => run(path.as_ref(), checked_decompress, strip_suffix),
         Some("-h" | "--help") => {
             println!("{USAGE}");
@@ -100,24 +104,14 @@ fn run(
     }
 }
 
-// Shares `run`'s `Result`-returning `transform` signature with
-// `checked_decompress`, which can fail; `compress` itself cannot.
-#[allow(clippy::unnecessary_wraps)]
-fn checked_compress(input: &[u8]) -> Result<Vec<u8>, String> {
-    Ok(mothergod::compress(input))
-}
-
 fn checked_decompress(input: &[u8]) -> Result<Vec<u8>, String> {
     mothergod::decompress(input).map_err(|err| err.to_string())
 }
 
-// Shares `run`'s `Result`-returning `derive_output` signature with
-// `strip_suffix`, which can fail; appending a suffix cannot.
-#[allow(clippy::unnecessary_wraps)]
-fn add_suffix(path: &Path) -> Result<PathBuf, String> {
+fn add_suffix(path: &Path) -> PathBuf {
     let mut out = path.as_os_str().to_owned();
     out.push(SUFFIX);
-    Ok(out.into())
+    out.into()
 }
 
 fn strip_suffix(path: &Path) -> Result<PathBuf, String> {
