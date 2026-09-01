@@ -23,6 +23,17 @@
 //! guarantee) even for a small frame that decodes to a much larger buffer.
 //! Input is still read whole into memory either way: the library has a
 //! streaming *writer*, not yet a streaming *reader*.
+//!
+//! Streaming trades away the old all-or-nothing output guarantee for a
+//! corrupt frame. To stdout, a decode failure now surfaces after whatever
+//! prefix `decompress_to_writer` already emitted, so a pipeline consuming
+//! incrementally (`| tar x`) sees truncated bytes ahead of the nonzero exit
+//! code, where a whole-buffer decode used to guarantee zero bytes reached
+//! stdout before the error. To a file argument, the same failure instead
+//! removes the partial file `create_new` had to open before decoding could
+//! start, so the on-disk case still sees nothing survive a failed run.
+//! Stdout has no equivalent mitigation: bytes already written cannot be
+//! unwritten.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};

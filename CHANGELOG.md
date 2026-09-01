@@ -102,7 +102,12 @@ All notable changes to this project are documented here. Format follows
   library has a streaming writer, not yet a streaming reader. A decode
   failure partway through a file-argument run still removes the partial
   output file, the same cleanup `write_new_file` already did for a
-  mid-write I/O failure.
+  mid-write I/O failure. To stdout there is no equivalent mitigation: a
+  decode failure now surfaces after whatever prefix `decompress_to_writer`
+  already wrote, so a pipeline consuming incrementally (`| tar x`) can see
+  truncated bytes ahead of the nonzero exit code, where the old whole-buffer
+  decode guaranteed zero bytes reached stdout before an error. Bytes already
+  written to stdout cannot be unwritten.
 
 - `Error::TooLarge(u32)` is now `Error::TooLarge { len: u32, max: u32 }`
   (`research/JOURNAL.md` S2-A71): `decompress_bounded`'s caller-supplied
