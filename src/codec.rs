@@ -492,6 +492,91 @@ pub fn ideal_cost_bits_column_expert_experiment(
     (sink.baseline_bits, sink.with_column_bits)
 }
 
+/// [`ColumnExpertCostSink`]'s SSE-calibrated counterpart: `research/JOURNAL.md`
+/// S1-P5's other open question before the real wiring slice — does the
+/// seventh expert's win survive once the mixed probability is calibrated
+/// by [`crate::literal::Literal::encode_sse`]'s SSE stage, the refinement
+/// every real byte already pays under `FORMAT_VERSION` 3? Flag/length/
+/// offset/slot price identically to [`ColumnExpertCostSink`] (unaffected
+/// by this question); only the literal path differs, pricing through
+/// [`crate::literal::Literal::ideal_cost_bits_column_expert_pair_sse`]
+/// instead.
+struct ColumnExpertCostSinkSse<'a> {
+    data: &'a [u8],
+    columns: NonZeroUsize,
+    max_banks: NonZeroUsize,
+    column_state: &'a mut ColumnExpertState,
+    baseline_bits: f64,
+    with_column_bits: f64,
+}
+
+impl TokenSink for ColumnExpertCostSinkSse<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
+        let bits = models.flag[flag_table].ideal_cost_bits(kind);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        let column = column::column_of(context.position, self.columns, self.data.len());
+        let bank = column::column_bank(column, self.max_banks);
+        let (baseline, with_column) = models.literal.ideal_cost_bits_column_expert_pair_sse(
+            context,
+            byte,
+            bank,
+            self.column_state,
+        );
+        self.baseline_bits += baseline;
+        self.with_column_bits += with_column;
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        let bits = ideal_cost_bucketed(&mut models.length, value);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        let bits = ideal_cost_bucketed(&mut models.offset, value);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        let bits = models.slot.ideal_cost_bits(symbol);
+        self.baseline_bits += bits;
+        self.with_column_bits += bits;
+    }
+}
+
+/// `research/JOURNAL.md` S1-P5's SSE-interaction measurement: same pairing
+/// as [`ideal_cost_bits_column_expert_experiment`], through this module's
+/// SSE-calibrated sink instead so both prices go through the SSE-calibrated
+/// bittree decomposition [`crate::literal::Literal::encode_sse`] actually
+/// pays, not the direct 256-way division.
+///
+/// Returns `(baseline_bits, with_column_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_column_expert_experiment_sse(
+    data: &[u8],
+    columns: NonZeroUsize,
+    max_banks: NonZeroUsize,
+) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut column_state = ColumnExpertState::new(max_banks);
+    let mut sink = ColumnExpertCostSinkSse {
+        data,
+        columns,
+        max_banks,
+        column_state: &mut column_state,
+        baseline_bits: 0.0,
+        with_column_bits: 0.0,
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.baseline_bits, sink.with_column_bits)
+}
+
 /// Whether `body_len` beats `best_len` in `encode`'s shortest-wins
 /// candidate search. Strict: a tie keeps the earlier (lower-indexed)
 /// candidate, so filter order in [`filters::select::pick`] is a stable
@@ -1585,6 +1670,39 @@ mod tests {
         // measurement recorded in the journal, not a unit test assertion.
         let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
         let (baseline, with_column) = ideal_cost_bits_column_expert_experiment(
+            data,
+            crate::test_support::nz(16),
+            crate::test_support::nz(16),
+        );
+        assert!(
+            baseline.is_finite() && baseline > 0.0,
+            "baseline={baseline}"
+        );
+        assert!(
+            with_column.is_finite() && with_column > 0.0,
+            "with_column={with_column}"
+        );
+    }
+
+    #[test]
+    fn ideal_cost_bits_column_expert_experiment_sse_is_zero_on_empty_input() {
+        let (baseline, with_column) = ideal_cost_bits_column_expert_experiment_sse(
+            b"",
+            crate::test_support::nz(4),
+            crate::test_support::nz(4),
+        );
+        assert!(baseline.abs() < 1e-9);
+        assert!(with_column.abs() < 1e-9);
+    }
+
+    #[test]
+    fn ideal_cost_bits_column_expert_experiment_sse_stays_finite_and_positive() {
+        // Same non-claim as ideal_cost_bits_column_expert_experiment_stays_finite_and_positive,
+        // for the SSE-calibrated pairing: the accept/reject verdict is a
+        // train/sealed measurement recorded in the journal, not a unit
+        // test assertion.
+        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+        let (baseline, with_column) = ideal_cost_bits_column_expert_experiment_sse(
             data,
             crate::test_support::nz(16),
             crate::test_support::nz(16),

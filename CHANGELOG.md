@@ -177,6 +177,22 @@ All notable changes to this project are documented here. Format follows
   is now the shared `rescale_bank` free function this new method also
   uses, behavior-preserving.
 
+- `literal::Literal::ideal_cost_bits_column_expert_pair_sse` and
+  `codec::ideal_cost_bits_column_expert_experiment_sse`
+  (`research/JOURNAL.md` S1-P5, S2-A76): answers S2-A69's own deferred
+  question, whether the column-keyed seventh expert's win survives once
+  the mixed probability is calibrated by `Literal::encode_sse`'s SSE
+  stage rather than priced directly. Prices the same seven-expert blend
+  through the SSE-calibrated bittree decomposition instead of a direct
+  256-way division; `ColumnExpertState` gained its own independent `Sse`
+  table so this path's calibration trajectory cannot leak into
+  `Literal`'s real one. `Literal::mix7`/`update_column_expert`, extracted
+  from `ideal_cost_bits_column_expert_pair`'s previously inline blend and
+  weight-update logic, are now shared by both the pre-SSE and SSE-paired
+  methods, behavior-preserving. Not wired into `Method`/`FORMAT_VERSION`:
+  measurement only, no bpb change to the shipped codec, covered by
+  focused unit tests.
+
 - `bench`'s held-out-final reports (`docs/benchmarks/canterbury.md`,
   `silesia.md`) now carry `mothergod encode MB/s` and `mothergod decode
   MB/s` columns, wall-clock, single-thread, measured on the same run and
