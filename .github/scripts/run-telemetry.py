@@ -328,13 +328,18 @@ def self_wake_line():
 # number. It proxies the seat's share of the seven-day allowance on the
 # assumption that the allowance weighs usage roughly as list pricing
 # does, by model-weighted tokens; the proxy's error is whatever that
-# assumption misses. None, not 0, when the window priced nothing.
+# assumption misses. None, not 0, when the window priced nothing, and
+# equally when the seat itself priced nothing (`cost` is None exactly
+# then, the same check the $/run column makes): a seat of all-uncosted
+# runs has an unknown share, and 0% would assert the opposite of the
+# dash beside it.
 recent_sums = {role: summarize(recent.get(role, [])) for role in roles}
 costed_total = sum(s["cost_total"] for s in recent_sums.values() if s)
 for s in recent_sums.values():
     if s:
         s["cost_share"] = (100.0 * s["cost_total"] / costed_total
-                           if costed_total else None)
+                           if costed_total and s["cost"] is not None
+                           else None)
 
 if JSON_MODE:
     def portable(summary):
