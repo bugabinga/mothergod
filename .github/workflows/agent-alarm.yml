@@ -34,6 +34,10 @@ on:
       # dead push left open PRs unreviewable (issue #132), and the
       # conflict is judgment only a woken fixer can apply.
       - propagate-review
+      # Nor this: its red means the traffic read lost its permission or
+      # the ledger write broke, and the API's 14-day retention turns a
+      # quiet failure into permanent data loss (issue #417).
+      - traffic-snapshot
     types: [completed]
 
 permissions:
