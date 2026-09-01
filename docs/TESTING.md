@@ -3,6 +3,28 @@
 What "tested" means for this project, in layers. Corpus rules live in
 `research/corpus/POLICY.md`.
 
+## Doctrine (ADR-0043)
+
+Tests form a cost-tiered, number-audited portfolio. The required PR
+gate stays fast and deterministic; everything expensive or statistical
+runs on a schedule and alarms the fixer on red (ADR-0036) instead of
+blocking PRs.
+
+| Tier | When | Blocks PRs | What runs |
+|---|---|---|---|
+| Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
+| Advisory | every PR | no, annotates | `mutants-check` (diff-scoped) |
+| Nightly | schedule | no, alarmed | fuzz with persistent corpus (#450, #451) |
+| Weekly | schedule | no, alarmed | monster matrix, large property profile (#452), coverage (#454), Miri (#456) |
+| Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
+
+Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
+new crashers, mutation score, region coverage, and line counts,
+rendered on the status page and judged in the weekly digest. Ledger
+numbers are maps, never gates; the only merge-blocking checks are
+behavioral. Items carrying issue numbers are planned; the layers below
+describe what runs today.
+
 ## Current automated cadence
 
 Every PR retains the required job names `fmt`, `clippy`, `test`, `doc`, and
@@ -70,6 +92,10 @@ weekly monster matrix runs them on every runtime target.
   (rep-symbol/offset-bucket disjointness, stored floor).
 - Every filter ships an exact-invertibility test (`unfilt(filt(x)) == x`)
   on data it targets AND data it doesn't.
+- Planned (#452): the seeded loops become proptest strategies with
+  automatic shrinking, plus differential agreement across the three
+  decode APIs (`decompress`, `decompress_bounded`,
+  `decompress_to_writer`).
 
 ## 2. Adversarial decode suite (Rust-input PRs)
 
@@ -92,6 +118,10 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `tests/adversarial/` as regression seeds.
 - Still planned: an explicit allocation-limiter target beyond
   `MAX_DECODED_LEN`'s bound, and cross-OS fuzz coverage in `monster`.
+- Planned (#450): corpus persistence across runs, ~10-minute nightly
+  runs, `cmin` hygiene, fuzz-hours to the trust ledger. Planned
+  (#451): a valid-frame generator (zstd decodecorpus analog) seeding
+  the corpus plus a structure-aware `Arbitrary` target.
 
 ## 4. Mutation testing (`mutants-check`, per PR)
 
@@ -106,6 +136,8 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   positive. Missed mutants appear as annotations on the changed lines.
 - Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
   at ~3.8h is a one-time backlog measurement, not weekly news.
+- Planned (#455): a monthly sharded whole-crate sweep, mutation score to
+  the trust ledger, survivors in one refreshed issue.
 
 ## 5. Determinism
 
@@ -162,3 +194,24 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   held-out finals numbers can now be stale. A content check against the
   committed reports, not a regeneration: those two reports fetch real
   corpora over the network, too slow and non-hermetic to run on every PR.
+
+## 8. Allocation torture (planned, #453)
+
+- The curl/SQLite mechanism: count a passing decode's allocations,
+  re-run failing the k-th allocation for every k, assert graceful `Err`,
+  never a panic or abort. A test-only `#[global_allocator]` in its own
+  integration-test binary. Every abort the sweep finds is a place decode
+  grows memory before validating input, which is hard rule 2's audit.
+
+## 9. Coverage map (planned, #454)
+
+- Weekly cargo-llvm-cov region coverage, published to the trust ledger
+  and status page with trend. Never a gate: a coverage target
+  manufactures assertions. It feeds triage: a stalled number sends the
+  worst-covered module to the heartbeat as one scoped issue.
+
+## 10. UB insurance (planned, #456)
+
+- Weekly `cargo miri test` lane in monster. The crate forbids unsafe,
+  so Miri is insurance that the claim stays true transitively, priced
+  by test selection (`cfg(miri)` excludes the slow storms).

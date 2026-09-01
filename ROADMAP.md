@@ -63,8 +63,10 @@ Outcome metrics (the product):
   (3) aggregate below xz -9e; (4) hold all of it as the corpus grows
   adversarially.
 - **TRUST** — zero known round-trip violations and zero decoder
-  panics/overallocations, ever; adversarial suite green; cumulative clean
-  fuzzing hours growing week over week once M4 lands.
+  panics/overallocations, ever; adversarial suite green; and, once the
+  trust ledger lands (#449), cumulative clean fuzz CPU-hours growing
+  week over week, whole-crate mutation score, and region coverage,
+  each reported with trend (ADR-0043).
 - **SPEED** — tracked, not yet optimized: report encode/decode MB/s on the
   finals each benchmark run; floor of ≥1 MB/s decode single-thread until M5
   makes speed a first-class target.
@@ -174,6 +176,31 @@ real bitstreams; then xz -9e.
 - [x] Frozen format spec v1: `docs/format/SPEC.md` declared stable at
       `FORMAT_VERSION` 3 (ADR-0041); versions 2 and 3 decode forever,
       evolution continues by version bump per hard rule 5.
+
+## M7 — Trust engineering (ADR-0043)
+
+Numbered by creation order, placed here by priority: correctness debt
+compounds worse than a late release (operator directive, 2026-09-01),
+so the heartbeat works these ahead of M5 and M6's open items. M3 stays
+the researcher's program, unaffected. Strategy in `docs/TESTING.md`;
+mechanisms in the issues.
+
+- [ ] Trust ledger + status page TRUST panel (#449). Lands first; the
+      other items append to it.
+- [ ] Fuzzing that compounds: persistent corpus, nightly 10-minute
+      runs (#450).
+- [ ] `frame_gen` valid-frame generator + structure-aware fuzzing
+      (#451).
+- [ ] proptest: shrinking properties + decode-API differential
+      agreement (#452).
+- [ ] Allocation torture sweep (#453).
+- [ ] Weekly region coverage, published never gated (#454).
+- [ ] Monthly whole-crate mutation score (#455).
+- [ ] Miri lane in monster (#456).
+- [ ] test-craft skill for the agents (#457, agent-system, BDFL queue).
+- Exploratory, researcher's option: Kani proof harnesses on the coder's
+  renormalization/update math; adopt only if it proves an invariant
+  fuzzing cannot, journal rules apply.
 
 ## M5 — Speed tiers
 
