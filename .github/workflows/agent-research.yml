@@ -113,3 +113,17 @@ jobs:
             ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
             ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
             ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # Run notice (operator directive, Telegram, 2026-09-01): researcher
+      # runs land in the operator's Telegram as a short summary, same
+      # mechanism as heartbeat runs; agent-heartbeat.yml carries the
+      # rationale. Runs after agent-audit because it reads that step's
+      # scrubbed files.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+        run: |
+          .github/scripts/run-notice.py "${RUNNER_TEMP}/agent-audit" researcher \
+            | .github/scripts/tg-send --notice
