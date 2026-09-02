@@ -40,10 +40,10 @@ each report: [`docs/benchmarks/`](docs/benchmarks/).
 decoded it at 4.422 MB/s; it encoded Silesia at 0.059 MB/s and decoded it at
 1.879 MB/s. Silesia's 212 MB took about an hour to compress and under two
 minutes to read back; encoding carries the optimal parse, so it runs roughly
-thirty times slower than decoding. Two caveats the reports state
-themselves: these are single-run figures from one machine, not a cross-machine
-claim, and an aggregate is total bytes over total time rather than a typical
-file, with per-file decode rates running from 0.3 to 39 MB/s. Speed is
+thirty times slower than decoding. One caveat the reports state themselves:
+these are single-run figures from one machine, not a cross-machine claim. One
+more worth adding: an aggregate is total bytes over total time rather than a
+typical file, with per-file decode rates running from 0.3 to 39 MB/s. Speed is
 measured every benchmark run and becomes a target of its own at
 [`ROADMAP.md`](ROADMAP.md)'s speed-tiers milestone; nothing before then is
 tuned for it.
