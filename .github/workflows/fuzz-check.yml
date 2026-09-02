@@ -1,10 +1,12 @@
 # Nightly cargo-fuzz run with a persistent corpus (#450, ADR-0043 layer 3).
 #
 # ROADMAP M4's "cargo-fuzz targets ... in scheduled CI", journal lead S1-P7:
-# `fuzz/` (research/JOURNAL.md S2-A25, issue #53) carries two libFuzzer
+# `fuzz/` (research/JOURNAL.md S2-A25, issue #53) carries three libFuzzer
 # targets: `decode_arbitrary` (hard rule 2: decode never panics or
-# overallocates unbounded on any input) and `roundtrip` (hard rule 1:
-# decompress(compress(x)) == x). Time-boxed here, not the fast per-PR gate,
+# overallocates unbounded on any input), `roundtrip` (hard rule 1:
+# decompress(compress(x)) == x), and `frame_mutate` (#451: byte flips near
+# a frame_gen-valid frame, reaching the post-header decode state machine
+# instead of rediscovering BadMagic). Time-boxed here, not the fast per-PR gate,
 # because libFuzzer's sanitizer-coverage instrumentation is nightly-only and
 # a real fuzz run's runtime doesn't belong on every push. Fuzzing compounds
 # only if coverage survives the run: the corpus persists through the actions
@@ -36,9 +38,9 @@ env:
 jobs:
   fuzz:
     runs-on: ubuntu-24.04
-    # ~2 min build and setup (observed on the weekly runs), 2 x 10 min fuzz,
+    # ~2 min build and setup (observed on the weekly runs), 3 x 10 min fuzz,
     # cmin and cache save on top.
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # The corpus persists across runs (#450). Cache keys are write-once,
@@ -71,6 +73,14 @@ jobs:
       - name: build fuzz targets
         working-directory: fuzz
         run: cargo fuzz build
+      # Deterministic valid-frame seeds (#475): frame_gen's 12 seeds lift
+      # decode_arbitrary from cov 26 to cov 418 before the first mutation
+      # (measured 2026-09-02, that build). Idempotent, same named files
+      # every run; cmin prunes any duplicates against an already-learned
+      # corpus. Before the census so the census reflects it.
+      - name: seed corpus
+        working-directory: fuzz
+        run: cargo run --bin seed_corpus
       # The census brackets the run: this one against the same step after
       # cmin shows what tonight learned, and against yesterday's log shows
       # whether the corpus compounds across runs (#450's acceptance test).
@@ -96,6 +106,13 @@ jobs:
           cargo fuzz run roundtrip -- -max_total_time=600 || rc=$?
           echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
           exit $rc
+      - name: fuzz frame_mutate
+        working-directory: fuzz
+        run: |
+          rc=0; t0=$SECONDS
+          cargo fuzz run frame_mutate -- -max_total_time=600 || rc=$?
+          echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
+          exit $rc
       # cmin keeps the persisted corpus minimal without losing coverage.
       # Success path only, deliberately: on a crasher run these steps skip
       # and the post-job save persists the unminimized corpus, which is
@@ -106,6 +123,7 @@ jobs:
         run: |
           cargo fuzz cmin decode_arbitrary
           cargo fuzz cmin roundtrip
+          cargo fuzz cmin frame_mutate
       - name: corpus census (after cmin)
         run: |
           find fuzz/corpus -type f | awk -F/ '{c[$3]++} END {for (t in c) print t ": " c[t] " input(s)"}'
