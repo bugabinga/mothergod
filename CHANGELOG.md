@@ -20,6 +20,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `.github/scripts/trust-telemetry.py`: the aggregator for ADR-0043's
+  trust ledger (issue #449), reading the small `entry.json` artifacts
+  scheduled test workflows will upload (fuzz CPU-hours, crashers,
+  mutation score, region coverage) into a status-page-ready JSON,
+  self-diagnosing and never a merge gate. Landing the read side first;
+  wiring an actual writer touches `.github/workflows/**`, which needs
+  the admin PAT, so that follow-up is agent-system-realm work.
+
 - The agent telemetry page and run-economics report publish projected
   API cost, the SDK's own list-rate figure per run, per seat and as a
   window total, labeled as a projection because the agents run on
