@@ -72,10 +72,13 @@ AGENT_PREFIX = "agent-"
 # not to run an agent at all.
 NOT_A_SESSION = frozenset({"skipped", "cancelled", "neutral"})
 
-# Runs pulled from the API before filtering to the window. A BDFL cadence of
-# three per hour against every push triggering ci, CodeQL and a review keeps
-# the window well inside this; a breach is REPORTED, never silently truncated.
+# Runs pulled from the API before filtering to the window. The common window
+# sits well inside the first fetch; a busy pipeline can breach it (2026-09-02:
+# three PRs ping-ponging review rounds put a 4-hour window past 100 runs), and
+# a breach refetches once at the deep bound. A breach of the deep bound is
+# REPORTED, never silently truncated.
 RUN_SCAN = 100
+RUN_SCAN_DEEP = 1000
 
 # One response longer than this is cut. The auditor judges altitude and voice,
 # and both are legible in the opening; a retrospect that floods the reader's
@@ -83,15 +86,20 @@ RUN_SCAN = 100
 RESPONSE_CAP = 2500
 
 
-def run_list(repo):
+def run_list(repo, limit):
     """Recent runs, newest first, with the fields the window and table need."""
     return json.loads(
         gh(
-            "run", "list", "--repo", repo, "--limit", str(RUN_SCAN),
+            "run", "list", "--repo", repo, "--limit", str(limit),
             "--json", "databaseId,name,event,status,conclusion,"
                       "createdAt,startedAt,updatedAt,url,displayTitle",
         )
     )
+
+
+def breached(runs, limit, anchor):
+    """A full page whose oldest run is still in the window hides older runs."""
+    return len(runs) == limit and iso(runs[-1]["updatedAt"]) >= anchor
 
 
 def in_window(run, anchor):
@@ -292,9 +300,11 @@ def main():
 
     print(f"anchor {anchor} ({source})")
 
-    runs = run_list(repo)
-    if len(runs) == RUN_SCAN and iso(runs[-1]["updatedAt"]) >= anchor:
-        print(f"\nINCOMPLETE: more than {RUN_SCAN} runs since the anchor; the oldest are not listed.")
+    runs = run_list(repo, RUN_SCAN)
+    if breached(runs, RUN_SCAN, anchor):
+        runs = run_list(repo, RUN_SCAN_DEEP)
+    if breached(runs, RUN_SCAN_DEEP, anchor):
+        print(f"\nINCOMPLETE: more than {RUN_SCAN_DEEP} runs since the anchor; the oldest are not listed.")
 
     agent_runs = [r for r in runs if r["name"].startswith(AGENT_PREFIX)]
     pending = [r for r in agent_runs if r["status"] != "completed"]
