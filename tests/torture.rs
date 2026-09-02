@@ -20,9 +20,8 @@
 //!
 //! Harness-off by default (`harness = false` in `Cargo.toml`, this file is
 //! `fn main`, not `#[test]`): spawning a child process per allocation call
-//! is too slow and platform-specific (`std::os::unix::process::ExitStatusExt`,
-//! Linux/macOS only) for the required gate's fast-and-deterministic
-//! contract (`docs/TESTING.md`'s doctrine table). Opt in with
+//! is too slow for the required gate's fast-and-deterministic contract
+//! (`docs/TESTING.md`'s doctrine table). Opt in with
 //! `MOTHERGOD_TORTURE=1 cargo test --test torture -- --nocapture`; unset,
 //! `cargo test --all-targets` still builds this binary but its `main` exits
 //! immediately.
@@ -44,8 +43,58 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Child, Command, ExitCode, ExitStatus};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
+/// Ceiling on one sabotaged-call child's runtime. A graceful `Err` or an
+/// abort both exit within milliseconds; the only way a child runs long is a
+/// sabotaged allocation driving decode into a loop instead of failing fast,
+/// exactly the case `Command::status()` alone would block on forever
+/// (reviewer, PR #467).
+const CHILD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A child's outcome once it either exits or is killed for outliving
+/// [`CHILD_TIMEOUT`]. Not folded into [`ExitStatus`]: the standard library
+/// gives no portable way to construct one for the timeout case.
+enum ChildOutcome {
+    Exited(ExitStatus),
+    TimedOut,
+}
+
+impl ChildOutcome {
+    fn is_graceful(&self) -> bool {
+        matches!(self, Self::Exited(status) if status.success())
+    }
+}
+
+impl std::fmt::Display for ChildOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exited(status) => write!(f, "exited {status}"),
+            Self::TimedOut => write!(f, "timed out after {CHILD_TIMEOUT:?}, killed"),
+        }
+    }
+}
+
+/// Polls `child` for exit, killing it if it outlives `timeout`. Polling
+/// rather than a blocking wait because the standard library has no portable
+/// wait-with-timeout; the sweep runs at most a few hundred children, so the
+/// poll interval's overhead is negligible next to spawn cost.
+fn wait_with_timeout(mut child: Child, timeout: Duration) -> ChildOutcome {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().expect("try_wait on child") {
+            return ChildOutcome::Exited(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return ChildOutcome::TimedOut;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
 
 struct TortureAlloc;
 
@@ -210,12 +259,13 @@ fn run_sweep() -> ExitCode {
         let n = armed_decode(&data, usize::MAX);
         total_calls += n;
         for k in 0..n {
-            let status = Command::new(&self_exe)
+            let child = Command::new(&self_exe)
                 .env("MOTHERGOD_TORTURE_CHILD", format!("{}:{k}", fixture.id))
-                .status()
+                .spawn()
                 .unwrap_or_else(|e| panic!("spawn child for {}:{k}: {e}", fixture.id));
-            if !status.success() {
-                failures.push((fixture.id.clone(), k, n, status));
+            let outcome = wait_with_timeout(child, CHILD_TIMEOUT);
+            if !outcome.is_graceful() {
+                failures.push((fixture.id.clone(), k, n, outcome));
             }
         }
         println!("torture: {} — {n} allocator calls swept", fixture.id);
@@ -230,8 +280,8 @@ fn run_sweep() -> ExitCode {
         "torture: {} sabotaged call(s) did not return gracefully:",
         failures.len()
     );
-    for (id, k, n, status) in &failures {
-        println!("  {id}: call {k} of {n} — child exited {status}");
+    for (id, k, n, outcome) in &failures {
+        println!("  {id}: call {k} of {n} — child {outcome}");
     }
     ExitCode::FAILURE
 }
