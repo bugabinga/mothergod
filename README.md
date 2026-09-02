@@ -32,9 +32,24 @@ mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and
 loses to both in aggregate on Silesia. Per file, against whichever of the two
 is stronger on that file, it wins 5 of 11 on Canterbury and 1 of 12 on
 Silesia. Closing Silesia is [`ROADMAP.md`](ROADMAP.md)'s current milestone.
-Speed is recorded on every run and not yet worked on. Per-file tables, the
-throughput columns, and the command that regenerates each report:
-[`docs/benchmarks/`](docs/benchmarks/).
+Per-file tables, the throughput columns, and the command that regenerates
+each report: [`docs/benchmarks/`](docs/benchmarks/).
+
+**It is slow.** mothergod's codec has no internal parallelism; the reports
+measure it one thread per file, several files at once, on one CI machine
+(AMD EPYC 9V74, 4 logical cores), more threads than cores, so the rate is a
+lower bound on what an isolated single-file run would show. On that run,
+mothergod encoded Canterbury at 0.133 MB/s and
+decoded it at 4.422 MB/s; it encoded Silesia at 0.059 MB/s and decoded it at
+1.879 MB/s. Silesia's 212 MB took about an hour to compress and under two
+minutes to read back; encoding carries the optimal parse, so it runs roughly
+thirty times slower than decoding. One caveat the reports state themselves:
+these are single-run figures from one machine, not a cross-machine claim. One
+more worth adding: an aggregate is total bytes over total time rather than a
+typical file, with per-file decode rates running from 0.3 to 39 MB/s. Speed is
+measured every benchmark run and becomes a target of its own at
+[`ROADMAP.md`](ROADMAP.md)'s speed-tiers milestone; nothing before then is
+tuned for it.
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
 format (`FORMAT_VERSION` 3) carries `Stored` and `Lz` (optimal-parse LZ over

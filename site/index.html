@@ -65,8 +65,9 @@
     section { display: flex; flex-direction: column; gap: 1rem; }
     p { color: var(--muted); }
     p strong { color: var(--starlight); font-weight: 500; }
-    /* A command and its flag are one token to the reader: never break them. */
-    code { white-space: nowrap; }
+    /* A command and its flag are one token to the reader: never break them.
+       Same for a rate and its unit, which wrapped after "0.059" at 1440px. */
+    code, .rate { white-space: nowrap; }
     a { color: var(--gold); }
     a:hover, a:focus-visible { color: var(--gold-deep); }
 
@@ -139,10 +140,10 @@
         <p>
           A <strong>context-mixing LZ hybrid</strong>: a filter bank feeds an
           optimal-parse LZ with in-DP repeat offsets, which feeds an adaptive
-          arithmetic coder with gradient-mixed experts. Ratio came first and
-          speed has not been worked on yet, so judge it on bits per byte and
-          read the throughput columns as a warning. Every design decision traces
-          to a recorded experiment in the <a
+          arithmetic coder with gradient-mixed experts. Ratio came first, so
+          judge it on bits per byte; the speed section below says what that
+          order cost. Every design decision traces to a recorded experiment in
+          the <a
             href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md"
           >research journal</a>, rejections included.
         </p>
@@ -200,15 +201,45 @@
           <code>xz -9e</code> in aggregate on Canterbury, and loses to both in
           aggregate on Silesia. Per file, against whichever of the two is
           stronger on that file, it wins 5 of 11 on Canterbury and 1 of 12 on
-          Silesia. Closing Silesia is the current milestone. Speed is recorded
-          but not yet worked on. The per-file tables, the throughput columns,
-          and the one command that regenerates each report are in
+          Silesia. Closing Silesia is the current milestone. The per-file
+          tables, the throughput columns, and the one command that regenerates
+          each report are in
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/canterbury.md"
           ><code>docs/benchmarks/canterbury.md</code></a> and
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/silesia.md"
           ><code>silesia.md</code></a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Speed</h2>
+        <p>
+          Slow, and that is the honest headline. mothergod's codec has no
+          internal parallelism; the reports measure it one thread per file,
+          several files at once, on one CI machine (AMD EPYC 9V74, 4 logical
+          cores), more threads than cores, so the rate is a lower bound on what
+          an isolated single-file run would show. On that same run, mothergod
+          encoded Canterbury at
+          <strong class="rate">0.133 MB/s</strong> and decoded it at
+          <strong class="rate">4.422 MB/s</strong>; it encoded Silesia at
+          <strong class="rate">0.059 MB/s</strong> and decoded it at
+          <strong class="rate">1.879 MB/s</strong>. Silesia's 212 MB took about
+          an hour to compress and under two minutes to read back. Encoding
+          carries the optimal parse, so it runs roughly thirty times slower than
+          decoding.
+        </p>
+        <p>
+          One caveat the reports state themselves: these are single-run figures
+          from one machine, not a cross-machine claim. One more worth adding: an
+          aggregate is total bytes over total time, so it is not a typical file.
+          Per-file decode rates in those reports run from
+          <span class="rate">0.3 to 39 MB/s</span>. Speed is measured on every
+          benchmark run and becomes a target of its own at the speed-tiers
+          milestone on the
+          <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
+          >roadmap</a>; nothing before then is tuned for it.
         </p>
       </section>
 

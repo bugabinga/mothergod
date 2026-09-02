@@ -18,6 +18,62 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-02 — Editorial: publishing the number that makes us look worst
+
+The 2026-09-01 entry withheld encode and decode throughput from the
+surface for one stated reason: the reports carried MB/s columns without
+naming the machine, and a speed number without its hardware is the same
+defect as a ratio without its corpus. I filed that against the generator
+as issue #432. It closed the same day; both reports now carry the CPU
+model, the core count, and the threading model directly above the table.
+The condition I named is gone, so the number ships.
+
+**The numbers, and why they are the point.** Canterbury: 0.133 MB/s
+encode, 4.422 MB/s decode. Silesia: 0.059 MB/s encode, 1.879 MB/s
+decode. Silesia's 212 MB therefore takes about an hour to compress. The
+surface previously said "speed is recorded but not yet worked on" and
+linked the reports. That sentence is true and it is not the same
+communication: a reader parses it as a modest caveat, and the fact
+behind it is roughly an hour of CPU for one corpus. **A caveat that
+understates its own magnitude is a claim, and it was outrunning its
+evidence in our favour.** That is the defect I am supposed to hate most,
+and it was mine.
+
+This is the zstd study's principle 3 (2026-08-31) applied to the axis I
+had only applied it to for ratio. Printing the Silesia ratio loss was
+easy: we win the other row. Printing the speed has no offsetting row at
+all, which is exactly why it buys more trust than it costs. An evaluating
+engineer discovers this number ten minutes after cloning; the only
+question our page controlled was whether they learned it from us or from
+their own terminal, and learning it from us is the version where the rest
+of the page stays credible.
+
+**Editorial rule, adopted: the reader learns the worst decision-relevant
+fact from us, on the page, in the same screen as the claim it qualifies.**
+Not behind a link, not as an adjective. A link is where the reader goes
+for detail they already know exists.
+
+Two smaller decisions worth keeping:
+
+- **Verbatim over rounded.** The reports print three decimals and the
+  surfaces quote them character for character, even though a single run
+  on a shared CI runner does not justify four significant figures. The
+  caveat sentence carries the uncertainty ("single-run figures from one
+  machine, not a cross-machine claim") instead of the rounding doing it
+  silently. Quoting the source exactly also lets a guard compare strings.
+- **The aggregate is disclosed as an aggregate.** Total bytes over total
+  time is not a typical file: per-file decode rates in the reports run
+  from 0.3 to 39 MB/s, and Canterbury's headline 4.422 is substantially
+  carried by one highly compressible spreadsheet. The range ships next to
+  the aggregate so nobody plans against the wrong number.
+
+Guarded, not just written: `tests/claims.rs` now compares all four
+restated rates against the generated reports, so the next regeneration
+that moves them fails CI instead of leaving a stale number on the page.
+That test is the mechanism this surface keeps earning; it now covers
+three of the four restated fact classes, with the measurement date still
+open as issue #469.
+
 ## 2026-09-02 — Editorial: the first screen answers "what", not "who"
 
 Shipped issue #416. Both first screens led with who builds mothergod:
