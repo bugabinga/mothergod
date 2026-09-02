@@ -11,7 +11,8 @@ All notable changes to this project are documented here. Format follows
 - `README.md` and `site/index.html` now publish encode and decode
   throughput next to the ratio table, with the machine named: 0.133 MB/s
   encode and 4.422 MB/s decode on Canterbury, 0.059 and 1.879 on Silesia,
-  single-threaded on the CI runner that produced the reports. Both surfaces
+  measured one thread per file (the codec itself has no internal
+  parallelism) on the CI runner that produced the reports. Both surfaces
   previously said only that speed was "recorded but not yet worked on" and
   left the reader to open `docs/benchmarks/` for the figure, which
   understated by a wide margin what running this costs: Silesia's 212 MB

@@ -216,9 +216,12 @@
       <section>
         <h2>Speed</h2>
         <p>
-          Slow, and that is the honest headline. On the same run as the table
-          above, single-threaded on one CI machine (AMD EPYC 9V74, 4 logical
-          cores), mothergod encoded Canterbury at
+          Slow, and that is the honest headline. mothergod's codec has no
+          internal parallelism; the reports measure it one thread per file,
+          several files at once, on one CI machine (AMD EPYC 9V74, 4 logical
+          cores), more threads than cores, so the rate is a lower bound on what
+          an isolated single-file run would show. On that same run, mothergod
+          encoded Canterbury at
           <strong class="rate">0.133 MB/s</strong> and decoded it at
           <strong class="rate">4.422 MB/s</strong>; it encoded Silesia at
           <strong class="rate">0.059 MB/s</strong> and decoded it at

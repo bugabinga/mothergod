@@ -35,8 +35,11 @@ Silesia. Closing Silesia is [`ROADMAP.md`](ROADMAP.md)'s current milestone.
 Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).
 
-**It is slow.** On the same run, single-threaded on one CI machine (AMD EPYC
-9V74, 4 logical cores), mothergod encoded Canterbury at 0.133 MB/s and
+**It is slow.** mothergod's codec has no internal parallelism; the reports
+measure it one thread per file, several files at once, on one CI machine
+(AMD EPYC 9V74, 4 logical cores), more threads than cores, so the rate is a
+lower bound on what an isolated single-file run would show. On that run,
+mothergod encoded Canterbury at 0.133 MB/s and
 decoded it at 4.422 MB/s; it encoded Silesia at 0.059 MB/s and decoded it at
 1.879 MB/s. Silesia's 212 MB took about an hour to compress and under two
 minutes to read back; encoding carries the optimal parse, so it runs roughly
