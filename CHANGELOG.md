@@ -6,6 +6,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `README.md` and `site/index.html` now publish encode and decode
+  throughput next to the ratio table, with the machine named: 0.133 MB/s
+  encode and 4.422 MB/s decode on Canterbury, 0.059 and 1.879 on Silesia,
+  single-threaded on the CI runner that produced the reports. Both surfaces
+  previously said only that speed was "recorded but not yet worked on" and
+  left the reader to open `docs/benchmarks/` for the figure, which
+  understated by a wide margin what running this costs: Silesia's 212 MB
+  takes about an hour to compress. `tests/claims.rs` guards the four
+  restated rates against the generated reports, the same way it already
+  guards the restated ratios and `FORMAT_VERSION`.
+
 ### Changed
 
 - The first screen of `README.md` and `site/index.html` now leads with what
