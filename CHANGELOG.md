@@ -8,6 +8,18 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `codec::decode`'s output buffer grew through `Vec::push`'s infallible
+  reallocation, so a real allocator failure partway through decoding a
+  large frame would abort the process instead of returning an `Err` (hard
+  rule 2). It now reserves its full, already-bounded capacity up front
+  through `try_reserve_exact`, surfacing a new `Error::OutOfMemory`
+  instead. Found by `tests/torture.rs` (issue #453), a new allocation-
+  failure torture sweep (`MOTHERGOD_TORTURE=1 cargo test --test torture`):
+  it counts a decode's allocator calls, then re-runs once per call with
+  that one call sabotaged in a fresh child process, and checks for a
+  graceful `Err` instead of a signal or a panic. The sweep still finds
+  aborts in the model tables' fixed-size allocations and the `Delta`/
+  `Bcj`/`Transpose` filters' undo buffers; #453 stays open for those.
 - The status page's trust panel said "1 ledger entries"; the count now
   picks singular or plural (follow-up to #465).
 - `README.md` and `site/index.html` restated `FORMAT_VERSION` and the

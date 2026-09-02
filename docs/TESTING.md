@@ -123,6 +123,21 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   with a comment naming the bug it caught).
 - Tests assert graceful `Err`, never a panic; allocation stays bounded by a
   stated multiple of the declared output size.
+- **Allocation-failure torture (#453).** The bound above stops decode from
+  asking for too much; it does not prove decode survives the allocator
+  actually refusing a request. `tests/torture.rs` (`cargo test --test
+  torture`, `harness = false` so it stays a fast no-op under the default
+  gate) counts every allocator call one decode makes, then re-runs it once
+  per call in a fresh child process with that one call sabotaged, and
+  checks the child's exit status for a signal or a panic rather than a
+  graceful `Err`. `MOTHERGOD_TORTURE=1` opts in to the real sweep. Landed:
+  `codec::decode`'s `output` buffer (`Error::OutOfMemory`), the one
+  allocation whose size is attacker-controlled rather than fixed by the
+  model tables. Still infallible, and still found by the sweep:
+  `Models::new`'s fixed-size tables and the `Delta`/`Bcj`/`Transpose`
+  filters' undo buffers — separable follow-up on #453, which stays open.
+  Not yet on a schedule (needs a workflow-file change); run manually until
+  it is.
 
 ## 3. Fuzzing (scheduled: `fuzz-check`, weekly)
 

@@ -732,7 +732,17 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     let mut models = Models::new();
     let mut context = Context::default();
     let mut reps = RepCache::initial();
+    // Reserved fallibly and exactly up front, not left to grow through
+    // `push`/`extend`'s doubling: `declared_len` is already bounded above,
+    // so nothing past this point ever asks `output` to grow past what it
+    // holds here, and `try_reserve_exact` turns a real allocator failure
+    // into `Error::OutOfMemory` instead of the process aborting through
+    // `push`'s infallible growth path (hard rule 2, torture-swept by
+    // `tests/torture.rs`, #453).
     let mut output: Vec<u8> = Vec::new();
+    output
+        .try_reserve_exact(declared_len)
+        .map_err(|_| Error::OutOfMemory)?;
 
     for _ in 0..token_count {
         let flag_table = usize::from(context.after_copy);

@@ -139,6 +139,15 @@ pub enum Error {
         /// see the variant's docs).
         max: u32,
     },
+    /// The allocator could not satisfy the output buffer's reservation
+    /// (`declared_len` bytes, already checked against the effective bound
+    /// before this point). A real allocator failure this far into decode
+    /// is rare, but hard rule 2 (`CLAUDE.md`) does not carve out an
+    /// exception for it: [`codec::decode`] reserves `output`'s capacity
+    /// through `try_reserve_exact` specifically so this returns an `Err`
+    /// instead of the process aborting (`rust-craft` skill's
+    /// allocation-discipline, torture-swept by `tests/torture.rs`, #453).
+    OutOfMemory,
 }
 
 impl core::fmt::Display for Error {
@@ -155,6 +164,7 @@ impl core::fmt::Display for Error {
                     "output length {len} exceeds the decoder's bound ({max} bytes)"
                 )
             }
+            Self::OutOfMemory => write!(f, "allocator could not satisfy the output buffer"),
         }
     }
 }
