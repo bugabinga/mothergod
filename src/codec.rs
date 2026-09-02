@@ -846,23 +846,20 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
 ///
 /// # Errors
 ///
-/// Same as [`decode`], wrapped in [`std::io::Error::other`] so this
-/// function has one error type instead of two; plus whatever `writer`'s
-/// own `write_all` returns, unwrapped, since that is already the right
-/// type.
+/// [`crate::WriteError::Decode`] for the same errors [`decode`] itself
+/// would return; [`crate::WriteError::Io`] for whatever `writer`'s own
+/// `write_all` returns. Neither boxes its payload through
+/// `std::io::Error::other` (issue #479): both are plain enum
+/// construction.
 pub(crate) fn decode_to_writer<W: std::io::Write>(
     payload: &[u8],
     version: u8,
     max_len: u32,
     writer: &mut W,
-) -> std::io::Result<()> {
-    let (filter_bytes, filtered_payload) = payload
-        .split_at_checked(2)
-        .ok_or(Error::Truncated)
-        .map_err(std::io::Error::other)?;
-    let candidate = Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]])
-        .ok_or(Error::Corrupt)
-        .map_err(std::io::Error::other)?;
+) -> Result<(), crate::WriteError> {
+    let (filter_bytes, filtered_payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
+    let candidate =
+        Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
     match candidate {
         Candidate::Identity => decode_undoable_streaming(
             filtered_payload,
@@ -872,8 +869,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             &mut StreamUndo::Identity,
         ),
         Candidate::Delta(stride) => {
-            let undo = filters::delta::Undo::try_new(stride)
-                .map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+            let undo = filters::delta::Undo::try_new(stride).map_err(|_| Error::OutOfMemory)?;
             decode_undoable_streaming(
                 filtered_payload,
                 version,
@@ -883,8 +879,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             )
         }
         Candidate::Bcj => {
-            let undo = filters::bcj::Undo::try_new()
-                .map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+            let undo = filters::bcj::Undo::try_new().map_err(|_| Error::OutOfMemory)?;
             decode_undoable_streaming(
                 filtered_payload,
                 version,
@@ -894,8 +889,9 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             )
         }
         Candidate::Transpose(_) => {
-            let decoded = decode(payload, version, max_len).map_err(std::io::Error::other)?;
-            writer.write_all(&decoded)
+            let decoded = decode(payload, version, max_len)?;
+            writer.write_all(&decoded)?;
+            Ok(())
         }
     }
 }
@@ -964,31 +960,30 @@ fn decode_undoable_streaming<W: std::io::Write>(
     max_len: u32,
     writer: &mut W,
     undo: &mut StreamUndo,
-) -> std::io::Result<()> {
+) -> Result<(), crate::WriteError> {
     let max_len = max_len.min(MAX_DECODED_LEN);
-    let (declared_len, token_count, ac_bytes) =
-        read_header(payload).map_err(std::io::Error::other)?;
+    let (declared_len, token_count, ac_bytes) = read_header(payload)?;
     if declared_len > max_len as usize {
-        return Err(std::io::Error::other(Error::TooLarge {
+        return Err(Error::TooLarge {
             len: u32::try_from(declared_len).expect(
                 "declared_len came from a u32 header field, so it always fits back into one",
             ),
             max: max_len,
-        }));
+        }
+        .into());
     }
 
     let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new().map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+    let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
     let mut context = Context::default();
     let mut reps = RepCache::initial();
-    let mut window = lz::Window::new();
+    let mut window = lz::Window::try_new().map_err(|_| Error::OutOfMemory)?;
 
     for _ in 0..token_count {
         let flag_table = usize::from(context.after_copy);
         match models.flag[flag_table].decode(&mut ac) {
             FLAG_LITERAL => {
-                ensure_room(window.written_len(), 1, declared_len)
-                    .map_err(std::io::Error::other)?;
+                ensure_room(window.written_len(), 1, declared_len)?;
                 let byte = if version >= LITERAL_SSE_MIN_VERSION {
                     models.literal.decode_sse(&mut ac, context)
                 } else {
@@ -1005,9 +1000,8 @@ fn decode_undoable_streaming<W: std::io::Write>(
                 // regardless of the residual bits: never zero.
                 let distance =
                     NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
-                ensure_within_window(distance).map_err(std::io::Error::other)?;
-                ensure_room(window.written_len(), len as usize, declared_len)
-                    .map_err(std::io::Error::other)?;
+                ensure_within_window(distance)?;
+                ensure_room(window.written_len(), len as usize, declared_len)?;
                 context = copy_streamed(&mut window, undo, writer, len, distance, context)?;
                 reps.push_front(distance);
             }
@@ -1017,8 +1011,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
                 let slot = RepSlot::from_index(models.slot.decode(&mut ac));
                 let len = decode_bucketed(&mut models.length, &mut ac);
                 let distance = reps.get(slot);
-                ensure_room(window.written_len(), len as usize, declared_len)
-                    .map_err(std::io::Error::other)?;
+                ensure_room(window.written_len(), len as usize, declared_len)?;
                 context = copy_streamed(&mut window, undo, writer, len, distance, context)?;
                 reps.promote(slot);
             }
@@ -1028,7 +1021,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
     undo.finish(writer)?;
 
     if window.written_len() != declared_len {
-        return Err(std::io::Error::other(Error::Corrupt));
+        return Err(Error::Corrupt.into());
     }
     Ok(())
 }
@@ -1057,13 +1050,12 @@ fn copy_streamed<W: std::io::Write>(
     len: u32,
     distance: NonZeroU32,
     mut context: Context,
-) -> std::io::Result<Context> {
+) -> Result<Context, crate::WriteError> {
     let distance = distance.get() as usize;
     window
         .written_len()
         .checked_sub(distance)
-        .ok_or(Error::Corrupt)
-        .map_err(std::io::Error::other)?;
+        .ok_or(Error::Corrupt)?;
     if len == 0 {
         return Ok(context.after_copy(&[]));
     }
@@ -1083,19 +1075,24 @@ mod tests {
     /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
     /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
     /// compare its output byte for byte against [`decode`]'s.
-    fn decode_streaming(payload: &[u8], version: u8, max_len: u32) -> std::io::Result<Vec<u8>> {
+    fn decode_streaming(
+        payload: &[u8],
+        version: u8,
+        max_len: u32,
+    ) -> Result<Vec<u8>, crate::WriteError> {
         let mut out = Vec::new();
         decode_to_writer(payload, version, max_len, &mut out)?;
         Ok(out)
     }
 
-    /// Downcasts an [`std::io::Error`] produced by [`decode_to_writer`]
-    /// back to the [`Error`] it wrapped via [`std::io::Error::other`], for
-    /// tests asserting exactly which decode error occurred rather than
-    /// just that some error did.
-    fn as_codec_error(err: &std::io::Error) -> Option<&Error> {
-        err.get_ref()
-            .and_then(|inner| inner.downcast_ref::<Error>())
+    /// Extracts the [`Error`] from a [`crate::WriteError`] produced by
+    /// [`decode_to_writer`], for tests asserting exactly which decode error
+    /// occurred rather than just that some error did.
+    fn as_codec_error(err: &crate::WriteError) -> Option<&Error> {
+        match err {
+            crate::WriteError::Decode(inner) => Some(inner),
+            crate::WriteError::Io(_) => None,
+        }
     }
 
     fn roundtrip(data: &[u8]) {
@@ -1852,10 +1849,10 @@ mod tests {
     #[test]
     fn streaming_propagates_the_writer_error_unwrapped() {
         // Distinguishes the two error origins decode_to_writer's docs
-        // promise: a decode error comes back wrapped in
-        // std::io::Error::other (as_codec_error downcasts it above), but a
-        // failure from the writer itself must come back exactly as the
-        // writer produced it, not re-wrapped.
+        // promise: a decode error comes back as WriteError::Decode
+        // (as_codec_error unwraps it above), but a failure from the writer
+        // itself must come back as WriteError::Io, carrying exactly what
+        // the writer produced, not re-wrapped.
         struct FailingWriter;
         impl std::io::Write for FailingWriter {
             fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
@@ -1880,10 +1877,15 @@ mod tests {
             &mut writer,
         )
         .expect_err("a writer that always fails must surface its error");
-        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
         assert!(
             as_codec_error(&err).is_none(),
             "a writer failure is not a decode Error and must not downcast to one"
         );
+        match err {
+            crate::WriteError::Io(err) => assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe),
+            crate::WriteError::Decode(err) => {
+                panic!("expected WriteError::Io, got Decode({err:?})")
+            }
+        }
     }
 }

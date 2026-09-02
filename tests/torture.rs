@@ -26,12 +26,12 @@
 //! `cargo test --all-targets` still builds this binary but its `main` exits
 //! immediately.
 //!
-//! Coverage today: this sweep only ever calls [`mothergod::decompress`], so
-//! it exercises `codec::decode`'s buffered path, not
-//! [`mothergod::decompress_to_writer`]'s streaming one
-//! (`codec::decode_to_writer`/`decode_undoable_streaming`) — the two paths
-//! allocate different things for the same frame, so a green run here is not
-//! a claim about the streaming path. On the swept path, every allocation is
+//! Coverage today: every fixture is swept through both
+//! [`mothergod::decompress`] (`codec::decode`'s buffered path) and
+//! [`mothergod::decompress_to_writer`] (`codec::decode_to_writer`/
+//! `decode_undoable_streaming`'s streaming path) — the two paths allocate
+//! different things for the same frame, so a green run on one is not a
+//! claim about the other. On the buffered path, every allocation is
 //! fallible: `output`'s capacity — the one allocation whose size is
 //! attacker-controlled (`declared_len`, up to `codec::MAX_DECODED_LEN`)
 //! rather than fixed by a constant — is reserved through
@@ -42,14 +42,15 @@
 //! use, since neither needs hard rule 2's guarantee. The streaming path's
 //! own allocations (`filters::delta::Undo::try_new`,
 //! `filters::bcj::Undo::try_new`, and `crate::TryBufWriter`'s write buffer)
-//! are fallible by the same construction, verified by reading the source
-//! rather than by this sweep; sabotaging them found that every error this
-//! path can return allocates through `std::io::Error::other`'s inherent
-//! `Box<dyn Error>` — infallible on stable Rust — so closing that gap needs
-//! a design that does not box a custom payload through `io::Error`, wider
-//! than #453's original scope (issue #479). The summary this binary prints
-//! names exactly which fixture/call index any future abort is found at, if
-//! a new allocation joins the swept path without its own fallible form.
+//! are fallible by the same construction. Its error-construction path used
+//! to allocate too, unconditionally: every `Err` it could return, even
+//! `Truncated` on a two-byte input, boxed its payload through
+//! `std::io::Error::other`'s inherent `Box<dyn Error>` — infallible on
+//! stable Rust. `WriteError` (issue #479) replaced that boxing with plain
+//! enum construction, which is what this sweep's `decompress_to_writer`
+//! leg now verifies stays true. The summary this binary prints names
+//! exactly which fixture/API/call index any future abort is found at, if a
+//! new allocation joins the swept path without its own fallible form.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
@@ -232,14 +233,77 @@ fn fixture_path(id: &str) -> PathBuf {
     }
 }
 
+/// Which public decode entry point one sweep pass drives: [`mothergod::decompress`]'s
+/// buffered path or [`mothergod::decompress_to_writer`]'s streaming one. The
+/// two allocate different things for the same frame (module doc), so each
+/// fixture is swept under both.
+#[derive(Clone, Copy)]
+enum Api {
+    Decompress,
+    DecompressToWriter,
+}
+
+impl Api {
+    const ALL: [Self; 2] = [Self::Decompress, Self::DecompressToWriter];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Decompress => "decompress",
+            Self::DecompressToWriter => "decompress_to_writer",
+        }
+    }
+
+    fn parse(label: &str) -> Self {
+        match label {
+            "decompress" => Self::Decompress,
+            "decompress_to_writer" => Self::DecompressToWriter,
+            other => panic!("unknown api {other:?} in child spec"),
+        }
+    }
+
+    fn run(self, data: &[u8]) {
+        match self {
+            Self::Decompress => {
+                let _ = mothergod::decompress(data);
+            }
+            Self::DecompressToWriter => {
+                // DiscardSink, not a Vec<u8>: Vec's own Write impl grows
+                // through an infallible extend_from_slice, which would
+                // abort under sabotage that belongs to this sweep's own
+                // sink rather than to the decoder under test.
+                let mut out = DiscardSink;
+                // u32::MAX so this leg's only bound is codec::MAX_DECODED_LEN
+                // itself, matching decompress's own effective bound.
+                let _ = mothergod::decompress_to_writer(data, u32::MAX, &mut out);
+            }
+        }
+    }
+}
+
+/// A [`std::io::Write`] sink that discards every byte without allocating,
+/// used as [`Api::DecompressToWriter`]'s destination so the sweep isolates
+/// the decoder's own allocations from a destination's (a `Vec<u8>` would
+/// grow through its own infallible `extend_from_slice`).
+struct DiscardSink;
+
+impl std::io::Write for DiscardSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Runs one decode with the allocator armed. `fail_at = usize::MAX` (never
 /// matched by `CALLS`, which starts at 0 and only grows) is the counting
 /// mode: nothing fails, and the return value is the total call count.
-fn armed_decode(data: &[u8], fail_at: usize) -> usize {
+fn armed_decode(api: Api, data: &[u8], fail_at: usize) -> usize {
     FAIL_AT.store(fail_at, Ordering::Relaxed);
     CALLS.store(0, Ordering::Relaxed);
     ARMED.store(true, Ordering::Relaxed);
-    let _ = mothergod::decompress(data);
+    api.run(data);
     ARMED.store(false, Ordering::Relaxed);
     CALLS.load(Ordering::Relaxed)
 }
@@ -249,12 +313,15 @@ fn armed_decode(data: &[u8], fail_at: usize) -> usize {
 /// entire assertion — an abort inside `armed_decode` kills this process
 /// before that, which is what the parent's exit-status check catches.
 fn run_child(spec: &str) -> ExitCode {
-    // rsplit_once: `id` is itself `kind:name` (fixture_path's format), so
-    // the boundary this spec cares about is the last colon, not the first.
-    let (id, fail_at) = spec.rsplit_once(':').expect("child spec is id:fail_at");
+    // Two rsplit_once calls because `id` is itself `kind:name` (fixture_path's
+    // format): the outer split peels off fail_at, the inner one peels off
+    // the api label, leaving id whole.
+    let (rest, fail_at) = spec.rsplit_once(':').expect("child spec is id:api:fail_at");
     let fail_at: usize = fail_at.parse().expect("fail_at is a usize");
+    let (id, api) = rest.rsplit_once(':').expect("child spec is id:api:fail_at");
+    let api = Api::parse(api);
     let data = fs::read(fixture_path(id)).unwrap_or_else(|e| panic!("read fixture {id:?}: {e}"));
-    armed_decode(&data, fail_at);
+    armed_decode(api, &data, fail_at);
     ExitCode::SUCCESS
 }
 
@@ -265,26 +332,39 @@ fn run_sweep() -> ExitCode {
     let mut swept = 0usize;
 
     for fixture in fixtures() {
-        swept += 1;
         let data = fs::read(&fixture.path)
             .unwrap_or_else(|e| panic!("read {}: {e}", fixture.path.display()));
-        let n = armed_decode(&data, usize::MAX);
-        total_calls += n;
-        for k in 0..n {
-            let child = Command::new(&self_exe)
-                .env("MOTHERGOD_TORTURE_CHILD", format!("{}:{k}", fixture.id))
-                .spawn()
-                .unwrap_or_else(|e| panic!("spawn child for {}:{k}: {e}", fixture.id));
-            let outcome = wait_with_timeout(child, CHILD_TIMEOUT);
-            if !outcome.is_graceful() {
-                failures.push((fixture.id.clone(), k, n, outcome));
+        for api in Api::ALL {
+            swept += 1;
+            let n = armed_decode(api, &data, usize::MAX);
+            total_calls += n;
+            for k in 0..n {
+                let child = Command::new(&self_exe)
+                    .env(
+                        "MOTHERGOD_TORTURE_CHILD",
+                        format!("{}:{}:{k}", fixture.id, api.label()),
+                    )
+                    .spawn()
+                    .unwrap_or_else(|e| {
+                        panic!("spawn child for {}:{}:{k}: {e}", fixture.id, api.label())
+                    });
+                let outcome = wait_with_timeout(child, CHILD_TIMEOUT);
+                if !outcome.is_graceful() {
+                    failures.push((fixture.id.clone(), api.label(), k, n, outcome));
+                }
             }
+            println!(
+                "torture: {} via {} — {n} allocator calls swept",
+                fixture.id,
+                api.label()
+            );
         }
-        println!("torture: {} — {n} allocator calls swept", fixture.id);
     }
 
     if failures.is_empty() {
-        println!("torture: {total_calls} allocator calls swept clean across {swept} fixtures");
+        println!(
+            "torture: {total_calls} allocator calls swept clean across {swept} fixture/API pairs"
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -292,8 +372,8 @@ fn run_sweep() -> ExitCode {
         "torture: {} sabotaged call(s) did not return gracefully:",
         failures.len()
     );
-    for (id, k, n, outcome) in &failures {
-        println!("  {id}: call {k} of {n} — child {outcome}");
+    for (id, api, k, n, outcome) in &failures {
+        println!("  {id} via {api}: call {k} of {n} — child {outcome}");
     }
     ExitCode::FAILURE
 }

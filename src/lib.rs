@@ -173,6 +173,57 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Error from [`decompress_to_writer`]: either the frame failed to decode
+/// ([`Error`], same variants and meaning as [`decompress`]'s) or `writer`
+/// itself failed.
+///
+/// Two owned variants instead of the single [`std::io::Error`] this type
+/// replaced (downcast via [`std::io::Error::get_ref`]): that shape needed
+/// `std::io::Error::other` to wrap every decode error, which boxes its
+/// payload through two allocations with no fallible sibling on stable Rust
+/// (`Box::new` twice: once into `Box<dyn Error + Send + Sync>`, once into
+/// `io::Error`'s own `Custom` struct). That meant *every* decode error —
+/// even `Truncated` on a two-byte input — could abort the process under
+/// real allocator pressure, violating hard rule 2 (issue #479). Plain enum
+/// construction allocates nothing.
+#[derive(Debug)]
+pub enum WriteError {
+    /// The frame did not decode; see [`Error`] for what each variant means.
+    Decode(Error),
+    /// `writer` itself failed.
+    Io(std::io::Error),
+}
+
+impl core::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Decode(err) => write!(f, "{err}"),
+            Self::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for WriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decode(err) => Some(err),
+            Self::Io(err) => Some(err),
+        }
+    }
+}
+
+impl From<Error> for WriteError {
+    fn from(err: Error) -> Self {
+        Self::Decode(err)
+    }
+}
+
+impl From<std::io::Error> for WriteError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
 const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
@@ -442,7 +493,7 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// either changes; header parsing and the `max_len`/`stored_bound` rules
 /// are duplicated rather than shared because they return through two
 /// different error types ([`Error`] here needs wrapping into
-/// [`std::io::Error`], [`decompress_bounded`] does not).
+/// [`WriteError`], [`decompress_bounded`] does not).
 ///
 /// Only bounds resident memory better than [`decompress_bounded`] for a
 /// [`Method::Lz`] frame whose encoder picked
@@ -461,42 +512,44 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 ///
 /// # Errors
 ///
-/// An [`std::io::Error`] wrapping an [`Error`] (retrievable via
-/// [`std::io::Error::get_ref`] and a downcast) for anything
-/// [`decompress_bounded`] would itself return as an `Err`, plus
-/// [`Error::OutOfMemory`] if the allocator cannot satisfy the write
-/// buffer's own allocation, or an unwrapped [`std::io::Error`] if `writer`
-/// itself fails.
+/// [`WriteError::Decode`] for anything [`decompress_bounded`] would itself
+/// return as an `Err`, plus [`Error::OutOfMemory`] if the allocator cannot
+/// satisfy the write buffer's own allocation; [`WriteError::Io`] if
+/// `writer` itself fails. Neither variant boxes its payload through
+/// `std::io::Error::other` (issue #479): both are plain enum
+/// construction, so a decode error can never abort the process under
+/// allocator pressure the way the wrapped form could.
 pub fn decompress_to_writer<W: std::io::Write>(
     input: &[u8],
     max_len: u32,
     writer: &mut W,
-) -> std::io::Result<()> {
+) -> Result<(), WriteError> {
     use std::io::Write as _;
 
     let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
     let max_len = max_len.min(codec::MAX_DECODED_LEN);
-    let (version, method, payload) = parse_header(input).map_err(std::io::Error::other)?;
-    let mut writer =
-        TryBufWriter::try_new(writer).map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+    let (version, method, payload) = parse_header(input)?;
+    let mut writer = TryBufWriter::try_new(writer).map_err(|_| Error::OutOfMemory)?;
     match method {
         Method::Stored => {
             if let Some(bound) = stored_bound
                 && payload.len() > bound as usize
             {
-                return Err(std::io::Error::other(Error::TooLarge {
+                return Err(Error::TooLarge {
                     len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
                     max: bound,
-                }));
+                }
+                .into());
             }
             writer.write_all(payload)?;
         }
         Method::Lz if version < codec::LZ_MIN_VERSION => {
-            return Err(std::io::Error::other(Error::UnsupportedVersion(version)));
+            return Err(Error::UnsupportedVersion(version).into());
         }
         Method::Lz => codec::decode_to_writer(payload, version, max_len, &mut writer)?,
     }
-    writer.flush()
+    writer.flush()?;
+    Ok(())
 }
 
 /// Reports whether `input`'s frame can decode with the output produced in
@@ -931,12 +984,15 @@ mod tests {
         assert_eq!(decodes_incrementally(&frame), Err(Error::BadMagic));
     }
 
-    /// Downcasts an [`std::io::Error`] produced by [`decompress_to_writer`]
-    /// back to the [`Error`] it wrapped via [`std::io::Error::other`], for
-    /// tests asserting exactly which decode error occurred.
-    fn as_codec_error(err: &std::io::Error) -> Option<&Error> {
-        err.get_ref()
-            .and_then(|inner| inner.downcast_ref::<Error>())
+    /// Extracts the [`Error`] from a [`WriteError`] produced by
+    /// [`decompress_to_writer`], for tests asserting exactly which decode
+    /// error occurred; `None` for a [`WriteError::Io`] (a `writer` failure,
+    /// never a decode error).
+    fn as_codec_error(err: &WriteError) -> Option<&Error> {
+        match err {
+            WriteError::Decode(inner) => Some(inner),
+            WriteError::Io(_) => None,
+        }
     }
 
     #[test]
@@ -1021,11 +1077,14 @@ mod tests {
         let mut writer = FailingWriter;
         let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut writer)
             .expect_err("a writer that always fails must surface its error");
-        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
         assert!(
             as_codec_error(&err).is_none(),
             "a writer failure is not a decode Error and must not downcast to one"
         );
+        match err {
+            WriteError::Io(err) => assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe),
+            WriteError::Decode(err) => panic!("expected WriteError::Io, got Decode({err:?})"),
+        }
     }
 }
 

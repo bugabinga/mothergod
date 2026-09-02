@@ -156,16 +156,8 @@ fn run_decompress(path: Option<&OsString>) -> ExitCode {
 fn decompress_into<W: Write>(input: &[u8], writer: &mut W, dest_name: &str) -> ExitCode {
     match mothergod::decompress_to_writer(input, u32::MAX, writer) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            if let Some(decode_err) = err
-                .get_ref()
-                .and_then(|inner| inner.downcast_ref::<mothergod::Error>())
-            {
-                fail(&decode_err.to_string())
-            } else {
-                fail(&format!("writing {dest_name}: {err}"))
-            }
-        }
+        Err(mothergod::WriteError::Decode(decode_err)) => fail(&decode_err.to_string()),
+        Err(mothergod::WriteError::Io(err)) => fail(&format!("writing {dest_name}: {err}")),
     }
 }
 

@@ -64,6 +64,23 @@ All notable changes to this project are documented here. Format follows
   `Box<dyn Error>`, which no `try_new` sibling can fix without changing
   the function's documented downcast contract — tracked in issue #479,
   not closed by this change.
+- Every error `decompress_to_writer` could return, even `Error::Truncated`
+  on a two-byte input, allocated via `std::io::Error::other`'s inherent
+  `Box<dyn Error>` (infallible on stable Rust), so a real allocator failure
+  on the way out could abort the process regardless of which decode error
+  occurred (hard rule 2, the finding #478 left open as issue #479).
+  `decompress_to_writer` now returns a new `WriteError` enum
+  (`Decode(Error)` or `Io(std::io::Error)`) instead of a boxed
+  `std::io::Error`, closing over the decode-error path with plain enum
+  construction; callers that used to downcast via `get_ref` now match the
+  variant directly (`src/bin/mothergod.rs`'s CLI updated). Extending
+  `tests/torture.rs`'s sweep to also drive `decompress_to_writer` (it
+  previously only swept `decompress`) found one more infallible
+  allocation this change did not by itself cover: `lz::Window::new`'s
+  fixed 1 MiB backing store, the streaming decode path's only user of it.
+  It now has a `try_new` sibling too. The sweep is fully green across
+  both APIs (158 allocator calls, 48 fixture/API pairs), closing issue
+  #479.
 - The status page's trust panel said "1 ledger entries"; the count now
   picks singular or plural (follow-up to #465).
 - `README.md` and `site/index.html` restated `FORMAT_VERSION` and the
