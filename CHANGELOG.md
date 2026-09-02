@@ -78,6 +78,17 @@ All notable changes to this project are documented here. Format follows
   5-byte minimal counterexample (`[0xE8, 0, 0, 0, 0]`). The LZ/model/coder
   round-trip loops and decode-API differential agreement remain, per the
   bullet above.
+- Decode-API differential agreement (issue #452): a `proptest` property in
+  `src/lib.rs` sweeps `decompress`, `decompress_bounded`, and
+  `decompress_to_writer` against every frame `compress` can produce, over
+  a mix of noise (drives `Method::Stored`) and repeated patterns (drives
+  `Method::Lz`). Case count is trimmed to 64 (a quarter of the filter
+  properties' default): `compress` runs the full optimal-parse LZ
+  encoder, far heavier per case than a filter round-trip, and 256 cases
+  measured 27s locally against the filter properties' sub-second cost.
+  Verified the strategy shrinks: a planted bug in `decompress_bounded`'s
+  `Method::Stored` arm reduced to a 5-byte minimal counterexample. The
+  LZ/model/coder round-trip loops remain, per the bullet above.
 
 - `.github/scripts/trust-telemetry.py`: the aggregator for ADR-0043's
   trust ledger (issue #449), reading the small `entry.json` artifacts
