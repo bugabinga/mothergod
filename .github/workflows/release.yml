@@ -1,0 +1,129 @@
+# Draft a GitHub release with binaries (#445, ROADMAP M6).
+#
+# GOVERNANCE.md holds releases at "agent-prepared, operator-triggered";
+# this workflow is the prepared half. Dispatch-only, never fired by a tag
+# push, and it only ever creates a DRAFT: the operator reviews tag, notes,
+# and assets before anything is public, and the tag ref itself is created
+# at publish time, pointing at the commit this run built (--target below).
+# The release body is CHANGELOG.md's Unreleased section via
+# .github/scripts/changelog-notes (#385), which fails the run when that
+# section is empty, because an empty body means the changelog was not kept.
+# Three targets whose runner host matches the triple, so no cross
+# toolchain; monster.yml's other rows (musl, arm64 Windows/Linux, Intel
+# macOS) are natural additions after the first release ships.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, vX.Y.Z
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Gates the matrix so a typoed tag fails in seconds, not after three
+  # release builds.
+  tag-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check tag shape
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "tag '$TAG' is not vX.Y.Z" >&2; exit 1; }
+
+  build:
+    needs: tag-check
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-26
+            target: aarch64-apple-darwin
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # cache "false" because releases are rare: the restore would almost
+      # always miss and the save would only evict hotter CI caches.
+      - uses: ./.github/actions/rust-ci
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          checks: setup
+          cache: "false"
+      - name: Build
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET" --bin mothergod
+      - name: Package
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          name="mothergod-$TAG-$TARGET"
+          mkdir "$name" dist
+          bin="target/$TARGET/release/mothergod"
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          cp "$bin" README.md LICENSE CHANGELOG.md "$name"/
+          case "$TARGET" in
+            *-windows-*) archive="$name.zip"; 7z a "dist/$archive" "$name" ;;
+            *) archive="$name.tar.gz"; tar czf "dist/$archive" "$name" ;;
+          esac
+          cd dist
+          # sha256sum exists on Linux and Windows Git Bash, shasum on macOS.
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mothergod-${{ inputs.tag }}-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  draft:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # gh release create; the only job here that writes anything.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          .github/scripts/changelog-notes CHANGELOG.md > notes.md
+          gh release create "$TAG" dist/* \
+            --draft \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA"
