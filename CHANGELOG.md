@@ -20,6 +20,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `proptest` as the crate's first dev-dependency (issue #452), trimmed to
+  `default-features = false, features = ["std"]`. `delta` and `transpose`
+  now each carry a `roundtrips` property (`decode(encode(x, param), param)
+  == x` over arbitrary data and stride/column count, shrinking on
+  failure) alongside their existing example tests, plus a differential
+  property checking `delta::Undo`'s streaming output against the batch
+  `decode` it shadows. `bcj`'s invertibility and the LZ/model/coder
+  round-trip loops are still hand-rolled; porting those, plus decode-API
+  differential agreement, is follow-up scope on #452.
+
 - `.github/scripts/trust-telemetry.py`: the aggregator for ADR-0043's
   trust ledger (issue #449), reading the small `entry.json` artifacts
   scheduled test workflows will upload (fuzz CPU-hours, crashers,

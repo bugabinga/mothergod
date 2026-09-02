@@ -21,6 +21,13 @@ categories = ["compression"]
 [lints]
 workspace = true
 
+[dev-dependencies]
+# default-features off: this crate only builds strategies with prop_oneof!/
+# prop_compose!/Just, none of which need fork/timeout (subprocess-isolated
+# shrinking, irrelevant to our deterministic pure functions) or regex-syntax
+# (regex-pattern string strategies, unused here).
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+
 [workspace.lints.rust]
 missing_docs = "warn"
 
