@@ -79,6 +79,20 @@ All notable changes to this project are documented here. Format follows
   round-trip loops and decode-API differential agreement remain, per the
   bullet above.
 
+- `fuzz/src/frame_gen.rs`: a deterministic generator of valid frames
+  (issue #451), built from inputs already proven in `src/filters.rs`'s
+  and `src/lz.rs`'s own unit tests and compressed through the real
+  `mothergod::compress`, so fuzzing exercises decode's post-header state
+  machine (rep offsets, filter undo, adaptive model state) instead of
+  mostly rediscovering `BadMagic`/`Truncated` from raw bytes. A third
+  libFuzzer target, `frame_mutate`, XOR-flips single bytes near a
+  generated frame so mutation explores the neighborhood of real frames.
+  `fuzz/src/bin/seed_corpus.rs` writes `frame_gen`'s output as corpus
+  seeds for `decode_arbitrary`/`roundtrip`/`frame_mutate`: 12
+  deterministic seeds reach `cov: 418 ft: 859` on `decode_arbitrary`,
+  more than cold libFuzzer reaches (`cov: 26 ft: 27` at start, `cov: 57
+  ft: 59` after ~15k mutated executions from scratch).
+
 - `.github/scripts/trust-telemetry.py`: the aggregator for ADR-0043's
   trust ledger (issue #449), reading the small `entry.json` artifacts
   scheduled test workflows will upload (fuzz CPU-hours, crashers,
