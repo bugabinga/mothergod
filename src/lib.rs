@@ -139,14 +139,16 @@ pub enum Error {
         /// see the variant's docs).
         max: u32,
     },
-    /// The allocator could not satisfy the output buffer's reservation
-    /// (`declared_len` bytes, already checked against the effective bound
-    /// before this point). A real allocator failure this far into decode
-    /// is rare, but hard rule 2 (`CLAUDE.md`) does not carve out an
-    /// exception for it: [`codec::decode`] reserves `output`'s capacity
-    /// through `try_reserve_exact` specifically so this returns an `Err`
-    /// instead of the process aborting (`rust-craft` skill's
-    /// allocation-discipline, torture-swept by `tests/torture.rs`, #453).
+    /// The allocator could not satisfy some fixed-size allocation partway
+    /// through decode: the output buffer's reservation (`declared_len`
+    /// bytes, already checked against the effective bound before this
+    /// point), a model's adaptive frequency table, or a filter's undo
+    /// buffer. A real allocator failure this far into decode is rare, but
+    /// hard rule 2 (`CLAUDE.md`) does not carve out an exception for it:
+    /// every one of those allocations goes through `try_reserve_exact`
+    /// specifically so this returns an `Err` instead of the process
+    /// aborting (`rust-craft` skill's allocation-discipline, torture-swept
+    /// by `tests/torture.rs`, #453).
     OutOfMemory,
 }
 
@@ -164,7 +166,7 @@ impl core::fmt::Display for Error {
                     "output length {len} exceeds the decoder's bound ({max} bytes)"
                 )
             }
-            Self::OutOfMemory => write!(f, "allocator could not satisfy the output buffer"),
+            Self::OutOfMemory => write!(f, "allocator could not satisfy a decode allocation"),
         }
     }
 }
@@ -221,6 +223,41 @@ pub(crate) fn rescale_bank(
         }
         *total = new_total;
     }
+}
+
+/// Builds a `Vec<T>` of `n` clones of `value`, failing gracefully instead
+/// of aborting if the allocator cannot satisfy `n` (hard rule 2,
+/// `rust-craft` skill's allocation-discipline): `try_reserve_exact` first,
+/// then `resize`, which never asks the allocator for more than that
+/// already-reserved capacity, mirroring [`codec::decode`]'s own
+/// `output.try_reserve_exact` shape (#453).
+///
+/// Shared by every fixed-size adaptive table on the real decode path
+/// ([`model::Model::try_new`], [`sse::Sse::try_new`],
+/// [`literal::Literal::try_new`]) so none of them can drift on how a
+/// fallible fill is built.
+pub(crate) fn try_filled_vec<T: Clone>(
+    n: usize,
+    value: T,
+) -> Result<Vec<T>, std::collections::TryReserveError> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n)?;
+    v.resize(n, value);
+    Ok(v)
+}
+
+/// Fallible counterpart to `data.to_vec()`: same bytes, but returns `Err`
+/// instead of aborting if the allocator cannot satisfy `data.len()`
+/// bytes. Shared by the filter undo buffers on the real decode path
+/// ([`filters::delta::try_decode`], [`filters::bcj::try_decode`]) that
+/// start from a copy of their input (#453).
+pub(crate) fn try_vec_from_slice(
+    data: &[u8],
+) -> Result<Vec<u8>, std::collections::TryReserveError> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(data.len())?;
+    v.extend_from_slice(data);
+    Ok(v)
 }
 
 /// Assembles a complete frame from `method` and its `payload`.
@@ -330,6 +367,75 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     }
 }
 
+/// Minimal write-buffering wrapper, standing in for [`std::io::BufWriter`]
+/// on [`decompress_to_writer`]'s real decode path: `BufWriter::new` itself
+/// allocates its buffer through an infallible path, which would abort the
+/// process under a real allocator failure instead of returning an `Err`
+/// (hard rule 2, `rust-craft` skill's allocation-discipline,
+/// `tests/torture.rs`, #453). [`codec::decode_to_writer`]'s streaming path
+/// writes one filtered byte at a time
+/// (`codec::StreamUndo::apply`), so wrapping `writer` unbuffered would turn
+/// each into its own `write_all` call; this preserves that batching while
+/// building its buffer through `try_reserve_exact`.
+struct TryBufWriter<'w, W: std::io::Write> {
+    inner: &'w mut W,
+    buf: Vec<u8>,
+}
+
+impl<'w, W: std::io::Write> TryBufWriter<'w, W> {
+    /// Matches [`std::io::BufWriter`]'s own default buffer size.
+    const CAPACITY: usize = 8 * 1024;
+
+    fn try_new(inner: &'w mut W) -> Result<Self, std::collections::TryReserveError> {
+        let mut buf = Vec::new();
+        buf.try_reserve_exact(Self::CAPACITY)?;
+        Ok(Self { inner, buf })
+    }
+
+    /// Writes out and clears any bytes still buffered, without flushing
+    /// `inner` itself (see [`std::io::Write::flush`] for that).
+    fn flush_buf(&mut self) -> std::io::Result<()> {
+        if !self.buf.is_empty() {
+            self.inner.write_all(&self.buf)?;
+            self.buf.clear();
+        }
+        Ok(())
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for TryBufWriter<'_, W> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if data.len() > Self::CAPACITY - self.buf.len() {
+            self.flush_buf()?;
+        }
+        if data.len() >= Self::CAPACITY {
+            return self.inner.write(data);
+        }
+        // The flush above guarantees at least `CAPACITY - self.buf.len()`
+        // room, and this arm is only reached when `data.len()` is at most
+        // that: never grows `buf` past the capacity reserved in `try_new`.
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.flush_buf()?;
+        self.inner.flush()
+    }
+}
+
+impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
+    /// Best-effort flush on drop, matching [`std::io::BufWriter`]'s own
+    /// `Drop` impl: a caller that returns through `?` before reaching an
+    /// explicit `flush()` call still gets whatever was buffered so far.
+    /// Errors are unobservable this late (no `Result` to return them
+    /// through) and so are ignored here exactly as `BufWriter` ignores
+    /// them.
+    fn drop(&mut self) {
+        let _ = self.flush_buf();
+    }
+}
+
 /// Like [`decompress_bounded`], but writes the decoded bytes to `writer`
 /// incrementally instead of collecting them into one returned `Vec<u8>`.
 /// Same frame-level checks, in the same order, so keep the two in sync if
@@ -357,8 +463,10 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
 ///
 /// An [`std::io::Error`] wrapping an [`Error`] (retrievable via
 /// [`std::io::Error::get_ref`] and a downcast) for anything
-/// [`decompress_bounded`] would itself return as an `Err`, or an
-/// unwrapped [`std::io::Error`] if `writer` itself fails.
+/// [`decompress_bounded`] would itself return as an `Err`, plus
+/// [`Error::OutOfMemory`] if the allocator cannot satisfy the write
+/// buffer's own allocation, or an unwrapped [`std::io::Error`] if `writer`
+/// itself fails.
 pub fn decompress_to_writer<W: std::io::Write>(
     input: &[u8],
     max_len: u32,
@@ -369,7 +477,8 @@ pub fn decompress_to_writer<W: std::io::Write>(
     let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
     let max_len = max_len.min(codec::MAX_DECODED_LEN);
     let (version, method, payload) = parse_header(input).map_err(std::io::Error::other)?;
-    let mut writer = std::io::BufWriter::new(writer);
+    let mut writer =
+        TryBufWriter::try_new(writer).map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
     match method {
         Method::Stored => {
             if let Some(bound) = stored_bound
@@ -532,7 +641,7 @@ mod tests {
         );
         assert_eq!(
             Error::OutOfMemory.to_string(),
-            "allocator could not satisfy the output buffer"
+            "allocator could not satisfy a decode allocation"
         );
     }
 

@@ -68,6 +68,26 @@ impl Model {
         }
     }
 
+    /// Fallible counterpart to [`Self::new`]: the same fresh table, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy
+    /// `alphabet_len` entries. [`crate::codec::decode`]'s real decode path
+    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`Self::new`] stays the panicking
+    /// constructor the encoder and every test use, where `alphabet_len` is
+    /// always one of this crate's own small fixed constants.
+    ///
+    /// # Panics
+    ///
+    /// Same as [`Self::new`]: `alphabet_len` zero is a caller bug, never
+    /// something adversarial input can trigger.
+    pub(crate) fn try_new(alphabet_len: usize) -> Result<Self, std::collections::TryReserveError> {
+        assert!(alphabet_len > 0, "Model alphabet must be non-empty");
+        Ok(Self {
+            freq: crate::try_filled_vec(alphabet_len, 1u32)?,
+            total: u32::try_from(alphabet_len).expect("alphabet_len fits u32"),
+        })
+    }
+
     fn update(&mut self, symbol: usize) {
         crate::rescale_bank(
             &mut self.freq,

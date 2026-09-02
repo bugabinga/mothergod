@@ -157,6 +157,26 @@ impl Models {
             slot: Model::new(lz::REP_SLOTS),
         }
     }
+
+    /// Fallible counterpart to [`Self::new`]: the same five fresh tables,
+    /// but returns `Err` instead of aborting if the allocator cannot
+    /// satisfy one of them. [`decode`] and [`decode_undoable_streaming`]
+    /// use this (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); every encode path keeps [`Self::new`],
+    /// where an allocator failure this small is already a fatal condition
+    /// for the whole process.
+    fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            literal: Literal::try_new()?,
+            flag: [
+                Model::try_new(FLAG_ALPHABET)?,
+                Model::try_new(FLAG_ALPHABET)?,
+            ],
+            length: Model::try_new(lz::LENGTH_BUCKETS)?,
+            offset: Model::try_new(lz::OFFSET_BUCKETS)?,
+            slot: Model::try_new(lz::REP_SLOTS)?,
+        })
+    }
 }
 
 /// Codes `value` (a match/rep length, or a match distance) as a
@@ -213,12 +233,22 @@ fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
 /// Inverse of [`apply_filter`]: reconstructs the original bytes from
 /// `data` (the filtered bytes [`decode`] just reassembled) and the
 /// `candidate` its payload named.
-fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Vec<u8> {
+///
+/// # Errors
+///
+/// Returns [`Error::OutOfMemory`] if the allocator cannot satisfy the
+/// undo buffer a non-`Identity` candidate needs (hard rule 2,
+/// `rust-craft` skill's allocation-discipline, `tests/torture.rs`, #453).
+fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Result<Vec<u8>, Error> {
     match candidate {
-        Candidate::Identity => data,
-        Candidate::Delta(stride) => filters::delta::decode(&data, stride),
-        Candidate::Bcj => filters::bcj::decode(&data),
-        Candidate::Transpose(columns) => filters::transpose::decode(&data, columns),
+        Candidate::Identity => Ok(data),
+        Candidate::Delta(stride) => {
+            filters::delta::try_decode(&data, stride).map_err(|_| Error::OutOfMemory)
+        }
+        Candidate::Bcj => filters::bcj::try_decode(&data).map_err(|_| Error::OutOfMemory),
+        Candidate::Transpose(columns) => {
+            filters::transpose::try_decode(&data, columns).map_err(|_| Error::OutOfMemory)
+        }
     }
 }
 
@@ -684,8 +714,10 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// [`Candidate::from_header_bytes`] recognizes. Returns
 /// [`Error::TooLarge`] if the declared length exceeds `max_len`, checked
 /// before any allocation or decode work.
-/// Returns [`Error::OutOfMemory`] if reserving `output`'s capacity to the
-/// declared length fails.
+/// Returns [`Error::OutOfMemory`] if the allocator cannot satisfy `output`'s
+/// capacity reservation, one of the model's fixed-size tables, or (for
+/// [`Candidate::Delta`]/[`Candidate::Bcj`]/[`Candidate::Transpose`]) the
+/// filter's undo buffer.
 /// Returns [`Error::Corrupt`] if a match token's distance exceeds
 /// [`lz::WINDOW`] (the real encoder's match finder never searches past it,
 /// `research/JOURNAL.md` M4's bounded-memory decode guarantee: a distance
@@ -732,7 +764,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     }
 
     let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::new();
+    let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
     let mut context = Context::default();
     let mut reps = RepCache::initial();
     // Reserved fallibly and exactly up front, not left to grow through
@@ -792,7 +824,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     if output.len() != declared_len {
         return Err(Error::Corrupt);
     }
-    Ok(undo_filter(candidate, output))
+    undo_filter(candidate, output)
 }
 
 /// Streaming counterpart to [`decode`], reached only through
@@ -839,20 +871,28 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             writer,
             &mut StreamUndo::Identity,
         ),
-        Candidate::Delta(stride) => decode_undoable_streaming(
-            filtered_payload,
-            version,
-            max_len,
-            writer,
-            &mut StreamUndo::Delta(filters::delta::Undo::new(stride)),
-        ),
-        Candidate::Bcj => decode_undoable_streaming(
-            filtered_payload,
-            version,
-            max_len,
-            writer,
-            &mut StreamUndo::Bcj(filters::bcj::Undo::new()),
-        ),
+        Candidate::Delta(stride) => {
+            let undo = filters::delta::Undo::try_new(stride)
+                .map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+            decode_undoable_streaming(
+                filtered_payload,
+                version,
+                max_len,
+                writer,
+                &mut StreamUndo::Delta(undo),
+            )
+        }
+        Candidate::Bcj => {
+            let undo = filters::bcj::Undo::try_new()
+                .map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+            decode_undoable_streaming(
+                filtered_payload,
+                version,
+                max_len,
+                writer,
+                &mut StreamUndo::Bcj(undo),
+            )
+        }
         Candidate::Transpose(_) => {
             let decoded = decode(payload, version, max_len).map_err(std::io::Error::other)?;
             writer.write_all(&decoded)
@@ -938,7 +978,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
     }
 
     let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::new();
+    let mut models = Models::try_new().map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
     let mut context = Context::default();
     let mut reps = RepCache::initial();
     let mut window = lz::Window::new();

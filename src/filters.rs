@@ -47,6 +47,24 @@ pub mod delta {
         out
     }
 
+    /// Fallible counterpart to [`decode`]: the same inverted bytes, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy a
+    /// copy of `data`. `crate::codec::decode`'s real decode path uses this
+    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
+    /// every test uses.
+    pub(crate) fn try_decode(
+        data: &[u8],
+        stride: NonZeroUsize,
+    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let stride = stride.get();
+        let mut out = crate::try_vec_from_slice(data)?;
+        for i in stride..out.len() {
+            out[i] = out[i].wrapping_add(out[i - stride]);
+        }
+        Ok(out)
+    }
+
     /// Streaming counterpart to [`decode`]: undoes the transform one
     /// filtered byte at a time instead of over a complete buffer, so a
     /// caller never needs the whole filtered stream resident to recover the
@@ -67,14 +85,22 @@ pub mod delta {
     }
 
     impl Undo {
-        /// An undo state ready to accept the first filtered byte.
-        pub(crate) fn new(stride: NonZeroUsize) -> Self {
+        /// An undo state ready to accept the first filtered byte. Returns
+        /// `Err` instead of aborting if the allocator cannot satisfy
+        /// `stride` bytes of history (hard rule 2, `rust-craft` skill's
+        /// allocation-discipline, `tests/torture.rs`, #453):
+        /// `crate::codec::decode_to_writer`'s real streaming decode path is
+        /// the only caller outside this module's own tests, and it is
+        /// reachable from untrusted input.
+        pub(crate) fn try_new(
+            stride: NonZeroUsize,
+        ) -> Result<Self, std::collections::TryReserveError> {
             let stride = stride.get();
-            Self {
+            Ok(Self {
                 stride,
-                history: vec![0u8; stride],
+                history: crate::try_filled_vec(stride, 0u8)?,
                 count: 0,
-            }
+            })
         }
 
         /// Undoes one more filtered byte, returning the raw byte [`decode`]
@@ -104,7 +130,7 @@ pub mod delta {
         /// against the batch [`decode`] this type shadows.
         fn undo_matches_decode(data: &[u8], stride: NonZeroUsize) {
             let encoded = encode(data, stride);
-            let mut undo = Undo::new(stride);
+            let mut undo = Undo::try_new(stride).unwrap();
             let streamed: Vec<u8> = encoded.iter().map(|&byte| undo.apply(byte)).collect();
             assert_eq!(streamed, decode(&encoded, stride));
             assert_eq!(streamed, data);
@@ -216,7 +242,7 @@ pub mod delta {
             ) {
                 let stride = NonZeroUsize::new(stride).unwrap();
                 let encoded = encode(&data, stride);
-                let mut undo = Undo::new(stride);
+                let mut undo = Undo::try_new(stride).unwrap();
                 let streamed: Vec<u8> = encoded.iter().map(|&byte| undo.apply(byte)).collect();
                 prop_assert_eq!(&streamed, &data);
                 prop_assert_eq!(streamed, decode(&encoded, stride));
@@ -276,6 +302,31 @@ pub mod transpose {
             }
         }
         out
+    }
+
+    /// Fallible counterpart to [`decode`]: the same reassembled bytes, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy an
+    /// `n`-byte output buffer. `crate::codec::decode`'s real decode path
+    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
+    /// every test uses.
+    pub(crate) fn try_decode(
+        data: &[u8],
+        columns: NonZeroUsize,
+    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let columns = columns.get();
+        let n = data.len();
+        let mut out = crate::try_filled_vec(n, 0u8)?;
+        let mut pos = 0usize;
+        for start in 0..columns {
+            let mut i = start;
+            while i < n {
+                out[i] = data[pos];
+                pos += 1;
+                i += columns;
+            }
+        }
+        Ok(out)
     }
 
     #[cfg(test)]
@@ -383,6 +434,26 @@ pub mod bcj {
     /// wrote them at.
     fn rewrite(data: &[u8], rewrite_operand: impl Fn(u32, u32) -> u32) -> Vec<u8> {
         let mut out = data.to_vec();
+        rewrite_in_place(&mut out, rewrite_operand);
+        out
+    }
+
+    /// Fallible counterpart to [`rewrite`]: the same in-place rewrite, but
+    /// starting from a copy of `data` that returns `Err` instead of
+    /// aborting if the allocator cannot satisfy it.
+    fn try_rewrite(
+        data: &[u8],
+        rewrite_operand: impl Fn(u32, u32) -> u32,
+    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let mut out = crate::try_vec_from_slice(data)?;
+        rewrite_in_place(&mut out, rewrite_operand);
+        Ok(out)
+    }
+
+    /// Shared scan [`rewrite`]/[`try_rewrite`] both drive over an
+    /// already-allocated `out`, so the two only ever differ in how `out`
+    /// was built, never in what happens to it.
+    fn rewrite_in_place(out: &mut [u8], rewrite_operand: impl Fn(u32, u32) -> u32) {
         let n = out.len();
         let mut i = 0usize;
         while i + INSTRUCTION_LEN <= n {
@@ -400,7 +471,6 @@ pub mod bcj {
                 i += 1;
             }
         }
-        out
     }
 
     /// Rewrites each `0xE8`/`0xE9` opcode's operand from relative to
@@ -420,6 +490,16 @@ pub mod bcj {
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
         rewrite(data, u32::wrapping_sub)
+    }
+
+    /// Fallible counterpart to [`decode`]: the same rewritten bytes, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy a
+    /// copy of `data`. `crate::codec::decode`'s real decode path uses this
+    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
+    /// every test uses.
+    pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        try_rewrite(data, u32::wrapping_sub)
     }
 
     /// Bytes [`Undo::apply`]/[`Undo::finish`] resolved from stream data so
@@ -480,11 +560,20 @@ pub mod bcj {
     }
 
     impl Undo {
-        pub(crate) fn new() -> Self {
-            Self {
-                pending: Vec::with_capacity(INSTRUCTION_LEN),
+        /// A fresh undo state, ready to accept the first filtered byte.
+        /// Returns `Err` instead of aborting if the allocator cannot
+        /// satisfy [`INSTRUCTION_LEN`] bytes of pending-buffer capacity
+        /// (hard rule 2, `rust-craft` skill's allocation-discipline,
+        /// `tests/torture.rs`, #453): `crate::codec::decode_to_writer`'s
+        /// real streaming decode path is the only caller outside this
+        /// module's own tests, and it is reachable from untrusted input.
+        pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+            let mut pending = Vec::new();
+            pending.try_reserve_exact(INSTRUCTION_LEN)?;
+            Ok(Self {
+                pending,
                 position: 0,
-            }
+            })
         }
 
         /// Feeds one more filtered byte, in stream order, returning any
@@ -548,7 +637,7 @@ pub mod bcj {
         /// differentially against the batch [`decode`] this type shadows.
         fn undo_matches_decode(data: &[u8]) {
             let encoded = encode(data);
-            let mut undo = Undo::new();
+            let mut undo = Undo::try_new().unwrap();
             let mut streamed = Vec::with_capacity(data.len());
             for &byte in &encoded {
                 streamed.extend_from_slice(undo.apply(byte).as_slice());
@@ -699,7 +788,7 @@ pub mod bcj {
             #[test]
             fn undo_matches_batch_decode(data in proptest::collection::vec(byte_with_opcodes(), 0..256)) {
                 let encoded = encode(&data);
-                let mut undo = Undo::new();
+                let mut undo = Undo::try_new().unwrap();
                 let mut streamed = Vec::with_capacity(data.len());
                 for &byte in &encoded {
                     streamed.extend_from_slice(undo.apply(byte).as_slice());
