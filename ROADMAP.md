@@ -187,17 +187,18 @@ mechanisms in the issues.
 
 - [ ] Trust ledger + status page TRUST panel (#449). Lands first; the
       other items append to it.
-- [ ] Fuzzing that compounds: persistent corpus, nightly 10-minute
+- [x] Fuzzing that compounds: persistent corpus, nightly 10-minute
       runs (#450).
 - [ ] `frame_gen` valid-frame generator + structure-aware fuzzing
       (#451).
 - [ ] proptest: shrinking properties + decode-API differential
       agreement (#452).
-- [ ] Allocation torture sweep (#453).
+- [ ] Allocation torture sweep (#453). Output-buffer class fixed in
+      #467; model tables and filter undo buffers still abort.
 - [ ] Weekly region coverage, published never gated (#454).
 - [ ] Monthly whole-crate mutation score (#455).
 - [ ] Miri lane in monster (#456).
-- [ ] test-craft skill for the agents (#457, agent-system, BDFL queue).
+- [x] test-craft skill for the agents (#457, agent-system, BDFL queue).
 - Exploratory, researcher's option: Kani proof harnesses on the coder's
   renormalization/update math; adopt only if it proves an invariant
   fuzzing cannot, journal rules apply.
