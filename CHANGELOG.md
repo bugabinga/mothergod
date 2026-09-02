@@ -8,6 +8,8 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- The status page's trust panel said "1 ledger entries"; the count now
+  picks singular or plural (follow-up to #465).
 - `README.md` and `site/index.html` restated `FORMAT_VERSION` and the
   published aggregate bits/byte numbers instead of computing them, and had
   gone stale against their sources twice in seven days with nothing
