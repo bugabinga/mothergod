@@ -111,7 +111,7 @@ weekly monster matrix runs them on every runtime target.
   data biased toward its `0xE8`/`0xE9` opcodes, since uniform bytes hit
   either on only 2/256 draws and would rarely exercise the rewrite branch
   (`test-craft`'s "generate the distribution the codec targets"). The
-  LZ/model/coder round-trip loops are still hand-rolled.
+  model/coder round-trip loops are still hand-rolled.
 - Decode-API differential agreement (`decompress`, `decompress_bounded`,
   `decompress_to_writer` must all agree on every frame `compress` can
   produce) is a `proptest` property in `src/lib.rs` (`#452`), swept over a
@@ -120,9 +120,19 @@ weekly monster matrix runs them on every runtime target.
   quarter of the filter properties' default 256): `compress` runs the
   full optimal-parse LZ encoder, far heavier per case than a filter
   round-trip.
-- Still planned (#452): port the remaining seeded round-trip loops (LZ,
-  model, coder) to proptest strategies over the corpus policy's generator
-  classes.
+- `lz::parse_greedy`/`parse_optimal` each carry a `replay(parse(x)) == x`
+  proptest property (`src/lz.rs`, `#452`), swept over the same structural
+  classes the module's hand-written `roundtrip_*` examples anchor
+  individually: unstructured noise, a short pattern repeated (forces a
+  Match/Rep token), a long single-byte run (the overlapping-distance copy
+  path), and a low-period pattern (exercises the rep cache). At default
+  case count (256): `parse_optimal`'s three-round DP is heavier per case
+  than a filter round-trip, so data length stays under a few hundred
+  bytes rather than trimming cases. Still planned (#452): port the
+  model/coder round-trip loops to proptest strategies over the corpus
+  policy's generator classes, currently only in the `bench` crate (`bench`
+  depends on `mothergod`, so pulling them in as a root dev-dependency
+  would be a cycle — a bigger, separate design question).
 
 ## 2. Adversarial decode suite (Rust-input PRs)
 
