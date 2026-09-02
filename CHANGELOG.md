@@ -144,6 +144,15 @@ All notable changes to this project are documented here. Format follows
   Verified the strategy shrinks: a planted bug in `decompress_bounded`'s
   `Method::Stored` arm reduced to a 5-byte minimal counterexample. The
   LZ/model/coder round-trip loops remain, per the bullet above.
+- `lz::parse_greedy`/`parse_optimal` each carry a `replay(parse(x)) == x`
+  proptest property (issue #452), swept over the structural classes
+  `src/lz.rs`'s hand-written `roundtrip_*` examples anchor individually
+  (noise, a repeated pattern, a long single-byte run, a low-period
+  pattern), rather than porting bench's corpus-policy generator classes:
+  `bench` depends on `mothergod`, so pulling those in as a root
+  dev-dependency would be a cycle, a bigger design question left open.
+  Verified the strategy shrinks: a planted `copy_match` bug reduced to a
+  minimal 3-byte counterexample. The model/coder round-trip loops remain.
 
 - `fuzz/src/frame_gen.rs`: a deterministic generator of valid frames
   (issue #451), built from inputs already proven in `src/filters.rs`'s
