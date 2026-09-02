@@ -13,6 +13,12 @@ libfuzzer-sys = "0.4"
 [dependencies.mothergod]
 path = ".."
 
+[lib]
+name = "mothergod_fuzz_support"
+path = "src/lib.rs"
+doc = false
+bench = false
+
 [[bin]]
 name = "decode_arbitrary"
 path = "fuzz_targets/decode_arbitrary.rs"
@@ -23,6 +29,13 @@ bench = false
 [[bin]]
 name = "roundtrip"
 path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_mutate"
+path = "fuzz_targets/frame_mutate.rs"
 test = false
 doc = false
 bench = false
