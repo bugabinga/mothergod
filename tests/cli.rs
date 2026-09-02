@@ -3,6 +3,10 @@
 //! stdin/stdout, the only way to exercise argument parsing and I/O wiring
 //! `mothergod`'s library tests never touch.
 
+// Not under Miri: every test here drives the compiled binary as a
+// subprocess, and Miri cannot spawn one (issue #456).
+#![cfg(not(miri))]
+
 use std::io::Write as _;
 use std::process::{Command, Stdio};
 

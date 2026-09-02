@@ -2,7 +2,7 @@ name: rust-ci
 description: Install one declared Rust toolchain and run a repository quality-check set
 inputs:
   toolchain:
-    description: stable, or msrv to read package.rust-version from Cargo.toml
+    description: stable, nightly, or msrv to read package.rust-version from Cargo.toml
     required: false
     default: stable
   target:
@@ -39,6 +39,9 @@ runs:
         case "$REQUESTED_TOOLCHAIN" in
           stable)
             version=stable
+            ;;
+          nightly)
+            version=nightly
             ;;
           msrv)
             declarations="$(

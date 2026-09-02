@@ -215,7 +215,11 @@ pub mod delta {
         }
     }
 
+    // Not under Miri: interpretation multiplies the storm's case count
+    // 10-100x, and the deterministic example tests above already walk the
+    // same paths for UB observation (issue #456).
     #[cfg(test)]
+    #[cfg(not(miri))]
     mod proptests {
         use super::*;
         use proptest::prelude::*;
@@ -384,7 +388,11 @@ pub mod transpose {
         }
     }
 
+    // Not under Miri: interpretation multiplies the storm's case count
+    // 10-100x, and the deterministic example tests above already walk the
+    // same paths for UB observation (issue #456).
     #[cfg(test)]
+    #[cfg(not(miri))]
     mod proptests {
         use super::*;
         use proptest::prelude::*;
@@ -754,7 +762,11 @@ pub mod bcj {
         }
     }
 
+    // Not under Miri: interpretation multiplies the storm's case count
+    // 10-100x, and the deterministic example tests above already walk the
+    // same paths for UB observation (issue #456).
     #[cfg(test)]
+    #[cfg(not(miri))]
     mod proptests {
         use super::*;
         use proptest::prelude::*;

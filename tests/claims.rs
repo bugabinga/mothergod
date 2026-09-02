@@ -9,6 +9,11 @@
 //! report — and fails naming the file, the claimed value, and the true
 //! value.
 
+// Not under Miri: prose-vs-source string comparison, no codec code runs
+// here for Miri to observe, so the lane spends its budget elsewhere
+// (issue #456).
+#![cfg(not(miri))]
+
 use std::path::Path;
 
 fn read(relative: &str) -> String {
