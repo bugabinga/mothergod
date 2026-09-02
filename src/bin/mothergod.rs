@@ -89,13 +89,7 @@ fn run(
     transform: impl FnOnce(&[u8]) -> Result<Vec<u8>, String>,
     derive_output: impl FnOnce(&Path) -> Result<PathBuf, String>,
 ) -> ExitCode {
-    let input = match path {
-        None => read_stdin(),
-        Some(path) => {
-            fs::read(path).map_err(|err| format!("reading {}: {err}", Path::new(path).display()))
-        }
-    };
-    let input = match input {
+    let input = match read_input(path) {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
@@ -125,13 +119,7 @@ fn run(
 /// `Vec<u8>` for its caller to write, which is exactly the buffering this
 /// function exists to avoid.
 fn run_decompress(path: Option<&OsString>) -> ExitCode {
-    let input = match path {
-        None => read_stdin(),
-        Some(path) => {
-            fs::read(path).map_err(|err| format!("reading {}: {err}", Path::new(path).display()))
-        }
-    };
-    let input = match input {
+    let input = match read_input(path) {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
@@ -197,6 +185,17 @@ fn strip_suffix(path: &Path) -> Result<PathBuf, String> {
     name.strip_suffix(SUFFIX)
         .map(PathBuf::from)
         .ok_or_else(|| format!("{}: expected a {SUFFIX} file", path.display()))
+}
+
+/// Reads stdin, or `path` if given. Shared by both subcommands' entry
+/// points, which otherwise differ only in how they use the result.
+fn read_input(path: Option<&OsString>) -> Result<Vec<u8>, String> {
+    match path {
+        None => read_stdin(),
+        Some(path) => {
+            fs::read(path).map_err(|err| format!("reading {}: {err}", Path::new(path).display()))
+        }
+    }
 }
 
 fn read_stdin() -> Result<Vec<u8>, String> {
