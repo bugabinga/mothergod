@@ -19,11 +19,22 @@ blocking PRs.
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
 
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
-new crashers, mutation score, region coverage, and line counts,
-rendered on the status page and judged in the weekly digest. Ledger
-numbers are maps, never gates; the only merge-blocking checks are
-behavioral. Items carrying issue numbers are planned; the layers below
-describe what runs today.
+new crashers, mutation score, and region coverage, rendered on the
+status page and judged in the weekly digest. Mechanism: each scheduled
+test workflow is meant to upload its own small `entry.json` artifact
+(`trust-<role>-<run-id>-<attempt>`), never a committed file — the same
+stateless-artifact pipeline `run-telemetry.py` already uses for run
+economics, and for the same reason (a tracked file collects
+concurrent-append conflicts, PR #34). `.github/scripts/trust-telemetry.py`
+aggregates them into `site/trust-data.json` at deploy time. Landed:
+the aggregator script. Not yet landed: any workflow actually uploading
+an entry, the `deploy-site.yml` step that runs the aggregator, and the
+status-page panel — pushing a `.github/workflows/**` diff needs the
+admin PAT (issue #24), which only the BDFL holds, so wiring the first
+writer (`fuzz-check`) is agent-system-realm follow-up work, tracked in
+#449. Ledger numbers are maps, never gates; the only merge-blocking
+checks are behavioral. Items carrying issue numbers are planned; the
+layers below describe what runs today.
 
 ## Current automated cadence
 
@@ -115,7 +126,8 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   (`decompress(compress(x)) == x` for arbitrary `x`).
 - `fuzz-check` runs both on a schedule (nightly toolchain, 30 seconds per
   target, Linux x64), not per-PR (`JOURNAL` S2-A53). New crashers land in
-  `tests/adversarial/` as regression seeds.
+  `tests/adversarial/` as regression seeds. Wiring it to also upload a
+  trust-ledger entry (#449, above) is follow-up work.
 - Still planned: an explicit allocation-limiter target beyond
   `MAX_DECODED_LEN`'s bound, and cross-OS fuzz coverage in `monster`.
 - Planned (#450): corpus persistence across runs, ~10-minute nightly
