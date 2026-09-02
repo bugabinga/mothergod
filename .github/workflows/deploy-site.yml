@@ -9,6 +9,7 @@ on:
       - "site/**"
       - ".github/workflows/deploy-site.yml"
       - ".github/scripts/run-telemetry.py"
+      - ".github/scripts/trust-telemetry.py"
       # /status-data.json sources (issue #95): a merge that moves one
       # redeploys the page the same hour; the daily cron catches the rest
       # (src/ line counts are deliberately not a trigger, codec merges are
@@ -25,7 +26,7 @@ on:
 
 permissions:
   contents: read
-  actions: read # run-telemetry.py lists and downloads audit artifacts
+  actions: read # run-telemetry.py and trust-telemetry.py list and download run artifacts
 
 concurrency:
   group: deploy-site
@@ -59,6 +60,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/run-telemetry.py site/agent-metrics.json 7
+      # Trust-ledger data for /status.html "Is it tested?" (#449,
+      # ADR-0043): same stateless-artifact pipeline and failure contract
+      # as run-telemetry.py above (self-diagnosing JSON on its own
+      # failures; continue-on-error covers a crash before that).
+      - continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/trust-telemetry.py site/trust-data.json
       - run: npx wrangler@4 pages deploy site --project-name=mothergod-site --branch=main --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -50,12 +50,29 @@ jobs:
       # cache restores only the binary, not ~/.cargo/.crates.toml, so an
       # unguarded install would rebuild from source on every hit.
       - run: test -x ~/.cargo/bin/cargo-fuzz || cargo install cargo-fuzz --version 0.13.2 --locked
+      # Built outside the timed steps below so the ledger's fuzz_cpu_s
+      # measures fuzzing, not compilation.
+      - name: build fuzz targets
+        working-directory: fuzz
+        run: cargo fuzz build
+      # Each fuzz step times itself and re-raises its own exit code, so a
+      # crasher that ends the run early still reports its true elapsed
+      # time; the crash case is the one the ledger most wants a real
+      # number for (#449).
       - name: fuzz decode_arbitrary
         working-directory: fuzz
-        run: cargo fuzz run decode_arbitrary -- -max_total_time=30
+        run: |
+          rc=0; t0=$SECONDS
+          cargo fuzz run decode_arbitrary -- -max_total_time=30 || rc=$?
+          echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
+          exit $rc
       - name: fuzz roundtrip
         working-directory: fuzz
-        run: cargo fuzz run roundtrip -- -max_total_time=30
+        run: |
+          rc=0; t0=$SECONDS
+          cargo fuzz run roundtrip -- -max_total_time=30 || rc=$?
+          echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
+          exit $rc
       - name: upload crashers
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -63,3 +80,22 @@ jobs:
           name: fuzz-artifacts
           path: fuzz/artifacts/
           if-no-files-found: ignore
+      # The trust-ledger entry (#449, ADR-0043): one small JSON artifact
+      # per run, aggregated by .github/scripts/trust-telemetry.py at site
+      # deploy time. if: always() because the crasher-found run is the one
+      # whose entry matters most. Fields this workflow does not measure
+      # stay null; #455 (mutation) and #454 (coverage) own theirs.
+      - name: build trust-ledger entry
+        if: always()
+        run: |
+          crashers=$(find fuzz/artifacts -type f 2>/dev/null | wc -l)
+          seconds=$(cat fuzz-seconds.txt 2>/dev/null | awk '{s+=$1} END {print s+0}')
+          printf '{"date":"%s","run_id":"%s","role":"fuzz","fuzz_cpu_s":%s,"crashers_new":%s,"mutation_score":null,"coverage_region_pct":null}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_RUN_ID" "$seconds" "$crashers" > entry.json
+      - name: upload trust-ledger entry
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: trust-fuzz-${{ github.run_id }}-${{ github.run_attempt }}
+          path: entry.json
+          retention-days: 90

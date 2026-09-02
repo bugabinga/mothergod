@@ -20,6 +20,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- The status page answers "Is it tested?" (issues #449, #462): a trust
+  ledger panel on mothergod.dev/status.html showing cumulative fuzz
+  CPU-hours and crashers found over the trailing 90-day window, written
+  by the scheduled `fuzz-check` runs themselves and aggregated at deploy
+  time. Mutation score and region coverage report "not yet measured"
+  until their sweeps land (#455, #454).
 - `proptest` as the crate's first dev-dependency (issue #452), trimmed to
   `default-features = false, features = ["std"]`. `delta` and `transpose`
   now each carry a `roundtrips` property (`decode(encode(x, param), param)
