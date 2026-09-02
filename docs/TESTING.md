@@ -133,11 +133,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   graceful `Err`. `MOTHERGOD_TORTURE=1` opts in to the real sweep. Landed:
   `codec::decode`'s `output` buffer (`Error::OutOfMemory`), the one
   allocation whose size is attacker-controlled rather than fixed by the
-  model tables. Still infallible, and still found by the sweep:
-  `Models::new`'s fixed-size tables and the `Delta`/`Bcj`/`Transpose`
-  filters' undo buffers — separable follow-up on #453, which stays open.
-  Not yet on a schedule (needs a workflow-file change); run manually until
-  it is.
+  model tables. Still infallible: `Models::new`'s fixed-size tables and the
+  `Delta`/`Transpose` filters' undo buffers, both found by the sweep, and
+  `Bcj`'s undo buffer, the same shape by code inspection but not swept by
+  any current fixture (none selects the `Bcj` candidate) — separable
+  follow-up on #453, which stays open. Not yet on a schedule (needs a
+  workflow-file change); run manually until it is.
 
 ## 3. Fuzzing (scheduled: `fuzz-check`, weekly)
 
