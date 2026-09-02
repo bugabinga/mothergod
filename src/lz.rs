@@ -251,12 +251,18 @@ pub(crate) struct Window {
 
 impl Window {
     /// An empty window: `WINDOW` bytes of backing storage, nothing written
-    /// yet.
-    pub(crate) fn new() -> Self {
-        Self {
-            buf: vec![0u8; WINDOW].into_boxed_slice(),
+    /// yet. Fallible (hard rule 2, `rust-craft` skill's
+    /// allocation-discipline): [`crate::codec`]'s streaming decode path,
+    /// this type's only production caller, needs a real allocator failure
+    /// on `WINDOW`'s fixed 1 MiB backing store to return `Err` instead of
+    /// aborting the process (`tests/torture.rs`, issue #479 — this
+    /// allocation was the one left on that path once the error-wrapping
+    /// half of #479 was fixed).
+    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            buf: crate::try_filled_vec(WINDOW, 0u8)?.into_boxed_slice(),
             written: 0,
-        }
+        })
     }
 
     /// Total bytes pushed so far, the streaming decoder's `output.len()`
@@ -294,7 +300,7 @@ mod window_tests {
 
     #[test]
     fn push_then_get_reads_back_recent_bytes() {
-        let mut window = Window::new();
+        let mut window = Window::try_new().unwrap();
         for byte in 0..10u8 {
             window.push(byte);
         }
@@ -311,7 +317,7 @@ mod window_tests {
         // Same shape as `copy_checked`'s own doc comment: a distance
         // shorter than the run length must reproduce a repeating pattern,
         // reading bytes this same loop just wrote.
-        let mut window = Window::new();
+        let mut window = Window::try_new().unwrap();
         for byte in *b"ab" {
             window.push(byte);
         }
@@ -327,7 +333,7 @@ mod window_tests {
 
     #[test]
     fn wraps_past_capacity_without_disturbing_still_in_range_bytes() {
-        let mut window = Window::new();
+        let mut window = Window::try_new().unwrap();
         for i in 0..(WINDOW + 5) {
             // Pack i into a byte so wrap-around is visible in the pattern.
             window.push(u8::try_from(i % 256).unwrap());
