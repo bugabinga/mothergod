@@ -6,7 +6,7 @@
     <title>mothergod — general-purpose lossless compression</title>
     <meta
       name="description"
-      content="A general-purpose lossless compressor in Rust, built in public by an autonomous AI development team. Beats zstd -19 on Canterbury, trails it on Silesia. Pre-alpha."
+      content="A general-purpose lossless compressor in Rust, built for compression ratio rather than speed. Beats zstd -19 and xz -9e on Canterbury, trails both on Silesia. Pre-alpha, built in public by an autonomous AI development team."
     >
     <link rel="icon" href="/logo.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -65,6 +65,8 @@
     section { display: flex; flex-direction: column; gap: 1rem; }
     p { color: var(--muted); }
     p strong { color: var(--starlight); font-weight: 500; }
+    /* A command and its flag are one token to the reader: never break them. */
+    code { white-space: nowrap; }
     a { color: var(--gold); }
     a:hover, a:focus-visible { color: var(--gold-deep); }
 
@@ -110,8 +112,9 @@
         >
         <h1>mother<span style="color: var(--gold)">god</span></h1>
         <p class="tagline">
-          General-purpose lossless compression, developed in public by an
-          autonomous AI development team.
+          A general-purpose lossless compressor in Rust, built for compression
+          ratio rather than speed, and meant to be judged on bits per byte
+          against <code>zstd -19</code> and <code>xz -9e</code>.
         </p>
       </header>
 
@@ -134,19 +137,14 @@
       <section>
         <h2>What this is</h2>
         <p>
-          mothergod is two experiments in one repository. <strong>A
-            compressor:</strong> a context-mixing LZ hybrid in Rust, designed
-          from first principles. Every design decision traces to a recorded
-          experiment in the <a
+          A <strong>context-mixing LZ hybrid</strong>: a filter bank feeds an
+          optimal-parse LZ with in-DP repeat offsets, which feeds an adaptive
+          arithmetic coder with gradient-mixed experts. Ratio came first and
+          speed has not been worked on yet, so judge it on bits per byte and
+          read the throughput columns as a warning. Every design decision traces
+          to a recorded experiment in the <a
             href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md"
-          >research journal</a>. <strong>A development team:</strong> triage,
-          implementation, adversarial code review, research, and releases are
-          done by Claude agents running on GitHub Actions, slowly, in public,
-          like a real team would. A human operator holds the veto and the keys:
-          see how it works in
-          <a
-            href="https://github.com/bugabinga/mothergod/blob/main/agents/GOVERNANCE.md"
-          >agents/GOVERNANCE.md</a>.
+          >research journal</a>, rejections included.
         </p>
       </section>
 
@@ -156,7 +154,7 @@
           Aggregate bits per byte on the two named corpora, lower is better.
           Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
           both are pinned by URL and SHA-256, fetched at measurement time and
-          never committed. Measured 2026-08-30 against <code>gzip 1.12</code>,
+          never committed. Measured 2026-09-01 against <code>gzip 1.12</code>,
           <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
           flags in the header row.
         </p>
@@ -211,6 +209,22 @@
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/silesia.md"
           ><code>silesia.md</code></a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Who builds it</h2>
+        <p>
+          Day-to-day development is done by Claude agents running on GitHub
+          Actions: triage, implementation, adversarial code review, research,
+          releases. Slowly, in public, like a real team would. A human operator
+          holds the veto and the keys. That is the second experiment in this
+          repository, and the table above is the first one's report card. How it
+          works:
+          <a
+            href="https://github.com/bugabinga/mothergod/blob/main/agents/GOVERNANCE.md"
+          >agents/GOVERNANCE.md</a>, and the seats are listed on the
+          <a href="/agents.html">agents page</a>.
         </p>
       </section>
 
