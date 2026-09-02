@@ -333,7 +333,8 @@
         <div class="stat"><span class="n">${escapeHtml(n)}</span><span class="label">${escapeHtml(label)}</span></div>
       `).join('');
       document.getElementById('trust-asof').textContent =
-        `${data.count} ledger entries in the window, aggregated ${data.generated_at}.`;
+        `${data.count} ledger ${data.count === 1 ? 'entry' : 'entries'} ` +
+        `in the window, aggregated ${data.generated_at}.`;
     }
 
     function escapeHtml(s) {
