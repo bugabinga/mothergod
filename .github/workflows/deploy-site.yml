@@ -26,7 +26,7 @@ on:
 
 permissions:
   contents: read
-  actions: read # run-telemetry.py lists and downloads audit artifacts
+  actions: read # run-telemetry.py and trust-telemetry.py list and download run artifacts
 
 concurrency:
   group: deploy-site
