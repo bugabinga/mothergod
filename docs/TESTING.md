@@ -102,12 +102,15 @@ weekly monster matrix runs them on every runtime target.
   own invariants — especially the ones the journal says were once implicit
   (rep-symbol/offset-bucket disjointness, stored floor).
 - Every filter ships an exact-invertibility test (`unfilt(filt(x)) == x`)
-  on data it targets AND data it doesn't. `delta` and `transpose` have
-  this as a `proptest` property (`#452`), the crate's first dev-dependency,
-  swept over arbitrary data and stride/column count with automatic
-  shrinking; the hand-written examples stay as named anchors per the
-  escalation ladder. `bcj`'s invertibility and the LZ/model/coder round-trip
-  loops are still hand-rolled.
+  on data it targets AND data it doesn't. `delta`, `transpose`, and `bcj`
+  have this as a `proptest` property (`#452`), the crate's first
+  dev-dependency, swept with automatic shrinking; the hand-written
+  examples stay as named anchors per the escalation ladder. `delta` and
+  `transpose` sweep arbitrary data and stride/column count; `bcj` sweeps
+  data biased toward its `0xE8`/`0xE9` opcodes, since uniform bytes hit
+  either on only 2/256 draws and would rarely exercise the rewrite branch
+  (`test-craft`'s "generate the distribution the codec targets"). The
+  LZ/model/coder round-trip loops are still hand-rolled.
 - Still planned (#452): port the remaining seeded round-trip loops (LZ,
   model, coder) to proptest strategies over the corpus policy's generator
   classes, plus differential agreement across the three decode APIs
