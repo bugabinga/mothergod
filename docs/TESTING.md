@@ -14,7 +14,7 @@ blocking PRs.
 |---|---|---|---|
 | Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
 | Advisory | every PR | no, annotates | `mutants-check` (diff-scoped) |
-| Nightly | schedule | no, alarmed | fuzz with persistent corpus (#450, #451) |
+| Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451) |
 | Weekly | schedule | no, alarmed | monster matrix, large property profile (#452), coverage (#454), Miri (#456) |
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
 
@@ -48,11 +48,12 @@ stage of x's quality gate. PRs touching no gate input receive successful
 skips through the path filter. Those five names are the repository ruleset
 contract.
 
-The advisory `fuzz-check` workflow runs Sundays at 06:13 UTC and on
-manual dispatch: both `fuzz/` targets, 30 seconds each, Linux x64 only
-(layer 3). A found crasher fails the job, uploads `fuzz/artifacts/`,
-and wakes the fixer through the alarm (ADR-0036). Every run, crash or
-clean, also uploads its trust-ledger entry (#449).
+The advisory `fuzz-check` workflow runs nightly at 02:13 UTC and on
+manual dispatch: both `fuzz/` targets, 10 minutes each, Linux x64 only,
+resuming from a corpus persisted across runs and minimized with `cmin`
+(layer 3, #450). A found crasher fails the job, uploads
+`fuzz/artifacts/`, and wakes the fixer through the alarm (ADR-0036).
+Every run, crash or clean, also uploads its trust-ledger entry (#449).
 
 The advisory `mutants-check` workflow runs on pull requests that touch
 `src/` or the crate's build inputs, mutating only the changed lines
@@ -143,23 +144,23 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   follow-up on #453, which stays open. Not yet on a schedule (needs a
   workflow-file change); run manually until it is.
 
-## 3. Fuzzing (scheduled: `fuzz-check`, weekly)
+## 3. Fuzzing (scheduled: `fuzz-check`, nightly)
 
 - `cargo-fuzz` targets in `fuzz/` (`JOURNAL` S2-A25): `decode_arbitrary`
   (decode of arbitrary bytes must not panic) and `roundtrip`
   (`decompress(compress(x)) == x` for arbitrary `x`).
-- `fuzz-check` runs both on a schedule (nightly toolchain, 30 seconds per
-  target, Linux x64), not per-PR (`JOURNAL` S2-A53). New crashers land in
-  `tests/adversarial/` as regression seeds. Every run, crash or clean,
-  uploads a trust-ledger entry (#449, above): fuzz seconds and new-crasher
-  count, timed around the run itself so a crasher's early exit still
-  reports true elapsed time.
+- `fuzz-check` runs both nightly (nightly toolchain, 10 minutes per
+  target, Linux x64), not per-PR (`JOURNAL` S2-A53). The corpus persists
+  across runs through the actions cache and is `cmin`-minimized after
+  each clean run, so coverage compounds instead of restarting cold
+  (#450). New crashers land in `tests/adversarial/` as regression seeds.
+  Every run, crash or clean, uploads a trust-ledger entry (#449, above):
+  fuzz seconds and new-crasher count, timed around the run itself so a
+  crasher's early exit still reports true elapsed time.
 - Still planned: an explicit allocation-limiter target beyond
   `MAX_DECODED_LEN`'s bound, and cross-OS fuzz coverage in `monster`.
-- Planned (#450): corpus persistence across runs, ~10-minute nightly
-  runs, `cmin` hygiene, fuzz-hours to the trust ledger. Planned
-  (#451): a valid-frame generator (zstd decodecorpus analog) seeding
-  the corpus plus a structure-aware `Arbitrary` target.
+- Planned (#451): a valid-frame generator (zstd decodecorpus analog)
+  seeding the corpus plus a structure-aware `Arbitrary` target.
 
 ## 4. Mutation testing (`mutants-check`, per PR)
 
