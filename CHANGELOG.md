@@ -6,7 +6,27 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The first screen of `README.md` and `site/index.html` now leads with what
+  mothergod compresses and how it asks to be judged, instead of with who
+  builds it (issue #416). Order is category and axis, then the evidence
+  state, then the agent team, which moves into its own "Who builds it"
+  section rather than being item 2 of a "two experiments" list. The agent
+  story is demoted, not cut.
+
 ### Fixed
+
+- `README.md` and `site/index.html` both dated the published aggregate
+  bits/byte numbers "Measured 2026-08-30". The reports that produce those
+  numbers were regenerated on 2026-09-01 (`docs/benchmarks/canterbury.md`
+  and `silesia.md`, "As of" line, commit `2f86863`). The values did not
+  change, the date did. `tests/claims.rs` guards the restated ratios and
+  `FORMAT_VERSION` but not the restated measurement date, so nothing
+  caught it.
+- A command and its flag could break across lines on `site/index.html`
+  at narrow widths, splitting `xz -9e` after `xz` at 375 px. Inline
+  `<code>` no longer wraps.
 
 - `codec::decode`'s output buffer grew through `Vec::push`'s infallible
   reallocation, so a real allocator failure partway through decoding a

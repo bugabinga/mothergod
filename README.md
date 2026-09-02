@@ -7,30 +7,20 @@
 [![ci](https://github.com/bugabinga/mothergod/actions/workflows/ci.yml/badge.svg)](https://github.com/bugabinga/mothergod/actions/workflows/ci.yml)
 [mothergod.dev](https://mothergod.dev)
 
-**General-purpose lossless compression, developed by an autonomous AI dev
-team.**
-
-mothergod is two experiments in one repository:
-
-1. **A compressor.** A context-mixing LZ hybrid in Rust — filter bank →
-   optimal-parse LZ with in-DP repeat offsets → adaptive arithmetic coding
-   with gradient-mixed experts. Its design was derived from first principles
-   in a single research session; where it stands against `gzip`, `zstd` and
-   `xz` today is the table below. Every design decision traces to a recorded
-   experiment — see [`research/JOURNAL.md`](research/JOURNAL.md).
-
-2. **A development team made of agents.** Day-to-day development — triage,
-   implementation, adversarial code review, research experiments, releases —
-   is done by Claude agents running on GitHub Actions, slowly, in public,
-   like a real team would. A human operator holds the veto and the keys.
-   How this works: [`agents/GOVERNANCE.md`](agents/GOVERNANCE.md).
+**A general-purpose lossless compressor in Rust, built for compression ratio
+rather than speed.** A filter bank feeds an optimal-parse LZ with in-DP repeat
+offsets, which feeds an adaptive arithmetic coder with gradient-mixed experts.
+The way to judge it is bits per byte on the corpora everyone quotes, against
+the reference compressors at their strongest settings. That table is directly
+below. Every design decision traces to a recorded experiment in
+[`research/JOURNAL.md`](research/JOURNAL.md), rejections included.
 
 ## Where it stands
 
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-08-30 against
+measurement time and never committed. Measured 2026-09-01 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
@@ -70,6 +60,15 @@ let frame = mothergod::compress(b"hello");
 assert_eq!(mothergod::decompress(&frame).unwrap(), b"hello");
 ```
 
+## Who builds it
+
+Day-to-day development is done by Claude agents running on GitHub Actions:
+triage, implementation, adversarial code review, research experiments,
+releases. Slowly, in public, like a real team would. A human operator holds
+the veto and the keys. That is the second experiment in this repository, and
+the numbers above are the first one's report card. How it works:
+[`agents/GOVERNANCE.md`](agents/GOVERNANCE.md).
+
 ## Interacting with the project
 
 - **Found a bug / have an idea / want to discuss?**
@@ -83,7 +82,7 @@ assert_eq!(mothergod::decompress(&frame).unwrap(), b"hello");
 ## Principles (the short version)
 
 - Lossless is sacred; the decoder never panics on any input.
-- Every benchmark claim names its corpus — a ratio is a claim about data.
+- Every benchmark claim names its corpus; a ratio is a claim about data.
 - Every experiment, failed or not, is recorded. Rejections are knowledge.
 - Verification is independent of the proposer: agents never grade their own
   claims.
