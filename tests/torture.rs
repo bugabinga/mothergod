@@ -26,18 +26,30 @@
 //! `cargo test --all-targets` still builds this binary but its `main` exits
 //! immediately.
 //!
-//! Coverage today: every allocation the real decode path (`codec::decode`,
-//! `codec::decode_undoable_streaming`) reaches is fallible. `output`'s
-//! capacity — the one allocation whose size is attacker-controlled
-//! (`declared_len`, up to `codec::MAX_DECODED_LEN`) rather than fixed by a
-//! constant — is reserved through `try_reserve_exact`. `Models::try_new`
-//! (`Model::try_new`, `Sse::try_new`, `Literal::try_new`) and the
-//! `Delta`/`Bcj`/`Transpose` filters' `try_decode` undo buffers cover the
-//! rest, each a fallible sibling of the panicking constructor the encoder
-//! and every test still use, since neither needs hard rule 2's guarantee.
-//! The summary this binary prints names exactly which fixture/call index
-//! any future abort is found at, if a new allocation joins the decode path
-//! without its own fallible form.
+//! Coverage today: this sweep only ever calls [`mothergod::decompress`], so
+//! it exercises `codec::decode`'s buffered path, not
+//! [`mothergod::decompress_to_writer`]'s streaming one
+//! (`codec::decode_to_writer`/`decode_undoable_streaming`) — the two paths
+//! allocate different things for the same frame, so a green run here is not
+//! a claim about the streaming path. On the swept path, every allocation is
+//! fallible: `output`'s capacity — the one allocation whose size is
+//! attacker-controlled (`declared_len`, up to `codec::MAX_DECODED_LEN`)
+//! rather than fixed by a constant — is reserved through
+//! `try_reserve_exact`. `Models::try_new` (`Model::try_new`,
+//! `Sse::try_new`, `Literal::try_new`) and the `Delta`/`Bcj`/`Transpose`
+//! filters' `try_decode` undo buffers cover the rest, each a fallible
+//! sibling of the panicking constructor the encoder and every test still
+//! use, since neither needs hard rule 2's guarantee. The streaming path's
+//! own allocations (`filters::delta::Undo::try_new`,
+//! `filters::bcj::Undo::try_new`, and `crate::TryBufWriter`'s write buffer)
+//! are fallible by the same construction, verified by reading the source
+//! rather than by this sweep; sabotaging them found that every error this
+//! path can return allocates through `std::io::Error::other`'s inherent
+//! `Box<dyn Error>` — infallible on stable Rust — so closing that gap needs
+//! a design that does not box a custom payload through `io::Error`, wider
+//! than #453's original scope (issue #479). The summary this binary prints
+//! names exactly which fixture/call index any future abort is found at, if
+//! a new allocation joins the swept path without its own fallible form.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;

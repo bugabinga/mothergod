@@ -94,6 +94,24 @@ pub struct Sse {
     table: Vec<f64>,
 }
 
+/// Writes the identity mapping (bin `i` starts at `i / (BINS - 1)`) into
+/// every one of `contexts` contexts' bins of `table`, already sized to
+/// `contexts * BINS`. Shared by [`Sse::new`] and [`Sse::try_new`], which
+/// differ only in how `table` itself was allocated, never in what fills it.
+fn fill_identity(table: &mut [f64], contexts: usize) {
+    for context in 0..contexts {
+        for bin in 0..BINS {
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "bin < BINS (33) and BINS - 1 (32): both exact in f64"
+            )]
+            {
+                table[context * BINS + bin] = bin as f64 / (BINS - 1) as f64;
+            }
+        }
+    }
+}
+
 impl Sse {
     /// A fresh table over `contexts` independent contexts, every bin
     /// initialized to the identity mapping (see the struct docs).
@@ -107,17 +125,7 @@ impl Sse {
     pub fn new(contexts: usize) -> Self {
         assert!(contexts > 0, "Sse must have at least one context");
         let mut table = vec![0.0; contexts * BINS];
-        for context in 0..contexts {
-            for bin in 0..BINS {
-                #[allow(
-                    clippy::cast_precision_loss,
-                    reason = "bin < BINS (33) and BINS - 1 (32): both exact in f64"
-                )]
-                {
-                    table[context * BINS + bin] = bin as f64 / (BINS - 1) as f64;
-                }
-            }
-        }
+        fill_identity(&mut table, contexts);
         Self { contexts, table }
     }
 
@@ -136,17 +144,7 @@ impl Sse {
     pub(crate) fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
         assert!(contexts > 0, "Sse must have at least one context");
         let mut table = crate::try_filled_vec(contexts * BINS, 0.0)?;
-        for context in 0..contexts {
-            for bin in 0..BINS {
-                #[allow(
-                    clippy::cast_precision_loss,
-                    reason = "bin < BINS (33) and BINS - 1 (32): both exact in f64"
-                )]
-                {
-                    table[context * BINS + bin] = bin as f64 / (BINS - 1) as f64;
-                }
-            }
-        }
+        fill_identity(&mut table, contexts);
         Ok(Self { contexts, table })
     }
 

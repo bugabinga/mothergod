@@ -714,8 +714,10 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// [`Candidate::from_header_bytes`] recognizes. Returns
 /// [`Error::TooLarge`] if the declared length exceeds `max_len`, checked
 /// before any allocation or decode work.
-/// Returns [`Error::OutOfMemory`] if reserving `output`'s capacity to the
-/// declared length fails.
+/// Returns [`Error::OutOfMemory`] if the allocator cannot satisfy `output`'s
+/// capacity reservation, one of the model's fixed-size tables, or (for
+/// [`Candidate::Delta`]/[`Candidate::Bcj`]/[`Candidate::Transpose`]) the
+/// filter's undo buffer.
 /// Returns [`Error::Corrupt`] if a match token's distance exceeds
 /// [`lz::WINDOW`] (the real encoder's match finder never searches past it,
 /// `research/JOURNAL.md` M4's bounded-memory decode guarantee: a distance
@@ -869,20 +871,28 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             writer,
             &mut StreamUndo::Identity,
         ),
-        Candidate::Delta(stride) => decode_undoable_streaming(
-            filtered_payload,
-            version,
-            max_len,
-            writer,
-            &mut StreamUndo::Delta(filters::delta::Undo::new(stride)),
-        ),
-        Candidate::Bcj => decode_undoable_streaming(
-            filtered_payload,
-            version,
-            max_len,
-            writer,
-            &mut StreamUndo::Bcj(filters::bcj::Undo::new()),
-        ),
+        Candidate::Delta(stride) => {
+            let undo = filters::delta::Undo::try_new(stride)
+                .map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+            decode_undoable_streaming(
+                filtered_payload,
+                version,
+                max_len,
+                writer,
+                &mut StreamUndo::Delta(undo),
+            )
+        }
+        Candidate::Bcj => {
+            let undo = filters::bcj::Undo::try_new()
+                .map_err(|_| std::io::Error::other(Error::OutOfMemory))?;
+            decode_undoable_streaming(
+                filtered_payload,
+                version,
+                max_len,
+                writer,
+                &mut StreamUndo::Bcj(undo),
+            )
+        }
         Candidate::Transpose(_) => {
             let decoded = decode(payload, version, max_len).map_err(std::io::Error::other)?;
             writer.write_all(&decoded)

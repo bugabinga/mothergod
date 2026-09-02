@@ -85,14 +85,22 @@ pub mod delta {
     }
 
     impl Undo {
-        /// An undo state ready to accept the first filtered byte.
-        pub(crate) fn new(stride: NonZeroUsize) -> Self {
+        /// An undo state ready to accept the first filtered byte. Returns
+        /// `Err` instead of aborting if the allocator cannot satisfy
+        /// `stride` bytes of history (hard rule 2, `rust-craft` skill's
+        /// allocation-discipline, `tests/torture.rs`, #453):
+        /// `crate::codec::decode_to_writer`'s real streaming decode path is
+        /// the only caller outside this module's own tests, and it is
+        /// reachable from untrusted input.
+        pub(crate) fn try_new(
+            stride: NonZeroUsize,
+        ) -> Result<Self, std::collections::TryReserveError> {
             let stride = stride.get();
-            Self {
+            Ok(Self {
                 stride,
-                history: vec![0u8; stride],
+                history: crate::try_filled_vec(stride, 0u8)?,
                 count: 0,
-            }
+            })
         }
 
         /// Undoes one more filtered byte, returning the raw byte [`decode`]
@@ -122,7 +130,7 @@ pub mod delta {
         /// against the batch [`decode`] this type shadows.
         fn undo_matches_decode(data: &[u8], stride: NonZeroUsize) {
             let encoded = encode(data, stride);
-            let mut undo = Undo::new(stride);
+            let mut undo = Undo::try_new(stride).unwrap();
             let streamed: Vec<u8> = encoded.iter().map(|&byte| undo.apply(byte)).collect();
             assert_eq!(streamed, decode(&encoded, stride));
             assert_eq!(streamed, data);
@@ -234,7 +242,7 @@ pub mod delta {
             ) {
                 let stride = NonZeroUsize::new(stride).unwrap();
                 let encoded = encode(&data, stride);
-                let mut undo = Undo::new(stride);
+                let mut undo = Undo::try_new(stride).unwrap();
                 let streamed: Vec<u8> = encoded.iter().map(|&byte| undo.apply(byte)).collect();
                 prop_assert_eq!(&streamed, &data);
                 prop_assert_eq!(streamed, decode(&encoded, stride));
@@ -552,11 +560,20 @@ pub mod bcj {
     }
 
     impl Undo {
-        pub(crate) fn new() -> Self {
-            Self {
-                pending: Vec::with_capacity(INSTRUCTION_LEN),
+        /// A fresh undo state, ready to accept the first filtered byte.
+        /// Returns `Err` instead of aborting if the allocator cannot
+        /// satisfy [`INSTRUCTION_LEN`] bytes of pending-buffer capacity
+        /// (hard rule 2, `rust-craft` skill's allocation-discipline,
+        /// `tests/torture.rs`, #453): `crate::codec::decode_to_writer`'s
+        /// real streaming decode path is the only caller outside this
+        /// module's own tests, and it is reachable from untrusted input.
+        pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+            let mut pending = Vec::new();
+            pending.try_reserve_exact(INSTRUCTION_LEN)?;
+            Ok(Self {
+                pending,
                 position: 0,
-            }
+            })
         }
 
         /// Feeds one more filtered byte, in stream order, returning any
@@ -620,7 +637,7 @@ pub mod bcj {
         /// differentially against the batch [`decode`] this type shadows.
         fn undo_matches_decode(data: &[u8]) {
             let encoded = encode(data);
-            let mut undo = Undo::new();
+            let mut undo = Undo::try_new().unwrap();
             let mut streamed = Vec::with_capacity(data.len());
             for &byte in &encoded {
                 streamed.extend_from_slice(undo.apply(byte).as_slice());
@@ -771,7 +788,7 @@ pub mod bcj {
             #[test]
             fn undo_matches_batch_decode(data in proptest::collection::vec(byte_with_opcodes(), 0..256)) {
                 let encoded = encode(&data);
-                let mut undo = Undo::new();
+                let mut undo = Undo::try_new().unwrap();
                 let mut streamed = Vec::with_capacity(data.len());
                 for &byte in &encoded {
                     streamed.extend_from_slice(undo.apply(byte).as_slice());
