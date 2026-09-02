@@ -49,6 +49,15 @@ All notable changes to this project are documented here. Format follows
   `decode` it shadows. `bcj`'s invertibility and the LZ/model/coder
   round-trip loops are still hand-rolled; porting those, plus decode-API
   differential agreement, is follow-up scope on #452.
+- `bcj` now carries the same `roundtrips` and `Undo`-differential
+  properties as `delta`/`transpose` (issue #452), swept over data biased
+  toward its `0xE8`/`0xE9` opcodes rather than uniform bytes: uniform
+  bytes hit either opcode on only 2/256 draws and would mostly exercise
+  the pass-through branch, not the rewrite one the filter exists for.
+  Verified the strategy shrinks: a planted `decode` bug reduced to a
+  5-byte minimal counterexample (`[0xE8, 0, 0, 0, 0]`). The LZ/model/coder
+  round-trip loops and decode-API differential agreement remain, per the
+  bullet above.
 
 - `.github/scripts/trust-telemetry.py`: the aggregator for ADR-0043's
   trust ledger (issue #449), reading the small `entry.json` artifacts
