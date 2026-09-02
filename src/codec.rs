@@ -402,19 +402,24 @@ pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
 }
 
 /// `research/JOURNAL.md` S1-P5's paired measurement, [`walk_tokens`]'s use
-/// in [`ideal_cost_bits_column_expert_experiment`]: sums the same
+/// in both [`ideal_cost_bits_column_expert_experiment`] and
+/// [`ideal_cost_bits_column_expert_experiment_sse`]: sums the same
 /// flag/length/offset/slot costs [`CostSink`] does, so any delta between
 /// `baseline_bits` and `with_column_bits` is attributable to the literal
-/// model alone, and prices every literal byte twice via
-/// [`Literal::ideal_cost_bits_column_expert_pair`] — the shipped six-expert
-/// mix, and the same mix with `column_state`'s bank blended in as a
-/// seventh expert, keyed by [`column::column_bank`] of
-/// [`column::column_of`]'s result for that byte's position in `data`.
+/// model alone, and prices every literal byte twice through
+/// `literal_pair` — the shipped six-expert mix, and the same mix with
+/// `column_state`'s bank blended in as a seventh expert, keyed by
+/// [`column::column_bank`] of [`column::column_of`]'s result for that
+/// byte's position in `data`. `literal_pair` is the one axis the two
+/// callers vary on: [`Literal::ideal_cost_bits_column_expert_pair`] or its
+/// SSE-calibrated counterpart
+/// [`Literal::ideal_cost_bits_column_expert_pair_sse`].
 struct ColumnExpertCostSink<'a> {
     data: &'a [u8],
     columns: NonZeroUsize,
     max_banks: NonZeroUsize,
     column_state: &'a mut ColumnExpertState,
+    literal_pair: fn(&mut Literal, Context, u8, usize, &mut ColumnExpertState) -> (f64, f64),
     baseline_bits: f64,
     with_column_bits: f64,
 }
@@ -429,12 +434,8 @@ impl TokenSink for ColumnExpertCostSink<'_> {
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
         let column = column::column_of(context.position, self.columns, self.data.len());
         let bank = column::column_bank(column, self.max_banks);
-        let (baseline, with_column) = models.literal.ideal_cost_bits_column_expert_pair(
-            context,
-            byte,
-            bank,
-            self.column_state,
-        );
+        let (baseline, with_column) =
+            (self.literal_pair)(&mut models.literal, context, byte, bank, self.column_state);
         self.baseline_bits += baseline;
         self.with_column_bits += with_column;
     }
@@ -458,24 +459,24 @@ impl TokenSink for ColumnExpertCostSink<'_> {
     }
 }
 
-/// `research/JOURNAL.md` S1-P5's before-wiring measurement: pairs a
-/// baseline ideal cost against the same walk with a seventh, column-keyed
-/// literal expert blended in
-/// ([`Literal::ideal_cost_bits_column_expert_pair`]), isolating any delta
-/// to the literal model alone (flag/length/offset/slot price identically
-/// on both sides). `columns`/`max_banks` mirror
-/// [`column::column_of`]/[`column::column_bank`]'s own parameters; `data`
-/// is already-filtered, the same contract [`ideal_cost_bits`] has — if the
-/// candidate under test is [`Candidate::Transpose`], `data` is the
-/// already-transposed bytes. Not reachable from [`encode`]/[`decode`]: no
-/// `Method`/`FORMAT_VERSION` wiring, measurement only.
+/// Shared body of [`ideal_cost_bits_column_expert_experiment`] and
+/// [`ideal_cost_bits_column_expert_experiment_sse`]: pairs a baseline ideal
+/// cost against the same walk with a seventh, column-keyed literal expert
+/// blended in through `literal_pair`, isolating any delta to the literal
+/// model alone (flag/length/offset/slot price identically on both sides).
+/// `columns`/`max_banks` mirror [`column::column_of`]/[`column::column_bank`]'s
+/// own parameters; `data` is already-filtered, the same contract
+/// [`ideal_cost_bits`] has — if the candidate under test is
+/// [`Candidate::Transpose`], `data` is the already-transposed bytes. Not
+/// reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
+/// wiring, measurement only.
 ///
 /// Returns `(baseline_bits, with_column_bits)`.
-#[must_use]
-pub fn ideal_cost_bits_column_expert_experiment(
+fn ideal_cost_bits_column_expert_experiment_with(
     data: &[u8],
     columns: NonZeroUsize,
     max_banks: NonZeroUsize,
+    literal_pair: fn(&mut Literal, Context, u8, usize, &mut ColumnExpertState) -> (f64, f64),
 ) -> (f64, f64) {
     let tokens = lz::parse_optimal(data);
     let mut models = Models::new();
@@ -485,6 +486,7 @@ pub fn ideal_cost_bits_column_expert_experiment(
         columns,
         max_banks,
         column_state: &mut column_state,
+        literal_pair,
         baseline_bits: 0.0,
         with_column_bits: 0.0,
     };
@@ -492,68 +494,38 @@ pub fn ideal_cost_bits_column_expert_experiment(
     (sink.baseline_bits, sink.with_column_bits)
 }
 
-/// [`ColumnExpertCostSink`]'s SSE-calibrated counterpart: `research/JOURNAL.md`
-/// S1-P5's other open question before the real wiring slice — does the
-/// seventh expert's win survive once the mixed probability is calibrated
-/// by [`crate::literal::Literal::encode_sse`]'s SSE stage, the refinement
-/// every real byte already pays under `FORMAT_VERSION` 3? Flag/length/
-/// offset/slot price identically to [`ColumnExpertCostSink`] (unaffected
-/// by this question); only the literal path differs, pricing through
-/// [`crate::literal::Literal::ideal_cost_bits_column_expert_pair_sse`]
-/// instead.
-struct ColumnExpertCostSinkSse<'a> {
-    data: &'a [u8],
+/// `research/JOURNAL.md` S1-P5's before-wiring measurement: does column
+/// identity help, blended in as a seventh literal expert alongside the
+/// shipped six, priced through
+/// [`Literal::ideal_cost_bits_column_expert_pair`]. The pairing mechanics
+/// (what `baseline_bits`/`with_column_bits` mean, `data`'s already-filtered
+/// contract, why this is unreachable from [`encode`]/[`decode`]) live on
+/// this module's private `ideal_cost_bits_column_expert_experiment_with`,
+/// which both this function and its SSE counterpart wrap.
+///
+/// Returns `(baseline_bits, with_column_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_column_expert_experiment(
+    data: &[u8],
     columns: NonZeroUsize,
     max_banks: NonZeroUsize,
-    column_state: &'a mut ColumnExpertState,
-    baseline_bits: f64,
-    with_column_bits: f64,
-}
-
-impl TokenSink for ColumnExpertCostSinkSse<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
-        let bits = models.flag[flag_table].ideal_cost_bits(kind);
-        self.baseline_bits += bits;
-        self.with_column_bits += bits;
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        let column = column::column_of(context.position, self.columns, self.data.len());
-        let bank = column::column_bank(column, self.max_banks);
-        let (baseline, with_column) = models.literal.ideal_cost_bits_column_expert_pair_sse(
-            context,
-            byte,
-            bank,
-            self.column_state,
-        );
-        self.baseline_bits += baseline;
-        self.with_column_bits += with_column;
-    }
-
-    fn length(&mut self, models: &mut Models, value: u32) {
-        let bits = ideal_cost_bucketed(&mut models.length, value);
-        self.baseline_bits += bits;
-        self.with_column_bits += bits;
-    }
-
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        let bits = ideal_cost_bucketed(&mut models.offset, value);
-        self.baseline_bits += bits;
-        self.with_column_bits += bits;
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        let bits = models.slot.ideal_cost_bits(symbol);
-        self.baseline_bits += bits;
-        self.with_column_bits += bits;
-    }
+) -> (f64, f64) {
+    ideal_cost_bits_column_expert_experiment_with(
+        data,
+        columns,
+        max_banks,
+        Literal::ideal_cost_bits_column_expert_pair,
+    )
 }
 
 /// `research/JOURNAL.md` S1-P5's SSE-interaction measurement: same pairing
-/// as [`ideal_cost_bits_column_expert_experiment`], through this module's
-/// SSE-calibrated sink instead so both prices go through the SSE-calibrated
-/// bittree decomposition [`crate::literal::Literal::encode_sse`] actually
-/// pays, not the direct 256-way division.
+/// as [`ideal_cost_bits_column_expert_experiment`], but priced through
+/// [`Literal::ideal_cost_bits_column_expert_pair_sse`] so both totals go
+/// through the SSE-calibrated bittree decomposition
+/// [`crate::literal::Literal::encode_sse`] actually pays, not the direct
+/// 256-way division — does the seventh expert's win survive that
+/// calibration, the refinement every real byte already pays under
+/// `FORMAT_VERSION` 3?
 ///
 /// Returns `(baseline_bits, with_column_bits)`.
 #[must_use]
@@ -562,19 +534,12 @@ pub fn ideal_cost_bits_column_expert_experiment_sse(
     columns: NonZeroUsize,
     max_banks: NonZeroUsize,
 ) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut column_state = ColumnExpertState::new(max_banks);
-    let mut sink = ColumnExpertCostSinkSse {
+    ideal_cost_bits_column_expert_experiment_with(
         data,
         columns,
         max_banks,
-        column_state: &mut column_state,
-        baseline_bits: 0.0,
-        with_column_bits: 0.0,
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.baseline_bits, sink.with_column_bits)
+        Literal::ideal_cost_bits_column_expert_pair_sse,
+    )
 }
 
 /// Whether `body_len` beats `best_len` in `encode`'s shortest-wins
