@@ -659,13 +659,14 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 ///
 /// Bounds decode work and allocation to the frame's declared output size,
 /// itself bounded by `max_len` (`docs/format/SPEC.md`,
-/// `rust-craft` skill's allocation-discipline): `output` starts empty and
-/// grows one token at a time, never preallocated from the header's
-/// declared length, and every token is rejected the moment it would grow
-/// `output` past that length — so a payload lying about either the
-/// declared length or the token count cannot make this function do more
-/// work, or allocate more memory, than the length it declared allows, and
-/// `max_len` bounds what it is allowed to declare in the first place, itself
+/// `rust-craft` skill's allocation-discipline): `output` is reserved
+/// fallibly and exactly once, up front, to `declared_len` (`try_reserve_exact`,
+/// returning [`Error::OutOfMemory`] on a real allocator failure instead of
+/// aborting), and every token is rejected the moment it would grow `output`
+/// past that length — so a payload lying about either the declared length or
+/// the token count cannot make this function do more work, or allocate more
+/// memory, than the length it declared allows, and `max_len` bounds what it
+/// is allowed to declare in the first place, itself
 /// clamped to [`MAX_DECODED_LEN`] regardless of what is passed in: that
 /// constant is the only ceiling this decoder's worst-case decode time has
 /// been measured against (see its docs). [`crate::decompress_bounded`]
@@ -683,6 +684,8 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// [`Candidate::from_header_bytes`] recognizes. Returns
 /// [`Error::TooLarge`] if the declared length exceeds `max_len`, checked
 /// before any allocation or decode work.
+/// Returns [`Error::OutOfMemory`] if reserving `output`'s capacity to the
+/// declared length fails.
 /// Returns [`Error::Corrupt`] if a match token's distance exceeds
 /// [`lz::WINDOW`] (the real encoder's match finder never searches past it,
 /// `research/JOURNAL.md` M4's bounded-memory decode guarantee: a distance
@@ -732,7 +735,17 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     let mut models = Models::new();
     let mut context = Context::default();
     let mut reps = RepCache::initial();
+    // Reserved fallibly and exactly up front, not left to grow through
+    // `push`/`extend`'s doubling: `declared_len` is already bounded above,
+    // so nothing past this point ever asks `output` to grow past what it
+    // holds here, and `try_reserve_exact` turns a real allocator failure
+    // into `Error::OutOfMemory` instead of the process aborting through
+    // `push`'s infallible growth path (hard rule 2, torture-swept by
+    // `tests/torture.rs`, #453).
     let mut output: Vec<u8> = Vec::new();
+    output
+        .try_reserve_exact(declared_len)
+        .map_err(|_| Error::OutOfMemory)?;
 
     for _ in 0..token_count {
         let flag_table = usize::from(context.after_copy);

@@ -28,6 +28,16 @@ workspace = true
 # (regex-pattern string strategies, unused here).
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 
+# harness = false: this binary re-execs itself per swept allocation call
+# (tests/torture.rs's own docs), which libtest's harness has no hook for,
+# and it must stay a fast no-op under a bare `cargo test --all-targets`
+# (docs/TESTING.md's required-gate contract) rather than running its sweep
+# every time.
+[[test]]
+name = "torture"
+path = "tests/torture.rs"
+harness = false
+
 [workspace.lints.rust]
 missing_docs = "warn"
 

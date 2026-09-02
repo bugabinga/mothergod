@@ -139,6 +139,15 @@ pub enum Error {
         /// see the variant's docs).
         max: u32,
     },
+    /// The allocator could not satisfy the output buffer's reservation
+    /// (`declared_len` bytes, already checked against the effective bound
+    /// before this point). A real allocator failure this far into decode
+    /// is rare, but hard rule 2 (`CLAUDE.md`) does not carve out an
+    /// exception for it: [`codec::decode`] reserves `output`'s capacity
+    /// through `try_reserve_exact` specifically so this returns an `Err`
+    /// instead of the process aborting (`rust-craft` skill's
+    /// allocation-discipline, torture-swept by `tests/torture.rs`, #453).
+    OutOfMemory,
 }
 
 impl core::fmt::Display for Error {
@@ -155,6 +164,7 @@ impl core::fmt::Display for Error {
                     "output length {len} exceeds the decoder's bound ({max} bytes)"
                 )
             }
+            Self::OutOfMemory => write!(f, "allocator could not satisfy the output buffer"),
         }
     }
 }
@@ -491,6 +501,39 @@ mod tests {
             FORMAT_VERSION,
             Method::Lz as u8,
         ]
+    }
+
+    #[test]
+    fn error_display_names_each_variant() {
+        // Nothing else in the crate calls `Error::to_string`, so this is the
+        // only thing standing between a `Display` edit and a silent user-facing
+        // regression (mutants-check, PR #467: the whole function survived
+        // whole-body replacement before this test existed).
+        assert_eq!(
+            Error::Truncated.to_string(),
+            "input ended before the frame header was complete"
+        );
+        assert_eq!(
+            Error::BadMagic.to_string(),
+            "input is not a mothergod frame (bad magic)"
+        );
+        assert_eq!(
+            Error::UnsupportedVersion(9).to_string(),
+            "unsupported format version 9"
+        );
+        assert_eq!(
+            Error::UnknownMethod(0xFF).to_string(),
+            "unknown compression method 255"
+        );
+        assert_eq!(Error::Corrupt.to_string(), "compressed payload is corrupt");
+        assert_eq!(
+            Error::TooLarge { len: 10, max: 5 }.to_string(),
+            "output length 10 exceeds the decoder's bound (5 bytes)"
+        );
+        assert_eq!(
+            Error::OutOfMemory.to_string(),
+            "allocator could not satisfy the output buffer"
+        );
     }
 
     #[test]
