@@ -97,6 +97,10 @@ jobs:
             When work changes `site/`, homepage layout, styling, browser
             interaction, or accessibility, use `web-ui`; skip it for
             deployment-workflow-only changes.
+            When writing or changing tests, fuzz targets, or property
+            strategies, or fixing what a fuzz, mutation, torture, or
+            coverage finding flagged, use `test-craft`; skip it when the
+            work leaves tests untouched.
 
             Bootstrap (idempotent, quick): ensure these labels exist (gh label
             create ... || true): triage, research, blocked-on-human, ops-log,
