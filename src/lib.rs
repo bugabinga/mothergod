@@ -944,12 +944,27 @@ mod proptests {
         // `filters.rs` sweep at proptest's default 256 cases; a quarter of
         // that keeps this property's slice of the required gate under 10s
         // (measured locally) while still sweeping both frame shapes above.
-        #![proptest_config(ProptestConfig::with_cases(64))]
+        // `ProptestConfig::with_cases` would pin the literal regardless of
+        // `PROPTEST_CASES`, silently opting this property out of the
+        // weekly-tier scale-up every other property gets for free via
+        // `ProptestConfig::default()`; read the env var ourselves instead so
+        // the fast-profile default stays 64 but a scaled-up run still wins.
+        #![proptest_config(ProptestConfig {
+            cases: std::env::var("PROPTEST_CASES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(64),
+            ..ProptestConfig::default()
+        })]
 
         /// `decompress`, `decompress_bounded` (at `codec::MAX_DECODED_LEN`),
         /// and `decompress_to_writer` must agree on every frame `compress`
-        /// can produce: three implementations of one contract, and a
-        /// disagreement between any two is a bug in one of them (#452).
+        /// can produce (#452). `decompress` is `decompress_bounded` at that
+        /// same bound, so the only genuine differential leg here is
+        /// `decompress_to_writer`; `decompress_bounded`'s own distinguishing
+        /// behavior, a tighter caller-supplied `max_len`, is covered by
+        /// `decompress_bounded_rejects_a_stored_frame_over_its_own_tighter_bound`
+        /// and its `Lz` sibling, not by this property.
         #[test]
         fn decode_apis_agree(input in data()) {
             let frame = compress(&input);
