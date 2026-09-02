@@ -157,6 +157,19 @@
         <div class="card" id="benchmarks-card" data-loading>Loading…</div>
       </section>
 
+      <section id="trust-section">
+        <h2>Is it tested?</h2>
+        <p>
+          The trust ledger (issue #449): numbers written by the scheduled test
+          workflows themselves, aggregated from their run artifacts by
+          <code>.github/scripts/trust-telemetry.py</code> on every deploy.
+          Cumulative figures cover the trailing 90-day artifact window; the
+          weekly digest is the durable record past that horizon.
+        </p>
+        <div class="stats" id="trust-grid" data-loading>Loading…</div>
+        <p class="asof" id="trust-asof"></p>
+      </section>
+
       <section id="progress-section">
         <h2>Is it alive?</h2>
         <p>
@@ -174,9 +187,10 @@
 
       <noscript>
         <p class="asof">
-          This page renders status-data.json with JavaScript. Without it, read
-          the sources directly: ROADMAP.md for milestones,
-          research/progress.jsonl for experiments, linked below.
+          This page renders status-data.json and trust-data.json with
+          JavaScript. Without it, read the sources directly: ROADMAP.md for
+          milestones, research/progress.jsonl for experiments, docs/TESTING.md
+          for the testing portfolio, linked below.
         </p>
       </noscript>
 
@@ -199,7 +213,9 @@
         if (!res.ok) throw new Error(`status-data.json: HTTP ${res.status}`);
         data = await res.json();
       } catch (err) {
-        document.querySelectorAll('[data-loading]').forEach((el) => {
+        // #trust-grid is loadTrust()'s to report on; its data file is
+        // fetched separately and may be fine when this one is not.
+        document.querySelectorAll('[data-loading]:not(#trust-grid)').forEach((el) => {
           el.textContent = `Could not load status-data.json (${err.message}).`;
         });
         return;
@@ -284,6 +300,42 @@
         'daily, and on merges that change its sources.' + problems;
     }
 
+    async function loadTrust() {
+      const grid = document.getElementById('trust-grid');
+      let data;
+      try {
+        const res = await fetch('/trust-data.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`trust-data.json: HTTP ${res.status}`);
+        data = await res.json();
+      } catch (err) {
+        grid.textContent = `Could not load trust-data.json (${err.message}).`;
+        return;
+      }
+      grid.removeAttribute('data-loading');
+      if (!data.count) {
+        // The aggregator's self-diagnosing empty state: it says exactly
+        // what it saw instead of pretending zeros are measurements.
+        grid.textContent = data.error ?? 'No trust-ledger entries yet.';
+        return;
+      }
+      const stat = (value, label, pendingLabel) =>
+        (value == null ? ['n/a', pendingLabel ?? label] : [value, label]);
+      const hours = data.cumulative_fuzz_cpu_hours;
+      const cells = [
+        stat(hours == null ? null : hours.toFixed(2), 'fuzz CPU-hours, 90d'),
+        stat(data.crashers_total, 'crashers found, 90d'),
+        stat(data.trend?.mutation_score?.latest, 'mutation score',
+          'mutation score, not yet measured (#455)'),
+        stat(data.trend?.coverage_region_pct?.latest, 'region coverage %',
+          'region coverage %, not yet measured (#454)'),
+      ];
+      grid.innerHTML = cells.map(([n, label]) => `
+        <div class="stat"><span class="n">${escapeHtml(n)}</span><span class="label">${escapeHtml(label)}</span></div>
+      `).join('');
+      document.getElementById('trust-asof').textContent =
+        `${data.count} ledger entries in the window, aggregated ${data.generated_at}.`;
+    }
+
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, (c) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -291,6 +343,7 @@
     }
 
     main();
+    loadTrust();
     </script>
   </body>
 </html>
