@@ -11,13 +11,14 @@ writing code and while judging a diff, not as a cleanup pass.
 
 ## Boundary
 
-Three artifacts have adjacent territory. They do not overlap, and
+Four artifacts have adjacent territory. They do not overlap, and
 keeping that true is a standing duty, not a one-time check.
 
 | Artifact | Question it answers |
 |---|---|
 | `deslop` skill | Does this code cost too much to read? |
 | `docs/TESTING.md` | What must be tested, at which layer, when? |
+| `test-craft` skill | Is this one test written and triaged well? |
 | this skill | Is this Rust, and does it prove its own claims? |
 
 The line: **`deslop` is language-agnostic and retrospective; this is
