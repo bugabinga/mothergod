@@ -121,6 +121,35 @@ impl Sse {
         Self { contexts, table }
     }
 
+    /// Fallible counterpart to [`Self::new`]: the same fresh, identity-
+    /// mapped table, but returns `Err` instead of aborting if the
+    /// allocator cannot satisfy `contexts * BINS` entries.
+    /// [`crate::literal::Literal::try_new`] uses this on the real decode
+    /// path (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`Self::new`] stays the panicking
+    /// constructor the encoder and every test use.
+    ///
+    /// # Panics
+    ///
+    /// Same as [`Self::new`]: `contexts` zero is a caller bug, never
+    /// something adversarial input can trigger.
+    pub(crate) fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
+        assert!(contexts > 0, "Sse must have at least one context");
+        let mut table = crate::try_filled_vec(contexts * BINS, 0.0)?;
+        for context in 0..contexts {
+            for bin in 0..BINS {
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "bin < BINS (33) and BINS - 1 (32): both exact in f64"
+                )]
+                {
+                    table[context * BINS + bin] = bin as f64 / (BINS - 1) as f64;
+                }
+            }
+        }
+        Ok(Self { contexts, table })
+    }
+
     /// The number of independent contexts this table calibrates.
     #[must_use]
     pub fn contexts(&self) -> usize {

@@ -223,6 +223,41 @@ pub(crate) fn rescale_bank(
     }
 }
 
+/// Builds a `Vec<T>` of `n` clones of `value`, failing gracefully instead
+/// of aborting if the allocator cannot satisfy `n` (hard rule 2,
+/// `rust-craft` skill's allocation-discipline): `try_reserve_exact` first,
+/// then `resize`, which never asks the allocator for more than that
+/// already-reserved capacity, mirroring [`codec::decode`]'s own
+/// `output.try_reserve_exact` shape (#453).
+///
+/// Shared by every fixed-size adaptive table on the real decode path
+/// ([`model::Model::try_new`], [`sse::Sse::try_new`],
+/// [`literal::Literal::try_new`]) so none of them can drift on how a
+/// fallible fill is built.
+pub(crate) fn try_filled_vec<T: Clone>(
+    n: usize,
+    value: T,
+) -> Result<Vec<T>, std::collections::TryReserveError> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n)?;
+    v.resize(n, value);
+    Ok(v)
+}
+
+/// Fallible counterpart to `data.to_vec()`: same bytes, but returns `Err`
+/// instead of aborting if the allocator cannot satisfy `data.len()`
+/// bytes. Shared by the filter undo buffers on the real decode path
+/// ([`filters::delta::try_decode`], [`filters::bcj::try_decode`]) that
+/// start from a copy of their input (#453).
+pub(crate) fn try_vec_from_slice(
+    data: &[u8],
+) -> Result<Vec<u8>, std::collections::TryReserveError> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(data.len())?;
+    v.extend_from_slice(data);
+    Ok(v)
+}
+
 /// Assembles a complete frame from `method` and its `payload`.
 fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(HEADER_LEN + payload.len());

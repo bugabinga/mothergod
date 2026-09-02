@@ -40,6 +40,19 @@ All notable changes to this project are documented here. Format follows
   graceful `Err` instead of a signal or a panic. The sweep still finds
   aborts in the model tables' fixed-size allocations and the `Delta`/
   `Bcj`/`Transpose` filters' undo buffers; #453 stays open for those.
+- `Model::new`/`Sse::new`/`Literal::new`'s fixed-size tables and the
+  `Delta`/`Bcj`/`Transpose` filters' undo buffers all built through
+  infallible allocation (`vec![x; n]`, `to_vec`), so a real allocator
+  failure reaching any of them would abort the decoder instead of
+  returning an `Err` (hard rule 2), the gap the previous `#453` entry
+  above left open. Each now has a `try_new`/`try_decode` sibling built on
+  `try_reserve_exact`, wired into `codec::Models::try_new` and
+  `codec::undo_filter` on the real decode path; the panicking originals
+  stay for the encoder and every test, where an allocator failure this
+  small is already fatal to the whole process. `tests/torture.rs`'s
+  allocation-failure sweep is fully green now (73 allocator calls across
+  the golden and adversarial corpus, was previously finding 66 aborts of
+  123 calls), closing issue #453.
 - The status page's trust panel said "1 ledger entries"; the count now
   picks singular or plural (follow-up to #465).
 - `README.md` and `site/index.html` restated `FORMAT_VERSION` and the

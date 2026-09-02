@@ -26,18 +26,18 @@
 //! `cargo test --all-targets` still builds this binary but its `main` exits
 //! immediately.
 //!
-//! Coverage today: `codec::decode`'s `output` buffer, the one allocation
-//! whose size is attacker-controlled (`declared_len`, up to
-//! `codec::MAX_DECODED_LEN`) rather than fixed by the model tables'
-//! constant sizes — the "grows before validating" class hard rule 2 is
-//! actually worried about, per the issue. `Models::new`'s fixed-size
-//! tables and the `Delta`/`Bcj`/`Transpose` filters' undo buffers are
-//! still infallible, so a sweep that reaches one of those allocations
-//! still aborts; the summary this binary prints names exactly which
-//! fixture/call index that is. Hardening those is real, separable
-//! follow-up work (`fetch_add` through `Model::new`, `Literal::new`, and
-//! each filter's `decode`, all currently `pub fn -> Self`/`-> Vec<u8>`
-//! with no room for `Err`) — tracked on #453, not silently dropped.
+//! Coverage today: every allocation the real decode path (`codec::decode`,
+//! `codec::decode_undoable_streaming`) reaches is fallible. `output`'s
+//! capacity — the one allocation whose size is attacker-controlled
+//! (`declared_len`, up to `codec::MAX_DECODED_LEN`) rather than fixed by a
+//! constant — is reserved through `try_reserve_exact`. `Models::try_new`
+//! (`Model::try_new`, `Sse::try_new`, `Literal::try_new`) and the
+//! `Delta`/`Bcj`/`Transpose` filters' `try_decode` undo buffers cover the
+//! rest, each a fallible sibling of the panicking constructor the encoder
+//! and every test still use, since neither needs hard rule 2's guarantee.
+//! The summary this binary prints names exactly which fixture/call index
+//! any future abort is found at, if a new allocation joins the decode path
+//! without its own fallible form.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;

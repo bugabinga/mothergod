@@ -193,8 +193,7 @@ mechanisms in the issues.
       (#451).
 - [ ] proptest: shrinking properties + decode-API differential
       agreement (#452).
-- [ ] Allocation torture sweep (#453). Output-buffer class fixed in
-      #467; model tables and filter undo buffers still abort.
+- [x] Allocation torture sweep (#453).
 - [ ] Weekly region coverage, published never gated (#454).
 - [ ] Monthly whole-crate mutation score (#455).
 - [ ] Miri lane in monster (#456).

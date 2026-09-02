@@ -47,6 +47,24 @@ pub mod delta {
         out
     }
 
+    /// Fallible counterpart to [`decode`]: the same inverted bytes, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy a
+    /// copy of `data`. `crate::codec::decode`'s real decode path uses this
+    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
+    /// every test uses.
+    pub(crate) fn try_decode(
+        data: &[u8],
+        stride: NonZeroUsize,
+    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let stride = stride.get();
+        let mut out = crate::try_vec_from_slice(data)?;
+        for i in stride..out.len() {
+            out[i] = out[i].wrapping_add(out[i - stride]);
+        }
+        Ok(out)
+    }
+
     /// Streaming counterpart to [`decode`]: undoes the transform one
     /// filtered byte at a time instead of over a complete buffer, so a
     /// caller never needs the whole filtered stream resident to recover the
@@ -278,6 +296,31 @@ pub mod transpose {
         out
     }
 
+    /// Fallible counterpart to [`decode`]: the same reassembled bytes, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy an
+    /// `n`-byte output buffer. `crate::codec::decode`'s real decode path
+    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
+    /// every test uses.
+    pub(crate) fn try_decode(
+        data: &[u8],
+        columns: NonZeroUsize,
+    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let columns = columns.get();
+        let n = data.len();
+        let mut out = crate::try_filled_vec(n, 0u8)?;
+        let mut pos = 0usize;
+        for start in 0..columns {
+            let mut i = start;
+            while i < n {
+                out[i] = data[pos];
+                pos += 1;
+                i += columns;
+            }
+        }
+        Ok(out)
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -383,6 +426,26 @@ pub mod bcj {
     /// wrote them at.
     fn rewrite(data: &[u8], rewrite_operand: impl Fn(u32, u32) -> u32) -> Vec<u8> {
         let mut out = data.to_vec();
+        rewrite_in_place(&mut out, rewrite_operand);
+        out
+    }
+
+    /// Fallible counterpart to [`rewrite`]: the same in-place rewrite, but
+    /// starting from a copy of `data` that returns `Err` instead of
+    /// aborting if the allocator cannot satisfy it.
+    fn try_rewrite(
+        data: &[u8],
+        rewrite_operand: impl Fn(u32, u32) -> u32,
+    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let mut out = crate::try_vec_from_slice(data)?;
+        rewrite_in_place(&mut out, rewrite_operand);
+        Ok(out)
+    }
+
+    /// Shared scan [`rewrite`]/[`try_rewrite`] both drive over an
+    /// already-allocated `out`, so the two only ever differ in how `out`
+    /// was built, never in what happens to it.
+    fn rewrite_in_place(out: &mut [u8], rewrite_operand: impl Fn(u32, u32) -> u32) {
         let n = out.len();
         let mut i = 0usize;
         while i + INSTRUCTION_LEN <= n {
@@ -400,7 +463,6 @@ pub mod bcj {
                 i += 1;
             }
         }
-        out
     }
 
     /// Rewrites each `0xE8`/`0xE9` opcode's operand from relative to
@@ -420,6 +482,16 @@ pub mod bcj {
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
         rewrite(data, u32::wrapping_sub)
+    }
+
+    /// Fallible counterpart to [`decode`]: the same rewritten bytes, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy a
+    /// copy of `data`. `crate::codec::decode`'s real decode path uses this
+    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
+    /// every test uses.
+    pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        try_rewrite(data, u32::wrapping_sub)
     }
 
     /// Bytes [`Undo::apply`]/[`Undo::finish`] resolved from stream data so

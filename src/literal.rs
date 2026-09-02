@@ -402,6 +402,21 @@ impl Literal {
         }
     }
 
+    /// Fallible counterpart to [`Self::new`]: the same fresh model, but
+    /// returns `Err` instead of aborting if the allocator cannot satisfy
+    /// any of its tables. [`crate::codec::decode`]'s real decode path
+    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453); [`Self::new`] stays the panicking
+    /// constructor the encoder and every test use.
+    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            freq: crate::try_filled_vec(BANKS * ALPHABET, 1u32)?,
+            total: crate::try_filled_vec(BANKS, ALPHABET_U32)?,
+            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [1.0; EXPERTS])?,
+            sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
+        })
+    }
+
     /// Blends the six experts' banks under the current mixing weights
     /// into a cumulative-frequency table over the 256 byte values.
     /// Ported unchanged from the archive's `Lit::cum`: every symbol's
