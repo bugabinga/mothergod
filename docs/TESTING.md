@@ -112,10 +112,17 @@ weekly monster matrix runs them on every runtime target.
   either on only 2/256 draws and would rarely exercise the rewrite branch
   (`test-craft`'s "generate the distribution the codec targets"). The
   LZ/model/coder round-trip loops are still hand-rolled.
+- Decode-API differential agreement (`decompress`, `decompress_bounded`,
+  `decompress_to_writer` must all agree on every frame `compress` can
+  produce) is a `proptest` property in `src/lib.rs` (`#452`), swept over a
+  mix of noise and repeated patterns so both `Method::Stored` and
+  `Method::Lz` frames get exercised. Case count is trimmed to 64 (a
+  quarter of the filter properties' default 256): `compress` runs the
+  full optimal-parse LZ encoder, far heavier per case than a filter
+  round-trip.
 - Still planned (#452): port the remaining seeded round-trip loops (LZ,
   model, coder) to proptest strategies over the corpus policy's generator
-  classes, plus differential agreement across the three decode APIs
-  (`decompress`, `decompress_bounded`, `decompress_to_writer`).
+  classes.
 
 ## 2. Adversarial decode suite (Rust-input PRs)
 
