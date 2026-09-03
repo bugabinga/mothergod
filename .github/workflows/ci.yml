@@ -83,7 +83,7 @@ jobs:
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/(scripts|actions/agent-audit)/|^\.github/workflows/ci\.yml$'; then
+          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/(scripts|actions/agent-audit|workflows)/|^agents/personas/'; then
             echo "js=true" >> "$GITHUB_OUTPUT"
           else
             echo "js=false" >> "$GITHUB_OUTPUT"
@@ -167,6 +167,10 @@ jobs:
   # importing the shared allowance parse (issue #310); the js filter above
   # watches all of .github/scripts/ because those files, retrospect included
   # (extensionless, invisible to a suffix match), are what these tests read.
+  # It watches .github/workflows/ and agents/personas/ for the same reason
+  # (issue #505): gh-comment's test reads every workflow's env block and takes
+  # the seat names from the persona files, so a PR adding seat seven is
+  # precisely the one that must run this job, and it touches no script.
   # Not a required check: it gates nothing on a red day for the crate, and
   # the ruleset's required names stay exactly as they are.
   worker:
