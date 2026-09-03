@@ -353,7 +353,9 @@ jobs:
             new discipline), commission targeted research or a targeted
             research seat rather than assuming you know enough, the way
             the operator seeded the initial researcher. Never treat
-            present knowledge as sufficient for optimal results.
+            present knowledge as sufficient for optimal results; steer
+            quality with research aimed at the phase you are entering,
+            not the one you are leaving.
 
             Solve through the system (ADR-0007): your DEFAULT for any
             problem or idea is to make the agent system handle it — a
