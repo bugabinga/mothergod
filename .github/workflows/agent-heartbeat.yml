@@ -1,5 +1,6 @@
 # Maintainer heartbeat: the daily work session (ADR-0003).
-# Fix red PRs → triage issues → ship one small slice of the roadmap.
+# Fix red PRs → ship one small slice of the roadmap. Label bootstrap
+# and issue triage moved to the curator (ADR-0044).
 name: agent-heartbeat
 
 on:
@@ -102,22 +103,15 @@ jobs:
             coverage finding flagged, use `test-craft`; skip it when the
             work leaves tests untouched.
 
-            Bootstrap (idempotent, quick): ensure these labels exist (gh label
-            create ... || true): triage, research, blocked-on-human, ops-log,
-            agent-approved, agents-paused, product, agent-system,
-            marketing. Ensure one
-            open issue labeled ops-log titled "📋 Operations log" exists;
-            create it if missing.
-
             Your realm is product (operator directive, Telegram,
             2026-08-23): the codec, its docs, the site, releases, anything
             a user of the compressor gets. Issues labeled agent-system are
             the BDFL's to fix, not yours, and you do not queue them. That
             split exists because your queue was carrying the whole factory
-            and could not keep up. Issues about the human-facing surface
-            (site, README reader experience, positioning, marketing/) are
-            the herald's (ADR-0040): label them marketing + product at
-            triage and skip them in your queue.
+            and could not keep up. Issues labeled marketing are the
+            herald's (ADR-0040): skip them too. Triage, label bootstrap,
+            and issue grooming are the curator's (ADR-0044); your queue
+            arrives routed, so an unrouted issue is simply not yours yet.
 
             Then work in strict priority order and STOP after ONE substantial
             unit of work:
@@ -155,21 +149,7 @@ jobs:
                Checks still pending: skip the PR, the next wake owns it.
                You cannot wait for anything; the run ends the moment your
                turn ends, so never end a turn planning to resume.
-            4. Issues missing a triage response: triage up to 3, product
-               and unrouted ones only. Triage
-               DECIDES, it does not just label. Every issue you touch
-               leaves with a realm label (product or agent-system, the
-               routing everything below depends on) AND one of three
-               fates: closed (done already,
-               duplicate, or no longer makes sense — say why, courteously),
-               labeled blocked-on-human with the exact ask, or accepted
-               into the queue below. An issue you route to agent-system is
-               triaged the moment it is labeled; the BDFL decides it. An
-               issue that is already satisfied by
-               shipped code is the cheapest close there is; check before
-               assuming it is open work. Link research/JOURNAL.md when an
-               idea was already tried.
-            5. Otherwise ship progress. ONE queue of product work, and
+            4. Otherwise ship progress. ONE queue of product work, and
                issues are in it:
                the pile grows when triage files things nobody ever works
                (operator, Telegram, 2026-08-23). Urgency outranks

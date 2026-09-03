@@ -101,7 +101,7 @@ The system is inert until these are done:
 
 ## Steering
 
-- **Give the team work**: open an issue. The heartbeat triages daily,
+- **Give the team work**: open an issue. The curator triages daily,
   and the BDFL wakes within seconds on any personal repo activity of
   yours.
 - **Change priorities**: edit `ROADMAP.md` (directly on main if you like —

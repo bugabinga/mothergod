@@ -38,11 +38,17 @@ is fully autonomous by design (ADR-0003).
   are queried read-only as success proxies, never posted to by the
   system, and that rule binds every seat. Never merges; the reviewer
   approves. Queue label: `marketing`.
-- *Maintainer heartbeat*: fixes red PRs, triages issues, picks the top
-  roadmap item and ships one small PR. Its queue is the `product` realm;
+- *Maintainer heartbeat*: fixes red PRs, picks the top roadmap item
+  and ships one small PR. Its queue is the `product` realm;
   `agent-system` issues belong to the BDFL (operator directive, Telegram,
-  2026-08-23). Cadence lives in the workflow's cron, nowhere else
-  (ADR-0015).
+  2026-08-23). Cadence rides the worker clock (ADR-0035), like every
+  seat's.
+- *Curator*, daily: stewards the issue tracker (ADR-0044). Bootstraps
+  labels and the ops-log issue, triages every new issue to a realm
+  and a fate, grooms open ones for staleness, duplicates, and scope,
+  and critiques substance adversarially with every author, the BDFL
+  and operator included. Judges and routes only: no `Edit`/`Write`,
+  no PRs, never merges, never removes `blocked-on-human`.
 - *Reviewer* — adversarial review of every PR; verifies claims by running
   them; merges when CI is green and the review passes. Never reviews work it
   authored in the same run.
@@ -54,7 +60,7 @@ is fully autonomous by design (ADR-0003).
 
 (An interactive `@claude` mention agent existed until 2026-08-21;
 removed by operator directive. Questions go in issues, which the
-heartbeat triages daily.)
+curator triages daily.)
 
 Agent behavior is governed by `CLAUDE.md` (the contract) and the workflow
 prompts in `.github/workflows/` — both are ordinary versioned files. The
@@ -414,13 +420,13 @@ agent cannot see the shape of.
 
 So: grant Bash unrestricted to any agent that already holds `Edit`/`Write`.
 Withhold a tool only where withholding states a real role boundary — the
-reviewer gets no `Edit`/`Write` because it judges and does not modify, and
-that denial is the design working.
+reviewer and the curator get no `Edit`/`Write` because they judge and do
+not modify, and that denial is the design working.
 
 ## Humans other than the operator
 
 Human contributions are welcome and go through the same pipeline: file issues,
-open PRs; the heartbeat triages questions daily. The reviewer agent reviews human
+open PRs; the curator triages questions daily. The reviewer agent reviews human
 PRs with the same rules (and extra courtesy — see CONTRIBUTING.md). Appeals
 against any agent decision: open an issue and tag @bugabinga; the operator's
 call is final.

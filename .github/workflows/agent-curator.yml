@@ -1,0 +1,183 @@
+# Curator: daily steward of the issue tracker (ADR-0044). Bootstraps
+# labels, triages every new issue to a realm and a fate, grooms open
+# ones for staleness and scope, and spars with authors on substance.
+# Judges and routes only: no Edit/Write, no PRs, no merges.
+name: agent-curator
+
+on:
+  # Woken daily at 08:53 UTC by the worker clock (ADR-0035); the cron
+  # lines in infra/telegram-worker/wrangler.toml are the cadence's
+  # source of truth. Never a native `schedule:` trigger here: GitHub's
+  # schedule-actor attribution breaks the app-token exchange on
+  # bot-edited files (GOVERNANCE.md "Push identity").
+  workflow_dispatch:
+    inputs:
+      source:
+        description: >-
+          'cron' when the worker clock's tick dispatched this run
+          (ADR-0035); left at the default for a human dispatch. Only
+          the clock's tick is discretionary, so only it can be skipped
+          by the allowance governor (ADR-0039).
+        required: false
+        default: manual
+
+permissions: {}
+
+# Per-agent group (ADR-0014): curator runs debounce against each other
+# only, never blocking another agent.
+concurrency:
+  group: agent-curator
+  cancel-in-progress: false
+
+jobs:
+  curator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: guard
+        uses: ./.github/actions/agent-guard
+        with:
+          token: ${{ github.token }}
+          role: curator
+          discretionary: ${{ inputs.source == 'cron' }}
+
+      - id: claude
+        if: steps.guard.outputs.paused != 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          # Job-scoped token for gh writes; outlives the claude app
+          # token, which expires ~1h into a session (issue #81).
+          # Comments and issues only, never pushes or merges
+          # (GOVERNANCE.md "Push identity").
+          GH_WORKFLOW_TOKEN: ${{ github.token }}
+          # gh-comment assembles the attribution footer from this.
+          ROLE: curator
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are on duty as the curator: the issue tracker is yours
+            to keep routed, honest, and current (ADR-0044, your
+            charter). Read first: agents/GOVERNANCE.md for roles and
+            routing. Link research/JOURNAL.md when an idea was already
+            tried there; enter it through its headings
+            (grep -n '^#'), never whole (ADR-0025).
+
+            Bootstrap (idempotent, quick): ensure these labels exist
+            (gh label create ... || true): triage, research,
+            blocked-on-human, ops-log, agent-approved, agents-paused,
+            product, agent-system, marketing. Ensure one open issue
+            labeled ops-log titled "📋 Operations log" exists; create
+            it if missing.
+
+            Then work in priority order. A run with nothing to do is a
+            good run; stop when the pass is done.
+
+            1. Triage every issue missing a triage response, newest
+               first, up to 5 this run. Triage DECIDES, it does not
+               just label. Every issue you touch leaves with exactly
+               one realm label (product or agent-system; human-facing
+               surface issues get marketing + product, which routes
+               them to the herald, ADR-0040) AND one of three fates:
+               closed (done already, duplicate, or no longer makes
+               sense; say why, courteously), labeled blocked-on-human
+               with the exact ask, or accepted with a comment saying
+               what acceptance means: the evidence it carries, what
+               would finish it, and what it blocks or is blocked by.
+               An issue already satisfied by shipped code is the
+               cheapest close there is; check the tree before assuming
+               it is open work.
+            2. Replies: where an author answered your critique,
+               respond this run: converge or concede, in a sentence
+               where a sentence does. After two critiques on one issue
+               with no answer, go quiet there. A disagreement that
+               will not converge gets one comment naming it, and your
+               final response flags it for the BDFL, whose retrospect
+               reads every run.
+            3. Groom up to 3 open issues, longest-untouched first.
+               Staleness: does the claim still match the repo? Check,
+               and cite what you checked. Duplicates: close the
+               younger onto the older unless the younger is sharper.
+               Scope braids: two ideas in one issue get asked to
+               split, or split yourself by filing the second half and
+               cross-linking. Missing evidence: a bug without a repro,
+               an enhancement without a beneficiary, a number without
+               a corpus; ask for exactly what is missing, nothing
+               more. Labels and milestones are yours to correct
+               silently. A title that no longer says what the issue
+               asks is yours to sharpen, noting the old title in a
+               comment. Another author's body text is never yours to
+               edit.
+
+            Hard rules: you critique substance (evidence, scope,
+            priority, staleness), never wording or style. You never
+            open a PR and never merge; a machinery defect you find
+            becomes an agent-system issue instead. Security reports
+            and advisories are the operator's alone; skip them. PRs
+            are the reviewer's; you read them only to learn an issue's
+            state. You apply blocked-on-human with the exact ask; only
+            the BDFL or the operator removes it (the latch rule,
+            GOVERNANCE.md). Post every comment, new issue, and close
+            with `.github/scripts/gh-comment` (body on stdin), never
+            `gh issue comment/create/close` directly and never a
+            hand-typed footer (issues #138, #489).
+
+            End of run: if you acted (closed, filed, labeled,
+            critiqued), post a 3-6 line summary on the ops-log issue;
+            a run that changed nothing posts nothing there. Your final
+            response is the record either way.
+          # No Edit/Write: the curator judges and routes, never
+          # modifies the tree (GOVERNANCE.md "Tool envelopes", the
+          # reviewer precedent). Bash unrestricted, same section.
+          claude_args: |
+            --append-system-prompt-file agents/personas/curator.md
+            ${{ steps.guard.outputs.model_flag }}
+            ${{ steps.guard.outputs.effort_flag }}
+            --max-turns 200
+            --allowedTools "Read,Grep,Glob,Bash"
+
+      - if: always() && steps.claude.outcome != 'skipped'
+        uses: ./.github/actions/agent-pause
+        with:
+          token: ${{ github.token }}
+          execution_file: ${{ steps.claude.outputs.execution_file }}
+          telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+
+      # Audit trail (operator directive): prompt and metadata in, final
+      # response out. Never the transcript, which records command lines
+      # and can carry credentials. Must not fail the run.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        uses: ./.github/actions/agent-audit
+        with:
+          token: ${{ github.token }}
+          role: curator
+          execution_file: ${{ steps.claude.outputs.execution_file }}
+          redact: |
+            ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+            ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+            ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+            ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # Run notice: curator runs land in the operator's Telegram as a
+      # short summary, same mechanism as heartbeat runs;
+      # agent-heartbeat.yml carries the rationale. Runs after
+      # agent-audit because it reads that step's scrubbed files.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+        run: |
+          .github/scripts/run-notice.py "${RUNNER_TEMP}/agent-audit" curator \
+            | .github/scripts/tg-send --notice
