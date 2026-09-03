@@ -307,3 +307,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - Weekly `cargo miri test` lane in monster. The crate forbids unsafe,
   so Miri is insurance that the claim stays true transitively, priced
   by test selection (`cfg(miri)` excludes the slow storms).
+
+## 11. FFI / C ABI end-to-end (planned, #41)
+
+- Gated on the Rust API stabilizing (1.0); not scheduled work today.
+  When scheduled: a C test harness links the `cdylib` crate's stable C
+  ABI (`mothergod.h`) and runs round-trip, adversarial-input, and
+  allocation-bound suites through the C surface itself, in CI —
+  proving no panic crosses the FFI boundary, not just that the Rust
+  API behaves.
