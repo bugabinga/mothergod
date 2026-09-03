@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post one issue comment, or close an issue with one, on the credential meant for it.
+"""Post one issue comment, close an issue with one, or open an issue, on the credential meant for it.
 
 Extensionless and executable because agents type it as a command mid-session,
 like tg-send and push-branch.
@@ -21,14 +21,28 @@ and never consults GH_ADMIN_TOKEN or an ambient GH_TOKEN, so a shell that
 exported the admin PAT for an earlier workflow-file push cannot leak it into
 a routine comment by accident.
 
-Scope: issues only. A PR is also an issue node, but `gh issue comment` fails
-on a PR argument, and PR review threads have their own posting path; wire
-those in when the need shows up rather than guessing the shape now.
+Creation (`--new`) rides the same credential for a second reason, issue #489:
+the app token expires about an hour into a session, and a run that measures
+for two hours cannot file what it learned. The workflow token has no such
+clock, so an issue filed at minute 130 lands exactly like one filed at minute
+three. That is not a fallback path with a trigger condition to remember; it
+is the only path, which is why there is nothing here to get wrong.
+
+Scope: issues only, and that boundary is load-bearing, not laziness. This
+credential must NEVER open a pull request, because GitHub raises no workflow
+run from an event its own `GITHUB_TOKEN` caused, so the PR would be born
+with no `ci` and no reviewer, forever (the argument in full, and what
+catches the run that needed one: GOVERNANCE "Stalled auto-merge", sixth
+signature). A PR is also an issue node, but `gh issue comment` fails on a PR
+argument, and PR review threads have their own posting path; wire those in
+when the need shows up rather than guessing the shape now.
 
 Usage: gh-comment <issue-number> [--close] < body
-Prints the comment's URL on stdout.
+       gh-comment --new "<title>" [--label NAME]... < body
+Prints the comment's or the new issue's URL on stdout.
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -43,12 +57,23 @@ def die(*lines):
 
 
 def main() -> int:
-    argv = sys.argv[1:]
-    close = "--close" in argv
-    argv = [a for a in argv if a != "--close"]
-    if len(argv) != 1 or not argv[0].isdigit():
-        die("usage: gh-comment <issue-number> [--close] < body")
-    number = argv[0]
+    parser = argparse.ArgumentParser(prog="gh-comment", description=__doc__.splitlines()[0])
+    parser.add_argument("number", nargs="?", help="the issue to comment on or close")
+    parser.add_argument("--close", action="store_true", help="close it, body as the closing comment")
+    parser.add_argument("--new", metavar="TITLE", help="open a new issue with this title")
+    parser.add_argument("--label", action="append", default=[], metavar="NAME",
+                        help="label for --new, repeatable")
+    args = parser.parse_args()
+
+    if args.new:
+        if args.number or args.close:
+            die("--new opens an issue; it takes no number and cannot --close one")
+    else:
+        if not args.number or not args.number.isdigit():
+            die("usage: gh-comment <issue-number> [--close] < body",
+                "       gh-comment --new \"<title>\" [--label NAME]... < body")
+        if args.label:
+            die("--label applies to --new only; label an existing issue with `gh issue edit`")
 
     role = os.environ.get("ROLE", "")
     if not role:
@@ -70,13 +95,18 @@ def main() -> int:
     env["GH_TOKEN"] = token
     env.pop("GH_ADMIN_TOKEN", None)
 
-    args = ["issue", "close" if close else "comment", number]
-    args += ["--comment" if close else "--body", full_body]
-    result = subprocess.run(
-        ["gh"] + args, env=env, capture_output=True, text=True
-    )
+    if args.new:
+        call = ["issue", "create", "--title", args.new, "--body", full_body]
+        for label in args.label:
+            call += ["--label", label]
+        target = f"a new issue titled {args.new!r}"
+    else:
+        call = ["issue", "close" if args.close else "comment", args.number]
+        call += ["--comment" if args.close else "--body", full_body]
+        target = f"issue {args.number}"
+    result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
     if result.returncode != 0:
-        die(f"gh {' '.join(args[:2])} {number} failed: {result.stderr.strip()}")
+        die(f"gh {' '.join(call[:2])} on {target} failed: {result.stderr.strip()}")
     print(result.stdout.strip())
     return 0
 

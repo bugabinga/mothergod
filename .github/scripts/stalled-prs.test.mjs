@@ -22,19 +22,27 @@ spec = importlib.util.spec_from_loader("stalled_prs", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
-print(json.dumps(mod.classify(json.loads(sys.argv[3]), now)))
+print(json.dumps(getattr(mod, sys.argv[4])(json.loads(sys.argv[3]), now)))
 `;
 
 const NOW = "2026-08-30T12:11:00Z";
 
-function classify(pr, now = NOW) {
+function call(fn, subject, now) {
   const run = spawnSync(
     "python3",
-    ["-c", driver, scriptsDir, now, JSON.stringify(pr)],
+    ["-c", driver, scriptsDir, now, JSON.stringify(subject), fn],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0, run.stderr);
   return JSON.parse(run.stdout);
+}
+
+function classify(pr, now = NOW) {
+  return call("classify", pr, now);
+}
+
+function classifyBranch(branch, now = NOW) {
+  return call("classify_branch", branch, now);
 }
 
 function check(name, conclusion, extra = {}) {
@@ -200,3 +208,38 @@ for (
     assert.equal(found, null);
   });
 }
+
+// branch-orphaned: the signature with no PR to hang on (issue #489). Run
+// 33677765718 pushed `claude/bdfl-miri-lane` at 22:20:48Z after two hours of
+// Miri measurement, then died on `gh pr create` with an expired app token.
+// Nothing on GitHub said so; the next session found it only because the dead
+// one had written a prose handoff.
+test("a branch pushed and never PR'd, past grace, is stalled work", () => {
+  const found = classifyBranch(
+    { name: "claude/bdfl-miri-lane", pushed: "2026-09-02T22:20:48Z" },
+    "2026-09-02T23:30:00Z",
+  );
+  assert.equal(found.kind, "branch-orphaned");
+  assert.match(found.detail, /2026-09-02T22:20:48Z/);
+  assert.match(found.rescue, /gh pr create --head claude\/bdfl-miri-lane/);
+});
+
+test("a branch pushed minutes ago is a live session, not a stall", () => {
+  // push-branch and `gh pr create` are seconds apart, but the session between
+  // them can be doing anything. Reporting that is a false line every wake.
+  assert.equal(
+    classifyBranch(
+      { name: "claude/bdfl-miri-lane", pushed: "2026-09-02T22:20:48Z" },
+      "2026-09-02T22:35:00Z",
+    ),
+    null,
+  );
+});
+
+test("a branch older than the activity window reports rather than hides", () => {
+  // Absent from the feed can only mean older than it, and a detector that
+  // stays quiet on missing data is the failure this whole script exists for.
+  const found = classifyBranch({ name: "claude/ancient", pushed: null });
+  assert.equal(found.kind, "branch-orphaned");
+  assert.match(found.detail, /before the activity window/);
+});
