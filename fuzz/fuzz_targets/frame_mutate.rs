@@ -3,7 +3,7 @@
 use std::sync::LazyLock;
 
 use libfuzzer_sys::fuzz_target;
-use mothergod_fuzz_support::frame_gen;
+use mothergod_fuzz_support::{FUZZ_MAX_DECODED_LEN, frame_gen};
 
 // frame_gen::frames() re-runs the real encoder over every preimage
 // (compress trials each shortlisted filter candidate through a full
@@ -24,7 +24,9 @@ static FRAMES: LazyLock<Vec<(&'static str, Vec<u8>)>> = LazyLock::new(frame_gen:
 // single-byte XOR flips, so mutation explores the *neighborhood* of real
 // frames instead of starting from nothing. Same contract as
 // decode_arbitrary: CLAUDE.md hard rule 2, a decode error is fine, a panic
-// or unbounded allocation is not.
+// or unbounded allocation is not. `decompress_bounded`, not `decompress`:
+// a flip can land on the declared-length field same as decode_arbitrary's
+// raw bytes can, so it needs the same cap (`FUZZ_MAX_DECODED_LEN`'s docs).
 fuzz_target!(|data: &[u8]| {
     let Some((&selector, flips)) = data.split_first() else {
         return;
@@ -38,5 +40,5 @@ fuzz_target!(|data: &[u8]| {
         let offset = usize::from(at) % frame.len();
         frame[offset] ^= xor;
     }
-    let _ = mothergod::decompress(&frame);
+    let _ = mothergod::decompress_bounded(&frame, FUZZ_MAX_DECODED_LEN);
 });
