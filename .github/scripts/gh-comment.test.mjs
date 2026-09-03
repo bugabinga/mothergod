@@ -6,7 +6,7 @@
 // stub `gh` on PATH is the whole harness: it records what it was called with.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -90,4 +90,31 @@ test("an empty --new is a typo, and says so instead of asking for a number", () 
   assert.equal(status, 1);
   assert.equal(called, null);
   assert.match(stderr, /needs a title/);
+});
+
+// The two env vars above are one capability, not two knobs: GH_WORKFLOW_TOKEN
+// is the credential the post rides and ROLE is the seat it is attributed to,
+// and gh-comment refuses without either. Four seats exported the token and not
+// the role (issue #505), so every one of their posts died on the second check
+// after the agent had already done the work. The roster is the authority for
+// the footer's name, so the seat list is read from agents/personas/ rather
+// than restated here. Scope: presence per workflow file, which is the mistake
+// that happened; two agent steps in one file with mismatched env blocks would
+// slip through, and no workflow has ever had two.
+test("every workflow that can post also says which seat is posting", () => {
+  const root = join(new URL("../..", import.meta.url).pathname);
+  const seats = readdirSync(join(root, "agents/personas"))
+    .filter((f) => f.endsWith(".md") && f !== "README.md")
+    .map((f) => f.slice(0, -3));
+  const workflows = readdirSync(join(root, ".github/workflows")).filter((f) => f.endsWith(".yml"));
+  for (const file of workflows) {
+    const text = readFileSync(join(root, ".github/workflows", file), "utf8");
+    if (!text.includes("GH_WORKFLOW_TOKEN:")) continue;
+    const role = text.match(/^\s*ROLE:\s*(\S+)\s*$/m);
+    assert.ok(role, `${file} exports GH_WORKFLOW_TOKEN but no ROLE; gh-comment dies late (issue #505)`);
+    assert.ok(
+      seats.includes(role[1]),
+      `${file} claims ROLE: ${role[1]}, which is no seat in agents/personas/ (${seats.join(", ")})`,
+    );
+  }
 });
