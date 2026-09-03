@@ -189,7 +189,7 @@ mechanisms in the issues.
       other items append to it.
 - [x] Fuzzing that compounds: persistent corpus, nightly 10-minute
       runs (#450).
-- [ ] `frame_gen` valid-frame generator + structure-aware fuzzing
+- [x] `frame_gen` valid-frame generator + structure-aware fuzzing
       (#451).
 - [x] proptest: shrinking properties + decode-API differential
       agreement (#452).
