@@ -17,7 +17,7 @@ Two agent-system pieces cannot live here, by platform requirement:
 
 - **`/.github/workflows/` and `/.github/actions/`** — the executable agent
   processes (heartbeat, reviewer, researcher, BDFL, deslopper, herald,
-  pause machinery), plus `agent-model-intel`, which is a plain script rather
+  curator, pause machinery), plus `agent-model-intel`, which is a plain script rather
   than an agent (ADR-0019) and reports model capability alongside our own
   run economics (ADR-0023). GitHub only runs workflows from `.github/`.
 - **`/CLAUDE.md`** — the agent contract. The Claude Code harness loads it

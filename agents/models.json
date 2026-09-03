@@ -49,6 +49,20 @@
         "effort": "high"
       }
     },
+    "curator": {
+      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first.",
+      "ladder": [
+        "claude-opus-5",
+        "claude-sonnet-5"
+      ],
+      "effort": "",
+      "thrift": {
+        "ladder": [
+          "claude-sonnet-5"
+        ],
+        "effort": ""
+      }
+    },
     "deslopper": {
       "ladder": [
         "claude-sonnet-5"

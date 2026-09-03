@@ -794,6 +794,12 @@ export const CLOCK = {
     // allowance governor may skip it (ADR-0039).
     { workflow: "agent-herald.yml", inputs: { source: "cron" } },
   ],
+  "53 8 * * *": [
+    // agent-curator, daily, off the other seats' minutes (ADR-0044).
+    // `source: cron` marks the wake discretionary, so the allowance
+    // governor may skip it (ADR-0039).
+    { workflow: "agent-curator.yml", inputs: { source: "cron" } },
+  ],
   "23 6 * * 6": [
     // agent-research, Saturdays, the slot it held as a native trigger
     // (issue #413). `source: cron` marks the wake discretionary
