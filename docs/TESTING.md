@@ -200,9 +200,15 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   — so libFuzzer mutates in that shape space directly, unlike
   `frame_mutate`'s byte flips near an already-encoded frame: issue
   #451's remaining "structure-aware `Arbitrary`-over-token-structures"
-  scope. Not yet in `fuzz-check` or seeded by `seed_corpus`: same
-  admin-PAT workflow-file gate as before (issue #24, BDFL-only per
-  `agents/GOVERNANCE.md`), filed as #492.
+  scope. `bin/seed_corpus.rs` now seeds it too, one file per
+  `PreimageRecipe` variant found by searching a deterministic byte
+  stream and decoding it back rather than hand-deriving `arbitrary`'s
+  enum layout (measured gain: a cold `frame_recipe` run's first
+  candidate fails to decode into any shape at all, 0 useful coverage;
+  the 5 seeds alone reach cov 1703/ft 3230 before a single mutation
+  runs). Not yet in `fuzz-check`: same admin-PAT workflow-file gate as
+  before (issue #24, BDFL-only per `agents/GOVERNANCE.md`), filed as
+  #492.
 
 ## 4. Mutation testing (`mutants-check`, per PR)
 

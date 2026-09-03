@@ -6,6 +6,11 @@
 //! prunes back out. Run from the `fuzz/` directory (`cargo run --bin
 //! seed_corpus`), matching every other cargo-fuzz command in
 //! `fuzz-check.yml`; writes under `corpus/`, relative to that directory.
+//!
+//! `frame_recipe`'s seeds come from
+//! [`frame_gen::recipe_corpus_seeds`] rather than `frames()`/
+//! `preimages()` directly: its input is bytes `arbitrary` parses into a
+//! [`frame_gen::PreimageRecipe`], not a frame or preimage itself.
 
 use std::fs;
 use std::path::Path;
@@ -48,6 +53,16 @@ fn main() {
     write_corpus(
         "roundtrip",
         frame_gen::preimages()
+            .into_iter()
+            .map(|(name, bytes)| (name.to_string(), bytes)),
+    );
+
+    // frame_recipe's input is bytes arbitrary parses into a
+    // PreimageRecipe: one seed per variant, letting libFuzzer's own
+    // mutation explore each shape's parameter space from there.
+    write_corpus(
+        "frame_recipe",
+        frame_gen::recipe_corpus_seeds()
             .into_iter()
             .map(|(name, bytes)| (name.to_string(), bytes)),
     );

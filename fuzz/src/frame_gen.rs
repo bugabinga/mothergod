@@ -24,6 +24,8 @@
 //! and its greedy counterpart already cover window-boundary distance
 //! behavior directly, without materializing a multi-megabyte buffer.
 
+use arbitrary::{Arbitrary, Unstructured};
+
 /// One named, deterministic preimage: the raw bytes handed to
 /// [`mothergod::compress`], not a frame itself. Exposed alongside
 /// [`frames`] so a caller seeding the always-valid `roundtrip` fuzz
@@ -229,6 +231,83 @@ impl PreimageRecipe {
     }
 }
 
+fn wants_nontrivial_len(len: u16) -> bool {
+    len > 256
+}
+
+fn is_repeated_byte(recipe: &PreimageRecipe) -> bool {
+    matches!(recipe, PreimageRecipe::RepeatedByte { len, .. } if wants_nontrivial_len(*len))
+}
+
+fn is_cyclic(recipe: &PreimageRecipe) -> bool {
+    matches!(recipe, PreimageRecipe::Cyclic { len } if wants_nontrivial_len(*len))
+}
+
+fn is_columnar_drift(recipe: &PreimageRecipe) -> bool {
+    matches!(recipe, PreimageRecipe::ColumnarDrift { columns, rows }
+        if *columns >= 2 && wants_nontrivial_len(*rows))
+}
+
+fn is_bcj_dense(recipe: &PreimageRecipe) -> bool {
+    matches!(recipe, PreimageRecipe::BcjDense { len } if wants_nontrivial_len(*len))
+}
+
+fn is_pseudo_random(recipe: &PreimageRecipe) -> bool {
+    matches!(recipe, PreimageRecipe::PseudoRandom { len, .. } if wants_nontrivial_len(*len))
+}
+
+/// Raw byte buffers that `arbitrary` decodes into a non-trivial instance
+/// of every [`PreimageRecipe`] variant, for `bin/seed_corpus.rs` to seed
+/// the `frame_recipe` fuzz target's corpus (issue #451's remaining
+/// "structure-aware `Arbitrary`-over-token-structures" scope; `#492`
+/// wires the target into `fuzz-check` itself). `arbitrary`'s derived
+/// byte layout for an enum is not part of its public contract and not
+/// worth hand-deriving: [`find_recipe_bytes`] searches for it instead,
+/// decoding each candidate back before accepting it, so a search that
+/// landed on the wrong shape cannot ship as a seed.
+#[must_use]
+pub fn recipe_corpus_seeds() -> Vec<(&'static str, Vec<u8>)> {
+    let shapes: [(&str, fn(&PreimageRecipe) -> bool); 5] = [
+        ("repeated_byte", is_repeated_byte),
+        ("cyclic", is_cyclic),
+        ("columnar_drift", is_columnar_drift),
+        ("bcj_dense", is_bcj_dense),
+        ("pseudo_random", is_pseudo_random),
+    ];
+    shapes
+        .into_iter()
+        .map(|(name, predicate)| (name, find_recipe_bytes(predicate)))
+        .collect()
+}
+
+/// Searches a deterministic byte stream for a prefix that `arbitrary`
+/// decodes into a [`PreimageRecipe`] satisfying `predicate`, growing the
+/// candidate length until one is found. xorshift64, not for
+/// cryptographic use: this needs reproducibility across runs, not
+/// unpredictability, so every `fuzz-check` job seeds the same corpus.
+fn find_recipe_bytes(predicate: fn(&PreimageRecipe) -> bool) -> Vec<u8> {
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next_byte = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state & 0xff) as u8
+    };
+    for len in [4usize, 6, 8, 10, 12, 16, 24, 32] {
+        for _ in 0..200_000u32 {
+            let bytes: Vec<u8> = (0..len).map(|_| next_byte()).collect();
+            if let Ok(recipe) = PreimageRecipe::arbitrary_take_rest(Unstructured::new(&bytes))
+                && predicate(&recipe)
+            {
+                return bytes;
+            }
+        }
+    }
+    panic!(
+        "frame_gen::find_recipe_bytes: no byte sequence decoded into the target shape within budget"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
@@ -339,5 +418,27 @@ mod tests {
             rows: u16::MAX,
         };
         assert!(recipe.to_bytes().len() <= 64 * MAX_DIM);
+    }
+
+    #[test]
+    fn recipe_corpus_seeds_decode_into_every_variant() {
+        let seeds = recipe_corpus_seeds();
+        assert_eq!(seeds.len(), 5, "one seed per PreimageRecipe variant");
+        for (name, bytes) in seeds {
+            let recipe = PreimageRecipe::arbitrary_take_rest(Unstructured::new(&bytes))
+                .unwrap_or_else(|e| panic!("seed {name} failed to decode: {e}"));
+            let right_shape = match name {
+                "repeated_byte" => matches!(recipe, PreimageRecipe::RepeatedByte { .. }),
+                "cyclic" => matches!(recipe, PreimageRecipe::Cyclic { .. }),
+                "columnar_drift" => matches!(recipe, PreimageRecipe::ColumnarDrift { .. }),
+                "bcj_dense" => matches!(recipe, PreimageRecipe::BcjDense { .. }),
+                "pseudo_random" => matches!(recipe, PreimageRecipe::PseudoRandom { .. }),
+                other => panic!("unexpected seed name {other}"),
+            };
+            assert!(
+                right_shape,
+                "seed {name} decoded into {recipe:?}, wrong shape"
+            );
+        }
     }
 }
