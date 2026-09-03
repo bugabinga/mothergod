@@ -84,3 +84,10 @@ test("no verb reaches gh without GH_WORKFLOW_TOKEN", () => {
   assert.equal(status, 1);
   assert.equal(called, null);
 });
+
+test("an empty --new is a typo, and says so instead of asking for a number", () => {
+  const { status, stderr, called } = run(["--new", ""]);
+  assert.equal(status, 1);
+  assert.equal(called, null);
+  assert.match(stderr, /needs a title/);
+});

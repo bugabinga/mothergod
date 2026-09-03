@@ -243,3 +243,44 @@ test("a branch older than the activity window reports rather than hides", () => 
   assert.equal(found.kind, "branch-orphaned");
   assert.match(found.detail, /before the activity window/);
 });
+
+// orphans() is the one part with network in it, and the reviewer of PR #490
+// found it crashing on the second page: `gh api --paginate --jq` prints one
+// document per page, so json.loads raises "Extra data" the day this repo
+// passes 30 branches. Dormant then, not dormant later, and it would have taken
+// all six signatures down with it. The stub returns the shape
+// `--paginate --slurp` actually returns: a list of pages.
+const orphansDriver = `
+import importlib.machinery, importlib.util, json, sys
+from datetime import datetime
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+
+def fake_gh(*args):
+    if args[0] == "api" and "branches" in args[1]:
+        return json.dumps([[{"name": "main"}, {"name": "claude/orphan"}], [{"name": "claude/had-a-pr"}]])
+    if args[0] == "api":
+        return json.dumps([{"ref": "refs/heads/claude/orphan", "timestamp": "2026-09-02T22:20:48Z"}])
+    if args[0] == "pr":
+        return json.dumps([{"number": 7}] if "claude/had-a-pr" in args else [])
+    raise AssertionError(args)
+
+mod.gh = fake_gh
+rows, branches = mod.orphans(set(), datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00")))
+print(json.dumps({"branches": branches, "found": [[b["name"], f["kind"]] for b, f in rows]}))
+`;
+
+test("orphans reads every page, and skips the branch that had its PR", () => {
+  const run = spawnSync(
+    "python3",
+    ["-c", orphansDriver, scriptsDir, "2026-09-02T23:30:00Z"],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const out = JSON.parse(run.stdout);
+  assert.equal(out.branches, 3);
+  assert.deepEqual(out.found, [["claude/orphan", "branch-orphaned"]]);
+});

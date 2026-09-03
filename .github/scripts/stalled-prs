@@ -276,9 +276,16 @@ def pushed_at(refs):
 
 def orphans(open_heads, now):
     """The pushed branches nobody opened a PR for. Costs one API call when clean."""
-    names = json.loads(
-        gh("api", "repos/{owner}/{repo}/branches", "--paginate", "--jq", "[.[].name]")
+    # --slurp, not --jq: `gh api --paginate --jq` runs the filter once per page
+    # and prints one JSON document per page, which json.loads rejects as "Extra
+    # data" the day this repo passes the endpoint's 30-branch page. Dormant at
+    # two branches and not staying dormant, because the branches this signature
+    # exists to find are precisely the ones no merge ever deletes, and the crash
+    # would take all six signatures down with it (reviewer, PR #490).
+    pages = json.loads(
+        gh("api", "repos/{owner}/{repo}/branches?per_page=100", "--paginate", "--slurp")
     )
+    names = [branch["name"] for page in pages for branch in page]
     candidates = [
         name
         for name in names

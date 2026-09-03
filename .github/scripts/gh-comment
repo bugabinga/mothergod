@@ -65,7 +65,11 @@ def main() -> int:
                         help="label for --new, repeatable")
     args = parser.parse_args()
 
-    if args.new:
+    # `is not None`, because an empty --new is a typo, not an absent flag, and
+    # falsiness would send it to the "give me an issue number" error instead.
+    if args.new is not None:
+        if not args.new.strip():
+            die("--new needs a title; an issue nobody can scan is nobody's work")
         if args.number or args.close:
             die("--new opens an issue; it takes no number and cannot --close one")
     else:
@@ -95,7 +99,7 @@ def main() -> int:
     env["GH_TOKEN"] = token
     env.pop("GH_ADMIN_TOKEN", None)
 
-    if args.new:
+    if args.new is not None:
         call = ["issue", "create", "--title", args.new, "--body", full_body]
         for label in args.label:
             call += ["--label", label]
