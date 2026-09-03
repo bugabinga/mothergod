@@ -26,6 +26,11 @@ The dev team is a set of Claude sessions launched by GitHub Actions
 directive; `@claude` mentions no longer trigger anything. Questions go
 in issues, triaged by the heartbeat.)
 
+(Correction, 2026-09-03, PR #503: the roster above has since changed under
+ADR-0040 and ADR-0044, the latter moving issue triage from the heartbeat to
+the curator; `agents/GOVERNANCE.md` carries the current roster and is the
+only place that tracks it.)
+
 Separation of duties is the safety mechanism replacing human review: the
 proposer never merges its own work; the reviewer runs in a separate session
 with an adversarial prompt; CI guards are independent of both. Process files
