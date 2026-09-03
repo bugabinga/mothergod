@@ -179,10 +179,10 @@ jobs:
       # move changes when the analysis runs and nothing about which queries
       # execute. Changing the suite is a separate decision with its own
       # evidence.
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
