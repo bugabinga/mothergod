@@ -1087,6 +1087,15 @@ struct PriceTable {
     rep: f64,
 }
 
+impl PriceTable {
+    /// Price of coding a match/rep of `len`: the bucket's modeled price
+    /// plus the raw bits needed to pin down `len` within that bucket.
+    fn length_price(&self, len: u32) -> f64 {
+        let b = bucket(len);
+        self.length[b] + extra_bits(b)
+    }
+}
+
 /// Raw frequency counts [`PriceTable`] is derived from, tallied from a
 /// token sequence (the archive's `lh`/`lb`/`ob`/`nrep`). Every entry
 /// starts at 1 (Laplace smoothing): an unseen symbol still gets a finite,
@@ -1233,7 +1242,7 @@ impl DpState {
         slot: RepSlot,
         new_cache: RepCache,
     ) {
-        let cost = base + prices.length[bucket(len)] + extra_bits(bucket(len)) + prices.rep;
+        let cost = base + prices.length_price(len) + prices.rep;
         self.relax(cost, i + len as usize, Move::Rep { len, slot }, new_cache);
     }
 
@@ -1299,10 +1308,7 @@ impl DpState {
         if match_len_here == SHORT_MATCH_LEN as usize
             && distance_here.get() < SHORT_MATCH_MAX_DISTANCE
         {
-            let cost = base
-                + prices.length[bucket(SHORT_MATCH_LEN)]
-                + extra_bits(bucket(SHORT_MATCH_LEN))
-                + offset_cost;
+            let cost = base + prices.length_price(SHORT_MATCH_LEN) + offset_cost;
             self.relax(
                 cost,
                 i + SHORT_MATCH_LEN as usize,
@@ -1323,8 +1329,7 @@ impl DpState {
                 if len > full_len {
                     break;
                 }
-                let cost =
-                    base + prices.length[bucket(len)] + extra_bits(bucket(len)) + offset_cost;
+                let cost = base + prices.length_price(len) + offset_cost;
                 self.relax(
                     cost,
                     i + len as usize,
@@ -1336,8 +1341,7 @@ impl DpState {
                 );
             }
         }
-        let cost =
-            base + prices.length[bucket(full_len)] + extra_bits(bucket(full_len)) + offset_cost;
+        let cost = base + prices.length_price(full_len) + offset_cost;
         self.relax(
             cost,
             i + full_len as usize,
