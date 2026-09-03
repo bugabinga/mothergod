@@ -8,6 +8,7 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
+arbitrary = { version = "1.4", features = ["derive"] }
 libfuzzer-sys = "0.4"
 
 [dependencies.mothergod]
@@ -36,6 +37,13 @@ bench = false
 [[bin]]
 name = "frame_mutate"
 path = "fuzz_targets/frame_mutate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_recipe"
+path = "fuzz_targets/frame_recipe.rs"
 test = false
 doc = false
 bench = false

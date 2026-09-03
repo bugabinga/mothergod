@@ -8,6 +8,19 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `fuzz/`: a fourth libFuzzer target, `frame_recipe` (issue #451's
+  remaining "structure-aware `Arbitrary`-over-token-structures" scope,
+  not closed by #476's `frame_mutate`). `frame_gen::PreimageRecipe`
+  derives `Arbitrary` over a small preimage-shape parameter space
+  (repeated-byte runs, byte cycles, columnar drift, opcode-dense BCJ
+  data, pseudo-random noise, each with fuzzer-controlled length/seed),
+  so libFuzzer mutates in that shape space directly instead of raw
+  frame bytes: a mutation stays a recognizable columnar-drift or
+  repeat-run input as it explores sizes `frame_gen`'s fixed dozen
+  preimages never try. Every recipe compresses through the real
+  encoder and must round-trip (hard rule 1). Not yet wired into
+  `fuzz-check.yml` or `seed_corpus`: same admin-PAT gate as #475.
+
 - `README.md` and `site/index.html` now publish encode and decode
   throughput next to the ratio table, with the machine named: 0.133 MB/s
   encode and 4.422 MB/s decode on Canterbury, 0.059 and 1.879 on Silesia,

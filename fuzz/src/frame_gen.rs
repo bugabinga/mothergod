@@ -50,7 +50,7 @@ pub fn preimages() -> Vec<(&'static str, Vec<u8>)> {
             (0..1000u32).map(|i| (i % 251) as u8).collect(),
         ),
         ("delta_columnar_drift", columnar_drift(4, 2000)),
-        ("bcj_opcode_dense", bcj_opcode_dense()),
+        ("bcj_opcode_dense", bcj_opcode_dense(1000)),
         ("transpose_columnar", columnar_drift(8, 2000)),
         (
             "pseudo_random_incompressible",
@@ -127,9 +127,10 @@ fn columnar_drift(columns: usize, rows: usize) -> Vec<u8> {
 /// `0xE8` (`call rel32`) opcode every 20 bytes, otherwise `0x90` (`nop`):
 /// `src/filters.rs`'s `pick_shortlists_bcj_for_opcode_dense_data` input,
 /// verified there to make `filters::select::pick` shortlist
-/// `Candidate::Bcj`.
-fn bcj_opcode_dense() -> Vec<u8> {
-    let mut data = vec![0x90u8; 1000];
+/// `Candidate::Bcj`. `len` is a parameter, not a fixed 1000, so
+/// [`PreimageRecipe::BcjDense`] can drive it through varying sizes.
+fn bcj_opcode_dense(len: usize) -> Vec<u8> {
+    let mut data = vec![0x90u8; len];
     for chunk in data.chunks_mut(20) {
         chunk[0] = 0xE8;
     }
@@ -160,6 +161,72 @@ fn pseudo_random(mut seed: u32, len: usize) -> Vec<u8> {
         data.push((seed >> 24) as u8);
     }
     data
+}
+
+/// One dimension (a length, a row count) a recipe hands to a generator
+/// below. Capped well under the tens-to-low-thousands range the
+/// hand-picked [`preimages`] already use: this module's doc comment
+/// measured a 1 MiB preimage at 1.6s/`compress` in release and unfinished
+/// after 280s in debug, because `encode` trials every filter candidate
+/// through the full optimal-parse pipeline per call. `columns` in
+/// [`PreimageRecipe::ColumnarDrift`] is capped separately and tighter,
+/// since it multiplies against a row count rather than standing alone.
+const MAX_DIM: usize = 4096;
+
+fn bound_dim(raw: u16) -> usize {
+    usize::from(raw) % (MAX_DIM + 1)
+}
+
+/// Structured recipe for one preimage (issue #451, mechanism item 3):
+/// deriving `Arbitrary` here, rather than on raw bytes, lets libFuzzer
+/// mutate this small parameter space directly. A mutation stays a
+/// recognizable member of the same shape family `filters::select::pick`
+/// keys off (a columnar drift stays columnar, a repeat stays a repeat) as
+/// it explores sizes and seeds [`preimages`]'s fixed dozen never tries,
+/// rather than [`frame_mutate`](super)'s byte flips near an
+/// already-encoded frame, which mutate in frame *bytes*, not in the
+/// preimage's shape.
+#[derive(Debug, Clone, arbitrary::Arbitrary)]
+pub enum PreimageRecipe {
+    /// `len` copies of `byte`: heavy single-offset repeat structure, the
+    /// shape `long_repeated_byte_run` fixes at 4000 bytes of `b'z'`.
+    RepeatedByte { byte: u8, len: u16 },
+    /// The 0..=255 byte cycle `cyclic_bytes` fixes at 5000 bytes, varying
+    /// length only: distance-256 repeat structure throughout.
+    Cyclic { len: u16 },
+    /// `columnar_drift`'s shape, generalized: `columns` capped at 64 so
+    /// `columns * rows` cannot run away the way an unbounded `u16 * u16`
+    /// would (frame_gen's own doc comment on why whole-buffer size
+    /// matters here). `pick_selects_delta_for_columnar_drift` and
+    /// `pick_shortlists_transpose_for_column_structured_data` (in
+    /// `src/filters.rs`) key off exactly this shape at columns 4 and 8;
+    /// other column counts explore neighboring filter-selection behavior
+    /// those two fixed cases do not.
+    ColumnarDrift { columns: u8, rows: u16 },
+    /// `bcj_opcode_dense`'s shape, generalized over length: `0xE8` every
+    /// 20 bytes amid `0x90` filler.
+    BcjDense { len: u16 },
+    /// `pseudo_random`'s shape, generalized: uniform bytes with no filter
+    /// or match/rep structure to exploit, varying seed and length so
+    /// `encode`'s `Method::Stored` fallback sees more than one input.
+    PseudoRandom { seed: u32, len: u16 },
+}
+
+impl PreimageRecipe {
+    /// Materializes this recipe's raw bytes, the preimage a fuzz target
+    /// hands to [`mothergod::compress`].
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match *self {
+            PreimageRecipe::RepeatedByte { byte, len } => vec![byte; bound_dim(len)],
+            PreimageRecipe::Cyclic { len } => (0..=255u8).cycle().take(bound_dim(len)).collect(),
+            PreimageRecipe::ColumnarDrift { columns, rows } => {
+                columnar_drift(usize::from(columns) % 65, bound_dim(rows))
+            }
+            PreimageRecipe::BcjDense { len } => bcj_opcode_dense(bound_dim(len)),
+            PreimageRecipe::PseudoRandom { seed, len } => pseudo_random(seed, bound_dim(len)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -217,9 +284,60 @@ mod tests {
     #[test]
     fn bcj_opcode_dense_selects_bcj_as_documented() {
         assert!(
-            pick(&bcj_opcode_dense()).contains(&Candidate::Bcj),
+            pick(&bcj_opcode_dense(1000)).contains(&Candidate::Bcj),
             "opcode-dense data should shortlist Bcj, same as filters.rs's \
              pick_shortlists_bcj_for_opcode_dense_data"
         );
+    }
+
+    #[test]
+    fn preimage_recipe_variants_round_trip() {
+        let recipes = [
+            PreimageRecipe::RepeatedByte {
+                byte: b'z',
+                len: 4000,
+            },
+            PreimageRecipe::Cyclic { len: 5000 },
+            PreimageRecipe::ColumnarDrift {
+                columns: 4,
+                rows: 2000,
+            },
+            PreimageRecipe::BcjDense { len: 1000 },
+            PreimageRecipe::PseudoRandom {
+                seed: 0xdead_beef,
+                len: 2048,
+            },
+            // Every field at its type's max: MAX_DIM/column-cap bounding
+            // must hold even at the widest input Arbitrary can hand this
+            // enum, the case a corpus-less fuzz run reaches first.
+            PreimageRecipe::ColumnarDrift {
+                columns: u8::MAX,
+                rows: u16::MAX,
+            },
+        ];
+        for recipe in recipes {
+            let data = recipe.to_bytes();
+            let frame = mothergod::compress(&data);
+            assert_eq!(
+                mothergod::decompress(&frame).as_deref(),
+                Ok(data.as_slice()),
+                "{recipe:?} failed to roundtrip"
+            );
+        }
+    }
+
+    #[test]
+    fn preimage_recipe_dimensions_stay_bounded() {
+        let recipe = PreimageRecipe::PseudoRandom {
+            seed: 0,
+            len: u16::MAX,
+        };
+        assert!(recipe.to_bytes().len() <= MAX_DIM);
+
+        let recipe = PreimageRecipe::ColumnarDrift {
+            columns: u8::MAX,
+            rows: u16::MAX,
+        };
+        assert!(recipe.to_bytes().len() <= 64 * MAX_DIM);
     }
 }
