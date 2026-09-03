@@ -22,19 +22,27 @@ spec = importlib.util.spec_from_loader("stalled_prs", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
-print(json.dumps(mod.classify(json.loads(sys.argv[3]), now)))
+print(json.dumps(getattr(mod, sys.argv[4])(json.loads(sys.argv[3]), now)))
 `;
 
 const NOW = "2026-08-30T12:11:00Z";
 
-function classify(pr, now = NOW) {
+function call(fn, subject, now) {
   const run = spawnSync(
     "python3",
-    ["-c", driver, scriptsDir, now, JSON.stringify(pr)],
+    ["-c", driver, scriptsDir, now, JSON.stringify(subject), fn],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0, run.stderr);
   return JSON.parse(run.stdout);
+}
+
+function classify(pr, now = NOW) {
+  return call("classify", pr, now);
+}
+
+function classifyBranch(branch, now = NOW) {
+  return call("classify_branch", branch, now);
 }
 
 function check(name, conclusion, extra = {}) {
@@ -200,3 +208,79 @@ for (
     assert.equal(found, null);
   });
 }
+
+// branch-orphaned: the signature with no PR to hang on (issue #489). Run
+// 33677765718 pushed `claude/bdfl-miri-lane` at 22:20:48Z after two hours of
+// Miri measurement, then died on `gh pr create` with an expired app token.
+// Nothing on GitHub said so; the next session found it only because the dead
+// one had written a prose handoff.
+test("a branch pushed and never PR'd, past grace, is stalled work", () => {
+  const found = classifyBranch(
+    { name: "claude/bdfl-miri-lane", pushed: "2026-09-02T22:20:48Z" },
+    "2026-09-02T23:30:00Z",
+  );
+  assert.equal(found.kind, "branch-orphaned");
+  assert.match(found.detail, /2026-09-02T22:20:48Z/);
+  assert.match(found.rescue, /gh pr create --head claude\/bdfl-miri-lane/);
+});
+
+test("a branch pushed minutes ago is a live session, not a stall", () => {
+  // push-branch and `gh pr create` are seconds apart, but the session between
+  // them can be doing anything. Reporting that is a false line every wake.
+  assert.equal(
+    classifyBranch(
+      { name: "claude/bdfl-miri-lane", pushed: "2026-09-02T22:20:48Z" },
+      "2026-09-02T22:35:00Z",
+    ),
+    null,
+  );
+});
+
+test("a branch older than the activity window reports rather than hides", () => {
+  // Absent from the feed can only mean older than it, and a detector that
+  // stays quiet on missing data is the failure this whole script exists for.
+  const found = classifyBranch({ name: "claude/ancient", pushed: null });
+  assert.equal(found.kind, "branch-orphaned");
+  assert.match(found.detail, /before the activity window/);
+});
+
+// orphans() is the one part with network in it, and the reviewer of PR #490
+// found it crashing on the second page: `gh api --paginate --jq` prints one
+// document per page, so json.loads raises "Extra data" the day this repo
+// passes 30 branches. Dormant then, not dormant later, and it would have taken
+// all six signatures down with it. The stub returns the shape
+// `--paginate --slurp` actually returns: a list of pages.
+const orphansDriver = `
+import importlib.machinery, importlib.util, json, sys
+from datetime import datetime
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+
+def fake_gh(*args):
+    if args[0] == "api" and "branches" in args[1]:
+        return json.dumps([[{"name": "main"}, {"name": "claude/orphan"}], [{"name": "claude/had-a-pr"}]])
+    if args[0] == "api":
+        return json.dumps([{"ref": "refs/heads/claude/orphan", "timestamp": "2026-09-02T22:20:48Z"}])
+    if args[0] == "pr":
+        return json.dumps([{"number": 7}] if "claude/had-a-pr" in args else [])
+    raise AssertionError(args)
+
+mod.gh = fake_gh
+rows, branches = mod.orphans(set(), datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00")))
+print(json.dumps({"branches": branches, "found": [[b["name"], f["kind"]] for b, f in rows]}))
+`;
+
+test("orphans reads every page, and skips the branch that had its PR", () => {
+  const run = spawnSync(
+    "python3",
+    ["-c", orphansDriver, scriptsDir, "2026-09-02T23:30:00Z"],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const out = JSON.parse(run.stdout);
+  assert.equal(out.branches, 3);
+  assert.deepEqual(out.found, [["claude/orphan", "branch-orphaned"]]);
+});

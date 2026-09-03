@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report every open PR whose progress has stopped, and name the rescue.
+"""Report every piece of PR-shaped work whose progress has stopped, and name the rescue.
 
 Extensionless and executable because agents type it as a command mid-session,
 like operator-sweep and retrospect.
@@ -36,6 +36,16 @@ Signatures, most specific first, at most one reported per PR:
                          evaluates `blocked` while the REST merge succeeds
                          (first hit PR #84).
 
+One signature has no PR to hang on, which is the whole point of it:
+
+    branch-orphaned      a pushed `claude/*` branch with no PR in any
+                         state, past its own grace. The session that
+                         pushed it died before `gh pr create`, usually on
+                         an expired app token (issue #489, first hit run
+                         33677765718). No other credential may open that
+                         PR, which is why this is detected rather than
+                         delegated: GOVERNANCE, sixth signature.
+
 A rescue of more than a command or two names its recipe by reference, and
 that recipe lives in agents/GOVERNANCE.md "Stalled auto-merge" and nowhere
 else, because a multi-step procedure kept in two places drifts in one of
@@ -45,7 +55,9 @@ GOVERNANCE's copy of those two is the explanation of why the PR stalled,
 not a second copy of the command.
 
 Deliberately NOT reported, said plainly so nothing claims a completeness it
-lacks. A PR labeled `blocked-on-human` is parked on purpose, and suppressing
+lacks. A `claude/*` branch whose PR was merged or closed is undeleted
+clutter, not stalled work, and a branch outside that prefix belongs to
+somebody who is not this machinery. A PR labeled `blocked-on-human` is parked on purpose, and suppressing
 it is what that label is for. A draft is a human's work-in-progress signal
 (CLAUDE.md rule 11); agent-review's `undraft` job owns bot drafts. A fork PR
 carries no secrets and belongs to the heartbeat. A PR with a red or still
@@ -53,9 +65,9 @@ running gate is not stalled: its author owns the next move. An open PR that
 is simply old and abandoned is a different class, and this detector does not
 pretend to find it.
 
-Liveness: the footer always prints how many PRs were read, how many stalled,
-and how many were suppressed, so a detector that has silently stopped
-matching is distinguishable from a quiet queue.
+Liveness: the footer always prints how many PRs and branches were read, how
+many stalled, and how many were suppressed, so a detector that has silently
+stopped matching is distinguishable from a quiet queue.
 
 Usage: stalled-prs
 Exits 0 whether or not anything stalled. A stall is a finding, not an error.
@@ -89,6 +101,16 @@ DEAD = frozenset({"FAILURE", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "STALE
 # Long enough for GitHub to schedule a queued job, short enough that a wake
 # on the next four-hourly cron still catches a birth conflict the same day.
 GRACE = timedelta(minutes=15)
+
+# The branches this machinery pushes (CLAUDE.md "Issue/PR conventions").
+BRANCH_PREFIX = "claude/"
+
+# A branch gets longer, because it is waiting on a live session rather than on
+# GitHub's scheduler: a push and its `gh pr create` are seconds apart, but the
+# session in between can be doing anything. Costs a false line when a run is
+# unusually slow between the two, which is why the rescue checks for a live
+# session before opening anything.
+BRANCH_GRACE = timedelta(minutes=30)
 
 FIELDS = (
     "number,title,labels,mergeStateStatus,headRefName,createdAt,"
@@ -206,15 +228,102 @@ def classify(pr, now):
     return None
 
 
-def render(rows, read, suppressed):
+def classify_branch(branch, now):
+    """Return the finding for one candidate branch, or None. Pure, like classify().
+
+    A candidate has already been filtered to `claude/*` with no PR in any
+    state; all that is left is whether it is old enough to be abandoned
+    rather than mid-push. `pushed` is None when the branch predates the
+    activity window we read, which can only mean older, so it reports.
+    """
+    pushed = branch["pushed"]
+    if pushed is not None:
+        at = datetime.strptime(iso(pushed), STAMP).replace(tzinfo=timezone.utc)
+        if now - at < BRANCH_GRACE:
+            return None
+    return finding(
+        "branch-orphaned",
+        f"pushed {pushed or 'before the activity window'} and never became a PR",
+        "GOVERNANCE 'Stalled auto-merge', sixth signature: confirm no session is "
+        f"still running, then `gh pr create --head {branch['name']}` with the body "
+        "from its commit message",
+    )
+
+
+def pushed_at(refs):
+    """Latest push or creation time per ref, from the repository activity feed.
+
+    One page. The feed is dense (every push, merge and branch delete), so a
+    ref missing from it is old, which `classify_branch` reads as past grace.
+
+    The window is 100 events, not a duration: a burst of pushes between a
+    branch's own push and this sweep can bury it, and the branch then reports
+    early. Reviewer's finding on PR #490, left as is because the rescue opens
+    with "confirm no session is still running", which is the check that costs
+    a reader ten seconds and catches exactly this.
+    """
+    activity = json.loads(
+        gh("api", "repos/{owner}/{repo}/activity?per_page=100",
+           "--jq", "[.[] | {ref, timestamp, activity_type}]")
+    )
+    stamps = {}
+    for event in activity:
+        ref = event["ref"].removeprefix("refs/heads/")
+        if ref in refs and ref not in stamps:
+            stamps[ref] = event["timestamp"]
+    return stamps
+
+
+def orphans(open_heads, now):
+    """The pushed branches nobody opened a PR for. Costs one API call when clean."""
+    # --slurp, not --jq: `gh api --paginate --jq` runs the filter once per page
+    # and prints one JSON document per page, which json.loads rejects as "Extra
+    # data" the day this repo passes the endpoint's 30-branch page. Dormant at
+    # two branches and not staying dormant, because the branches this signature
+    # exists to find are precisely the ones no merge ever deletes, and the crash
+    # would take all six signatures down with it (reviewer, PR #490).
+    pages = json.loads(
+        gh("api", "repos/{owner}/{repo}/branches?per_page=100", "--paginate", "--slurp")
+    )
+    names = [branch["name"] for page in pages for branch in page]
+    candidates = [
+        name
+        for name in names
+        if name.startswith(BRANCH_PREFIX) and name not in open_heads
+    ]
+    if not candidates:
+        return [], len(names)
+    stamps = pushed_at(set(candidates))
+    rows = []
+    for name in candidates:
+        # A closed or merged PR means this branch had its life; the leftover
+        # ref is clutter for whoever prunes branches, not stalled work.
+        if json.loads(gh("pr", "list", "--head", name, "--state", "all",
+                         "--limit", "1", "--json", "number")):
+            continue
+        branch = {"name": name, "pushed": stamps.get(name)}
+        found = classify_branch(branch, now)
+        if found:
+            rows.append((branch, found))
+    return rows, len(names)
+
+
+def render(rows, branch_rows, read, branches, suppressed):
     for pr, found in rows:
         print(f"#{pr['number']:<5} {found['kind']:<21} {pr['title'][:52]}")
         print(f"        {found['detail']}")
         print(f"        rescue: {found['rescue']}")
         print()
+    for branch, found in branch_rows:
+        print(f"{'--':<6} {found['kind']:<21} {branch['name'][:52]}")
+        print(f"        {found['detail']}")
+        print(f"        rescue: {found['rescue']}")
+        print()
     print(
-        f"stalled-prs: open {read} | stalled {len(rows)} | suppressed {suppressed}"
+        f"stalled-prs: open {read} | branches {branches} | "
+        f"stalled {len(rows) + len(branch_rows)} | suppressed {suppressed}"
         f" | grace {int(GRACE.total_seconds() // 60)}m"
+        f"/{int(BRANCH_GRACE.total_seconds() // 60)}m"
     )
 
 
@@ -224,9 +333,12 @@ def main():
     )
     now = datetime.now(timezone.utc)
     rows = [(pr, classify(pr, now)) for pr in pulls]
+    branch_rows, branches = orphans({pr["headRefName"] for pr in pulls}, now)
     render(
         [(pr, found) for pr, found in rows if found],
+        branch_rows,
         len(pulls),
+        branches,
         sum(1 for pr in pulls if suppress(pr)),
     )
 

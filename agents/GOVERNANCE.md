@@ -262,6 +262,27 @@ propagate-review run that agent-alarm dispatches on, and the rescue
 for those is the same mechanical merge as the `dirty` case, resolved
 by hand.
 
+A sixth signature has no PR at all. The session's app token expires
+about an hour in, so a run whose work outlasts that pushes its branch
+and then dies on `gh pr create` (issue #489; run 33677765718 spent two
+hours measuring Miri, then could not open PR #488). The work is
+finished, pushed, and invisible: no PR, no checks, nothing for the
+five signatures above to match, and the only reason the next session
+found it was a prose handoff the dead one had thought to write.
+`stalled-prs` reports it as `branch-orphaned`. Rescue: confirm no
+session is still running (`gh run list --status in_progress`), then
+`gh pr create --head <branch>` with the body taken from the branch's
+commit message, which is where a session that expects to die should
+have put its rationale.
+
+This one cannot be fixed the way the comment half was. Issue creation
+moved to the workflow token and stopped expiring; PR creation cannot
+follow, because GitHub raises no workflow run from an event its own
+`GITHUB_TOKEN` caused, and `ci` and `agent-review` trigger on
+`pull_request` alone. A PR opened on that identity would be born into
+the first signature above, permanently. Detection is the answer, not
+delegation.
+
 ## Push identity
 
 Three credentials can push, and the pusher decides whether the pipeline
@@ -305,7 +326,8 @@ it is why the script exists and what it protects.
   the PR is operator-attributed, which wakes a full BDFL run on its
   own PR: five BDFL PRs did that in 85 minutes on 2026-08-23 (#111,
   #112, #113, #114, #122), burning 22 runner-minutes and the lane
-  (issue #141). Same rule for `gh issue create`.
+  (issue #141). Issues are stricter still: `gh-comment --new` is the
+  only path, on the workflow token, per "Token lifetime" below.
 
 Token lifetime (issue #81): the claude app token expires about an hour
 into a session; past that, every `gh` call riding the default
@@ -315,10 +337,19 @@ Front-load token-dependent writes. For comments that must land late in
 a long run, fall back to the job-scoped workflow token, exposed to
 agent sessions as `GH_WORKFLOW_TOKEN`:
 `GH_TOKEN="$GH_WORKFLOW_TOKEN" gh api ...`. That identity is
-`github-actions[bot]`, blessed for issue and PR comments only, never
-for pushes (first bullet above) and never for merges. The reviewer is
-exempt from all of this; its `gh` rides `github.token` job-wide
-already.
+`github-actions[bot]`, blessed for issue comments, issue creation and
+PR comments, never for pushes (first bullet above) and never for
+merges. The reviewer is exempt from all of this; its `gh` rides
+`github.token` job-wide already.
+
+Issue creation is not a fallback with a condition to remember: it is
+the only path, `.github/scripts/gh-comment --new`, so an issue filed at
+minute 130 of a run lands exactly like one filed at minute three
+(issue #489). That identity must never open a pull request, and the
+reason is in "Stalled auto-merge", sixth signature. PR creation has no
+late path at all; a run that expects to outlive its token puts its
+rationale in the commit message, pushes, and lets `branch-orphaned`
+catch what it could not open.
 
 A held `action_required` run is never cleared, only outrun: no agent
 token approves one (PR #43), so the correction is a fresh event

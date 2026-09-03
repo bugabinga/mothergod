@@ -212,5 +212,9 @@ platform requirement). New files follow the placement rule in `agents/README.md`
   which is how a pile grows. Split by who should do the work, not by which directory it touches:
   CI that only the factory feels is `agent-system` even though it gates the
   crate.
+- File issues with `.github/scripts/gh-comment --new "<title>" --label <realm>`,
+  body on stdin, never `gh issue create`: it assembles the role footer and
+  rides the one write credential that does not expire mid-run (issue #489).
+  Same script comments and closes (`gh-comment <number> [--close]`).
 - Anything only the human operator can do (secrets, settings, uploads,
   crates.io) → label `blocked-on-human`, explain exactly what is needed, move on.
