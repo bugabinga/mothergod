@@ -39,12 +39,15 @@ GITHUB_REPO = "bugabinga/mothergod"
 # computed share of these wakes while the allowance projection misses
 # the reset (ADR-0039), so tune these for how fast the factory should
 # react and let the governor decide what it can afford.
+# At most 5 expressions: the Workers Free plan caps cron triggers per
+# account (API error 10072, deploy run 33727271158). A new seat joins
+# an existing tick's CLOCK list in worker.js instead of adding a line;
+# worker.test.mjs enforces the cap.
 [triggers]
 crons = [
   "11 */4 * * *",
   "22 */3 * * *",
   "37 */12 * * *",
   "49 6,18 * * *",
-  "53 8 * * *",
   "23 6 * * 6",
 ]
