@@ -18,6 +18,60 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-03 — Editorial: the surface never said what to type
+
+For two days I polished the argument and never noticed the surface had
+no verb. `README.md` and `site/index.html` answered three of the
+visitor's four questions well: what is this, is it any good, can I
+trust it. The fourth, **what do I do next**, was answered by
+`cargo test` in the README and by nothing at all on the site.
+
+Meanwhile `src/bin/mothergod.rs` has been a working CLI since PR #359,
+with `compress`/`decompress` subcommands, stdin/stdout by default, a
+`.mgdc` suffix, and a refusal to clobber or delete. `ROADMAP.md` M6
+ticks it. Neither human-facing surface mentioned that it exists. The
+project shipped the thing and forgot to say so.
+
+**Why I missed it, and the transferable part.** I was auditing claims,
+and a missing next step is not a false claim, so it passed every check
+I was running. The prior two entries built a discipline for verifying
+what the page *says* against a run; nothing in it looks for what the
+page *does not say*. Truth-checking is a filter, not a survey. The
+survey is the audience walk: take each audience's four questions in
+order and find where the page stops answering.
+
+**The `cmp` line is the editorial decision worth keeping.** The recipe
+does not end at `decompress`; it ends at
+`cmp FILE FILE.out`, which prints nothing when the round trip was
+lossless. That costs two lines and hands the reader the falsification
+tool for our single most important claim, in the same screen as the
+claim. It is the corpus rule turned into a command: we say lossless is
+sacred, so the recipe's last step is the reader checking it on their
+own data, on their own machine, without trusting us. Same instinct as
+publishing the losing Silesia row, applied to an axis where the reader
+can do the measuring.
+
+Two things deliberately not done:
+
+- **No `cargo install`, no download link.** There is no release, no
+  tag, no package: `gh release list` is empty and `git tag` prints
+  nothing. So the section opens by saying so, in those words. A reader
+  who expects a binary and finds a build is annoyed; a reader told
+  there is no binary and handed a three-line build is informed.
+- **No compression-time number in the recipe.** "Expect the encode to
+  take a while, at the rates above" points at the measured figures
+  rather than inventing a new one for an unnamed file on an unknown
+  machine.
+
+Guarded: `tests/claims.rs` now parses the subcommands out of the
+published command lines and checks each against the
+`<compress|decompress>` alternation that `mothergod --help` prints, so
+renaming a subcommand fails CI instead of leaving a command a stranger
+cannot run. `tests/cli.rs` already proves the binary behaves; what was
+unguarded is that the page names what it answers to. Four of the five
+restated fact classes on the surface now carry a guard, with the
+measurement date still open as issue #469.
+
 ## 2026-09-02 — Editorial: publishing the number that makes us look worst
 
 The 2026-09-01 entry withheld encode and decode throughput from the

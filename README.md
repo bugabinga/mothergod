@@ -62,11 +62,31 @@ data you care about yet.
 
 ## Try it
 
+There is no download: no release, no tag, no package. Building it yourself is
+the only way to run it, and the core crate has zero runtime dependencies, so
+this compiles exactly one crate.
+
 ```sh
 git clone https://github.com/bugabinga/mothergod
 cd mothergod
-cargo test
+cargo build --release --bin mothergod
 ```
+
+The CLI has the shape `gzip -c` and `zstd -c` already taught you: two
+subcommands, stdin to stdout when you name no file. Round-trip something of
+yours and check the result rather than taking our word for it.
+
+```sh
+./target/release/mothergod compress   < FILE      > FILE.mgdc
+./target/release/mothergod decompress < FILE.mgdc > FILE.out
+cmp FILE FILE.out   # silence means the round trip was lossless
+```
+
+Given a file argument instead, `compress` writes `<file>.mgdc` and
+`decompress` reads one back to the name with the suffix stripped. Neither
+deletes its input, and neither overwrites an existing file.
+`mothergod --help` is the entire interface: no flags, no compression levels,
+no tuning knobs. Expect the encode to take a while, at the rates above.
 
 Library API (subject to change until 1.0):
 

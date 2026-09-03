@@ -8,6 +8,18 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `README.md` and `site/index.html` now tell the reader how to run
+  mothergod. The CLI (`src/bin/mothergod.rs`, ROADMAP M6) has existed
+  since #359 and neither surface mentioned it: the README's "Try it"
+  offered `cargo test`, and the site offered nothing at all, so the
+  page that argues the compressor is worth your attention never said
+  what to type. Both now publish the build command, the stdin/stdout
+  and file-argument forms, the `.mgdc` suffix, and a `cmp` that lets
+  the reader verify losslessness rather than take our word for it.
+  `tests/claims.rs` checks the published subcommands against the
+  binary's own `--help`, so a rename cannot leave a wrong command on
+  the page.
+
 - `fuzz/`: a fourth libFuzzer target, `frame_recipe` (issue #451's
   remaining "structure-aware `Arbitrary`-over-token-structures" scope,
   not closed by #476's `frame_mutate`). `frame_gen::PreimageRecipe`
