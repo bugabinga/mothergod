@@ -8,16 +8,6 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
-- `fuzz-check.yml` discovers its targets with `cargo fuzz list` instead
-  of naming them, so a target added to `fuzz/Cargo.toml` is fuzzed the
-  next night with no workflow-file change (closes #492, which existed
-  only to perform that edit for `frame_recipe`). The workflow's wall
-  clock is now a fixed budget (`FUZZ_BUDGET_S`, 1800s) divided by the
-  target count rather than a fixed 10 minutes per target: a new target
-  costs the others depth, never the operator more runner minutes, and
-  can never push the job past its timeout. A crasher in one target no
-  longer skips the remaining ones; the run still fails.
-
 - `fuzz/`: a fourth libFuzzer target, `frame_recipe` (issue #451's
   remaining "structure-aware `Arbitrary`-over-token-structures" scope,
   not closed by #476's `frame_mutate`). `frame_gen::PreimageRecipe`
@@ -51,6 +41,16 @@ All notable changes to this project are documented here. Format follows
   guards the restated ratios and `FORMAT_VERSION`.
 
 ### Changed
+
+- `fuzz-check.yml` discovers its targets with `cargo fuzz list` instead
+  of naming them, so a target added to `fuzz/Cargo.toml` is fuzzed the
+  next night with no workflow-file change (closes #492, which existed
+  only to perform that edit for `frame_recipe`). The workflow's wall
+  clock is now a fixed budget (`FUZZ_BUDGET_S`, 1800s) divided by the
+  target count rather than a fixed 10 minutes per target: a new target
+  costs the others depth, never the operator more runner minutes, and
+  can never push the job past its timeout. A crasher in one target no
+  longer skips the remaining ones; the run still fails.
 
 - The first screen of `README.md` and `site/index.html` now leads with what
   mothergod compresses and how it asks to be judged, instead of with who

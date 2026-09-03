@@ -86,13 +86,9 @@ jobs:
           mkdir -p fuzz/corpus
           find fuzz/corpus -type f | awk -F/ '{c[$3]++} END {for (t in c) print t ": " c[t] " input(s)"; if (!length(c)) print "corpus: empty"}'
       # Targets are discovered, never listed here (#492). `cargo fuzz list`
-      # reads fuzz/Cargo.toml's [[bin]] entries, which is where a target's
-      # existence is already decided; naming them again in this file made a
-      # second source of truth whose only failure mode was silence, since a
-      # target absent from this list is simply never fuzzed and no check
-      # goes red. Adding one also cost an admin-PAT round trip, because
-      # only the BDFL seat can push .github/workflows (#24): #475/#480 and
-      # #492 are that round trip, twice.
+      # reads fuzz/Cargo.toml's [[bin]] entries, where a target's existence
+      # is already decided; a second list here failed silently, because a
+      # target missing from it is never fuzzed and no check goes red.
       #
       # The nightly's wall clock is the budget and the target count is the
       # divisor. A new target therefore costs the others depth, never the
