@@ -326,7 +326,8 @@ it is why the script exists and what it protects.
   the PR is operator-attributed, which wakes a full BDFL run on its
   own PR: five BDFL PRs did that in 85 minutes on 2026-08-23 (#111,
   #112, #113, #114, #122), burning 22 runner-minutes and the lane
-  (issue #141). Same rule for `gh issue create`.
+  (issue #141). Issues are stricter still: `gh-comment --new` is the
+  only path, on the workflow token, per "Token lifetime" below.
 
 Token lifetime (issue #81): the claude app token expires about an hour
 into a session; past that, every `gh` call riding the default

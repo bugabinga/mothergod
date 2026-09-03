@@ -38,15 +38,13 @@ Signatures, most specific first, at most one reported per PR:
 
 One signature has no PR to hang on, which is the whole point of it:
 
-    branch-orphaned      a pushed `claude/*` branch that never became a PR,
-                         past its own grace. The session's app token expires
-                         about an hour in (issue #81), so a run whose work
-                         outlasts that pushes its branch and then dies on
-                         `gh pr create` (issue #489, run 33677765718): work
-                         finished, pushed, and invisible. No other credential
-                         may open that PR, so detection is the whole answer;
-                         the alternative was a prose handoff on the ops-log
-                         that worked only while the next session read it.
+    branch-orphaned      a pushed `claude/*` branch with no PR in any
+                         state, past its own grace. The session that
+                         pushed it died before `gh pr create`, usually on
+                         an expired app token (issue #489, first hit run
+                         33677765718). No other credential may open that
+                         PR, which is why this is detected rather than
+                         delegated: GOVERNANCE, sixth signature.
 
 A rescue of more than a command or two names its recipe by reference, and
 that recipe lives in agents/GOVERNANCE.md "Stalled auto-merge" and nowhere
@@ -257,6 +255,12 @@ def pushed_at(refs):
 
     One page. The feed is dense (every push, merge and branch delete), so a
     ref missing from it is old, which `classify_branch` reads as past grace.
+
+    The window is 100 events, not a duration: a burst of pushes between a
+    branch's own push and this sweep can bury it, and the branch then reports
+    early. Reviewer's finding on PR #490, left as is because the rescue opens
+    with "confirm no session is still running", which is the check that costs
+    a reader ten seconds and catches exactly this.
     """
     activity = json.loads(
         gh("api", "repos/{owner}/{repo}/activity?per_page=100",
