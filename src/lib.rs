@@ -1088,7 +1088,12 @@ mod tests {
     }
 }
 
+// Not under Miri: interpretation costs 300-5000x per case on this
+// crate (measured, issue #456), the storm multiplies that by its case
+// count, and the deterministic example tests already walk the same
+// paths for UB observation.
 #[cfg(test)]
+#[cfg(not(miri))]
 mod proptests {
     use super::*;
     use proptest::prelude::*;

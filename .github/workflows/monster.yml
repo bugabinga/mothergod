@@ -114,6 +114,44 @@ jobs:
           target: ${{ matrix.target }}
           checks: ${{ matrix.checks || 'runtime' }}
 
+  # Hard rule 2 re-proved under an interpreter that observes UB directly:
+  # src/ is #![forbid(unsafe_code)], so this lane is insurance for the day
+  # unsafe creeps in (issue #456), priced by measurement, not by the issue's
+  # 10-100x planning guess. Measured 2026-09-02: Miri runs this crate's
+  # arithmetic-coder loops 300-5000x slower than native, so the lane is a
+  # selection, not the whole suite. In: the adversarial sweep, every hostile
+  # fixture through the full decode path (~10 min), and the filter
+  # transforms (~25 s), the buffer-index arithmetic half of decode. Out:
+  # filters::select (prices candidates through the coder, 686 s for ONE
+  # test), golden (re-encodes fixtures, one test alone breached 28 min),
+  # and the rest of the unit suite (coder-loop tests cost minutes each).
+  # Widening the lane means measuring first. Test-code cfg(miri) guards
+  # mark only what can never run under Miri regardless of budget:
+  # subprocess spawning (cli), prose checks (claims), proptest storms.
+  miri:
+    name: Miri | x86-64 | nightly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # Nightly grows lints ahead of stable; their churn is not this
+      # lane's signal, UB is.
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          toolchain: nightly
+          checks: setup
+      - name: Install Miri
+        run: rustup component add miri rust-src
+      - name: Miri sweep
+        env:
+          # The fixture directories live on the real filesystem.
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: |
+          cargo miri test -p mothergod --test adversarial
+          cargo miri test -p mothergod --lib filters:: -- --skip filters::select
+
   x-msrv:
     name: x | MSRV
     runs-on: ubuntu-24.04
@@ -157,8 +195,8 @@ jobs:
 
   report:
     name: report
-    if: ${{ always() && (needs.test.result == 'failure' || needs.test.result == 'cancelled' || needs.android.result == 'failure' || needs.android.result == 'cancelled') }}
-    needs: [test, android]
+    if: ${{ always() && (needs.test.result == 'failure' || needs.test.result == 'cancelled' || needs.android.result == 'failure' || needs.android.result == 'cancelled' || needs.miri.result == 'failure' || needs.miri.result == 'cancelled') }}
+    needs: [test, android, miri]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
