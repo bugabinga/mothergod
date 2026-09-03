@@ -191,7 +191,7 @@ mechanisms in the issues.
       runs (#450).
 - [ ] `frame_gen` valid-frame generator + structure-aware fuzzing
       (#451).
-- [ ] proptest: shrinking properties + decode-API differential
+- [x] proptest: shrinking properties + decode-API differential
       agreement (#452).
 - [x] Allocation torture sweep (#453).
 - [ ] Weekly region coverage, published never gated (#454).
