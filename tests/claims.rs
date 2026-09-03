@@ -1,13 +1,14 @@
 //! Guard: `README.md` and `site/index.html` restate `FORMAT_VERSION`, the
-//! published aggregate bits/byte numbers, and the published aggregate
-//! encode/decode MB/s instead of computing them, so a codec change or a
-//! report regeneration can leave any of them stale with nothing catching it
+//! published aggregate bits/byte numbers, the published aggregate
+//! encode/decode MB/s, and the CLI recipe a reader is told to type, instead
+//! of deriving any of them, so a codec change, a report regeneration or a
+//! renamed subcommand can leave any of them stale with nothing catching it
 //! (issue #431: twice in seven days, PR #243 and again the day this test
 //! was added). Compares every restated claim against its single source of
 //! truth — `FORMAT_VERSION` against `src/lib.rs`'s own constant, the
 //! aggregate figures against the matching generated `docs/benchmarks/*.md`
-//! report — and fails naming the file, the claimed value, and the true
-//! value.
+//! report, the recipe against the binary's own usage output — and fails
+//! naming the file, the claimed value, and the true value.
 
 // Not under Miri: prose-vs-source string comparison, no codec code runs
 // here for Miri to observe, so the lane spends its budget elsewhere
@@ -210,5 +211,75 @@ fn published_throughput_matches_its_generated_reports() {
                 "site/index.html's {corpus} {direction} MB/s is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
             );
         }
+    }
+}
+
+/// What `mothergod --help` prints. The binary's own usage text is the source
+/// of truth for its interface: `src/bin/mothergod.rs` is where a rename
+/// happens, and running it is the only reading that cannot go stale.
+fn help_text() -> String {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mothergod"))
+        .arg("--help")
+        .output()
+        .expect("mothergod binary should spawn");
+    assert!(output.status.success(), "mothergod --help should exit 0");
+    String::from_utf8(output.stdout).expect("usage text is UTF-8")
+}
+
+/// The subcommands the binary offers, from the `<compress|decompress>`
+/// alternation in the first line of its usage. Parsed rather than substring
+/// matched because `decompress` contains `compress`, so a plain `contains`
+/// would keep passing after `compress` alone was renamed.
+fn binary_subcommands(help: &str) -> Vec<&str> {
+    let open = help.find('<').expect("usage line brackets its subcommands");
+    let close = help[open..].find('>').expect("unterminated <...>") + open;
+    help[open + 1..close].split('|').collect()
+}
+
+/// The subcommands a surface tells the reader to type, taken as the word
+/// after each invocation of the built binary. Anchored on the path segment
+/// `release/mothergod ` so it picks up the copy-pasteable command lines
+/// (`./target/release/mothergod compress < FILE > FILE.mgdc`) and not the
+/// prose mentions of `mothergod --help`.
+fn published_subcommands(surface: &str) -> Vec<&str> {
+    surface
+        .match_indices("release/mothergod ")
+        .map(|(index, marker)| {
+            surface[index + marker.len()..]
+                .split_whitespace()
+                .next()
+                .expect("a subcommand follows the binary path")
+        })
+        .collect()
+}
+
+#[test]
+fn published_cli_recipe_names_commands_the_binary_answers_to() {
+    // `tests/cli.rs` proves the binary behaves; this proves the recipe on
+    // the public surfaces still names what it answers to, which is the half
+    // a stranger's terminal would otherwise discover for us.
+    let help = help_text();
+    let offered = binary_subcommands(&help);
+
+    for surface_file in ["README.md", "site/index.html"] {
+        let surface = read(surface_file);
+        let published = published_subcommands(&surface);
+        assert!(
+            published.len() >= 2,
+            "{surface_file} publishes {} runnable mothergod commands, expected the compress and decompress pair",
+            published.len()
+        );
+        for command in published {
+            assert!(
+                offered.contains(&command),
+                "{surface_file} tells the reader to run `mothergod {command}`; the binary offers {offered:?}"
+            );
+        }
+        // The suffix is restated in the recipe on both surfaces and derived
+        // from `SUFFIX` in the binary, which prints it in the same usage.
+        assert!(
+            surface.contains(".mgdc") && help.contains(".mgdc"),
+            "{surface_file} and mothergod --help disagree about the compressed-file suffix"
+        );
     }
 }

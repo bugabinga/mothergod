@@ -88,6 +88,17 @@
     .bench td { font-family: "JetBrains Mono", monospace; color: var(--muted); }
     .bench .ours, .bench thead th.ours { color: var(--gold); font-weight: 500; }
 
+    /* Commands are copy-pasted, so they never wrap: the block scrolls
+       sideways instead, and carries tabindex so a keyboard can reach that
+       scroll the way a pointer can. */
+    pre {
+      background: var(--nebula); border: 1px solid var(--line); border-radius: 10px;
+      padding: 1rem 1.1rem; overflow-x: auto;
+      font-family: "JetBrains Mono", monospace; font-size: .8rem; line-height: 1.9;
+      color: var(--starlight);
+    }
+    pre:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+
     .principles { list-style: none; display: flex; flex-direction: column; gap: .6rem; padding: 0; }
     .principles li { color: var(--muted); padding-left: 1.4rem; position: relative; }
     .principles li::before { content: "—"; position: absolute; left: 0; color: var(--gold); }
@@ -240,6 +251,38 @@
           milestone on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
           >roadmap</a>; nothing before then is tuned for it.
+        </p>
+      </section>
+
+      <section>
+        <h2>Try it</h2>
+        <p>
+          There is no download: no release, no tag, no package. Building it
+          yourself is the only way to run it, and the core crate has zero
+          runtime dependencies, so this compiles exactly one crate.
+        </p>
+        <pre
+          tabindex="0"
+          role="region"
+          aria-label="Commands to build mothergod and round-trip a file"
+        >git clone https://github.com/bugabinga/mothergod
+cd mothergod
+cargo build --release --bin mothergod
+
+./target/release/mothergod compress &lt; FILE &gt; FILE.mgdc
+./target/release/mothergod decompress &lt; FILE.mgdc &gt; FILE.out
+cmp FILE FILE.out</pre>
+        <p>
+          The CLI has the shape <code>gzip -c</code> and <code>zstd -c</code>
+          already taught you: two subcommands, stdin to stdout when you name no
+          file. That last line is the point of running it at all, and
+          <code>cmp</code> printing nothing is it passing. Given a file argument
+          instead, <code>compress</code> writes
+          <code>&lt;file&gt;.mgdc</code> and <code>decompress</code> reads one
+          back to the name with the suffix stripped; neither deletes its input,
+          and neither overwrites an existing file. <code>mothergod --help</code>
+          is the entire interface: no flags, no compression levels, no tuning
+          knobs. Expect the encode to take a while, at the rates above.
         </p>
       </section>
 
