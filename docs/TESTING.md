@@ -49,7 +49,7 @@ skips through the path filter. Those five names are the repository ruleset
 contract.
 
 The advisory `fuzz-check` workflow runs nightly at 02:13 UTC and on
-manual dispatch: both `fuzz/` targets, 10 minutes each, Linux x64 only,
+manual dispatch: three `fuzz/` targets, 10 minutes each, Linux x64 only,
 resuming from a corpus persisted across runs and minimized with `cmin`
 (layer 3, #450). A found crasher fails the job, uploads
 `fuzz/artifacts/`, and wakes the fixer through the alarm (ADR-0036).
@@ -181,24 +181,28 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - Still planned: an explicit allocation-limiter target beyond
   `MAX_DECODED_LEN`'s bound, and cross-OS fuzz coverage in `monster`.
 - Issue #451 (zstd's `decodecorpus`/SQLite's `dbsqlfuzz` analog):
-  landed so far, in `fuzz/`, not yet scheduled — `frame_gen.rs`, a
-  deterministic generator of valid frames (inputs already proven, in
-  `src/filters.rs`'s/`src/lz.rs`'s own unit tests, to drive every
-  `filters::select::Candidate` kind and the rep cache, compressed
-  through the real `mothergod::compress` so every returned frame is
-  valid by construction); a third libFuzzer target, `frame_mutate`,
-  that applies byte flips near a `frame_gen` frame so mutation explores
-  the decoder's post-header state machine instead of mostly
-  rediscovering `BadMagic`/`Truncated`; and `bin/seed_corpus.rs`,
+  `frame_gen.rs`, a deterministic generator of valid frames (inputs
+  already proven, in `src/filters.rs`'s/`src/lz.rs`'s own unit tests, to
+  drive every `filters::select::Candidate` kind and the rep cache,
+  compressed through the real `mothergod::compress` so every returned
+  frame is valid by construction); a third libFuzzer target,
+  `frame_mutate`, that applies byte flips near a `frame_gen` frame so
+  mutation explores the decoder's post-header state machine instead of
+  mostly rediscovering `BadMagic`/`Truncated`; and `bin/seed_corpus.rs`,
   writing `frame_gen`'s output as corpus seeds (measured gain on
   `decode_arbitrary`, this build: libFuzzer's own single generated seed
   reaches cov 26/ft 27, `frame_gen`'s 12 seeds alone reach cov 418/ft
-  859 before a single mutation runs). Not yet run by `fuzz-check`: that
-  workflow-file wiring needs the admin PAT to push (issue #24, BDFL-only
-  per `agents/GOVERNANCE.md`), filed as #475. The structure-aware
-  `Arbitrary`-over-token-structures target issue #451 also named remains
-  open scope too — `frame_mutate` mutates bytes near a valid frame, not
-  in frame-space directly.
+  859 before a single mutation runs). All three run in `fuzz-check`
+  (#475/#480). A fourth target, `frame_recipe`, derives `Arbitrary` on
+  `frame_gen::PreimageRecipe` — a small preimage-shape parameter space
+  (repeated-byte runs, byte cycles, columnar drift, opcode-dense BCJ
+  data, pseudo-random noise, each with a fuzzer-controlled length/seed)
+  — so libFuzzer mutates in that shape space directly, unlike
+  `frame_mutate`'s byte flips near an already-encoded frame: issue
+  #451's remaining "structure-aware `Arbitrary`-over-token-structures"
+  scope. Not yet in `fuzz-check` or seeded by `seed_corpus`: same
+  admin-PAT workflow-file gate as before (issue #24, BDFL-only per
+  `agents/GOVERNANCE.md`), filed as #492.
 
 ## 4. Mutation testing (`mutants-check`, per PR)
 
