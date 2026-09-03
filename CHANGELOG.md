@@ -153,6 +153,16 @@ All notable changes to this project are documented here. Format follows
   dev-dependency would be a cycle, a bigger design question left open.
   Verified the strategy shrinks: a planted `copy_match` bug reduced to a
   minimal 3-byte counterexample. The model/coder round-trip loops remain.
+- `model::Model` and `coder`'s raw `Encoder`/`Decoder` (via its
+  `FreqTable` test double) each carry a `roundtrip_symbols(symbols,
+  alphabet)` proptest property (issue #452), swept over alphabet size
+  2..64 and stream length 0..300, alongside the existing hand-written
+  examples (rescale crossing, interleaved model instances, etc.), which
+  stay as named anchors per the escalation ladder. Verified the strategy
+  shrinks: a planted `Model::decode` bug reduced to a minimal
+  2-symbol-alphabet, 1-symbol counterexample. Porting either property to
+  the corpus policy's generator classes, and a `PROPTEST_CASES`
+  weekly-scale-up profile, remain open on #452.
 
 - `fuzz/src/frame_gen.rs`: a deterministic generator of valid frames
   (issue #451), built from inputs already proven in `src/filters.rs`'s

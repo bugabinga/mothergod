@@ -128,11 +128,15 @@ weekly monster matrix runs them on every runtime target.
   path), and a low-period pattern (exercises the rep cache). At default
   case count (256): `parse_optimal`'s three-round DP is heavier per case
   than a filter round-trip, so data length stays under a few hundred
-  bytes rather than trimming cases. Still planned (#452): port the
-  model/coder round-trip loops to proptest strategies over the corpus
-  policy's generator classes, currently only in the `bench` crate (`bench`
-  depends on `mothergod`, so pulling them in as a root dev-dependency
-  would be a cycle — a bigger, separate design question).
+  bytes rather than trimming cases. `model::Model` and `coder`'s raw
+  `Encoder`/`Decoder` (via its `FreqTable` test double) each carry the
+  same `roundtrip_symbols(symbols, alphabet)` property, swept over
+  alphabet size 2..64 and stream length 0..300 (`#452`). Still open
+  (`#452`): porting any of these properties to the corpus policy's
+  generator classes, currently only in the `bench` crate (`bench` depends
+  on `mothergod`, so pulling them in as a root dev-dependency would be a
+  cycle — a bigger, separate design question), and a `PROPTEST_CASES`
+  weekly-scale-up profile, which no workflow sets yet.
 
 ## 2. Adversarial decode suite (Rust-input PRs)
 

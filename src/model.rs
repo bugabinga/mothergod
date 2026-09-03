@@ -166,7 +166,7 @@ impl Model {
 mod tests {
     use super::*;
 
-    fn roundtrip_symbols(symbols: &[usize], alphabet_len: usize) {
+    pub(super) fn roundtrip_symbols(symbols: &[usize], alphabet_len: usize) {
         let mut model = Model::new(alphabet_len);
         let mut enc = Encoder::new();
         for &s in symbols {
@@ -350,5 +350,48 @@ mod tests {
         // No panic is the assertion: decoded symbols past the real data
         // are whatever implicit-zero bits produce, never treated as
         // ground truth here.
+    }
+}
+
+// `mod tests` above is a wall of `roundtrip*` examples that each vary one
+// dimension (alphabet size, symbol distribution, stream length): the
+// escalation ladder's rung-2 trigger (`test-craft`'s escalation-ladder
+// reference, #452 scope item 1). The examples stay as named anchors for
+// the specific edge cases they document (rescale crossing, interleaved
+// model instances); this property sweeps arbitrary alphabets and symbol
+// streams instead of one example per shape. `roundtrip_symbols` is
+// `mod tests`' own helper, reused here rather than duplicated
+// (single source of truth for the encode/decode/assert sequence).
+// Not under Miri: interpretation costs 300-5000x per case on this
+// crate (measured, issue #456), the storm multiplies that by its case
+// count, and the deterministic example tests already walk the same
+// paths for UB observation.
+#[cfg(test)]
+#[cfg(not(miri))]
+mod proptests {
+    use proptest::prelude::*;
+
+    use super::tests::roundtrip_symbols;
+
+    /// Alphabet size 2..64 (every hand-written example above falls in this
+    /// range), symbol stream length 0..300 (`Model::decode`'s scan is
+    /// `O(alphabet)` per symbol, so this stays cheap at proptest's default
+    /// case count without needing a `PROPTEST_CASES`-scaled profile the way
+    /// `lib.rs`'s heavier `compress`-driven property does).
+    fn symbols_and_alphabet() -> impl Strategy<Value = (usize, Vec<usize>)> {
+        (2usize..64).prop_flat_map(|alphabet| {
+            proptest::collection::vec(0..alphabet, 0..300)
+                .prop_map(move |symbols| (alphabet, symbols))
+        })
+    }
+
+    proptest! {
+        /// Every symbol decoded back matches what was encoded, swept over
+        /// arbitrary alphabets and streams instead of one example per shape
+        /// (mirrors `mod tests`' `roundtrip_symbols`-based examples).
+        #[test]
+        fn roundtrip_holds_for_arbitrary_symbol_streams((alphabet, symbols) in symbols_and_alphabet()) {
+            roundtrip_symbols(&symbols, alphabet);
+        }
     }
 }
