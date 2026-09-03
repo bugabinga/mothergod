@@ -8,6 +8,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `tests/claims.rs` now guards two more facts `README.md` and
+  `site/index.html` restate from the generated benchmark reports: the
+  measurement date and the three reference compressor versions (`gzip`,
+  `Zstandard`, `XZ Utils`). A report regeneration under an unchanged
+  ratio previously left only the date stale with nothing catching it
+  (issue #469); the guard covered the ratios, throughput and
+  `FORMAT_VERSION` already but not these.
+
 - `README.md` and `site/index.html` now tell the reader how to run
   mothergod. The CLI (`src/bin/mothergod.rs`, ROADMAP M6) has existed
   since #359 and neither surface mentioned it: the README's "Try it"

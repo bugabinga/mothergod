@@ -1,14 +1,18 @@
 //! Guard: `README.md` and `site/index.html` restate `FORMAT_VERSION`, the
 //! published aggregate bits/byte numbers, the published aggregate
-//! encode/decode MB/s, and the CLI recipe a reader is told to type, instead
-//! of deriving any of them, so a codec change, a report regeneration or a
+//! encode/decode MB/s, the measurement date, the reference compressor
+//! versions, and the CLI recipe a reader is told to type, instead of
+//! deriving any of them, so a codec change, a report regeneration or a
 //! renamed subcommand can leave any of them stale with nothing catching it
 //! (issue #431: twice in seven days, PR #243 and again the day this test
-//! was added). Compares every restated claim against its single source of
-//! truth — `FORMAT_VERSION` against `src/lib.rs`'s own constant, the
-//! aggregate figures against the matching generated `docs/benchmarks/*.md`
-//! report, the recipe against the binary's own usage output — and fails
-//! naming the file, the claimed value, and the true value.
+//! was added; issue #469: the report regenerated under an unchanged ratio
+//! left only the restated date stale, and nothing compared it). Compares
+//! every restated claim against its single source of truth —
+//! `FORMAT_VERSION` against `src/lib.rs`'s own constant, the aggregate
+//! figures, date and tool versions against the matching generated
+//! `docs/benchmarks/*.md` report, the recipe against the binary's own
+//! usage output — and fails naming the file, the claimed value, and the
+//! true value.
 
 // Not under Miri: prose-vs-source string comparison, no codec code runs
 // here for Miri to observe, so the lane spends its budget elsewhere
@@ -209,6 +213,105 @@ fn published_throughput_matches_its_generated_reports() {
             assert_eq!(
                 site_claim, rounded,
                 "site/index.html's {corpus} {direction} MB/s is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
+            );
+        }
+    }
+}
+
+/// The date restated in a surface's "Measured `<date>`" phrase.
+fn measured_date(text: &str) -> String {
+    let marker = "Measured ";
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found"))
+        + marker.len();
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| !(c.is_ascii_digit() || c == '-'))
+        .unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
+/// A report's own measurement date, the date part of its `As of <timestamp>`
+/// header.
+fn report_date(report_file: &str) -> String {
+    let text = read(&format!("docs/benchmarks/{report_file}"));
+    let marker = "As of ";
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found in {report_file}"))
+        + marker.len();
+    let rest = &text[start..];
+    let end = rest
+        .find('T')
+        .unwrap_or_else(|| panic!("no time separator after {marker:?} in {report_file}"));
+    rest[..end].to_string()
+}
+
+#[test]
+fn measurement_date_matches_its_report() {
+    let readme_claim = measured_date(&read("README.md"));
+    let site_claim = measured_date(&read("site/index.html"));
+
+    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
+        let truth = report_date(report_file);
+        assert_eq!(
+            readme_claim, truth,
+            "README.md's measurement date is {readme_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
+        );
+        assert_eq!(
+            site_claim, truth,
+            "site/index.html's measurement date is {site_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
+        );
+    }
+}
+
+/// The first dotted version number (a digit run containing `.`) after the
+/// first occurrence of `name` in `text`. Scans past intervening prose
+/// rather than taking the text immediately after `name`: the report's own
+/// zstd line reads "Zstandard CLI (64-bit) v1.5.7", so a run of digits
+/// starts at "64" (from "64-bit") before the actual version, and only the
+/// dot distinguishes the real version from that false start.
+fn version_after(text: &str, name: &str) -> String {
+    let start = text
+        .find(name)
+        .unwrap_or_else(|| panic!("{name:?} not found"))
+        + name.len();
+    let mut rest = &text[start..];
+    loop {
+        let digit_start = rest
+            .find(|c: char| c.is_ascii_digit())
+            .unwrap_or_else(|| panic!("no version digits after {name:?}"));
+        let run = &rest[digit_start..];
+        let run_end = run
+            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .unwrap_or(run.len());
+        let candidate = &run[..run_end];
+        if candidate.contains('.') {
+            return candidate.to_string();
+        }
+        rest = &run[run_end..];
+    }
+}
+
+#[test]
+fn reference_compressor_versions_match_their_generated_reports() {
+    let readme = read("README.md");
+    let site = read("site/index.html");
+
+    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
+        let report = read(&format!("docs/benchmarks/{report_file}"));
+        for tool in ["gzip", "Zstandard", "XZ Utils"] {
+            let truth = version_after(&report, tool);
+            let readme_claim = version_after(&readme, tool);
+            let site_claim = version_after(&site, tool);
+            assert_eq!(
+                readme_claim, truth,
+                "README.md's {tool} version is {readme_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
+            );
+            assert_eq!(
+                site_claim, truth,
+                "site/index.html's {tool} version is {site_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
             );
         }
     }
