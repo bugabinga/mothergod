@@ -39,11 +39,8 @@ pub mod delta {
     /// Inverts [`encode`] with the same `stride`.
     #[must_use]
     pub fn decode(data: &[u8], stride: NonZeroUsize) -> Vec<u8> {
-        let stride = stride.get();
         let mut out = data.to_vec();
-        for i in stride..out.len() {
-            out[i] = out[i].wrapping_add(out[i - stride]);
-        }
+        undo_in_place(&mut out, stride.get());
         out
     }
 
@@ -57,12 +54,19 @@ pub mod delta {
         data: &[u8],
         stride: NonZeroUsize,
     ) -> Result<Vec<u8>, std::collections::TryReserveError> {
-        let stride = stride.get();
         let mut out = crate::try_vec_from_slice(data)?;
+        undo_in_place(&mut out, stride.get());
+        Ok(out)
+    }
+
+    /// Shared scan [`decode`]/[`try_decode`] both drive over an
+    /// already-allocated `out` (initialized to a copy of the filtered
+    /// bytes), so the two only ever differ in how `out` was built, never in
+    /// what happens to it.
+    fn undo_in_place(out: &mut [u8], stride: usize) {
         for i in stride..out.len() {
             out[i] = out[i].wrapping_add(out[i - stride]);
         }
-        Ok(out)
     }
 
     /// Streaming counterpart to [`decode`]: undoes the transform one
@@ -294,18 +298,8 @@ pub mod transpose {
     /// Inverts [`encode`] with the same `columns`.
     #[must_use]
     pub fn decode(data: &[u8], columns: NonZeroUsize) -> Vec<u8> {
-        let columns = columns.get();
-        let n = data.len();
-        let mut out = vec![0u8; n];
-        let mut pos = 0usize;
-        for start in 0..columns {
-            let mut i = start;
-            while i < n {
-                out[i] = data[pos];
-                pos += 1;
-                i += columns;
-            }
-        }
+        let mut out = vec![0u8; data.len()];
+        decode_into(&mut out, data, columns.get());
         out
     }
 
@@ -319,9 +313,16 @@ pub mod transpose {
         data: &[u8],
         columns: NonZeroUsize,
     ) -> Result<Vec<u8>, std::collections::TryReserveError> {
-        let columns = columns.get();
-        let n = data.len();
-        let mut out = crate::try_filled_vec(n, 0u8)?;
+        let mut out = crate::try_filled_vec(data.len(), 0u8)?;
+        decode_into(&mut out, data, columns.get());
+        Ok(out)
+    }
+
+    /// Shared scan [`decode`]/[`try_decode`] both drive over an
+    /// already-allocated, zero-filled `out`, so the two only ever differ in
+    /// how `out` was built, never in what happens to it.
+    fn decode_into(out: &mut [u8], data: &[u8], columns: usize) {
+        let n = out.len();
         let mut pos = 0usize;
         for start in 0..columns {
             let mut i = start;
@@ -331,7 +332,6 @@ pub mod transpose {
                 i += columns;
             }
         }
-        Ok(out)
     }
 
     #[cfg(test)]
