@@ -1,12 +1,9 @@
 # Nightly cargo-fuzz run with a persistent corpus (#450, ADR-0043 layer 3).
 #
 # ROADMAP M4's "cargo-fuzz targets ... in scheduled CI", journal lead S1-P7:
-# `fuzz/` (research/JOURNAL.md S2-A25, issue #53) carries three libFuzzer
-# targets: `decode_arbitrary` (hard rule 2: decode never panics or
-# overallocates unbounded on any input), `roundtrip` (hard rule 1:
-# decompress(compress(x)) == x), and `frame_mutate` (#451: byte flips near
-# a frame_gen-valid frame, reaching the post-header decode state machine
-# instead of rediscovering BadMagic). Time-boxed here, not the fast per-PR gate,
+# `fuzz/` (research/JOURNAL.md S2-A25, issue #53) carries the libFuzzer
+# targets, and this workflow does not name them: it fuzzes whatever
+# `cargo fuzz list` reports. Time-boxed here, not the fast per-PR gate,
 # because libFuzzer's sanitizer-coverage instrumentation is nightly-only and
 # a real fuzz run's runtime doesn't belong on every push. Fuzzing compounds
 # only if coverage survives the run: the corpus persists through the actions
@@ -38,8 +35,8 @@ env:
 jobs:
   fuzz:
     runs-on: ubuntu-24.04
-    # ~2 min build and setup (observed on the weekly runs), 3 x 10 min fuzz,
-    # cmin and cache save on top.
+    # ~2 min build and setup (observed on the weekly runs), FUZZ_BUDGET_S
+    # of fuzzing whatever the target count, cmin and cache save on top.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -88,30 +85,49 @@ jobs:
         run: |
           mkdir -p fuzz/corpus
           find fuzz/corpus -type f | awk -F/ '{c[$3]++} END {for (t in c) print t ": " c[t] " input(s)"; if (!length(c)) print "corpus: empty"}'
-      # Each fuzz step times itself and re-raises its own exit code, so a
-      # crasher that ends the run early still reports its true elapsed
-      # time; the crash case is the one the ledger most wants a real
-      # number for (#449).
-      - name: fuzz decode_arbitrary
+      # Targets are discovered, never listed here (#492). `cargo fuzz list`
+      # reads fuzz/Cargo.toml's [[bin]] entries, which is where a target's
+      # existence is already decided; naming them again in this file made a
+      # second source of truth whose only failure mode was silence, since a
+      # target absent from this list is simply never fuzzed and no check
+      # goes red. Adding one also cost an admin-PAT round trip, because
+      # only the BDFL seat can push .github/workflows (#24): #475/#480 and
+      # #492 are that round trip, twice.
+      #
+      # The nightly's wall clock is the budget and the target count is the
+      # divisor. A new target therefore costs the others depth, never the
+      # operator more runner minutes, and can never push this job past its
+      # timeout. That trade is right for a corpus that persists: depth lost
+      # on one night is recovered across nights, a silent timeout is not.
+      #
+      # Every target runs even after one crashes. libFuzzer exits the
+      # instant it finds a crasher, so continuing costs nearly nothing, and
+      # a bug in the first target must not cost the rest their night. The
+      # aggregated exit code still fails the job, which is what skips cmin
+      # below. Each target is timed individually and the times are summed
+      # for the ledger, so a crasher's early exit still reports true
+      # elapsed time; the crash case is the one the ledger most wants a
+      # real number for (#449).
+      - name: fuzz all targets
         working-directory: fuzz
+        env:
+          FUZZ_BUDGET_S: 1800
         run: |
-          rc=0; t0=$SECONDS
-          cargo fuzz run decode_arbitrary -- -max_total_time=600 || rc=$?
-          echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
-          exit $rc
-      - name: fuzz roundtrip
-        working-directory: fuzz
-        run: |
-          rc=0; t0=$SECONDS
-          cargo fuzz run roundtrip -- -max_total_time=600 || rc=$?
-          echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
-          exit $rc
-      - name: fuzz frame_mutate
-        working-directory: fuzz
-        run: |
-          rc=0; t0=$SECONDS
-          cargo fuzz run frame_mutate -- -max_total_time=600 || rc=$?
-          echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
+          targets=$(cargo fuzz list)
+          test -n "$targets" || { echo "cargo fuzz list reported no targets"; exit 1; }
+          count=$(echo "$targets" | wc -l)
+          each=$((FUZZ_BUDGET_S / count))
+          # A slice this thin is not a fuzz run, and 0 means "no limit" to
+          # libFuzzer, i.e. a hang until timeout-minutes. Say which knob to
+          # turn rather than silently doing either.
+          test "$each" -ge 60 || { echo "$count targets leaves ${each}s each; raise FUZZ_BUDGET_S and timeout-minutes"; exit 1; }
+          echo "$count target(s), ${each}s each"
+          rc=0
+          for t in $targets; do
+            t0=$SECONDS
+            cargo fuzz run "$t" -- -max_total_time="$each" || rc=$?
+            echo $((SECONDS - t0)) >> ../fuzz-seconds.txt
+          done
           exit $rc
       # cmin keeps the persisted corpus minimal without losing coverage.
       # Success path only, deliberately: on a crasher run these steps skip
@@ -121,9 +137,9 @@ jobs:
       - name: minimize corpus
         working-directory: fuzz
         run: |
-          cargo fuzz cmin decode_arbitrary
-          cargo fuzz cmin roundtrip
-          cargo fuzz cmin frame_mutate
+          for t in $(cargo fuzz list); do
+            cargo fuzz cmin "$t"
+          done
       - name: corpus census (after cmin)
         run: |
           find fuzz/corpus -type f | awk -F/ '{c[$3]++} END {for (t in c) print t ": " c[t] " input(s)"}'

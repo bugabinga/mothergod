@@ -169,10 +169,17 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 
 - `cargo-fuzz` targets in `fuzz/` (`JOURNAL` S2-A25): `decode_arbitrary`
   (decode of arbitrary bytes must not panic) and `roundtrip`
-  (`decompress(compress(x)) == x` for arbitrary `x`). `fuzz-check` runs
-  both nightly (nightly toolchain, 10 minutes per target, Linux x64),
-  not per-PR (`JOURNAL` S2-A53). The corpus persists across runs through
-  the actions cache and is `cmin`-minimized after each clean run, so
+  (`decompress(compress(x)) == x` for arbitrary `x`), plus the
+  structure-aware pair below. `fuzz-check` runs them nightly (nightly
+  toolchain, Linux x64), not per-PR (`JOURNAL` S2-A53). It does not name
+  its targets: it fuzzes whatever `cargo fuzz list` reports, so a target
+  added to `fuzz/Cargo.toml` is fuzzed the next night with no
+  workflow-file change. The nightly's wall clock is the budget
+  (`FUZZ_BUDGET_S`, 1800s) and the target count is the divisor, so a new
+  target costs the others depth rather than costing runner minutes; the
+  step fails loudly rather than shrink a slice below 60s. The corpus
+  persists across runs through the actions cache and is
+  `cmin`-minimized after each clean run, so
   coverage compounds instead of restarting cold (#450). New crashers
   land in `tests/adversarial/` as regression seeds. Every run, crash or
   clean, uploads a trust-ledger entry (#449, above): fuzz seconds and
@@ -192,8 +199,8 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   writing `frame_gen`'s output as corpus seeds (measured gain on
   `decode_arbitrary`, this build: libFuzzer's own single generated seed
   reaches cov 26/ft 27, `frame_gen`'s 12 seeds alone reach cov 418/ft
-  859 before a single mutation runs). All three run in `fuzz-check`
-  (#475/#480). A fourth target, `frame_recipe`, derives `Arbitrary` on
+  859 before a single mutation runs). A fourth target, `frame_recipe`,
+  derives `Arbitrary` on
   `frame_gen::PreimageRecipe` — a small preimage-shape parameter space
   (repeated-byte runs, byte cycles, columnar drift, opcode-dense BCJ
   data, pseudo-random noise, each with a fuzzer-controlled length/seed)
@@ -206,9 +213,7 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   enum layout (measured gain: a cold `frame_recipe` run's first
   candidate fails to decode into any shape at all, 0 useful coverage;
   the 5 seeds alone reach cov 1703/ft 3230 before a single mutation
-  runs). Not yet in `fuzz-check`: same admin-PAT workflow-file gate as
-  before (issue #24, BDFL-only per `agents/GOVERNANCE.md`), filed as
-  #492.
+  runs).
 
 ## 4. Mutation testing (`mutants-check`, per PR)
 
