@@ -67,6 +67,8 @@ jobs:
           # expires ~1h into a session (issue #81). Comments only, never
           # pushes or merges (GOVERNANCE.md "Push identity").
           GH_WORKFLOW_TOKEN: ${{ github.token }}
+          # gh-comment assembles the attribution footer from this.
+          ROLE: herald
           # Read access to mothergod.dev analytics for the USERS survey
           # (ADR-0040); granted per the secrets row of GOVERNANCE.md's
           # decision table. Zone-scoped, never printed (CLAUDE.md rule
