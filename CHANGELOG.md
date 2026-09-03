@@ -19,7 +19,15 @@ All notable changes to this project are documented here. Format follows
   repeat-run input as it explores sizes `frame_gen`'s fixed dozen
   preimages never try. Every recipe compresses through the real
   encoder and must round-trip (hard rule 1). Not yet wired into
-  `fuzz-check.yml` or `seed_corpus`: same admin-PAT gate as #475.
+  `fuzz-check.yml`: same admin-PAT gate as #475.
+
+- `fuzz/bin/seed_corpus.rs` now seeds `frame_recipe`'s corpus too
+  (issue #451): one file per `PreimageRecipe` variant, found by
+  searching a deterministic byte stream for one `arbitrary` decodes
+  into the target shape rather than hand-deriving its enum layout.
+  Measured gain: a cold `frame_recipe` run's first candidate fails to
+  decode into any shape at all (0 useful coverage); the 5 seeds alone
+  reach cov 1703/ft 3230 before a single mutation runs.
 
 - `README.md` and `site/index.html` now publish encode and decode
   throughput next to the ratio table, with the machine named: 0.133 MB/s
