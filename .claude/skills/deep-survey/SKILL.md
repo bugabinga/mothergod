@@ -41,8 +41,7 @@ computed or estimated from repo evidence. USERS comes from
 `marketing/JOURNAL.md`.
 
 Each metric gets a value or "unmeasurable yet", a trend, and a one-line
-judgment. A metric you cannot measure is itself a top gap: schedule the
-work that makes it measurable before the work it would measure.
+judgment.
 
 ## 4. Stay current
 
