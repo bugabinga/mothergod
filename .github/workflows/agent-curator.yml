@@ -5,8 +5,10 @@
 name: agent-curator
 
 on:
-  # Woken daily at 08:53 UTC by the worker clock (ADR-0035); the cron
-  # lines in infra/telegram-worker/wrangler.toml are the cadence's
+  # Woken at 00:37 and 12:37 UTC by the worker clock (ADR-0035), on
+  # the deslopper's tick: the Workers Free plan caps the account at 5
+  # cron expressions, so seats share ticks. The cron lines in
+  # infra/telegram-worker/wrangler.toml are the cadence's
   # source of truth. Never a native `schedule:` trigger here: GitHub's
   # schedule-actor attribution breaks the app-token exchange on
   # bot-edited files (GOVERNANCE.md "Push identity").

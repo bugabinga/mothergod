@@ -787,18 +787,17 @@ export const CLOCK = {
   "37 */12 * * *": [
     // agent-deslop, twice daily, off the other seats' minutes.
     { workflow: "agent-deslop.yml" },
+    // agent-curator shares the tick (ADR-0044): the Workers Free plan
+    // caps the account at 5 cron expressions, so a new seat joins an
+    // existing list rather than adding a line. `source: cron` marks
+    // the wake discretionary (ADR-0039).
+    { workflow: "agent-curator.yml", inputs: { source: "cron" } },
   ],
   "49 6,18 * * *": [
     // agent-herald, twice daily (ADR-0040), off the other seats'
     // minutes. `source: cron` marks the wake discretionary, so the
     // allowance governor may skip it (ADR-0039).
     { workflow: "agent-herald.yml", inputs: { source: "cron" } },
-  ],
-  "53 8 * * *": [
-    // agent-curator, daily, off the other seats' minutes (ADR-0044).
-    // `source: cron` marks the wake discretionary, so the allowance
-    // governor may skip it (ADR-0039).
-    { workflow: "agent-curator.yml", inputs: { source: "cron" } },
   ],
   "23 6 * * 6": [
     // agent-research, Saturdays, the slot it held as a native trigger

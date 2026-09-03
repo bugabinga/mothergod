@@ -626,6 +626,11 @@ test("Clock ticks (ADR-0035)", async (t) => {
         .matchAll(/"([^"]*)"/g),
     ].map((m) => m[1]);
     assert.deepEqual(crons.slice().sort(), Object.keys(CLOCK).sort());
+    // The Workers Free plan caps cron triggers at 5 per account (API
+    // error 10072). A sixth line deploys the script, then fails the
+    // schedule update, leaving the new seat clock-dead (deploy run
+    // 33727271158, 2026-09-03). Seats share ticks via CLOCK lists.
+    assert.ok(crons.length <= 5, `Workers Free allows 5 cron triggers; got ${crons.length}`);
   });
 
   await t.test("a tick that wakes a governed seat says it was the clock", async () => {
@@ -650,16 +655,23 @@ test("Clock ticks (ADR-0035)", async (t) => {
     }
   });
 
-  await t.test("the deslop tick dispatches without inputs", async () => {
-    // Ungoverned by choice: two wakes a day is not where the allowance goes,
-    // and a seat with no `source` input would reject one (ADR-0039).
+  await t.test("the shared deslop/curator tick wakes both, each with its own inputs", async () => {
+    // One expression, two seats (Workers Free caps crons at 5). The
+    // deslopper stays ungoverned by choice: two wakes a day is not
+    // where the allowance goes, and a seat with no `source` input
+    // would reject one (ADR-0039). The curator is governed like any
+    // discretionary wake.
     const setup = harness(() => new Response(null, { status: 204 }));
     const cron = cronFor("agent-deslop.yml");
     await tick(setup, cron);
-    const dispatch = setup.calls.find((call) => call.url.includes("/dispatches"));
-    assert.ok(dispatch.url.includes("agent-deslop.yml"), `${cron} must wake the deslopper`);
-    assert.deepEqual(JSON.parse(dispatch.init.body), { ref: "main" });
-    assert.deepEqual(clocklog(setup)[0].woke, ["agent-deslop.yml"]);
+    const dispatches = setup.calls.filter((call) => call.url.includes("/dispatches"));
+    const bodyFor = (workflow) => JSON.parse(dispatches.find((call) => call.url.includes(workflow)).init.body);
+    assert.deepEqual(bodyFor("agent-deslop.yml"), { ref: "main" });
+    assert.deepEqual(bodyFor("agent-curator.yml"), {
+      ref: "main",
+      inputs: { source: "cron" },
+    });
+    assert.deepEqual(clocklog(setup)[0].woke, ["agent-deslop.yml", "agent-curator.yml"]);
   });
 
   await t.test("a failed dispatch is logged as failed, never thrown", async () => {
