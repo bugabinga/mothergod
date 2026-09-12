@@ -248,10 +248,14 @@ missing runs (issue #338). Rescue is the same mechanical merge as the
 `dirty` case above, just reached by a different detection path.
 
 A fourth signature is the reviewer's own death. The `review` check
-ends failure, cancelled, or timed out, so no verdict label is ever
-applied, and the two label-keyed signatures above cannot see it while
-the gates sit green (first hit PR #377: exit 143, a runner shutdown
-mid-review, run 33307410525). Nothing retries it on its own, because
+ends failure, cancelled, or timed out, usually leaving no verdict
+label for the two label-keyed signatures above to see while the gates
+sit green (first hit PR #377: exit 143, a runner shutdown mid-review,
+run 33307410525). Usually, not always: a dying session can apply its
+verdict label yet post no items (PR #516, a mid-run 401), so a dead
+review counts as this signature whatever the labels say, and the
+label it left is cleaned up by the fresh round it triggers. Nothing
+retries it on its own, because
 `agent-review.yml` triggers on pushes and open/reopen only. Rescue:
 close the PR, then reopen it, which fires `reopened` and starts a
 fresh review of the same head. A `review` check that SUCCEEDED and

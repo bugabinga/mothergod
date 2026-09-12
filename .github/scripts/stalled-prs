@@ -24,9 +24,12 @@ Signatures, most specific first, at most one reported per PR:
     dirty                mergeable state DIRTY: `main` moved and conflicted
                          the branch (first hit PR #34).
     reviewer-died        the `review` check ended failure, cancelled, or
-                         timed out, and no verdict label landed. Nothing
-                         retries it: agent-review triggers on pushes and
-                         open/reopen only (first hit PR #377).
+                         timed out. A verdict label does not clear it: a
+                         dying session can apply its label yet post no
+                         items (first hit PR #516, a mid-run 401), so only
+                         a completed round may speak through labels.
+                         Nothing retries it: agent-review triggers on
+                         pushes and open/reopen only (first hit PR #377).
     verdict-missing      the `review` check SUCCEEDED and left no verdict
                          label. The reviewer finished without deciding,
                          which no other signature can distinguish from a
@@ -199,16 +202,23 @@ def classify(pr, now):
     if review is None or review["status"] != "COMPLETED":
         return None
 
+    # A dead review outranks any verdict label, checked before the labels
+    # because a dying session can half-apply its verdict: PR #516's review
+    # applied changes-requested five seconds before its run 401'd, posting
+    # no items, and the label made the stall invisible to the label-keyed
+    # branches below. A label from a round whose check died vouches for
+    # nothing; only a completed round may speak through labels.
+    if review["conclusion"] in DEAD:
+        return finding(
+            "reviewer-died",
+            f"the review check ended {review['conclusion']} at "
+            f"{review.get('completedAt', 'unknown')}; no verdict is coming",
+            f"close then reopen: `gh pr close {pr['number']}`, "
+            f"`gh pr reopen {pr['number']}`. agent-review has no "
+            "workflow_dispatch, so reopen is the only refire",
+        )
+
     if not labels & VERDICT_LABELS:
-        if review["conclusion"] in DEAD:
-            return finding(
-                "reviewer-died",
-                f"the review check ended {review['conclusion']} at "
-                f"{review.get('completedAt', 'unknown')}; no verdict is coming",
-                f"close then reopen: `gh pr close {pr['number']}`, "
-                f"`gh pr reopen {pr['number']}`. agent-review has no "
-                "workflow_dispatch, so reopen is the only refire",
-            )
         if review["conclusion"] == "SUCCESS":
             return finding(
                 "verdict-missing",
