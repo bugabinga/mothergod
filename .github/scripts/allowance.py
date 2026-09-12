@@ -28,10 +28,8 @@ Projection lives here too, for the same reason the parse does. `project`
 is the week-average arithmetic the allowance governor throttles on
 (guard-decide.py, ADR-0039). The budget footer used to carry its own
 projection, a two-reading delta over the audited minutes, and the two
-disagreed at the same instant: 82% projected for the window on the
-governor's side, SLOW DOWN on the footer's, because a post-pause burst
-extrapolates to a rate the week never sustains (issue #533). One
-arithmetic, imported by both, cannot disagree with itself.
+disagreed at the same instant (issue #533; retrospect's docstring has the
+numbers). One arithmetic, imported by both, cannot disagree with itself.
 """
 
 import math
