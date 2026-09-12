@@ -27,6 +27,13 @@ machinery keys on `status == "rejected"` (ADR-0018), which fires when the
 factory has ALREADY stopped for up to a week. Between "fine" and "stopped"
 there was no signal at all. These artifacts are downloaded for the audit
 regardless, so the number costs nothing extra and appears on every wake.
+The verdict it prints is the governor's own projection (`allowance.project`,
+ADR-0039), never a second estimate. The footer once ran its own, a
+two-reading delta over the audited minutes, and shouted SLOW DOWN at 33%
+used with 2.7 of 7 days gone, because a post-pause catch-up burst
+extrapolates to a rate the week never sustains; the governor, reading the
+same minute, projected 82% and throttled nothing (issue #533). An advisory
+that fires on a different rate than the mechanism is a second policy.
 
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
@@ -61,7 +68,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 
-from allowance import valid_fraction, valid_reset, window_readings
+from allowance import WEEK, project, valid_fraction, valid_reset, window_readings
 from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
 
 # Only these produce a judgeable session. Everything else in the repository is
@@ -79,6 +86,12 @@ NOT_A_SESSION = frozenset({"skipped", "cancelled", "neutral"})
 # REPORTED, never silently truncated.
 RUN_SCAN = 100
 RUN_SCAN_DEEP = 1000
+
+# The one window the governor throttles on (guard-decide.py reads the
+# `allowance-state` ledger, which agent-audit writes from this window). The
+# other windows inform; only this one carries a verdict, because a verdict
+# the governor does not share is the disagreement #533 was about.
+GOVERNED = "seven_day"
 
 # One response longer than this is cut. The auditor judges altitude and voice,
 # and both are legible in the opening; a retrospect that floods the reader's
@@ -196,6 +209,41 @@ def describe(run, meta, response):
         print(f"    {line}")
 
 
+def governor(observed, resets, used):
+    """The governor's verdict on the seven-day window, from the arithmetic it runs.
+
+    `project` is what agent-guard throttles on (ADR-0039). When it returns a
+    projection, every seat with a `thrift` block is already on it and the
+    clock's discretionary wakes are being skipped; SLOW DOWN here tells the
+    seat that is awake anyway to spend like the factory is being throttled,
+    because it is. When it returns None the projection reaches the reset and
+    nothing is throttled, whatever the last sixteen minutes looked like.
+    """
+    elapsed = (observed - (resets - WEEK)) / 3600
+    remaining = (resets - observed) / 3600
+    if elapsed <= 0 or remaining <= 0:
+        print("        governor: reading outside its own window; nothing to project.")
+        return
+    week_average = used / elapsed
+    sustainable = max(0.0, 1.0 - used) / remaining
+    projection = project(observed, resets, used)
+    if projection is None:
+        print(
+            f"        governor: week-average {week_average:.2%}/h, {sustainable:.2%}/h "
+            "reaches the reset; projection reaches the reset, every seat in its normal tier."
+        )
+        return
+    exhausts = datetime.fromtimestamp(projection["exhausts_at"], timezone.utc)
+    print(
+        f"        governor: week-average {week_average:.2%}/h, {sustainable:.2%}/h "
+        f"reaches the reset; projected exhaustion {exhausts.strftime(STAMP)} misses it "
+        f"by {(resets - projection['exhausts_at']) / 3600:.1f}h. Thrift tiers on, "
+        "discretionary wakes being skipped."
+    )
+    print("        SLOW DOWN: cut discretionary work, or the pause "
+          "machinery stops the factory before the reset.")
+
+
 def budget(samples, anchor):
     """What the subscription has left, from the rate-limit events just read.
 
@@ -207,6 +255,12 @@ def budget(samples, anchor):
     without it. A window kind whose readings ALL fail validation is named
     below instead of dropped: a healthy sibling window must not make a
     shape change look like a quiet one (issue #310).
+
+    Two rates appear and only one is a verdict. "burned X% over the N min
+    audited" is an observation of what the audited sessions cost, printed
+    as such; it is the two-reading delta `allowance.project` rejects as a
+    projection (#369, #533), and nothing here extrapolates it. The verdict
+    is `governor`, on the GOVERNED window only.
     """
     print("\nbudget:")
     if not samples:
@@ -247,33 +301,19 @@ def budget(samples, anchor):
         reset = datetime.fromtimestamp(resets_at, timezone.utc)
         now = stamp_to_dt(last_when)
         hours = (reset - now).total_seconds() / 3600
-        print(f"{line}, resets {reset.strftime(STAMP)} ({hours:.1f}h)")
-
-        if hours <= 0:
-            continue
-        affordable = left / hours
-        elapsed = (stamp_to_dt(last_when) - stamp_to_dt(first_when)).total_seconds() / 3600
+        minutes = (now - stamp_to_dt(first_when)).total_seconds() / 60
         burned = used - first["utilization"]
-        if elapsed > 0 and burned > 0:
-            observed = burned / elapsed
-            runway = left / observed
-            verdict = (
-                f"exhausts in {runway:.1f}h, {runway - hours:+.1f}h against the reset"
-                if runway < hours
-                else f"lasts {runway:.1f}h, past the reset"
-            )
-            print(
-                f"        burned {burned:.1%} over the {elapsed * 60:.0f} min audited "
-                f"({observed:.2%}/h); {affordable:.2%}/h reaches the reset. At this pace, {verdict}."
-            )
-            if runway < hours:
-                print("        SLOW DOWN: cut discretionary work, or the pause "
-                      "machinery stops the factory before the reset.")
-        else:
-            print(f"        no measurable burn in the window; {affordable:.2%}/h reaches the reset.")
-
+        # A negative delta means the window reset mid-audit; the observation
+        # has no meaning then and is dropped, the verdict below still stands.
+        observation = (
+            f"; burned {burned:.1%} over the {minutes:.0f} min audited"
+            if minutes > 0 and burned >= 0 else ""
+        )
+        print(f"{line}, resets {reset.strftime(STAMP)} ({hours:.1f}h){observation}")
         if last.get("isUsingOverage"):
             print("        on overage: past the included allowance already.")
+        if kind == GOVERNED:
+            governor(now.timestamp(), resets_at, used)
 
     for kind in sorted(set(unreadable) - set(by_type)):
         print(f"    {kind}: present in {unreadable[kind]} event(s), none "

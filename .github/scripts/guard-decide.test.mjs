@@ -15,6 +15,7 @@ const scriptsDir = new URL(".", import.meta.url).pathname;
 
 const driver = `
 import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("guard_decide", sys.argv[1] + "/guard-decide.py")
 spec = importlib.util.spec_from_loader("guard_decide", loader)
 mod = importlib.util.module_from_spec(spec)
