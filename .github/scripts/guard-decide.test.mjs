@@ -15,6 +15,7 @@ const scriptsDir = new URL(".", import.meta.url).pathname;
 
 const driver = `
 import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("guard_decide", sys.argv[1] + "/guard-decide.py")
 spec = importlib.util.spec_from_loader("guard_decide", loader)
 mod = importlib.util.module_from_spec(spec)
@@ -194,6 +195,15 @@ test("a projection nobody can trust never costs a wake", async (t) => {
     }),
     "zero burn": fence(missing(0)),
     "a string where a number belongs": fence({ ...missing(), utilization: "high" }),
+    // Python's json.loads accepts NaN and Infinity, the same parser _fenced()
+    // uses, and every comparison against NaN is False, so a non-finite reading
+    // walked past every early return above and crashed three frames deep in
+    // _utc() (review of PR #536, reproduced on main). Hand-written fences,
+    // because JSON.stringify would turn these into null and test nothing.
+    "NaN where the utilization belongs": "```json\n{\"observedAt\": " + (RESETS - 302400) + ", \"resetsAt\": " + RESETS
+      + ", \"utilization\": NaN}\n```",
+    "an infinite reset instant": "```json\n{\"observedAt\": " + (RESETS - 302400)
+      + ", \"resetsAt\": Infinity, \"utilization\": 0.9}\n```",
   };
   for (const [name, allowance] of Object.entries(cases)) {
     await t.test(name, () => {

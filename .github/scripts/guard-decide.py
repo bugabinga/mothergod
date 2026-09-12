@@ -40,7 +40,7 @@ import re
 import sys
 import time
 
-WEEK = 604800
+from allowance import project as project_reading
 
 # Never keep less than this share of the day, however badly the projection
 # misses. The stall sweep, the inbox drain and the operator sweep only happen
@@ -83,15 +83,12 @@ def _utc(epoch):
 
 
 def project(allowance):
-    """Week-average seven-day burn against the next reset, or None if unusable.
+    """The ledger issue body as a projection: parse here, arithmetic in allowance.py.
 
-    One reading's utilization over the window elapsed so far, never a
-    two-reading delta: back-to-back sessions space the readings under a minute
-    apart, the utilization delta falls below reporting precision, and the
-    governor goes blind exactly when burn peaks (#369).
-
-    None means "no usable reading", which is also what a projection that
-    reaches the reset returns: both leave every caller in its normal tier.
+    The arithmetic is shared with retrospect's budget footer so the advisory
+    a BDFL reads and the throttle the guard applies are one computation
+    (issue #533). None means "no usable reading" or "reaches the reset";
+    both leave every caller in its normal tier.
     """
     ledger = _fenced(allowance)
     if ledger is None:
@@ -100,32 +97,9 @@ def project(allowance):
     # the reading now. One .get carries the transition.
     reading = ledger.get("current", ledger) if isinstance(ledger, dict) else {}
     try:
-        observed = float(reading["observedAt"])
-        resets = float(reading["resetsAt"])
-        used = float(reading["utilization"])
-    except (TypeError, KeyError, ValueError, AttributeError):
+        return project_reading(reading["observedAt"], reading["resetsAt"], reading["utilization"])
+    except (TypeError, KeyError, AttributeError):
         return None
-
-    elapsed = observed - (resets - WEEK)
-    remaining = resets - observed
-    # A reading from a lapsed window has no time left to spend anything over,
-    # so it cannot say whether the current window is in trouble.
-    if elapsed <= 0 or remaining <= 0:
-        return None
-    rate = used / elapsed
-    if rate <= 0:
-        return None
-    exhausts_at = observed + (1.0 - used) / rate
-    if exhausts_at >= resets:
-        return None
-    return {
-        "rate": rate,
-        # Negative when the allowance is already spent; the floor below turns
-        # that into "keep a quarter", not "keep none".
-        "sustainable": max((1.0 - used) / remaining, 0.0),
-        "resets": resets,
-        "exhausts_at": exhausts_at,
-    }
 
 
 def miss(projection):

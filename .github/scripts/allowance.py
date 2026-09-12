@@ -23,9 +23,61 @@ only `valid_fraction` and degrades a bad reset in display. `window_readings`
 itself filters on structure only, yielding invalid windows too, so a
 consumer can NAME the window kinds that fail its validation instead of
 dropping them silently (issue #310).
+
+Projection lives here too, for the same reason the parse does. `project`
+is the week-average arithmetic the allowance governor throttles on
+(guard-decide.py, ADR-0039). The budget footer used to carry its own
+projection, a two-reading delta over the audited minutes, and the two
+disagreed at the same instant (issue #533; retrospect's docstring has the
+numbers). One arithmetic, imported by both, cannot disagree with itself.
 """
 
 import math
+
+WEEK = 604800
+
+
+def project(observed, resets, used):
+    """Week-average seven-day burn against the next reset, or None if unusable.
+
+    One reading's utilization over the window elapsed so far, never a
+    two-reading delta: back-to-back sessions space the readings under a
+    minute apart, the utilization delta falls below reporting precision,
+    and the governor goes blind exactly when burn peaks (#369). The same
+    delta over-reads in the other direction when the readings straddle a
+    burst (#533). Elapsed time since the window opened is the only
+    denominator that does neither.
+
+    None means "no usable reading", which is also what a projection that
+    reaches the reset returns: both leave every caller in its normal tier.
+    Epoch seconds and a fraction in [0, 1], all three; the caller parses.
+    """
+    try:
+        observed, resets, used = float(observed), float(resets), float(used)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (observed, resets, used)):
+        return None
+    elapsed = observed - (resets - WEEK)
+    remaining = resets - observed
+    # A reading from a lapsed window has no time left to spend anything over,
+    # so it cannot say whether the current window is in trouble.
+    if elapsed <= 0 or remaining <= 0:
+        return None
+    rate = used / elapsed
+    if rate <= 0:
+        return None
+    exhausts_at = observed + (1.0 - used) / rate
+    if exhausts_at >= resets:
+        return None
+    return {
+        "rate": rate,
+        # Negative when the allowance is already spent; the governor's floor
+        # turns that into "keep a quarter", not "keep none".
+        "sustainable": max((1.0 - used) / remaining, 0.0),
+        "resets": resets,
+        "exhausts_at": exhausts_at,
+    }
 
 
 def window_readings(info):
