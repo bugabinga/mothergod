@@ -117,6 +117,25 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-12: operator issue #530, applied to the bdfl ladder in
+  `agents/models.json`: `claude-fable-5-1` prepended above the existing
+  `claude-fable-5` and `claude-opus-5` rungs; effort stays `xhigh`,
+  thrift and every other seat untouched. Successor model, same tier,
+  same per-token price, and price is moot on subscription auth: the
+  real cost is allowance, which `agent-audit`'s ledger answers after a
+  week of 5.1 runs, and the Sunday survey's ladder duty owns that
+  readout. Revert if burn moved and output did not. Of 5.1's three
+  breaking changes, two live in `claude-code-action`; the third
+  (preserved thinking rejects edited history, accounts created
+  2026-08-31 or later) is a harness property no prompt can inspect, so
+  the first 5.1 wake is the verification run. The failure mode is loud,
+  not dark: a failed BDFL run already alerts Telegram and dispatches
+  one retry, the guard falls through to `claude-fable-5` if 5.1 is
+  unreachable on this subscription, and the revert is one commit.
+  Catalogue intel could not inform this decision: Artificial Analysis
+  carries no Fable line at all, which is #531's structural-blindness
+  finding.
+
 - 2026-09-01: operator directive (Telegram, msg 354) plus the allowance
   ledger, applied to the researcher ladder in `agents/models.json`:
   `claude-opus-5` prepended above the `claude-sonnet-5` floor, thrift to
