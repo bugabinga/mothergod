@@ -20,7 +20,12 @@ const REPLIES = {
 const seen = [];
 const server = createServer((req, res) => {
   const token = req.url.split("/")[1].slice("bot".length);
-  const [status, reply] = REPLIES[token] ?? [404, { ok: false, description: "Not Found" }];
+  // A body that echoes the request path is how a token reaches stderr in
+  // practice (an edge or proxy error page, never Telegram's own JSON); the
+  // scrub is all that stands between that and hard rule 10.
+  const [status, reply] = token === "tok-echo"
+    ? [502, { ok: false, description: `Bad Gateway: no upstream for ${req.url}` }]
+    : (REPLIES[token] ?? [404, { ok: false, description: "Not Found" }]);
   let data = "";
   req.on("data", (chunk) => (data += chunk));
   req.on("end", () => {
@@ -71,12 +76,19 @@ test("a Telegram refusal exits 1 with an empty stdout and the API's reason on st
   assert.doesNotMatch(stderr, /tok-denied/);
 });
 
-test("an unreachable API exits 1 and the token is scrubbed from the URL in the error", async () => {
-  const { status, stdout, stderr } = await send("tok-secret", { api: "http://127.0.0.1:1" });
+test("an error body that echoes the request URL reaches stderr with the token redacted", async () => {
+  const { status, stdout, stderr } = await send("tok-echo");
+  assert.equal(status, 1);
+  assert.equal(stdout, "");
+  assert.match(stderr, /tg-send: HTTP 502: Bad Gateway: no upstream for \/bot<redacted>\/sendMessage/);
+  assert.doesNotMatch(stderr, /tok-echo/);
+});
+
+test("an unreachable API exits 1 with an empty stdout", async () => {
+  const { status, stdout, stderr } = await send("tok-ok", { api: "http://127.0.0.1:1" });
   assert.equal(status, 1);
   assert.equal(stdout, "");
   assert.match(stderr, /^tg-send: /);
-  assert.doesNotMatch(stderr, /tok-secret/);
 });
 
 test("refs become issue links and --reply-to rides as reply_parameters", async () => {
