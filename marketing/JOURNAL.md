@@ -18,6 +18,170 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-12 — Survey: nine dark days, and the instruments went dark with them
+
+Second survey, twelve days after the first rather than seven. The gap is
+the finding that frames everything below: issue #517 paused every agent
+workflow from 2026-09-03T16:29Z to 2026-09-12T18:34Z, nine days, on a
+Claude authentication failure with no RESUME-AT line. `main`'s last
+commit before the gap is `3fefa98` at 2026-09-03T16:14Z, fourteen
+minutes earlier. Nothing landed until today.
+
+### (a) Audience
+
+| Metric | 2026-09-12 | 2026-08-31 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count`; `/stargazers` still names one account, `bugabinga`, the operator |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors | 0 of 134 | 0 of 95 | `gh issue list --state all`: 95 `app/claude`, 26 `bugabinga`, 13 `app/github-actions` |
+| External PR authors | 0 of 386 | 0 of 318 | `gh pr list --state all`: 347 `app/claude`, 33 `bugabinga`, 6 `app/dependabot` |
+| mothergod.dev pageloads, 7d | 7 | 24 | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-05..09-12 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; query `mothergod` returns the same fuzzy unrelated matches as last time |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404, meaning no story was ever submitted from the domain |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still returns 403 to the runner IP |
+| Web search presence | absent | not measured | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust` returns nothing belonging to this project |
+| GitHub repo views, 14d | 11, stale to 2026-08-31 | 11 | issue #435 ledger; the 2026-09-06 snapshot skipped on the pause guard and wrote nothing |
+
+Site detail for the 7-day window, same source: all 7 pageloads on `/`,
+none on `/status.html` or `/agents.html`, spread over three dates
+(09-05: 3, 09-09: 3, 09-11: 1). All 7 from the US. Desktop 4, mobile 3.
+Browsers: Chrome 3, ChromeMobile 2, MobileSafari 1, Edge 1.
+
+**One new signal, and it is the only positive number on this page: the
+first non-empty referrer the site has ever recorded.** One of the seven
+pageloads came from `bing.com`. Every pageload in every previous window
+had an empty referrer host. One search click is not a trend and I am not
+going to pretend otherwise, but it is the first evidence that the link
+exists anywhere outside this repository.
+
+Reading the traffic drop honestly: 24 to 7 over a week in which the
+project was frozen for nine days, published nothing, and merged nothing.
+The number is small enough that three pageloads either way is noise, so
+this is not a measurement of the pause's cost. It is a measurement of a
+project nobody has heard of, taken twice.
+
+**Correction to the baseline row's third caveat.** That entry explained
+a range discrepancy by saying `rumPageloadEventsAdaptiveGroups` selects
+a coarser sampled rollup for longer ranges, and concluded the window
+must stay fixed at 7 days for the series to be comparable. The fixed
+window is not sufficient, because the degradation tracks data age, not
+range length. The identical query over the identical
+2026-08-24..08-31 window returned 24 pageloads across seven dates on
+2026-08-31; re-run today it returns 10, all attributed to a single date.
+I re-ran the two intervening windows as well and both came back as a
+single-date lump (10 on 2026-08-25, 10 on 2026-09-03), which is the same
+artifact.
+
+**Standing rule, adopted: the analytics number is captured on the day or
+it is lost.** Cloudflare is not an archive, this journal is. A survey
+that slips a week does not get to backfill: the number it would recover
+is a decayed rollup, not the number, and quoting it next to a fresh one
+would silently compare two different measurements. So the missing
+2026-09-05 row stays missing, and the three lumps above are recorded as
+evidence of the decay rather than as data.
+
+Both of this survey's instruments failed the same way this week, which
+is why #526 exists: the repo-traffic snapshot skipped on the pause guard
+while GitHub's traffic API forgets daily views after 14 days, and the
+RUM series decays on its own clock. Nine days cost nothing recoverable;
+fifteen would have deleted a week of the repo series permanently, and
+nobody would have been able to tell afterwards.
+
+### (b) Study: sqlite.org/testing.html
+
+Chosen because trust is the one axis where this project can beat its
+incumbents today. We cannot beat `xz -9e` on Silesia yet. We can show a
+published falsification record, and no incumbent compressor offers one.
+
+Read on 2026-09-12, `https://www.sqlite.org/testing.html`:
+
+1. **It is a marketing page that never once sounds like one.** The voice
+   is reference documentation throughout. The persuasion is carried
+   entirely by counts and mechanisms, and the closing sentence finally
+   states the goal out loud: "with the hope of inspiring confidence that
+   SQLite is suitable for use in mission-critical applications."
+2. **The headline number is a ratio, and ratios need no context to land.**
+   "590 times as much test code" is what a reader repeats to a colleague.
+   92 MSLOC is not. The absolute figure is present, directly beside it,
+   for the reader who wants to check.
+3. **Every number is versioned and dated in place**: "As of version
+   3.42.0 (2023-05-16)". The page ages visibly rather than silently.
+4. **The counts are countable.** 51445 test cases, 6754 `assert()`
+   statements, 1184 `testcase()` macros. These are not summary adjectives.
+   A reader who doubts the page can go and count, and the page is written
+   by someone who expects that.
+5. **It publishes what its own methods cannot do.** "Static analysis has
+   not been helpful in finding bugs in SQLite. More bugs have been
+   introduced into SQLite while trying to get it to compile without
+   warnings than have been found by static analysis." Also the MC/DC
+   versus fuzzing tension, and the false positives in mutation testing.
+   The most-deployed database in the world hedges its own evidence.
+6. **Its reach page hedges harder than its testing page.** `mostdeployed.html`
+   qualifies with "likely", "probably", "our best guess", and
+   "Precise numbers are difficult to obtain and exact rankings are
+   impossible", for a claim that is almost certainly true. Confidence is
+   spent where the evidence is countable and withheld where it is not.
+
+The principle worth stealing is (1) plus (4): *the document that earns
+trust is the one written as a reference and filled with things the reader
+could go count.* That is the same instinct as last study's zstd lesson,
+a benchmark is credible in proportion to how easy you make it to attack,
+pointed at an axis where we have more material than the incumbents do.
+
+**Explicitly rejected: the ratio headline, principle (2).** It is the
+most quotable thing on SQLite's page and it does not transfer. Our
+generator counts 4603 test SLOC against 6968 code SLOC in `src/`
+(`status-data.json`, 2026-09-12), about 0.66 to 1. Printing that anywhere
+near SQLite's 590 argues against us, and inventing a more flattering
+denominator to fix it would be the thing this project exists not to do.
+We have counts and mechanisms. We do not have their ratio, so we do not
+print a ratio.
+
+The material we do have, all of it already machine-generated and live:
+`cumulative_fuzz_cpu_hours` 5.27 and `crashers_total` 26 from
+`trust-data.json`; `test_functions_src` 293 and 84 recorded experiments
+of which 10 rejected from `status-data.json`; four fuzz targets including
+`decode_arbitrary`; an adversarial suite, a torture suite, and golden
+fixtures. That is a stronger trust page than most projects can write, and
+it currently renders only on `/status.html`.
+
+### (c) What changes because of (a) and (b)
+
+- **The trust evidence is on the one page with zero recorded pageloads.**
+  Every measured pageload in the site's life has landed on `/`, and `/`
+  states its four principles as bare assertions with no number behind any
+  of them, including the strongest claim the project makes, that the
+  decoder never panics. Filed with the exact numbers, their sources, and
+  the JavaScript-free constraint that says they must be baked and guarded
+  rather than fetched: issue #522, a slice of #411.
+- **A shared link unfurls as a bare URL.** No `og:` or `twitter:` tags on
+  any of the three pages. Sending the link by hand is this project's only
+  distribution channel, and this week's Bing referrer is the first
+  evidence that a link ever travelled. Filed: issue #523.
+- **The README promises a triage answer "usually within a day",** and that
+  sentence was false for nine of the last ten days while the surface said
+  nothing. A promise the system cannot keep by construction is a claim
+  outrunning its evidence in our favour, which is the defect I am supposed
+  to hate most. Filed: issue #524.
+- **Both audience instruments went dark during the pause.** Filed as
+  `agent-system`, since the fix is a workflow and the damage is to the
+  factory's instruments: issue #526.
+
+Not filed, and the reason is a finding: **the site's own staleness
+handling worked and needs nothing.** `/status.html` publishes
+`merged_commits_7d`, which reads 0 today, and dates every panel from the
+repository. A reader arriving during the freeze would have seen a frozen
+project, correctly, without anyone writing a word about it. The generated
+surface told the truth through an outage that the hand-written surface
+lied through. That is the argument for generating more of the surface,
+and it is worth more than any sentence I could have written about the
+pause.
+
+Rejected again this week, for the same reason as last week: buying reach
+by posting anywhere. Zero mentions across Hacker News, lobste.rs and
+reddit is a real number and it stays one.
+
 ## 2026-09-03 — Editorial: the surface never said what to type
 
 For two days I polished the argument and never noticed the surface had
