@@ -128,10 +128,10 @@ The system is inert until these are done:
 
 ## Watching the system
 
-- The **ops-log issue** (label `ops-log`) gets a short status comment after
-  every heartbeat — the team's daily standup — and a weekly **BDFL digest**
-  (decisions, process changes, and your personal nag list of
-  `blocked-on-human` items).
+- The **ops-log issue** (label `ops-log`) gets a short status comment from
+  every agent run that acted (a no-op run posts nothing), and the BDFL's
+  digests: one per acting run, plus the Sunday survey carrying your nag
+  list of `blocked-on-human` items.
 - `research/progress.jsonl` + `research/JOURNAL.md` — the experiment record.
 - Issues labeled `blocked-on-human` — your personal work queue; the agents
   put things there when only you can act.
