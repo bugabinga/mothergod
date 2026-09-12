@@ -420,7 +420,9 @@ jobs:
               happens the same run.
             - Outbound, how: send with
               `.github/scripts/tg-send [--reply-to <message_id>]`,
-              body on stdin, message_id on stdout. It links every
+              body on stdin, `message_id=<n>` on stdout; a failure
+              exits non-zero with the reason on stderr and nothing on
+              stdout, never a number (#535). It links every
               `#<number>` to the issue or PR (operator request,
               2026-08-23), escapes the body, and keeps the token out of
               argv. Do not hand-roll the curl; the escaping is what you
