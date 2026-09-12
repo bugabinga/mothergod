@@ -129,7 +129,7 @@ def match(rung):
             return m
     return None
 
-findings, mapping = [], []
+findings, misses, mapping = [], [], []
 for role, ladder in sorted(ladders.items()):
     if not ladder:
         continue
@@ -137,6 +137,14 @@ for role, ladder in sorted(ladders.items()):
     hit = match(top)
     mapping.append((role, top, hit["id"] if hit else None, hit["score"] if hit else None))
     if not hit:
+        # An unresolved top rung is a finding in its own right, not a table
+        # cell: it enters the fingerprint and the verdict, so it comments
+        # once and re-fires only when the fact changes. It is still not
+        # scored against the catalogue tops, because the per-role comparison
+        # needs the rung's own catalogue score as its baseline, and
+        # synthesizing one is modelling where this channel's job is
+        # measuring (issue #531 ruling).
+        misses.append((role, top))
         continue
     # Findings drive an issue post, so they are restricted to models this
     # project can actually call: authentication is a Claude subscription
@@ -151,7 +159,8 @@ for role, ladder in sorted(ladders.items()):
         findings.append((role, top, hit["score"], m["id"], m["score"]))
 
 fingerprint = hashlib.sha256(
-    json.dumps(sorted((f[0], f[3], f[4]) for f in findings)).encode()
+    json.dumps([sorted((f[0], f[3], f[4]) for f in findings),
+                sorted(misses)]).encode()
 ).hexdigest()[:16]
 
 prior = os.environ.get("PRIOR", "")
@@ -170,10 +179,17 @@ for role, top, hit_id, hit_score in mapping:
     lines.append(f"| {role} | `{top}` | {f'`{hit_id}`' if hit_id else '**no match**'} "
                  f"| {hit_score if hit_score is not None else 'n/a'} |")
 lines.append("")
-if any(h is None for _, _, h, _ in mapping):
-    lines.append("A rung showing **no match** is far more likely a naming mismatch between "
-                 "their slugs and ours than a retired model. Confirm the mapping before "
-                 "reading anything into it; this job never treats a miss as a retirement.")
+if misses:
+    lines.append("## Top rungs their catalogue cannot resolve")
+    lines.append("")
+    for role, top in sorted(misses):
+        lines.append(f"- **{role}**: `{top}` matches no catalogue entry in either direction.")
+    lines.append("")
+    lines.append("These seats get no capability comparison this snapshot: the per-role "
+                 "check needs the rung's own catalogue score as its baseline, and there "
+                 "is none (issue #531). A miss is far more likely a naming mismatch "
+                 "between their slugs and ours than a retired model; this job never "
+                 "treats a miss as a retirement.")
     lines.append("")
 if findings:
     lines.append("## Scoring above a ladder top rung, and not on that ladder")
@@ -225,6 +241,6 @@ lines.append(f"<!-- fingerprint: {fingerprint} -->")
 body = "\n".join(lines)
 write("issue.md", body)
 write("summary.md", body)
-write("verdict", "unchanged" if (unchanged or not findings) else "changed")
-print(f"models={len(models)} findings={len(findings)} fingerprint={fingerprint} "
-      f"unchanged={unchanged}")
+write("verdict", "unchanged" if (unchanged or not (findings or misses)) else "changed")
+print(f"models={len(models)} findings={len(findings)} misses={len(misses)} "
+      f"fingerprint={fingerprint} unchanged={unchanged}")
