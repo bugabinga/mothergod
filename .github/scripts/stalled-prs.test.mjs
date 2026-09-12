@@ -139,6 +139,31 @@ test("changes-requested is a verdict, not a stall: the author owns the move", ()
   assert.equal(found, null);
 });
 
+test("PR #516: a dying review's half-applied label does not mask its death", () => {
+  // The 401ing review session applied changes-requested five seconds before
+  // its run failed, posting no items. A label from a dead round vouches for
+  // nothing; the stall must still report.
+  const found = classify(
+    pr({
+      labels: [{ name: "changes-requested" }],
+      statusCheckRollup: [...GREEN_GATES, review("FAILURE")],
+    }),
+  );
+  assert.equal(found.kind, "reviewer-died");
+});
+
+test("a stale approval does not authorize a head whose review died", () => {
+  // agent-approved from an earlier round plus a dead re-review means the
+  // current head is unreviewed; the rescue is a fresh review, not a merge.
+  const found = classify(
+    pr({
+      labels: [{ name: "agent-approved" }],
+      statusCheckRollup: [...GREEN_GATES, review("CANCELLED")],
+    }),
+  );
+  assert.equal(found.kind, "reviewer-died");
+});
+
 test("a dirty merge state outranks whatever the reviewer did", () => {
   const found = classify(
     pr({
