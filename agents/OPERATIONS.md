@@ -113,10 +113,14 @@ The system is inert until these are done:
 
 ## Pausing and resuming (ADR-0004)
 
-- **Automatic**: when any agent run hits a Claude usage limit, the system
-  opens an issue labeled `agents-paused` with a `RESUME-AT: <ISO time>` line
-  (+6 h rolling-window, +24 h weekly limit). Every agent workflow skips while
-  it's open; the first scheduled run after RESUME-AT closes it and resumes.
+- **Automatic**: when any agent run hits a Claude usage limit or auth
+  failure, the system opens an issue labeled `agents-paused` with a
+  `RESUME-AT: <ISO time>` line (+6 h rolling-window, +24 h weekly limit or
+  auth failure). Every agent workflow skips while it's open; the first
+  scheduled run after RESUME-AT closes it and resumes. For an auth failure
+  that run is a probe: a still-bad token refiles the pause for another day,
+  so after fixing `CLAUDE_CODE_OAUTH_TOKEN` you close nothing; the fleet
+  heals itself within a day (ADR-0045).
 - **Manual pause**: open an issue yourself with label `agents-paused`.
   No `RESUME-AT` line = paused until you close it.
 - **Manual resume**: close the pause issue.
