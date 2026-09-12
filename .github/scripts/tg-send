@@ -25,8 +25,10 @@ silently when done wrong:
 - The delivery is recorded in the KV chat log, because this process is the
   only party that knows the send succeeded (#183).
 
-Reads the body from stdin, prints the sent message_id to stdout so the caller
-can log it or reply to it.
+Reads the body from stdin. On success the only stdout is `message_id=<n>`,
+self-describing because a bare `429` was once read as Telegram's rate-limit
+status and retried into four identical status lines (#535); on failure the
+exit is non-zero, stdout stays empty and stderr carries the reason.
 
 `--notice` marks the message as a notification rather than a turn in the
 operator conversation: it answers nothing, so it must not decrement the
@@ -46,7 +48,9 @@ import sys
 import urllib.error
 import urllib.request
 
-API = "https://api.telegram.org/bot{}/sendMessage"
+# The host is overridable so tg-send.test.mjs can stand in for Telegram and
+# pin what each exit prints; nothing in production sets it.
+API = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org") + "/bot{}/sendMessage"
 # Cloudflare's edge answers 403 to urllib's default User-Agent, so every
 # stop_typing() call was refused before reaching our own worker and the
 # indicator ran on until the worker capped it. Our tooling says who it is.
@@ -145,7 +149,7 @@ def main() -> int:
     if not notice:
         stop_typing()
         record(sent["result"], reply_to, body)
-    print(sent["result"]["message_id"])
+    print(f"message_id={sent['result']['message_id']}")
     return 0
 
 
