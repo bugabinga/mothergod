@@ -28,6 +28,13 @@ factory has ALREADY stopped for up to a week. Between "fine" and "stopped"
 there was no signal at all. These artifacts are downloaded for the audit
 regardless, so the number costs nothing extra and appears on every wake.
 
+ATTRIBUTION is the third reading, and it also rides free. A seat that
+posts an issue comment around `gh-comment` loses its role footer, and two
+seats did it three days apart with prompt text already forbidding it
+(issue #510). The tell is mechanical, author login alone, so it lives as
+a predicate in `attribution.py` and its findings print here, beside the
+sessions that produced them.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -63,6 +70,7 @@ from datetime import datetime, timezone
 
 from allowance import valid_fraction, valid_reset, window_readings
 from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
+from attribution import report as attribution_report
 
 # Only these produce a judgeable session. Everything else in the repository is
 # graded by exit code.
@@ -342,10 +350,13 @@ def main():
         for run in pending:
             print(f"    {run['name']}  {run['displayTitle']}  {run['url']}")
 
+    comments, bypassed = attribution_report(repo, anchor)
+
     budget(samples, anchor)
     print(
         f"\nretrospect: sessions {read} | no-artifact {len(orphans)} "
-        f"| pending {len(pending)} | since {anchor}"
+        f"| pending {len(pending)} | issue-comments {comments} "
+        f"| bypassed {bypassed} | since {anchor}"
     )
 
 
