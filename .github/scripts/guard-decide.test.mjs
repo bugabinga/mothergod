@@ -200,10 +200,10 @@ test("a projection nobody can trust never costs a wake", async (t) => {
     // walked past every early return above and crashed three frames deep in
     // _utc() (review of PR #536, reproduced on main). Hand-written fences,
     // because JSON.stringify would turn these into null and test nothing.
-    "NaN where the utilization belongs":
-      "```json\n{\"observedAt\": " + (RESETS - 302400) + ", \"resetsAt\": " + RESETS + ", \"utilization\": NaN}\n```",
-    "an infinite reset instant":
-      "```json\n{\"observedAt\": " + (RESETS - 302400) + ", \"resetsAt\": Infinity, \"utilization\": 0.9}\n```",
+    "NaN where the utilization belongs": "```json\n{\"observedAt\": " + (RESETS - 302400) + ", \"resetsAt\": " + RESETS
+      + ", \"utilization\": NaN}\n```",
+    "an infinite reset instant": "```json\n{\"observedAt\": " + (RESETS - 302400)
+      + ", \"resetsAt\": Infinity, \"utilization\": 0.9}\n```",
   };
   for (const [name, allowance] of Object.entries(cases)) {
     await t.test(name, () => {
