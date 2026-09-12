@@ -1,0 +1,10 @@
+# tests/golden/ and tests/adversarial/ pin exact bytes: golden.rs decodes a
+# committed frame and asserts it equals the committed plaintext byte for
+# byte, and torture.rs/adversarial.rs feed committed bytes straight to the
+# decoder. Git's line-ending conversion must never touch either directory,
+# on any platform, regardless of whether a given fixture's content looks
+# like text (issue #518: Windows checkout rewrote a golden .plaintext
+# fixture's LF line endings to CRLF, so the decoded frame no longer matched
+# the pinned plaintext -- a checkout artifact, not a decode regression).
+tests/golden/** -text
+tests/adversarial/** -text

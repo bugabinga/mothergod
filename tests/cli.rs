@@ -5,7 +5,11 @@
 
 // Not under Miri: every test here drives the compiled binary as a
 // subprocess, and Miri cannot spawn one (issue #456).
-#![cfg(not(miri))]
+// Not on Android: `.github/scripts/android-runner` pushes only the test
+// executable plus tests/adversarial/ and tests/golden/ to the device, not
+// `CARGO_BIN_EXE_mothergod`, so spawning it there is a guaranteed ENOENT,
+// not a finding about the codec (issue #518).
+#![cfg(not(any(miri, target_os = "android")))]
 
 use std::io::Write as _;
 use std::process::{Command, Stdio};

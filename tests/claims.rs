@@ -17,7 +17,13 @@
 // Not under Miri: prose-vs-source string comparison, no codec code runs
 // here for Miri to observe, so the lane spends its budget elsewhere
 // (issue #456).
-#![cfg(not(miri))]
+// Not on Android: every claim here is read from README.md, site/index.html,
+// docs/benchmarks/*.md or the built `mothergod` binary, none of which
+// `.github/scripts/android-runner` pushes to the device (it pushes only the
+// test executable plus tests/adversarial/ and tests/golden/), so every read
+// and the binary spawn are a guaranteed failure unrelated to whether the
+// claims are true (issue #518).
+#![cfg(not(any(miri, target_os = "android")))]
 
 use std::path::Path;
 
