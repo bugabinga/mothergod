@@ -9,6 +9,20 @@
 #   debouncing (ADR-0014), not failures.
 # - An absent run creates no completion event, so a cron that never
 #   fires stays covered only by the scheduled wakes' state checks.
+# - A `failure` with zero jobs never executed a step, so there is
+#   nothing for a fixer to fix: GitHub creates a run for every matching
+#   event, including ones whose actor filter will skip them, and a
+#   bot's PR review can leave one behind red (incident: CodeQL's review
+#   on PR #549 made six agent-bdfl runs, run 34756768291 of them red,
+#   which cost a false "the fixer is down" alert and a full retry).
+#   `startup_failure` is also job-less and is NOT covered by that skip,
+#   because a workflow too broken to start is exactly what the fixer
+#   must see. A phantom still counts as red for the dedup above, so it
+#   suppresses the next real red on the SAME branch. Usually harmless,
+#   not structurally so: an operator-submitted PR review wakes
+#   agent-bdfl on that PR's head branch too, which is where phantoms
+#   land. Pre-existing, since the dedup has always read a conclusion
+#   rather than a job count.
 # - A red whose only failing step is agent-review's refusal sentinel
 #   never dispatches (ADR-0036): that red is the machinery speaking,
 #   not failing, and a step rename over there fails open to spurious
@@ -91,6 +105,32 @@ jobs:
               ;;
           esac
 
+      # Zero jobs means the run never reached a step, so its red says
+      # nothing about the seat's health. The `on:` blocks cannot filter
+      # by actor (agent-bdfl.yml says why), so every bot event still
+      # creates a run; most conclude `skipped`, but one can land on
+      # `failure` instead and claim the fixer died. Scoped to
+      # `failure` so `startup_failure`, job-less by nature and always
+      # real, still wakes the fixer.
+      - name: A red that never ran is not a failure
+        id: phantom
+        if: steps.dedup.outputs.fresh == 'true' &&
+          github.event.workflow_run.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$THIS_ID/jobs" \
+            --jq '.total_count')"
+          echo "the red run ran $jobs job(s)"
+          if [ "$jobs" -eq 0 ]; then
+            echo "no step ever ran; nothing to fix, and no operator alert"
+            echo "phantom=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "phantom=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # agent-review's "A green review means a review happened" step
       # turns the action's silent anti-tamper refusal into a deliberate
       # red so an unreviewed PR cannot look reviewed. That red is a
@@ -101,6 +141,7 @@ jobs:
       - name: A refusal red is a signal, not a failure
         id: refusal
         if: steps.dedup.outputs.fresh == 'true' &&
+          steps.phantom.outputs.phantom != 'true' &&
           github.event.workflow_run.name == 'agent-review'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,6 +160,7 @@ jobs:
       # operator-attributed dispatches (issue #50).
       - name: Wake agent-bdfl
         if: steps.dedup.outputs.fresh == 'true' &&
+          steps.phantom.outputs.phantom != 'true' &&
           steps.refusal.outputs.refused != 'true'
         env:
           GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
@@ -129,6 +171,7 @@ jobs:
       # and must still go (review on #270).
       - name: Tell the operator when the fixer itself died
         if: always() && steps.dedup.outputs.fresh == 'true' &&
+          steps.phantom.outputs.phantom != 'true' &&
           github.event.workflow_run.name == 'agent-bdfl'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
