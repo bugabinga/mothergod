@@ -2721,10 +2721,14 @@ record.
   bottleneck (at most 256 comparisons per byte against `mix`'s 1536
   multiply-add-shift operations) — left for a later slice if it's ever
   worth its own measurement. | Remaining S1-P6 scope: this slice alone
-  does not reach the floor; the lead's other named directions
-  (bit-decomposed/LPAQ-style coding ~10×, tANS fast path ~100×, explicit
-  AVX2 blend ~1.5×) are still open, in the lead's own expected-payoff
-  order. Issue #447 stays open, updated with these numbers.
+  does not reach the floor. Bit-decomposed coding already shipped
+  (S2-A58/S2-A59, wired as SSE at S2-A60, `FORMAT_VERSION` 3) without
+  removing the per-byte rebuild this slice targets — `bittree` is
+  handed the same 257-entry `cum` `mix` still rebuilds from scratch, per
+  issue #447's curator note (2026-09-03). The lead's remaining open
+  directions: the incremental cumulative structure (S1-P6's original
+  ~10× target, not yet spent), tANS fast path (~100×), explicit AVX2
+  blend (~1.5×). Issue #447 stays open, updated with these numbers.
   `research/progress.jsonl` it126.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
@@ -2738,8 +2742,11 @@ record.
   it a queue entry. S2-A77 took the first slice: splitting `mix`'s fused
   loop cut decode's measured ns/byte by about 13.5% on this sandbox
   (`xargs.1` still under the floor after it), autovectorization-shaped,
-  not an incremental structure — the incremental/bit-decomposed/tANS/
-  AVX2 directions above are still the open scope.
+  not an incremental structure. Bit-decomposed coding above already
+  shipped (S2-A58/S2-A59/S2-A60, `FORMAT_VERSION` 3) without reaching
+  the floor, since `bittree` is handed the same from-scratch `cum`; the
+  incremental cumulative structure, tANS, and AVX2 are still the open
+  scope.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
