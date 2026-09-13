@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
-"""Compose a one-screen Telegram notice for a finished agent run.
+"""Compose a Telegram notice for a finished agent run.
 
 Operator directive (Telegram, 2026-08-27): heartbeat runs notify the
 operator like BDFL runs do, but nothing in the session drafts the message.
 The agent's final response already summarizes the run, so drafting a second
 summary in-session would spend context to say the same thing twice. This
-composes the notice mechanically instead: a status line from the audit
-metadata, then the final response clipped to one phone screen.
+composes the notice mechanically instead, out of that response and the audit
+metadata.
+
+The result leads and the provenance trails. Every notice used to open with
+`<label>: green, 12 turns, 8m`, which is the same sentence on every run and
+answers a question the operator was not asking; they read past it to reach
+the one line that differed (operator report, 2026-09-13). Uniform text at the
+end of a message is a signature, uniform text at the front is a wall. So the
+run's own words come first, and the label, turn count and duration go last in
+one italic line. A failed run inverts this, because there the fact that it
+failed IS the news.
 
 Reads the files agent-audit extracted, AFTER its secret scrub, so this text
 inherits that redaction and adds no new leak surface. Composing only; the
 send is tg-send's job (`run-notice.py <audit-dir> <label> | tg-send
---notice`).
+--notice`), and tg-send owns rendering the house markdown this passes
+through untouched.
 
 Never exits non-zero for missing or partial audit data: a notice that a run
 finished without a readable record is still a notice, and observability does
@@ -23,7 +33,11 @@ import json
 import os
 import sys
 
-CLIP = 500  # chars of response; the notice must fit one phone screen
+# Chars of response kept. 500 cut mid-sentence and lost the conclusion the
+# operator actually wanted, which reads as the run hiding something; a clip
+# this size ends most summaries at their real end, and the ones it does cut
+# say so and link the full record.
+CLIP = 1200
 
 
 def main() -> int:
@@ -42,25 +56,32 @@ def main() -> int:
     if meta is None:
         # A run that died before the audit wrote anything still gets
         # reported; the link is all the evidence there is.
-        print(f"{label}: finished, no audit record\n{run_url}")
+        print(f"**{label} finished.** No audit record survived it, so the "
+              f"run log is the only account of what happened.\n{run_url}")
         return 0
 
     telemetry = meta.get("telemetry") or {}
-    status = "RED" if meta.get("is_error") else "green"
+    failed = bool(meta.get("is_error"))
     turns = telemetry.get("num_turns")
     minutes = round((telemetry.get("duration_ms") or 0) / 60000)
-    stats = ", ".join(
-        [status]
+    response, clipped = clipped_response(audit_dir)
+
+    lines = []
+    if failed:
+        lines.append(f"**{label} failed.**")
+    if response:
+        lines.append(response)
+    elif not failed:
+        lines.append(f"**{label} finished** and left no summary behind.")
+    # The link is offered exactly when this message is not the whole story.
+    if failed or clipped or not response:
+        lines.append(run_url)
+    facts = (
+        [label]
         + ([f"{turns} turns"] if turns is not None else [])
         + ([f"{minutes}m"] if minutes else [])
     )
-
-    lines = [f"{label}: {stats}"]
-    response = clipped_response(audit_dir)
-    if response:
-        lines.append(response)
-    if status == "RED" or not response:
-        lines.append(run_url)
+    lines.append("_" + ", ".join(facts) + "_")
     print("\n".join(lines))
     return 0
 
@@ -81,27 +102,38 @@ def read_metadata(audit_dir: str):
     return meta if isinstance(meta, dict) else None
 
 
-def clipped_response(audit_dir: str) -> str:
-    """The final response, readable on a phone, or empty.
+def clipped_response(audit_dir: str) -> tuple[str, bool]:
+    """The final response and whether it was cut short.
 
     agent-audit writes a `(...)` placeholder when the execution file carried
-    no result entry; that is absence, not content. Markdown emphasis and
-    code ticks are stripped because Telegram renders them literally; line
-    structure is kept because heartbeat summaries are bulleted. The clip
-    cuts at a whitespace boundary so the ellipsis never splits a word.
+    no result entry; that is absence, not content. Markdown is left alone:
+    tg-send renders the house dialect into Telegram's markup now, so
+    stripping emphasis here would only throw away the structure that makes a
+    bulleted summary scannable.
+
+    The cut lands where the writer already paused, preferring a paragraph
+    break to a line break to a word break, and never before halfway, because
+    a boundary found too early costs more text than a ragged edge. The caller
+    needs the second return value to decide whether to offer the run link:
+    truncation the reader cannot see or recover from is how a notice comes
+    across as withholding.
     """
     try:
         with open(os.path.join(audit_dir, "output-response.md"),
                   encoding="utf-8") as fh:
             text = fh.read().strip()
     except OSError:
-        return ""
+        return "", False
     if not text or text.startswith("("):
-        return ""
-    text = text.replace("**", "").replace("`", "")
-    if len(text) > CLIP:
-        text = text[:CLIP].rsplit(None, 1)[0] + "…"
-    return text
+        return "", False
+    if len(text) <= CLIP:
+        return text, False
+    head = text[:CLIP]
+    for boundary in ("\n\n", "\n", " "):
+        cut = head.rfind(boundary)
+        if cut > CLIP // 2:
+            return head[:cut].rstrip() + "…", True
+    return head.rstrip() + "…", True
 
 
 if __name__ == "__main__":

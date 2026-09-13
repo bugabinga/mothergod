@@ -68,9 +68,31 @@ CHATLOG = "chatlog"
 KEEP = 40  # entries retained; this number is the whole retention policy
 SUMMARY = 200  # chars of an entry's text; 40 entries must stay one screenful
 
-# A ref is `#<digits>`. Not preceded by a word character, `/` or `#`, so
-# `abc#1`, a URL fragment and `##1` are left alone.
-REF = re.compile(r"(?<![\w/#])#(\d{1,6})\b")
+# The house markdown dialect, as one left-to-right pass. Alternation order is
+# precedence: code wins, so a `**x**` inside backticks stays literal, and a
+# link wins over the ref inside its own URL. One pass with no re-entry is what
+# keeps the output well-formed without a parser, because nothing emitted here
+# can be rematched by this pattern.
+#
+# A ref is `#<digits>`, not preceded by a word character, `/` or `#`, so
+# `abc#1`, a URL fragment and `##1` are left alone. Italic demands a non-word
+# character on both outsides, because `seven_day: 56% used` is a budget
+# footer, not emphasis, and the naive form runs from that underscore to
+# whichever one comes next, three lines later.
+INLINE = re.compile(
+    r"`(?P<code>[^`\n]+)`"
+    r"|\[(?P<label>[^\]\n]+)\]\((?P<href>[^)\s\"]+)\)"
+    r"|\*\*(?P<bold>[^*\n]+)\*\*"
+    r"|(?<!\w)_(?P<italic>[^_\n]+)_(?!\w)"
+    r"|(?<![\w/#])#(?P<ref>\d{1,6})\b"
+)
+# Line-level forms. Telegram has no heading and no list, so a heading becomes
+# a bold line and a bullet becomes the character a human would have typed.
+# Both require the space after the marker, which is what keeps `#542` a ref
+# and `---` a rule rather than an empty bullet.
+HEADING = re.compile(r"^ {0,3}#{1,6} +(.*?) *#* *$")
+BULLET = re.compile(r"^( *)[-*] +")
+DOT = "•"  # Telegram has no list markup; this is what a human would type
 
 
 def main() -> int:
@@ -103,13 +125,9 @@ def main() -> int:
         return 2
 
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
-    text = REF.sub(
-        lambda m: f'<a href="https://github.com/{repo}/issues/{m[1]}">#{m[1]}</a>',
-        html.escape(body, quote=False),
-    )
-    # Escaping only touches & < >, so the refs survive it unchanged and the
-    # order above is safe. Length is checked after linking, because the anchor
-    # markup is what actually travels.
+    text = render(body, repo)
+    # Length is checked after rendering, because the markup is what actually
+    # travels and it is several times the source in a link-dense message.
     if len(text) > LIMIT:
         print(f"tg-send: {len(text)} chars after linking, over Telegram's {LIMIT}; "
               "split it rather than let the API truncate", file=sys.stderr)
@@ -151,6 +169,49 @@ def main() -> int:
         record(sent["result"], reply_to, body)
     print(f"message_id={sent['result']['message_id']}")
     return 0
+
+
+def render(body: str, repo: str) -> str:
+    """The house markdown dialect, in the only markup Telegram accepts.
+
+    CLAUDE.md mandates one markdown dialect for every posted text, so agents
+    write `**bold**` everywhere and have no reason to know that this one
+    destination speaks HTML. Telegram printed the asterisks literally, and
+    every summary arrived wearing its own markup (operator report,
+    2026-09-13). Translating here is what keeps the dialect single: callers
+    write the house dialect, and the process that owns the destination owns
+    the translation.
+
+    Escaping runs first, so any markup character already in the body is text
+    by the time the patterns see it and cannot be read as a tag. Only the
+    forms Telegram has a tag for survive; everything else stays literal,
+    which is the honest outcome for a subset this small and the reason the
+    subset can stay small.
+    """
+    lines = []
+    for line in html.escape(body, quote=False).split("\n"):
+        heading = HEADING.match(line)
+        if heading:
+            lines.append(f"<b>{heading[1]}</b>" if heading[1] else "")
+            continue
+        lines.append(BULLET.sub(rf"\1{DOT} ", line))
+    return INLINE.sub(lambda m: inline(m, repo), "\n".join(lines))
+
+
+def inline(match: re.Match, repo: str) -> str:
+    """One inline form, rendered. Exactly one group of INLINE is ever set."""
+    if match["code"] is not None:
+        return f"<code>{match['code']}</code>"
+    if match["href"] is not None:
+        return f'<a href="{match["href"]}">{match["label"]}</a>'
+    if match["bold"] is not None:
+        return f"<b>{match['bold']}</b>"
+    if match["italic"] is not None:
+        return f"<i>{match['italic']}</i>"
+    ref = match["ref"]
+    # GitHub's /issues/<n> redirects to the PR when the number is a PR, so one
+    # form covers both and the sender never has to know which it is.
+    return f'<a href="https://github.com/{repo}/issues/{ref}">#{ref}</a>'
 
 
 def record(sent: dict, reply_to: int | None, body: str) -> None:
