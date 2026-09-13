@@ -141,6 +141,14 @@ jobs:
       statuses: write
       discussions: write
       pages: write
+      # The Security tab, read-only, for `.github/scripts/security-alerts`.
+      # Two keys because they cover different scanners and neither implies
+      # the other: `security-events` is code scanning (and is explicitly NOT
+      # Dependabot), `vulnerability-alerts` is Dependabot. Read, never write:
+      # dismissing an alert is a written judgement a human or a PR should be
+      # able to find, not a side effect of a sweep.
+      security-events: read
+      vulnerability-alerts: read
     steps:
       # When this run began, in epoch ms, for the typing indicator's
       # cutoff in the last step. Messages older than this are this run's
@@ -480,7 +488,14 @@ jobs:
                list (the prose it replaced missed PR #377). Rescue
                recipes live in agents/GOVERNANCE.md "Stalled
                auto-merge"; a stall the named rescue does not clear
-               gets blocked-on-human.
+               gets blocked-on-human. Then run
+               `.github/scripts/security-alerts`: GitHub's scanners
+               write to the Security tab, which is a web page no
+               workflow reads and no check gates on, so five open
+               high-severity alerts sat unread for nine hours after
+               PR #549 merged green. Triage each row it prints, and
+               treat UNREADABLE as the loudest row on the page: a
+               lapsed grant makes every other line a lie.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
                run `.github/scripts/retrospect` and judge each
                session it prints: right result in a sane turn count,
