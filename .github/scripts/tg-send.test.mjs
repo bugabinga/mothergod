@@ -102,3 +102,49 @@ test("refs become issue links and --reply-to rides as reply_parameters", async (
     "shipped <a href=\"https://github.com/bugabinga/mothergod/issues/535\">#535</a>",
   );
 });
+
+// Rendering. Agents write the one markdown dialect CLAUDE.md mandates, and
+// Telegram speaks HTML, so until tg-send translated, every summary reached the
+// operator wearing its own asterisks (operator report, 2026-09-13). These pin
+// the subset and, more importantly, the two ways the naive patterns misfire.
+
+test("house markdown becomes Telegram's own markup", async () => {
+  const { status } = await send("tok-ok", {
+    body: "## Summary\n\n- **done**: shipped _clean_ via `x check`",
+  });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    "<b>Summary</b>\n\n• <b>done</b>: shipped <i>clean</i> via <code>x check</code>",
+  );
+});
+
+test("a code span is literal, markup and refs inside it included", async () => {
+  const { status } = await send("tok-ok", { body: "`**x**` and `#1` stay literal" });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    "<code>**x**</code> and <code>#1</code> stay literal",
+  );
+});
+
+// The budget footer tg-send carries every week is `seven_day: ... 44% left`.
+// An italic rule that ignores word boundaries runs from that underscore to
+// whichever one comes next and italicizes the paragraph between them.
+test("underscores inside identifiers are not emphasis", async () => {
+  const { status } = await send("tok-ok", {
+    body: "seven_day: 56% used, 44% left, five_hour resets soon",
+  });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    "seven_day: 56% used, 44% left, five_hour resets soon",
+  );
+});
+
+// Escaping runs before rendering, so a body cannot smuggle markup through.
+test("markup characters in the body stay text", async () => {
+  const { status } = await send("tok-ok", { body: "5 < 6 <b>not a tag</b>" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "5 &lt; 6 &lt;b&gt;not a tag&lt;/b&gt;");
+});

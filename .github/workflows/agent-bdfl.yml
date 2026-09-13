@@ -407,9 +407,20 @@ jobs:
               the curl: the escaping is what you will get wrong, and
               Telegram fails it silently.
             - Outbound, status line (operator directive, Telegram,
-              2026-08-22): end EVERY run, scheduled and silent no-ops
-              included, with one terse Telegram message: wake reason,
-              what you did or "no-op". One line, two at most. The
+              2026-08-22; reshaped 2026-09-13, when the operator
+              reported every summary reading alike): end EVERY run,
+              scheduled and silent no-ops included, with one Telegram
+              message. Lead with what changed, concretely: the first
+              line is the entire message to a reader who stops there.
+              No fixed opener. "Wake: <reason>. Shipped ..." on every
+              run is a preamble the operator learns to skip, and the
+              wake reason earns its place only when it explains the
+              result. Length follows content: a no-op is one line, a
+              run that shipped three things and moved a number gets
+              the room to say so, because a cap that cuts the finding
+              is how "terse" turned into "truncated". House markdown
+              renders natively now, so **bold** the one thing that
+              matters and let structure carry the rest. The
               status line rides the run's LAST Telegram message: a
               run that already owes the operator a reply (inbox
               answer, digest summary, alert) folds the status line
