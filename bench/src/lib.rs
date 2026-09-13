@@ -45,8 +45,8 @@
 //! [`regret`] scores a candidate corpus addition once those three exist to
 //! feed it real numbers.
 //!
-//! [`finals`] and `reference` (the latter also behind `corpus-fetch`) are
-//! the first callers to feed `regret` real held-out-final numbers: a
+//! [`finals`] and [`mod@reference`] are the first callers to feed `regret`
+//! real held-out-final numbers: a
 //! `finals_report` binary fetches Canterbury, compresses every file with
 //! `mothergod::compress` and the pinned reference compressors, and writes
 //! `docs/benchmarks/canterbury.md`. A `silesia_report` binary does the same
@@ -59,7 +59,6 @@ pub mod baseline;
 pub mod corpus;
 pub mod finals;
 pub mod graph;
-#[cfg(feature = "corpus-fetch")]
 pub mod reference;
 
 use std::fmt::Write as _;

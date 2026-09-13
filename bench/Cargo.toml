@@ -40,10 +40,11 @@ tar = { version = "0.4.46", default-features = false, optional = true }
 corpus-fetch = ["dep:ureq", "dep:sha2", "dep:bzip2-rs", "dep:flate2", "dep:tar"]
 
 # Explicit rather than left to autobin discovery: these binaries call
-# `corpus`/`reference`, both gated behind `corpus-fetch`, so they must not
-# enter a default-features build (`cargo build --workspace`, CLAUDE.md's
-# required `cargo test --all-targets`) the way `baseline_gate` and
-# `render_baseline_graph` do.
+# `corpus`, gated behind `corpus-fetch`, so they must not enter a
+# default-features build (`cargo build --workspace`, CLAUDE.md's required
+# `cargo test --all-targets`) the way `baseline_gate` and
+# `render_baseline_graph` do. `reference` is no longer gated (issue #550),
+# but that doesn't free these binaries: they still need `corpus`'s fetch.
 [[bin]]
 name = "finals_report"
 required-features = ["corpus-fetch"]
