@@ -120,8 +120,8 @@ without anything getting faster.
 
 A public repository is charged nothing for standard runners, which is not the
 same as free. Concurrent jobs are limited **per account**, not per repository,
-and this account runs nine agent seats plus seven scheduled
-workflows. Optimise as though the
+and this account runs twenty workflow files, seven of them
+model-carrying agent seats. Optimise as though the
 minutes were billed: the discipline is identical and only the unit changes.
 
 What saves minutes, in order of effect:
