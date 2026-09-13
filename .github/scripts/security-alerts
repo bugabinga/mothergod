@@ -67,7 +67,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-from anchor import STAMP
+from anchor import stamp_to_dt
 
 # Worst first. Code scanning's `security_severity_level` and Dependabot's
 # `security_advisory.severity` share a vocabulary, which is what lets one
@@ -124,8 +124,7 @@ def api(path):
 
 def age(stamp, now):
     """Whole days an alert has been open. The consumer's failure is the age."""
-    born = datetime.strptime(stamp, STAMP).replace(tzinfo=timezone.utc)
-    return (now - born).days
+    return (now - stamp_to_dt(stamp)).days
 
 
 def dependabot(alert, now):
