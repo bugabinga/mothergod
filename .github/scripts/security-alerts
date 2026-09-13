@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Report every open security alert GitHub holds for this repository, and name the move.
+
+Extensionless and executable because agents type it as a command mid-session,
+like operator-sweep, retrospect and stalled-prs.
+
+GitHub already runs the scanners. CodeQL uploads SARIF on every pull request
+and pushes to main (`.github/workflows/codeql.yml`), Dependabot watches the
+cargo lockfile and the action pins, secret scanning watches every push. All
+three write to the Security tab, which is a web page. No workflow reads it, no
+check gates on it, and no agent prompt mentioned it. On 2026-09-13 that cost
+exactly what it was always going to cost: five open high-severity code-scanning
+alerts, created 12:19Z by the merge of PR #549, still unread at 21:52Z when a
+BDFL run looked for the first time. The pull request merged green because code
+scanning is not a required check, and nothing downstream of a green merge ever
+asks a second question.
+
+A scanner with no consumer is not coverage. It is a machine for generating
+unread pages.
+
+What this reads, and the grant each needs on the calling job:
+
+    dependabot alerts     `vulnerability-alerts: read`. Not `security-events`,
+                          which does not cover them. No PAT needed: this is a
+                          real GITHUB_TOKEN scope, verified against the
+                          workflow-syntax reference 2026-09-13.
+    code scanning alerts  `security-events: read`. Every SARIF-producing tool
+                          lands here, so a second scanner added later is
+                          reported by this script on the day it runs, with no
+                          edit.
+
+Deliberately NOT read, said plainly so nothing claims a completeness it lacks.
+Secret scanning alerts have no GITHUB_TOKEN scope at all; they reach the
+operator through GitHub's own notifications, and push protection stops the
+common case before the push lands. Closed and auto-dismissed alerts are
+somebody's finished decision. A dismissed alert stays dismissed: re-litigating
+a written triage on every wake is how a report becomes noise, and noise is how
+a report becomes unread, which is the failure this script exists to end.
+
+The invariant that matters more than any row it prints:
+
+    AN ENDPOINT THIS CANNOT READ PRINTS AS UNREADABLE, NEVER AS ZERO.
+
+A dropped permission is indistinguishable from a clean repository when a 403
+is swallowed, and the swallowed version of this script is worse than no script,
+because it manufactures the reassurance whose absence is the only reason
+anybody looked. Both reads therefore report their own failure as a finding.
+
+Runtime versus development scope is the one judgement encoded here. The core
+crate ships zero runtime dependencies (CLAUDE.md "Style", ADR-0006/ADR-0020),
+so a CVE in a dev-dependency reaches a contributor's machine and CI, never a
+user's decoder. Both are reported; only one is an emergency, and a report that
+flattens them teaches the reader to skim.
+
+Liveness: the footer always prints how many alerts each endpoint returned and
+whether it was readable, so a reader can tell a quiet repository from a
+detector that has silently stopped working.
+
+Usage: security-alerts
+
+Exits 0 whether or not anything is open. An alert is a finding, not an error.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+from anchor import stamp_to_dt
+
+# Worst first. Code scanning's `security_severity_level` and Dependabot's
+# `security_advisory.severity` share a vocabulary, which is what lets one
+# ordering sort both lists. The REST enums are low/medium/high/critical;
+# `moderate` is GraphQL's spelling of `medium` and is carried here on purpose,
+# because the two failure modes are not symmetric. An unused key costs a dict
+# entry. A missing key sends a real moderate-severity CVE through the unknown
+# branch below, which sorts it under a lint note, which is where nobody looks.
+RANK = {"critical": 0, "high": 1, "medium": 2, "moderate": 2, "low": 3}
+
+# A code-scanning rule with no security severity is a quality rule, not a
+# vulnerability. It still prints, below the security ones, under its own
+# `rule.severity` (error/warning/note): CodeQL's default suite carries both,
+# and silently dropping half the tool's output is the habit this script exists
+# to break.
+QUALITY = {"error": 4, "warning": 5, "note": 6}
+
+
+def api(path):
+    """Read a paginated endpoint. Returns (rows, None) or (None, reason).
+
+    Never dies. A tool failure here is the finding, so it is returned as data
+    and rendered as a row, rather than exiting non-zero and taking the other
+    endpoint's result down with it.
+
+    No `--slurp`, and that is the deliberate half. Both endpoints return a JSON
+    ARRAY, and `gh api --paginate` merges array pages into one array: measured
+    on gh 2.100.0 against this repository's five dismissed alerts at
+    `per_page=2`, three pages arrive as one 5-element list. Adding `--slurp`
+    here would return a list of PAGES, and the row builders would raise
+    AttributeError on a list, uncaught, which is a crash rather than the
+    graceful UNREADABLE this whole script is built around (measured the same
+    way, PR #555 review).
+
+    The crash that `stalled-prs.test.mjs` records from the PR #490 review is
+    `--paginate --jq`, not bare `--paginate`: `--jq` runs the filter once per
+    page and prints one JSON document per LINE, which `json.loads` cannot take.
+    That construct is the hazard, and the reason the siblings carry `--slurp`.
+    Adding a `--jq` to this call without also adding `--slurp` reintroduces it.
+    """
+    proc = subprocess.run(
+        ["gh", "api", "--paginate", path],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        reason = proc.stderr.strip().splitlines()
+        return None, (reason[-1] if reason else f"gh exited {proc.returncode}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "response was not JSON"
+
+
+def age(stamp, now):
+    """Whole days an alert has been open. The consumer's failure is the age."""
+    return (now - stamp_to_dt(stamp)).days
+
+
+def dependabot(alert, now):
+    """One row for a Dependabot alert, or None if it is not ours to report."""
+    if alert.get("state") != "open":
+        return None
+    advisory = alert.get("security_advisory") or {}
+    vuln = alert.get("security_vulnerability") or {}
+    dep = alert.get("dependency") or {}
+    package = (dep.get("package") or {}).get("name", "?")
+    # `scope` is absent on some ecosystems; unknown scope is treated as
+    # runtime, because guessing "only a dev-dependency" is the guess that
+    # lets a real one through.
+    dev = dep.get("scope") == "development"
+    patched = (vuln.get("first_patched_version") or {}).get("identifier")
+    if patched:
+        move = f"bump to {patched}; Dependabot opens the PR, merge it"
+    else:
+        move = "no patched version: assess reachability, then pin or replace"
+    return {
+        "sev": advisory.get("severity", "low"),
+        "what": f"{package} {advisory.get('ghsa_id', '')}".strip(),
+        "where": "dev-dependency" if dev else "RUNTIME dependency",
+        "age": age(alert["created_at"], now),
+        "url": alert.get("html_url", ""),
+        "move": move,
+    }
+
+
+def code_scanning(alert, now):
+    """One row for a code-scanning alert, or None if it is not ours to report."""
+    if alert.get("state") != "open":
+        return None
+    rule = alert.get("rule") or {}
+    instance = alert.get("most_recent_instance") or {}
+    location = instance.get("location") or {}
+    path = location.get("path", "?")
+    line = location.get("start_line")
+    return {
+        "sev": rule.get("security_severity_level") or rule.get("severity", "note"),
+        "what": f"{rule.get('id', '?')} ({(alert.get('tool') or {}).get('name', '?')})",
+        "where": f"{path}:{line}" if line else path,
+        "age": age(alert["created_at"], now),
+        "url": alert.get("html_url", ""),
+        "move": "fix it, or dismiss it with a written reason",
+    }
+
+
+def order(row):
+    """Worst first, then oldest first. Unknown severity sorts with the noise."""
+    return (RANK.get(row["sev"], QUALITY.get(row["sev"], 7)), -row["age"])
+
+
+def render(dep_rows, dep_error, code_rows, code_error, out=sys.stdout):
+    """Print the findings and the liveness footer. Returns the footer."""
+    for title, rows, error in (
+        ("dependabot", dep_rows, dep_error),
+        ("code scanning", code_rows, code_error),
+    ):
+        if error is not None:
+            print(f"\n{title}: UNREADABLE, which is not the same as clean.", file=out)
+            print(f"    {error}", file=out)
+            print(
+                "    Grant the calling job `vulnerability-alerts: read`"
+                if title == "dependabot"
+                else "    Grant the calling job `security-events: read`",
+                file=out,
+            )
+            continue
+        if not rows:
+            continue
+        print(f"\n{title}: {len(rows)} open", file=out)
+        for row in sorted(rows, key=order):
+            print(
+                f"    {row['sev']:<8} {row['age']:>3}d  {row['where']}", file=out
+            )
+            print(f"             {row['what']}", file=out)
+            print(f"             -> {row['move']}", file=out)
+            if row["url"]:
+                print(f"             {row['url']}", file=out)
+
+    footer = (
+        f"security-alerts: dependabot "
+        f"{'unreadable' if dep_error else len(dep_rows)}"
+        f" | code-scanning {'unreadable' if code_error else len(code_rows)}"
+        f" | secret-scanning not-readable-by-design"
+    )
+    print(f"\n{footer}", file=out)
+    return footer
+
+
+def main():
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    now = datetime.now(timezone.utc)
+
+    raw, dep_error = api(f"repos/{repo}/dependabot/alerts?state=open&per_page=100")
+    dep_rows = [] if raw is None else [r for r in (dependabot(a, now) for a in raw) if r]
+
+    raw, code_error = api(f"repos/{repo}/code-scanning/alerts?state=open&per_page=100")
+    code_rows = (
+        [] if raw is None else [r for r in (code_scanning(a, now) for a in raw) if r]
+    )
+
+    render(dep_rows, dep_error, code_rows, code_error)
+
+
+if __name__ == "__main__":
+    main()
