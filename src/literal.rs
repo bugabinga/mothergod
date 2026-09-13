@@ -425,23 +425,44 @@ impl Literal {
     /// starting every frequency at 1), so `cum` is always strictly
     /// increasing and `cum[ALPHABET]` is always the true total passed to
     /// the coder.
+    ///
+    /// Two passes, not one fused loop over `symbol` (`research/JOURNAL.md`
+    /// S1-P6, issue #447): the per-symbol multiply-add below is
+    /// independent across symbols, but the original single loop also
+    /// carried `acc`'s running total through the same iterations, a
+    /// loop-carried dependency that keeps the optimizer from
+    /// autovectorizing the multiply-add at all. Splitting the prefix sum
+    /// into its own pass over already-computed values leaves the
+    /// axpy-shaped accumulation (pass one) free of any cross-symbol
+    /// dependency. This changes only *when* each addition happens, never
+    /// its value: pass one still sums the same six per-expert terms for a
+    /// given symbol in the same expert order (0..EXPERTS) the old fused
+    /// loop did, and pass two performs the identical `(mixed >> 16) + 1`
+    /// running sum. `mix`'s output is therefore bit-for-bit identical to
+    /// the pre-split version; this is a speed change, not a format change
+    /// (hard rule 5), so no golden fixture or `FORMAT_VERSION` bump is
+    /// needed.
     fn mix(&self, bank_indices: &[usize; EXPERTS], weight_index: usize) -> [u64; ALPHABET + 1] {
         let weights = &self.weights[weight_index];
         let weight_sum: f64 = weights.iter().sum();
         let mut scale = [0u64; EXPERTS];
-        for expert in 0..EXPERTS {
-            let bank_total = f64::from(self.total[bank_indices[expert]]);
+        for (expert, &bank) in bank_indices.iter().enumerate() {
+            let bank_total = f64::from(self.total[bank]);
             scale[expert] = fixed_point_scale(weights[expert], weight_sum, bank_total);
         }
+
+        let mut mixed = [0u64; ALPHABET];
+        for (&bank, &s) in bank_indices.iter().zip(scale.iter()) {
+            let base = bank * ALPHABET;
+            for (m, &freq) in mixed.iter_mut().zip(&self.freq[base..base + ALPHABET]) {
+                *m += s * u64::from(freq);
+            }
+        }
+
         let mut cum = [0u64; ALPHABET + 1];
         let mut acc = 0u64;
-        for symbol in 0..ALPHABET {
-            let mut mixed = 0u64;
-            for expert in 0..EXPERTS {
-                let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + symbol]);
-                mixed += scale[expert] * freq;
-            }
-            acc += (mixed >> 16) + 1;
+        for (symbol, &m) in mixed.iter().enumerate() {
+            acc += (m >> 16) + 1;
             cum[symbol + 1] = acc;
         }
         cum
