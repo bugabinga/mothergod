@@ -1,10 +1,10 @@
 //! Shells out to the pinned reference compressors
 //! (`research/corpus/POLICY.md`: "Reference compressors: zstd -19 and
 //! xz -9e at pinned versions") plus gzip, measuring compressed size on the
-//! same bytes [`crate::finals`] measures `mothergod::compress` on. Gated
-//! behind `corpus-fetch`: only meaningful alongside a held-out-final fetch
-//! (`crate::corpus`), so it never enters the default-feature build
-//! CLAUDE.md's required checks compile.
+//! same bytes [`crate::finals`] measures `mothergod::compress` on. Only
+//! meaningful alongside a held-out-final fetch (`crate::corpus`, gated
+//! behind `corpus-fetch`), but this module itself has no such dependency
+//! and compiles in CLAUDE.md's required checks like any other.
 
 use crate::finals::FileMeasurement;
 use std::io;
@@ -97,7 +97,7 @@ pub fn generated_at() -> io::Result<String> {
 /// machine.
 ///
 /// `CI` is the convention every major CI system exports (GitHub Actions,
-/// GitLab, Travis, CircleCI); its absence just means "not detected as CI",
+/// GitLab, Travis, `CircleCI`); its absence just means "not detected as CI",
 /// not "definitely a developer machine".
 #[must_use]
 pub fn machine_info() -> String {
