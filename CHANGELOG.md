@@ -62,6 +62,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- Literal decode is faster, same bits/byte: `Literal::mix` (issue #447,
+  ROADMAP SPEED) split its per-symbol loop into a data-parallel
+  multiply-add pass and a separate prefix-sum pass, removing a
+  loop-carried dependency that blocked autovectorization. Measured
+  ~13.5% fewer ns/byte decoding 8 MiB of incompressible data on one
+  machine (`research/JOURNAL.md` S2-A77; not a cross-machine claim,
+  same caveat `docs/benchmarks/` already carries for its MB/s columns);
+  output is bit-for-bit unchanged (same `FORMAT_VERSION`,
+  `bench/baseline.json` ratio gate unaffected).
+
 - `fuzz-check.yml` discovers its targets with `cargo fuzz list` instead
   of naming them, so a target added to `fuzz/Cargo.toml` is fuzzed the
   next night with no workflow-file change (closes #492, which existed
