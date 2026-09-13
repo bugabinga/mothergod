@@ -18,8 +18,11 @@
 #   `startup_failure` is also job-less and is NOT covered by that skip,
 #   because a workflow too broken to start is exactly what the fixer
 #   must see. A phantom still counts as red for the dedup above, so it
-#   suppresses the next real red on the SAME branch; harmless while
-#   phantoms land on PR branches and genuine seat reds land on main.
+#   suppresses the next real red on the SAME branch. Usually harmless,
+#   not structurally so: an operator-submitted PR review wakes
+#   agent-bdfl on that PR's head branch too, which is where phantoms
+#   land. Pre-existing, since the dedup has always read a conclusion
+#   rather than a job count.
 # - A red whose only failing step is agent-review's refusal sentinel
 #   never dispatches (ADR-0036): that red is the machinery speaking,
 #   not failing, and a step rename over there fails open to spurious
