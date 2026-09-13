@@ -7,8 +7,8 @@
 // thing it observes. Twelve sibling scripts carried tests while this one,
 // rewritten in #548, carried none.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
