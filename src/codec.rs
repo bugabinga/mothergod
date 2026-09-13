@@ -613,6 +613,18 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Reads the 4-byte little-endian `u32` at `payload[start..start + 4]`.
+///
+/// # Errors
+///
+/// Returns [`Error::Truncated`] if `payload` is shorter than `start + 4`.
+fn read_u32_le(payload: &[u8], start: usize) -> Result<u32, Error> {
+    let field = payload.get(start..start + 4).ok_or(Error::Truncated)?;
+    Ok(u32::from_le_bytes(
+        field.try_into().expect("checked to be exactly 4 bytes"),
+    ))
+}
+
 /// Splits `payload` into its declared output length, token count, and the
 /// remaining range-coded bytes.
 ///
@@ -621,19 +633,27 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// Returns [`Error::Truncated`] if `payload` is shorter than the 8-byte
 /// header.
 fn read_header(payload: &[u8]) -> Result<(usize, u32, &[u8]), Error> {
-    let declared_len = payload.get(0..4).ok_or(Error::Truncated)?;
-    let declared_len = u32::from_le_bytes(
-        declared_len
-            .try_into()
-            .expect("checked to be exactly 4 bytes"),
-    );
-    let token_count = payload.get(4..8).ok_or(Error::Truncated)?;
-    let token_count = u32::from_le_bytes(
-        token_count
-            .try_into()
-            .expect("checked to be exactly 4 bytes"),
-    );
+    let declared_len = read_u32_le(payload, 0)?;
+    let token_count = read_u32_le(payload, 4)?;
     Ok((declared_len as usize, token_count, &payload[8..]))
+}
+
+/// Rejects a declared output length past `max_len`, before any allocation
+/// or decode work: shared by [`decode`] and [`decode_undoable_streaming`],
+/// both of which read it straight out of [`read_header`].
+fn ensure_within_max_len(declared_len: usize, max_len: u32) -> Result<(), Error> {
+    if declared_len > max_len as usize {
+        // declared_len was cast up from the header's u32 field (read_header),
+        // so casting back down here is always exact.
+        Err(Error::TooLarge {
+            len: u32::try_from(declared_len).expect(
+                "declared_len came from a u32 header field, so it always fits back into one",
+            ),
+            max: max_len,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 /// Rejects a token whose declared size would grow `output` past
@@ -752,16 +772,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     let candidate =
         Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
     let (declared_len, token_count, ac_bytes) = read_header(payload)?;
-    if declared_len > max_len as usize {
-        // declared_len was cast up from the header's u32 field (read_header),
-        // so casting back down here is always exact.
-        return Err(Error::TooLarge {
-            len: u32::try_from(declared_len).expect(
-                "declared_len came from a u32 header field, so it always fits back into one",
-            ),
-            max: max_len,
-        });
-    }
+    ensure_within_max_len(declared_len, max_len)?;
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
@@ -963,15 +974,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
 ) -> Result<(), crate::WriteError> {
     let max_len = max_len.min(MAX_DECODED_LEN);
     let (declared_len, token_count, ac_bytes) = read_header(payload)?;
-    if declared_len > max_len as usize {
-        return Err(Error::TooLarge {
-            len: u32::try_from(declared_len).expect(
-                "declared_len came from a u32 header field, so it always fits back into one",
-            ),
-            max: max_len,
-        }
-        .into());
-    }
+    ensure_within_max_len(declared_len, max_len)?;
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
