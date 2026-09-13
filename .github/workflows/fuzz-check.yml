@@ -151,10 +151,17 @@ jobs:
       # deploy time. if: always() because the crasher-found run is the one
       # whose entry matters most. Fields this workflow does not measure
       # stay null; #455 (mutation) and #454 (coverage) own theirs.
+      #
+      # Crashers are the files libFuzzer names as such: crash-, oom-,
+      # timeout-, leak-. It also leaves slow-unit-* files under the same
+      # prefix on a green run (any input past -report_slow_units, 10 s),
+      # which are a speed observation, not a crash. Counting every file
+      # put 26 phantom crashers from eleven green runs on the status page
+      # (survey, 2026-09-13).
       - name: build trust-ledger entry
         if: always()
         run: |
-          crashers=$(find fuzz/artifacts -type f 2>/dev/null | wc -l)
+          crashers=$(find fuzz/artifacts -type f \( -name 'crash-*' -o -name 'oom-*' -o -name 'timeout-*' -o -name 'leak-*' \) 2>/dev/null | wc -l)
           seconds=$(cat fuzz-seconds.txt 2>/dev/null | awk '{s+=$1} END {print s+0}')
           printf '{"date":"%s","run_id":"%s","role":"fuzz","fuzz_cpu_s":%s,"crashers_new":%s,"mutation_score":null,"coverage_region_pct":null}\n' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_RUN_ID" "$seconds" "$crashers" > entry.json
