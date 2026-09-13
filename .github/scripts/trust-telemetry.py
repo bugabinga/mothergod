@@ -48,6 +48,14 @@ MAX_DOWNLOADS = 200
 
 FIELDS = ("fuzz_cpu_s", "crashers_new", "mutation_score", "coverage_region_pct")
 
+# Entries before this instant counted every file libFuzzer left under
+# fuzz/artifacts as a crasher, slow-unit-* files included, and eleven green
+# runs put 26 crashers on the status page (survey, 2026-09-13). They measured
+# nothing about crashers, so the field reads as unmeasured for them.
+# Retention is 90 days: after 2026-12-12 no such entry can exist, and this
+# constant, its one use below, and this comment are deletable.
+CRASHERS_MEASURED_SINCE = "2026-09-13T06:00:00Z"
+
 
 def write(obj):
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -115,6 +123,9 @@ if not entries:
     bail(f"Found {len(wanted)} trust-ledger artifacts, none readable.")
 
 entries.sort(key=lambda e: (e["date"], str(e["run_id"])))
+for entry in entries:
+    if entry["date"] < CRASHERS_MEASURED_SINCE:
+        entry["crashers_new"] = None
 
 
 def latest_and_previous(field):
