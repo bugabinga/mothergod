@@ -1,6 +1,7 @@
 ---
 name: workflows
 description: Use when writing or reviewing a file under .github/workflows/ or .github/actions/, pinning or bumping an action, adding caching, changing a job's permissions or triggers, spending runner minutes, or when a run is red, slow, or never started.
+user-invocable: true
 ---
 
 # Building a CI workflow that is worth having
@@ -119,7 +120,8 @@ without anything getting faster.
 
 A public repository is charged nothing for standard runners, which is not the
 same as free. Concurrent jobs are limited **per account**, not per repository,
-and this account runs nine agent seats off one clock. Optimise as though the
+and this account runs nine agent seats plus seven scheduled
+workflows. Optimise as though the
 minutes were billed: the discipline is identical and only the unit changes.
 
 What saves minutes, in order of effect:
@@ -175,10 +177,14 @@ it here. The two scars, so you recognise the symptom:
 - PR creation cannot move to the workflow token the way issue creation did,
   because `ci` and `agent-review` trigger on `pull_request` alone. A PR opened
   on that identity would be born with no checks, permanently (issue #489).
-- `schedule:` is never used in an agent workflow. GitHub attributes a scheduled
-  run to whoever it decides last touched the bot-edited file, and the OIDC
-  token exchange rejects a bot actor. The clock is a Cloudflare Worker
-  dispatching on the operator's PAT (ADR-0035).
+- No `claude-code-action` seat carries a `schedule:` trigger. GitHub attributes
+  a scheduled run to whoever it decides last touched the bot-edited file, and
+  the OIDC token exchange rejects a bot actor, so the clock is a Cloudflare
+  Worker dispatching on the operator's PAT (ADR-0035). The qualifier is the
+  whole rule: a script-only workflow exchanges no token and keeps its native
+  cron safely, which seven files here do, `agent-model-intel.yml:33` among
+  them. Read ADR-0035 and GOVERNANCE "Push identity" before adding either
+  kind.
 
 A second exception with a different symptom: a pull request the token opens or
 updates, including by pushing to an open one, **does** create a run, held in an
