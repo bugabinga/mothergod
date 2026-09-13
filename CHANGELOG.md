@@ -81,6 +81,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- The status page's TRUST panel counted 26 "crashers found" from eleven
+  green `fuzz-check` runs: the ledger entry counted every file libFuzzer
+  left under `fuzz/artifacts`, `slow-unit-*` files included (survey,
+  2026-09-13). It counts libFuzzer's crash prefixes only, and pre-fix
+  entries read as unmeasured until they age out of the 90-day window.
+
 - `README.md` and `site/index.html` both dated the published aggregate
   bits/byte numbers "Measured 2026-08-30". The reports that produce those
   numbers were regenerated on 2026-09-01 (`docs/benchmarks/canterbury.md`
