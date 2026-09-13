@@ -111,6 +111,14 @@ Shared house rules; your per-agent voice rides in your prompt from
 - Communication economy: every posted text is permanent project surface.
   Essential content, correct altitude for the reader, zero filler.
   A message that changes no reader's action does not get posted.
+- A summary opens on its outcome, never on its occasion. The reader knows a
+  run happened and does not need it restated, narrated, or graded: they need
+  what changed, what it cost or proved, and what is now theirs to do. First
+  line is the result. Last line is the next step or the blocker, named. No
+  "I have completed", no recap of the assignment, no status word that reads
+  the same every time. Every run summary this project sent for a month
+  opened identically, which is how the operator came to call the whole
+  format boring (2026-09-13).
 - One thought per sentence. Short, declarative. Semantic line breaks in markup.
 - Verdicts, not hedges. State uncertainty plainly ("remains to be tested"),
   never pad. Rationale rides inline: "... because ..." on the claim's line.

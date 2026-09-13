@@ -91,6 +91,54 @@ test("an unreachable API exits 1 with an empty stdout", async () => {
   assert.match(stderr, /^tg-send: /);
 });
 
+// The rendering pass. Agents compose in markdown everywhere else in this
+// project, and for a month every asterisk, backtick and `## ` they wrote
+// arrived on the operator's phone as literal punctuation (2026-09-13). These
+// pin the subset, and the two ways rendering can do real damage: mangling a
+// snake_case identifier, and emitting a tag Telegram will reject.
+async function rendered(body) {
+  await send("tok-ok", { body });
+  return seen.at(-1).text;
+}
+
+test("markdown becomes Telegram's own formatting", async () => {
+  assert.equal(
+    await rendered("## Summary\n\nShipped **the fix**, see `src/lib.rs`.\n- one\n* two"),
+    "<b>Summary</b>\n\nShipped <b>the fix</b>, see <code>src/lib.rs</code>.\n\u2022 one\n\u2022 two",
+  );
+});
+
+test("a fenced block becomes pre, with its contents escaped and unlinked", async () => {
+  assert.equal(
+    await rendered("```rust\nlet x = a < b; // see #7\n```"),
+    "<pre>let x = a &lt; b; // see #7</pre>",
+  );
+});
+
+test("a ref inside code stays text, because Telegram forbids nested entities", async () => {
+  assert.equal(
+    await rendered("`#42` versus #42"),
+    '<code>#42</code> versus <a href="https://github.com/bugabinga/mothergod/issues/42">#42</a>',
+  );
+});
+
+// The reason italic demands non-word flanks. This repo's prose names
+// identifiers constantly, and `link_preview_options` rendered as
+// `link<i>preview</i>options` would be worse than the raw underscore it fixes.
+test("snake_case is left alone and only flanked underscores italicize", async () => {
+  assert.equal(
+    await rendered("_really_ matters for link_preview_options and a_b_c"),
+    "<i>really</i> matters for link_preview_options and a_b_c",
+  );
+});
+
+test("markup in the body is escaped, never rendered as a tag", async () => {
+  assert.equal(
+    await rendered("<script>x</script> and **a " + String.fromCharCode(38) + " b**"),
+    "&lt;script&gt;x&lt;/script&gt; and <b>a &amp; b</b>",
+  );
+});
+
 test("refs become issue links and --reply-to rides as reply_parameters", async () => {
   const { status } = await send("tok-ok", { body: "shipped #535", args: ["--reply-to", "7"] });
   assert.equal(status, 0);

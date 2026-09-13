@@ -13,6 +13,14 @@ silently when done wrong:
 - HTML escaping, which `parse_mode=HTML` makes mandatory. Unescaped `<` makes
   Telegram reject the message or eat the rest of it, and the agent that wrote
   it has already moved on.
+- Markdown becomes Telegram's native formatting (operator report,
+  2026-09-13). Write the body in the markdown CLAUDE.md's voice rules are
+  already written in: `**bold**`, `_italic_`, `` `code` ``, fenced blocks,
+  `- ` bullets, `## ` headings. Bullets become `•`, headings become bold,
+  the rest become their tags. Nothing else is markdown here: no link
+  syntax, no tables. The alternative was five prompts each carrying a
+  channel-specific dialect, and every one of them was shipping raw
+  asterisks to the operator's phone.
 - The token stays out of argv (hard rule 10). It is read from the environment,
   spent inside this process, and scrubbed from any error text before it is
   printed, because urllib puts the request URL in its exceptions.
@@ -72,6 +80,24 @@ SUMMARY = 200  # chars of an entry's text; 40 entries must stay one screenful
 # `abc#1`, a URL fragment and `##1` are left alone.
 REF = re.compile(r"(?<![\w/#])#(\d{1,6})\b")
 
+# The markdown subset every agent already writes, mapped to the tags Telegram
+# renders. CLAUDE.md's voice rules are written in markdown and agents compose
+# in markdown everywhere else, so the alternatives were teaching five prompts a
+# channel-specific dialect they would forget, or stripping the markers and
+# losing the emphasis (run-notice.py did exactly that). Rendering here costs
+# the senders nothing and is the only place that has to be right.
+FENCE = re.compile(r"```[\w+-]*\n?(.*?)```", re.DOTALL)
+CODE = re.compile(r"`([^`\n]+)`")
+# A heading is a line, not a document structure: Telegram has no headings, and
+# bold is what "this line is a label" looks like there.
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*$", re.MULTILINE)
+BULLET = re.compile(r"^([ \t]*)[-*][ \t]+", re.MULTILINE)
+BOLD = re.compile(r"\*\*(\S(?:[^*\n]*\S)?)\*\*")
+# Italic demands non-word characters on both flanks, because this project's
+# prose is full of snake_case: `link_preview_options` must survive intact, and
+# an identifier mangled into markup is worse than an underscore shown raw.
+ITALIC = re.compile(r"(?<![\w`])_(\S(?:[^_\n]*\S)?)_(?!\w)")
+
 
 def main() -> int:
     args = sys.argv[1:]
@@ -102,14 +128,8 @@ def main() -> int:
         print("tg-send: empty body; refusing to send", file=sys.stderr)
         return 2
 
-    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
-    text = REF.sub(
-        lambda m: f'<a href="https://github.com/{repo}/issues/{m[1]}">#{m[1]}</a>',
-        html.escape(body, quote=False),
-    )
-    # Escaping only touches & < >, so the refs survive it unchanged and the
-    # order above is safe. Length is checked after linking, because the anchor
-    # markup is what actually travels.
+    text = render(body, os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod"))
+    # Length is checked after rendering, because the markup is what travels.
     if len(text) > LIMIT:
         print(f"tg-send: {len(text)} chars after linking, over Telegram's {LIMIT}; "
               "split it rather than let the API truncate", file=sys.stderr)
@@ -151,6 +171,69 @@ def main() -> int:
         record(sent["result"], reply_to, body)
     print(f"message_id={sent['result']['message_id']}")
     return 0
+
+
+def render(body: str, repo: str) -> str:
+    """The body as Telegram HTML: escaped, emphasized, bulleted, ref-linked.
+
+    Escaping comes first and is total, so no `<` in the body can ever be read
+    as a tag; every tag after this point was put there by this function. The
+    emphasis passes run before linking because linking is what introduces
+    markup containing `/` and `"`, and nothing should have to scan across it.
+
+    Code is split out ahead of both passes and rendered untouched. Inside
+    backticks an asterisk is an asterisk and `#42` is not a link: Telegram
+    forbids nested entities in `code`, so a ref linked in there would be a 400
+    on a message the sender has already stopped thinking about.
+    """
+    parts = []
+    for chunk, kind in segments(html.escape(body, quote=False)):
+        if kind == "pre":
+            parts.append(f"<pre>{chunk.rstrip(chr(10))}</pre>")
+        elif kind == "code":
+            parts.append(f"<code>{chunk}</code>")
+        else:
+            parts.append(prose(chunk, repo))
+    return "".join(parts).strip()
+
+
+def segments(text: str):
+    """`(chunk, kind)` pairs covering `text` exactly, kind in pre/code/text."""
+    for chunk, fenced in split(FENCE, text):
+        if fenced:
+            yield chunk, "pre"
+            continue
+        for piece, ticked in split(CODE, chunk):
+            yield piece, "code" if ticked else "text"
+
+
+def split(pattern: re.Pattern, text: str):
+    """`(chunk, matched)` pairs covering `text`; matched chunks are group 1.
+
+    The unmatched runs come through verbatim rather than as spans, so the
+    caller never has to index back into the original and cannot lose a
+    character between two matches.
+    """
+    end = 0
+    for found in pattern.finditer(text):
+        if found.start() > end:
+            yield text[end:found.start()], False
+        yield found[1], True
+        end = found.end()
+    if end < len(text):
+        yield text[end:], False
+
+
+def prose(text: str, repo: str) -> str:
+    """Emphasis, list bullets and issue refs for one non-code run."""
+    text = HEADING.sub(r"<b>\1</b>", text)
+    text = BULLET.sub("\\1\u2022 ", text)
+    text = BOLD.sub(r"<b>\1</b>", text)
+    text = ITALIC.sub(r"<i>\1</i>", text)
+    return REF.sub(
+        lambda m: f'<a href="https://github.com/{repo}/issues/{m[1]}">#{m[1]}</a>',
+        text,
+    )
 
 
 def record(sent: dict, reply_to: int | None, body: str) -> None:
