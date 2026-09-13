@@ -84,9 +84,15 @@ new script's tests are picked up with no wiring.
   `agent-model-intel.yml:120`); all three interpolate values GitHub controls
   rather than values a contributor does, which is why they are debt and not an
   incident. Fix the one in the file you are touching.
-- A `prompt:` block is an action input, not a shell body. Interpolation there
-  is ordinary and the twenty-eight instances in `agent-bdfl.yml` are not
-  instances of this rule.
+- A `prompt:` block takes no `${{ }}` either, for an unrelated reason worth
+  knowing before you reach for one. A single expression makes the **whole
+  block** an expression, and an expression is capped at 21,000 characters.
+  `agent-bdfl.yml`'s prompt is around 26,000, and GitHub rejected every push of
+  that file on 2026-08-23 with `Exceeded max expression length 21000` until the
+  last interpolation came out. Personas arrive via
+  `--append-system-prompt-file`, other dynamic values via `env:`. All 28
+  `${{ }}` in that file sit outside the prompt block, in `env:`, `with:` and
+  `permissions:`; the rule is recorded at `agent-bdfl.yml:225`.
 
 ## Caching
 
