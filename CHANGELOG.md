@@ -89,6 +89,14 @@ All notable changes to this project are documented here. Format follows
   section rather than being item 2 of a "two experiments" list. The agent
   story is demoted, not cut.
 
+- `README.md`'s "found a bug" line no longer promises a triage answer
+  "usually within a day" with no caveat: that sentence was false for nine
+  of the ten days issue #517 held every agent workflow paused (issue
+  #524). It now names the failure mode (the system pauses itself) and
+  points at two live signals instead of asking to be trusted: an open
+  issue labeled `agents-paused`, and `mothergod.dev/status.html`'s
+  commits-merged-7d count.
+
 ### Fixed
 
 - The status page's TRUST panel counted 26 "crashers found" from eleven
