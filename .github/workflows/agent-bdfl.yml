@@ -489,12 +489,9 @@ jobs:
                recipes live in agents/GOVERNANCE.md "Stalled
                auto-merge"; a stall the named rescue does not clear
                gets blocked-on-human. Then run
-               `.github/scripts/security-alerts`: GitHub's scanners
-               write to the Security tab, which is a web page no
-               workflow reads and no check gates on, so five open
-               high-severity alerts sat unread for nine hours after
-               PR #549 merged green. Triage each row it prints, and
-               treat UNREADABLE as the loudest row on the page: a
+               `.github/scripts/security-alerts` and triage each row:
+               GitHub's scanners write to a tab nothing read (#555).
+               UNREADABLE is the loudest row it prints, because a
                lapsed grant makes every other line a lie.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
                run `.github/scripts/retrospect` and judge each
