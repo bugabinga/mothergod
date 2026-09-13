@@ -131,19 +131,9 @@ fn run_decompress(path: Option<&OsString>) -> ExitCode {
                 Ok(out_path) => out_path,
                 Err(err) => return fail(&err),
             };
-            let mut file = match File::options().write(true).create_new(true).open(&out_path) {
-                Ok(file) => file,
-                Err(err) => return fail(&format!("writing {}: {err}", out_path.display())),
-            };
-            let code = decompress_into(&input, &mut file, &out_path.display().to_string());
-            if code == ExitCode::FAILURE {
-                // Mirrors write_new_file's own partial-file cleanup: a file
-                // that create_new just made but decompress_into failed to
-                // finish writing would otherwise survive as a corrupt file
-                // create_new refuses to retry over.
-                let _ = fs::remove_file(&out_path);
-            }
-            code
+            write_new_file_with(&out_path, |file| {
+                decompress_into(&input, file, &out_path.display().to_string())
+            })
         }
     }
 }
@@ -209,20 +199,32 @@ fn write_stdout(bytes: &[u8]) -> ExitCode {
 /// Writes `bytes` to `path`, refusing to clobber an existing file (`compress`
 /// re-run over an already-compressed file, or a `decompress` target that
 /// already exists, must not silently destroy it).
-///
-/// A write failure after `create_new` succeeded (disk full, interrupted)
-/// removes the partial file: otherwise it survives as a corrupt file that
-/// `create_new` refuses to retry over, permanently blocking a re-run.
 fn write_new_file(path: &Path, bytes: &[u8]) -> ExitCode {
+    write_new_file_with(path, |file| match file.write_all(bytes) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => fail(&format!("writing {}: {err}", path.display())),
+    })
+}
+
+/// Opens `path` as a new file, refusing to clobber an existing one, then
+/// runs `write` against it. Shared by [`write_new_file`] and
+/// [`run_decompress`]'s file branch, which otherwise each open the file and
+/// clean up after a failed write identically.
+///
+/// A write failure after `create_new` succeeded (disk full, interrupted, a
+/// corrupt decode) removes the partial file: otherwise it survives as a
+/// corrupt file that `create_new` refuses to retry over, permanently
+/// blocking a re-run.
+fn write_new_file_with(path: &Path, write: impl FnOnce(&mut File) -> ExitCode) -> ExitCode {
     let mut file = match File::options().write(true).create_new(true).open(path) {
         Ok(file) => file,
         Err(err) => return fail(&format!("writing {}: {err}", path.display())),
     };
-    if let Err(err) = file.write_all(bytes) {
+    let code = write(&mut file);
+    if code == ExitCode::FAILURE {
         let _ = fs::remove_file(path);
-        return fail(&format!("writing {}: {err}", path.display()));
     }
-    ExitCode::SUCCESS
+    code
 }
 
 fn fail(message: &str) -> ExitCode {
