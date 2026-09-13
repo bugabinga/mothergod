@@ -70,8 +70,12 @@ from datetime import datetime, timezone
 from anchor import STAMP
 
 # Worst first. Code scanning's `security_severity_level` and Dependabot's
-# `security_advisory.severity` share this vocabulary, which is what lets one
-# ordering sort both lists.
+# `security_advisory.severity` share a vocabulary, which is what lets one
+# ordering sort both lists. The REST enums are low/medium/high/critical;
+# `moderate` is GraphQL's spelling of `medium` and is carried here on purpose,
+# because the two failure modes are not symmetric. An unused key costs a dict
+# entry. A missing key sends a real moderate-severity CVE through the unknown
+# branch below, which sorts it under a lint note, which is where nobody looks.
 RANK = {"critical": 0, "high": 1, "medium": 2, "moderate": 2, "low": 3}
 
 # A code-scanning rule with no security severity is a quality rule, not a
@@ -88,6 +92,21 @@ def api(path):
     Never dies. A tool failure here is the finding, so it is returned as data
     and rendered as a row, rather than exiting non-zero and taking the other
     endpoint's result down with it.
+
+    No `--slurp`, and that is the deliberate half. Both endpoints return a JSON
+    ARRAY, and `gh api --paginate` merges array pages into one array: measured
+    on gh 2.100.0 against this repository's five dismissed alerts at
+    `per_page=2`, three pages arrive as one 5-element list. Adding `--slurp`
+    here would return a list of PAGES, and the row builders would raise
+    AttributeError on a list, uncaught, which is a crash rather than the
+    graceful UNREADABLE this whole script is built around (measured the same
+    way, PR #555 review).
+
+    The crash that `stalled-prs.test.mjs` records from the PR #490 review is
+    `--paginate --jq`, not bare `--paginate`: `--jq` runs the filter once per
+    page and prints one JSON document per LINE, which `json.loads` cannot take.
+    That construct is the hazard, and the reason the siblings carry `--slurp`.
+    Adding a `--jq` to this call without also adding `--slurp` reintroduces it.
     """
     proc = subprocess.run(
         ["gh", "api", "--paginate", path],
