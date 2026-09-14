@@ -93,6 +93,23 @@ def api(path):
     and rendered as a row, rather than exiting non-zero and taking the other
     endpoint's result down with it.
 
+    Reads on `GH_WORKFLOW_TOKEN`, and that is load-bearing, not a preference.
+    Inside an agent session `GH_TOKEN` is the Claude GitHub App's installation
+    token, whose scopes are fixed by the app and carry neither security scope.
+    The calling job's own GITHUB_TOKEN, the one the `permissions:` block in
+    `.github/workflows/agent-bdfl.yml` actually grants, reaches the session
+    only under this second name. So:
+
+        A JOB-LEVEL `permissions:` GRANT DOES NOT REACH A `gh` CALL THAT
+        DEFAULTS TO `GH_TOKEN` FROM WITHIN AN AGENT SESSION.
+
+    Both endpoints therefore answered 403 for the first day this script
+    existed, with the grant present and correct the whole time (PR #555,
+    measured 2026-09-14). Unset the variable and the call falls back to
+    whatever `gh` finds, which outside a session is the ordinary workflow
+    token: the fallback is the plain-`run:`-step case, not a second guess at
+    the session case.
+
     No `--slurp`, and that is the deliberate half. Both endpoints return a JSON
     ARRAY, and `gh api --paginate` merges array pages into one array: measured
     on gh 2.100.0 against this repository's five dismissed alerts at
@@ -108,10 +125,15 @@ def api(path):
     That construct is the hazard, and the reason the siblings carry `--slurp`.
     Adding a `--jq` to this call without also adding `--slurp` reintroduces it.
     """
+    env = dict(os.environ)
+    workflow_token = env.get("GH_WORKFLOW_TOKEN")
+    if workflow_token:
+        env["GH_TOKEN"] = workflow_token
     proc = subprocess.run(
         ["gh", "api", "--paginate", path],
         capture_output=True,
         text=True,
+        env=env,
     )
     if proc.returncode != 0:
         reason = proc.stderr.strip().splitlines()
@@ -191,6 +213,15 @@ def render(dep_rows, dep_error, code_rows, code_error, out=sys.stdout):
                 "    Grant the calling job `vulnerability-alerts: read`"
                 if title == "dependabot"
                 else "    Grant the calling job `security-events: read`",
+                file=out,
+            )
+            # Two causes produce one 403, and the grant is only the first.
+            # The second outlived a whole day of the first being correct, so
+            # it is named on every failure rather than inferred by the reader.
+            print(
+                "    ...and check GH_WORKFLOW_TOKEN reached this script: the"
+                " session's default token is the Claude app's, which no"
+                " job-level grant can widen.",
                 file=out,
             )
             continue

@@ -80,6 +80,21 @@ test("each unreadable endpoint names its own missing grant", () => {
   assert.match(out, /dependabot 0/);
 });
 
+test("an unreadable endpoint names the token cause, not just the grant", () => {
+  // The grant was present and correct for a full day while both endpoints
+  // answered 403, because the session's gh runs on the Claude app token and
+  // no `permissions:` block can widen that one (PR #555, measured 2026-09-14).
+  // A hint that names only the grant sends the next reader to the one place
+  // that is already right.
+  const out = call("render", {
+    dep: [],
+    dep_error: "HTTP 403",
+    code: [],
+    code_error: "HTTP 403",
+  });
+  assert.match(out, /GH_WORKFLOW_TOKEN/);
+});
+
 test("a genuinely clean repository says so quietly", () => {
   const out = call("render", { dep: [], dep_error: null, code: [], code_error: null });
   assert.match(out, /dependabot 0 \| code-scanning 0/);
