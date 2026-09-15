@@ -201,11 +201,10 @@ impl Ppm {
             self.freq[symbol] > 0,
             "Ppm::encode called on a never-observed symbol; use encode_escape"
         );
-        let low: u32 = self.freq[..symbol].iter().sum();
-        let high = low + self.freq[symbol];
-        encoder.encode(
-            u64::from(low),
-            u64::from(high),
+        crate::encode_symbol(
+            encoder,
+            &self.freq,
+            symbol,
             u64::from(self.total + self.distinct),
         );
         self.observe(symbol);
@@ -265,13 +264,7 @@ impl Ppm {
             decoder.decode(total, denom, denom);
             return None;
         }
-        let mut symbol = 0;
-        let mut low = 0u64;
-        while low + u64::from(self.freq[symbol]) <= target {
-            low += u64::from(self.freq[symbol]);
-            symbol += 1;
-        }
-        let high = low + u64::from(self.freq[symbol]);
+        let (symbol, low, high) = crate::scan_for_target(&self.freq, target);
         decoder.decode(low, high, denom);
         self.observe(symbol);
         Some(symbol)

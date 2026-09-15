@@ -330,6 +330,43 @@ pub(crate) fn rescale_bank(
     }
 }
 
+/// Codes `symbol` through `encoder` at the sub-range `freq[..symbol].sum()..
+/// +freq[symbol]` out of `denom`, the cumulative-frequency range every
+/// symbol coder in the crate hands [`coder::Encoder::encode`].
+///
+/// Shared by [`model::Model::encode`] and [`ppm::Ppm::encode`], which pass
+/// their own table and `denom` (`total`, or `total + distinct` under PPM
+/// Method C's escape band) around this one scan, so the two can't drift on
+/// how a symbol's range is carved out of a frequency table.
+pub(crate) fn encode_symbol(encoder: &mut coder::Encoder, freq: &[u32], symbol: usize, denom: u64) {
+    let low: u32 = freq[..symbol].iter().sum();
+    let high = low + freq[symbol];
+    encoder.encode(u64::from(low), u64::from(high), denom);
+}
+
+/// Finds the symbol whose cumulative-frequency range in `freq` contains
+/// `target` (as returned by [`coder::Decoder::target`]), returning the
+/// symbol and the `[low, high)` range [`coder::Decoder::decode`] must
+/// consume to stay in lockstep with [`encode_symbol`].
+///
+/// Never runs past the end of `freq`: callers bound `target` to
+/// `freq.iter().sum()` (plus, for [`ppm::Ppm`], a reserved escape share
+/// handled before calling this), so the scan always finds a symbol
+/// regardless of what bytes produced `target`.
+///
+/// Shared by [`model::Model::decode`] and [`ppm::Ppm::decode`], the decode
+/// side of [`encode_symbol`]'s split.
+pub(crate) fn scan_for_target(freq: &[u32], target: u64) -> (usize, u64, u64) {
+    let mut symbol = 0;
+    let mut low = 0u64;
+    while low + u64::from(freq[symbol]) <= target {
+        low += u64::from(freq[symbol]);
+        symbol += 1;
+    }
+    let high = low + u64::from(freq[symbol]);
+    (symbol, low, high)
+}
+
 /// Builds a `Vec<T>` of `n` clones of `value`, failing gracefully instead
 /// of aborting if the allocator cannot satisfy `n` (hard rule 2,
 /// `rust-craft` skill's allocation-discipline): `try_reserve_exact` first,
