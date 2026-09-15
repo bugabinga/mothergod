@@ -246,6 +246,60 @@ fn parse_header(input: &[u8]) -> Result<(u8, Method, &[u8]), Error> {
     Ok((version, method, payload))
 }
 
+/// A parsed frame header plus the two bounds [`decompress_bounded`] and
+/// [`decompress_to_writer`] both enforce before dispatching on `method`,
+/// built by [`bounded_header`] so the two can't drift on either rule.
+struct BoundedHeader<'a> {
+    /// `Some` only when the caller's `max_len` is strictly tighter than
+    /// [`codec::MAX_DECODED_LEN`]; see [`bounded_header`] for why a looser
+    /// one never rejects a [`Method::Stored`] frame on size alone.
+    stored_bound: Option<u32>,
+    max_len: u32,
+    version: u8,
+    method: Method,
+    payload: &'a [u8],
+}
+
+/// Shared by [`decompress_bounded`] and [`decompress_to_writer`]: parses the
+/// header, then reduces `max_len` and the caller-visible `stored_bound` the
+/// same way both do. Both callers need `Error`, never `WriteError`;
+/// `decompress_to_writer` converts on its own `?` through [`WriteError`]'s
+/// `From<Error>` impl.
+fn bounded_header(input: &[u8], max_len: u32) -> Result<BoundedHeader<'_>, Error> {
+    // Method::Stored's payload length is read directly from `input`, never
+    // spoofable past what was already loaded into memory, so unlike
+    // Method::Lz's declared-length field (docs/format/SPEC.md lines 91-94)
+    // MAX_DECODED_LEN itself buys it no safety margin. Only a caller-chosen
+    // bound strictly tighter than MAX_DECODED_LEN is worth enforcing here;
+    // at or above it this arm stays exactly as unbounded as `decompress`
+    // (equivalent to calling this with max_len == MAX_DECODED_LEN) always
+    // was, so incompressible input at or past 256 MiB keeps round-tripping.
+    let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
+    let max_len = max_len.min(codec::MAX_DECODED_LEN);
+    let (version, method, payload) = parse_header(input)?;
+    Ok(BoundedHeader {
+        stored_bound,
+        max_len,
+        version,
+        method,
+        payload,
+    })
+}
+
+/// Rejects a [`Method::Stored`] frame whose payload exceeds `stored_bound`
+/// (see [`bounded_header`] for when that bound is `None`).
+fn check_stored_bound(payload: &[u8], stored_bound: Option<u32>) -> Result<(), Error> {
+    if let Some(bound) = stored_bound
+        && payload.len() > bound as usize
+    {
+        return Err(Error::TooLarge {
+            len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
+            max: bound,
+        });
+    }
+    Ok(())
+}
+
 /// Increments `freq[symbol]`/`*total` by `increment`, then halves every
 /// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
 /// rescales down to an impossible-to-code symbol) once `*total` exceeds
@@ -390,27 +444,16 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// declared-length field, [`codec::MAX_DECODED_LEN`] buys it no safety
 /// margin, only a compatibility break for large incompressible input.
 pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
-    // Method::Stored's payload length is read directly from `input`, never
-    // spoofable past what was already loaded into memory, so unlike
-    // Method::Lz's declared-length field (docs/format/SPEC.md lines 91-94)
-    // MAX_DECODED_LEN itself buys it no safety margin. Only a caller-chosen
-    // bound strictly tighter than MAX_DECODED_LEN is worth enforcing here;
-    // at or above it this arm stays exactly as unbounded as `decompress`
-    // (equivalent to calling this with max_len == MAX_DECODED_LEN) always
-    // was, so incompressible input at or past 256 MiB keeps round-tripping.
-    let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
-    let max_len = max_len.min(codec::MAX_DECODED_LEN);
-    let (version, method, payload) = parse_header(input)?;
+    let BoundedHeader {
+        stored_bound,
+        max_len,
+        version,
+        method,
+        payload,
+    } = bounded_header(input, max_len)?;
     match method {
         Method::Stored => {
-            if let Some(bound) = stored_bound
-                && payload.len() > bound as usize
-            {
-                return Err(Error::TooLarge {
-                    len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
-                    max: bound,
-                });
-            }
+            check_stored_bound(payload, stored_bound)?;
             Ok(payload.to_vec())
         }
         Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
@@ -489,11 +532,9 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 
 /// Like [`decompress_bounded`], but writes the decoded bytes to `writer`
 /// incrementally instead of collecting them into one returned `Vec<u8>`.
-/// Same frame-level checks, in the same order, so keep the two in sync if
-/// either changes; header parsing and the `max_len`/`stored_bound` rules
-/// are duplicated rather than shared because they return through two
-/// different error types ([`Error`] here needs wrapping into
-/// [`WriteError`], [`decompress_bounded`] does not).
+/// Same frame-level checks, in the same order (shared with it through the
+/// same private header-parsing and bound-checking helpers), so the two
+/// can't drift.
 ///
 /// Only bounds resident memory better than [`decompress_bounded`] for a
 /// [`Method::Lz`] frame whose encoder picked
@@ -526,21 +567,17 @@ pub fn decompress_to_writer<W: std::io::Write>(
 ) -> Result<(), WriteError> {
     use std::io::Write as _;
 
-    let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
-    let max_len = max_len.min(codec::MAX_DECODED_LEN);
-    let (version, method, payload) = parse_header(input)?;
+    let BoundedHeader {
+        stored_bound,
+        max_len,
+        version,
+        method,
+        payload,
+    } = bounded_header(input, max_len)?;
     let mut writer = TryBufWriter::try_new(writer).map_err(|_| Error::OutOfMemory)?;
     match method {
         Method::Stored => {
-            if let Some(bound) = stored_bound
-                && payload.len() > bound as usize
-            {
-                return Err(Error::TooLarge {
-                    len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
-                    max: bound,
-                }
-                .into());
-            }
+            check_stored_bound(payload, stored_bound)?;
             writer.write_all(payload)?;
         }
         Method::Lz if version < codec::LZ_MIN_VERSION => {
