@@ -2730,6 +2730,47 @@ record.
   ~10× target, not yet spent), tANS fast path (~100×), explicit AVX2
   blend (~1.5×). Issue #447 stays open, updated with these numbers.
   `research/progress.jsonl` it126.
+- S2-A78 | REJECTED | S1-P6's remaining incremental-cumulative-structure
+  direction (issue #447, following S2-A77's autovectorization slice).
+  Hypothesis: a per-bank order-statistics structure (a Fenwick/
+  binary-indexed tree over each of the six experts' 256-entry frequency
+  tables) could let `mix` answer the handful of point queries
+  `bittree::walk_sse` actually reads (one per tree level, `LEVELS` = 8)
+  in `O(EXPERTS * log ALPHABET)` instead of today's full `O(EXPERTS *
+  ALPHABET)` array build, leaving every coded bit identical to today's
+  output. No candidate was implemented: the blocking fact is an exact
+  arithmetic identity, not a corpus-dependent outcome, so no train/val
+  measurement applies (kind `wild`, same shape as it68's decode-time
+  characterization). | Mechanism: `mix` computes `cum[symbol + 1] =
+  cum[symbol] + (mixed[symbol] >> 16) + 1`, a per-symbol floor division
+  of the combined six-expert sum, applied before the running total ever
+  sees the next symbol. Answering `cum` at one position needs the sum of
+  `(mixed[i] >> 16) + 1` over every `i` below it, and floor does not
+  distribute over addition: `mixed = [3*65536 - 1, 2]` gives per-symbol
+  floors `2, 0` (sum 2), but `(196607 + 2) >> 16 = 3`, a whole unit off
+  (verified directly, not asserted). A Fenwick tree over each bank's raw
+  (pre-shift) frequencies answers `O(log n)` range-sum queries against
+  `mixed` itself, not against `cum`'s floored, per-symbol-summed form —
+  getting the latter still means visiting every `i` below the query
+  position individually, the same `O(ALPHABET)` work `mix` already does.
+  The one reformulation that does answer in `O(log ALPHABET)` — floor
+  the aggregate once instead of every symbol, `cum(position) =
+  (prefix_sum_mixed(position) >> 16) + position` — computes a materially
+  different number per symbol than today's `mix`, a bitstream change
+  (`FORMAT_VERSION` bump, golden fixtures, a real ratio re-measurement
+  per hard rule 5), not the same-output speed change this lead's
+  remaining budget was scoped for. Separately, and independent of the
+  floor problem: `banks()` re-derives a context-hash-keyed bank per
+  expert every call, and `update()` re-adapts every mixing weight every
+  call (S1-A4's context-sensitive weights, exponentiated gradient), so
+  the six-bank *combination* `mix` blends essentially never repeats from
+  one literal to the next — only the six single-bank raw-frequency
+  tables persist meaningfully across calls, and those alone cannot
+  answer the per-symbol-floor query below the `O(ALPHABET)` bound just
+  shown. | The incremental-cumulative direction closes here as
+  infeasible without a `FORMAT_VERSION` bump; S1-P6's remaining scope
+  narrows to the tANS fast path and the explicit AVX2 blend.
+  `research/progress.jsonl` it127.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
   Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
@@ -2744,9 +2785,12 @@ record.
   (`xargs.1` still under the floor after it), autovectorization-shaped,
   not an incremental structure. Bit-decomposed coding above already
   shipped (S2-A58/S2-A59/S2-A60, `FORMAT_VERSION` 3) without reaching
-  the floor, since `bittree` is handed the same from-scratch `cum`; the
-  incremental cumulative structure, tANS, and AVX2 are still the open
-  scope.
+  the floor, since `bittree` is handed the same from-scratch `cum`. S2-A78
+  closed the incremental-cumulative direction as infeasible without a
+  `FORMAT_VERSION` bump (`mix`'s per-symbol floor does not distribute
+  over a prefix sum, and the six-expert combination itself never repeats
+  call to call); the tANS fast path and explicit AVX2 blend are the
+  remaining open scope.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
