@@ -147,6 +147,13 @@ jobs:
       # Dependabot), `vulnerability-alerts` is Dependabot. Read, never write:
       # dismissing an alert is a written judgement a human or a PR should be
       # able to find, not a side effect of a sweep.
+      #
+      # These two grant `github.token`, NOT the token the agent session's `gh`
+      # picks up by default, which is the Claude app's installation token and
+      # is not widenable from here. They reach the script only because
+      # GH_WORKFLOW_TOKEN below carries `github.token` into the session and
+      # the script reads on it. Drop that env line and these grants go back to
+      # being decoration over two 403s, which is how PR #555 shipped.
       security-events: read
       vulnerability-alerts: read
     steps:
@@ -200,6 +207,11 @@ jobs:
           # Job-scoped fallback for gh writes after the claude app token
           # expires ~1h into a session (issue #81). Comments only, never
           # pushes or merges (GOVERNANCE.md "Push identity").
+          # Also the ONLY path by which this job's `permissions:` block
+          # reaches the session at all: `.github/scripts/security-alerts`
+          # reads the Security tab on this token because the session's
+          # default `gh` token is the Claude app's and cannot be granted
+          # those scopes. Removing this line silently blinds that script.
           GH_WORKFLOW_TOKEN: ${{ github.token }}
           # Read by .github/scripts/gh-comment to assemble the footer
           # (issue #138, #206): "bdfl · [Claude Code](...)".
