@@ -8,6 +8,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `src/tans.rs`: `normalize_frequencies`, a standalone tANS/FSE-family
+  frequency-table-normalization primitive (`research/JOURNAL.md` S1-P6,
+  issue #447's remaining speed-tier scope after AVX2 was closed off by
+  `forbid(unsafe_code)`). Rescales raw symbol counts onto a power-of-two
+  total via largest-remainder rounding, preserving every originally-nonzero
+  symbol's nonzero share. Not yet wired to any `Method` or bitstream; no
+  format or behavior change.
+
 - `site/index.html`, `site/status.html` and `site/agents.html` now carry
   Open Graph and Twitter Card meta tags (`og:title`, `og:description`,
   `og:url`, `og:type`, `og:site_name`, `twitter:card`) and a canonical

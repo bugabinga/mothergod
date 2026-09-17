@@ -17,15 +17,16 @@
 //! assert_eq!(mothergod::decompress(&frame), Ok(original));
 //! ```
 
-// `bittree`/`codec`/`coder`/`column`/`literal`/`lz`/`model`/`ppm`/`sse` are
-// the compression engine's internals, not a surface downstream crates are
-// meant to call directly: `#[doc(hidden)]` keeps them out of the published
-// API a 0.1 consumer sees (ROADMAP M6). Of the nine, only `lz` has a real
-// external call site today (`mothergod::lz::WINDOW`, `bench/src/lib.rs`);
-// the other eight are still `pub` rather than `pub(crate)` because several
-// of their items (`Ppm`, `Sse::contexts`, `Model::ideal_cost_bits`) are
-// research surface for standing leads not yet wired into the live codec
-// path (S1-P1, S1-P3) and have no in-crate caller either — `pub(crate)`
+// `bittree`/`codec`/`coder`/`column`/`literal`/`lz`/`model`/`ppm`/`sse`/
+// `tans` are the compression engine's internals, not a surface downstream
+// crates are meant to call directly: `#[doc(hidden)]` keeps them out of the
+// published API a 0.1 consumer sees (ROADMAP M6). Of the ten, only `lz` has
+// a real external call site today (`mothergod::lz::WINDOW`,
+// `bench/src/lib.rs`); the other nine are still `pub` rather than
+// `pub(crate)` because several of their items (`Ppm`, `Sse::contexts`,
+// `Model::ideal_cost_bits`, `tans::normalize_frequencies`) are research
+// surface for standing leads not yet wired into the live codec path
+// (S1-P1, S1-P3, S1-P6) and have no in-crate caller either — `pub(crate)`
 // would turn them into `dead_code` lint errors under this crate's `-D
 // warnings` gate. Narrowing them stays future work, done together with
 // wiring or removing that research code, not as a side effect of a
@@ -51,6 +52,8 @@ pub mod model;
 pub mod ppm;
 #[doc(hidden)]
 pub mod sse;
+#[doc(hidden)]
+pub mod tans;
 
 /// First bytes of every mothergod frame.
 pub const MAGIC: [u8; 4] = *b"MGDC";

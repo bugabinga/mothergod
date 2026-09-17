@@ -2838,6 +2838,49 @@ record.
   authority. | S1-P6's remaining scope narrows to the tANS fast path
   alone; explicit AVX2 blend is closed until a future ADR revisits
   `forbid(unsafe_code)`. `research/progress.jsonl` it129.
+- S2-A81 | ACCEPTED | First slice of S1-P6's remaining tANS fast path
+  (issue #447, after S2-A80 closed AVX2): `src/tans.rs`'s
+  `normalize_frequencies`, a standalone, not-yet-wired primitive every
+  tANS/FSE-family coder needs before it can build encode or decode
+  tables — rescaling raw symbol counts onto a power-of-two total
+  (`1 << table_log2`) so a future coder's state transform can use
+  shifts and masks instead of division. Largest-remainder rounding:
+  floor each symbol's ideal share (bumping a nonzero count's floor-to-
+  zero up to 1, since nothing downstream could ever code a symbol at
+  frequency 0), then settle the exact total by adding to or removing
+  from the entries whose rounding was least faithful to their true
+  share first, ranked by `(counts[i] * table_target) % total` and tied
+  by ascending index, this slice's own tie-break choice for determinism.
+  No archive precedent (grepped `research/imports/session-1/mothergod.rs`
+  clean of any ANS-family code, same check S2-A57/S2-A64 ran for their
+  own leads). Review (PR #576) measured the surplus-removal branch
+  O(nonzero.len() * surplus) on a shape with one dominant entry and
+  the rest pinned at the forced-nonzero floor (750ms at 20,000 distinct
+  symbols): the round-robin loop re-scanned every already-exhausted
+  entry once per single-slot removal. Rewritten to a single forward
+  pass over the same remainder-sorted order, taking each entry's full
+  headroom before advancing instead of one slot per revisit — O(n log n)
+  overall (the sort dominates), 4.2s -> well under 200ms on that shape.
+  | 12 unit tests: sum equals the target total across 6 distinct
+  count/`table_log2` shapes, every originally-nonzero symbol keeps a
+  nonzero share, zero entries stay zero, exact-power-of-two counts
+  pass through unchanged, a dominant symbol claims most of the table,
+  determinism (same input twice), the `distinct == target` edge
+  (forces every entry to exactly 1), `u32::MAX`-scale counts do not
+  overflow, the dominant-outlier surplus-removal shape stays under a
+  200ms bound, and two panics (`table_log2 >= 32`, more distinct
+  symbols than table slots); `cargo x check` (fmt, clippy pedantic +
+  missing_docs, test, doc) clean. | No bpb measurement: this primitive
+  has no coder around it yet to produce a bitstream, same reason
+  S2-A42/S2-A57/S2-A64
+  gave for their own first slices — `progress.jsonl` records this as
+  `kind: "patch"` with null bpb deltas; `baseline_gate check` confirms
+  the existing 11 cases are unaffected (nothing wired). Remaining S1-P6
+  scope: the encode/decode state-transform tables built from a
+  normalized frequency table (the "spread" step), the coder's state
+  machine itself, wiring behind a new fast `Method` variant, and the
+  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
+  needs.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -2859,7 +2902,11 @@ record.
   closed the explicit-AVX2-blend direction too, blocked by the crate's
   own `forbid(unsafe_code)` (ADR-0017/ADR-0043) independent of any
   corpus measurement; the tANS fast path is the sole remaining open
-  scope.
+  scope. S2-A81 took tANS's own first slice: `src/tans.rs`'s
+  `normalize_frequencies`, standalone and not yet wired. Remaining
+  scope: the encode/decode state-transform tables, the coder's state
+  machine, `Method` wiring, and the `FORMAT_VERSION` bump and
+  real-bitstream measurement that wiring needs.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
