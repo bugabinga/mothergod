@@ -5,7 +5,8 @@ Extensionless and executable because agents type it as a command mid-session,
 like push-branch and settle-push.
 
 The BDFL's operator sweep is time-based, not state-based: it anchors on the
-previous successful run's start and asks what the operator did since, because
+start of the previous run that held a session (anchor.py; a guard-skipped run
+is not a run, #525) and asks what the operator did since, because
 comments land on closed issues and merged PRs too (issue #36). It was carried
 as prose naming two endpoints, and prose cannot notice that it is incomplete.
 It was incomplete. `issues/comments` returns conversation comments,
