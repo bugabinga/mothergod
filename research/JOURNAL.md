@@ -2850,9 +2850,10 @@ record.
   frequency 0), then settle the exact total by adding to or removing
   from the entries whose rounding was least faithful to their true
   share first, ranked by `(counts[i] * table_target) % total` and tied
-  by ascending index for determinism (ADR-0024). No archive precedent
-  (grepped `research/imports/session-1/mothergod.rs` clean of any
-  ANS-family code, same check S2-A57/S2-A64 ran for their own leads).
+  by ascending index, this slice's own tie-break choice for determinism.
+  No archive precedent (grepped `research/imports/session-1/mothergod.rs`
+  clean of any ANS-family code, same check S2-A57/S2-A64 ran for their
+  own leads).
   | 11 unit tests: sum equals the target total across 6 distinct
   count/`table_log2` shapes, every originally-nonzero symbol keeps a
   nonzero share, zero entries stay zero, exact-power-of-two counts

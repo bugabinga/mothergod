@@ -1,5 +1,5 @@
 //! tANS table normalization: [`normalize_frequencies`], a standalone
-//! primitive for ROADMAP M3's sixth standing lead (`research/JOURNAL.md`
+//! primitive for ROADMAP M5's speed-tier work (`research/JOURNAL.md`
 //! S1-P6, "speed tier"), issue #447. Not a port: the founding session never
 //! implemented ANS-family coding (grepped
 //! `research/imports/session-1/mothergod.rs` clean of any tANS/rANS code),
@@ -50,9 +50,9 @@
 /// `(counts[i] * target) % total`, the exact fractional part flooring
 /// discarded, and slots are added to (or removed from) the entries whose
 /// rounding was least faithful to their true share first, breaking ties by
-/// ascending index for determinism (ADR-0024). Removing a slot only ever
-/// touches an entry already above 1, so a symbol that started nonzero never
-/// reaches zero.
+/// ascending index, this function's own tie-break choice for determinism.
+/// Removing a slot only ever touches an entry already above 1, so a symbol
+/// that started nonzero never reaches zero.
 ///
 /// A symbol with `counts[i] == 0` always keeps a normalized frequency of 0:
 /// this function only redistributes weight among symbols that occurred at
