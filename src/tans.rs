@@ -117,18 +117,25 @@ pub fn normalize_frequencies(counts: &[u32], table_log2: u32) -> Vec<u32> {
     } else if allocated > target {
         // Smallest fractional remainder first: those entries' floor (or
         // the forced bump to 1) overshot their true share the most, so
-        // they give a slot back first. distinct <= target guarantees a
+        // they give slots back first. distinct <= target guarantees a
         // reachable target with every entry staying >= 1 (see doc above).
+        // One forward pass: each entry gives up as much of its headroom
+        // (freq[i] - 1) as the remaining surplus needs before the pass
+        // moves on, rather than 1 slot per entry per revisit. The prior
+        // round-robin form re-scanned every already-exhausted entry on
+        // every single-slot removal, O(nonzero.len() * surplus) when
+        // almost all entries sit at the floor and one dominant entry
+        // holds the whole surplus (measured quadratic, PR #576 review).
         nonzero.sort_by(|&a, &b| remainder(a).cmp(&remainder(b)).then(a.cmp(&b)));
         let mut surplus = allocated - target;
-        let mut idx = 0;
-        while surplus > 0 {
-            let i = nonzero[idx % nonzero.len()];
-            if freq[i] > 1 {
-                freq[i] -= 1;
-                surplus -= 1;
+        for i in nonzero {
+            if surplus == 0 {
+                break;
             }
-            idx += 1;
+            let headroom = freq[i] - 1;
+            let take = headroom.min(surplus);
+            freq[i] -= take;
+            surplus -= take;
         }
     }
 
@@ -226,6 +233,38 @@ mod tests {
     fn distinct_equal_to_target_forces_every_entry_to_exactly_one() {
         let freq = normalize_frequencies(&[50, 30, 20, 5, 0], 2);
         assert_eq!(freq, vec![1, 1, 1, 1, 0]);
+    }
+
+    #[test]
+    fn surplus_removal_stays_near_linear_with_one_dominant_outlier() {
+        // The shape PR #576 review measured quadratic on: n-1 symbols
+        // pinned at the forced-nonzero floor of 1 (their natural share
+        // floors to 0 and gets bumped), one dominant symbol whose own
+        // floor absorbs the entire resulting surplus. Round-robin removal
+        // re-scanned every already-exhausted entry once per single-slot
+        // removal (750ms at n=20,000); the single forward pass this test
+        // guards removes each entry's headroom in one visit instead.
+        // table_log2=15 keeps distinct (n) <= target (32,768) while
+        // staying far enough below `total` that every floor-1 entry needs
+        // the forced bump, which is what produces the surplus (as opposed
+        // to a deficit) this branch handles. Bound leaves generous
+        // headroom for slower CI hardware while still catching a
+        // regression back to the O(n * surplus) form.
+        let n = 20_000;
+        let mut counts = vec![1u32; n];
+        counts[0] = 1_000_000;
+        let table_log2 = 15;
+        let start = std::time::Instant::now();
+        let freq = normalize_frequencies(&counts, table_log2);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_millis(200),
+            "n={n} with one dominant outlier took {elapsed:?}, expected well under 200ms; \
+             likely a regression to the round-robin O(n * surplus) surplus-removal form"
+        );
+        let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+        assert_eq!(sum, 1u64 << table_log2);
+        assert!(freq.iter().all(|&f| f > 0));
     }
 
     #[test]

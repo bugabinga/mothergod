@@ -2853,17 +2853,26 @@ record.
   by ascending index, this slice's own tie-break choice for determinism.
   No archive precedent (grepped `research/imports/session-1/mothergod.rs`
   clean of any ANS-family code, same check S2-A57/S2-A64 ran for their
-  own leads).
-  | 11 unit tests: sum equals the target total across 6 distinct
+  own leads). Review (PR #576) measured the surplus-removal branch
+  O(nonzero.len() * surplus) on a shape with one dominant entry and
+  the rest pinned at the forced-nonzero floor (750ms at 20,000 distinct
+  symbols): the round-robin loop re-scanned every already-exhausted
+  entry once per single-slot removal. Rewritten to a single forward
+  pass over the same remainder-sorted order, taking each entry's full
+  headroom before advancing instead of one slot per revisit — O(n log n)
+  overall (the sort dominates), 4.2s -> well under 200ms on that shape.
+  | 12 unit tests: sum equals the target total across 6 distinct
   count/`table_log2` shapes, every originally-nonzero symbol keeps a
   nonzero share, zero entries stay zero, exact-power-of-two counts
   pass through unchanged, a dominant symbol claims most of the table,
   determinism (same input twice), the `distinct == target` edge
   (forces every entry to exactly 1), `u32::MAX`-scale counts do not
-  overflow, and two panics (`table_log2 >= 32`, more distinct symbols
-  than table slots); `cargo x check` (fmt, clippy pedantic + missing_docs,
-  test, doc) clean. | No bpb measurement: this primitive has no coder
-  around it yet to produce a bitstream, same reason S2-A42/S2-A57/S2-A64
+  overflow, the dominant-outlier surplus-removal shape stays under a
+  200ms bound, and two panics (`table_log2 >= 32`, more distinct
+  symbols than table slots); `cargo x check` (fmt, clippy pedantic +
+  missing_docs, test, doc) clean. | No bpb measurement: this primitive
+  has no coder around it yet to produce a bitstream, same reason
+  S2-A42/S2-A57/S2-A64
   gave for their own first slices — `progress.jsonl` records this as
   `kind: "patch"` with null bpb deltas; `baseline_gate check` confirms
   the existing 11 cases are unaffected (nothing wired). Remaining S1-P6
