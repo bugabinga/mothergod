@@ -2499,7 +2499,8 @@ record.
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
   reach regardless of this slice's verdict.
-- S1-P5 | LEAD | Per-column modeling after transpose (filter-aware coder,
+- S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
+  ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
   `column::column_of`, not yet wired). Second slice, S2-A66: `column::
   column_bank`, wrapping `column_of`'s unbounded result into a fixed-size
@@ -2771,6 +2772,47 @@ record.
   infeasible without a `FORMAT_VERSION` bump; S1-P6's remaining scope
   narrows to the tANS fast path and the explicit AVX2 blend.
   `research/progress.jsonl` it127.
+- S2-A79 | ACCEPTED | S1-P5's real-wiring slice, closing the lead
+  (`FORMAT_VERSION` 4, ADR-0046): `Literal::encode_column`/`decode_column`
+  code a `Candidate::Transpose` frame's literals through the seven-expert
+  mix (`Literal::mix7`) instead of the six-expert `encode_sse`/`decode_sse`,
+  reusing `Literal::update`/`update_column_expert` verbatim rather than a
+  new coupled update (the six real experts adapt exactly as `encode_sse`
+  leaves them, `ColumnExpertState` adapts separately against the seven-way
+  mixed estimate that was actually coded — the same order S2-A76's ideal-
+  cost pairing already measured, not a new design). `codec::decode` reads
+  its already-parsed filter selector alongside the declared version to
+  pick the path; every other candidate is byte-for-byte unchanged at
+  version 4. | Measured, real bitstreams (`mothergod::compress`, this run's
+  sandbox): `bench/baseline.json`'s 11 fixed train-tier cases show no
+  regression (`baseline_gate check` passes); 10 of 11 are byte-identical
+  (none select `Candidate::Transpose` in the real encoder trial at these
+  fixed seeds/lengths). `entropy_ladder_h6` does select
+  `Candidate::Transpose(96)` on both the unpatched and patched build (a
+  `filters::select::pick` entropy-margin artifact on iid noise, unrelated
+  to this slice's target shape) and moves 6.179200 -> 6.178240 bpb
+  (**-0.000960**), two orders of magnitude inside `TOLERANCE_BITS` (0.02);
+  not written back to `bench/baseline.json` (see ADR-0046's Consequences
+  for why). Two purpose-built train/sealed pairs (synthetic fixed-width
+  tabular data, each column cycling through its own period with ~20% of
+  bytes jittered off the clean pattern so the literal model carries real
+  weight, not just LZ repeats — both real encoder trials reduce to
+  `Candidate::Transpose(96)`): 8-column shape, train 8464 -> 8298 bytes
+  (**-0.055333 bpb**), sealed 8400 -> 8240 bytes (**-0.053333 bpb**);
+  20-column shape, train 22556 -> 22344 bytes (**-0.028267 bpb**), sealed
+  22643 -> 22432 bytes (**-0.028134 bpb**). All four improve; corpus
+  policy's accept rule (train improvement, no validation regression)
+  passes on both pairs. Sealed-only `gradient_image`/`access_log`: both
+  select `Candidate::Identity` on both codec versions at this generator's
+  default parameters, byte-identical — `filters::select::TRANSPOSE_COLUMNS`'s
+  fixed candidate list does not include `gradient_image`'s true 200-column
+  width, so this slice's real corpus impact is narrower than S1-P5's
+  original "target: sao" framing hoped; widening that candidate list is
+  separate scope (a `filters::select` heuristic question), not reopened
+  here. | Mechanism: full argument in ADR-0046's Decision section, not
+  duplicated here. New golden fixture `tests/golden/v4-tabular-columns`
+  (same plaintext as `v3-tabular-columns`, re-encoded); that pair stays
+  committed, decode-only, forever. `research/progress.jsonl` it128.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
   Concrete target as of S2-A27: `Literal::decode`'s all-literal worst

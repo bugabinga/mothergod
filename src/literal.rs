@@ -361,6 +361,23 @@ impl ColumnExpertState {
             sse: Sse::new(bittree::SSE_CONTEXTS),
         }
     }
+
+    /// Fallible counterpart to [`Self::new`], the same shape
+    /// [`Literal::try_new`] gives the six real experts: `codec::decode`'s
+    /// real decode path constructs a `ColumnExpertState` from a fixed,
+    /// decoder-chosen `max_banks` (never a value read off untrusted input),
+    /// but the allocation itself can still fail, and hard rule 2 requires
+    /// `Error::OutOfMemory` there instead of an abort.
+    pub(crate) fn try_new(
+        max_banks: NonZeroUsize,
+    ) -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            freq: crate::try_filled_vec(max_banks.get() * ALPHABET, 1u32)?,
+            total: crate::try_filled_vec(max_banks.get(), ALPHABET_U32)?,
+            weight: crate::try_filled_vec(WEIGHT_CONTEXTS, 1.0)?,
+            sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
+        })
+    }
 }
 
 /// Six-expert context-mixing model over literal bytes. See the module
@@ -824,6 +841,76 @@ impl Literal {
         {
             symbol as u8
         }
+    }
+
+    /// Codes `byte` through `encoder` under `context`, blending
+    /// `column_state`'s bank in as a seventh expert via [`Self::mix7`] and
+    /// coding the result through the SSE-calibrated bittree decomposition
+    /// against `column_state`'s own [`Sse`] table (`research/JOURNAL.md`
+    /// S1-P5's real-wiring slice, `FORMAT_VERSION` 4). The six real
+    /// experts adapt exactly as [`Self::encode_sse`] leaves them —
+    /// [`Self::update`] still runs, on the same six-way `mixed` estimate
+    /// it always has, unperturbed by the column expert — the same
+    /// layering [`bittree`]'s own SSE stage already uses on top of the
+    /// six-expert mix, not a new coupling. `column_state`'s own weight and
+    /// bank adapt separately via [`Self::update_column_expert`], against
+    /// the seven-way mixed estimate that was actually coded. Reproduces
+    /// exactly the update order [`Self::ideal_cost_bits_column_expert_pair_sse`]
+    /// measured (`research/JOURNAL.md` S2-A76): `update_column_expert`
+    /// first (reading the six real experts' pre-update state), then the
+    /// six-expert `update`.
+    pub fn encode_column(
+        &mut self,
+        encoder: &mut Encoder,
+        context: Context,
+        byte: u8,
+        column_bank: usize,
+        column_state: &mut ColumnExpertState,
+    ) {
+        let (bank_indices, weight_index) = banks(context);
+        let cum7 = self.mix7(&bank_indices, weight_index, column_bank, column_state);
+        bittree::encode_symbol_sse(encoder, &cum7, byte, &mut column_state.sse);
+        let symbol = usize::from(byte);
+        self.update_column_expert(
+            &bank_indices,
+            weight_index,
+            symbol,
+            column_bank,
+            column_state,
+        );
+        self.update(&bank_indices, weight_index, symbol, exp);
+    }
+
+    /// Decodes one byte from `decoder` under `context`, the exact inverse
+    /// of [`Self::encode_column`]; see that method's docs for the coding
+    /// and update shape.
+    ///
+    /// Never panics on adversarial `decoder` state, the same argument
+    /// [`Self::decode_sse`]'s docs give: [`bittree::decode_symbol_sse`] is
+    /// total over any coded bit pattern, and [`Self::mix7`]'s `cum7` is
+    /// this model's own invariant (both banks' Laplace floors), never
+    /// derived from `decoder`'s bytes.
+    #[must_use]
+    pub fn decode_column(
+        &mut self,
+        decoder: &mut Decoder,
+        context: Context,
+        column_bank: usize,
+        column_state: &mut ColumnExpertState,
+    ) -> u8 {
+        let (bank_indices, weight_index) = banks(context);
+        let cum7 = self.mix7(&bank_indices, weight_index, column_bank, column_state);
+        let byte = bittree::decode_symbol_sse(decoder, &cum7, &mut column_state.sse);
+        let symbol = usize::from(byte);
+        self.update_column_expert(
+            &bank_indices,
+            weight_index,
+            symbol,
+            column_bank,
+            column_state,
+        );
+        self.update(&bank_indices, weight_index, symbol, exp);
+        byte
     }
 }
 
@@ -1412,5 +1499,136 @@ mod tests {
             );
             context = context.after_literal(b);
         }
+    }
+
+    /// [`ColumnExpertState::try_new`] must produce the exact same state
+    /// [`ColumnExpertState::new`] does: the real decode path's fallible
+    /// constructor is not a second, independently-written source of the
+    /// same starting state ([`Self::try_new`]'s own docs).
+    #[test]
+    fn column_expert_state_try_new_matches_new() {
+        let via_new = ColumnExpertState::new(crate::test_support::nz(4));
+        let via_try_new = ColumnExpertState::try_new(crate::test_support::nz(4)).unwrap();
+        assert_eq!(via_new.freq, via_try_new.freq);
+        assert_eq!(via_new.total, via_try_new.total);
+        assert_eq!(via_new.weight, via_try_new.weight);
+        assert_eq!(
+            format!("{:?}", via_new.sse),
+            format!("{:?}", via_try_new.sse)
+        );
+    }
+
+    /// Round-trips bytes through [`Literal::encode_column`]/`decode_column`
+    /// under a fixed `column_bank` per byte (`columns` cycles through
+    /// `banks`), the real-wiring counterpart of `roundtrip_bytes_sse`
+    /// above.
+    fn roundtrip_bytes_column(bytes: &[u8], banks: usize) {
+        let mut model = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(banks));
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for (i, &b) in bytes.iter().enumerate() {
+            model.encode_column(&mut enc, context, b, i % banks, &mut column_state);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+
+        let mut model = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(banks));
+        let mut context = Context::default();
+        let mut dec = Decoder::new(&encoded);
+        let mut got = Vec::with_capacity(bytes.len());
+        for i in 0..bytes.len() {
+            let b = model.decode_column(&mut dec, context, i % banks, &mut column_state);
+            context = context.after_literal(b);
+            got.push(b);
+        }
+        assert_eq!(got, bytes);
+    }
+
+    #[test]
+    fn empty_stream_round_trips_through_column_expert() {
+        roundtrip_bytes_column(&[], 4);
+    }
+
+    #[test]
+    fn single_byte_round_trips_through_column_expert() {
+        roundtrip_bytes_column(b"x", 4);
+    }
+
+    #[test]
+    fn tabular_columns_round_trip_through_column_expert() {
+        // The shape this path targets (research/JOURNAL.md S1-P5): fixed-
+        // width records, each column cycling through its own small period,
+        // the same class tests/golden/v4-tabular-columns pins.
+        let columns = 8;
+        let rows: Vec<u8> = (0..600u32)
+            .map(|i| u8::try_from((i * 7 + i / u32::try_from(columns).unwrap()) % 251).unwrap())
+            .collect();
+        roundtrip_bytes_column(&rows, columns);
+    }
+
+    #[test]
+    fn pseudo_random_bytes_round_trip_through_column_expert() {
+        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+        roundtrip_bytes_column(&bytes, 5);
+    }
+
+    #[test]
+    fn decoding_truncated_stream_does_not_panic_through_column_expert() {
+        let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
+        let banks = 4;
+        let mut model = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(banks));
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for (i, &b) in bytes.iter().enumerate() {
+            model.encode_column(&mut enc, context, b, i % banks, &mut column_state);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+        let truncated = &encoded[..encoded.len() / 2];
+
+        let mut model = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(banks));
+        let mut context = Context::default();
+        let mut dec = Decoder::new(truncated);
+        for i in 0..bytes.len() {
+            let b = model.decode_column(&mut dec, context, i % banks, &mut column_state);
+            context = context.after_literal(b);
+        }
+        // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
+    }
+
+    /// [`Literal::encode_column`] must leave the six real experts' weights
+    /// exactly where [`Literal::encode_sse`] would, per the layering
+    /// [`Literal::encode_column`]'s own docs claim: `update_column_expert`
+    /// touches only `column_state`, never `self.weights`/`self.freq`.
+    #[test]
+    fn encode_column_updates_the_six_real_experts_same_as_encode_sse() {
+        let bytes = b"hello world hello again";
+        let mut via_column = Literal::new();
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
+        let mut context_column = Context::default();
+        let mut enc_column = Encoder::new();
+        for &b in bytes {
+            via_column.encode_column(&mut enc_column, context_column, b, 2, &mut column_state);
+            context_column = context_column.after_literal(b);
+        }
+
+        let mut via_sse = Literal::new();
+        let mut context_sse = Context::default();
+        let mut enc_sse = Encoder::new();
+        for &b in bytes {
+            via_sse.encode_sse(&mut enc_sse, context_sse, b);
+            context_sse = context_sse.after_literal(b);
+        }
+
+        assert_eq!(via_column.freq, via_sse.freq);
+        assert_eq!(via_column.total, via_sse.total);
+        assert_eq!(via_column.weights, via_sse.weights);
     }
 }

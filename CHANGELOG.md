@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- Codec: a column-keyed seventh literal expert, blended into the
+  six-expert mix for any frame whose filter selector names
+  `Candidate::Transpose` (`research/JOURNAL.md` S1-P5, ADR-0046).
+  `FORMAT_VERSION` bumps to 4; every other candidate's literal coding is
+  unchanged. Real-bitstream measurement on two purpose-built tabular
+  fixtures: -0.055/-0.053 bpb (8-column shape, train/sealed) and
+  -0.028/-0.028 bpb (20-column shape, train/sealed); `bench/baseline.json`'s
+  11 fixed cases show no regression.
+
 - `tests/claims.rs` now guards two more facts `README.md` and
   `site/index.html` restate from the generated benchmark reports: the
   measurement date and the three reference compressor versions (`gzip`,

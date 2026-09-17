@@ -52,7 +52,7 @@ measured every benchmark run and becomes a target of its own at
 tuned for it.
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 3) carries `Stored` and `Lz` (optimal-parse LZ over
+format (`FORMAT_VERSION` 4) carries `Stored` and `Lz` (optimal-parse LZ over
 an adaptive, context-mixing range coder; `research/JOURNAL.md` S2-D2/S2-D3).
 That format is frozen ([`docs/format/SPEC.md`](docs/format/SPEC.md),
 ADR-0041): no future version may drop decode support for a version 2 or 3

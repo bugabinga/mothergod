@@ -33,10 +33,18 @@
 //! ([`crate::literal::Literal::encode_sse`]/`decode_sse`,
 //! `docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
 //! S1-P1) where a version-2 frame codes it as one direct 256-way range
-//! division ([`crate::literal::Literal::encode`]/`decode`). [`decode`]
-//! takes the frame's declared `version` and picks the matching literal
-//! path; every other symbol (flag/length/offset/slot) is unaffected and
-//! coded identically at every version `LZ_MIN_VERSION` or above.
+//! division ([`crate::literal::Literal::encode`]/`decode`). A version-4
+//! frame whose filter selector names [`Candidate::Transpose`] goes one step
+//! further still: each literal byte blends a column-keyed seventh expert
+//! into the mix before the same SSE-calibrated coding
+//! ([`crate::literal::Literal::encode_column`]/`decode_column`,
+//! `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
+//! `research/JOURNAL.md` S1-P5); every other candidate at version 4 codes
+//! its literals exactly as version 3 does. [`decode`] takes the frame's
+//! declared `version` and its already-parsed `candidate` and picks the
+//! matching literal path; every other symbol (flag/length/offset/slot) is
+//! unaffected and coded identically at every version `LZ_MIN_VERSION` or
+//! above, regardless of candidate.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -74,6 +82,27 @@ pub(crate) const LZ_MIN_VERSION: u8 = 2;
 /// `decode`: see the module docs' "Payload layout" section and [`decode`]'s
 /// own docs for the version dispatch this feeds.
 const LITERAL_SSE_MIN_VERSION: u8 = 3;
+
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
+/// [`Candidate::Transpose`] frame's literal sub-stream through
+/// [`crate::literal::Literal::encode_column`]/`decode_column` (a seventh,
+/// column-keyed expert blended into the mix, `research/JOURNAL.md` S1-P5,
+/// `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`)
+/// instead of [`crate::literal::Literal::encode_sse`]/`decode_sse`. Every
+/// other candidate's literal sub-stream, and every candidate at a lower
+/// version, is unaffected — see the module docs' "Payload layout" section.
+const COLUMN_EXPERT_MIN_VERSION: u8 = 4;
+
+/// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
+/// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
+/// a decoder reads a frame's `columns` param from untrusted input, so bank
+/// storage must size from a constant, never from that field directly
+/// (`crate::column`'s own docs, CLAUDE.md hard rule 2). 256 covers every
+/// column count `filters::select::pick` can ever choose (its widest
+/// candidate is 96) with no aliasing at all, and matches the alphabet-sized
+/// scale every other `literal.rs` bank-count constant in this range already
+/// uses (`ALPHABET`).
+const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 
 /// Largest declared output length [`decode`] accepts, checked before any
 /// allocation or decode work: `rust-craft`'s allocation-discipline
@@ -304,10 +333,27 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
     }
 }
 
+/// [`EncodeSink`]'s column-coding state for a [`Candidate::Transpose`]
+/// trial: `columns` is the candidate's own param, `data_len` is the
+/// filtered data's length (`crate::column::column_of`'s `len`, always the
+/// pre-filter length too since every filter here preserves length), and
+/// `state` is the seventh expert's own fresh bank/weight/SSE state for this
+/// one trial encode.
+struct ColumnCoding<'a> {
+    columns: NonZeroUsize,
+    data_len: usize,
+    state: &'a mut ColumnExpertState,
+}
+
 /// [`TokenSink`] that drives a real [`Encoder`], [`walk_tokens`]'s use in
-/// [`encode_tokens`].
+/// [`encode_tokens`]. `column` is `Some` exactly when the candidate under
+/// trial is [`Candidate::Transpose`] (`encode`'s caller), selecting
+/// [`crate::literal::Literal::encode_column`] over
+/// [`crate::literal::Literal::encode_sse`] for every literal in this trial
+/// (`research/JOURNAL.md` S1-P5, `COLUMN_EXPERT_MIN_VERSION`).
 struct EncodeSink<'a> {
     ac: &'a mut Encoder,
+    column: Option<ColumnCoding<'a>>,
 }
 
 impl TokenSink for EncodeSink<'_> {
@@ -318,8 +364,18 @@ impl TokenSink for EncodeSink<'_> {
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
         // Compression always targets the newest format version
         // (`FORMAT_VERSION`), so encoding always takes the SSE-calibrated
-        // path; `decode` is the one that must still read older frames.
-        models.literal.encode_sse(self.ac, context, byte);
+        // path (with or without the column expert); `decode` is the one
+        // that must still read older frames.
+        match &mut self.column {
+            Some(col) => {
+                let position = column::column_of(context.position, col.columns, col.data_len);
+                let bank = column::column_bank(position, MAX_COLUMN_BANKS);
+                models
+                    .literal
+                    .encode_column(self.ac, context, byte, bank, col.state);
+            }
+            None => models.literal.encode_sse(self.ac, context, byte),
+        }
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
@@ -371,6 +427,9 @@ impl TokenSink for CostSink {
 /// Encodes already-filtered `data` through the LZ + context-mixing
 /// pipeline: [`encode`]'s per-candidate trial body, and the whole of what
 /// this function used to be before filter trial-selection wrapped it.
+/// `columns` is `Some` exactly when this trial's candidate is
+/// [`Candidate::Transpose`] with that column count, selecting the
+/// column-expert literal path for the whole trial (see [`EncodeSink`]).
 ///
 /// # Panics
 ///
@@ -378,7 +437,7 @@ impl TokenSink for CostSink {
 /// header field is a `u32`, the same bound [`lz::parse_greedy`] already
 /// enforces. [`crate::compress`] checks this before calling in, so
 /// nothing reachable from the public API hits it today.
-fn encode_tokens(data: &[u8]) -> Vec<u8> {
+fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>) -> Vec<u8> {
     let declared_len = u32::try_from(data.len())
         .expect("codec::encode: input longer than u32::MAX is not supported yet");
 
@@ -388,7 +447,23 @@ fn encode_tokens(data: &[u8]) -> Vec<u8> {
 
     let mut models = Models::new();
     let mut ac = Encoder::new();
-    walk_tokens(&tokens, data, &mut models, &mut EncodeSink { ac: &mut ac });
+    let mut column_state = columns.map(|_| ColumnExpertState::new(MAX_COLUMN_BANKS));
+    let column = columns
+        .zip(column_state.as_mut())
+        .map(|(columns, state)| ColumnCoding {
+            columns,
+            data_len: data.len(),
+            state,
+        });
+    walk_tokens(
+        &tokens,
+        data,
+        &mut models,
+        &mut EncodeSink {
+            ac: &mut ac,
+            column,
+        },
+    );
 
     let mut out = Vec::with_capacity(8 + data.len() / 2);
     out.extend_from_slice(&declared_len.to_le_bytes());
@@ -596,7 +671,11 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     let mut best: Option<(Candidate, Vec<u8>)> = None;
     for candidate in filters::select::pick(data) {
         let filtered = apply_filter(candidate, data);
-        let body = encode_tokens(&filtered);
+        let columns = match candidate {
+            Candidate::Transpose(columns) => Some(columns),
+            Candidate::Identity | Candidate::Delta(_) | Candidate::Bcj => None,
+        };
+        let body = encode_tokens(&filtered, columns);
         if best
             .as_ref()
             .is_none_or(|(_, existing)| shorter_than(body.len(), existing.len()))
@@ -753,10 +832,14 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 /// (`crate::decompress` already has it in scope at its one call site):
 /// versions below 3 decode the literal sub-stream through
 /// [`crate::literal::Literal::decode`] (the old direct 256-way division),
-/// version 3 and above through [`crate::literal::Literal::decode_sse`] (see
-/// the module docs' "Payload layout" section). Every other symbol decodes
-/// identically regardless of `version`, since only the literal sub-stream's
-/// internal shape changed.
+/// version 3 and above through [`crate::literal::Literal::decode_sse`], and
+/// — only for a [`Candidate::Transpose`] frame, version
+/// `COLUMN_EXPERT_MIN_VERSION` (4) and above — through
+/// [`crate::literal::Literal::decode_column`] instead, blending a
+/// column-keyed seventh expert into the mix (see the module docs' "Payload
+/// layout" section). Every other symbol decodes identically regardless of
+/// `version` or candidate, since only the literal sub-stream's internal
+/// shape changed.
 ///
 /// # Panics
 ///
@@ -778,6 +861,17 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
     let mut context = Context::default();
     let mut reps = RepCache::initial();
+    // Some exactly when this frame's candidate is Candidate::Transpose and
+    // its declared version codes the column-expert path (COLUMN_EXPERT_MIN_VERSION):
+    // mirrors encode_tokens's ColumnCoding, but `state` is owned here
+    // (there is no per-candidate trial to share it across).
+    let mut column: Option<(NonZeroUsize, ColumnExpertState)> = match candidate {
+        Candidate::Transpose(columns) if version >= COLUMN_EXPERT_MIN_VERSION => Some((
+            columns,
+            ColumnExpertState::try_new(MAX_COLUMN_BANKS).map_err(|_| Error::OutOfMemory)?,
+        )),
+        _ => None,
+    };
     // Reserved fallibly and exactly up front, not left to grow through
     // `push`/`extend`'s doubling: `declared_len` is already bounded above,
     // so nothing past this point ever asks `output` to grow past what it
@@ -795,10 +889,16 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
         match models.flag[flag_table].decode(&mut ac) {
             FLAG_LITERAL => {
                 ensure_room(output.len(), 1, declared_len)?;
-                let byte = if version >= LITERAL_SSE_MIN_VERSION {
-                    models.literal.decode_sse(&mut ac, context)
-                } else {
-                    models.literal.decode(&mut ac, context)
+                let byte = match &mut column {
+                    Some((columns, state)) => {
+                        let position = column::column_of(context.position, *columns, declared_len);
+                        let bank = column::column_bank(position, MAX_COLUMN_BANKS);
+                        models.literal.decode_column(&mut ac, context, bank, state)
+                    }
+                    None if version >= LITERAL_SSE_MIN_VERSION => {
+                        models.literal.decode_sse(&mut ac, context)
+                    }
+                    None => models.literal.decode(&mut ac, context),
                 };
                 output.push(byte);
                 context = context.after_literal(byte);
@@ -1262,7 +1362,7 @@ mod tests {
         let filtered: Vec<u8> = [1u8, 2, 3, 4].iter().copied().cycle().take(200).collect();
         let raw = filters::delta::decode(&filtered, stride);
         let mut frame = Candidate::Delta(stride).to_header_bytes().to_vec();
-        frame.extend(encode_tokens(&filtered));
+        frame.extend(encode_tokens(&filtered, None));
 
         assert_eq!(
             decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
@@ -1323,6 +1423,93 @@ mod tests {
         );
     }
 
+    /// Fixed-width records whose columns each cycle through their own
+    /// period (`research/JOURNAL.md` S1-P5's target shape, same
+    /// construction as `tests/golden/v4-tabular-columns`), with a fraction
+    /// of bytes jittered off the clean pattern so the literal model, not
+    /// just `lz::parse_optimal`'s LZ matches, carries real weight — the
+    /// data this ADR-0046 slice's own real-bitstream measurement used.
+    fn tabular_columns_data(columns: usize, rows: usize, seed: u32) -> Vec<u8> {
+        let periods: Vec<u32> = (0..columns)
+            .map(|c| 3 + ((u32::try_from(c).unwrap() * 7 + seed) % 6))
+            .collect();
+        let bases: Vec<u8> = (0..columns)
+            .map(|c| {
+                u8::try_from(
+                    (u32::try_from(c).unwrap().wrapping_mul(0x1e))
+                        .wrapping_add(seed.wrapping_mul(3))
+                        % 256,
+                )
+                .unwrap()
+            })
+            .collect();
+        let mut rng =
+            crate::test_support::Xorshift32::new(0x9e37_79b9 ^ seed.wrapping_mul(0x8551_4d97) | 1);
+        let mut data = vec![0u8; columns * rows];
+        for row in 0..rows {
+            for (col, &period) in periods.iter().enumerate() {
+                let phase = u32::try_from(row).unwrap() % period;
+                let mut v = bases[col].wrapping_add(u8::try_from(phase).unwrap());
+                let r = rng.next().expect("Xorshift32 never terminates");
+                if r % 100 < 20 {
+                    let jitter = u8::try_from((r >> 8) % 40).unwrap();
+                    v = v.wrapping_add(jitter).wrapping_sub(20);
+                }
+                data[row * columns + col] = v;
+            }
+        }
+        data
+    }
+
+    #[test]
+    fn roundtrip_tabular_columns_data_selects_transpose_and_streams_it() {
+        // Same shape as roundtrip_columnar_drift_data_selects_delta_and_
+        // streams_it and roundtrip_bcj_call_dense_data_selects_bcj_and_
+        // streams_it: proves encode() actually selects Candidate::Transpose
+        // for real data (kind byte 3), and that both decode() and
+        // decode_streaming (which falls back to decode()'s whole-buffer
+        // path for Transpose, JOURNAL S2-D4) reproduce the original bytes —
+        // this is the real-wiring column-expert path (ADR-0046), not just
+        // filters::transpose round-tripping in isolation.
+        let data = tabular_columns_data(8, 2000, 1);
+        let encoded = encode(&data);
+        assert_eq!(
+            encoded[0], 3,
+            "tabular column data should select Transpose, got kind byte {}",
+            encoded[0]
+        );
+        assert_eq!(
+            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(data.as_slice())
+        );
+        assert_eq!(
+            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            data,
+            "streaming roundtrip mismatch: Transpose's whole-buffer fallback path"
+        );
+    }
+
+    #[test]
+    fn column_expert_path_is_gated_on_both_version_and_candidate() {
+        // A Candidate::Transpose frame declared at a version below
+        // COLUMN_EXPERT_MIN_VERSION must decode through the plain SSE path
+        // (Literal::decode_sse), never decode_column: encoding a payload
+        // the column-expert path actually produced and then decoding it as
+        // version 3 must NOT reproduce the original data (the two paths
+        // code different bits for the same bytes), proving the version
+        // gate, not just the candidate check, controls dispatch.
+        let data = tabular_columns_data(8, 2000, 1);
+        let encoded = encode(&data);
+        assert_eq!(encoded[0], 3, "fixture must select Transpose");
+        assert_ne!(
+            decode(&encoded, LITERAL_SSE_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(data.as_slice()),
+            "decoding a COLUMN_EXPERT_MIN_VERSION frame as version 3 must not \
+             silently reproduce the original data"
+        );
+    }
+
     #[test]
     fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
         // A run of identical 5-byte instructions in the *filtered* stream
@@ -1336,7 +1523,7 @@ mod tests {
         let filtered: Vec<u8> = unit.iter().copied().cycle().take(200).collect();
         let raw = filters::bcj::decode(&filtered);
         let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
-        frame.extend(encode_tokens(&filtered));
+        frame.extend(encode_tokens(&filtered, None));
 
         assert_eq!(
             decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
@@ -1368,7 +1555,7 @@ mod tests {
         filtered.extend_from_slice(&[0xE8, 0x01, 0x02, 0x03]);
         let raw = filters::bcj::decode(&filtered);
         let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
-        frame.extend(encode_tokens(&filtered));
+        frame.extend(encode_tokens(&filtered, None));
 
         assert_eq!(
             decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
@@ -1626,7 +1813,7 @@ mod tests {
 
         let ideal_bits = ideal_cost_bits(data);
 
-        let real = encode_tokens(data);
+        let real = encode_tokens(data, None);
         #[allow(
             clippy::cast_precision_loss,
             reason = "encoded length is far below f64's exact integer range (2^53)"
