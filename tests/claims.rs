@@ -392,3 +392,102 @@ fn published_cli_recipe_names_commands_the_binary_answers_to() {
         );
     }
 }
+
+/// The text between `<title>` and `</title>`.
+fn title_text(page: &str) -> &str {
+    let start = page
+        .find("<title>")
+        .unwrap_or_else(|| panic!("no <title> tag"))
+        + "<title>".len();
+    let rest = &page[start..];
+    let end = rest
+        .find("</title>")
+        .unwrap_or_else(|| panic!("unterminated <title>"));
+    &rest[..end]
+}
+
+/// The full `<... >` tag whose attributes contain `selector` (e.g.
+/// `name="description"` or `property="og:title"`), scoped to the `<head>` so
+/// a same-named string in page body text cannot match, and bounded to the
+/// enclosing `<` and `>` so attribute lookups on it cannot spill into the
+/// next tag when this one omits the attribute being looked up.
+fn tag_containing<'a>(page: &'a str, selector: &str) -> &'a str {
+    let head_end = page.find("</head>").unwrap_or(page.len());
+    let head = &page[..head_end];
+    let selector_start = head
+        .find(selector)
+        .unwrap_or_else(|| panic!("no tag with {selector:?} found"));
+    let open = head[..selector_start]
+        .rfind('<')
+        .unwrap_or_else(|| panic!("no tag start before {selector:?}"));
+    let close = head[selector_start..]
+        .find('>')
+        .unwrap_or_else(|| panic!("unterminated tag after {selector:?}"));
+    &head[open..selector_start + close]
+}
+
+/// The `attr="..."` value inside a single already-scoped tag.
+fn attr_value<'a>(tag: &'a str, attr: &str) -> &'a str {
+    let marker = format!("{attr}=\"");
+    let start = tag
+        .find(&marker)
+        .unwrap_or_else(|| panic!("tag has no {attr} attribute: {tag:?}"))
+        + marker.len();
+    let after = &tag[start..];
+    let end = after
+        .find('"')
+        .unwrap_or_else(|| panic!("unterminated {attr} attribute in {tag:?}"));
+    &after[..end]
+}
+
+/// The `content="..."` value of the head tag matching `selector`.
+fn meta_content<'a>(page: &'a str, selector: &str) -> &'a str {
+    attr_value(tag_containing(page, selector), "content")
+}
+
+/// The `href="..."` value of `<link rel="canonical">`.
+fn canonical_href(page: &str) -> &str {
+    attr_value(tag_containing(page, "rel=\"canonical\""), "href")
+}
+
+#[test]
+fn social_preview_tags_match_each_pages_own_title_and_description() {
+    // A link unfurler reads `og:*`/`twitter:*`, not `<title>` or
+    // `<meta name="description">`, so a page can update the reader-facing
+    // pair and silently leave the unfurled preview stale (issue #523). This
+    // is the description's single source of truth enforced across the
+    // duplicate the OG spec requires: the og:title/og:description content
+    // attributes, and the canonical/og:url pair naming the same address.
+    let pages = [
+        ("site/index.html", "https://mothergod.dev/"),
+        ("site/status.html", "https://mothergod.dev/status.html"),
+        ("site/agents.html", "https://mothergod.dev/agents.html"),
+    ];
+
+    for (file, canonical) in pages {
+        let page = read(file);
+        let title = title_text(&page);
+        let description = meta_content(&page, "name=\"description\"");
+        let og_title = meta_content(&page, "property=\"og:title\"");
+        let og_description = meta_content(&page, "property=\"og:description\"");
+        let og_url = meta_content(&page, "property=\"og:url\"");
+
+        assert_eq!(
+            og_title, title,
+            "{file}'s og:title is {og_title:?}, its own <title> is {title:?}"
+        );
+        assert_eq!(
+            og_description, description,
+            "{file}'s og:description is {og_description:?}, its own meta description is {description:?}"
+        );
+        assert_eq!(
+            canonical_href(&page),
+            canonical,
+            "{file}'s canonical link does not point at {canonical}"
+        );
+        assert_eq!(
+            og_url, canonical,
+            "{file}'s og:url is {og_url:?}, expected {canonical} to match its canonical link"
+        );
+    }
+}
