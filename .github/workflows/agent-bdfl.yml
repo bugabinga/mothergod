@@ -277,13 +277,18 @@ jobs:
               there to read it (run 32723091059, 2026-08-24).
             - DELTA — any other wake. The run economy below, in
               order; a no-op is a good outcome.
-            - SURVEY — a scheduled Sunday wake where the ops-log has
-              no deep-survey digest dated that Sunday yet: run the
+            - SURVEY — `.github/scripts/survey-due` answers `due`.
+              It reads the day, the wake and the deep-survey marker
+              on the ops log, and its docstring is the contract. The
+              condition it replaced was prose, and on 2026-09-13 a
+              run misread it and told the operator no survey had run
+              twelve hours after one had (#558). On `due`: run the
               delta core, then the `deep-survey` skill, which holds
-              the weekly deep duties. Chat
-              wakes never carry the survey; reply latency outranks
-              it, and the self-healing condition hands it to the
-              next scheduled wake.
+              the weekly deep duties. The one condition it cannot
+              see is the inbox, so a Sunday wake with messages
+              waiting is CHAT even when the script says `due`: reply
+              latency outranks the survey, and the next scheduled
+              wake picks it up.
 
             Mandate: the Mission in ROADMAP.md — make mothergod the best
             general-purpose lossless compressor AS AN OPEN-SOURCE PRODUCT
@@ -518,8 +523,17 @@ jobs:
                this project cold: the pause fires only once the
                shared seven-day allowance is gone. When it says
                SLOW DOWN, the remaining headroom is the run's real
-               constraint: ship the one thing that matters, drop
-               discretionary work, and say the number in the status
+               constraint: ship the one thing that matters and drop
+               discretionary work in this order, cheapest loss
+               first: the agent-system queue item (step 5), then
+               the retrospect deep-read, then the digest's depth.
+               The guard has already dropped a share of the clock
+               wakes by the time you read the footer (ADR-0039), so
+               that lever is spent. A due deep survey is LAST, after
+               all three, because skipping important work is a last
+               resort and the survey is the only duty that sees what
+               a week of delta cores cannot (operator directive,
+               Telegram, 2026-09-13). Say the number in the status
                line so the operator learns it from you rather than
                from a dead factory.
                Same pass, second lens (ADR-0022): what did this
