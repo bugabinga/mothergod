@@ -187,8 +187,8 @@ test("chatlog -n keeps the tail, and a bad -n falls back to the default", () => 
   assert.match(out, /t4/);
   assert.doesNotMatch(out, /t2\b/);
   assert.equal(py("turns", ["-n", "3"]), 3);
-  assert.equal(py("turns", ["-n", "banana"]), 12);
-  assert.equal(py("turns", []), 12);
+  assert.equal(py("turns", ["-n", "banana"]), 40);
+  assert.equal(py("turns", []), 40, "the default is the worker's ceiling, not a shorter window");
 });
 
 test("a multi-line turn is flattened, so one turn stays one line", () => {

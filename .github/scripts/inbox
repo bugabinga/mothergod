@@ -31,7 +31,8 @@ Three verbs, because an agent does exactly three things here:
     drain            every pending update, oldest first, with the key to pass
                      to `done` (default when no verb is given)
     done <key>       delete one processed key, after acting on it
-    chatlog [-n N]   the last N turns of conversation memory, oldest first
+    chatlog [-n N]   conversation memory, oldest first; the whole log unless
+                     `-n` narrows it
 
 `list` and `read` are deliberately absent. Splitting "what is waiting" from
 "what does it say" only invites a caller that lists, acts on the count, and
@@ -74,8 +75,15 @@ UA = "mothergod-inbox"
 # than "every key that is not one of the two I remember".
 PREFIX = "u:"
 CHATLOG = "chatlog"
-TURNS = 12  # a screenful of conversation memory; the log itself keeps 40
-SUMMARY = 140  # per-turn width, matching tg-send's own chat-log summaries
+# The whole log by default, because the worker's ceiling is what a reader of
+# this expects and 40 flattened lines is still one screen. A smaller default
+# would silently drop the oldest turns: any seat calling tg-send writes here,
+# so cross-seat chatter can push past a short window between two BDFL wakes,
+# and a run that cannot see its own last message is the amnesia this log
+# exists to cure (#183).
+TURNS = 40  # worker.js KEEP, the storage ceiling; -n narrows it
+SUMMARY = 200  # per-turn width, matching tg-send's SUMMARY so display loses
+               # nothing the chat log actually stored
 
 
 class Unreadable(Exception):
@@ -116,7 +124,7 @@ def main(argv: list[str]) -> int:
 
 
 def turns(rest: list[str]) -> int:
-    """`-n N`, defaulting to a screenful. A bad N is not worth an error path."""
+    """`-n N`, defaulting to the whole log. A bad N is not worth an error path."""
     if len(rest) == 2 and rest[0] == "-n" and rest[1].isdigit():
         return int(rest[1])
     return TURNS
