@@ -2813,26 +2813,53 @@ record.
   duplicated here. New golden fixture `tests/golden/v4-tabular-columns`
   (same plaintext as `v3-tabular-columns`, re-encoded); that pair stays
   committed, decode-only, forever. `research/progress.jsonl` it128.
+- S2-A80 | REJECTED | S1-P6's remaining explicit-AVX2-blend direction
+  (issue #447), following S2-A77/S2-A78. Hypothesis: hand-written AVX2
+  intrinsics for `mix`'s per-symbol multiply-add pass (the pass S2-A77
+  split out for autovectorization) could beat the compiler's own
+  vectorization by controlling lane width and instruction selection
+  directly, with output staying bit-for-bit identical (integer
+  multiply-add-then-sum over `u64` is associative regardless of lane
+  order, no precision loss). No candidate implemented: every
+  `std::arch` SIMD intrinsic is an `unsafe fn`, and `src/lib.rs:4`/
+  `src/bin/mothergod.rs:1` carry `#![forbid(unsafe_code)]` crate-wide —
+  a documented quality-boundary choice (ADR-0017), load-bearing for the
+  weekly Miri lane's guarantee that no undefined behavior reaches the
+  decode path (ADR-0043) — and `forbid`, unlike `deny`, cannot be
+  locally lifted by a nested `#[allow(unsafe_code)]`; verified against
+  `rustc`'s own lint semantics, not asserted. The one route to SIMD
+  that stays in safe code, `std::simd` (portable SIMD), is nightly-only
+  and unavailable here too: `rust-toolchain.toml` pins `channel =
+  "stable"`. | Mechanism: this is a policy conflict, not a
+  corpus-dependent outcome (kind `wild`, same shape as S2-A78/it68: no
+  candidate to keep or delete, nothing to measure). Lifting
+  `forbid(unsafe_code)` is a quality-boundary change squarely in
+  ADR-0017's own territory, not a call this slice makes on its own
+  authority. | S1-P6's remaining scope narrows to the tANS fast path
+  alone; explicit AVX2 blend is closed until a future ADR revisits
+  `forbid(unsafe_code)`. `research/progress.jsonl` it129.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
-  fast path (~100×, zstd-class -1 mode), explicit AVX2 blend (~1.5×).
-  Concrete target as of S2-A27: `Literal::decode`'s all-literal worst
-  case measures ~1170 ns/byte (~854 KB/s), under the ROADMAP SPEED floor
-  (≥1 MB/s decode) — `Literal::mix` rebuilds all 256 cumulative entries
-  from scratch every byte instead of an incremental structure. S2-A67/
-  S2-A68 later measured the same floor violation on real corpus files
-  (Canterbury's `xargs.1` 0.775 MB/s, Silesia's `x-ray` 0.392 MB/s and
-  `sao` 0.428 MB/s), a finding that sat unlinked until issue #447 gave
-  it a queue entry. S2-A77 took the first slice: splitting `mix`'s fused
-  loop cut decode's measured ns/byte by about 13.5% on this sandbox
-  (`xargs.1` still under the floor after it), autovectorization-shaped,
-  not an incremental structure. Bit-decomposed coding above already
-  shipped (S2-A58/S2-A59/S2-A60, `FORMAT_VERSION` 3) without reaching
-  the floor, since `bittree` is handed the same from-scratch `cum`. S2-A78
-  closed the incremental-cumulative direction as infeasible without a
-  `FORMAT_VERSION` bump (`mix`'s per-symbol floor does not distribute
-  over a prefix sum, and the six-expert combination itself never repeats
-  call to call); the tANS fast path and explicit AVX2 blend are the
-  remaining open scope.
+  fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
+  `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
+  (~854 KB/s), under the ROADMAP SPEED floor (≥1 MB/s decode) —
+  `Literal::mix` rebuilds all 256 cumulative entries from scratch every
+  byte instead of an incremental structure. S2-A67/S2-A68 later measured
+  the same floor violation on real corpus files (Canterbury's `xargs.1`
+  0.775 MB/s, Silesia's `x-ray` 0.392 MB/s and `sao` 0.428 MB/s), a
+  finding that sat unlinked until issue #447 gave it a queue entry.
+  S2-A77 took the first slice: splitting `mix`'s fused loop cut decode's
+  measured ns/byte by about 13.5% on this sandbox (`xargs.1` still under
+  the floor after it), autovectorization-shaped, not an incremental
+  structure. Bit-decomposed coding above already shipped (S2-A58/S2-A59/
+  S2-A60, `FORMAT_VERSION` 3) without reaching the floor, since `bittree`
+  is handed the same from-scratch `cum`. S2-A78 closed the incremental-
+  cumulative direction as infeasible without a `FORMAT_VERSION` bump
+  (`mix`'s per-symbol floor does not distribute over a prefix sum, and
+  the six-expert combination itself never repeats call to call). S2-A80
+  closed the explicit-AVX2-blend direction too, blocked by the crate's
+  own `forbid(unsafe_code)` (ADR-0017/ADR-0043) independent of any
+  corpus measurement; the tANS fast path is the sole remaining open
+  scope.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
