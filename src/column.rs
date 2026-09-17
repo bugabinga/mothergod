@@ -2,7 +2,9 @@
 //! position belongs to (`research/JOURNAL.md` S1-P5, per-column modeling
 //! after transpose). Standalone primitive, same order S1-P1/S1-P2/S1-P3/
 //! S1-P4 each opened their own first slice with (S2-A40, S2-A42, S2-A57,
-//! S2-A61): not yet wired into [`crate::literal::Literal`] or `codec.rs`.
+//! S2-A61); since wired into [`crate::literal::Literal`]
+//! (`encode_column`/`decode_column`) and `codec.rs`'s decode loop
+//! (`dc32411`, `FORMAT_VERSION` 4, `research/JOURNAL.md` S2-A79).
 //!
 //! `transpose::encode` regroups a row-major byte stream into column-major
 //! order so a downstream model with only short-range context can see a
@@ -23,10 +25,8 @@
 //! `columns` directly (CLAUDE.md hard rule 2) -- `column_bank` wraps
 //! [`column_of`]'s unbounded result into a fixed-size bank space, the same
 //! convention `literal.rs`'s existing experts already use (`ORDER2_BASE`'s
-//! `& 0xFFF`, `ALIGN_BASE`'s `position & 3`). Remaining S1-P5 scope: an
-//! actual column-index-keyed expert bank in `Literal`, threading the
-//! `columns` filter selection already knows down to it, a `FORMAT_VERSION`
-//! bump, and a real bpb measurement.
+//! `& 0xFFF`, `ALIGN_BASE`'s `position & 3`). S1-P5 is resolved, real
+//! wiring and real-bitstream measurement included; see ADR-0046.
 
 use std::num::NonZeroUsize;
 
@@ -47,12 +47,16 @@ use std::num::NonZeroUsize;
 ///
 /// # Panics
 ///
-/// Panics if `position >= len`: every caller already knows the
-/// transposed stream's length by construction (`transpose::encode` never
-/// changes it), so an out-of-range `position` is a caller bug, not
-/// adversarial input -- nothing on the decode path calls this
-/// (`transpose::decode` inverts the byte layout directly, without ever
-/// needing a per-position column index).
+/// Panics if `position >= len`. On the encode path every caller already
+/// knows the transposed stream's length by construction (`transpose::encode`
+/// never changes it), so an out-of-range `position` there is a caller bug.
+/// On the decode path (`codec.rs`'s column-expert literal decode) `len` is
+/// `declared_len`, read from untrusted compressed input, so the caller must
+/// establish `position < len` itself before calling: `codec.rs` does this
+/// with `ensure_room(output.len(), 1, declared_len)?` immediately before
+/// each call, which rejects a token that would grow `output` past
+/// `declared_len` and so guarantees `context.position < declared_len` by
+/// the time `column_of` runs.
 #[must_use]
 pub fn column_of(position: usize, columns: NonZeroUsize, len: usize) -> usize {
     assert!(
