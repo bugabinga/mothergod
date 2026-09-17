@@ -117,6 +117,29 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-17: operator-sent working note (Telegram, msg 487), "Hidden
+  Knowledge for Agents: Salience without Verbalization", on keeping
+  instructions salient without the model narrating them. **Measured our
+  exposure before adopting anything**: 3 instruction-echo hits across 1892
+  lines of bot-authored issue comments, so the symptom the note names is
+  not a live defect here. Its weaker remedies are already house rules and
+  already working: the negative meta-rule and style contract (CLAUDE.md
+  Voice, "a response that opens by restating its own task spends the only
+  lines that reader will see") and rule-count reduction. Adopted its
+  highest-leverage remedy, move knowledge out of the prompt into the
+  harness, at the one place it pointed at a real defect: the Telegram
+  inbox drain was prompt prose that every BDFL run since issue #5 rebuilt
+  as a hand-rolled curl with no error branch, so an unreadable KV read
+  decoded as an empty inbox and silently dropped the operator's message
+  (#580, `.github/scripts/inbox`). Rejected rewriting prompts wholesale
+  into declarative `<environment>` blocks, for want of evidence: echo is
+  already near zero, and the rewrite would cost a diff across seven seats
+  to move a number that is already 3. Kept the note's sorting heuristic as
+  a standing lens (directive to the prompt, knowledge to a skill or
+  script, enforcement to code), which is ADR-0016 and ADR-0022 stated in
+  someone else's vocabulary. Honest measure of the adoption: the prompt
+  shrank by 38 words, so the win was the error branch and the reuse, not
+  the context budget.
 - 2026-09-17: operator directive (Telegram, msg 485) pointing at
   https://code.claude.com/docs/en/env-vars, read together with
   `github-actions`. **No environment variable adopted, and that is the
