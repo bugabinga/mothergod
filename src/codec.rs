@@ -368,8 +368,12 @@ impl TokenSink for EncodeSink<'_> {
         // that must still read older frames.
         match &mut self.column {
             Some(col) => {
-                let position = column::column_of(context.position, col.columns, col.data_len);
-                let bank = column::column_bank(position, MAX_COLUMN_BANKS);
+                let bank = column::bank_of(
+                    context.position,
+                    col.columns,
+                    col.data_len,
+                    MAX_COLUMN_BANKS,
+                );
                 models
                     .literal
                     .encode_column(self.ac, context, byte, bank, col.state);
@@ -514,9 +518,9 @@ pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
 /// model alone, and prices every literal byte twice through
 /// `literal_pair` — the shipped six-expert mix, and the same mix with
 /// `column_state`'s bank blended in as a seventh expert, keyed by
-/// [`column::column_bank`] of [`column::column_of`]'s result for that
-/// byte's position in `data`. `literal_pair` is the one axis the two
-/// callers vary on: [`Literal::ideal_cost_bits_column_expert_pair`] or its
+/// [`column::bank_of`] for that byte's position in `data`. `literal_pair` is
+/// the one axis the two callers vary on:
+/// [`Literal::ideal_cost_bits_column_expert_pair`] or its
 /// SSE-calibrated counterpart
 /// [`Literal::ideal_cost_bits_column_expert_pair_sse`].
 struct ColumnExpertCostSink<'a> {
@@ -537,8 +541,12 @@ impl TokenSink for ColumnExpertCostSink<'_> {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        let column = column::column_of(context.position, self.columns, self.data.len());
-        let bank = column::column_bank(column, self.max_banks);
+        let bank = column::bank_of(
+            context.position,
+            self.columns,
+            self.data.len(),
+            self.max_banks,
+        );
         let (baseline, with_column) =
             (self.literal_pair)(&mut models.literal, context, byte, bank, self.column_state);
         self.baseline_bits += baseline;
@@ -569,8 +577,8 @@ impl TokenSink for ColumnExpertCostSink<'_> {
 /// cost against the same walk with a seventh, column-keyed literal expert
 /// blended in through `literal_pair`, isolating any delta to the literal
 /// model alone (flag/length/offset/slot price identically on both sides).
-/// `columns`/`max_banks` mirror [`column::column_of`]/[`column::column_bank`]'s
-/// own parameters; `data` is already-filtered, the same contract
+/// `columns`/`max_banks` mirror [`column::bank_of`]'s own parameters;
+/// `data` is already-filtered, the same contract
 /// [`ideal_cost_bits`] has — if the candidate under test is
 /// [`Candidate::Transpose`], `data` is the already-transposed bytes. Not
 /// reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
@@ -891,8 +899,12 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
                 ensure_room(output.len(), 1, declared_len)?;
                 let byte = match &mut column {
                     Some((columns, state)) => {
-                        let position = column::column_of(context.position, *columns, declared_len);
-                        let bank = column::column_bank(position, MAX_COLUMN_BANKS);
+                        let bank = column::bank_of(
+                            context.position,
+                            *columns,
+                            declared_len,
+                            MAX_COLUMN_BANKS,
+                        );
                         models.literal.decode_column(&mut ac, context, bank, state)
                     }
                     None if version >= LITERAL_SSE_MIN_VERSION => {
