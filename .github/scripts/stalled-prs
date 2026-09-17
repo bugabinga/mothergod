@@ -52,10 +52,33 @@ One signature has no PR to hang on, which is the whole point of it:
 A rescue of more than a command or two names its recipe by reference, and
 that recipe lives in agents/GOVERNANCE.md "Stalled auto-merge" and nowhere
 else, because a multi-step procedure kept in two places drifts in one of
-them. The two single-command rescues state the command inline instead:
+them. The three single-command rescues state the command inline instead:
 sending a reader to a document to be told `gh pr reopen` is ceremony, and
-GOVERNANCE's copy of those two is the explanation of why the PR stalled,
+GOVERNANCE's copy of those three is the explanation of why the PR stalled,
 not a second copy of the command.
+
+`--rescue` applies those three itself and prints one line per command it
+ran (issue #566: a dead review was refired by hand twice in three days, by
+a BDFL wake reading this report and typing the two commands it names). The
+decision behind each was already made by machinery or by the reviewer, so
+nothing is left to judge:
+
+    reviewer-died, verdict-missing   close, then reopen. A duplicate review
+                                     costs minutes; a missed one costs the
+                                     PR every hour until the next wake.
+    approved-not-landing             merge-pr <n> --sha <head>, the exact
+                                     command the reviewer's own merge would
+                                     have run had GitHub let it fire.
+
+Two holds keep the merge arm honest, and a held PR is reported with the
+reason instead of touched. A PR touching `.github/workflows/` is the
+BDFL's to land after reading its file list (GOVERNANCE "Merging"), so it
+stays a report. And the `agent-approved` label must postdate the review
+round on the current head: a label that survived a push vouches for an
+older head, so that PR stays a report too. A refire inside the grace is
+held as well, so a review that died into an outage is not reopened into
+the same wall by a wake minutes later. Every other signature stays
+report-only: their rescues are judgement.
 
 Deliberately NOT reported, said plainly so nothing claims a completeness it
 lacks. A `claude/*` branch whose PR was merged or closed is undeleted
@@ -70,16 +93,22 @@ pretend to find it.
 
 Liveness: the footer always prints how many PRs and branches were read, how
 many stalled, and how many were suppressed, so a detector that has silently
-stopped matching is distinguishable from a quiet queue.
+stopped matching is distinguishable from a quiet queue. With `--rescue` it
+also prints how many it rescued and how many it held.
 
-Usage: stalled-prs
-Exits 0 whether or not anything stalled. A stall is a finding, not an error.
+Usage: stalled-prs [--rescue]
+Exits 0 whether or not anything stalled. A stall is a finding, not an error,
+and so is a rescue that failed: it is printed with GitHub's own words and the
+sweep goes on to the next PR.
 """
 
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 
-from anchor import STAMP, gh, iso
+from anchor import STAMP, gh, iso, stamp_to_dt
 
 # The required checks, from CLAUDE.md "Commands (run before any push)". A gate
 # renamed in branch protection and not here reads as `never-fired` on every
@@ -116,9 +145,24 @@ BRANCH_PREFIX = "claude/"
 BRANCH_GRACE = timedelta(minutes=30)
 
 FIELDS = (
-    "number,title,labels,mergeStateStatus,headRefName,createdAt,"
+    "number,title,labels,mergeStateStatus,headRefName,headRefOid,createdAt,"
     "isDraft,isCrossRepository,statusCheckRollup"
 )
+
+# The signatures --rescue applies, and how. Refire is a close then a reopen:
+# agent-review has no workflow_dispatch, and `reopened` on the app token is
+# the one event that starts an unheld review of the same head. Land is the
+# reviewer's own merge command, run late.
+REFIRE = frozenset({"reviewer-died", "verdict-missing"})
+LAND = "approved-not-landing"
+
+# The one path prefix that makes a merge the BDFL's by operator ruling
+# (issue #136; GOVERNANCE "Merging"). Same constant push-branch keys its
+# credential on; a PR under it is never landed by this script.
+WORKFLOW_PREFIX = ".github/workflows/"
+
+# merge-pr, by path, so --rescue runs the sibling this checkout carries.
+MERGE_PR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "merge-pr")
 
 
 def latest(rollup, key):
@@ -138,8 +182,16 @@ def latest(rollup, key):
     return newest
 
 
-def finding(kind, detail, rescue):
-    return {"kind": kind, "detail": detail, "rescue": rescue}
+def finding(kind, detail, rescue, review=None):
+    """One reported stall. `review` carries the head's review-check timestamps
+    for the kinds --rescue can act on, so plan() needs no second rollup read."""
+    found = {"kind": kind, "detail": detail, "rescue": rescue}
+    if review is not None:
+        found["review"] = {
+            "startedAt": review.get("startedAt"),
+            "completedAt": review.get("completedAt"),
+        }
+    return found
 
 
 def suppress(pr):
@@ -216,6 +268,7 @@ def classify(pr, now):
             f"close then reopen: `gh pr close {pr['number']}`, "
             f"`gh pr reopen {pr['number']}`. agent-review has no "
             "workflow_dispatch, so reopen is the only refire",
+            review,
         )
 
     if not labels & VERDICT_LABELS:
@@ -223,19 +276,124 @@ def classify(pr, now):
             return finding(
                 "verdict-missing",
                 "the review check succeeded and applied no verdict label",
-                f"read {review.get('detailsUrl', 'the review run')}, then apply the "
-                "verdict it reached, or reopen to review again",
+                f"close then reopen: `gh pr close {pr['number']}`, "
+                f"`gh pr reopen {pr['number']}`; or read "
+                f"{review.get('detailsUrl', 'the review run')} first, if one "
+                "duplicate review is worth the read",
+                review,
             )
         return None
 
     if "agent-approved" in labels:
         return finding(
-            "approved-not-landing",
+            LAND,
             "approved with every required gate green, still open",
             "GOVERNANCE 'Stalled auto-merge', second signature: "
             f"merge-pr {pr['number']} --sha <reviewed-head>",
+            review,
         )
     return None
+
+
+def plan(pr, found, now, files=None, approved_at=None):
+    """The mechanical rescue for a finding. Pure, like classify().
+
+    Returns {"argv": [command, ...]} to run in order, {"hold": reason} when
+    the kind is rescuable but this instance is not, or None when the kind
+    is judgement and stays a report. `files` is the PR's changed paths and
+    `approved_at` the latest `agent-approved` label event, both read by the
+    caller only for the merge arm, so the refire arm costs no extra call.
+    """
+    kind = found["kind"]
+    number = str(pr["number"])
+    review = found.get("review") or {}
+
+    if kind in REFIRE:
+        ended = review.get("completedAt")
+        if ended:
+            age = now - stamp_to_dt(iso(ended))
+            if age < GRACE:
+                return {
+                    "hold": f"the review ended {int(age.total_seconds() // 60)}m ago, "
+                    f"inside the {int(GRACE.total_seconds() // 60)}m grace: a refire "
+                    "this fresh chases the wall it died against; the next wake refires it"
+                }
+        return {"argv": [["gh", "pr", "close", number], ["gh", "pr", "reopen", number]]}
+
+    if kind == LAND:
+        if files is None:
+            return {"hold": "the file list did not read, and a merge on a vacuous read is not proof"}
+        if any(path.startswith(WORKFLOW_PREFIX) for path in files):
+            return {
+                "hold": f"touches {WORKFLOW_PREFIX}: the BDFL's to land after reading "
+                "the file list (GOVERNANCE 'Merging')"
+            }
+        started = review.get("startedAt")
+        if approved_at is None or started is None or iso(approved_at) < iso(started):
+            return {
+                "hold": "agent-approved predates the review round on this head, so the "
+                f"verdict may not cover it: read the round, then merge-pr {number} "
+                f"--sha {pr['headRefOid']}"
+            }
+        return {"argv": [[MERGE_PR, number, "--sha", pr["headRefOid"]]]}
+
+    return None
+
+
+def approved_at(number):
+    """When `agent-approved` was last applied to this PR, or None if never.
+
+    The timeline, not the label list: a label says the PR is approved, the
+    event says WHEN, and when is what decides whether the approval postdates
+    the head. `--slurp` for the same reason orphans() uses it: one document
+    per page otherwise.
+    """
+    pages = json.loads(
+        gh("api", f"repos/{{owner}}/{{repo}}/issues/{number}/timeline?per_page=100",
+           "--paginate", "--slurp")
+    )
+    stamps = [
+        event["created_at"]
+        for page in pages
+        for event in page
+        if event.get("event") == "labeled"
+        and (event.get("label") or {}).get("name") == "agent-approved"
+    ]
+    return max(stamps) if stamps else None
+
+
+def changed_files(number):
+    """The PR's changed paths, or None when the read fails: absence must hold
+    the merge, never wave it through, so this does not die the way gh() does."""
+    proc = subprocess.run(
+        ["gh", "pr", "view", str(number), "--json", "files"], capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return [f["path"] for f in json.loads(proc.stdout)["files"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def apply(steps):
+    """Run a plan's commands in order, printing each with its outcome.
+
+    Stops at the first failure, because the second command of a refire on a
+    PR the first one did not close is not a rescue. Returns True when every
+    step ran clean. Silence is never success here either: a merge-pr that
+    said nothing would be a merge nobody can find in the transcript.
+    """
+    for argv in steps:
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        said = (proc.stdout + proc.stderr).strip().splitlines()
+        tail = f" -> {said[-1]}" if said else ""
+        shown = " ".join(os.path.basename(argv[0]) if i == 0 else a for i, a in enumerate(argv))
+        if proc.returncode != 0:
+            print(f"        applied: {shown} -> FAILED exit {proc.returncode}{tail}")
+            return False
+        print(f"        applied: {shown}{tail}")
+    return True
 
 
 def classify_branch(branch, now):
@@ -318,26 +476,56 @@ def orphans(open_heads, now):
     return rows, len(names)
 
 
-def render(rows, branch_rows, read, branches, suppressed):
+def rescue(pr, found, now):
+    """Plan and apply one PR's rescue. Returns "rescued", "held", "failed", or
+    None for a kind that stays a report. Reads the file list and the label
+    timeline only for the merge arm, which is the one that needs them."""
+    number = pr["number"]
+    if found["kind"] == LAND:
+        step = plan(pr, found, now, changed_files(number), approved_at(number))
+    else:
+        step = plan(pr, found, now)
+    if step is None:
+        return None
+    if "hold" in step:
+        print(f"        held: {step['hold']}")
+        return "held"
+    return "rescued" if apply(step["argv"]) else "failed"
+
+
+def render(rows, branch_rows, read, branches, suppressed, now, rescuing):
+    tally = {"rescued": 0, "held": 0, "failed": 0}
     for pr, found in rows:
         print(f"#{pr['number']:<5} {found['kind']:<21} {pr['title'][:52]}")
         print(f"        {found['detail']}")
         print(f"        rescue: {found['rescue']}")
+        if rescuing:
+            outcome = rescue(pr, found, now)
+            if outcome:
+                tally[outcome] += 1
         print()
     for branch, found in branch_rows:
         print(f"{'--':<6} {found['kind']:<21} {branch['name'][:52]}")
         print(f"        {found['detail']}")
         print(f"        rescue: {found['rescue']}")
         print()
-    print(
+    footer = (
         f"stalled-prs: open {read} | branches {branches} | "
         f"stalled {len(rows) + len(branch_rows)} | suppressed {suppressed}"
         f" | grace {int(GRACE.total_seconds() // 60)}m"
         f"/{int(BRANCH_GRACE.total_seconds() // 60)}m"
     )
+    if rescuing:
+        footer += f" | rescued {tally['rescued']} | held {tally['held']} | failed {tally['failed']}"
+    print(footer)
 
 
 def main():
+    args = sys.argv[1:]
+    rescuing = "--rescue" in args
+    if [a for a in args if a != "--rescue"]:
+        print(f"stalled-prs: unknown argument(s) {args}; usage: stalled-prs [--rescue]", file=sys.stderr)
+        sys.exit(1)
     pulls = json.loads(
         gh("pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS)
     )
@@ -350,6 +538,8 @@ def main():
         len(pulls),
         branches,
         sum(1 for pr in pulls if suppress(pr)),
+        now,
+        rescuing,
     )
 
 

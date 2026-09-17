@@ -210,8 +210,12 @@ that dies before it renders a verdict. Detection is machinery, not
 recall: `.github/scripts/stalled-prs` reads every open PR each BDFL
 run and prints the stalled ones with the rescue named. Its docstring
 is the list of signatures it matches and the ones it deliberately
-skips. The rescues stay here, because a procedure kept in two places
-drifts in one of them.
+skips. With `--rescue`, the BDFL's standing invocation, it also applies
+the three rescues that are one command (issue #566: a dead review was
+refired by hand twice in three days, by a wake reading the report and
+typing what it named) and prints what it held and why. The rescues
+that are more than a command stay here, because a procedure kept in
+two places drifts in one of them.
 
 The first two signatures are found on open `agent-approved` PRs:
 
@@ -227,9 +231,14 @@ The first two signatures are found on open `agent-approved` PRs:
 - Mergeable state clean, required gates green, auto-merge armed, PR
   still open: the branch tip is unsigned, so GitHub's own evaluation
   sits at `blocked` while the REST squash merge succeeds immediately
-  (first hit PR #84; same porcelain/API asymmetry as PR #25). Rescue:
-  `merge-pr <pr> --sha <reviewed-head>`, nothing else; the reviewer's
-  verdict already covers that exact head.
+  (first hit PR #84; PR #571 sat so for 2h38m; same porcelain/API
+  asymmetry as PR #25). `stalled-prs --rescue` runs
+  `merge-pr <pr> --sha <head>` itself, after two checks it holds on:
+  the PR touches no file under `.github/workflows/` (those are the
+  BDFL's, "Merging" below), and the `agent-approved` label postdates
+  the head's review round, which is "the verdict covers that exact
+  head" in a form a script can read. A held PR is reported with the
+  reason and the command, for the BDFL's own eyes.
 
 If a held run still blocks after re-attribution, comment on the PR
 naming it, label `blocked-on-human`, move on.
@@ -256,12 +265,16 @@ verdict label yet post no items (PR #516, a mid-run 401), so a dead
 review counts as this signature whatever the labels say, and the
 label it left is cleaned up by the fresh round it triggers. Nothing
 retries it on its own, because
-`agent-review.yml` triggers on pushes and open/reopen only. Rescue:
-close the PR, then reopen it, which fires `reopened` and starts a
-fresh review of the same head. A `review` check that SUCCEEDED and
-left no verdict label is the same stall reached differently: read the
-run before reopening, since the reviewer may have decided and failed
-only to label.
+`agent-review.yml` triggers on pushes and open/reopen only.
+`stalled-prs --rescue` closes and reopens it, which fires `reopened`
+and starts a fresh review of the same head; it holds for the grace
+after the death, so a review that died into an outage is not refired
+into the same wall by a wake minutes later. A `review` check that
+SUCCEEDED and left no verdict label is the same stall reached
+differently (PR #561: a reviewer guard-skipped by a pause) and gets
+the same refire. The reviewer may have decided and failed only to
+label, and one duplicate review then costs minutes, where the read
+that would save it costs a BDFL wake.
 
 A fifth signature is machine-owned and needs no sweep: an
 `agent-review.yml` change landing on main leaves every open PR with a
