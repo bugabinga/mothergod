@@ -93,9 +93,26 @@ pub fn column_bank(column: usize, max_banks: NonZeroUsize) -> usize {
     column % max_banks.get()
 }
 
+/// [`column_of`] then [`column_bank`] in one call: the bank the byte at
+/// `position` in a `columns`-wide, `len`-long transposed stream belongs to,
+/// wrapped into a fixed `max_banks`-size space. `codec.rs`'s three
+/// column-expert literal sites (`EncodeSink`, `ColumnExpertCostSink`, and
+/// `decode`'s `FLAG_LITERAL` arm) all need exactly this pair in this order;
+/// this is that pairing, named once. Same panic condition as [`column_of`]:
+/// `position < len` must already hold.
+#[must_use]
+pub fn bank_of(
+    position: usize,
+    columns: NonZeroUsize,
+    len: usize,
+    max_banks: NonZeroUsize,
+) -> usize {
+    column_bank(column_of(position, columns, len), max_banks)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{column_bank, column_of};
+    use super::{bank_of, column_bank, column_of};
     use crate::test_support::nz;
 
     /// Ground truth independent of [`column_of`]'s closed form: replays
@@ -215,6 +232,17 @@ mod tests {
         for position in 0..len {
             let column = column_of(position, columns, len);
             assert!(column_bank(column, max_banks) < max_banks.get());
+        }
+    }
+
+    #[test]
+    fn bank_of_matches_column_of_then_column_bank() {
+        let columns = nz(37);
+        let len = 200;
+        let max_banks = nz(5);
+        for position in 0..len {
+            let expected = column_bank(column_of(position, columns, len), max_banks);
+            assert_eq!(bank_of(position, columns, len, max_banks), expected);
         }
     }
 }
