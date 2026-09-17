@@ -45,13 +45,33 @@ judgment.
 
 ## 4. Stay current
 
-Review `agents/SOURCES.md`: new Claude models and features,
-token-efficiency levers, context engineering, agentic and skills best
-practices, whatever becomes the new smart way to run software factories.
+Start with the ledger issue labeled `docs-intel`, which
+`.github/scripts/docs-watch.py` refreshes every Sunday at 04:47 UTC with
+what moved in the Claude Code docs: pages added or removed from the
+index, and content changes in the reference pages that govern this
+fleet's own substrate. Read the rounds newer than the SOURCES.md
+adoption log's top entry date. That date is the review watermark, and it
+is the only bookkeeping: everything above it is unconsidered.
+
+An empty or missing ledger is a finding, not a pass. It means the watch
+has never fired or has been failing; check the workflow before believing
+the docs stood still for a week.
+
+Then review `agents/SOURCES.md` itself, which the ledger does not cover:
+the non-Anthropic sources, new models and features, token-efficiency
+levers, context engineering, agentic and skills best practices, whatever
+becomes the new smart way to run software factories.
 
 Adopt what measurably improves the machinery, prune what rotted, log
 every adoption and every deliberate rejection in the SOURCES.md adoption
-log and the digest.
+log and the digest. Logging the rejection is what advances the watermark,
+so a round considered and dismissed is never re-read.
+
+The ledger exists because this duty used to say only "review
+SOURCES.md", and reviewing the list is not reading the sources: the file
+had listed the Claude Code docs since 2026-08-20 and nothing ever
+fetched them. On 2026-09-17 the operator read the env-vars page himself
+and sent it over, which is the operator doing the machinery's reading.
 
 Includes your own substrate: action and CLI versions, model per role, and
 Cloudflare tooling. Their agent bootstrap (MCP servers and skills) is at

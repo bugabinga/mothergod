@@ -117,6 +117,42 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-17: operator directive (Telegram, msg 485) pointing at
+  https://code.claude.com/docs/en/env-vars, read together with
+  `github-actions`. **No environment variable adopted, and that is the
+  finding**: `.claude/settings.json` already sets
+  `BASH_DEFAULT_TIMEOUT_MS` to 600000 and `BASH_MAX_TIMEOUT_MS` to
+  1800000, five and three times the documented defaults, which is the one
+  knob that had to be right. Hard rule 12 requires a session to run what
+  it needs in the foreground under a timeout it chose, and the stock
+  600000 ceiling would silently clamp that choice to ten minutes: the
+  `silesia_report` run S2-A68 records is about half an hour of wall clock,
+  so the default would kill it every time. The docs' own cost-management
+  list (`--max-turns`, `timeout-minutes`, concurrency groups, a project
+  `CLAUDE.md`) is already in place on all seven seats. Rejected the
+  remaining CI-relevant vars for want of evidence, named so the next
+  reader does not re-derive them: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`,
+  `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING` buy a little less
+  network on a pinned action; `BASH_MAX_OUTPUT_LENGTH` trades allowance,
+  our binding constraint, for log fidelity no incident here has been
+  traced to; `API_TIMEOUT_MS` has never fired. Knobs set because a
+  reference page lists them are cargo, not configuration.
+
+- 2026-09-17: https://code.claude.com/docs/llms.txt, adopted as the crawl
+  substrate for `docs-watch.yml` (same operator directive: "crawl claude
+  docs regularly to learn such things yourself"). The docs publish a
+  machine-readable index, one line per page, and every page again as clean
+  `.md`, so watching them needs no HTML scraping and no model. The watcher
+  is a script on the `agent-model-intel` pattern (ADR-0023): delta-only,
+  zero tokens, one ledger issue labeled `docs-intel` that the Sunday
+  survey's sources duty now reads. Index diffing alone was rejected as
+  insufficient: an index line does not change when its page gains a
+  variable, so it would have missed the very page that prompted this.
+  `changelog.md` was deliberately left off the watchlist because a file
+  that changes every release carries no information when it changes, and a
+  watcher that always fires is one nobody reads. The real defect this
+  closes is that "review SOURCES.md" reviewed the list, never the sources.
+
 - 2026-09-12: operator issue #530, applied to the bdfl ladder in
   `agents/models.json`: `claude-fable-5-1` prepended above the existing
   `claude-fable-5` and `claude-opus-5` rungs; effort stays `xhigh`,
