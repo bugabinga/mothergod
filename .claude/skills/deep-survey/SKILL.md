@@ -1,6 +1,6 @@
 ---
 name: deep-survey
-description: The mothergod BDFL's weekly deep-run duties, in order, once the delta core is clean. Full state read, process health, scorecard, sources review, workflow speed hunt, model ladders, roster charters, lifecycle verification, and the digest that records the survey ran. Use on a SURVEY wake, meaning a scheduled Sunday wake whose Sunday has no deep-survey digest on the ops-log issue yet. Not for chat wakes or routine delta wakes, which skip these duties entirely.
+description: The mothergod BDFL's weekly deep-run duties, in order, once the delta core is clean. Full state read, process health, scorecard, sources review, workflow speed hunt, model ladders, roster charters, lifecycle verification, and the digest that records the survey ran. Use on a SURVEY wake, meaning a wake where `.github/scripts/survey-due` answers `due`. Not for chat wakes or routine delta wakes, which skip these duties entirely.
 user-invocable: true
 ---
 
@@ -12,11 +12,11 @@ why they live here instead of in every wake's context.
 Run the delta core first, in full. The survey is what a clean delta core
 earns, never a reason to skip a stalled PR or an unread operator comment.
 
-The mode condition is self-healing: it keys on a deep-survey digest
-dated that Sunday on the ops-log issue. A survey the run never reached
-is retried by the next scheduled wake, so a missed Sunday costs latency
-and nothing else. That only holds if the digest carries the date, which
-is this skill's completion gate.
+The mode condition is self-healing: `.github/scripts/survey-due` keys on
+the marker this skill's completion gate emits. A survey the run never
+reached is retried by the next scheduled wake, so a missed Sunday costs
+latency and nothing else. That only holds if the digest carries the
+marker, which is why emitting it is the first line of the gate below.
 
 ## 1. Read the state
 
@@ -106,9 +106,16 @@ visible and does not silently stall on the same seat.
 
 ## Completion gate
 
-- The digest is posted on the ops-log issue and **carries the survey's
-  Sunday date**, because the mode condition reads that date to decide
-  whether the week's survey already ran.
+- The digest is posted on the ops-log issue and **carries the marker**,
+  on its own line, with the survey's Sunday in UTC:
+
+      <!-- deep-survey 2026-09-13 -->
+
+  `survey-due` reads it to decide whether the week's survey already ran,
+  and reads nothing else: a prose heading gets rephrased by whoever
+  writes next week's digest, and a run that could not tell reported a
+  survey it had already done as skipped (#558). A missing marker costs a
+  duplicated survey, so write it before the prose, not after.
 - It carries the full scorecard: each metric, value or "unmeasurable
   yet", trend, one-line judgment.
 - Every adoption, rejection, model change, and charter change made this

@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Answer whether this wake owes the weekly deep survey, and say what decided.
+
+Extensionless and executable because agents type it as a command mid-session,
+like operator-sweep, retrospect, stalled-prs and security-alerts.
+
+The SURVEY wake condition used to be a sentence: "a scheduled Sunday wake
+where the ops-log has no deep-survey digest dated that Sunday yet". A model
+evaluated it by reading issue #3's prose by eye, matching a digest heading
+against a skill name. On 2026-09-13 one did not: the survey had run at
+00:38:19Z, and the 12:31:56Z digest told the operator this week had no survey
+and announced skipping it for budget. The run reported a sacrifice it had not
+made, because nothing could tell it the duty was already done (#558).
+
+Every other per-run duty was compiled for exactly this reason: operator-sweep
+(#147), stalled-prs (#377), retrospect, security-alerts (#555). The survey's
+trigger was the last prose detector left, guarding the most expensive duty.
+
+Three conditions decide, and this reads all three:
+
+    the day        Sunday in UTC. The cadence is weekly and the ops log is
+                   timestamped in UTC, so the week boundary is UTC's.
+    the wake       TRIGGER_EVENT, when the environment sets it. A scheduled
+                   wake carries the survey. Unset means somebody asked the
+                   question by hand, which is always a fair question.
+    the marker     an HTML comment the deep-survey skill's completion gate
+                   emits into its digest on the ops-log issue:
+
+                       <!-- deep-survey 2026-09-13 -->
+
+The marker is an HTML comment and not the digest's prose heading, because a
+heading is written fresh by a different model every week and the one thing a
+detector cannot survive is being rephrased. It carries its own Sunday rather
+than relying on the comment's `created_at`: the 00:38Z digest that started
+this shows a survey can cross midnight, and the survey a digest reports is the
+one it says it is.
+
+Deliberately NOT read, said plainly so nothing claims a completeness it lacks.
+The Telegram inbox makes a scheduled wake a CHAT wake, and a CHAT wake never
+carries the survey because reply latency outranks it. That state lives in
+Cloudflare KV, this reads GitHub, and drain order means the caller knows the
+answer before it runs this. The prompt keeps that clause.
+
+The invariant that matters more than any line it prints:
+
+    AN OPS LOG THIS CANNOT READ ANSWERS DUE, NEVER RAN.
+
+The two failures are not symmetric. Answering DUE wrongly costs one duplicated
+survey, in the open, on a Sunday, and the next marker ends it. Answering RAN
+wrongly skips the week's most expensive duty silently, which is the exact bug
+this script exists to end, and the bug leaves no trace but an absence nobody
+is looking for. So an unreadable ops log, a missing marker and a malformed
+marker all answer DUE.
+
+Liveness: the footer always names the Sunday it tested, whether the ops log
+read, and how many markers it saw, so a reader can tell a survey that has not
+happened from a detector that has silently stopped working.
+
+Usage: survey-due
+
+Exits 0 whichever way it answers. A due survey is a duty, not an error.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+# The ops-log issue (CLAUDE.md "Where things live"). The survey's digest is
+# posted here, so this is where the marker lives.
+OPS_LOG = 3
+
+# Matches the marker the deep-survey skill's completion gate emits. Tolerant
+# of inner whitespace because a markdown editor may reflow it, strict about
+# the date because the date is the whole payload.
+MARKER = re.compile(r"<!--\s*deep-survey\s+(\d{4}-\d{2}-\d{2})\s*-->")
+
+SUNDAY = 6  # datetime.weekday(): Monday is 0.
+
+
+def comments(repo, since):
+    """Read the ops-log comments posted since `since`. Returns (rows, reason).
+
+    Never dies. An unreadable ops log is a finding this renders as DUE, not an
+    exit code, so it is returned as data like security-alerts does with a 403.
+
+    Not `anchor.gh`, which dies on failure: dying here would answer neither
+    DUE nor RAN, and a caller that gets no answer falls back to reading the
+    prose by eye, which is the failure mode (#558). Not security-alerts' own
+    reader either: that one swaps in GH_WORKFLOW_TOKEN for the security scopes
+    the app token lacks, and issue comments need no such widening.
+
+    `since` bounds the read to the current week. The ops log is append-only
+    and years long; paginating all of it to find a marker at most seven days
+    old would make this the slowest duty in a run that has four.
+
+    No `--jq`. `gh api --paginate --jq` prints one JSON document per line,
+    which `json.loads` cannot take (the crash stalled-prs.test.mjs records
+    from PR #490). Bare `--paginate` merges array pages into one array.
+    """
+    proc = subprocess.run(
+        ["gh", "api", "--paginate", f"repos/{repo}/issues/{OPS_LOG}/comments?since={since}&per_page=100"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        reason = proc.stderr.strip().splitlines()
+        return None, (reason[-1] if reason else f"gh exited {proc.returncode}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "response was not JSON"
+
+
+def sunday_of(now):
+    """The UTC date of `now`'s Sunday, or None when `now` is not a Sunday.
+
+    No rounding back to the most recent Sunday. The survey is a Sunday duty,
+    and a Monday wake that computed yesterday's Sunday would report the week's
+    survey DUE for a day that has ended, which is a wake spent on a duty whose
+    window closed.
+    """
+    return now.strftime("%Y-%m-%d") if now.weekday() == SUNDAY else None
+
+
+def marked(rows, sunday):
+    """The first ops-log comment whose marker names `sunday`, or None.
+
+    Reads the marker's own date, not the comment's `created_at`: a survey that
+    starts Sunday evening posts its digest on Monday, and the survey it
+    reports is still Sunday's.
+    """
+    for row in rows:
+        for found in MARKER.findall(row.get("body") or ""):
+            if found == sunday:
+                return row
+    return None
+
+
+def render(sunday, trigger, rows, error, out=sys.stdout):
+    """Print the verdict and the liveness footer. Returns the footer."""
+    if sunday is None:
+        verdict, detail = "not-due", "not a Sunday in UTC"
+    elif trigger is not None and trigger != "schedule":
+        verdict, detail = "not-due", f"wake is {trigger}, not schedule"
+    elif error is not None:
+        verdict, detail = "due", "ops log UNREADABLE, which is not the same as no survey"
+    else:
+        hit = marked(rows, sunday)
+        if hit is None:
+            verdict, detail = "due", "no deep-survey marker for this Sunday"
+        else:
+            verdict, detail = f"ran {hit['created_at']}", hit["html_url"]
+
+    if verdict == "due":
+        print(f"\nsurvey: DUE for Sunday {sunday}. {detail}.", file=out)
+        if error is not None:
+            print(f"    {error}", file=out)
+            print(
+                "    Reading the ops log by eye is what this replaced."
+                " Re-run once, then treat the survey as due.",
+                file=out,
+            )
+        print(
+            "    Run the delta core in full first, then the `deep-survey` skill.",
+            file=out,
+        )
+
+    # Read state comes from the read, never from the conditions that led to
+    # it: a wake that answered from the clock alone never touched the ops log,
+    # and printing `readable` for a read that did not happen is the kind of
+    # manufactured reassurance the UNREADABLE invariant above exists to refuse.
+    if error is not None:
+        state = "unreadable"
+    elif rows is None:
+        state = "unread"
+    else:
+        state = "readable"
+    markers = "-" if rows is None else sum(
+        1 for row in rows if MARKER.search(row.get("body") or "")
+    )
+    # Every verdict carries its reason on the footer line, including the two
+    # quiet ones. A bare `not-due` sends the reader back to the clock and the
+    # trigger to reconstruct which of them decided, and reconstructing the
+    # condition by hand is what this script replaced.
+    footer = (
+        f"survey-due: {verdict} ({detail})"
+        f" | sunday {sunday or '-'}"
+        f" | ops-log {state}"
+        f" | markers {markers}"
+    )
+    print(f"\n{footer}", file=out)
+    return footer
+
+
+def main():
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    now = datetime.now(timezone.utc)
+    sunday = sunday_of(now)
+    trigger = os.environ.get("TRIGGER_EVENT") or None
+
+    # Only a Sunday scheduled wake can owe the survey, so only it pays for the
+    # read. Every other wake answers from the clock alone.
+    rows, error = (None, None)
+    if sunday is not None and (trigger is None or trigger == "schedule"):
+        rows, error = comments(repo, f"{sunday}T00:00:00Z")
+
+    render(sunday, trigger, rows, error)
+
+
+if __name__ == "__main__":
+    main()
