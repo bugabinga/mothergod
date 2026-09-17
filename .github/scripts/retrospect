@@ -53,6 +53,12 @@ lacks:
   - a run that died before its audit step, which has no artifact. Reported by
     name with its URL, because that is the one case where `gh run view --log`
     still earns its cost.
+  - a phantom: a run GitHub raised and never gave a job, concluding `failure`
+    in seconds with nothing behind it (#553; a bot-attributed pull_request
+    event does this now and then, 33233523131 and 35205833235). Counted on
+    one line with its URL, never sent to the log, because there is no log:
+    `gh run view --log` answers "log not found", and a BDFL wake spent two
+    calls learning that on 2026-09-17.
   - non-agent workflows (ci, CodeQL, the worker tests). Those are graded by
     passing or failing, not by judgement.
   - dollars. `total_cost_usd_notional` is a subscription's shadow price, not
@@ -150,20 +156,32 @@ def download(run_id, into):
     return None
 
 
-def session_skipped(repo, run_id):
-    """True when the guard skipped the session: every Claude step concluded `skipped`.
+def hollow(repo, run_id):
+    """Why a run with no artifact held no session, or None when it did and died.
+
+    "skipped": the guard skipped it, every Claude step concluded `skipped`.
+    "phantom": GitHub raised the run and scheduled no job at all (#553), so
+    there is no step, no session and no log; agent-alarm learned this class
+    first and this is the same test, a job count of zero.
+    None: a real session that died before its audit step, or a run with no
+    Claude step by design (agent-alarm); both stay in the no-artifact list,
+    where the URL is the story.
 
     Asked only about a run with no artifact, so an ordinary window spends no
-    extra call. A run with no Claude step at all (agent-alarm) fails this
-    test and stays in the no-artifact list, where its URL is the story.
+    extra call.
     """
-    conclusions = json.loads(
+    jobs = json.loads(
         gh(
             "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
-            "--jq", '[.jobs[].steps[] | select(.name | test("claude-code-action")) | .conclusion]',
+            "--jq", '{jobs: (.jobs | length), claude: [.jobs[].steps[] '
+                    '| select(.name | test("claude-code-action")) | .conclusion]}',
         )
     )
-    return bool(conclusions) and all(c == "skipped" for c in conclusions)
+    if jobs["jobs"] == 0:
+        return "phantom"
+    if jobs["claude"] and all(c == "skipped" for c in jobs["claude"]):
+        return "skipped"
+    return None
 
 
 def read_session(directory):
@@ -382,13 +400,16 @@ def main():
     window.sort(key=lambda r: r["updatedAt"])
 
     workspace = tempfile.mkdtemp(prefix="retrospect-")
-    read, skipped, orphans, samples = 0, 0, [], []
+    read, skipped, orphans, phantoms, samples = 0, 0, [], [], []
     try:
         for run in window:
             directory = download(run["databaseId"], workspace)
             if directory is None:
-                if session_skipped(repo, run["databaseId"]):
+                why = hollow(repo, run["databaseId"])
+                if why == "skipped":
                     skipped += 1
+                elif why == "phantom":
+                    phantoms.append(run)
                 else:
                     orphans.append(run)
                 continue
@@ -410,6 +431,11 @@ def main():
         for run in orphans:
             print(f"    {iso(run['updatedAt'])}  {run['name']}  {run['conclusion']}  {run['url']}")
 
+    if phantoms:
+        print("\nphantom (GitHub raised the run and scheduled no job; no session, no log, nothing to read; #553):")
+        for run in phantoms:
+            print(f"    {iso(run['updatedAt'])}  {run['name']}  {run['conclusion']}  {run['url']}")
+
     if pending:
         print("\nstill running (judged in a later window, not dropped):")
         for run in pending:
@@ -420,7 +446,7 @@ def main():
     budget(samples, anchor)
     print(
         f"\nretrospect: sessions {read} | skipped {skipped} | no-artifact {len(orphans)} "
-        f"| pending {len(pending)} | issue-comments {comments} "
+        f"| phantom {len(phantoms)} | pending {len(pending)} | issue-comments {comments} "
         f"| bypassed {bypassed} | since {anchor}"
     )
 
