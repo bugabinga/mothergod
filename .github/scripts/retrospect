@@ -47,6 +47,9 @@ lacks:
 
   - runs still in flight, which have uploaded nothing to judge yet. They are
     listed as pending, not silently dropped, and land in a later window.
+  - a run the guard skipped (pause, throttle, exhausted ladder), which held
+    no session. Counted on one line, never listed: forty of them after an
+    outage were once printed as sessions that died, URL each (#525).
   - a run that died before its audit step, which has no artifact. Reported by
     name with its URL, because that is the one case where `gh run view --log`
     still earns its cost.
@@ -56,15 +59,15 @@ lacks:
     a bill, and is reported for comparison between roles only.
 
 Windowing: sessions that COMPLETED at or after the anchor, where the anchor is
-the previous BDFL run's start (anchor.py). A session that finished during that
+the start of the previous BDFL run that held a session (anchor.py). A session that finished during that
 run's long tail can therefore be judged twice. That is deliberate. Anchoring
 on the predecessor's finish instead would leave every session that completed
 while it was working covered by nobody, and a second read costs a minute where
 a gap costs the finding.
 
 Liveness: the last line always prints how many sessions were read, how many
-had no artifact, and the anchor, so a retrospect that returns nothing forever
-is distinguishable from a quiet hour.
+runs were skipped, how many had no artifact, and the anchor, so a retrospect
+that returns nothing forever is distinguishable from a quiet hour.
 """
 
 import argparse
@@ -145,6 +148,22 @@ def download(run_id, into):
         if "metadata.json" in files:
             return root
     return None
+
+
+def session_skipped(repo, run_id):
+    """True when the guard skipped the session: every Claude step concluded `skipped`.
+
+    Asked only about a run with no artifact, so an ordinary window spends no
+    extra call. A run with no Claude step at all (agent-alarm) fails this
+    test and stays in the no-artifact list, where its URL is the story.
+    """
+    conclusions = json.loads(
+        gh(
+            "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
+            "--jq", '[.jobs[].steps[] | select(.name | test("claude-code-action")) | .conclusion]',
+        )
+    )
+    return bool(conclusions) and all(c == "skipped" for c in conclusions)
 
 
 def read_session(directory):
@@ -363,12 +382,15 @@ def main():
     window.sort(key=lambda r: r["updatedAt"])
 
     workspace = tempfile.mkdtemp(prefix="retrospect-")
-    read, orphans, samples = 0, [], []
+    read, skipped, orphans, samples = 0, 0, [], []
     try:
         for run in window:
             directory = download(run["databaseId"], workspace)
             if directory is None:
-                orphans.append(run)
+                if session_skipped(repo, run["databaseId"]):
+                    skipped += 1
+                else:
+                    orphans.append(run)
                 continue
             meta, response = read_session(directory)
             describe(run, meta, response)
@@ -379,6 +401,9 @@ def main():
                     samples.append((when, info))
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
+
+    if skipped:
+        print(f"\nguard-skipped: {skipped} runs held no session (pause, throttle or exhausted ladder); nothing to read.")
 
     if orphans:
         print("\nno artifact (died before the audit step; the log is the only story here):")
@@ -394,7 +419,7 @@ def main():
 
     budget(samples, anchor)
     print(
-        f"\nretrospect: sessions {read} | no-artifact {len(orphans)} "
+        f"\nretrospect: sessions {read} | skipped {skipped} | no-artifact {len(orphans)} "
         f"| pending {len(pending)} | issue-comments {comments} "
         f"| bypassed {bypassed} | since {anchor}"
     )

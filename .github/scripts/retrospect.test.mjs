@@ -181,3 +181,48 @@ test("retrospect budget footer fixtures", async (t) => {
     });
   }
 });
+
+// session_skipped separates a guard-skipped run from one that died before its
+// audit step; both have no artifact. The three shapes are real, probed on
+// 2026-09-17: a skipped BDFL run (35165527435), a session that died (the
+// reviewer on #564, 34970585258) and an alarm run with no Claude step at all
+// (34970888339). Before this, forty skipped runs after an outage printed as
+// forty deaths (#525).
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const skipDriver = `
+import importlib.machinery, importlib.util, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(mod.session_skipped("o/r", 1))
+`;
+
+function sessionSkipped(conclusions) {
+  const dir = mkdtempSync(join(tmpdir(), "retrospect-gh-"));
+  // gh api ... --jq already applied the selector; the stub prints its answer.
+  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho '${JSON.stringify(conclusions)}'\n`);
+  chmodSync(join(dir, "gh"), 0o755);
+  const proc = spawnSync("python3", ["-c", skipDriver, scriptsDir], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  return proc.stdout.trim();
+}
+
+test("a guard-skipped run: the Claude step concluded skipped", () => {
+  assert.equal(sessionSkipped(["skipped"]), "True");
+});
+
+test("a session that died is not skipped, whatever its post step says", () => {
+  assert.equal(sessionSkipped(["failure", "success"]), "False");
+});
+
+test("a run with no Claude step at all is not skipped either", () => {
+  assert.equal(sessionSkipped([]), "False");
+});
