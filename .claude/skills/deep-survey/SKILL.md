@@ -67,12 +67,6 @@ every adoption and every deliberate rejection in the SOURCES.md adoption
 log and the digest. Logging the rejection is what advances the watermark,
 so a round considered and dismissed is never re-read.
 
-The ledger exists because this duty used to say only "review
-SOURCES.md", and reviewing the list is not reading the sources: the file
-had listed the Claude Code docs since 2026-08-20 and nothing ever
-fetched them. On 2026-09-17 the operator read the env-vars page himself
-and sent it over, which is the operator doing the machinery's reading.
-
 Includes your own substrate: action and CLI versions, model per role, and
 Cloudflare tooling. Their agent bootstrap (MCP servers and skills) is at
 https://developers.cloudflare.com/agent-setup/prompt.md; when real

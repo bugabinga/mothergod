@@ -25,8 +25,10 @@ name: docs-watch
 on:
   schedule:
     # Sundays 04:47 UTC, clear of the other Sunday crons (codeql 04:07,
-    # traffic-snapshot 04:23, model-intel 05:07, corpus-fetch-check 05:41,
-    # fuzz-check 06:13) and ahead of the Sunday survey that reads it.
+    # traffic-snapshot 04:23, model-intel 05:07, corpus-fetch-check 05:41)
+    # and ahead of the Sunday survey that reads it. Verified against the
+    # files, not against a neighbouring comment: the list this was first
+    # copied from had fuzz-check at Sunday 06:13, and it is 02:13 daily.
     - cron: "47 4 * * 0"
   workflow_dispatch:
 

@@ -32,8 +32,10 @@ name: traffic-snapshot
 on:
   schedule:
     # Sundays 04:23 UTC, clear of the other Sunday crons (codeql 04:07,
-    # model-intel 05:07, corpus-fetch-check 05:41, fuzz-check 06:13)
+    # docs-watch 04:47, model-intel 05:07, corpus-fetch-check 05:41)
     # and ahead of the Sunday survey wakes that read the result.
+    # fuzz-check was listed here as Sunday 06:13 until PR #577; it is
+    # `13 2 * * *`, daily at 02:13, and never collided with anything.
     - cron: "23 4 * * 0"
   workflow_dispatch:
 
