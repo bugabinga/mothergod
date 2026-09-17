@@ -398,28 +398,22 @@ jobs:
             Telegram (the project status bot; token in
             TELEGRAM_BOT_TOKEN, operator chat id in
             OPERATOR_TELEGRAM_CHAT_ID):
-            - Inbox (webhook mode, issue #5): the bot's webhook is the
-              Cloudflare Worker in infra/telegram-worker/ — it verifies
-              Telegram's secret token, drops every chat but the
-              operator's, stores surviving updates in KV, and fires
-              workflow_dispatch here. Every run, right after the delta
-              check, drain the inbox: list keys under
-              accounts/$KV_ACCOUNT/storage/kv/namespaces/$KV_NAMESPACE
-              (Cloudflare API, bearer CLOUDFLARE_API_TOKEN; both ids are
-              in your environment; keys are
-              zero-padded update ids, list order = arrival order), read
-              each value, act on it as operator steering, confirm
-              briefly on Telegram, then DELETE the processed key. A
-              message stays in KV only if you crashed; the confirmation
-              is the receipt. Never call getUpdates; webhook mode owns
-              the stream.
+            - Inbox (webhook mode, issue #5): `.github/scripts/inbox
+              drain` every run, right after the delta check; its
+              docstring is the contract. Act on each message as
+              operator steering, confirm briefly on Telegram, then
+              `inbox done <key>` on it. The confirmation is the
+              receipt, so a message stays queued only if you crashed
+              before replying. A drain that exits non-zero read
+              nothing: UNREADABLE is not an empty inbox, and treating
+              it as one drops the operator's message silently.
             - Chat memory (operator request, 2026-08-23): runs are
-              amnesiac; key `chatlog` in the same namespace holds the
-              last 40 turns, written by the worker and tg-send only,
-              never by hand. Read it on a chat wake before answering,
-              and whenever you cannot account for what this run already
-              did: an entry carrying this run's id means you already
-              spoke (#183). Edits never arrive (the webhook takes new
+              amnesiac; `inbox chatlog` holds the last 40 turns,
+              written by the worker and tg-send only, never by hand.
+              Read it on a chat wake before answering, and whenever
+              you cannot account for what this run already did: an
+              entry carrying this run's id means you already spoke
+              (#183). Edits never arrive (the webhook takes new
               messages only); a correction is a new message. An
               operator request to trim or delete the log happens the
               same run.

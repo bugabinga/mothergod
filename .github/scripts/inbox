@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""Read and drain the operator's Telegram inbox, or say plainly that it could not.
+
+Extensionless and executable because agents type it as a command mid-session,
+like tg-send, operator-sweep, retrospect and stalled-prs.
+
+The webhook worker (infra/telegram-worker/) verifies Telegram's secret token,
+drops every chat but the operator's, and stores each surviving update in KV
+under a `u:`-prefixed, zero-padded update id. Draining that queue is the first
+duty of a chat wake, and until this script existed it was prose in an agent
+prompt: list the keys with a hand-rolled curl against the Cloudflare API, parse
+the JSON inline, act, delete. Every BDFL run since issue #5 rebuilt that curl
+from scratch, which is both the reuse ladder ignored and, worse, the invariant
+below left to luck.
+
+    A KV READ THIS CANNOT PERFORM PRINTS UNREADABLE AND EXITS NON-ZERO,
+    NEVER `pending 0`.
+
+That is the whole reason this is a script and not a paragraph. A hand-rolled
+read has no error branch, so a lapsed `CLOUDFLARE_API_TOKEN`, a renamed
+namespace or a Cloudflare 5xx all decode as an empty list. An empty inbox is
+not a neutral reading: it is the signal that turns a CHAT wake into a DELTA
+wake. The operator is then at a phone, waiting, while the run does its sweeps
+and posts a status line about something else entirely. The message is not
+delayed, it is silently never answered, and nothing anywhere records that it
+was missed. `security-alerts` learned this lesson for the Security tab (#555);
+the inbox is the louder channel and had none of it.
+
+Three verbs, because an agent does exactly three things here:
+
+    drain            every pending update, oldest first, with the key to pass
+                     to `done` (default when no verb is given)
+    done <key>       delete one processed key, after acting on it
+    chatlog [-n N]   the last N turns of conversation memory, oldest first
+
+`list` and `read` are deliberately absent. Splitting "what is waiting" from
+"what does it say" only invites a caller that lists, acts on the count, and
+never reads, so `drain` always carries the bodies.
+
+Deleting is a separate verb on purpose. Draining does not consume: a run that
+crashes between reading and acting must find the message still queued on its
+next wake, because the confirmation to the operator is the receipt, not the
+read. `done` is what a run calls once it has actually replied.
+
+Never calls Telegram's getUpdates. Webhook mode owns that stream, and polling
+it would race the worker for the same updates.
+
+Reads KV_ACCOUNT, KV_NAMESPACE and CLOUDFLARE_API_TOKEN from the environment.
+The token is spent inside this process and scrubbed from any error text before
+printing (hard rule 10).
+
+Usage: inbox [drain | done <key> | chatlog [-n N]]
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+
+BASE = ("https://api.cloudflare.com/client/v4/accounts/{}"
+        "/storage/kv/namespaces/{}")
+# Cloudflare's edge answers 403 to urllib's default User-Agent, the same trap
+# tg-send documents; our tooling says who it is.
+UA = "mothergod-inbox"
+# The worker's own prefix for stored updates. `chatlog` and `clocklog` live in
+# the same namespace and are not messages, so the prefix is the filter rather
+# than "every key that is not one of the two I remember".
+PREFIX = "u:"
+CHATLOG = "chatlog"
+TURNS = 12  # a screenful of conversation memory; the log itself keeps 40
+SUMMARY = 140  # per-turn width, matching tg-send's own chat-log summaries
+
+
+class Unreadable(Exception):
+    """KV did not answer. Distinct from "KV answered, and it was empty"."""
+
+
+def main(argv: list[str]) -> int:
+    """Dispatch one verb, or explain the usage that would have worked."""
+    verb = argv[0] if argv else "drain"
+    try:
+        if verb == "drain":
+            return drain()
+        if verb == "done":
+            if len(argv) != 2:
+                print("inbox: done needs exactly one key, e.g. "
+                      "`inbox done u:000033118156`", file=sys.stderr)
+                return 2
+            return done(argv[1])
+        if verb == "chatlog":
+            return chatlog(turns(argv[1:]))
+    except Unreadable as error:
+        print(f"\ninbox: UNREADABLE, which is not the same as empty. {error}",
+              file=sys.stderr)
+        return 1
+    print(f"inbox: no verb {verb!r}. Usage: inbox [drain | done <key> | "
+          f"chatlog [-n N]]", file=sys.stderr)
+    return 2
+
+
+def turns(rest: list[str]) -> int:
+    """`-n N`, defaulting to a screenful. A bad N is not worth an error path."""
+    if len(rest) == 2 and rest[0] == "-n" and rest[1].isdigit():
+        return int(rest[1])
+    return TURNS
+
+
+def drain() -> int:
+    """Every pending update, oldest first, bodies included."""
+    keys = pending()
+    updates = [(key, fetch(key)) for key in keys]
+    sys.stdout.write(render(updates))
+    return 0
+
+
+def done(key: str) -> int:
+    """Delete one processed key.
+
+    A key that is already gone is success, not failure: two runs racing the
+    same drain (ADR-0014) must not turn the loser into a red exit over work
+    that did happen.
+    """
+    if not key.startswith(PREFIX):
+        print(f"inbox: {key!r} is not an update key; they start with "
+              f"{PREFIX!r}. `chatlog` is memory and is never deleted here.",
+              file=sys.stderr)
+        return 2
+    url = f"{kv_base()}/values/{urllib.parse.quote(key)}"
+    try:
+        call(url, method="DELETE")
+    except Unreadable as error:
+        print(f"inbox: {key} NOT deleted: {error}", file=sys.stderr)
+        return 1
+    print(f"inbox: {key} deleted | the reply was the receipt")
+    return 0
+
+
+def chatlog(keep: int) -> int:
+    """Conversation memory, oldest first, one line per turn."""
+    url = f"{kv_base()}/values/{CHATLOG}"
+    try:
+        log = call(url)
+    except Unreadable:
+        raise
+    if not isinstance(log, list):
+        log = []
+    sys.stdout.write(render_chatlog(log, keep))
+    return 0
+
+
+def pending() -> list[str]:
+    """Update keys, arrival order.
+
+    Cloudflare lists keys lexicographically and the worker zero-pads the update
+    id, so lexicographic order is arrival order. Sorted explicitly anyway: that
+    equivalence is the worker's promise, and this reader should not break
+    quietly on the day the padding width changes.
+    """
+    url = f"{kv_base()}/keys?limit=1000&prefix={urllib.parse.quote(PREFIX)}"
+    payload = call(url, envelope=True)
+    names = [entry["name"] for entry in payload if isinstance(entry, dict)
+             and str(entry.get("name", "")).startswith(PREFIX)]
+    return sorted(names)
+
+
+def fetch(key: str) -> dict:
+    """One stored update.
+
+    A key listed a moment ago and missing now was drained by a concurrent run,
+    not a failure; it renders as an empty body rather than taking the whole
+    drain down with it.
+    """
+    url = f"{kv_base()}/values/{urllib.parse.quote(key)}"
+    try:
+        value = call(url)
+    except Unreadable as error:
+        if "404" in str(error):
+            return {}
+        raise
+    return value if isinstance(value, dict) else {}
+
+
+def render(updates: list[tuple[str, dict]]) -> str:
+    """The drain, as an agent needs to read it.
+
+    Pure so the tests can drive it without a network: the swallowed-error bug
+    this script exists to prevent is only provable if the renderer can be made
+    to fire on demand.
+    """
+    lines = []
+    for key, update in updates:
+        message = message_of(update)
+        who = message.get("message_id", "?")
+        lines.append(f"{key}  {when(message.get('date'))}  message {who}")
+        for line in body_of(message):
+            lines.append(f"    {line}")
+    footer = f"\ninbox: pending {len(updates)}"
+    if updates:
+        footer += " | act, reply, then `inbox done <key>` on each"
+    return "\n".join(lines + [footer, ""])
+
+
+def render_chatlog(log: list, keep: int) -> str:
+    """Conversation memory as one scannable line per turn."""
+    recent = log[-keep:] if keep > 0 else []
+    lines = []
+    for entry in recent:
+        if not isinstance(entry, dict):
+            continue
+        who = entry.get("from", "?")
+        run = entry.get("run_id")
+        tail = f"  run {run}" if run else ""
+        lines.append(f"{when(entry.get('date'))}  {who:8} "
+                     f"{one_line(entry.get('text', ''))}{tail}")
+    footer = (f"\ninbox: chatlog {len(recent)} of {len(log)} turns"
+              f" | an entry carrying this run's id means you already spoke")
+    return "\n".join(lines + [footer, ""])
+
+
+def one_line(text) -> str:
+    """One turn, one line.
+
+    The worker stores the operator's message verbatim, newlines and all, while
+    tg-send already summarizes our own side. Rendering the raw text breaks the
+    promise this view is built on: 40 turns have to be scannable in a
+    screenful, and a four-line message pushes three older turns off it.
+    """
+    line = " ".join(str(text).split())
+    if not line:
+        return "[no text: attachment or empty message]"
+    return line if len(line) <= SUMMARY else line[: SUMMARY - 1] + "\u2026"
+
+
+def message_of(update: dict) -> dict:
+    """The message inside an update.
+
+    Only `message` is expected: the webhook takes new messages only, so an
+    edit arrives as a fresh message and never as `edited_message`. Falling
+    back anyway costs one dict lookup and beats rendering a blank line if
+    that ever changes upstream.
+    """
+    for field in ("message", "edited_message", "channel_post"):
+        value = update.get(field)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def body_of(message: dict) -> list[str]:
+    """What was actually sent, including the non-text kinds.
+
+    An attachment renders as its file_id because that is the argument the
+    agent needs next (getFile), and a document with no caption would otherwise
+    print as an empty message the reader cannot act on.
+    """
+    lines = [line for line in str(message.get("text", "")).splitlines() if line]
+    caption = str(message.get("caption", ""))
+    if caption:
+        lines += [line for line in caption.splitlines() if line]
+    for kind in ("document", "photo", "voice", "audio", "video", "sticker"):
+        item = message.get(kind)
+        item = item[-1] if isinstance(item, list) and item else item
+        if isinstance(item, dict):
+            name = item.get("file_name", kind)
+            lines.append(f"[{kind}: {name} | file_id {item.get('file_id')}]")
+    return lines or ["[empty message]"]
+
+
+def when(stamp) -> str:
+    """Telegram's unix seconds as an instant a human can place."""
+    if not isinstance(stamp, (int, float)):
+        return "????-??-??T??:??:??Z"
+    return datetime.fromtimestamp(stamp, timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+
+
+def kv_base() -> str:
+    """The namespace URL, or the reason there is not one.
+
+    A missing credential is Unreadable and not an empty inbox, for the same
+    reason a 403 is: both end with a run that believes nobody wrote to it.
+    """
+    account = os.environ.get("KV_ACCOUNT")
+    namespace = os.environ.get("KV_NAMESPACE")
+    if not (account and namespace and os.environ.get("CLOUDFLARE_API_TOKEN")):
+        raise Unreadable(
+            "KV_ACCOUNT, KV_NAMESPACE and CLOUDFLARE_API_TOKEN must all be in "
+            "the environment; one of them is not, so no inbox was read")
+    return BASE.format(account, namespace)
+
+
+def call(url: str, method: str = "GET", envelope: bool = False):
+    """One Cloudflare KV request, with every failure surfaced.
+
+    `envelope` asks for the API's `result` field, which the keys endpoint wraps
+    its list in; a value read returns the stored JSON as-is.
+    """
+    token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+    request = urllib.request.Request(
+        url, method=method,
+        headers={"Authorization": f"Bearer {token}", "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        raise Unreadable(
+            f"Cloudflare answered {error.code} "
+            f"{scrub(error.reason or '', token)}") from None
+    except OSError as error:
+        raise Unreadable(scrub(str(error), token)) from None
+    if not raw:
+        return [] if envelope else {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise Unreadable(f"Cloudflare did not answer JSON: {error}") from None
+    if not envelope:
+        return payload
+    if isinstance(payload, dict) and not payload.get("success", True):
+        raise Unreadable(f"Cloudflare refused: {payload.get('errors')}")
+    result = payload.get("result") if isinstance(payload, dict) else None
+    return result if isinstance(result, list) else []
+
+
+def scrub(message: str, token: str) -> str:
+    """The token never reaches a log, even inside an exception's own text."""
+    return message.replace(token, "<redacted>") if token else message
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
