@@ -1,8 +1,8 @@
-# mothergod bitstream format (FORMAT_VERSION 3, frozen)
+# mothergod bitstream format (FORMAT_VERSION 4, frozen)
 
 Status: **stable, frozen** (ADR-0041). Every version this document
-covers — 2 and 3 — decodes forever: no future ADR may drop decode
-support for either one (CLAUDE.md hard rule 5). Evolution continues
+covers — 2, 3, and 4 — decodes forever: no future ADR may drop decode
+support for any of them (CLAUDE.md hard rule 5). Evolution continues
 only by adding a new version via a `FORMAT_VERSION` bump; this
 document is normative for the current code, and code and spec change
 in the same PR.
@@ -12,7 +12,7 @@ in the same PR.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 3)
+4       1     format version (currently 4)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -23,11 +23,12 @@ unknown method (`UnknownMethod`). A `Method::Lz` payload additionally
 requires format version >= 2 (`codec::LZ_MIN_VERSION`): version 1 named a
 different, incompatible `Lz` payload layout (ADR-0026, superseded by
 ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
-rather than parsed under the current layout. Version 2 and version 3
+rather than parsed under the current layout. Versions 2, 3, and 4
 `Lz` frames share the same outer payload layout below; only the literal
 sub-stream's internal shape differs between them (see "Lz" below,
-ADR-0038) — a decoder dispatches on the declared version rather than
-rejecting either.
+ADR-0038, ADR-0046) — a decoder dispatches on the declared version (and,
+for version 4, the frame's own filter selector) rather than rejecting
+any of them.
 
 ## Methods
 
@@ -54,19 +55,28 @@ offset  size  field
 10      ...   range-coded stream, of the FILTERED bytes
 ```
 
-**Literal sub-stream shape is version-gated (ADR-0038).** At format
-version 2, each literal byte is one direct 256-way range division over
-the six-expert mixer's cumulative table (`literal::Literal::encode`/
-`decode`). At format version 3 and above
-(`codec::LITERAL_SSE_MIN_VERSION`), each literal byte is instead 8
+**Literal sub-stream shape is version- (and, at version 4, candidate-)
+gated (ADR-0038, ADR-0046).** At format version 2, each literal byte is
+one direct 256-way range division over the six-expert mixer's cumulative
+table (`literal::Literal::encode`/`decode`). At format version 3 and
+above (`codec::LITERAL_SSE_MIN_VERSION`), each literal byte is instead 8
 chained binary decisions over the same table
 (`bittree::encode_symbol`/`decode_symbol`'s chain-rule decomposition),
 each calibrated by a secondary symbol estimation (SSE) stage keyed on
 tree position (`bittree::sse_context`, 255 contexts) before it drives the
-range coder (`literal::Literal::encode_sse`/`decode_sse`). Every other
-symbol in the stream (flag/length/offset/slot) is coded identically
-regardless of version; a decoder dispatches only the literal sub-stream
-on the frame's declared version.
+range coder (`literal::Literal::encode_sse`/`decode_sse`). At format
+version 4 and above (`codec::COLUMN_EXPERT_MIN_VERSION`), a frame whose
+filter selector names `Candidate::Transpose` codes its literals one step
+further still: a column-keyed seventh expert (`column::column_of`/
+`column_bank`, keyed on the byte's position among the transposed stream's
+columns) is blended into the six-expert mix before the same
+SSE-calibrated binary-tree coding (`literal::Literal::encode_column`/
+`decode_column`); every other candidate at version 4 codes its literals
+exactly as version 3 does. Every other symbol in the stream
+(flag/length/offset/slot) is coded identically regardless of version or
+candidate; a decoder dispatches only the literal sub-stream, on the
+frame's declared version and (at version 4) its own already-parsed filter
+selector.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for
