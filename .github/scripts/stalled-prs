@@ -75,10 +75,12 @@ reason instead of touched. A PR touching `.github/workflows/` is the
 BDFL's to land after reading its file list (GOVERNANCE "Merging"), so it
 stays a report. And the `agent-approved` label must postdate the review
 round on the current head: a label that survived a push vouches for an
-older head, so that PR stays a report too. A refire inside the grace is
-held as well, so a review that died into an outage is not reopened into
-the same wall by a wake minutes later. Every other signature stays
-report-only: their rescues are judgement.
+older head, so that PR stays a report too. Either read failing (the file
+list, the label timeline) holds the same way: a merge on a vacuous read
+is not proof, and a failed read never ends the sweep. A refire inside the
+grace is held as well, so a review that died into an outage is not
+reopened into the same wall by a wake minutes later. Every other
+signature stays report-only: their rescues are judgement.
 
 Deliberately NOT reported, said plainly so nothing claims a completeness it
 lacks. A `claude/*` branch whose PR was merged or closed is undeleted
@@ -329,7 +331,13 @@ def plan(pr, found, now, files=None, approved_at=None):
                 "the file list (GOVERNANCE 'Merging')"
             }
         started = review.get("startedAt")
-        if approved_at is None or started is None or iso(approved_at) < iso(started):
+        if approved_at is None or started is None:
+            return {
+                "hold": "the agent-approved label event did not read (timeline unreadable, "
+                "or the label arrived by no event), so the verdict cannot be placed on "
+                f"this head: read the round, then merge-pr {number} --sha {pr['headRefOid']}"
+            }
+        if iso(approved_at) < iso(started):
             return {
                 "hold": "agent-approved predates the review round on this head, so the "
                 f"verdict may not cover it: read the round, then merge-pr {number} "
@@ -347,18 +355,29 @@ def approved_at(number):
     event says WHEN, and when is what decides whether the approval postdates
     the head. `--slurp` for the same reason orphans() uses it: one document
     per page otherwise.
+
+    Fails soft, like changed_files(): None when the read fails, never a
+    death, because this runs inside the per-PR sweep and one 502 on one
+    timeline must not take the report and the footer down with it
+    (reviewer's must on PR #572). plan() holds the merge on None.
     """
-    pages = json.loads(
-        gh("api", f"repos/{{owner}}/{{repo}}/issues/{number}/timeline?per_page=100",
-           "--paginate", "--slurp")
+    proc = subprocess.run(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/issues/{number}/timeline?per_page=100",
+         "--paginate", "--slurp"],
+        capture_output=True, text=True,
     )
-    stamps = [
-        event["created_at"]
-        for page in pages
-        for event in page
-        if event.get("event") == "labeled"
-        and (event.get("label") or {}).get("name") == "agent-approved"
-    ]
+    if proc.returncode != 0:
+        return None
+    try:
+        stamps = [
+            event["created_at"]
+            for page in json.loads(proc.stdout)
+            for event in page
+            if event.get("event") == "labeled"
+            and (event.get("label") or {}).get("name") == "agent-approved"
+        ]
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
     return max(stamps) if stamps else None
 
 
