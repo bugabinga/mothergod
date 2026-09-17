@@ -69,8 +69,7 @@ function pyAsync(fn, payload, env = {}) {
     let err = "";
     child.stdout.on("data", (chunk) => (out += chunk));
     child.stderr.on("data", (chunk) => (err += chunk));
-    child.on("close", (code) =>
-      code === 0 ? resolve(JSON.parse(out)) : reject(new Error(err)));
+    child.on("close", (code) => code === 0 ? resolve(JSON.parse(out)) : reject(new Error(err)));
   });
 }
 
@@ -79,6 +78,34 @@ function cli(args, env = {}) {
     encoding: "utf8",
     env: { ...process.env, ...env },
   });
+}
+
+// The CLI form of pyAsync, for the verbs a stub server has to answer.
+function cliAsync(args, env = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(script, args, { env: { ...process.env, ...env } });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+// A stub Cloudflare, addressed through KV_API_BASE. Returns the env an
+// `inbox` child needs to talk to it instead of the real API.
+async function stubKV(handler) {
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    env: {
+      KV_API_BASE: `http://127.0.0.1:${server.address().port}`,
+      KV_ACCOUNT: "acct",
+      KV_NAMESPACE: "ns",
+      CLOUDFLARE_API_TOKEN: "planted-token",
+    },
+    close: () => server.close(),
+  };
 }
 
 // Credentials absent is the cheapest way to reach the same branch a 403 or a
@@ -151,7 +178,10 @@ test("chatlog marks which turns this run already spoke", () => {
 });
 
 test("chatlog -n keeps the tail, and a bad -n falls back to the default", () => {
-  const log = { log: Array.from({ length: 5 }, (_, i) => ({ from: "bdfl", date: 1789672837, text: `t${i}` })), keep: 2 };
+  const log = {
+    log: Array.from({ length: 5 }, (_, i) => ({ from: "bdfl", date: 1789672837, text: `t${i}` })),
+    keep: 2,
+  };
   const out = py("render_chatlog", log);
   assert.match(out, /chatlog 2 of 5 turns/);
   assert.match(out, /t4/);
@@ -193,6 +223,71 @@ test("an unknown verb names the usage that would have worked", () => {
   const run = cli(["slurp"]);
   assert.equal(run.status, 2);
   assert.match(run.stderr, /drain \| done <key> \| chatlog/);
+});
+
+test("done on a key another run already drained is success, not a red run", async () => {
+  const stub = await stubKV((request, response) => {
+    assert.equal(request.method, "DELETE");
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ success: false, errors: [{ code: 10009 }] }));
+  });
+  try {
+    const run = await cliAsync(["done", "u:000000000042"], stub.env);
+    assert.equal(run.status, 0, "the losing side of the race did the work too");
+    assert.match(run.stdout, /already gone/);
+    assert.equal(run.stderr, "");
+  } finally {
+    stub.close();
+  }
+});
+
+test("done on a key that genuinely failed to delete stays red", async () => {
+  const stub = await stubKV((_request, response) => {
+    response.writeHead(500, "Internal Server Error");
+    response.end("boom");
+  });
+  try {
+    const run = await cliAsync(["done", "u:000000000042"], stub.env);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /NOT deleted/);
+    assert.doesNotMatch(run.stderr, /planted-token/);
+  } finally {
+    stub.close();
+  }
+});
+
+test("done deletes, and says the reply was the receipt", async () => {
+  const stub = await stubKV((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ success: true, result: null }));
+  });
+  try {
+    const run = await cliAsync(["done", "u:000000000042"], stub.env);
+    assert.equal(run.status, 0);
+    assert.match(run.stdout, /deleted \| the reply was the receipt/);
+  } finally {
+    stub.close();
+  }
+});
+
+test("a listed key that vanishes before the read does not fail the drain", async () => {
+  const stub = await stubKV((request, response) => {
+    if (request.url.includes("/keys")) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ success: true, result: [{ name: "u:000000000042" }] }));
+      return;
+    }
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ success: false, errors: [] }));
+  });
+  try {
+    const run = await cliAsync(["drain"], stub.env);
+    assert.equal(run.status, 0);
+    assert.match(run.stdout, /\[empty message\]/);
+    assert.match(run.stdout, /pending 1/);
+  } finally {
+    stub.close();
+  }
 });
 
 test("a 403 from Cloudflare is Unreadable, and the token is not in the text", async () => {

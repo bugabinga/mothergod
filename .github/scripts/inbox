@@ -60,8 +60,12 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-BASE = ("https://api.cloudflare.com/client/v4/accounts/{}"
-        "/storage/kv/namespaces/{}")
+# The host is overridable so inbox.test.mjs can stand in for Cloudflare and
+# pin what each exit prints; nothing in production sets it. Same seam tg-send
+# uses for Telegram, and the reason the already-gone race below is provable
+# rather than asserted.
+BASE = (os.environ.get("KV_API_BASE", "https://api.cloudflare.com")
+        + "/client/v4/accounts/{}/storage/kv/namespaces/{}")
 # Cloudflare's edge answers 403 to urllib's default User-Agent, the same trap
 # tg-send documents; our tooling says who it is.
 UA = "mothergod-inbox"
@@ -75,7 +79,17 @@ SUMMARY = 140  # per-turn width, matching tg-send's own chat-log summaries
 
 
 class Unreadable(Exception):
-    """KV did not answer. Distinct from "KV answered, and it was empty"."""
+    """KV did not answer. Distinct from "KV answered, and it was empty".
+
+    Carries the HTTP status when there was one, because two callers need to
+    tell 404 (the key is gone, which is sometimes the expected outcome) from
+    every other failure. Matching on the rendered message instead would make
+    a reworded string silently change control flow.
+    """
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def main(argv: list[str]) -> int:
@@ -132,6 +146,13 @@ def done(key: str) -> int:
     try:
         call(url, method="DELETE")
     except Unreadable as error:
+        if error.status == 404:
+            # The sibling race to fetch()'s: the other run drained and deleted
+            # it while this one was replying. The queue is in the state this
+            # verb exists to reach, so reporting failure would be a lie that
+            # reddens a run for work that did happen.
+            print(f"inbox: {key} already gone | another run drained it")
+            return 0
         print(f"inbox: {key} NOT deleted: {error}", file=sys.stderr)
         return 1
     print(f"inbox: {key} deleted | the reply was the receipt")
@@ -177,7 +198,7 @@ def fetch(key: str) -> dict:
     try:
         value = call(url)
     except Unreadable as error:
-        if "404" in str(error):
+        if error.status == 404:
             return {}
         raise
     return value if isinstance(value, dict) else {}
@@ -308,7 +329,7 @@ def call(url: str, method: str = "GET", envelope: bool = False):
     except urllib.error.HTTPError as error:
         raise Unreadable(
             f"Cloudflare answered {error.code} "
-            f"{scrub(error.reason or '', token)}") from None
+            f"{scrub(error.reason or '', token)}", status=error.code) from None
     except OSError as error:
         raise Unreadable(scrub(str(error), token)) from None
     if not raw:
