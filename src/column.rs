@@ -47,12 +47,16 @@ use std::num::NonZeroUsize;
 ///
 /// # Panics
 ///
-/// Panics if `position >= len`: every caller already knows the
-/// transposed stream's length by construction (`transpose::encode` never
-/// changes it), so an out-of-range `position` is a caller bug, not
-/// adversarial input -- nothing on the decode path calls this
-/// (`transpose::decode` inverts the byte layout directly, without ever
-/// needing a per-position column index).
+/// Panics if `position >= len`. On the encode path every caller already
+/// knows the transposed stream's length by construction (`transpose::encode`
+/// never changes it), so an out-of-range `position` there is a caller bug.
+/// On the decode path (`codec.rs`'s column-expert literal decode) `len` is
+/// `declared_len`, read from untrusted compressed input, so the caller must
+/// establish `position < len` itself before calling: `codec.rs` does this
+/// with `ensure_room(output.len(), 1, declared_len)?` immediately before
+/// each call, which rejects a token that would grow `output` past
+/// `declared_len` and so guarantees `context.position < declared_len` by
+/// the time `column_of` runs.
 #[must_use]
 pub fn column_of(position: usize, columns: NonZeroUsize, len: usize) -> usize {
     assert!(
