@@ -497,12 +497,17 @@ jobs:
             2. Inbox drain (above).
             3. State check: ops-log tail, gh run list, open PRs/issues,
                recent commits. Then run
-               `.github/scripts/stalled-prs`: it names each stalled
-               PR and its rescue, and its docstring is the signature
-               list (the prose it replaced missed PR #377). Rescue
-               recipes live in agents/GOVERNANCE.md "Stalled
-               auto-merge"; a stall the named rescue does not clear
-               gets blocked-on-human. Then run
+               `.github/scripts/stalled-prs --rescue`: it names each
+               stalled PR and its rescue, applies the single-command
+               ones itself (a dead or verdict-less review is refired,
+               an approved PR with green gates is landed on the head
+               its verdict covers) and says what it held and why. Its
+               docstring is the signature list (the prose it replaced
+               missed PR #377; the hand-typed refire it replaced cost
+               PR #564 forty hours, #566). Recipes for the rest live
+               in agents/GOVERNANCE.md "Stalled auto-merge"; a stall
+               the named rescue does not clear gets
+               blocked-on-human. Then run
                `.github/scripts/security-alerts` and triage each row:
                GitHub's scanners write to a tab nothing read (#555).
                UNREADABLE is the loudest row it prints, because a

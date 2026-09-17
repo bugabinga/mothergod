@@ -309,3 +309,226 @@ test("orphans reads every page, and skips the branch that had its PR", () => {
   assert.equal(out.branches, 3);
   assert.deepEqual(out.found, [["claude/orphan", "branch-orphaned"]]);
 });
+
+// --rescue (issue #566): the three single-command rescues stop being commands
+// a BDFL wake types after reading this report. plan() is pure so the holds can
+// be asserted without a PR to break; apply() is the one line of subprocess.
+const planDriver = `
+import importlib.machinery, importlib.util, json, sys
+from datetime import datetime
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+case = json.loads(sys.argv[3])
+found = mod.classify(case["pr"], now)
+print(json.dumps({"found": found, "plan": mod.plan(case["pr"], found, now, case.get("files"), case.get("approved_at"))}))
+`;
+
+function planFor(pr, extra = {}, now = NOW) {
+  const run = spawnSync(
+    "python3",
+    ["-c", planDriver, scriptsDir, now, JSON.stringify({ pr, ...extra })],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+const HEAD = "811b32a5545ed62ea7278b844801ba351fe4015a";
+const approved = (extra = {}) =>
+  pr({
+    headRefOid: HEAD,
+    labels: [{ name: "agent-approved" }],
+    statusCheckRollup: [...GREEN_GATES, review("SUCCESS", { startedAt: "2026-08-30T10:53:30Z" })],
+    ...extra,
+  });
+
+test("a dead review past the grace is refired: close, then reopen", () => {
+  const { found, plan } = planFor(
+    pr({ statusCheckRollup: [...GREEN_GATES, review("CANCELLED")] }),
+  );
+  assert.equal(found.review.completedAt, "2026-08-30T10:54:26Z");
+  assert.deepEqual(plan, {
+    argv: [["gh", "pr", "close", "377"], ["gh", "pr", "reopen", "377"]],
+  });
+});
+
+test("a review that died minutes ago is held: it chases the wall it died against", () => {
+  const { plan } = planFor(
+    pr({ statusCheckRollup: [...GREEN_GATES, review("CANCELLED")] }),
+    {},
+    "2026-08-30T11:02:00Z",
+  );
+  assert.match(plan.hold, /7m ago, inside the 15m grace/);
+});
+
+test("a verdict-less review gets the same refire", () => {
+  const { found, plan } = planFor(
+    pr({ statusCheckRollup: [...GREEN_GATES, review("SUCCESS")] }),
+  );
+  assert.equal(found.kind, "verdict-missing");
+  assert.deepEqual(plan.argv, [["gh", "pr", "close", "377"], ["gh", "pr", "reopen", "377"]]);
+});
+
+test("PR #571: approved after the head's review round, no workflow file, lands on that head", () => {
+  const { found, plan } = planFor(approved(), {
+    files: ["src/column.rs"],
+    approved_at: "2026-08-30T10:56:50Z",
+  });
+  assert.equal(found.kind, "approved-not-landing");
+  assert.equal(plan.argv.length, 1);
+  assert.match(plan.argv[0][0], /merge-pr$/);
+  assert.deepEqual(plan.argv[0].slice(1), ["377", "--sha", HEAD]);
+});
+
+test("a workflow file makes the merge the BDFL's, so it is held", () => {
+  const { plan } = planFor(approved(), {
+    files: ["src/column.rs", ".github/workflows/agent-review.yml"],
+    approved_at: "2026-08-30T10:56:50Z",
+  });
+  assert.match(plan.hold, /BDFL's to land/);
+});
+
+test("an approval older than the head's review round is held, not trusted", () => {
+  // The label survived a push. It vouches for a head that no longer exists.
+  const { plan } = planFor(approved(), {
+    files: ["src/column.rs"],
+    approved_at: "2026-08-30T10:40:00Z",
+  });
+  assert.match(plan.hold, /predates the review round/);
+  assert.match(plan.hold, new RegExp(`merge-pr 377 --sha ${HEAD}`));
+});
+
+test("a file list that did not read holds the merge; a vacuous read is not proof", () => {
+  const { plan } = planFor(approved(), { approved_at: "2026-08-30T10:56:50Z" });
+  assert.match(plan.hold, /did not read/);
+});
+
+test("a dirty PR has no mechanical rescue", () => {
+  const { found, plan } = planFor(
+    pr({ mergeStateStatus: "DIRTY", statusCheckRollup: [...GREEN_GATES, review("CANCELLED")] }),
+  );
+  assert.equal(found.kind, "dirty");
+  assert.equal(plan, null);
+});
+
+const applyDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(json.dumps(mod.apply(json.loads(sys.argv[2]))))
+`;
+
+function applySteps(steps) {
+  const run = spawnSync("python3", ["-c", applyDriver, scriptsDir, JSON.stringify(steps)], {
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const lines = run.stdout.trimEnd().split("\n");
+  return { ok: JSON.parse(lines.pop()), printed: lines };
+}
+
+test("apply prints each command with the tool's last line, and stops at the first failure", () => {
+  const clean = applySteps([["sh", "-c", "echo merge-pr: merged 377"]]);
+  assert.equal(clean.ok, true);
+  assert.deepEqual(clean.printed, ["        applied: sh -c echo merge-pr: merged 377 -> merge-pr: merged 377"]);
+
+  const broken = applySteps([["sh", "-c", "echo nope >&2; exit 3"], ["sh", "-c", "echo never"]]);
+  assert.equal(broken.ok, false);
+  assert.deepEqual(broken.printed, ["        applied: sh -c echo nope >&2; exit 3 -> FAILED exit 3 -> nope"]);
+});
+
+// The two reads the merge arm depends on, and rescue() around them, against a
+// stubbed `gh` on PATH. The reviewer of PR #572 found approved_at() dying the
+// whole sweep on one failed timeline read while the docstring promised the
+// sweep goes on; these pin the soft failure and the hold it becomes.
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const readsDriver = `
+import importlib.machinery, importlib.util, json, sys
+from datetime import datetime
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+case = json.loads(sys.argv[3])
+out = {"approved_at": mod.approved_at(571), "changed_files": mod.changed_files(571)}
+if "pr" in case:
+    found = mod.classify(case["pr"], now)
+    out["rescue"] = mod.rescue(case["pr"], found, now)
+print(json.dumps(out))
+`;
+
+// A gh that answers `pr view` and `api` from the script given, and fails
+// everything else loudly; the stub's exit code is the failure under test.
+function withGh(script, extra = {}, now = NOW) {
+  const dir = mkdtempSync(join(tmpdir(), "stalled-prs-gh-"));
+  writeFileSync(join(dir, "gh"), `#!/bin/sh\n${script}\n`);
+  chmodSync(join(dir, "gh"), 0o755);
+  const run = spawnSync(
+    "python3",
+    ["-c", readsDriver, scriptsDir, now, JSON.stringify(extra)],
+    { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const lines = run.stdout.trimEnd().split("\n");
+  return { out: JSON.parse(lines.pop()), printed: lines };
+}
+
+const TIMELINE = JSON.stringify([
+  [
+    { event: "labeled", label: { name: "changes-requested" }, created_at: "2026-09-17T09:29:59Z" },
+    { event: "committed", sha: "811b32a" },
+  ],
+  [
+    { event: "labeled", label: { name: "agent-approved" }, created_at: "2026-09-17T09:36:50Z" },
+    { event: "unlabeled", label: { name: "changes-requested" }, created_at: "2026-09-17T09:36:51Z" },
+  ],
+]);
+
+test("approved_at reads the latest agent-approved event across pages; changed_files reads paths", () => {
+  const { out } = withGh(
+    `case "$1 $2" in
+       "pr view") echo '{"files":[{"path":"src/column.rs"}]}' ;;
+       "api repos/{owner}/{repo}/issues/571/timeline?per_page=100") echo '${TIMELINE}' ;;
+       *) echo "unexpected: $*" >&2; exit 9 ;;
+     esac`,
+  );
+  assert.equal(out.approved_at, "2026-09-17T09:36:50Z");
+  assert.deepEqual(out.changed_files, ["src/column.rs"]);
+});
+
+test("a gh that fails makes both reads None instead of ending the sweep", () => {
+  const { out } = withGh(`echo "HTTP 502" >&2; exit 1`);
+  assert.equal(out.approved_at, null);
+  assert.equal(out.changed_files, null);
+});
+
+test("an unparseable timeline is None too", () => {
+  const { out } = withGh(`echo 'not json'`);
+  assert.equal(out.approved_at, null);
+});
+
+test("rescue() on a timeline that did not read holds, prints why, and returns", () => {
+  const { out, printed } = withGh(
+    `case "$1 $2" in
+       "pr view") echo '{"files":[{"path":"src/column.rs"}]}' ;;
+       *) echo "HTTP 502" >&2; exit 1 ;;
+     esac`,
+    { pr: approved() },
+  );
+  assert.equal(out.rescue, "held");
+  assert.equal(printed.length, 1);
+  assert.match(printed[0], /^ {8}held: the agent-approved label event did not read/);
+  assert.match(printed[0], new RegExp(`merge-pr 377 --sha ${HEAD}`));
+});
