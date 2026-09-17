@@ -8,6 +8,15 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `site/index.html`, `site/status.html` and `site/agents.html` now carry
+  Open Graph and Twitter Card meta tags (`og:title`, `og:description`,
+  `og:url`, `og:type`, `og:site_name`, `twitter:card`) and a canonical
+  link, so a shared `mothergod.dev` link unfurls with a title and
+  description instead of rendering bare (issue #523). `tests/claims.rs`
+  guards each page's `og:title`/`og:description` against its own
+  `<title>`/meta description and its `og:url` against its own canonical
+  link, so the two required copies of each string cannot drift.
+
 - `tests/claims.rs` now guards two more facts `README.md` and
   `site/index.html` restate from the generated benchmark reports: the
   measurement date and the three reference compressor versions (`gzip`,
