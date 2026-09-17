@@ -120,9 +120,16 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
 - 2026-09-17: operator-sent working note (Telegram, msg 487), "Hidden
   Knowledge for Agents: Salience without Verbalization", on keeping
   instructions salient without the model narrating them. **Measured our
-  exposure before adopting anything**: 3 instruction-echo hits across 1892
-  lines of bot-authored issue comments, so the symptom the note names is
-  not a live defect here. Its weaker remedies are already house rules and
+  exposure before adopting anything**, on a named corpus: the 100 most
+  recent comments from `repos/{owner}/{repo}/issues/comments?per_page=100
+  &sort=created&direction=desc` (which covers issue and PR comments both),
+  restricted to bot authors, 1892 lines of body text, grepped for
+  instruction-echo phrasing ("per CLAUDE.md", "as instructed", "my prompt
+  says" and eleven siblings): 3 hits. A wider sweep by the reviewer of
+  #581 over the full comment history put it at 9 to 33 depending on how
+  loosely echo is read, on a corpus of 22380 lines. Both readings agree on
+  the conclusion and only the conclusion is load-bearing: the symptom the
+  note names is not a live defect here. Its weaker remedies are already house rules and
   already working: the negative meta-rule and style contract (CLAUDE.md
   Voice, "a response that opens by restating its own task spends the only
   lines that reader will see") and rule-count reduction. Adopted its
