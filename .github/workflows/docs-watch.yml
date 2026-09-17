@@ -1,0 +1,110 @@
+# Claude docs watch (operator directive, Telegram, 2026-09-17).
+#
+# Deliberately NOT an agent: no Claude step, no tokens, no context window
+# (ADR-0019, ADR-0023). Diffing two fetches is arithmetic. A script does it
+# for free, and third-party prose never reaches a model's context, so the
+# injection surface an agent reading the docs would have does not exist here.
+#
+# Because it exchanges no OIDC token, this file keeps a native `cron:`
+# safely, the qualifier ADR-0035 turns on: only a claude-code-action seat
+# needs the Worker's dispatch, because only it is rejected as a bot actor.
+# Seven script-only workflows here already do this.
+#
+# Output is delta-only (ADR-0007 run economy). Nothing moved, nothing
+# written. When something moved it refreshes ONE ledger issue labeled
+# `docs-intel`, which the BDFL reads on the Sunday survey's sources duty,
+# logging what it adopted or rejected in `agents/SOURCES.md`.
+#
+# Why a ledger issue and not a committed file: a machinery commit to main
+# wakes the BDFL, and a refresh must never cost a wake (issue #50, #417).
+#
+# The judgement stays the BDFL's. This job puts evidence on the table and
+# never edits a prompt, a setting or a ladder itself.
+name: docs-watch
+
+on:
+  schedule:
+    # Sundays 04:47 UTC, clear of the other Sunday crons (codeql 04:07,
+    # traffic-snapshot 04:23, model-intel 05:07, corpus-fetch-check 05:41)
+    # and ahead of the Sunday survey that reads it. Verified against the
+    # files, not against a neighbouring comment: the list this was first
+    # copied from had fuzz-check at Sunday 06:13, and it is 02:13 daily.
+    - cron: "47 4 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docs-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # Seven fetches of about 1 MB total plus two gh calls. A minute is the
+    # honest budget; five is the headroom for a slow docs origin.
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout, for the watch script
+      issues: write # the ledger issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - id: guard
+        uses: ./.github/actions/agent-guard
+        with:
+          token: ${{ github.token }}
+
+      - if: steps.guard.outputs.paused != 'true'
+        id: watch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Any state, not just open: a closed ledger's digests still carry
+          # forward, closure only retires the issue number.
+          prior="$(gh issue list --repo "$GITHUB_REPOSITORY" --label docs-intel --state all --json number,state --limit 1)"
+          n="$(jq -r '.[0].number // empty' <<<"$prior")"
+          state="$(jq -r '.[0].state // empty' <<<"$prior")"
+          if [ -n "$n" ]; then
+            gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/prior.md"
+          else
+            : > "$RUNNER_TEMP/prior.md"
+          fi
+
+          # Writes changed=true|false to $GITHUB_OUTPUT, and exits non-zero
+          # if it could not look. A watcher that reports calm because the
+          # fetch died is worse than no watcher.
+          python3 .github/scripts/docs-watch.py "$RUNNER_TEMP/prior.md" "$RUNNER_TEMP/body.md"
+
+          {
+            echo "ledger_number=$n"
+            echo "ledger_state=$state"
+          } >> "$GITHUB_OUTPUT"
+
+      - if: steps.guard.outputs.paused != 'true' && steps.watch.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEDGER_NUMBER: ${{ steps.watch.outputs.ledger_number }}
+          LEDGER_STATE: ${{ steps.watch.outputs.ledger_state }}
+        run: |
+          set -euo pipefail
+          cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+
+          gh label create docs-intel --repo "$GITHUB_REPOSITORY" \
+            --color 0E8A16 --description "Machinery-written Claude docs watch ledger" 2>/dev/null || true
+
+          if [ "$LEDGER_STATE" = OPEN ]; then
+            gh issue edit "$LEDGER_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+            echo "::notice::Claude docs moved; refreshed ledger issue #${LEDGER_NUMBER}."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "📚 Claude docs watch" \
+              --label docs-intel --label agent-system \
+              --body-file "$RUNNER_TEMP/body.md"
+            echo "::notice::Claude docs moved; opened a fresh ledger issue."
+          fi
