@@ -47,6 +47,27 @@ fn narrow(low: u64, high: u64, cum_low: u64, cum_high: u64, total: u64) -> (u64,
     (new_low, new_high)
 }
 
+/// Splits `[0, BIT_SCALE)` at `threshold` for
+/// [`Encoder::encode_bit`]/[`Decoder::decode_bit`]: `bit` takes the low side
+/// `[0, threshold)`, `!bit` the high side `[threshold, BIT_SCALE)`. Shared
+/// for the same reason as [`narrow`]: both sides must derive the identical
+/// range from the identical threshold.
+fn threshold_range(bit: bool, threshold: u64) -> (u64, u64) {
+    if bit {
+        (0, threshold)
+    } else {
+        (threshold, BIT_SCALE)
+    }
+}
+
+/// Splits `[0, BIT_SCALE)` in half for
+/// [`Encoder::encode_bits`]/[`Decoder::decode_bits`]'s fixed, unmodeled
+/// 50/50 coding: `bit` `0` takes the low half, `1` the high half. Shared
+/// for the same reason as [`narrow`].
+fn uniform_range(bit: u64) -> (u64, u64) {
+    (bit * (BIT_SCALE / 2), (bit + 1) * (BIT_SCALE / 2))
+}
+
 /// Range-codes a byte stream from a sequence of caller-supplied
 /// cumulative-frequency ranges.
 ///
@@ -142,11 +163,8 @@ impl Encoder {
     pub fn encode_bits(&mut self, value: u32, bits: u32) {
         for k in (0..bits).rev() {
             let bit = u64::from((value >> k) & 1);
-            self.encode(
-                bit * (BIT_SCALE / 2),
-                (bit + 1) * (BIT_SCALE / 2),
-                BIT_SCALE,
-            );
+            let (cum_low, cum_high) = uniform_range(bit);
+            self.encode(cum_low, cum_high, BIT_SCALE);
         }
     }
 
@@ -159,11 +177,7 @@ impl Encoder {
     /// `codec.rs`.
     pub fn encode_bit(&mut self, bit: bool, probability_of_one: f64) {
         let threshold = quantize_probability(probability_of_one);
-        let (cum_low, cum_high) = if bit {
-            (0, threshold)
-        } else {
-            (threshold, BIT_SCALE)
-        };
+        let (cum_low, cum_high) = threshold_range(bit, threshold);
         self.encode(cum_low, cum_high, BIT_SCALE);
     }
 
@@ -298,11 +312,8 @@ impl<'a> Decoder<'a> {
         for _ in 0..bits {
             let target = self.target(BIT_SCALE);
             let bit = u32::from(target >= BIT_SCALE / 2);
-            self.decode(
-                u64::from(bit) * (BIT_SCALE / 2),
-                u64::from(bit + 1) * (BIT_SCALE / 2),
-                BIT_SCALE,
-            );
+            let (cum_low, cum_high) = uniform_range(u64::from(bit));
+            self.decode(cum_low, cum_high, BIT_SCALE);
             value = (value << 1) | bit;
         }
         value
@@ -318,11 +329,7 @@ impl<'a> Decoder<'a> {
     pub fn decode_bit(&mut self, probability_of_one: f64) -> bool {
         let threshold = quantize_probability(probability_of_one);
         let bit = self.target(BIT_SCALE) < threshold;
-        let (cum_low, cum_high) = if bit {
-            (0, threshold)
-        } else {
-            (threshold, BIT_SCALE)
-        };
+        let (cum_low, cum_high) = threshold_range(bit, threshold);
         self.decode(cum_low, cum_high, BIT_SCALE);
         bit
     }
