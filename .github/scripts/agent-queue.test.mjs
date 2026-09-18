@@ -1,10 +1,15 @@
 // Fixtures for agent-queue, the ranking step 5 did by eye until 2026-09-18.
+// The script's docstring carries the why; these pin the behaviour.
 //
 // The first assertion is the one the script exists for: a queue that cannot be
 // read must print UNREADABLE, never empty. The prompt answers an empty queue by
 // stopping, so a wrong `empty` turns a backlog into a run that reports finding
-// nothing. The second is the drift that produced the script: a fresh wording
-// nit must not outrank a 25-day token-exposure bug (#583 over #106).
+// nothing.
+//
+// Fixtures use synthetic issue numbers wherever they test the ladder, because a
+// fixture that hard-codes a real issue's labels is pinned to a triage decision
+// that can change tomorrow. The two tests that do name real issues assert what
+// the live tracker actually returns today, mislabels included.
 //
 // `classify`, `render`, `rank_of`, `claims` and `blockers` are pure by
 // construction (no network, no clock: rows and `now` are arguments) precisely
@@ -77,22 +82,41 @@ test("an unreadable issue list prints UNREADABLE, never empty", () => {
   assert.doesNotMatch(out, /issues readable/);
 });
 
-test("urgency beats recency: the old bug outranks the fresh nit", () => {
-  // The 2026-09-18 drift, pinned. #583 filed today, #106 open 25 days with a
-  // bug label. Reading the list by eye put the fresh one on top.
+test("a labelled bug outranks a fresh unlabelled item", () => {
+  // Synthetic numbers: this pins the ladder, not any issue's current triage.
+  const rows = [
+    issue(2, { title: "filed this morning" }),
+    issue(1, { title: "an old bug", createdAt: "2026-08-23T08:46:19Z", labels: ["agent-system", "bug"] }),
+  ];
+  const out = call("render", { rows });
+  assert.match(out, /agent-queue: top is #1 \(bug, 25d old\)/);
+  assert.deepEqual(call("classify", { rows }).ranked, [1, 2]);
+});
+
+test("rank dominates age, so a mislabel outranks the item it should sit under", () => {
+  // The real shapes on 2026-09-18, real labels, no flattering. #106 is a
+  // token-exposure path open 25 days carrying `enhancement`; #583 is a prompt
+  // wording defect filed that morning carrying nothing. `enhancement` is the
+  // bottom tier, so #583 sorts above it and this asserts that it does.
+  //
+  // Not a bug in the ladder: rank must dominate age or every stale wishlist
+  // item buries today's outage. It is a bug in the labels, and the fix is a
+  // triage call on #106, not a thumb on this scale. Pinned so the tradeoff is
+  // visible to whoever reads the output and wonders.
   const rows = [
     issue(583, { title: "BDFL prompt describes a lever branch protection lacks" }),
     issue(106, {
       title: "Reviewer executes PR code with live tokens",
       // 25 days and 15 hours before the driver's frozen now, so 25 whole days.
       createdAt: "2026-08-23T08:46:19Z",
-      labels: ["agent-system", "bug"],
+      labels: ["agent-system", "enhancement"],
     }),
   ];
+  assert.deepEqual(call("classify", { rows }).ranked, [583, 106]);
+  // Both stay visible: the queue never hides the item whose label is wrong.
   const out = call("render", { rows });
-  assert.match(out, /agent-queue: top is #106 \(bug, 25d old\)/);
-  const { ranked } = call("classify", { rows });
-  assert.deepEqual(ranked, [106, 583]);
+  assert.match(out, /#106/);
+  assert.match(out, /enhancement\s+25d/);
 });
 
 test("ledgers are excluded, so a permanent issue never sorts to the top", () => {
@@ -156,6 +180,9 @@ test("a claim needs a closing keyword, not a passing mention", () => {
     call("claims", { prs: [{ body: "Closes #106 and fixes #107", headRefName: "claude/x" }] }),
     [106, 107],
   );
+  // `refs` is GitHub's non-closing cross-reference idiom. Treating it as a
+  // claim would pull a live issue out of the queue for being mentioned.
+  assert.deepEqual(call("claims", { prs: [{ body: "Refs #106, see also Ref #12", headRefName: "claude/x" }] }), []);
   // Branch names never claim: harvesting digits would have `tans-s1-p6`
   // claim #1 and #6, excluding two real issues for a slug.
   assert.deepEqual(call("claims", { prs: [{ body: "", headRefName: "claude/tans-s1-p6" }] }), []);

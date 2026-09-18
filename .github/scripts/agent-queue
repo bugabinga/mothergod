@@ -11,16 +11,21 @@ that order by reading `gh issue list` output by eye, and a rule evaluated
 fresh by a different model every wake drifts toward whatever is nearest to
 hand.
 
-On 2026-09-18 it drifted measurably. The run named #583 as queue top: a BDFL
-prompt wording defect the same run had filed minutes earlier. Open at the same
-moment, unclaimed, and older by 25 days: #106, a path by which code on a
-same-repo branch reads the reviewer's live tokens. Recency beat urgency
-because recency was in the context window and urgency was on page two.
+On 2026-09-18 the run named #583 as queue top: a prompt wording defect the same
+run had filed minutes earlier, chosen over sixteen other open items. Whether it
+deserved that place is arguable. That nothing could check the claim is not, and
+an order no one can audit is one that drifts toward whatever is nearest to hand.
 
-This is the failure #589 addressed from the other side: an abstract rule loses
-to a concrete habit. That fix named the habit. This one removes the judgment
-call, which is the stronger move wherever the inputs are machine-readable, and
-here they are: labels, age, cross-references, open PRs.
+What this fixes, and what it does not, because the difference is the whole
+honest claim. It fixes the re-derivation: the order is computed from labels,
+age and cross-references, printed with its reasons, and pinned by tests. It
+does NOT adjudicate labels, and the ladder is exactly as good as they are.
+#106, a path by which code on a same-repo branch reads the reviewer's live
+tokens, carries `enhancement` and therefore sorts to the lowest tier at 25 days
+old, below items filed this morning. That is the labels talking, and this
+script will not overrule them to flatter its own output. What it does is put
+the question on every run's screen instead of page two. Ranking and triage are
+different jobs; this one does ranking.
 
 Four things decide an item's place, in this order:
 
@@ -101,10 +106,11 @@ BUCKETS = ("unrouted", "other-realm", "ledger", "latched", "claimed")
 BLOCKS = re.compile(r"block(?:s|ed\s+by|ing)\s+#(\d+)", re.IGNORECASE)
 DEPENDS = re.compile(r"depends\s+on\s+#(\d+)", re.IGNORECASE)
 
-# GitHub's own closing keywords, which is what makes a PR body a claim rather
-# than a citation. Narrow on purpose: see `claims`.
+# GitHub's documented auto-close keywords, and only those. `refs #12` is
+# deliberately absent: it is the standard NON-closing cross-reference idiom,
+# which is the exact bare mention `claims` must not treat as a claim.
 CLOSES = re.compile(
-    r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#(\d+)", re.IGNORECASE
+    r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", re.IGNORECASE
 )
 
 
