@@ -319,7 +319,7 @@ def budget(samples, anchor, now=None):
     (injected only by the fixtures, which must not move with the clock),
     every span is measured from it, and the two facts are labelled apart:
     a window whose reset has passed reports the closed window instead of
-    fake headroom, and a live window older than STALE_HOURS says `used`
+    fake headroom, and a live window read STALE_HOURS or longer ago says `used`
     is a floor, because utilization only grows until the window turns
     over. The governor keeps the observation instant, because its rate is
     `used` over the elapsed that produced it, and it does not run at all
