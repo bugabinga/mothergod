@@ -1,7 +1,7 @@
-//! tANS table normalization: [`normalize_frequencies`], a standalone
-//! primitive for ROADMAP M5's speed-tier work (`research/JOURNAL.md`
-//! S1-P6, "speed tier"), issue #447. Not a port: the founding session never
-//! implemented ANS-family coding (grepped
+//! tANS table construction: [`normalize_frequencies`] and
+//! [`spread_symbols`], standalone primitives for ROADMAP M5's speed-tier
+//! work (`research/JOURNAL.md` S1-P6, "speed tier"), issue #447. Not a
+//! port: the founding session never implemented ANS-family coding (grepped
 //! `research/imports/session-1/mothergod.rs` clean of any tANS/rANS code),
 //! so there is no archive behavior to carry forward, same situation
 //! [`crate::sse`] and [`crate::ppm`] documented for their own leads
@@ -18,21 +18,24 @@
 //! table-lookup encode/decode, no per-byte rebuild to eliminate because
 //! there is nothing to incrementally maintain in the first place.
 //!
-//! **This slice.** Every tANS/FSE-family coder needs a *normalized*
-//! frequency table before it can build encode or decode tables from it: raw
-//! symbol counts summed to an arbitrary total, rescaled onto a power-of-two
-//! total (`1 << table_log2`) so the coder's state transform can use shifts
-//! and masks instead of division. [`normalize_frequencies`] is that
-//! rescaling step alone, standalone and not yet called from anywhere:
-//! largest-remainder rounding (floor each symbol's ideal share, then settle
-//! the total exactly by nudging the entries whose rounding lost or gained
-//! the most, in a fixed deterministic order) so every originally-nonzero
-//! symbol keeps a nonzero share -- a symbol tANS could never code
-//! otherwise, the same "never seen" pitfall [`crate::ppm`]'s module doc
-//! discusses for a different table shape.
+//! **First slice (S2-A81).** [`normalize_frequencies`]: raw symbol counts
+//! summed to an arbitrary total, rescaled onto a power-of-two total
+//! (`1 << table_log2`) so the coder's state transform can use shifts and
+//! masks instead of division.
 //!
-//! **Remaining S1-P6 scope.** Building the encode/decode state-transform
-//! tables from a normalized frequency table (the "spread" step), the
+//! **This slice.** Every tANS/FSE-family coder next assigns each of the
+//! `1 << table_log2` table slots to exactly one symbol -- the "spread"
+//! step -- before it can build encode or decode transition tables from
+//! that assignment. [`spread_symbols`] is that assignment alone: symbol
+//! `s` occupies exactly `freq[s]` slots, scattered by a fixed odd stride
+//! (coprime to the power-of-two table size, so its orbit covers every
+//! slot exactly once) instead of packed contiguously, so a table walked in
+//! slot order interleaves symbols close to their frequency order rather
+//! than running one symbol at a time -- the shape the decode table built
+//! from it depends on. Standalone and not yet called from anywhere.
+//!
+//! **Remaining S1-P6 scope.** Building the encode/decode transition tables
+//! from a spread assignment (state deltas and next-state arithmetic), the
 //! coder's actual state machine, wiring it behind a new fast `Method`
 //! variant, and the `FORMAT_VERSION` bump and real-bitstream measurement
 //! that wiring needs.
@@ -142,6 +145,70 @@ pub fn normalize_frequencies(counts: &[u32], table_log2: u32) -> Vec<u32> {
     freq.into_iter()
         .map(|f| u32::try_from(f).expect("every entry stays within target, itself a valid u32"))
         .collect()
+}
+
+/// The stride a table of `table_size` slots advances by per placement in
+/// [`spread_symbols`]. Any odd stride is coprime to a power-of-two
+/// `table_size`, so repeatedly adding it mod `table_size` visits every
+/// slot exactly once before returning to the start -- the only property
+/// [`spread_symbols`]'s correctness depends on. The magnitude (half the
+/// table plus an eighth of it plus three) is FSE's own constant, chosen to
+/// scatter placements rather than cluster them; forcing the low bit is
+/// this function's own fix for `table_size == 8`, where the constant
+/// alone lands on 8, itself even.
+fn spread_stride(table_size: usize) -> usize {
+    ((table_size >> 1) + (table_size >> 3) + 3) | 1
+}
+
+/// Assigns each of the `1 << table_log2` table slots to exactly one
+/// symbol, from a normalized frequency table -- one whose entries already
+/// sum to `1 << table_log2`, [`normalize_frequencies`]'s postcondition.
+///
+/// Symbol `s` occupies exactly `freq[s]` of the returned table's slots.
+/// Slots fill in stride order (see `spread_stride`) rather than
+/// contiguously per symbol, so reading the result in slot order
+/// interleaves symbols instead of running one symbol at a time -- the
+/// classic FSE/tANS "spread" step, and the shape a decode table built from
+/// this assignment depends on.
+///
+/// # Panics
+///
+/// Panics if `table_log2 >= 32` (`1 << table_log2` would not fit the `u32`
+/// shift every caller of this module uses, same bound
+/// [`normalize_frequencies`] enforces). Panics if `freq` does not sum to
+/// exactly `1 << table_log2`: this function assigns slots to symbols by
+/// construction and has no notion of a slot left over or a symbol short of
+/// its share, so a mismatched total is a caller error, never a property of
+/// adversarial input -- this primitive is not yet reachable from any
+/// decode path.
+#[must_use]
+pub fn spread_symbols(freq: &[u32], table_log2: u32) -> Vec<u32> {
+    assert!(
+        table_log2 < 32,
+        "table_log2 must fit a u32 shift; got {table_log2}"
+    );
+    let table_size = 1usize << table_log2;
+    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+    assert!(
+        sum == table_size as u64,
+        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
+         Call normalize_frequencies first."
+    );
+
+    let mask = table_size - 1;
+    let stride = spread_stride(table_size);
+
+    let mut table = vec![0u32; table_size];
+    let mut position = 0usize;
+    for (symbol, &count) in freq.iter().enumerate() {
+        let symbol = u32::try_from(symbol)
+            .expect("alphabet size fits u32, same bound freq's caller respects");
+        for _ in 0..count {
+            table[position] = symbol;
+            position = (position + stride) & mask;
+        }
+    }
+    table
 }
 
 #[cfg(test)]
@@ -274,5 +341,110 @@ mod tests {
         let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
         assert_eq!(sum, 1u64 << 12);
         assert!(freq.iter().all(|&f| f > 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "must fit a u32 shift")]
+    fn spread_table_log2_of_32_panics() {
+        let _ = spread_symbols(&[1, 1], 32);
+    }
+
+    #[test]
+    #[should_panic(expected = "freq must sum to exactly")]
+    fn spread_rejects_a_freq_that_does_not_sum_to_the_table_size() {
+        let _ = spread_symbols(&[1, 1, 1], 2);
+    }
+
+    #[test]
+    fn spread_matches_a_hand_computed_table() {
+        // table_size=4, stride = ((4>>1)+(4>>3)+3)|1 = 5, mask=3.
+        // position: 0 -[+5&3=1]-> 1 -[+5&3=2]-> 2 -[+5&3=3]-> 3 -[+5&3=0]-> 0
+        assert_eq!(spread_symbols(&[2, 1, 1], 2), vec![0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn spread_places_every_symbol_the_right_number_of_times() {
+        let cases: &[(&[u32], u32)] = &[
+            (&[100, 1, 1], 3),
+            (&[1, 1, 1], 2),
+            (&[7, 5, 3, 1], 5),
+            (&[1000, 1, 1, 1, 1, 1, 1, 1], 4),
+            (&[3, 3, 3, 3, 3, 3, 3, 3, 3], 6),
+            (&[255, 254, 253, 1], 10),
+        ];
+        for &(counts, table_log2) in cases {
+            let freq = normalize_frequencies(counts, table_log2);
+            let table = spread_symbols(&freq, table_log2);
+            assert_eq!(table.len(), 1usize << table_log2);
+            for (symbol, &want) in freq.iter().enumerate() {
+                let got = table
+                    .iter()
+                    .filter(|&&s| s == u32::try_from(symbol).unwrap())
+                    .count();
+                assert_eq!(
+                    got, want as usize,
+                    "symbol {symbol} placed {got} times, wanted {want}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn spread_never_writes_the_same_slot_twice() {
+        // Reimplements the position sequence independently of
+        // spread_symbols to catch a bug that both places every symbol the
+        // right number of times overall (the check above) and still
+        // collides two placements onto the same slot: a slot's final
+        // value can equal 0 (a real symbol) whether or not it was ever
+        // actually visited, so an overwritten slot and an untouched one
+        // can silently balance each other's count in that check alone.
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let table_size = 1usize << table_log2;
+        let mask = table_size - 1;
+        let stride = spread_stride(table_size);
+
+        let mut seen = vec![false; table_size];
+        let mut position = 0usize;
+        for &count in &freq {
+            for _ in 0..count {
+                assert!(!seen[position], "slot {position} written twice");
+                seen[position] = true;
+                position = (position + stride) & mask;
+            }
+        }
+        assert!(seen.iter().all(|&s| s), "not every slot was written");
+    }
+
+    #[test]
+    fn spread_is_deterministic() {
+        let counts = [37, 19, 0, 5, 5, 200, 1, 1, 1, 1, 1];
+        let freq = normalize_frequencies(&counts, 10);
+        let first = spread_symbols(&freq, 10);
+        let second = spread_symbols(&freq, 10);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn spread_handles_a_single_slot_table() {
+        assert_eq!(spread_symbols(&[1], 0), vec![0]);
+    }
+
+    #[test]
+    fn spread_handles_table_size_eight_where_the_bare_constant_is_even() {
+        // stride's magnitude alone ((8>>1)+(8>>3)+3 = 8) is even and would
+        // divide table_size=8, collapsing every placement onto slot 0;
+        // spread_stride's `| 1` is what keeps this case correct.
+        let freq = normalize_frequencies(&[5, 2, 1], 3);
+        let table = spread_symbols(&freq, 3);
+        assert_eq!(table.len(), 8);
+        for (symbol, &want) in freq.iter().enumerate() {
+            let got = table
+                .iter()
+                .filter(|&&s| s == u32::try_from(symbol).unwrap())
+                .count();
+            assert_eq!(got, want as usize);
+        }
     }
 }
