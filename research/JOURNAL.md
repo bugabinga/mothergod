@@ -2950,6 +2950,45 @@ record.
   over both tables, wiring behind a new fast `Method` variant, and the
   `FORMAT_VERSION` bump and real-bitstream measurement that wiring
   needs.
+- S2-A84 | ACCEPTED | Fourth slice of S1-P6's remaining tANS fast path
+  (issue #447, after S2-A83's `build_decode_table`): `src/tans.rs`'s
+  `build_encode_table`, the mirroring encode-table construction
+  S2-A83 named as remaining scope. Inverts `build_decode_table`'s own
+  per-symbol occurrence numbering rather than recomputing it: a decoder
+  answers "slot `p` decodes to which symbol, at which occurrence"; an
+  encoder already knows the symbol it is about to emit and needs the
+  opposite lookup, "symbol `s`'s occurrence `n` sits at which slot," so
+  this function makes one pass over the same spread table
+  `build_decode_table` walks and records each symbol's occurrences (in
+  slot order, which is also ascending order since the pass is a single
+  forward scan) into a per-symbol `Vec<u32>` of slot positions, instead
+  of a per-slot struct. `FSE`'s own real encode tables (`symbolTT`,
+  `deltaFindState`/`deltaNbBits`) fold this lookup into a division-free
+  closed form; this slice keeps the plain table because nothing yet
+  reads it inside a hot loop to make that optimization pay for itself —
+  the coder's state machine (remaining scope below) is what would tell
+  whether the closed form is worth the extra complexity, not a decision
+  to make ahead of having one. | 12 unit tests: three panics
+  (`table_log2 >= 32`, a `freq`/`table_symbol` length mismatch, an
+  out-of-range symbol id), a hand-computed 4-slot table (the same
+  worked example `build_decode_table`'s own hand-computed test uses,
+  read in the opposite direction), each symbol's row length matching
+  its `freq` entry, rows sorted ascending by construction, an
+  independent cross-check filtering the spread table for each symbol
+  and comparing the resulting slot list directly (not reusing
+  `build_encode_table`'s own scan), a round-trip property test feeding
+  every `(symbol, slot)` pair the encode table names back through
+  `build_decode_table` and asserting the decoded symbol matches,
+  determinism, and a zero-count symbol getting an empty row rather than
+  a missing one or a panic; `cargo x check` (fmt, clippy pedantic +
+  missing_docs, test, doc) clean. | No bpb measurement, same reason as
+  S2-A81 through S2-A83: no coder yet to produce a bitstream —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb
+  deltas; `baseline_gate check` confirms the existing 11 cases are
+  unaffected (nothing wired). Remaining S1-P6 scope: the coder's actual
+  read/write state machine over both tables, wiring behind a new fast
+  `Method` variant, and the `FORMAT_VERSION` bump and real-bitstream
+  measurement that wiring needs.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -2975,8 +3014,9 @@ record.
   `normalize_frequencies`, standalone and not yet wired. S2-A82 took the
   next slice, the "spread" step (`spread_symbols`), also standalone and
   not yet wired. S2-A83 took the decode-table construction step
-  (`build_decode_table`), also standalone and not yet wired. Remaining
-  scope: the mirroring encode-table construction, the coder's actual
+  (`build_decode_table`), also standalone and not yet wired. S2-A84 took
+  the mirroring encode-table construction step (`build_encode_table`),
+  also standalone and not yet wired. Remaining scope: the coder's actual
   read/write state machine over both tables, `Method` wiring, and the
   `FORMAT_VERSION` bump and real-bitstream measurement that wiring
   needs.

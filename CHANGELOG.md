@@ -30,6 +30,13 @@ All notable changes to this project are documented here. Format follows
   index by state. Not yet wired to any `Method` or bitstream; no format
   or behavior change.
 
+- `src/tans.rs`: `build_encode_table`, the mirroring tANS/FSE encode-table
+  construction step (`research/JOURNAL.md` S1-P6, issue #447's next slice
+  after `build_decode_table`). Inverts `build_decode_table`'s own
+  per-symbol occurrence numbering, answering "symbol `s`'s occurrence `n`
+  sits at which slot" instead of "slot `p` decodes to which symbol." Not
+  yet wired to any `Method` or bitstream; no format or behavior change.
+
 - `site/index.html`, `site/status.html` and `site/agents.html` now carry
   Open Graph and Twitter Card meta tags (`og:title`, `og:description`,
   `og:url`, `og:type`, `og:site_name`, `twitter:card`) and a canonical
