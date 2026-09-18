@@ -182,11 +182,10 @@ const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
 /// `weight`'s share of `weight_sum`, scaled into [`FIXED_POINT_SCALE`]'s
 /// fixed-point space and normalized by `bank_total` so an expert's raw
 /// frequency count converts into that same fixed-point unit before
-/// summing. Shared by [`Literal::mix`] and
-/// [`Literal::ideal_cost_bits_column_expert_pair`]'s own seven-wide blend
-/// (`research/JOURNAL.md` S1-P5): both need the identical scale-factor
-/// formula, only the `weight_sum` they normalize against differs (six
-/// experts' worth vs. seven).
+/// summing. Shared by [`Literal::mix`] and [`Literal::mix7`]'s own
+/// seven-wide blend (`research/JOURNAL.md` S1-P5): both need the
+/// identical scale-factor formula, only the `weight_sum` they normalize
+/// against differs (six experts' worth vs. seven).
 fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
     let normalized = weight / weight_sum;
     #[allow(
@@ -203,10 +202,10 @@ fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
 /// moves given `estimate` (this expert's own prediction) versus `mixed`
 /// (the blend's prediction), clamped to `[MIN_WEIGHT, MAX_WEIGHT]`.
 /// Shared by [`Literal::update`]'s six real experts and
-/// [`Literal::ideal_cost_bits_column_expert_pair`]'s seventh: that
-/// method's own docs already claim its column weight adapts "the same
-/// ... rule `Self::update` uses" — this makes that claim true by
-/// construction instead of by two independently written copies.
+/// [`Literal::update_column_expert`]'s seventh: that method's own docs
+/// already claim its column weight adapts "the same ... rule
+/// `Self::update` uses" — this makes that claim true by construction
+/// instead of by two independently written copies.
 fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) -> f64 {
     let denominator = mixed.max(MIN_DENOMINATOR);
     let gradient = LEARNING_RATE * (estimate - mixed) / denominator;
@@ -317,15 +316,20 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     )
 }
 
-/// Measurement-only seventh expert for `research/JOURNAL.md` S1-P5's "does
-/// column identity help, blended in alongside the shipped six" hypothesis
-/// (`crate::codec::ideal_cost_bits_column_expert_experiment`'s only
-/// caller, via [`Literal::ideal_cost_bits_column_expert_pair`]). Not part
-/// of [`Literal`]'s own persisted state and never constructed by
-/// `encode`/`decode`: a column-keyed frequency bank plus its own single
-/// mixing weight per weight-context key (the same key `Literal`'s own six
-/// weight vectors are indexed by), adapting on its own trajectory
-/// alongside, never inside, the six real experts' weights.
+/// The seventh, column-keyed expert [`Literal::encode_column`]/
+/// `decode_column` blend into the mix for a [`Candidate::Transpose`]
+/// frame's literal sub-stream (`research/JOURNAL.md` S1-P5,
+/// `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
+/// `FORMAT_VERSION` 4). Not part of [`Literal`]'s own persisted state and
+/// never touched by the plain `encode`/`decode` (or `encode_sse`/
+/// `decode_sse`) pair: `codec.rs` constructs it separately, per trial, and
+/// threads it through only the column-coding path. A column-keyed
+/// frequency bank plus its own single mixing weight per weight-context key
+/// (the same key `Literal`'s own six weight vectors are indexed by),
+/// adapting on its own trajectory alongside, never inside, the six real
+/// experts' weights.
+///
+/// [`Candidate::Transpose`]: crate::filters::select::Candidate::Transpose
 #[derive(Debug, Clone)]
 pub struct ColumnExpertState {
     /// `max_banks * ALPHABET` frequencies, bank-major (same convention as
@@ -338,10 +342,9 @@ pub struct ColumnExpertState {
     weight: Vec<f64>,
     /// This expert's own SSE calibration trajectory, independent of
     /// [`Literal::sse`]'s real one (`research/JOURNAL.md` S1-P5's
-    /// SSE-interaction question).
-    /// [`Literal::ideal_cost_bits_column_expert_pair_sse`] calibrates the
-    /// seven-expert mix through this table instead, so probing whether the
-    /// column signal survives SSE calibration never perturbs the
+    /// SSE-interaction question). [`Literal::encode_column`]/
+    /// `decode_column` calibrate the seven-expert mix through this table
+    /// instead, so the column signal's own calibration never perturbs the
     /// six-expert model's shipped calibration trajectory.
     sse: Sse,
 }
@@ -630,11 +633,9 @@ impl Literal {
 
     /// Seven-wide counterpart of [`Self::mix`]: the same fixed-point blend
     /// with `column_state`'s bank folded in as a seventh expert, keyed by
-    /// `column_bank`. Shared by [`Self::ideal_cost_bits_column_expert_pair`]
-    /// and [`Self::ideal_cost_bits_column_expert_pair_sse`] so the two
-    /// experiments price the identical seven-expert distribution and can
-    /// only differ in how they turn `cum` into bits
-    /// (`research/JOURNAL.md` S1-P5).
+    /// `column_bank`. Shared by [`Self::encode_column`] and
+    /// [`Self::decode_column`] so both code the identical seven-expert
+    /// distribution (`research/JOURNAL.md` S1-P5).
     fn mix7(
         &self,
         bank_indices: &[usize; EXPERTS],
@@ -672,9 +673,8 @@ impl Literal {
 
     /// Adapts `column_state`'s own weight and bank toward `symbol`, the
     /// seventh-expert counterpart of [`Self::update`]'s six real experts,
-    /// shared by [`Self::ideal_cost_bits_column_expert_pair`] and
-    /// [`Self::ideal_cost_bits_column_expert_pair_sse`] so both price
-    /// `column_state` through the identical adaptation rule
+    /// shared by [`Self::encode_column`] and [`Self::decode_column`] so
+    /// both adapt `column_state` through the identical rule
     /// (`research/JOURNAL.md` S1-P5). The column expert's own weight adapts
     /// on the same continuous-probability-space rule [`Self::update`] uses
     /// for the six real weights, restricted to this one component: how well
@@ -716,101 +716,6 @@ impl Literal {
             DEFAULT_INCREMENT,
             DEFAULT_LIMIT,
         );
-    }
-
-    /// `research/JOURNAL.md` S1-P5, before-wiring measurement: prices
-    /// `byte` twice from the same pre-update six-expert state, the paired
-    /// methodology S2-R6 used for S1-P3's escape fallback — once under the
-    /// shipped mix ([`Self::ideal_cost_bits`] exactly, including its own
-    /// `update` call, so the six real experts adapt on their one real
-    /// trajectory regardless of this method ever being called), once with
-    /// `column_state`'s bank blended in as a seventh expert via
-    /// [`Self::mix7`]. `column_state` adapts on its own trajectory via
-    /// [`Self::update_column_expert`], independent of the six real weights
-    /// (never written back into `self.weights`).
-    ///
-    /// Returns `(baseline_bits, with_column_bits)`.
-    #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
-    pub fn ideal_cost_bits_column_expert_pair(
-        &mut self,
-        context: Context,
-        byte: u8,
-        column_bank: usize,
-        column_state: &mut ColumnExpertState,
-    ) -> (f64, f64) {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-
-        let cum7 = self.mix7(&bank_indices, weight_index, column_bank, column_state);
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "same bound as ideal_cost_bits: fixed-point sums stay well under 2^53"
-        )]
-        let with_column_probability =
-            (cum7[symbol + 1] - cum7[symbol]) as f64 / cum7[ALPHABET] as f64;
-        let with_column_bits = -with_column_probability.log2();
-
-        self.update_column_expert(
-            &bank_indices,
-            weight_index,
-            symbol,
-            column_bank,
-            column_state,
-        );
-
-        let baseline_bits = self.ideal_cost_bits(context, byte);
-
-        (baseline_bits, with_column_bits)
-    }
-
-    /// `research/JOURNAL.md` S1-P5's other open question before the real
-    /// wiring slice: does the seventh column-keyed expert's win survive
-    /// once the mixed probability is calibrated by [`Self::encode_sse`]'s
-    /// SSE stage, the refinement every real byte already pays under
-    /// `FORMAT_VERSION` 3? Prices `byte` twice through that exact
-    /// bittree/SSE decomposition — once under the shipped six-expert mix
-    /// ([`Self::ideal_cost_bits_sse`] exactly, so `self.sse`'s one real
-    /// trajectory adapts identically to production regardless of this
-    /// method ever running), once with `column_state`'s seventh expert
-    /// blended in via [`Self::mix7`] (the same blend
-    /// [`Self::ideal_cost_bits_column_expert_pair`] uses) and calibrated by
-    /// `column_state`'s own independent [`Sse`] table, so the with-column
-    /// path's calibration trajectory cannot leak into the six-expert one's.
-    ///
-    /// Returns `(baseline_bits, with_column_bits)`, both after SSE.
-    #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
-    pub fn ideal_cost_bits_column_expert_pair_sse(
-        &mut self,
-        context: Context,
-        byte: u8,
-        column_bank: usize,
-        column_state: &mut ColumnExpertState,
-    ) -> (f64, f64) {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-
-        let cum7 = self.mix7(&bank_indices, weight_index, column_bank, column_state);
-        let with_column_bits = bittree::ideal_cost_bits_sse(&cum7, byte, &mut column_state.sse);
-
-        self.update_column_expert(
-            &bank_indices,
-            weight_index,
-            symbol,
-            column_bank,
-            column_state,
-        );
-
-        let baseline_bits = self.ideal_cost_bits_sse(context, byte);
-
-        (baseline_bits, with_column_bits)
     }
 
     /// Decodes one byte from `decoder` under `context`, then updates the
@@ -855,8 +760,8 @@ impl Literal {
     /// six-expert mix, not a new coupling. `column_state`'s own weight and
     /// bank adapt separately via [`Self::update_column_expert`], against
     /// the seven-way mixed estimate that was actually coded. Reproduces
-    /// exactly the update order [`Self::ideal_cost_bits_column_expert_pair_sse`]
-    /// measured (`research/JOURNAL.md` S2-A76): `update_column_expert`
+    /// exactly the update order `research/JOURNAL.md` S2-A76's
+    /// before-wiring measurement found correct: `update_column_expert`
     /// first (reading the six real experts' pre-update state), then the
     /// six-expert `update`.
     pub fn encode_column(
@@ -1363,142 +1268,6 @@ mod tests {
         assert!(state.freq.iter().all(|&f| f == 1));
         assert_eq!(state.total, vec![ALPHABET_U32; 4]);
         assert_eq!(state.weight, vec![1.0; WEIGHT_CONTEXTS]);
-    }
-
-    #[test]
-    fn column_expert_pair_baseline_matches_plain_ideal_cost_bits() {
-        // The pair's baseline side is Self::ideal_cost_bits verbatim
-        // (`Self::ideal_cost_bits_column_expert_pair`'s own docs): walking
-        // a model through the paired method must land on exactly the same
-        // per-byte costs and exactly the same six-expert state a model
-        // walked through plain `ideal_cost_bits` alone would, byte for
-        // byte, with column_state along for the ride.
-        let mut paired = Literal::new();
-        let mut plain = Literal::new();
-        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
-        let mut context = Context::default();
-        for &b in b"the quick brown fox jumps over the lazy dog" {
-            let (baseline, _) =
-                paired.ideal_cost_bits_column_expert_pair(context, b, 0, &mut column_state);
-            let expected = plain.ideal_cost_bits(context, b);
-            assert!(
-                (baseline - expected).abs() < 1e-9,
-                "byte {b:?}: paired baseline {baseline} vs plain {expected}"
-            );
-            context = context.after_literal(b);
-        }
-    }
-
-    #[test]
-    fn column_expert_pair_updates_only_its_own_column_bank() {
-        let mut model = Literal::new();
-        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
-        let context = Context::default();
-        let _ = model.ideal_cost_bits_column_expert_pair(context, b'x', 2, &mut column_state);
-
-        let bank2_total: u32 = column_state.freq[2 * ALPHABET..3 * ALPHABET].iter().sum();
-        assert_eq!(bank2_total, column_state.total[2]);
-        assert_eq!(
-            column_state.freq[2 * ALPHABET + usize::from(b'x')],
-            1 + DEFAULT_INCREMENT
-        );
-        for other in [0usize, 1, 3] {
-            assert!(
-                column_state.freq[other * ALPHABET..(other + 1) * ALPHABET]
-                    .iter()
-                    .all(|&f| f == 1)
-            );
-            assert_eq!(column_state.total[other], ALPHABET_U32);
-        }
-    }
-
-    #[test]
-    fn column_expert_pair_costs_stay_finite_and_positive() {
-        let mut model = Literal::new();
-        let mut column_state = ColumnExpertState::new(crate::test_support::nz(8));
-        let mut context = Context::default();
-        for (i, &b) in b"0123456789abcdefghijklmnopqrstuvwxyz".iter().enumerate() {
-            let bank = i % 8;
-            let (baseline, with_column) =
-                model.ideal_cost_bits_column_expert_pair(context, b, bank, &mut column_state);
-            assert!(
-                baseline.is_finite() && baseline > 0.0,
-                "baseline={baseline}"
-            );
-            assert!(
-                with_column.is_finite() && with_column > 0.0,
-                "with_column={with_column}"
-            );
-            context = context.after_literal(b);
-        }
-    }
-
-    #[test]
-    fn column_expert_pair_sse_baseline_matches_plain_ideal_cost_bits_sse() {
-        // Same claim as column_expert_pair_baseline_matches_plain_ideal_cost_bits,
-        // for the SSE-calibrated pair: the baseline side is
-        // Self::ideal_cost_bits_sse verbatim.
-        let mut paired = Literal::new();
-        let mut plain = Literal::new();
-        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
-        let mut context = Context::default();
-        for &b in b"the quick brown fox jumps over the lazy dog" {
-            let (baseline, _) =
-                paired.ideal_cost_bits_column_expert_pair_sse(context, b, 0, &mut column_state);
-            let expected = plain.ideal_cost_bits_sse(context, b);
-            assert!(
-                (baseline - expected).abs() < 1e-9,
-                "byte {b:?}: paired baseline {baseline} vs plain {expected}"
-            );
-            context = context.after_literal(b);
-        }
-    }
-
-    #[test]
-    fn column_expert_pair_sse_adapts_its_own_sse_table_independently() {
-        // column_state's own Sse table must move away from the identity
-        // mapping it starts at, on its own trajectory: Self::mix7's
-        // seven-expert cum table differs from the six-expert one
-        // Self::ideal_cost_bits_sse's internal call calibrates, so the two
-        // Sse tables see different raw probabilities and must diverge.
-        let mut model = Literal::new();
-        let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
-        let context = Context::default();
-        let fresh_sse = format!(
-            "{:?}",
-            ColumnExpertState::new(crate::test_support::nz(4)).sse
-        );
-
-        for &b in b"aaaaaaaaaaaaaaaaaaaa" {
-            let _ = model.ideal_cost_bits_column_expert_pair_sse(context, b, 2, &mut column_state);
-        }
-
-        assert_ne!(
-            format!("{:?}", column_state.sse),
-            fresh_sse,
-            "column_state's own SSE table should adapt away from the identity mapping"
-        );
-    }
-
-    #[test]
-    fn column_expert_pair_sse_costs_stay_finite_and_positive() {
-        let mut model = Literal::new();
-        let mut column_state = ColumnExpertState::new(crate::test_support::nz(8));
-        let mut context = Context::default();
-        for (i, &b) in b"0123456789abcdefghijklmnopqrstuvwxyz".iter().enumerate() {
-            let bank = i % 8;
-            let (baseline, with_column) =
-                model.ideal_cost_bits_column_expert_pair_sse(context, b, bank, &mut column_state);
-            assert!(
-                baseline.is_finite() && baseline > 0.0,
-                "baseline={baseline}"
-            );
-            assert!(
-                with_column.is_finite() && with_column > 0.0,
-                "with_column={with_column}"
-            );
-            context = context.after_literal(b);
-        }
     }
 
     /// [`ColumnExpertState::try_new`] must produce the exact same state
