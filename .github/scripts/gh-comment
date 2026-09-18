@@ -47,6 +47,8 @@ import os
 import subprocess
 import sys
 
+from secret_scrub import scrub
+
 FOOTER = "\n\n---\n_{role} · [Claude Code](https://claude.ai/code)_"
 
 
@@ -86,6 +88,15 @@ def main() -> int:
     body = sys.stdin.read().strip()
     if not body:
         die("empty body; refusing to post")
+    # An issue comment is permanent, public, unmasked project surface (hard
+    # rule 10 names it). Redact rather than refuse: a blocked post costs the
+    # run its report, and the scrubbed body is already safe. Warn loudly so
+    # the session reports the leak instead of never learning it happened.
+    body, redactions = scrub(body)
+    if redactions:
+        print(f"gh-comment: redacted {redactions} credential-shaped string(s) "
+              "from the body; a secret reached your text (CLAUDE.md rule 10)",
+              file=sys.stderr)
     full_body = body + FOOTER.format(role=role)
 
     token = os.environ.get("GH_WORKFLOW_TOKEN", "")
