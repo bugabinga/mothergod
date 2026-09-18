@@ -37,6 +37,20 @@ All notable changes to this project are documented here. Format follows
   sits at which slot" instead of "slot `p` decodes to which symbol." Not
   yet wired to any `Method` or bitstream; no format or behavior change.
 
+- `site/index.html`'s Principles section now backs each of its four
+  claims with a linked artifact and a checkable count instead of stating
+  them as bare assertions (issue #522): the panic claim links the four
+  fuzz targets and the adversarial/torture suites, the corpus claim links
+  `bench/corpus.toml`'s 13 pinned archives, the experiment claim links
+  `research/progress.jsonl`, and the independent-verification claim cites
+  `CLAUDE.md`'s hard rules 3 and 8. The trust evidence previously rendered
+  only on `/status.html`, which has recorded zero pageloads in every
+  measured window. `tests/claims.rs` guards the fuzz-target and
+  pinned-archive counts exactly and the experiment counts as a floor
+  (`>=`, not `==`): the log grows on every research or codec experiment
+  (`CLAUDE.md` rule 6), so an exact-equality guard would fail CI on PRs
+  outside the herald's realm every time it did.
+
 - `site/index.html`, `site/status.html` and `site/agents.html` now carry
   Open Graph and Twitter Card meta tags (`og:title`, `og:description`,
   `og:url`, `og:type`, `og:site_name`, `twitter:card`) and a canonical
