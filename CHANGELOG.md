@@ -170,6 +170,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- The status page called M3 and M5 `pending`, the same word it uses for a
+  milestone nobody has started, on a day the experiment ledger held 93
+  entries against M3 (operator report, 2026-09-18). Both are programs, not
+  deliverables: continuous work with a target and no finish line, so they
+  carry no checklist and the generator had nothing to read. They now render
+  `ongoing`, and ROADMAP.md states the distinction plus what release 0.1
+  does and does not gate on.
+
 - The status page's TRUST panel counted 26 "crashers found" from eleven
   green `fuzz-check` runs: the ledger entry counted every file libFuzzer
   left under `fuzz/artifacts`, `slow-unit-*` files included (survey,

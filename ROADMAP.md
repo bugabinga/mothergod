@@ -94,10 +94,27 @@ Process metrics (the team — BDFL's machinery gauge):
 
 ## Milestones
 
-Ordered milestones. The daily heartbeat picks the top unblocked item and ships
-the smallest useful slice of it. Items marked `blocked-on-human` need the
-operator. Research-flavored items defer to `research/JOURNAL.md` leads for
-their ordering.
+Two kinds of entry live here, and conflating them is how the status page came
+to call this project's most-worked area "pending" (operator report,
+2026-09-18).
+
+A **milestone** is a deliverable with a definition of done, so it carries a
+checklist: M0, M1, M2, M4, M6, M7. A **program** is continuous work with a
+target but no finish line, so it carries none: M3 (ratio) and M5 (speed). The
+numbering is creation order, not a dependency chain, and a program gates
+nothing; M7 already says this of itself.
+
+Release 0.1 (M6) therefore gates on its own two open items alone. It promises
+what M0/M1/M2/M4 delivered: lossless, adversarially tested, deterministic
+across platforms, a frozen format, a CLI and a library. It does not promise
+the RATIO ladder, whose first rung is open (Silesia aggregate 2.061 b/B
+against zstd -19's 1.997, `docs/benchmarks/`). Waiting on a program is
+waiting forever, because a program has no state in which it is finished.
+
+The daily heartbeat picks the top unblocked item and ships the smallest useful
+slice of it. Items marked `blocked-on-human` need the operator.
+Research-flavored items defer to `research/JOURNAL.md` leads for their
+ordering.
 
 **Product shape** (operator directive, 2026-08-22): mothergod ships in
 the zstd/xz/gzip genre. That means one CLI that both compresses and
@@ -144,6 +161,10 @@ agent processes. Done 2026-08-20.
 
 ## M3 — Close the gaps (research program)
 
+A program, not a milestone: no checklist, because there is no state in which
+beating the field is finished. Progress reads off the Scorecard's RATIO ladder
+and `research/progress.jsonl`, never a checkbox.
+
 Work the journal's standing leads in order: SSE (S1-P1), btultra2-class parse
 (S1-P2), PPM escape (S1-P3), large windows (S1-P4), per-column modeling
 (S1-P5). Target: beat zstd -19 per-file on all of Silesia/Canterbury with
@@ -173,9 +194,11 @@ real bitstreams; then xz -9e.
       S1-P7. Encode still takes a whole buffer (the optimal-parse encoder
       needs the full input regardless) and the CLI still reads its whole
       input up front; only decode's memory bound was this item's target.
-- [x] Frozen format spec v1: `docs/format/SPEC.md` declared stable at
-      `FORMAT_VERSION` 3 (ADR-0041); versions 2 and 3 decode forever,
-      evolution continues by version bump per hard rule 5.
+- [x] Frozen format spec v1: `docs/format/SPEC.md` declared stable by
+      ADR-0041, at `FORMAT_VERSION` 3 then; it tracks the current version
+      (4 since ADR-0046) because the freeze is a process, not a number.
+      Versions 2 and later decode forever, evolution continues by version
+      bump per hard rule 5.
 
 ## M7 — Trust engineering (ADR-0043)
 
@@ -203,6 +226,9 @@ mechanisms in the issues.
   fuzzing cannot, journal rules apply.
 
 ## M5 — Speed tiers
+
+A program, not a milestone, on the same terms as M3: it is the Scorecard's
+SPEED line, worked continuously.
 
 Bit-decomposed fast models, tANS fast path (level -1 mode), explicit SIMD
 blend, measured multi-core scaling (S1-P6).

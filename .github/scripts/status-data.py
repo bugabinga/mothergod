@@ -72,7 +72,15 @@ def _commit():
 
 @field("milestones")
 def _milestones():
-    """ROADMAP.md `## M<n> — Title` headers; ✅ or checkbox states below."""
+    """ROADMAP.md `## M<n> — Title` headers; ✅ or checkbox states below.
+
+    Four statuses, because three could not tell a program from unstarted
+    work. ROADMAP.md's Milestones intro draws the line: a milestone is a
+    deliverable with a checklist, a program is continuous work that has
+    none. Inferring "pending" from an absent checklist told the live page
+    that M3 had not been started, on a day the experiment ledger held 93
+    entries against it (operator report, 2026-09-18).
+    """
     text = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     milestones = []
     sections = re.split(r"^## (?=M\d)", text, flags=re.M)[1:]
@@ -91,8 +99,10 @@ def _milestones():
             status = "done"
         elif checked:
             status = "active"
-        else:
+        elif unchecked:
             status = "pending"
+        else:
+            status = "ongoing"
         milestones.append({"id": mid, "title": title, "status": status})
     if not milestones:
         raise ValueError("no `## M<n>` sections found in ROADMAP.md")
@@ -101,11 +111,16 @@ def _milestones():
 
 @field("phase")
 def _phase():
-    """Pre-alpha until every ROADMAP milestone is done (M6 is release 0.1)."""
+    """Pre-alpha until every ROADMAP milestone is done (M6 is release 0.1).
+
+    Programs are excluded: they never reach "done", so counting them would
+    pin this field to pre-alpha past 1.0 and forever after.
+    """
     milestones = data.get("milestones")
     if not milestones:
         raise ValueError("phase derives from milestones, which failed")
-    if all(m["status"] == "done" for m in milestones):
+    deliverables = [m for m in milestones if m["status"] != "ongoing"]
+    if deliverables and all(m["status"] == "done" for m in deliverables):
         return "released"
     return "pre-alpha"
 
