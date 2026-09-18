@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Rank the agent-system queue, so step 5 takes the top item and not the recent one.
+
+Extensionless and executable because agents type it as a command mid-session,
+like operator-sweep, retrospect, stalled-prs, security-alerts and survey-due.
+
+The BDFL prompt has carried the ordering rule since 2026-08-23: "take the top
+unclaimed agent-system issue", "urgency first: bug before enhancement, a
+blocker before what it blocks", "claim check first". Every wake re-derived
+that order by reading `gh issue list` output by eye, and a rule evaluated
+fresh by a different model every wake drifts toward whatever is nearest to
+hand.
+
+On 2026-09-18 the run named #583 as queue top: a prompt wording defect the same
+run had filed minutes earlier, chosen over sixteen other open items. Whether it
+deserved that place is arguable. That nothing could check the claim is not, and
+an order no one can audit is one that drifts toward whatever is nearest to hand.
+
+What this fixes, and what it does not, because the difference is the whole
+honest claim. It fixes the re-derivation: the order is computed from labels,
+age and cross-references, printed with its reasons, and pinned by tests. It
+does NOT adjudicate labels, and the ladder is exactly as good as they are.
+#106, a path by which code on a same-repo branch reads the reviewer's live
+tokens, carries `enhancement` and therefore sorts to the lowest tier at 25 days
+old, below items filed this morning. That is the labels talking, and this
+script will not overrule them to flatter its own output. What it does is put
+the question on every run's screen instead of page two. Ranking and triage are
+different jobs; this one does ranking.
+
+Four things decide an item's place, in this order:
+
+    routed         an issue with no realm label is in nobody's queue. Routing
+                   it is the caller's duty before shipping anything, so it is
+                   surfaced in its own section rather than ranked.
+    excluded       a ledger, a blocked-on-human latch, or an issue another
+                   session already claims.
+    urgency        bug, then blocker, then plain, then enhancement, exactly
+                   the prompt's ladder.
+    age            oldest first within a rank, because the queue's failure
+                   mode is an old item that nothing ever surfaces.
+
+Ledgers are excluded, and that exclusion is why the `ledger` label exists. Six
+of the twenty-two issues carrying agent-system on 2026-09-18 were
+machinery-written ledgers (the ops log, the two model ledgers, the allowance,
+traffic and docs ledgers): permanent, never shipped, never closed. They
+tripled the apparent queue, and any of them could sort to the top, where the
+only correct action is to leave it alone. Six ad-hoc labels each secretly
+meant "not work"; one label says it, and says it to `gh issue list` too.
+
+Deliberately NOT decided here, said plainly so nothing claims a completeness
+it lacks. Whether to ship the top item at all belongs to the caller: the
+budget footer can say SLOW DOWN, and step 5 is the prescribed first cut. This
+ranks the queue; it never argues for spending on it.
+
+The invariant that matters more than any line it prints:
+
+    A QUEUE THIS CANNOT READ PRINTS UNREADABLE, NEVER EMPTY.
+
+The two failures are not symmetric. A wrong UNREADABLE costs one re-run, in
+the open. A wrong `empty` tells a run the factory has no debt, and the prompt
+answers an empty queue by stopping. That is a no-op run reported as a good
+outcome, which is how a backlog grows while every run says it found nothing.
+
+Liveness: the footer always names how many items ranked, what each exclusion
+removed, and the age of the top item, so a reader can tell a queue that is
+genuinely empty from a matcher that has silently stopped working.
+
+Usage: agent-queue [--all]
+
+    --all   print every ranked item, not just the top five.
+
+Exits 0 whichever way it answers. A deep queue is a workload, not an error.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+# Issues the machinery writes and no session ships. A label is the marker
+# rather than a list of issue numbers in this file, because a numbers list
+# here is a count that drifts the day someone adds a ledger, which is the
+# defect #559 records against the workflows skill.
+LEDGER = "ledger"
+
+# This queue's realm. Realm routing itself is the caller's duty, but an
+# unrouted issue cannot be ranked into any realm's queue, so it is surfaced
+# separately rather than silently dropped.
+REALM = "agent-system"
+REALMS = ("product", "agent-system", "marketing")
+
+# Urgency ladder, lowest sorts first, straight from the prompt's sentence.
+# `blocker` is not a label: it is computed from cross-references below.
+RANKS = {"bug": 0, "blocker": 1, "plain": 2, "enhancement": 3}
+RANK_NAME = {value: key for key, value in RANKS.items()}
+
+# The exclusion buckets, named once so the footer and the empty case cannot
+# disagree about which filters exist.
+BUCKETS = ("unrouted", "other-realm", "ledger", "latched", "claimed")
+
+# "blocks #12", "blocked by #12", "blocking #12", "depends on #12". These are
+# the shapes our issue bodies actually use. A reference this misses costs an
+# item one rank, never a wrong exclusion, so the pattern stays narrow.
+BLOCKS = re.compile(r"block(?:s|ed\s+by|ing)\s+#(\d+)", re.IGNORECASE)
+DEPENDS = re.compile(r"depends\s+on\s+#(\d+)", re.IGNORECASE)
+
+# GitHub's documented auto-close keywords, and only those. `refs #12` is
+# deliberately absent: it is the standard NON-closing cross-reference idiom,
+# which is the exact bare mention `claims` must not treat as a claim.
+CLOSES = re.compile(
+    r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", re.IGNORECASE
+)
+
+
+def gh(args):
+    """Run a gh command. Returns (parsed, error); never raises, never exits.
+
+    Not `anchor.gh`, which dies on failure. Dying here would print neither a
+    queue nor UNREADABLE, and a caller that gets no answer falls back to
+    reading `gh issue list` by eye, which is the habit this replaces.
+    """
+    proc = subprocess.run(args, capture_output=True, text=True)
+    if proc.returncode != 0:
+        reason = proc.stderr.strip().splitlines()
+        return None, (reason[-1] if reason else f"gh exited {proc.returncode}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "response was not JSON"
+
+
+def claims(prs):
+    """Issue numbers another session is already holding.
+
+    A claim needs a closing keyword, not a bare mention. PR bodies cite issue
+    numbers constantly in prose ("the drift #589 recorded"), and matching any
+    `#N` would exclude every issue a PR happened to reference. That failure is
+    silent and points the wrong way: it shrinks the queue, and a queue that
+    under-reports work is the same defect as an empty one.
+
+    Branch names are not read at all. Ours are slugs (`claude/bdfl-agent-queue`,
+    `claude/tans-s1-p6`) that carry no issue number, and harvesting the bare
+    digits that do appear would have `tans-s1-p6` claim #1 and #6. A branch
+    with no PR is therefore invisible here; the prompt keeps that sweep as the
+    caller's eyes, which is cheap because a claim without a PR is rare and
+    short-lived.
+    """
+    held = set()
+    for pr in prs or []:
+        held.update(int(number) for number in CLOSES.findall(pr.get("body") or ""))
+    return held
+
+
+def blockers(rows):
+    """Issue numbers that some other open issue says it is waiting on.
+
+    Read from every row's body, including rows this queue excludes: an issue
+    blocked by a ledger still makes that ledger load-bearing, and a product
+    issue waiting on machinery is exactly what "a blocker before what it
+    blocks" exists for.
+    """
+    found = set()
+    for row in rows:
+        body = row.get("body") or ""
+        for pattern in (BLOCKS, DEPENDS):
+            found.update(int(number) for number in pattern.findall(body))
+    return found
+
+
+def labels_of(row):
+    """The row's label names as a set."""
+    return {label["name"] for label in row.get("labels") or []}
+
+
+def rank_of(row, blocking):
+    """The urgency rank, by the prompt's ladder. Lower sorts first."""
+    names = labels_of(row)
+    if "bug" in names:
+        return RANKS["bug"]
+    if row["number"] in blocking:
+        return RANKS["blocker"]
+    if "enhancement" in names:
+        return RANKS["enhancement"]
+    return RANKS["plain"]
+
+
+def classify(rows, held, now):
+    """Split open issues into the ranked queue and the named exclusions.
+
+    Returns (ranked, excluded). Every exclusion keeps its items so the footer
+    can say what each filter removed: a queue that shrinks for an unnamed
+    reason is indistinguishable from a reader that stopped working.
+    """
+    blocking = blockers(rows)
+    ranked = []
+    excluded = {bucket: [] for bucket in BUCKETS}
+
+    for row in rows:
+        names = labels_of(row)
+        number = row["number"]
+        created = datetime.fromisoformat(row["createdAt"].replace("Z", "+00:00"))
+        item = {
+            "number": number,
+            "title": row["title"],
+            "age": (now - created).days,
+            "labels": sorted(names),
+            "rank": rank_of(row, blocking),
+        }
+
+        if names.isdisjoint(REALMS):
+            excluded["unrouted"].append(item)
+        elif REALM not in names:
+            excluded["other-realm"].append(item)
+        elif LEDGER in names:
+            excluded["ledger"].append(item)
+        elif "blocked-on-human" in names:
+            excluded["latched"].append(item)
+        elif number in held:
+            excluded["claimed"].append(item)
+        else:
+            ranked.append(item)
+
+    # Oldest first inside a rank: the queue's failure mode is an old item that
+    # nothing surfaces, so age breaks every tie in the old item's favour.
+    ranked.sort(key=lambda item: (item["rank"], -item["age"]))
+    return ranked, excluded
+
+
+def render(ranked, excluded, error, show_all=False, out=sys.stdout):
+    """Print the queue and the liveness footer. Returns the footer."""
+    if error is not None:
+        print(f"\nagent-queue: UNREADABLE. {error}", file=out)
+        print(
+            "    Reading `gh issue list` by eye is what this replaced."
+            " Re-run once, and do not report an empty queue.",
+            file=out,
+        )
+    elif not ranked:
+        print("\nagent-queue: empty. No unclaimed, routed agent-system work.", file=out)
+    else:
+        top = ranked[0]
+        print(
+            f"\nagent-queue: top is #{top['number']}"
+            f" ({RANK_NAME[top['rank']]}, {top['age']}d old)",
+            file=out,
+        )
+        for item in (ranked if show_all else ranked[:5]):
+            print(
+                f"  {RANK_NAME[item['rank']]:>11}  {item['age']:>4}d"
+                f"  #{item['number']}  {item['title'][:64]}",
+                file=out,
+            )
+        if not show_all and len(ranked) > 5:
+            print(f"  ... {len(ranked) - 5} more, with --all", file=out)
+
+    # Routing outranks shipping: an unrouted issue sits in nobody's queue, and
+    # the prompt makes labelling it the BDFL's job before any other work.
+    if excluded["unrouted"]:
+        print("\nunrouted, route these before you ship (no realm label):", file=out)
+        for item in excluded["unrouted"]:
+            print(f"  {item['age']:>4}d  #{item['number']}  {item['title'][:64]}", file=out)
+
+    if excluded["claimed"]:
+        print("\nclaimed by an open PR, do not take:", file=out)
+        for item in excluded["claimed"]:
+            print(f"  #{item['number']}  {item['title'][:64]}", file=out)
+
+    # Read state comes from the read, never from the conditions around it.
+    state = "unreadable" if error is not None else "readable"
+    counts = " ".join(
+        f"{bucket} {len(excluded[bucket])}" for bucket in BUCKETS if excluded[bucket]
+    )
+    top = f"#{ranked[0]['number']} {ranked[0]['age']}d" if ranked else "-"
+    footer = (
+        f"agent-queue: {'UNREADABLE' if error is not None else f'{len(ranked)} ranked'}"
+        f" | issues {state}"
+        f" | top {top}"
+        f" | excluded {counts or 'none'}"
+    )
+    print(f"\n{footer}", file=out)
+    return footer
+
+
+def main():
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    show_all = "--all" in sys.argv[1:]
+
+    rows, error = gh([
+        "gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "200",
+        "--json", "number,title,labels,createdAt,body",
+    ])
+    prs, pr_error = gh([
+        "gh", "pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
+        "--json", "number,body,headRefName",
+    ])
+
+    # A PR list that will not read is a claim check that cannot run, and an
+    # unchecked claim sends two sessions at one issue. So a failed PR read
+    # fails the whole answer rather than ranking against claims it never saw.
+    error = error or pr_error
+
+    if error is not None:
+        render([], {bucket: [] for bucket in BUCKETS}, error, show_all)
+        return
+
+    ranked, excluded = classify(rows, claims(prs), datetime.now(timezone.utc))
+    render(ranked, excluded, None, show_all)
+
+
+if __name__ == "__main__":
+    main()
