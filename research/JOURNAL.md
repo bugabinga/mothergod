@@ -2950,6 +2950,44 @@ record.
   over both tables, wiring behind a new fast `Method` variant, and the
   `FORMAT_VERSION` bump and real-bitstream measurement that wiring
   needs.
+- S2-A84 | ACCEPTED | Fourth slice of S1-P6's remaining tANS fast path
+  (issue #447, after S2-A83's `build_decode_table`): `src/tans.rs`'s
+  `build_encode_table`, the mirroring encode-side construction —
+  `build_next_state_table` (the shared table an encoder indexes by
+  register value to find its next state) plus `build_encode_transforms`
+  (one `EncodeTransform` per symbol: which of two adjacent bit counts the
+  current register needs, and where to look up the result). Unlike the
+  three slices before it, this one is not a straight port of an FSE
+  formula from memory: the encode register lives in
+  `[table_size, 2 * table_size)` throughout encoding (ANS's own
+  doubling-range invariant), one bit wider than `build_decode_table`'s
+  own `[0, table_size)` decode state, so the per-symbol bit-count formula
+  had to be re-derived against `build_decode_table`'s own
+  already-tested occurrence numbering rather than assumed correct by
+  analogy; a first pass copying `tableLog - highbit32(freq - 1)` from
+  memory was off by one bit and caught before commit only by the
+  cross-check test below, not by recollection. | 6 new unit tests: four
+  panics (`table_log2 >= 31` for both construction functions — one bit
+  tighter than `build_decode_table`'s `< 32`, since this side's values
+  range up to `2 * table_size` — and the usual freq-sum/table-symbol
+  mismatches), two hand-computed examples matching
+  `build_decode_table`'s own example (freq=[2,1,1], table_log2=2), and
+  determinism. The load-bearing test is
+  `encode_table_inverts_decode_table_for_every_register_value`: for
+  every table slot (every decode state) and every bit pattern decode
+  could have read to land there, it reconstructs the corresponding
+  encode register and runs it through `EncodeTransform` and
+  `build_next_state_table`'s output, asserting the result recovers
+  exactly the same slot — every reachable register value, across 6
+  shapes, not one hand-picked example. `cargo x check` (fmt, clippy
+  pedantic + missing_docs, test, doc) clean. | No bpb measurement, same
+  reason as S2-A81/S2-A82/S2-A83: no coder yet to produce a bitstream —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas;
+  `baseline_gate check` confirms the existing 11 cases are unaffected
+  (nothing wired). Remaining S1-P6 scope: the coder's actual read/write
+  state machine over both tables, wiring behind a new fast `Method`
+  variant, and the `FORMAT_VERSION` bump and real-bitstream measurement
+  that wiring needs.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -2975,11 +3013,13 @@ record.
   `normalize_frequencies`, standalone and not yet wired. S2-A82 took the
   next slice, the "spread" step (`spread_symbols`), also standalone and
   not yet wired. S2-A83 took the decode-table construction step
-  (`build_decode_table`), also standalone and not yet wired. Remaining
-  scope: the mirroring encode-table construction, the coder's actual
-  read/write state machine over both tables, `Method` wiring, and the
-  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
-  needs.
+  (`build_decode_table`), also standalone and not yet wired. S2-A84 took
+  the mirroring encode-table construction (`build_encode_table`),
+  re-derived against `build_decode_table`'s own formulas rather than
+  assumed by analogy, also standalone and not yet wired. Remaining
+  scope: the coder's actual read/write state machine over both tables,
+  `Method` wiring, and the `FORMAT_VERSION` bump and real-bitstream
+  measurement that wiring needs.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the

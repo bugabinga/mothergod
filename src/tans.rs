@@ -45,10 +45,22 @@
 //! anywhere: nothing yet builds the matching encode table or reads/writes
 //! real bits against this one.
 //!
-//! **Remaining S1-P6 scope.** The mirroring encode-table construction, the
-//! coder's actual read/write state machine over both tables, wiring it
-//! behind a new fast `Method` variant, and the `FORMAT_VERSION` bump and
-//! real-bitstream measurement that wiring needs.
+//! **This slice (S2-A84).** [`build_encode_table`]: the mirroring
+//! encode-table construction, [`build_next_state_table`] and
+//! [`build_encode_transforms`]'s exact inverse of [`build_decode_table`].
+//! The encode register lives in `[table_size, 2 * table_size)` throughout
+//! encoding rather than `[0, table_size)` (ANS's own doubling-range
+//! invariant), so this is not a mechanical transpose of the decode
+//! construction; it is derived and cross-checked against
+//! [`build_decode_table`]'s own already-tested formulas rather than
+//! transcribed from any reference, and
+//! `encode_table_inverts_decode_table_for_every_register_value` proves the
+//! two sides agree over every reachable register value, not just a
+//! hand-worked example.
+//!
+//! **Remaining S1-P6 scope.** The coder's actual read/write state machine
+//! over both tables, wiring it behind a new fast `Method` variant, and the
+//! `FORMAT_VERSION` bump and real-bitstream measurement that wiring needs.
 
 /// Rescales `counts` onto a table of exactly `1 << table_log2` slots,
 /// preserving every originally-nonzero entry's nonzero-ness.
@@ -321,6 +333,219 @@ pub fn build_decode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -
             }
         })
         .collect()
+}
+
+/// One symbol's tANS encode-side transform: which of two adjacent bit
+/// counts the current encode register needs to emit this symbol, and
+/// where the resulting state lands in [`EncodeTable::next_state`].
+///
+/// The encode register lives in `[table_size, 2 * table_size)` throughout
+/// encoding -- ANS's own doubling-range invariant -- rather than in
+/// `[0, table_size)`, the range [`build_decode_table`] keeps its decode
+/// state in: the leading bit that wider range always carries is exactly
+/// the bit [`build_decode_table`]'s `new_state_base` computation strips
+/// back off, so a value just decoded can be re-encoded (`table_size +`
+/// the decode state) with no separate bookkeeping for how many bits it
+/// took to arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncodeTransform {
+    /// Bits this symbol takes when the register is below
+    /// `min_state_plus`; `max_bits_out + 1` bits at or above it. Named
+    /// after FSE's own construction (`FSE_buildCTable`): the smaller of
+    /// the two adjacent bit counts a frequency that is not a power of two
+    /// needs, one for most of the register's range and one bit wider for
+    /// the rest. The sole count for every register value when this
+    /// symbol's frequency is 0, 1, or a power of two, in which case
+    /// `min_state_plus` is unreachable.
+    pub max_bits_out: u32,
+    /// Register threshold: below it this symbol takes `max_bits_out`
+    /// bits, at or above it `max_bits_out + 1`. `u32::MAX` when a single
+    /// bit count covers the whole register range, which no valid
+    /// register value ever reaches.
+    pub min_state_plus: u32,
+    /// Added to `register >> nb_bits_out` to index
+    /// [`EncodeTable::next_state`] and find the state after encoding this
+    /// symbol. Negative whenever this symbol's own frequency exceeds the
+    /// combined frequency of every symbol before it, which is common for
+    /// the first frequent symbol in the alphabet.
+    pub delta_find_state: i64,
+}
+
+/// [`EncodeTransform`] for one symbol of the given `freq`, given `total`,
+/// the sum of every preceding symbol's frequency.
+///
+/// Frequency 0 or 1 take the sole-bit-count form directly: a symbol that
+/// never occurs is never encoded (`max_bits_out`/`min_state_plus` are
+/// placeholders no valid call site reaches), and a symbol occurring
+/// exactly once has exactly one occurrence number (`freq` itself,
+/// [`build_decode_table`]'s own numbering), always
+/// `table_log2 - highbit32(freq)` bits (`highbit32(1) == 0`, so exactly
+/// `table_log2`). Any other frequency has two adjacent bit counts:
+/// `max_bits_out = table_log2 - 1 - highbit32(freq - 1)` is
+/// [`build_decode_table`]'s own per-occurrence bit count
+/// (`table_log2 - highbit32(next_state)`) at the occurrence numbers large
+/// enough for a power-of-two-or-above `next_state`, one bit more below
+/// that threshold; `min_state_plus = freq << (max_bits_out + 1)` is that
+/// threshold carried into register space (derived from, and verified
+/// against, [`build_decode_table`]'s own numbering by
+/// `encode_table_inverts_decode_table_for_every_register_value` below,
+/// not transcribed from any reference).
+fn encode_transform_for(freq: u32, table_log2: u32, total: i64) -> EncodeTransform {
+    match freq {
+        0 => EncodeTransform {
+            max_bits_out: table_log2,
+            min_state_plus: u32::MAX,
+            delta_find_state: 0,
+        },
+        1 => EncodeTransform {
+            max_bits_out: table_log2,
+            min_state_plus: u32::MAX,
+            delta_find_state: total - 1,
+        },
+        f => {
+            let max_bits_out = table_log2 - 1 - highbit32(f - 1);
+            let min_state_plus = f << (max_bits_out + 1);
+            EncodeTransform {
+                max_bits_out,
+                min_state_plus,
+                delta_find_state: total - i64::from(f),
+            }
+        }
+    }
+}
+
+/// Builds one [`EncodeTransform`] per symbol from a normalized frequency
+/// table ([`normalize_frequencies`]'s postcondition: entries summing to
+/// `1 << table_log2`).
+///
+/// # Panics
+///
+/// Panics if `table_log2 >= 31`: unlike [`normalize_frequencies`] and
+/// [`spread_symbols`], this function's output describes the encode
+/// register, which ranges over `[table_size, 2 * table_size)`, one bit
+/// wider than `table_size` itself, so the headroom this bound leaves is
+/// one bit tighter than theirs. Panics if `freq` does not sum to exactly
+/// `1 << table_log2`.
+#[must_use]
+pub fn build_encode_transforms(freq: &[u32], table_log2: u32) -> Vec<EncodeTransform> {
+    assert!(
+        table_log2 < 31,
+        "table_log2 must leave room for the encode register's \
+         [table_size, 2 * table_size) range to fit u32; got {table_log2}"
+    );
+    let table_size: u64 = 1u64 << table_log2;
+    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+    assert!(
+        sum == table_size,
+        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
+         Call normalize_frequencies first."
+    );
+
+    let mut total: i64 = 0;
+    freq.iter()
+        .map(|&f| {
+            let transform = encode_transform_for(f, table_log2, total);
+            total += i64::from(f);
+            transform
+        })
+        .collect()
+}
+
+/// Builds the tANS "next state" table: [`EncodeTransform::delta_find_state`],
+/// added to `register >> nb_bits_out`, indexes here to find the register's
+/// next value.
+///
+/// Indexed the same way [`build_decode_table`]'s occurrence numbering
+/// groups slots by symbol: entry `base[s] + n` (`base[s]` the sum of
+/// `freq[0..s]`, `n` in `0..freq[s]`) holds the encode register value
+/// (`table_size + slot`, already carrying the register's own leading bit)
+/// for the slot [`spread_symbols`] gave that symbol's `n`-th occurrence --
+/// this function's exact inverse: [`spread_symbols`] maps slot to symbol,
+/// this maps (symbol, occurrence) back to slot.
+///
+/// `table_symbol` is [`spread_symbols`]'s output and `freq` is the
+/// normalized frequency table it was spread from, the same two
+/// [`build_decode_table`] takes.
+///
+/// # Panics
+///
+/// Panics if `table_log2 >= 31` (one bit tighter than
+/// [`build_decode_table`]'s own `< 32`, for the same register-range reason
+/// [`build_encode_transforms`] documents). Panics if `freq` does not sum
+/// to exactly `1 << table_log2`, or if `table_symbol` does not have
+/// exactly that many entries, or if any of its entries is not a valid
+/// index into `freq` -- the same three preconditions
+/// [`build_decode_table`] enforces.
+#[must_use]
+pub fn build_next_state_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -> Vec<u32> {
+    assert!(
+        table_log2 < 31,
+        "table_log2 must leave room for table_size + slot to fit u32; got {table_log2}"
+    );
+    let table_size = 1usize << table_log2;
+    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+    assert!(
+        sum == table_size as u64,
+        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
+         Call normalize_frequencies first."
+    );
+    assert!(
+        table_symbol.len() == table_size,
+        "table_symbol must have exactly 1 << table_log2 ({table_size}) entries; got {}",
+        table_symbol.len()
+    );
+    let table_size_u32 =
+        u32::try_from(table_size).expect("table_log2 < 31 keeps table_size within u32");
+
+    let mut cursor: Vec<u32> = Vec::with_capacity(freq.len());
+    let mut running = 0u32;
+    for &f in freq {
+        cursor.push(running);
+        running += f;
+    }
+
+    let mut table = vec![0u32; table_size];
+    for (slot, &symbol) in table_symbol.iter().enumerate() {
+        let idx = symbol as usize;
+        assert!(
+            idx < cursor.len(),
+            "table_symbol entry {symbol} is not a valid index into freq (len {})",
+            cursor.len()
+        );
+        let write_at = cursor[idx];
+        cursor[idx] += 1;
+        let slot_u32 =
+            u32::try_from(slot).expect("slot < table_size fits u32 whenever table_size does");
+        table[write_at as usize] = table_size_u32 + slot_u32;
+    }
+    table
+}
+
+/// The tANS encode side, mirroring [`build_decode_table`]'s decode side:
+/// [`next_state`](EncodeTable::next_state) and one [`EncodeTransform`] per
+/// symbol, together enough to compute, for a symbol and the current
+/// encode register, how many bits to emit and the register's next value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodeTable {
+    /// See [`build_next_state_table`].
+    pub next_state: Vec<u32>,
+    /// One [`EncodeTransform`] per symbol, indexed by symbol id.
+    pub transforms: Vec<EncodeTransform>,
+}
+
+/// Builds the complete tANS encode side from the same three inputs
+/// [`build_decode_table`] takes: [`build_next_state_table`] and
+/// [`build_encode_transforms`], run once each.
+///
+/// # Panics
+///
+/// Whatever either of those two panics on; see their own docs.
+#[must_use]
+pub fn build_encode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -> EncodeTable {
+    EncodeTable {
+        next_state: build_next_state_table(table_symbol, freq, table_log2),
+        transforms: build_encode_transforms(freq, table_log2),
+    }
 }
 
 #[cfg(test)]
@@ -714,6 +939,157 @@ mod tests {
             assert_eq!(slot.symbol, 0);
             assert_eq!(slot.nb_bits, 0);
             assert_eq!(slot.new_state_base, u32::try_from(u).unwrap());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "must leave room for the encode register's")]
+    fn encode_transforms_table_log2_of_31_panics() {
+        let _ = build_encode_transforms(&[1, 1], 31);
+    }
+
+    #[test]
+    #[should_panic(expected = "freq must sum to exactly")]
+    fn encode_transforms_rejects_a_freq_that_does_not_sum_to_the_table_size() {
+        let _ = build_encode_transforms(&[1, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "must leave room for table_size + slot")]
+    fn next_state_table_log2_of_31_panics() {
+        let _ = build_next_state_table(&[0], &[1], 31);
+    }
+
+    #[test]
+    #[should_panic(expected = "freq must sum to exactly")]
+    fn next_state_table_rejects_a_freq_that_does_not_sum_to_the_table_size() {
+        let _ = build_next_state_table(&[0, 0, 1], &[1, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "table_symbol must have exactly")]
+    fn next_state_table_rejects_a_mismatched_table_symbol_length() {
+        let _ = build_next_state_table(&[0, 0, 1], &[2, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a valid index into freq")]
+    fn next_state_table_rejects_an_out_of_range_symbol() {
+        let _ = build_next_state_table(&[0, 0, 1, 5], &[2, 1, 1], 2);
+    }
+
+    #[test]
+    fn encode_transforms_matches_a_hand_computed_example() {
+        // freq=[2,1,1], table_log2=2 (table_size=4): every occurrence of
+        // symbol 0 (freq 2, a power of two) needs 1 bit uniformly
+        // (build_decode_table's own hand-computed example above agrees:
+        // both its occurrences get nb_bits=1), so max_bits_out=1 and
+        // min_state_plus is unreachable... except 2 is *not* freq==1, so
+        // it takes the general formula: max_bits_out = 2-1-highbit32(1) =
+        // 2-1-0 = 1, min_state_plus = 2<<2 = 8 = 2*table_size, unreachable
+        // by any valid register (< 2*table_size), consistent with the
+        // uniform bit count a power-of-two frequency needs.
+        // Symbols 1 and 2 (freq 1) take the sole-bit-count path directly:
+        // max_bits_out=table_log2=2, min_state_plus=u32::MAX.
+        let transforms = build_encode_transforms(&[2, 1, 1], 2);
+        assert_eq!(
+            transforms,
+            vec![
+                EncodeTransform {
+                    max_bits_out: 1,
+                    min_state_plus: 8,
+                    delta_find_state: -2,
+                },
+                EncodeTransform {
+                    max_bits_out: 2,
+                    min_state_plus: u32::MAX,
+                    delta_find_state: 1,
+                },
+                EncodeTransform {
+                    max_bits_out: 2,
+                    min_state_plus: u32::MAX,
+                    delta_find_state: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn next_state_table_matches_a_hand_computed_example() {
+        // table_symbol=[0,0,1,2] (spread_symbols's own hand-computed
+        // example above), freq=[2,1,1], table_log2=2 (table_size=4):
+        // symbol 0's two occurrences sit at slots 0 and 1, symbol 1's one
+        // occurrence at slot 2, symbol 2's one occurrence at slot 3, so
+        // the table (grouped by symbol, offset by table_size=4) is
+        // [4,5, 6, 7] read off directly in slot order.
+        let table = build_next_state_table(&[0, 0, 1, 2], &[2, 1, 1], 2);
+        assert_eq!(table, vec![4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn encode_table_is_deterministic() {
+        let counts = [37, 19, 0, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let first = build_encode_table(&spread, &freq, table_log2);
+        let second = build_encode_table(&spread, &freq, table_log2);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn encode_table_inverts_decode_table_for_every_register_value() {
+        // The real cross-check: for every table slot u (a decode state)
+        // and every bit pattern decode could have read to land there,
+        // reconstructing the corresponding encode register and running it
+        // through EncodeTransform + EncodeTable::next_state must recover
+        // exactly the same slot u, offset into register space
+        // (table_size + u) -- proving build_encode_table is
+        // build_decode_table's exact functional inverse over every
+        // reachable register value, not just a hand-picked example.
+        let cases: &[(&[u32], u32)] = &[
+            (&[100, 1, 1], 3),
+            (&[1, 1, 1], 2),
+            (&[7, 5, 3, 1], 5),
+            (&[1000, 1, 1, 1, 1, 1, 1, 1], 4),
+            (&[3, 3, 3, 3, 3, 3, 3, 3, 3], 6),
+            (&[255, 254, 253, 1], 10),
+        ];
+        for &(counts, table_log2) in cases {
+            let freq = normalize_frequencies(counts, table_log2);
+            let spread = spread_symbols(&freq, table_log2);
+            let decode = build_decode_table(&spread, &freq, table_log2);
+            let encode = build_encode_table(&spread, &freq, table_log2);
+            let table_size = 1u32 << table_log2;
+
+            for (u, slot) in decode.iter().enumerate() {
+                let u = u32::try_from(u).unwrap();
+                let transform = encode.transforms[slot.symbol as usize];
+                for bits in 0..(1u32 << slot.nb_bits) {
+                    let register = slot.new_state_base + bits + table_size;
+                    let nb_bits_out = if register < transform.min_state_plus {
+                        transform.max_bits_out
+                    } else {
+                        transform.max_bits_out + 1
+                    };
+                    assert_eq!(
+                        nb_bits_out, slot.nb_bits,
+                        "counts={counts:?} table_log2={table_log2} u={u} bits={bits}"
+                    );
+                    let index = i64::from(register >> nb_bits_out) + transform.delta_find_state;
+                    let index = usize::try_from(index).unwrap_or_else(|_| {
+                        panic!(
+                            "negative next_state index: \
+                             counts={counts:?} table_log2={table_log2} u={u} bits={bits}"
+                        )
+                    });
+                    assert_eq!(
+                        encode.next_state[index],
+                        table_size + u,
+                        "counts={counts:?} table_log2={table_log2} u={u} bits={bits}"
+                    );
+                }
+            }
         }
     }
 }
