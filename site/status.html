@@ -166,6 +166,7 @@
 
       <section id="benchmarks-section">
         <h2>Is it any good?</h2>
+        <div class="card" id="ratio-card" data-loading>Loading…</div>
         <div class="card" id="benchmarks-card" data-loading>Loading…</div>
       </section>
 
@@ -248,6 +249,50 @@
         <code>src/lib.rs</code> doc comments:</p>
         ${methods}
       `;
+
+      // The gap to the field, and how long it has stood still. Ranked above
+      // the synthetic gate table below because it is the number the mission
+      // is judged on; the gate cases only say a PR did not regress.
+      const ratio = document.getElementById('ratio-card');
+      ratio.removeAttribute('data-loading');
+      if (data.ratio?.corpora?.length) {
+        const rows = data.ratio.corpora.map((c) => `
+          <tr>
+            <td>${escapeHtml(c.corpus)}</td>
+            <td>${c.bits_per_byte.toFixed(3)}</td>
+            <td>${Math.abs(c.gap).toFixed(3)} ${c.gap > 0 ? 'behind' : 'ahead of'}
+              ${escapeHtml(c.best_reference)}</td>
+          </tr>
+        `).join('');
+        const days = data.ratio.baseline_age_days;
+        ratio.innerHTML = `
+          <table class="bench">
+            <caption>
+              The number the mission is judged on: aggregate bits per byte on
+              the two real held-out corpora, against whichever of
+              <code>zstd -19</code> and <code>xz -9e</code> is stronger on
+              that corpus, from the generated reports in
+              <code>docs/benchmarks/</code>. Lower is better.
+            </caption>
+            <thead><tr>
+              <th scope="col">corpus</th>
+              <th scope="col">bits/byte</th>
+              <th scope="col">vs the strongest reference</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p>
+            Regression baseline last rewritten
+            ${escapeHtml(data.ratio.baseline_written)}, ${days}
+            day${days === 1 ? '' : 's'} ago. It is rewritten only when a
+            measured ratio change is accepted, so that date is how long this
+            number has stood still.
+          </p>
+        `;
+      } else {
+        ratio.textContent =
+          'docs/benchmarks/ could not be read at generation time.';
+      }
 
       const benchmarks = document.getElementById('benchmarks-card');
       benchmarks.removeAttribute('data-loading');

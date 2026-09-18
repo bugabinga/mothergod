@@ -8,6 +8,16 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- `/status` publishes the number the mission is judged on: aggregate bits
+  per byte on Canterbury and Silesia against whichever of `zstd -19` and
+  `xz -9e` is stronger there, plus the date `bench/baseline.json` was last
+  rewritten, which is how long that number has stood still. Both derive
+  from sources the repository already generates and already guards
+  (`docs/benchmarks/*.md` and the ratio gate), so nothing new is
+  hand-maintained. The page previously showed eleven synthetic gate figures
+  with no target and no date, which a reader could not tell apart from
+  progress (operator report, 2026-09-18).
+
 - `src/tans.rs`: `normalize_frequencies`, a standalone tANS/FSE-family
   frequency-table-normalization primitive (`research/JOURNAL.md` S1-P6,
   issue #447's remaining speed-tier scope after AVX2 was closed off by

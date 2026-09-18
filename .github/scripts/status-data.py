@@ -16,6 +16,8 @@ else:
 - phase, milestones      ROADMAP.md milestone headers and checkboxes
 - format_version, methods  src/lib.rs (the const and the Method enum docs)
 - benchmarks             bench/baseline.json (the CI ratio gate's baseline)
+- ratio                  docs/benchmarks/*.md aggregates + baseline.json's
+                         commit date (gap to the field, and when it last moved)
 - experiments            research/progress.jsonl
 - merged_commits_7d      git history (deploy checks out full depth)
 - sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
@@ -162,6 +164,70 @@ def _methods():
 def _benchmarks():
     baseline = json.loads((ROOT / "bench" / "baseline.json").read_text())
     return {"source": "bench/baseline.json", "bits_per_byte": baseline}
+
+
+@field("ratio")
+def _ratio():
+    """The mission's number: distance to the field, and when it last moved.
+
+    The page published eleven bits/byte figures with no target and no
+    date, so a reader could not tell a codec that gained this week from
+    one flat for a month, and the operator could not either (2026-09-18).
+    Both halves derive from sources that already exist and are already
+    guarded, so this adds no file anyone has to maintain: the gap comes
+    from the generated finals reports' own aggregate row, and the date is
+    the commit date of `bench/baseline.json`, which the ratio gate's
+    `write` mode rewrites on an accepted ratio change and nothing else
+    touches.
+
+    Reference names are read from the report's header row rather than
+    hardcoded, so a change to the pinned reference flags carries through
+    instead of silently mislabeling a column.
+    """
+    corpora = []
+    for corpus, filename in (("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")):
+        lines = (ROOT / "docs" / "benchmarks" / filename).read_text(
+            encoding="utf-8"
+        ).splitlines()
+
+        def cells(line):
+            return [c.strip().strip("*") for c in line.strip().strip("|").split("|")]
+
+        header = cells(next(l for l in lines if l.startswith("| file |")))
+        row = cells(next(l for l in lines if l.startswith("|") and "aggregate" in l))
+        ours = float(row[2])
+        # Columns 0-2 are file, bytes and mothergod's own b/B; every later
+        # `<tool> b/B` column is a reference compressor.
+        references = {
+            name.removesuffix(" b/B"): float(row[i])
+            for i, name in enumerate(header)
+            if i > 2 and name.endswith("b/B")
+        }
+        if not references:
+            raise ValueError(f"no reference b/B columns in {filename}")
+        best = min(references, key=references.get)
+        corpora.append(
+            {
+                "corpus": corpus,
+                "source": f"docs/benchmarks/{filename}",
+                "bits_per_byte": ours,
+                "best_reference": best,
+                "best_bits_per_byte": references[best],
+                # Positive means mothergod is behind the strongest reference.
+                "gap": round(ours - references[best], 6),
+            }
+        )
+
+    written = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-1", "--format=%cs", "--", "bench/baseline.json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if not written:
+        raise ValueError("no commit touches bench/baseline.json")
+    age = (NOW.date() - datetime.fromisoformat(written).date()).days
+    return {"corpora": corpora, "baseline_written": written, "baseline_age_days": age}
 
 
 @field("experiments")
