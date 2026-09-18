@@ -110,6 +110,10 @@ RUN_SCAN_DEEP = 1000
 # the governor does not share is the disagreement #533 was about.
 GOVERNED = "seven_day"
 
+# Below an hour a reading cannot move a %/h verdict by a full unit, so
+# naming its age would be noise; at or above, `used` is visibly a floor.
+STALE_HOURS = 1.0
+
 # One response longer than this is cut. The auditor judges altitude and voice,
 # and both are legible in the opening; a retrospect that floods the reader's
 # context is a retrospect the reader skims.
@@ -289,7 +293,7 @@ def governor(observed, resets, used):
           "machinery stops the factory before the reset.")
 
 
-def budget(samples, anchor):
+def budget(samples, anchor, now=None):
     """What the subscription has left, from the rate-limit events just read.
 
     `samples` is (when, rate_limit_info) in session order. Each info carries
@@ -306,7 +310,23 @@ def budget(samples, anchor):
     as such; it is the two-reading delta `allowance.project` rejects as a
     projection (#369, #533), and nothing here extrapolates it. The verdict
     is `governor`, on the GOVERNED window only.
+
+    A reading is not a clock. `used` is only ever as-of the event that
+    reported it, the last audited session, which on a quiet wake is hours
+    back; time-to-reset is arithmetic against the present. Computing the
+    latter from the former printed "(2.5h)" for a five-hour window that
+    had reset 52 minutes before the run read it. So `now` is the present
+    (injected only by the fixtures, which must not move with the clock),
+    every span is measured from it, and the two facts are labelled apart:
+    a window whose reset has passed reports the closed window instead of
+    fake headroom, and a live window older than STALE_HOURS says `used`
+    is a floor, because utilization only grows until the window turns
+    over. The governor keeps the observation instant, because its rate is
+    `used` over the elapsed that produced it, and it does not run at all
+    on a window that already reset: a stale SLOW DOWN throttles a seat
+    the guard has already released.
     """
+    now = now or datetime.now(timezone.utc)
     print("\nbudget:")
     if not samples:
         print("    no rate-limit events in the window. Either nothing ran long "
@@ -344,9 +364,16 @@ def budget(samples, anchor):
             continue
 
         reset = datetime.fromtimestamp(resets_at, timezone.utc)
-        now = stamp_to_dt(last_when)
+        observed = stamp_to_dt(last_when)
         hours = (reset - now).total_seconds() / 3600
-        minutes = (now - stamp_to_dt(first_when)).total_seconds() / 60
+        age = (now - observed).total_seconds() / 3600
+        if hours <= 0:
+            print(f"    {kind}: reset {reset.strftime(STAMP)}, {-hours:.1f}h ago; "
+                  f"the last reading ({used:.0%} used, at {observed.strftime(STAMP)}) "
+                  "describes the window that closed.")
+            continue
+
+        minutes = (observed - stamp_to_dt(first_when)).total_seconds() / 60
         burned = used - first["utilization"]
         # A negative delta means the window reset mid-audit; the observation
         # has no meaning then and is dropped, the verdict below still stands.
@@ -354,11 +381,12 @@ def budget(samples, anchor):
             f"; burned {burned:.1%} over the {minutes:.0f} min audited"
             if minutes > 0 and burned >= 0 else ""
         )
-        print(f"{line}, resets {reset.strftime(STAMP)} ({hours:.1f}h){observation}")
+        staleness = f"; reading {age:.1f}h old, so used is a floor" if age >= STALE_HOURS else ""
+        print(f"{line}, resets {reset.strftime(STAMP)} ({hours:.1f}h){staleness}{observation}")
         if last.get("isUsingOverage"):
             print("        on overage: past the included allowance already.")
         if kind == GOVERNED:
-            governor(now.timestamp(), resets_at, used)
+            governor(observed.timestamp(), resets_at, used)
 
     for kind in sorted(set(unreadable) - set(by_type)):
         print(f"    {kind}: present in {unreadable[kind]} event(s), none "

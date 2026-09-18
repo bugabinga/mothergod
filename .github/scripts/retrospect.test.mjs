@@ -23,7 +23,14 @@ samples = [
     (e["when"], e["info"]) if "info" in e else ("2026-08-28T12:00:00Z", e)
     for e in json.loads(sys.argv[2])
 ]
-mod.budget(samples, None)
+# The footer measures every span from the present, so a fixture must pin
+# the present or its expected hours move with the wall clock. argv[3] is
+# that instant; absent, it is the last reading, the zero-staleness case
+# the pre-#584 footer assumed unconditionally.
+now = mod.stamp_to_dt(sys.argv[3]) if len(sys.argv) > 3 else (
+    mod.stamp_to_dt(max(when for when, _ in samples)) if samples else None
+)
+mod.budget(samples, None, now)
 `;
 
 // Issue #533's minute, verbatim: the seven-day window opened 2026-09-10 02:00
@@ -161,6 +168,49 @@ const fixtures = [
     expect: [/five_hour: 60% used, 40% left[^\n]*; burned 52\.0% over the 16 min audited/],
     reject: [/SLOW DOWN/],
   },
+  {
+    // The defect this file's `now` exists for. Run 35290133931 read a
+    // five-hour window that had reset 52 minutes earlier and printed
+    // "55% left ... (2.5h)": headroom in a window that no longer existed,
+    // because time-to-reset was measured from the reading, not the clock.
+    name: "a window whose reset has passed reports the closed window, not headroom",
+    events: [{ when: "2026-09-12T19:26:00Z", info: windows(0.45, 0.24) }],
+    now: "2026-09-13T00:52:00Z",
+    expect: [
+      /five_hour: reset 2026-09-13T00:00:00Z, 0\.9h ago; the last reading \(45% used, at 2026-09-12T19:26:00Z\) describes the window that closed\./,
+    ],
+    reject: [/five_hour: 45% used/, /55% left/, /\(2\.5h\)/],
+  },
+  {
+    // Same staleness on a live window: the reset is real headroom, measured
+    // from now, and `used` is named as the floor it is.
+    name: "a stale reading on a live window measures from now and calls used a floor",
+    events: [{ when: "2026-09-12T19:26:00Z", info: windows(0.45, 0.24) }],
+    now: "2026-09-12T22:26:00Z",
+    expect: [
+      /five_hour: 45% used, 55% left, resets 2026-09-13T00:00:00Z \(1\.6h\); reading 3\.0h old, so used is a floor/,
+      /seven_day: 24% used, 76% left, resets 2026-09-17T02:00:00Z \(99\.6h\); reading 3\.0h old, so used is a floor/,
+    ],
+    reject: [/\(4\.6h\)/],
+  },
+  {
+    // A reading under STALE_HOURS says nothing about its own age: an
+    // unconditional clause would be filler on every healthy run.
+    name: "a fresh reading carries no staleness clause",
+    events: [{ when: "2026-09-12T19:26:00Z", info: windows(0.45, 0.24) }],
+    now: "2026-09-12T20:00:00Z",
+    expect: [/five_hour: 45% used, 55% left, resets 2026-09-13T00:00:00Z \(4\.0h\)/],
+    reject: [/so used is a floor/],
+  },
+  {
+    // A SLOW DOWN from a window the guard has already rolled over would
+    // throttle a seat that has its full allowance back.
+    name: "the governor stays silent on a governed window that already reset",
+    events: [{ when: "2026-09-16T14:00:00Z", info: windows(0.05, 0.9) }],
+    now: "2026-09-17T03:00:00Z",
+    expect: [/seven_day: reset 2026-09-17T02:00:00Z, 1\.0h ago/],
+    reject: [/SLOW DOWN/, /governor:/, /90% used, 10% left/],
+  },
 ];
 
 test("retrospect budget footer fixtures", async (t) => {
@@ -168,7 +218,13 @@ test("retrospect budget footer fixtures", async (t) => {
     await t.test(fixture.name, () => {
       const result = spawnSync(
         "python3",
-        ["-c", driver, scriptsDir, JSON.stringify(fixture.events)],
+        [
+          "-c",
+          driver,
+          scriptsDir,
+          JSON.stringify(fixture.events),
+          ...(fixture.now ? [fixture.now] : []),
+        ],
         { encoding: "utf8" },
       );
       assert.equal(result.status, 0, result.stderr || result.stdout);
