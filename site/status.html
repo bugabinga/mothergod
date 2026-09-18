@@ -260,7 +260,8 @@
           <tr>
             <td>${escapeHtml(c.corpus)}</td>
             <td>${c.bits_per_byte.toFixed(3)}</td>
-            <td>${Math.abs(c.gap).toFixed(3)} ${c.gap > 0 ? 'behind' : 'ahead of'}
+            <td>${Math.abs(c.gap).toFixed(3)}
+              ${c.gap > 0 ? 'behind' : c.gap < 0 ? 'ahead of' : 'level with'}
               ${escapeHtml(c.best_reference)}</td>
           </tr>
         `).join('');
@@ -268,10 +269,10 @@
         ratio.innerHTML = `
           <table class="bench">
             <caption>
-              The number the mission is judged on: aggregate bits per byte on
-              the two real held-out corpora, against whichever of
-              <code>zstd -19</code> and <code>xz -9e</code> is stronger on
-              that corpus, from the generated reports in
+              The number the mission is judged on: aggregate bits per byte
+              on the two real held-out corpora, against whichever reference
+              compressor the report measures is strongest on that corpus,
+              named per row. From the generated reports in
               <code>docs/benchmarks/</code>. Lower is better.
             </caption>
             <thead><tr>
