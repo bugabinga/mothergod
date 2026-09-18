@@ -133,7 +133,11 @@ Shared house rules; your per-agent voice rides in your prompt from
   lines straight to the operator's phone (`run-notice.py`), so lead with what
   changed, concretely, and leave the run's label, turn count and link to the
   machinery that already appends them. A response that opens by restating its
-  own task spends the only lines that reader will see.
+  own task spends the only lines that reader will see. Concretely: never open
+  with a completion announcement. "Heartbeat complete.", "Run complete.
+  Summary:" and their variants restate the label the notice already prints as
+  its trailing line. The first sentence names what changed, or says nothing
+  changed.
 - Speak as yourself, an agent of mothergod, never as the operator.
 
 ## Values (every agent)
