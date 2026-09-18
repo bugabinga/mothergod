@@ -106,8 +106,10 @@
     .milestones li[data-status="done"] .badge { color: var(--green); border-color: var(--green); }
     .milestones li[data-status="active"] .badge { color: var(--gold); border-color: var(--gold); }
     .milestones li[data-status="pending"] .badge { color: var(--dim); }
+    .milestones li[data-status="ongoing"] .badge { color: var(--amber); border-color: var(--amber); }
     .milestones li[data-status="done"] .id { color: var(--green); }
     .milestones li[data-status="active"] .id { color: var(--gold); }
+    .milestones li[data-status="ongoing"] .id { color: var(--amber); }
 
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .8rem; }
     .stat {
@@ -151,9 +153,9 @@
         <p class="back"><a href="/">← mothergod</a></p>
         <h1>Project status</h1>
         <p class="tagline">
-          Generated from the repository itself: ROADMAP.md's own checkboxes, the
-          research journal's experiment log, and this checkout's source tree.
-          Every number below names where it came from.
+          Generated from the repository itself: ROADMAP.md's own milestone list,
+          the research journal's experiment log, and this checkout's source
+          tree. Every number below names where it came from.
         </p>
       </header>
 
@@ -183,8 +185,11 @@
       <section id="progress-section">
         <h2>Is it alive?</h2>
         <p>
-          Milestones, oldest first. Status comes straight from ROADMAP.md's
-          checkboxes.
+          Milestones, oldest first, straight from ROADMAP.md. A milestone is a
+          deliverable, so its status is its checklist: <code>done</code>,
+          <code>active</code>, or <code>pending</code> before the first box is
+          ticked. <code>ongoing</code> marks a program instead: continuous work
+          with a target and no finish line, so it has no checklist to read.
         </p>
         <ul class="milestones" id="milestones-list" data-loading>Loading…</ul>
 
