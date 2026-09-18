@@ -48,6 +48,10 @@ import sys
 import urllib.error
 import urllib.request
 
+# `scrub` redacts every credential shape from the outgoing body;
+# `scrub_token` below removes one known token from API error text.
+from secret_scrub import scrub
+
 # The host is overridable so tg-send.test.mjs can stand in for Telegram and
 # pin what each exit prints; nothing in production sets it.
 API = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org") + "/bot{}/sendMessage"
@@ -124,6 +128,15 @@ def main() -> int:
         print("tg-send: empty body; refusing to send", file=sys.stderr)
         return 2
 
+    # Same exit, same rule as gh-comment: redact, never block, warn loudly.
+    # The chat log this message lands in is a Cloudflare KV the operator reads
+    # on a phone, so a leaked token would outlive the run that printed it.
+    body, redactions = scrub(body)
+    if redactions:
+        print(f"tg-send: redacted {redactions} credential-shaped string(s) "
+              "from the body; a secret reached your text (CLAUDE.md rule 10)",
+              file=sys.stderr)
+
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
     text = render(body, repo)
     # Length is checked after rendering, because the markup is what actually
@@ -158,10 +171,10 @@ def main() -> int:
             detail = json.loads(detail).get("description", detail)
         except json.JSONDecodeError:
             pass
-        print(f"tg-send: HTTP {error.code}: {scrub(detail, token)}", file=sys.stderr)
+        print(f"tg-send: HTTP {error.code}: {scrub_token(detail, token)}", file=sys.stderr)
         return 1
     except OSError as error:
-        print(f"tg-send: {scrub(str(error), token)}", file=sys.stderr)
+        print(f"tg-send: {scrub_token(str(error), token)}", file=sys.stderr)
         return 1
 
     if not notice:
@@ -267,7 +280,7 @@ def record(sent: dict, reply_to: int | None, body: str) -> None:
         kv_write(url, token, log[-KEEP:])
     except (OSError, ValueError, KeyError) as error:
         print(f"tg-send: sent, but the chat log was not updated: "
-              f"{scrub(str(error), token)}", file=sys.stderr)
+              f"{scrub_token(str(error), token)}", file=sys.stderr)
 
 
 def summarize(body: str) -> str:
@@ -353,10 +366,10 @@ def stop_typing() -> None:
         urllib.request.urlopen(request, timeout=5).close()
     except OSError as error:  # HTTPError included; it subclasses OSError.
         print(f"tg-send: could not stop the typing indicator: "
-              f"{scrub(str(error), secret)}", file=sys.stderr)
+              f"{scrub_token(str(error), secret)}", file=sys.stderr)
 
 
-def scrub(message: str, token: str) -> str:
+def scrub_token(message: str, token: str) -> str:
     """Never print a secret (hard rule 10), whoever built the string."""
     return message.replace(token, "<redacted>")
 
