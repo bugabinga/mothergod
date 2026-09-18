@@ -77,17 +77,18 @@ pub fn column_of(position: usize, columns: NonZeroUsize, len: usize) -> usize {
 /// Maps [`column_of`]'s unbounded column index into a fixed-size bank
 /// space, `column % max_banks.get()`.
 ///
-/// A future column-index-keyed literal expert (`research/JOURNAL.md`
-/// S1-P5's remaining scope) must size its bank storage from a constant
-/// alone, never from the frame's declared `columns`: a decoder reads
-/// `columns` from untrusted compressed input, so sizing bank storage to
-/// it directly would let a hostile frame drive unbounded allocation
-/// (CLAUDE.md hard rule 2). Wrapping modulo a fixed `max_banks` is the
-/// same convention `literal.rs`'s existing experts already use to keep
-/// an unbounded context bounded (`ORDER2_BASE`'s `& 0xFFF`, `WORD_BASE`'s
-/// `& 0xFFF`, `ALIGN_BASE`'s `position & 3`): real separation for the
-/// common case this lead targets (structured data with a modest column
-/// count), aliasing rather than allocating for an adversarial one.
+/// [`crate::literal::ColumnExpertState`], the column-index-keyed literal
+/// expert wired into `codec.rs` (`research/JOURNAL.md` S1-P5, ADR-0046),
+/// sizes its bank storage from a constant alone, never from the frame's
+/// declared `columns`: a decoder reads `columns` from untrusted compressed
+/// input, so sizing bank storage to it directly would let a hostile frame
+/// drive unbounded allocation (CLAUDE.md hard rule 2). Wrapping modulo a
+/// fixed `max_banks` is the same convention `literal.rs`'s existing
+/// experts already use to keep an unbounded context bounded
+/// (`ORDER2_BASE`'s `& 0xFFF`, `WORD_BASE`'s `& 0xFFF`, `ALIGN_BASE`'s
+/// `position & 3`): real separation for the common case this lead targets
+/// (structured data with a modest column count), aliasing rather than
+/// allocating for an adversarial one.
 #[must_use]
 pub fn column_bank(column: usize, max_banks: NonZeroUsize) -> usize {
     column % max_banks.get()
@@ -95,10 +96,10 @@ pub fn column_bank(column: usize, max_banks: NonZeroUsize) -> usize {
 
 /// [`column_of`] then [`column_bank`] in one call: the bank the byte at
 /// `position` in a `columns`-wide, `len`-long transposed stream belongs to,
-/// wrapped into a fixed `max_banks`-size space. `codec.rs`'s three
-/// column-expert literal sites (`EncodeSink`, `ColumnExpertCostSink`, and
-/// `decode`'s `FLAG_LITERAL` arm) all need exactly this pair in this order;
-/// this is that pairing, named once. Same panic condition as [`column_of`]:
+/// wrapped into a fixed `max_banks`-size space. `codec.rs`'s two
+/// column-expert literal sites (`EncodeSink` and `decode`'s
+/// `FLAG_LITERAL` arm) both need exactly this pair in this order; this is
+/// that pairing, named once. Same panic condition as [`column_of`]:
 /// `position < len` must already hold.
 #[must_use]
 pub fn bank_of(
