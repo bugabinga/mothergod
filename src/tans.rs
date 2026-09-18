@@ -31,24 +31,29 @@
 //! so a table walked in slot order interleaves symbols close to their
 //! frequency order rather than running one symbol at a time.
 //!
-//! **This slice.** [`build_decode_table`] turns a spread assignment into
-//! the entries a real tANS decoder indexes by state: for each table slot,
-//! which symbol it decodes to, how many bits to pull off the bitstream,
-//! and the baseline those bits are added to for the next state (itself a
-//! valid index back into this same table). Each symbol's occurrences,
-//! visited in slot order, are numbered consecutively starting at that
-//! symbol's own normalized frequency -- the state range a canonical tANS
-//! table reserves for it -- and a given occurrence number's bit count and
-//! baseline fall straight out of that number's highest set bit
-//! (`FSE_buildDTable`'s construction; no archive precedent, same check
-//! the two slices before it ran). Standalone and not yet called from
-//! anywhere: nothing yet builds the matching encode table or reads/writes
-//! real bits against this one.
+//! **Fourth slice (S2-A83).** [`build_decode_table`] turns a spread
+//! assignment into the entries a real tANS decoder indexes by state: for
+//! each table slot, which symbol it decodes to, how many bits to pull off
+//! the bitstream, and the baseline those bits are added to for the next
+//! state (itself a valid index back into this same table). Each symbol's
+//! occurrences, visited in slot order, are numbered consecutively starting
+//! at that symbol's own normalized frequency -- the state range a
+//! canonical tANS table reserves for it -- and a given occurrence number's
+//! bit count and baseline fall straight out of that number's highest set
+//! bit (`FSE_buildDTable`'s construction; no archive precedent, same check
+//! the two slices before it ran).
 //!
-//! **Remaining S1-P6 scope.** The mirroring encode-table construction, the
-//! coder's actual read/write state machine over both tables, wiring it
-//! behind a new fast `Method` variant, and the `FORMAT_VERSION` bump and
-//! real-bitstream measurement that wiring needs.
+//! **This slice.** [`build_encode_table`] inverts that same per-symbol
+//! occurrence numbering: [`build_decode_table`] answers "slot `p` decodes
+//! to which symbol, at which occurrence"; an encoder instead already knows
+//! the symbol it is about to emit and needs the opposite lookup, "symbol
+//! `s`'s occurrence `n` sits at which slot" -- the table state a real tANS
+//! encoder transitions to. Standalone and not yet called from anywhere:
+//! nothing yet wires either table into a coder or reads/writes real bits.
+//!
+//! **Remaining S1-P6 scope.** The coder's actual read/write state machine
+//! over both tables, wiring it behind a new fast `Method` variant, and the
+//! `FORMAT_VERSION` bump and real-bitstream measurement that wiring needs.
 
 /// Rescales `counts` onto a table of exactly `1 << table_log2` slots,
 /// preserving every originally-nonzero entry's nonzero-ness.
@@ -321,6 +326,66 @@ pub fn build_decode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -
             }
         })
         .collect()
+}
+
+/// Builds the tANS encode table: for symbol `s`, `table[s][n]` is the slot
+/// [`build_decode_table`] assigned to `s`'s occurrence number `n` (the
+/// same numbering [`build_decode_table`]'s own docs describe, consecutive
+/// starting at `freq[s]`, `n` here counted from 0 rather than from
+/// `freq[s]`). An encoder that has already chosen the next symbol to emit
+/// and knows which occurrence of it this is looks the slot up here instead
+/// of the decoder's direction (slot -> symbol).
+///
+/// `table_symbol` is [`spread_symbols`]'s output and `freq` is the
+/// normalized frequency table it was spread from, the same two inputs
+/// [`build_decode_table`] takes; this function makes one pass over
+/// `table_symbol` in slot order, so `table[s]` always comes out sorted by
+/// slot position ascending, matching the order symbols actually occupy
+/// their occurrence range in.
+///
+/// # Panics
+///
+/// Panics if `table_log2 >= 32`, or if `freq` does not sum to exactly
+/// `1 << table_log2`, or if `table_symbol.len()` is not `1 << table_log2`
+/// (the same three preconditions [`build_decode_table`] enforces). Panics
+/// if any of `table_symbol`'s entries is not a valid index into `freq` --
+/// guaranteed when `table_symbol` is `spread_symbols`'s own output for
+/// this exact `freq`, the only supported caller shape; this primitive is
+/// not yet reachable from any decode path.
+#[must_use]
+pub fn build_encode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -> Vec<Vec<u32>> {
+    assert!(
+        table_log2 < 32,
+        "table_log2 must fit a u32 shift; got {table_log2}"
+    );
+    let table_size = 1usize << table_log2;
+    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+    assert!(
+        sum == table_size as u64,
+        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
+         Call normalize_frequencies first."
+    );
+    assert!(
+        table_symbol.len() == table_size,
+        "table_symbol must have exactly 1 << table_log2 ({table_size}) entries; got {}",
+        table_symbol.len()
+    );
+
+    let mut table: Vec<Vec<u32>> = freq
+        .iter()
+        .map(|&f| Vec::with_capacity(f as usize))
+        .collect();
+    for (position, &symbol) in table_symbol.iter().enumerate() {
+        let idx = symbol as usize;
+        assert!(
+            idx < table.len(),
+            "table_symbol entry {symbol} is not a valid index into freq (len {})",
+            table.len()
+        );
+        let position = u32::try_from(position).expect("table_size fits u32 since table_log2 < 32");
+        table[idx].push(position);
+    }
+    table
 }
 
 #[cfg(test)]
@@ -698,6 +763,140 @@ mod tests {
         let first = build_decode_table(&spread, &freq, table_log2);
         let second = build_decode_table(&spread, &freq, table_log2);
         assert_eq!(first, second);
+    }
+
+    #[test]
+    #[should_panic(expected = "must fit a u32 shift")]
+    fn encode_table_log2_of_32_panics() {
+        let _ = build_encode_table(&[0], &[1], 32);
+    }
+
+    #[test]
+    #[should_panic(expected = "freq must sum to exactly")]
+    fn encode_table_rejects_a_freq_that_does_not_sum_to_the_table_size() {
+        let _ = build_encode_table(&[0, 0, 1], &[1, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "table_symbol must have exactly")]
+    fn encode_table_rejects_a_mismatched_table_symbol_length() {
+        let _ = build_encode_table(&[0, 0, 1], &[2, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a valid index into freq")]
+    fn encode_table_rejects_an_out_of_range_symbol() {
+        let _ = build_encode_table(&[0, 0, 1, 5], &[2, 1, 1], 2);
+    }
+
+    #[test]
+    fn encode_table_matches_a_hand_computed_example() {
+        // freq=[2,1,1], table_log2=2, spread table [0,0,1,2]
+        // (spread_matches_a_hand_computed_table's own example): symbol 0
+        // occupies slots 0 and 1, symbol 1 occupies slot 2, symbol 2
+        // occupies slot 3.
+        let table = build_encode_table(&[0, 0, 1, 2], &[2, 1, 1], 2);
+        assert_eq!(table, vec![vec![0, 1], vec![2], vec![3]]);
+    }
+
+    #[test]
+    fn encode_table_lengths_match_freq() {
+        let counts = [37, 19, 0, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+        assert_eq!(encode.len(), freq.len());
+        for (symbol, entries) in encode.iter().enumerate() {
+            assert_eq!(
+                entries.len(),
+                freq[symbol] as usize,
+                "symbol {symbol} has {} encode entries, wanted freq {}",
+                entries.len(),
+                freq[symbol]
+            );
+        }
+    }
+
+    #[test]
+    fn encode_table_entries_are_sorted_ascending_by_slot() {
+        // The single pass over table_symbol in slot order guarantees each
+        // symbol's entries come out already sorted; an out-of-order entry
+        // would mean two occurrences got swapped relative to their actual
+        // slot positions.
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+        for entries in &encode {
+            assert!(entries.windows(2).all(|w| w[0] < w[1]));
+        }
+    }
+
+    #[test]
+    fn encode_table_is_the_exact_inverse_of_the_spread_table() {
+        // Cross-check independent of build_encode_table's own scan: every
+        // slot in the spread table for symbol s, collected in ascending
+        // slot order, must equal that symbol's encode-table row exactly.
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+        for (symbol, entries) in encode.iter().enumerate() {
+            let want: Vec<u32> = spread
+                .iter()
+                .enumerate()
+                .filter(|&(_, &s)| s as usize == symbol)
+                .map(|(p, _)| u32::try_from(p).unwrap())
+                .collect();
+            assert_eq!(*entries, want, "symbol {symbol}");
+        }
+    }
+
+    #[test]
+    fn encode_table_round_trips_through_the_decode_table() {
+        // The real property that matters: every (symbol, occurrence) the
+        // encode table names, handed to the decode table by slot, decodes
+        // back to that exact symbol.
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+        for (symbol, entries) in encode.iter().enumerate() {
+            for &slot in entries {
+                assert_eq!(
+                    decode[slot as usize].symbol as usize, symbol,
+                    "encode table for symbol {symbol} points at slot {slot}, \
+                     which decodes to a different symbol"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn encode_table_is_deterministic() {
+        let counts = [37, 19, 0, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let first = build_encode_table(&spread, &freq, table_log2);
+        let second = build_encode_table(&spread, &freq, table_log2);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn encode_table_handles_a_zero_count_symbol() {
+        // A symbol with freq 0 (never occurred) gets an empty encode row,
+        // not a missing one or a panic.
+        let freq = normalize_frequencies(&[5, 0, 3], 4);
+        let spread = spread_symbols(&freq, 4);
+        let encode = build_encode_table(&spread, &freq, 4);
+        assert_eq!(encode.len(), 3);
+        assert!(encode[1].is_empty());
     }
 
     #[test]
