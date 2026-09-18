@@ -320,19 +320,48 @@ cmp FILE FILE.out</pre>
         <ul class="principles">
           <li>
             Lossless is sacred: the decoder never panics on any input,
-            adversarial or not.
+            adversarial or not. Backed by 4 fuzz targets, including
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/fuzz/fuzz_targets/decode_arbitrary.rs"
+            ><code>decode_arbitrary</code></a>, plus an
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/tests/adversarial.rs"
+            >adversarial suite</a> and a
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/tests/torture.rs"
+            >torture suite</a> that feed it truncated and bit-flipped input on
+            purpose. Cumulative fuzz time and the crash count run live on
+            <a href="/status.html">the status page</a>.
           </li>
           <li>
             Every benchmark claim names its corpus; a ratio without a corpus is
             not a claim.
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/bench/corpus.toml"
+            ><code>bench/corpus.toml</code></a> pins the 13 archives behind
+            every number above by URL and SHA-256, per the
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/research/corpus/POLICY.md"
+            >corpus policy</a>.
           </li>
           <li>
             Every experiment, accepted or rejected, is recorded: rejections are
             knowledge too.
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/research/progress.jsonl"
+            ><code>research/progress.jsonl</code></a> holds at least 90 entries,
+            at least 10 of them rejected, each with its own hypothesis and
+            mechanism of failure.
           </li>
           <li>
             Verification is independent of the proposer: agents never grade
             their own work.
+            <a href="https://github.com/bugabinga/mothergod/blob/main/CLAUDE.md"
+            >CLAUDE.md</a>'s hard rules 3 and 8 forbid an agent merging its own
+            pull request or grading its own claim;
+            <a
+              href="https://github.com/bugabinga/mothergod/blob/main/agents/GOVERNANCE.md"
+            >agents/GOVERNANCE.md</a> names the reviewer that enforces both.
           </li>
         </ul>
       </section>

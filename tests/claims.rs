@@ -450,6 +450,134 @@ fn canonical_href(page: &str) -> &str {
     attr_value(tag_containing(page, "rel=\"canonical\""), "href")
 }
 
+/// The number immediately following `marker` in `text`, e.g. `13` in
+/// "pins the 13 archives".
+fn number_after(text: &str, marker: &str) -> u32 {
+    let after = text.find(marker).map_or_else(
+        || panic!("{marker:?} not found"),
+        |index| &text[index + marker.len()..],
+    );
+    let digits: String = after
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits
+        .parse()
+        .unwrap_or_else(|_| panic!("no number follows {marker:?}"))
+}
+
+#[test]
+fn fuzz_target_count_matches_fuzz_fuzz_targets() {
+    let true_count =
+        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/fuzz_targets"))
+            .expect("fuzz/fuzz_targets should be readable")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "rs"))
+            .count();
+
+    let claim = number_after(&read("site/index.html"), "Backed by ");
+    assert_eq!(
+        claim as usize, true_count,
+        "site/index.html claims {claim} fuzz targets, fuzz/fuzz_targets/ holds {true_count}"
+    );
+}
+
+#[test]
+fn pinned_corpus_archive_count_matches_bench_corpus_toml() {
+    let toml = read("bench/corpus.toml");
+    let true_count = toml.matches("[[file]]").count();
+
+    let claim = number_after(&read("site/index.html"), "pins the ");
+    assert_eq!(
+        claim as usize, true_count,
+        "site/index.html claims {claim} pinned archives, bench/corpus.toml has {true_count} [[file]] entries"
+    );
+}
+
+#[test]
+fn experiment_floor_holds_against_research_progress_jsonl() {
+    // A floor (`>=`), not an exact count: every experiment appends a line
+    // (CLAUDE.md rule 6), so an exact-equality guard here would fail on
+    // every unrelated PR that lands a research or codec experiment,
+    // dragging site/index.html into a realm it does not own. The floor
+    // only trips if the log shrinks or loses rejections, which is the
+    // failure worth catching.
+    let jsonl = read("research/progress.jsonl");
+    let entries: Vec<&str> = jsonl
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let true_total = entries.len();
+    let true_rejected = entries
+        .iter()
+        .filter(|line| line.contains("\"verdict\": \"rejected\""))
+        .count();
+
+    // The claim reads "... holds at least 90 entries, at least 10 of them
+    // rejected ...": the two "at least" phrases in encounter order give
+    // the total, then the rejected floor.
+    let site = read("site/index.html");
+    let mut floors = site
+        .match_indices("at least ")
+        .map(|(index, marker)| number_after(&site[index..], marker) as usize);
+    let claimed_total = floors.next().expect("a total-experiments floor");
+    let claimed_rejected = floors.next().expect("a rejected-experiments floor");
+
+    assert!(
+        true_total >= claimed_total,
+        "site/index.html claims at least {claimed_total} experiments, research/progress.jsonl holds {true_total}"
+    );
+    assert!(
+        true_rejected >= claimed_rejected,
+        "site/index.html claims at least {claimed_rejected} rejected experiments, research/progress.jsonl holds {true_rejected}"
+    );
+}
+
+/// A numbered rule's full text, from its `"<n>. "`-prefixed line up to the
+/// next such line: a hard rule wraps across multiple lines in CLAUDE.md, so
+/// `line_containing` alone would miss text on the rule's continuation
+/// lines.
+fn numbered_rule<'a>(text: &'a str, first_line: &str) -> &'a str {
+    let start = text
+        .find(first_line)
+        .unwrap_or_else(|| panic!("{first_line:?} not found"));
+    let rest = &text[start..];
+    let end = rest
+        .lines()
+        .skip(1)
+        .position(|line| line.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map_or(rest.len(), |offset_line| {
+            rest.lines()
+                .take(offset_line + 1)
+                .map(|l| l.len() + 1)
+                .sum()
+        });
+    &rest[..end]
+}
+
+/// Whitespace-normalized (newlines and indentation collapsed to single
+/// spaces) so a phrase that wraps across a source line still matches a
+/// contiguous `contains` check.
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn independent_verification_claim_matches_claude_md_rules_3_and_8() {
+    let claude_md = read("CLAUDE.md");
+    let rule_3 = normalize_whitespace(numbered_rule(&claude_md, "3. Never weaken a guard"));
+    assert!(
+        rule_3.contains("you do not grade your own claim"),
+        "CLAUDE.md rule 3 no longer forbids grading your own claim; site/index.html cites it by number"
+    );
+    let rule_8 = numbered_rule(&claude_md, "8. Do not merge your own PR");
+    assert!(
+        rule_8.contains("Do not merge your own PR"),
+        "CLAUDE.md rule 8 no longer forbids merging your own PR; site/index.html cites it by number"
+    );
+}
+
 #[test]
 fn social_preview_tags_match_each_pages_own_title_and_description() {
     // A link unfurler reads `og:*`/`twitter:*`, not `<title>` or

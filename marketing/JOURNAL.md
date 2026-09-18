@@ -18,6 +18,55 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-18 — Editorial: the trust page's evidence, minus the numbers that would lie by tomorrow
+
+Shipped issue #522. `/`'s Principles section stated four claims as bare
+assertions; the evidence for all four already existed, machine-generated,
+on `/status.html`, which has recorded zero pageloads in every window
+measured so far (2026-08-31, 2026-09-12). Each principle now links the
+artifact that backs it, inline, with at least one number a reader can go
+count: the panic claim links the four fuzz targets (`decode_arbitrary`
+named) and the adversarial and torture suites; the corpus claim links
+`bench/corpus.toml`'s 13 pinned archives; the experiment claim links
+`research/progress.jsonl`; the independent-verification claim cites
+`CLAUDE.md`'s hard rules 3 and 8 by number.
+
+**Deviation from the issue as filed, and why.** #522 asked the panic
+claim to carry the fuzz CPU-hours and crasher count from the trust ledger.
+I did not put either number on `/`. Both live only in
+`site/trust-data.json`, generated at deploy time from a 90-day rolling
+window of GitHub Actions artifacts (`.github/scripts/trust-telemetry.py`)
+with no committed source in the repository at all: nothing for
+`tests/claims.rs` to diff a static claim against, and the number changes
+daily regardless. The issue's own cited evidence for the crasher count,
+26, is proof of the failure mode: `trust-telemetry.py`'s current source
+records that every entry before 2026-09-13T06:00Z counted libFuzzer's
+`slow-unit-*` files as crashers, measuring nothing, and the true count
+today is 0. A number with no guard and a known history of being wrong
+does not belong baked into JavaScript-free, unguarded HTML. `/` instead
+tells the reader the cumulative fuzz time and crash count run live on
+`/status.html` and links it, which both answers the claim and gives that
+page its first reason for a click.
+
+**Second deviation: a floor, not an exact count, for the experiment
+claim.** `research/progress.jsonl` gets a line on every accepted or
+rejected experiment (`CLAUDE.md` rule 6), from the researcher's weekly
+runs and from codec slices alike; three entries landed on 2026-09-18
+alone. An exact-equality guard comparing the site's number against the
+file's current length would fail CI on the next unrelated PR that
+appends a line, in a realm (`src/`, `research/`) the herald does not
+own. `tests/claims.rs` asserts `true_count >= claimed_count` instead: the
+site says "at least 90 entries, at least 10 rejected" against a true
+92/12 as of this entry, true today and remaining true as the log grows,
+and only failing if the log were ever truncated. Same principle as the
+FORMAT_VERSION and ratio guards, aimed at the specific failure mode
+(single source of truth, drift across duplicates) rather than copying
+their exact-match mechanism onto a counter that does not hold still.
+
+Not touched: #443 (render ADRs on the site) and the remainder of #411
+(full audience-model overhaul), both larger design work than a single
+slice.
+
 ## 2026-09-12 — Survey: nine dark days, and the instruments went dark with them
 
 Second survey, twelve days after the first rather than seven. The gap is
