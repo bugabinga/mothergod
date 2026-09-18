@@ -9,8 +9,9 @@ All notable changes to this project are documented here. Format follows
 ### Added
 
 - `/status` publishes the number the mission is judged on: aggregate bits
-  per byte on Canterbury and Silesia against whichever of `zstd -19` and
-  `xz -9e` is stronger there, plus the date `bench/baseline.json` was last
+  per byte on Canterbury and Silesia against whichever reference
+  compressor the finals reports measure is strongest there, named per
+  row, plus the date `bench/baseline.json` was last
   rewritten, which is how long that number has stood still. Both derive
   from sources the repository already generates and already guards
   (`docs/benchmarks/*.md` and the ratio gate), so nothing new is
