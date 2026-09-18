@@ -2989,6 +2989,48 @@ record.
   read/write state machine over both tables, wiring behind a new fast
   `Method` variant, and the `FORMAT_VERSION` bump and real-bitstream
   measurement that wiring needs.
+- S2-A85 | ACCEPTED | Sixth slice of S1-P6's remaining tANS fast path
+  (issue #447, after S2-A84's `build_encode_table`): `src/tans.rs`'s
+  `encode_symbol`, `encode_message`, `decode_message` — the coder's
+  actual read/write state machine over both tables. `decode_message`
+  needs no new algorithm: `DecodeSlot` already fully specifies a decode
+  step (index by state, read `nb_bits` bits, add `new_state_base`), so
+  it is a loop over that plus real bit reads. Encoding has no closed
+  form yet (`build_encode_table`'s own docs deferred one, "nothing yet
+  reads it inside a hot loop to make that optimization pay for itself"):
+  `encode_symbol` instead searches `encode_table[symbol]`'s occurrences
+  for the one whose decode range covers the target state, relying on
+  the property that an FSE/tANS decode table's per-symbol occurrence
+  ranges partition `[0, table_size)` exactly and contiguously (an
+  `encode_symbol_is_the_exact_inverse_of_a_decode_step` test walks every
+  slot's every admissible bits value and confirms the search recovers
+  it exactly). `encode_message` threads `encode_symbol` backward over a
+  whole symbol sequence — reverse order, the direction a stack-like ANS
+  state actually threads through — collecting bits in encode order,
+  reversing once, then packing into a real byte buffer (a private
+  `BitWriter`, LSB-first) that `decode_message`'s counterpart
+  (`BitReader`) reads forward from byte 0; no existing bit-I/O
+  abstraction in the crate fit (`coder.rs`'s is an arithmetic-coding
+  range coder, not a plain bit packer), so both are new and scoped to
+  this module. | 15 unit tests (`BitWriter`/`BitReader` round trip and
+  bounds panic, `encode_symbol` panics/hand-computed example/exact
+  inverse-of-decode-step property, `encode_message`/`decode_message`
+  round trip including the single-symbol-table and empty-message edges,
+  an out-of-range `initial_state` panic) plus a
+  `encode_decode_message_round_trips_for_arbitrary_symbol_sequences`
+  proptest over arbitrary alphabets, table sizes, and symbol streams (a
+  separate `#[cfg(not(miri))] mod proptests`, mirroring `coder.rs`'s own
+  layout and its reasoning for excluding Miri: interpretation cost
+  multiplied by the case count, with the deterministic examples already
+  walking the same paths for UB observation); `cargo x check` clean. |
+  No bpb measurement, same reason as S2-A81 through S2-A84: no `Method`
+  wiring yet, so no real bitstream to measure — `progress.jsonl` records
+  this as `kind: "patch"` with null bpb deltas; `baseline_gate check`
+  confirms the existing 11 cases are unaffected (nothing wired). This
+  closes the "read/write state machine" item. Remaining S1-P6 scope:
+  wiring this coder behind a new fast `Method` variant, and the
+  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
+  needs.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -3016,10 +3058,12 @@ record.
   not yet wired. S2-A83 took the decode-table construction step
   (`build_decode_table`), also standalone and not yet wired. S2-A84 took
   the mirroring encode-table construction step (`build_encode_table`),
-  also standalone and not yet wired. Remaining scope: the coder's actual
-  read/write state machine over both tables, `Method` wiring, and the
-  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
-  needs.
+  also standalone and not yet wired. S2-A85 took the coder's actual
+  read/write state machine over both tables (`encode_symbol`,
+  `encode_message`, `decode_message`), standalone over a real (if
+  scratch) byte buffer and still not wired to any `Method`. Remaining
+  scope: `Method` wiring and the `FORMAT_VERSION` bump and real-bitstream
+  measurement that wiring needs.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the

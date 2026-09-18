@@ -43,17 +43,36 @@
 //! bit (`FSE_buildDTable`'s construction; no archive precedent, same check
 //! the two slices before it ran).
 //!
-//! **This slice.** [`build_encode_table`] inverts that same per-symbol
-//! occurrence numbering: [`build_decode_table`] answers "slot `p` decodes
-//! to which symbol, at which occurrence"; an encoder instead already knows
-//! the symbol it is about to emit and needs the opposite lookup, "symbol
-//! `s`'s occurrence `n` sits at which slot" -- the table state a real tANS
-//! encoder transitions to. Standalone and not yet called from anywhere:
-//! nothing yet wires either table into a coder or reads/writes real bits.
+//! **Fifth slice (S2-A84).** [`build_encode_table`] inverts that same
+//! per-symbol occurrence numbering: [`build_decode_table`] answers "slot
+//! `p` decodes to which symbol, at which occurrence"; an encoder instead
+//! already knows the symbol it is about to emit and needs the opposite
+//! lookup, "symbol `s`'s occurrence `n` sits at which slot" -- the table
+//! state a real tANS encoder transitions to.
 //!
-//! **Remaining S1-P6 scope.** The coder's actual read/write state machine
-//! over both tables, wiring it behind a new fast `Method` variant, and the
-//! `FORMAT_VERSION` bump and real-bitstream measurement that wiring needs.
+//! **This slice.** [`encode_symbol`], [`encode_message`] and
+//! [`decode_message`]: the coder's actual read/write state machine over
+//! both tables. Decoding a slot is already fully specified by
+//! [`DecodeSlot`] itself (index the table by state, read `nb_bits` bits,
+//! add `new_state_base`), so [`decode_message`] applies that directly.
+//! Encoding has no closed form yet ([`build_encode_table`]'s own docs
+//! deferred it, "nothing yet reads it inside a hot loop to make that
+//! optimization pay for itself"): [`encode_symbol`] instead searches a
+//! symbol's occurrences for the one whose decode range covers the target
+//! state, relying on the property that an FSE/tANS decode table's per-symbol
+//! occurrence ranges partition `[0, table_size)` exactly and contiguously
+//! (`decode_table_bit_counts_and_bases_stay_in_range`'s own bound is a
+//! consequence of it). [`encode_message`] threads that backward over a
+//! whole symbol sequence -- reverse order, the direction a stack-like ANS
+//! state actually threads through -- and packs the resulting bits into a
+//! real byte buffer (LSB-first, forward-readable) that [`decode_message`]
+//! reads back. Both are standalone and not yet callable from any `Method`:
+//! this closes the "read/write state machine" item, leaving `Method`
+//! wiring and the `FORMAT_VERSION` bump as the only remaining scope.
+//!
+//! **Remaining S1-P6 scope.** Wiring this coder behind a new fast `Method`
+//! variant, and the `FORMAT_VERSION` bump and real-bitstream measurement
+//! that wiring needs.
 
 /// Rescales `counts` onto a table of exactly `1 << table_log2` slots,
 /// preserving every originally-nonzero entry's nonzero-ness.
@@ -386,6 +405,287 @@ pub fn build_encode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -
         table[idx].push(position);
     }
     table
+}
+
+/// Accumulates bits least-significant-bit first into a growing byte
+/// buffer. Private: message-level packing is this slice's whole job, and
+/// nothing outside it has any use yet for a bit-at-a-time writer.
+struct BitWriter {
+    bytes: Vec<u8>,
+    acc: u64,
+    nb_bits: u32,
+}
+
+impl BitWriter {
+    fn new() -> Self {
+        Self {
+            bytes: Vec::new(),
+            acc: 0,
+            nb_bits: 0,
+        }
+    }
+
+    /// Appends the low `nb_bits` bits of `value`, least-significant-bit
+    /// first. A `nb_bits` of 0 is a no-op, the shape every call in this
+    /// module makes for a single-symbol table (see
+    /// `single_symbol_whole_table_needs_zero_bits_and_is_an_identity_map`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nb_bits > 32`: every field this module ever packs comes
+    /// from a `table_log2 < 32` table, so `nb_bits` never legitimately
+    /// exceeds 32.
+    fn write(&mut self, value: u32, nb_bits: u32) {
+        assert!(
+            nb_bits <= 32,
+            "nb_bits {nb_bits} exceeds the 32-bit fields this module ever packs"
+        );
+        if nb_bits == 0 {
+            return;
+        }
+        // `nb_bits <= 32` (asserted above), so `1u64 << nb_bits` never
+        // exceeds `1u64 << 32`, well within u64's 64 bits: no separate
+        // nb_bits == 32 case is needed the way it would be at u32's own
+        // width.
+        let mask = (1u64 << nb_bits) - 1;
+        self.acc |= (u64::from(value) & mask) << self.nb_bits;
+        self.nb_bits += nb_bits;
+        while self.nb_bits >= 8 {
+            self.bytes.push((self.acc & 0xff) as u8);
+            self.acc >>= 8;
+            self.nb_bits -= 8;
+        }
+    }
+
+    /// Flushes any partial trailing byte, zero-padded in its unused high
+    /// bits, and returns the packed buffer.
+    fn finish(mut self) -> Vec<u8> {
+        if self.nb_bits > 0 {
+            self.bytes.push((self.acc & 0xff) as u8);
+        }
+        self.bytes
+    }
+}
+
+/// Reads bits least-significant-bit first from a byte buffer, matching
+/// [`BitWriter`]'s packing order. Private, for the same reason
+/// [`BitWriter`] is.
+struct BitReader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    acc: u64,
+    nb_bits: u32,
+}
+
+impl<'a> BitReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            pos: 0,
+            acc: 0,
+            nb_bits: 0,
+        }
+    }
+
+    /// Reads and returns the next `nb_bits` bits, least-significant-bit
+    /// first.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nb_bits > 32` (same bound [`BitWriter::write`]
+    /// enforces), or if the buffer runs out before `nb_bits` bits have
+    /// been supplied -- caller error (asking for more than
+    /// [`BitWriter`] wrote), never a property of adversarial input: this
+    /// primitive is not yet reachable from any decode path.
+    fn read(&mut self, nb_bits: u32) -> u32 {
+        assert!(
+            nb_bits <= 32,
+            "nb_bits {nb_bits} exceeds the 32-bit fields this module ever packs"
+        );
+        while self.nb_bits < nb_bits {
+            let &byte = self.bytes.get(self.pos).unwrap_or_else(|| {
+                panic!(
+                    "buffer ran out after {} bytes before {nb_bits} bits were \
+                     supplied; caller asked for more than BitWriter wrote",
+                    self.pos
+                )
+            });
+            self.acc |= u64::from(byte) << self.nb_bits;
+            self.nb_bits += 8;
+            self.pos += 1;
+        }
+        // Same `nb_bits <= 32` bound as `BitWriter::write`: no separate
+        // nb_bits == 32 case needed against u64's own 64-bit width.
+        let mask = (1u64 << nb_bits) - 1;
+        let value = u32::try_from(self.acc & mask)
+            .expect("mask keeps the result within nb_bits <= 32 bits, which fits u32");
+        self.acc >>= nb_bits;
+        self.nb_bits -= nb_bits;
+        value
+    }
+}
+
+/// The result of one tANS encode step: how many bits to emit and their
+/// value, plus the state a decoder would have been in immediately before
+/// emitting `symbol` -- what a real encoder threads backward into the
+/// preceding symbol's own [`encode_symbol`] call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Encoded {
+    /// How many bits to emit for this step.
+    pub nb_bits: u32,
+    /// The bits to emit, right-justified in the low `nb_bits` bits.
+    pub bits: u32,
+    /// The state a decoder would have been in immediately before this
+    /// step, i.e. the state to encode the preceding symbol against.
+    pub state: u32,
+}
+
+/// One tANS encode step, the inverse of a [`DecodeSlot`] lookup: given
+/// `target_state` (the state a decoder would be in immediately *after*
+/// decoding `symbol`) and `symbol` itself, finds the unique occurrence of
+/// `symbol` whose decode range covers `target_state` and returns the bits
+/// that occurrence emits, how many, and the state a decoder would have
+/// been in immediately before -- a valid slot to index `decode_table`
+/// with for the preceding symbol's own step.
+///
+/// Relies on the property that [`build_decode_table`]'s per-symbol
+/// occurrence ranges (`[new_state_base, new_state_base + 2^nb_bits)`)
+/// partition `[0, table_size)` exactly and contiguously, so exactly one
+/// occurrence of any given symbol covers any given `target_state`. No
+/// closed form yet ([`build_encode_table`]'s own docs deferred one): this
+/// searches `encode_table[symbol]`'s occurrences in order, which is at
+/// most `freq[symbol]` decode-table lookups.
+///
+/// # Panics
+///
+/// Panics if `symbol` is not a valid index into `encode_table`, or if its
+/// row is empty (`freq[symbol] == 0`: it never occurred, so it could
+/// never have been encoded) -- caller error, not yet reachable from any
+/// decode path. Panics (via the `expect`) if no occurrence covers
+/// `target_state`, which would mean `encode_table`/`decode_table` were
+/// not built from the same `spread_symbols` output for the same `freq`,
+/// the only supported caller shape.
+#[must_use]
+pub fn encode_symbol(
+    target_state: u32,
+    symbol: u32,
+    encode_table: &[Vec<u32>],
+    decode_table: &[DecodeSlot],
+) -> Encoded {
+    let idx = symbol as usize;
+    assert!(
+        idx < encode_table.len(),
+        "symbol {symbol} is not a valid index into encode_table (len {})",
+        encode_table.len()
+    );
+    let row = &encode_table[idx];
+    assert!(
+        !row.is_empty(),
+        "symbol {symbol} never occurred (freq 0), cannot encode it"
+    );
+    let slot = row
+        .iter()
+        .copied()
+        .find(|&slot| {
+            let info = &decode_table[slot as usize];
+            let width = 1u32 << info.nb_bits;
+            target_state >= info.new_state_base && target_state - info.new_state_base < width
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no occurrence of symbol {symbol} covers state {target_state}; \
+                 encode_table/decode_table must come from the same spread_symbols \
+                 output for the same freq"
+            )
+        });
+    let info = &decode_table[slot as usize];
+    Encoded {
+        nb_bits: info.nb_bits,
+        bits: target_state - info.new_state_base,
+        state: slot,
+    }
+}
+
+/// Encodes `symbols` (each a valid index into `encode_table`/`freq`,
+/// with a nonzero frequency) into a packed byte buffer, using the tANS
+/// tables built from that same `freq`. Returns the buffer and the state
+/// [`decode_message`] must be given to decode it back.
+///
+/// Processes `symbols` in reverse: tANS state threads backward from a
+/// fixed seed (state 0, arbitrary -- [`decode_message`] never assumes
+/// any particular value, it only receives whatever this function
+/// returns), each step's [`encode_symbol`] call producing the bits for
+/// one symbol and the state to encode the symbol before it against.
+/// Collecting those bits in encode order and reversing once, before
+/// packing, is what lets [`decode_message`] read the returned buffer
+/// forward from byte 0 instead of needing to read backward from its end.
+///
+/// # Panics
+///
+/// Panics under the same conditions [`encode_symbol`] does, for any
+/// symbol in `symbols`.
+#[must_use]
+pub fn encode_message(
+    symbols: &[u32],
+    encode_table: &[Vec<u32>],
+    decode_table: &[DecodeSlot],
+) -> (Vec<u8>, u32) {
+    let mut state = 0u32;
+    let mut steps: Vec<(u32, u32)> = Vec::with_capacity(symbols.len());
+    for &symbol in symbols.iter().rev() {
+        let step = encode_symbol(state, symbol, encode_table, decode_table);
+        steps.push((step.nb_bits, step.bits));
+        state = step.state;
+    }
+    steps.reverse();
+    let mut writer = BitWriter::new();
+    for (nb_bits, bits) in steps {
+        writer.write(bits, nb_bits);
+    }
+    (writer.finish(), state)
+}
+
+/// Decodes `count` symbols from `bytes`, starting from `initial_state`
+/// (the state [`encode_message`] returned alongside the buffer being
+/// decoded), using `decode_table`.
+///
+/// Each step indexes `decode_table` by the current state, reads
+/// [`DecodeSlot::nb_bits`] bits off `bytes`, and adds them to
+/// [`DecodeSlot::new_state_base`] for the next state -- [`DecodeSlot`]'s
+/// own docs already fully specify this step, so this function is the
+/// loop over it, plus the actual bit reads [`encode_symbol`]'s
+/// counterpart never had to perform.
+///
+/// # Panics
+///
+/// Panics if `initial_state` is not a valid index into `decode_table`.
+/// Panics if `bytes` runs out before `count` symbols have been decoded
+/// -- caller error (asking for more symbols than were encoded, or
+/// passing a `count`/`decode_table` that do not match the buffer's
+/// origin), never a property of adversarial input: this primitive is not
+/// yet reachable from any decode path.
+#[must_use]
+pub fn decode_message(
+    bytes: &[u8],
+    initial_state: u32,
+    count: usize,
+    decode_table: &[DecodeSlot],
+) -> Vec<u32> {
+    assert!(
+        (initial_state as usize) < decode_table.len(),
+        "initial_state {initial_state} is not a valid index into a decode_table of length {}",
+        decode_table.len()
+    );
+    let mut reader = BitReader::new(bytes);
+    let mut state = initial_state;
+    let mut symbols = Vec::with_capacity(count);
+    for _ in 0..count {
+        let slot = &decode_table[state as usize];
+        symbols.push(slot.symbol);
+        let bits = reader.read(slot.nb_bits);
+        state = slot.new_state_base + bits;
+    }
+    symbols
 }
 
 #[cfg(test)]
@@ -900,6 +1200,192 @@ mod tests {
     }
 
     #[test]
+    fn bit_writer_reader_round_trip_arbitrary_widths() {
+        let fields: &[(u32, u32)] = &[
+            (0b1, 1),
+            (0b101, 3),
+            (0, 0),
+            (0xff, 8),
+            (0x1234_5678, 32),
+            (0b11, 2),
+            (0, 5),
+            (0x7fff_ffff, 31),
+        ];
+        let mut writer = BitWriter::new();
+        for &(value, nb_bits) in fields {
+            writer.write(value, nb_bits);
+        }
+        let bytes = writer.finish();
+        let mut reader = BitReader::new(&bytes);
+        for &(value, nb_bits) in fields {
+            let mask = if nb_bits == 32 {
+                u32::MAX
+            } else {
+                (1u32 << nb_bits) - 1
+            };
+            assert_eq!(reader.read(nb_bits), value & mask, "nb_bits={nb_bits}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "buffer ran out")]
+    fn bit_reader_panics_past_the_end_of_the_buffer() {
+        let mut reader = BitReader::new(&[0xff]);
+        assert_eq!(reader.read(8), 0xff);
+        let _ = reader.read(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a valid index into encode_table")]
+    fn encode_symbol_rejects_an_out_of_range_symbol() {
+        let freq = normalize_frequencies(&[2, 1, 1], 2);
+        let spread = spread_symbols(&freq, 2);
+        let encode = build_encode_table(&spread, &freq, 2);
+        let decode = build_decode_table(&spread, &freq, 2);
+        let _ = encode_symbol(0, 5, &encode, &decode);
+    }
+
+    #[test]
+    #[should_panic(expected = "never occurred (freq 0)")]
+    fn encode_symbol_rejects_a_zero_frequency_symbol() {
+        let freq = normalize_frequencies(&[5, 0, 3], 4);
+        let spread = spread_symbols(&freq, 4);
+        let encode = build_encode_table(&spread, &freq, 4);
+        let decode = build_decode_table(&spread, &freq, 4);
+        let _ = encode_symbol(0, 1, &encode, &decode);
+    }
+
+    #[test]
+    fn encode_symbol_matches_a_hand_computed_example() {
+        // freq=[2,1,1], table_log2=2, spread [0,0,1,2]
+        // (spread_matches_a_hand_computed_table's example), decode table
+        // (decode_table_matches_a_hand_computed_example's example):
+        //   slot0: symbol0, nb_bits=1, base=0 (covers target 0..2)
+        //   slot1: symbol0, nb_bits=1, base=2 (covers target 2..4)
+        //   slot2: symbol1, nb_bits=2, base=0 (covers target 0..4)
+        //   slot3: symbol2, nb_bits=2, base=0 (covers target 0..4)
+        let freq = normalize_frequencies(&[2, 1, 1], 2);
+        assert_eq!(freq, vec![2, 1, 1]);
+        let spread = spread_symbols(&freq, 2);
+        let encode = build_encode_table(&spread, &freq, 2);
+        let decode = build_decode_table(&spread, &freq, 2);
+
+        // Symbol 0, target_state 1: covered by slot0's [0,2) range.
+        let step = encode_symbol(1, 0, &encode, &decode);
+        assert_eq!(
+            step,
+            Encoded {
+                nb_bits: 1,
+                bits: 1,
+                state: 0
+            }
+        );
+        // Symbol 0, target_state 3: covered by slot1's [2,4) range.
+        let step = encode_symbol(3, 0, &encode, &decode);
+        assert_eq!(
+            step,
+            Encoded {
+                nb_bits: 1,
+                bits: 1,
+                state: 1
+            }
+        );
+        // Symbol 1, any target_state in [0,4): only slot2.
+        let step = encode_symbol(3, 1, &encode, &decode);
+        assert_eq!(
+            step,
+            Encoded {
+                nb_bits: 2,
+                bits: 3,
+                state: 2
+            }
+        );
+    }
+
+    #[test]
+    fn encode_symbol_is_the_exact_inverse_of_a_decode_step() {
+        // For every slot in the decode table, and every bits value that
+        // slot's nb_bits admits, decoding from that slot reaches some
+        // target_state; encoding that symbol against that target_state
+        // must recover the original slot, bits, and nb_bits exactly.
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 8;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+
+        for (slot, info) in decode.iter().enumerate() {
+            let slot = u32::try_from(slot).unwrap();
+            let width = 1u32 << info.nb_bits;
+            for bits in 0..width {
+                let target_state = info.new_state_base + bits;
+                let step = encode_symbol(target_state, info.symbol, &encode, &decode);
+                assert_eq!(step.state, slot, "slot={slot} bits={bits}");
+                assert_eq!(step.bits, bits, "slot={slot} bits={bits}");
+                assert_eq!(step.nb_bits, info.nb_bits, "slot={slot} bits={bits}");
+            }
+        }
+    }
+
+    #[test]
+    fn encode_message_decode_message_round_trip() {
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 8;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+
+        let symbols: Vec<u32> = vec![0, 4, 4, 4, 1, 0, 0, 4, 2, 3, 0, 4, 5, 6, 7, 8, 9, 4, 0];
+        let (bytes, initial_state) = encode_message(&symbols, &encode, &decode);
+        let decoded = decode_message(&bytes, initial_state, symbols.len(), &decode);
+        assert_eq!(decoded, symbols);
+    }
+
+    #[test]
+    fn encode_message_decode_message_round_trip_single_symbol_table() {
+        // A one-symbol alphabet needs 0 bits per decode; the round trip
+        // should still hold with an all-empty-looking bitstream.
+        let table_log2 = 4;
+        let freq = vec![1u32 << table_log2];
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+
+        let symbols = vec![0u32; 25];
+        let (bytes, initial_state) = encode_message(&symbols, &encode, &decode);
+        assert!(bytes.is_empty());
+        let decoded = decode_message(&bytes, initial_state, symbols.len(), &decode);
+        assert_eq!(decoded, symbols);
+    }
+
+    #[test]
+    fn encode_message_decode_message_round_trip_empty_message() {
+        let counts = [3, 1, 1];
+        let table_log2 = 2;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let encode = build_encode_table(&spread, &freq, table_log2);
+
+        let (bytes, initial_state) = encode_message(&[], &encode, &decode);
+        assert!(bytes.is_empty());
+        assert_eq!(initial_state, 0);
+        let decoded = decode_message(&bytes, initial_state, 0, &decode);
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a valid index into a decode_table")]
+    fn decode_message_rejects_an_out_of_range_initial_state() {
+        let freq = normalize_frequencies(&[2, 1, 1], 2);
+        let spread = spread_symbols(&freq, 2);
+        let decode = build_decode_table(&spread, &freq, 2);
+        let _ = decode_message(&[], 4, 0, &decode);
+    }
+
+    #[test]
     fn single_symbol_whole_table_needs_zero_bits_and_is_an_identity_map() {
         // A source with only one possible symbol needs 0 bits per decode
         // (probability 1), and there is really only one conceptual state,
@@ -913,6 +1399,65 @@ mod tests {
             assert_eq!(slot.symbol, 0);
             assert_eq!(slot.nb_bits, 0);
             assert_eq!(slot.new_state_base, u32::try_from(u).unwrap());
+        }
+    }
+}
+
+// Not under Miri: interpretation costs 300-5000x per case on this crate
+// (measured, issue #456), the storm multiplies that by its case count,
+// and `mod tests`' own examples already walk the same round-trip shape
+// for UB observation (`coder.rs`'s `mod proptests` header comment records
+// the same reasoning for the entropy coder this one parallels).
+#[cfg(test)]
+#[cfg(not(miri))]
+mod proptests {
+    use proptest::prelude::*;
+
+    use super::{
+        build_decode_table, build_encode_table, decode_message, encode_message,
+        normalize_frequencies, spread_symbols,
+    };
+
+    /// Every originally-nonzero symbol stays nonzero
+    /// ([`normalize_frequencies`]'s own guarantee) and every count here
+    /// is drawn `>= 1`, so the whole `0..alphabet` range is always a
+    /// valid, encodable symbol -- no filtering needed before generating
+    /// symbol sequences over it. `table_log2` is picked before the
+    /// alphabet and caps it at `1 << table_log2`, [`normalize_frequencies`]'s
+    /// own precondition (one table slot per distinct symbol, at least).
+    fn freq_table_log2_and_symbols() -> impl Strategy<Value = (Vec<u32>, u32, Vec<u32>)> {
+        (3u32..10)
+            .prop_flat_map(|table_log2| {
+                let max_alphabet = (1usize << table_log2).min(12);
+                (
+                    prop::collection::vec(1u32..500, 2..=max_alphabet),
+                    Just(table_log2),
+                )
+            })
+            .prop_flat_map(|(counts, table_log2)| {
+                let freq = normalize_frequencies(&counts, table_log2);
+                let alphabet = freq.len();
+                prop::collection::vec(0..u32::try_from(alphabet).unwrap(), 0..64)
+                    .prop_map(move |symbols| (freq.clone(), table_log2, symbols))
+            })
+    }
+
+    proptest! {
+        /// Every symbol [`encode_message`] packs, [`decode_message`]
+        /// recovers exactly, over arbitrary alphabets, table sizes, and
+        /// symbol streams -- the property that matters about this
+        /// slice, mirroring `mod tests`' own hand-picked examples.
+        #[test]
+        fn encode_decode_message_round_trips_for_arbitrary_symbol_sequences(
+            (freq, table_log2, symbols) in freq_table_log2_and_symbols()
+        ) {
+            let spread = spread_symbols(&freq, table_log2);
+            let decode = build_decode_table(&spread, &freq, table_log2);
+            let encode = build_encode_table(&spread, &freq, table_log2);
+
+            let (bytes, initial_state) = encode_message(&symbols, &encode, &decode);
+            let decoded = decode_message(&bytes, initial_state, symbols.len(), &decode);
+            prop_assert_eq!(decoded, symbols);
         }
     }
 }

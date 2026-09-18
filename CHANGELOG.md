@@ -37,6 +37,16 @@ All notable changes to this project are documented here. Format follows
   sits at which slot" instead of "slot `p` decodes to which symbol." Not
   yet wired to any `Method` or bitstream; no format or behavior change.
 
+- `src/tans.rs`: `encode_symbol`, `encode_message`, `decode_message`, the
+  tANS coder's actual read/write state machine over both tables
+  (`research/JOURNAL.md` S1-P6, issue #447's next slice after
+  `build_encode_table`). `decode_message` applies `DecodeSlot` directly;
+  `encode_symbol` inverts it (no closed form yet, searches a symbol's
+  occurrences for the one covering the target state) and `encode_message`
+  threads that backward over a whole sequence, packing real bits into a
+  byte buffer `decode_message` reads forward. Not yet wired to any
+  `Method` or bitstream; no format or behavior change.
+
 - `site/index.html`'s Principles section now backs each of its four
   claims with a linked artifact and a checkable count instead of stating
   them as bare assertions (issue #522): the panic claim links the four
