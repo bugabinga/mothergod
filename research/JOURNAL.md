@@ -2913,6 +2913,43 @@ record.
   next-state arithmetic), the coder's state machine itself, wiring
   behind a new fast `Method` variant, and the `FORMAT_VERSION` bump and
   real-bitstream measurement that wiring needs.
+- S2-A83 | ACCEPTED | Third slice of S1-P6's remaining tANS fast path
+  (issue #447, after S2-A82's `spread_symbols`): `src/tans.rs`'s
+  `build_decode_table`, the classic FSE/tANS decode-table construction
+  step — turning a spread assignment into the per-slot entries a real
+  decoder indexes by state (which symbol, how many bits to read next,
+  and the baseline those bits are added to for the next state).
+  `FSE_buildDTable`'s own construction, no archive precedent, same check
+  S2-A81/S2-A82 ran: each symbol's occurrences in the spread table,
+  visited in slot order, are numbered consecutively starting at that
+  symbol's own normalized frequency (the state range a canonical tANS
+  table reserves for it), and a given occurrence number's bit count and
+  baseline fall straight out of that number's highest set bit
+  (`table_log2` minus the bit position for the count, that many bits
+  shifted in and `1 << table_log2` subtracted back off for the
+  baseline). A private `highbit32` helper wraps `u32::ilog2` (clippy's
+  `manual_ilog2` caught a hand-rolled `leading_zeros` reimplementation in
+  one of this slice's own tests during review, applied to both). | 12
+  unit tests: three panics (`table_log2 >= 32`, a `freq`/`table_symbol`
+  length mismatch, an out-of-range symbol id in `table_symbol`), a
+  hand-computed 4-slot table (worked by hand against the construction
+  formula), the decode table's symbol column matching the spread table
+  it was built from exactly, bit-count/baseline range bounds across the
+  same 6 shapes S2-A81/S2-A82's tests used, an independent cross-check
+  recomputing each occurrence's expected bit count and baseline from its
+  position among that symbol's own occurrences rather than reusing the
+  function's own running counter, determinism, and a single-symbol
+  whole-table case (needs 0 bits per decode and is an identity map
+  slot-to-slot, the trivial-probability-1 sanity check); `cargo x check`
+  (fmt, clippy pedantic + missing_docs, test, doc) clean. | No bpb
+  measurement, same reason as S2-A81/S2-A82: no coder yet to produce a
+  bitstream — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas; `baseline_gate check` confirms the existing 11 cases are
+  unaffected (nothing wired). Remaining S1-P6 scope: the mirroring
+  encode-table construction, the coder's actual read/write state machine
+  over both tables, wiring behind a new fast `Method` variant, and the
+  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
+  needs.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -2937,10 +2974,12 @@ record.
   scope. S2-A81 took tANS's own first slice: `src/tans.rs`'s
   `normalize_frequencies`, standalone and not yet wired. S2-A82 took the
   next slice, the "spread" step (`spread_symbols`), also standalone and
-  not yet wired. Remaining scope: the encode/decode transition tables
-  built from a spread assignment, the coder's state machine, `Method`
-  wiring, and the `FORMAT_VERSION` bump and real-bitstream measurement
-  that wiring needs.
+  not yet wired. S2-A83 took the decode-table construction step
+  (`build_decode_table`), also standalone and not yet wired. Remaining
+  scope: the mirroring encode-table construction, the coder's actual
+  read/write state machine over both tables, `Method` wiring, and the
+  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
+  needs.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
