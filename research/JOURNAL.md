@@ -2881,6 +2881,38 @@ record.
   machine itself, wiring behind a new fast `Method` variant, and the
   `FORMAT_VERSION` bump and real-bitstream measurement that wiring
   needs.
+- S2-A82 | ACCEPTED | Second slice of S1-P6's remaining tANS fast path
+  (issue #447, after S2-A81's `normalize_frequencies`): `src/tans.rs`'s
+  `spread_symbols`, the classic FSE/tANS "spread" step — assigning each
+  of a `1 << table_log2`-slot table to exactly one symbol from a
+  normalized frequency table, symbol `s` taking exactly `freq[s]` slots.
+  Scattered by a fixed stride (`spread_stride`, private) instead of
+  packed contiguously per symbol: any stride odd relative to the
+  power-of-two table size is coprime to it, so its additive orbit mod
+  `table_size` visits every slot exactly once before repeating, the only
+  property placement correctness needs. Magnitude borrowed from FSE's
+  own constant (half the table plus an eighth plus three) for the
+  scattering quality real FSE/tANS decode tables rely on, with the low
+  bit forced on: the bare constant lands on `table_size` itself (hence
+  even) at `table_size == 8`, which would collapse every placement onto
+  slot 0. No archive precedent, same check S2-A81 ran. | 9 unit tests:
+  two panics (`table_log2 >= 32`, a `freq` that does not sum to
+  `1 << table_log2`), a hand-computed 4-slot table, per-symbol placement
+  counts across the same 6 shapes S2-A81's sum-total test used, an
+  independent reimplementation of the stride walk asserting no slot is
+  ever written twice and every slot is written once (a per-symbol-count
+  check alone cannot rule out a slot collision that happens to land on
+  the default fill value, a real symbol id), determinism, a single-slot
+  table, and the `table_size == 8` even-constant edge; `cargo x check`
+  (fmt, clippy pedantic + missing_docs, test, doc) clean. | No bpb
+  measurement, same reason as S2-A81: no coder yet to produce a
+  bitstream — `progress.jsonl` records this as `kind: "patch"` with null
+  bpb deltas; `baseline_gate check` confirms the existing 11 cases are
+  unaffected (nothing wired). Remaining S1-P6 scope: the encode/decode
+  transition tables built from a spread assignment (state deltas and
+  next-state arithmetic), the coder's state machine itself, wiring
+  behind a new fast `Method` variant, and the `FORMAT_VERSION` bump and
+  real-bitstream measurement that wiring needs.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -2903,10 +2935,12 @@ record.
   own `forbid(unsafe_code)` (ADR-0017/ADR-0043) independent of any
   corpus measurement; the tANS fast path is the sole remaining open
   scope. S2-A81 took tANS's own first slice: `src/tans.rs`'s
-  `normalize_frequencies`, standalone and not yet wired. Remaining
-  scope: the encode/decode state-transform tables, the coder's state
-  machine, `Method` wiring, and the `FORMAT_VERSION` bump and
-  real-bitstream measurement that wiring needs.
+  `normalize_frequencies`, standalone and not yet wired. S2-A82 took the
+  next slice, the "spread" step (`spread_symbols`), also standalone and
+  not yet wired. Remaining scope: the encode/decode transition tables
+  built from a spread assignment, the coder's state machine, `Method`
+  wiring, and the `FORMAT_VERSION` bump and real-bitstream measurement
+  that wiring needs.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the

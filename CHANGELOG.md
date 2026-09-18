@@ -16,6 +16,13 @@ All notable changes to this project are documented here. Format follows
   symbol's nonzero share. Not yet wired to any `Method` or bitstream; no
   format or behavior change.
 
+- `src/tans.rs`: `spread_symbols`, the tANS/FSE "spread" step
+  (`research/JOURNAL.md` S1-P6, issue #447's next slice after
+  `normalize_frequencies`). Assigns each table slot to a symbol, scattered
+  by a stride coprime to the power-of-two table size instead of packed
+  contiguously per symbol. Not yet wired to any `Method` or bitstream; no
+  format or behavior change.
+
 - `site/index.html`, `site/status.html` and `site/agents.html` now carry
   Open Graph and Twitter Card meta tags (`og:title`, `og:description`,
   `og:url`, `og:type`, `og:site_name`, `twitter:card`) and a canonical
