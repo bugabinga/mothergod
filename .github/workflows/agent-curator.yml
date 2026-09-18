@@ -77,7 +77,13 @@ jobs:
             Bootstrap (idempotent, quick): ensure these labels exist
             (gh label create ... || true): triage, research,
             blocked-on-human, ops-log, agent-approved, agents-paused,
-            product, agent-system, marketing. Ensure one open issue
+            product, agent-system, marketing, ledger. `ledger` marks
+            an issue the machinery writes and no session ships (the
+            ops log, the model, allowance, traffic and docs
+            ledgers); `.github/scripts/agent-queue` excludes it, so
+            a ledger left unlabelled sorts into the BDFL's work
+            queue where the only correct action is to leave it
+            alone. A new ledger issue is yours to label on triage. Ensure one open issue
             labeled ops-log titled "📋 Operations log" exists; create
             it if missing.
 

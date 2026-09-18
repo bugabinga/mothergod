@@ -207,10 +207,14 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 
 - Branches: `claude/<short-slug>`. Conventional-ish commit subjects, imperative.
 - Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
-  `marketing`, `blocked-on-human`, `agents-paused`, `ops-log`,
+  `marketing`, `blocked-on-human`, `agents-paused`, `ops-log`, `ledger`,
   `agent-approved`, `changes-requested`. The last two are the reviewer's
   verdict, typed: exactly one of them, never both, and the maintainer
-  filters on them rather than reading prose.
+  filters on them rather than reading prose. `ledger` marks an issue the
+  machinery writes and no session ships, so queues can exclude it: six
+  such issues carried no common marker until 2026-09-18, and each one
+  sorted into the BDFL's work queue where the only correct action is to
+  leave it alone.
 - Every issue carries exactly one realm label, and whoever opens it applies
   it: `product` for what a user of the compressor gets (codec, docs, site,
   releases), `agent-system` for the factory (agents, workflows, prompts,

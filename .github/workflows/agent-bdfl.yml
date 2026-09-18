@@ -543,15 +543,22 @@ jobs:
             5. Agent-system queue (operator directive, Telegram,
                2026-08-23): issues labeled agent-system are yours to
                fix. When the steps above found nothing needing
-               direction, do not stop at a no-op: take the top
-               unclaimed agent-system issue and ship it.
-               Urgency first: bug before enhancement, a blocker
-               before what it blocks. Claim check first, because
-               agents run concurrently (ADR-0014) and an open PR or
-               claude/* branch means taken. One per run; the cadence
-               does the rest. An issue carrying neither realm label
-               is unrouted, and routing is yours before it is anyone
-               else's work: label it, then queue it or hand it over.
+               direction, do not stop at a no-op: run
+               `.github/scripts/agent-queue` and ship its top item.
+               It applies the ladder this step used to ask you to
+               apply by eye (bug, then blocker, then plain, then
+               enhancement, oldest first inside a rank) and drops
+               what you must not take: ledgers, blocked-on-human
+               latches, and issues an open PR already claims
+               (ADR-0014). Its docstring is the contract. Reading
+               the list yourself is what it replaced: on 2026-09-18
+               that put a wording nit filed minutes earlier above
+               #106, a token-exposure bug 25 days old. One per run;
+               the cadence does the rest. It also prints unrouted
+               issues, and routing those is yours before it is
+               anyone else's work: label them, then queue or hand
+               over. UNREADABLE is not an empty queue, and only an
+               empty queue lets this run stop at a no-op.
             If the delta core found nothing and the agent-system queue
             is empty, send the Telegram status line
             and stop — a no-op run that posts nothing on the repo is a
