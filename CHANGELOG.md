@@ -23,6 +23,13 @@ All notable changes to this project are documented here. Format follows
   contiguously per symbol. Not yet wired to any `Method` or bitstream; no
   format or behavior change.
 
+- `src/tans.rs`: `build_decode_table`, the tANS/FSE decode-table
+  construction step (`research/JOURNAL.md` S1-P6, issue #447's next slice
+  after `spread_symbols`). Turns a spread assignment into the per-slot
+  (symbol, bit count, next-state baseline) entries a real decoder would
+  index by state. Not yet wired to any `Method` or bitstream; no format
+  or behavior change.
+
 - `site/index.html`, `site/status.html` and `site/agents.html` now carry
   Open Graph and Twitter Card meta tags (`og:title`, `og:description`,
   `og:url`, `og:type`, `og:site_name`, `twitter:card`) and a canonical

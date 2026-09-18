@@ -23,22 +23,32 @@
 //! (`1 << table_log2`) so the coder's state transform can use shifts and
 //! masks instead of division.
 //!
-//! **This slice.** Every tANS/FSE-family coder next assigns each of the
+//! **Third slice (S2-A82).** [`spread_symbols`]: assigns each of the
 //! `1 << table_log2` table slots to exactly one symbol -- the "spread"
-//! step -- before it can build encode or decode transition tables from
-//! that assignment. [`spread_symbols`] is that assignment alone: symbol
-//! `s` occupies exactly `freq[s]` slots, scattered by a fixed odd stride
-//! (coprime to the power-of-two table size, so its orbit covers every
-//! slot exactly once) instead of packed contiguously, so a table walked in
-//! slot order interleaves symbols close to their frequency order rather
-//! than running one symbol at a time -- the shape the decode table built
-//! from it depends on. Standalone and not yet called from anywhere.
+//! step -- scattering symbol `s` across exactly `freq[s]` slots by a fixed
+//! odd stride (coprime to the power-of-two table size, so its orbit
+//! covers every slot exactly once) instead of packing them contiguously,
+//! so a table walked in slot order interleaves symbols close to their
+//! frequency order rather than running one symbol at a time.
 //!
-//! **Remaining S1-P6 scope.** Building the encode/decode transition tables
-//! from a spread assignment (state deltas and next-state arithmetic), the
-//! coder's actual state machine, wiring it behind a new fast `Method`
-//! variant, and the `FORMAT_VERSION` bump and real-bitstream measurement
-//! that wiring needs.
+//! **This slice.** [`build_decode_table`] turns a spread assignment into
+//! the entries a real tANS decoder indexes by state: for each table slot,
+//! which symbol it decodes to, how many bits to pull off the bitstream,
+//! and the baseline those bits are added to for the next state (itself a
+//! valid index back into this same table). Each symbol's occurrences,
+//! visited in slot order, are numbered consecutively starting at that
+//! symbol's own normalized frequency -- the state range a canonical tANS
+//! table reserves for it -- and a given occurrence number's bit count and
+//! baseline fall straight out of that number's highest set bit
+//! (`FSE_buildDTable`'s construction; no archive precedent, same check
+//! the two slices before it ran). Standalone and not yet called from
+//! anywhere: nothing yet builds the matching encode table or reads/writes
+//! real bits against this one.
+//!
+//! **Remaining S1-P6 scope.** The mirroring encode-table construction, the
+//! coder's actual read/write state machine over both tables, wiring it
+//! behind a new fast `Method` variant, and the `FORMAT_VERSION` bump and
+//! real-bitstream measurement that wiring needs.
 
 /// Rescales `counts` onto a table of exactly `1 << table_log2` slots,
 /// preserving every originally-nonzero entry's nonzero-ness.
@@ -209,6 +219,108 @@ pub fn spread_symbols(freq: &[u32], table_log2: u32) -> Vec<u32> {
         }
     }
     table
+}
+
+/// `floor(log2(x))`, the position of `x`'s highest set bit (`0` for
+/// `x == 1`). Every call site in this module passes a per-symbol running
+/// state that starts at that symbol's own normalized frequency
+/// ([`normalize_frequencies`]'s postcondition: at least 1 for any symbol
+/// [`spread_symbols`] ever actually places) and only grows from there, so
+/// `x` is never 0 in practice.
+fn highbit32(x: u32) -> u32 {
+    debug_assert!(
+        x > 0,
+        "highbit32 is only ever called on a live tANS state, never 0"
+    );
+    x.ilog2()
+}
+
+/// One tANS decode-table slot: the symbol table state `u` decodes to, how
+/// many bits the decoder reads off the bitstream from that state, and the
+/// baseline those bits are added to for the next state -- itself a valid
+/// index back into the same table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodeSlot {
+    /// The symbol this table state decodes to.
+    pub symbol: u32,
+    /// How many bits the decoder reads off the bitstream from this state.
+    pub nb_bits: u32,
+    /// Added to the bits just read to produce the next state.
+    pub new_state_base: u32,
+}
+
+/// Builds the tANS decode table a real decoder would index by state:
+/// slot `u`'s entry names which symbol state `u` decodes to, how many
+/// bits to read next, and the baseline (`new_state_base`) those bits are
+/// added to for the next state.
+///
+/// `table_symbol` is [`spread_symbols`]'s output (slot `u` holds the
+/// symbol occupying it) and `freq` is the normalized frequency table
+/// ([`normalize_frequencies`]'s output) it was spread from. Each symbol
+/// `s`'s occurrences in `table_symbol`, visited in slot order, are
+/// numbered consecutively starting at `freq[s]` (the state range a
+/// canonical tANS table reserves for `s`): occurrence number `n`'s
+/// `nb_bits` is `table_log2` minus `n`'s highest set bit, and its
+/// `new_state_base` is `n` shifted left by that many bits with
+/// `1 << table_log2` subtracted back off (`FSE_buildDTable`'s
+/// construction; no archive precedent, same check [`spread_symbols`] and
+/// [`normalize_frequencies`] ran).
+///
+/// # Panics
+///
+/// Panics if `table_log2 >= 32`, or if `freq` does not sum to exactly
+/// `1 << table_log2` (same two preconditions [`spread_symbols`]
+/// enforces). Panics if `table_symbol.len()` is not `1 << table_log2`, or
+/// if any of its entries is not a valid index into `freq` -- both are
+/// guaranteed when `table_symbol` is `spread_symbols`'s own output for
+/// this exact `freq`, the only supported caller shape; this primitive is
+/// not yet reachable from any decode path.
+#[must_use]
+pub fn build_decode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -> Vec<DecodeSlot> {
+    assert!(
+        table_log2 < 32,
+        "table_log2 must fit a u32 shift; got {table_log2}"
+    );
+    let table_size = 1usize << table_log2;
+    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+    assert!(
+        sum == table_size as u64,
+        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
+         Call normalize_frequencies first."
+    );
+    assert!(
+        table_symbol.len() == table_size,
+        "table_symbol must have exactly 1 << table_log2 ({table_size}) entries; got {}",
+        table_symbol.len()
+    );
+    let table_size_u32 =
+        u32::try_from(table_size).expect("table_log2 < 32 keeps table_size within u32");
+    let table_size_u64 = u64::from(table_size_u32);
+
+    let mut symbol_next: Vec<u32> = freq.to_vec();
+    table_symbol
+        .iter()
+        .map(|&symbol| {
+            let idx = symbol as usize;
+            assert!(
+                idx < symbol_next.len(),
+                "table_symbol entry {symbol} is not a valid index into freq (len {})",
+                symbol_next.len()
+            );
+            let next_state = symbol_next[idx];
+            symbol_next[idx] += 1;
+            let nb_bits = table_log2 - highbit32(next_state);
+            let new_state_base =
+                u32::try_from((u64::from(next_state) << nb_bits) - table_size_u64).expect(
+                    "new_state_base lands in [0, table_size), which fits u32 whenever table_size does",
+                );
+            DecodeSlot {
+                symbol,
+                nb_bits,
+                new_state_base,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -445,6 +557,163 @@ mod tests {
                 .filter(|&&s| s == u32::try_from(symbol).unwrap())
                 .count();
             assert_eq!(got, want as usize);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "must fit a u32 shift")]
+    fn decode_table_log2_of_32_panics() {
+        let _ = build_decode_table(&[0], &[1], 32);
+    }
+
+    #[test]
+    #[should_panic(expected = "freq must sum to exactly")]
+    fn decode_table_rejects_a_freq_that_does_not_sum_to_the_table_size() {
+        let _ = build_decode_table(&[0, 0, 1], &[1, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "table_symbol must have exactly")]
+    fn decode_table_rejects_a_mismatched_table_symbol_length() {
+        let _ = build_decode_table(&[0, 0, 1], &[2, 1, 1], 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a valid index into freq")]
+    fn decode_table_rejects_an_out_of_range_symbol() {
+        let _ = build_decode_table(&[0, 0, 1, 5], &[2, 1, 1], 2);
+    }
+
+    #[test]
+    fn decode_table_matches_a_hand_computed_example() {
+        // freq=[2,1,1], table_log2=2 (table_size=4), spread table [0,0,1,2]
+        // (spread_matches_a_hand_computed_table's own example). symbolNext
+        // starts [2,1,1]:
+        //   u=0: s=0, next_state=2 -> highbit=1, nb_bits=1, base=(2<<1)-4=0
+        //   u=1: s=0, next_state=3 -> highbit=1, nb_bits=1, base=(3<<1)-4=2
+        //   u=2: s=1, next_state=1 -> highbit=0, nb_bits=2, base=(1<<2)-4=0
+        //   u=3: s=2, next_state=1 -> highbit=0, nb_bits=2, base=(1<<2)-4=0
+        let table = build_decode_table(&[0, 0, 1, 2], &[2, 1, 1], 2);
+        assert_eq!(
+            table,
+            vec![
+                DecodeSlot {
+                    symbol: 0,
+                    nb_bits: 1,
+                    new_state_base: 0
+                },
+                DecodeSlot {
+                    symbol: 0,
+                    nb_bits: 1,
+                    new_state_base: 2
+                },
+                DecodeSlot {
+                    symbol: 1,
+                    nb_bits: 2,
+                    new_state_base: 0
+                },
+                DecodeSlot {
+                    symbol: 2,
+                    nb_bits: 2,
+                    new_state_base: 0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn decode_table_symbol_field_matches_the_spread_table_exactly() {
+        let counts = [37, 19, 0, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let symbols: Vec<u32> = decode.iter().map(|slot| slot.symbol).collect();
+        assert_eq!(symbols, spread);
+    }
+
+    #[test]
+    fn decode_table_bit_counts_and_bases_stay_in_range() {
+        let cases: &[(&[u32], u32)] = &[
+            (&[100, 1, 1], 3),
+            (&[1, 1, 1], 2),
+            (&[7, 5, 3, 1], 5),
+            (&[1000, 1, 1, 1, 1, 1, 1, 1], 4),
+            (&[3, 3, 3, 3, 3, 3, 3, 3, 3], 6),
+            (&[255, 254, 253, 1], 10),
+        ];
+        for &(counts, table_log2) in cases {
+            let freq = normalize_frequencies(counts, table_log2);
+            let spread = spread_symbols(&freq, table_log2);
+            let decode = build_decode_table(&spread, &freq, table_log2);
+            let table_size = 1u32 << table_log2;
+            for slot in &decode {
+                assert!(
+                    slot.nb_bits <= table_log2,
+                    "nb_bits {} exceeds table_log2 {table_log2}",
+                    slot.nb_bits
+                );
+                assert!(
+                    slot.new_state_base < table_size,
+                    "new_state_base {} not below table_size {table_size}",
+                    slot.new_state_base
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decode_table_per_symbol_occurrence_numbers_are_consecutive_from_freq() {
+        // Cross-checks the state-numbering scheme by recomputing each
+        // occurrence's expected (nb_bits, new_state_base) from its
+        // position among that symbol's own occurrences (occurrence n of a
+        // symbol starting at freq[s] means next_state = freq[s] + n)
+        // rather than reusing build_decode_table's running counter.
+        let counts = [37, 19, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        let table_size: u64 = 1 << table_log2;
+
+        let mut occurrence = vec![0u32; freq.len()];
+        for (slot, &symbol) in decode.iter().zip(spread.iter()) {
+            let n = occurrence[symbol as usize];
+            occurrence[symbol as usize] += 1;
+            let next_state = freq[symbol as usize] + n;
+            let highbit = next_state.ilog2();
+            let expected_nb_bits = table_log2 - highbit;
+            let expected_base = (u64::from(next_state) << expected_nb_bits) - table_size;
+            assert_eq!(slot.nb_bits, expected_nb_bits);
+            assert_eq!(u64::from(slot.new_state_base), expected_base);
+        }
+    }
+
+    #[test]
+    fn decode_table_is_deterministic() {
+        let counts = [37, 19, 0, 5, 5, 200, 1, 1, 1, 1, 1];
+        let table_log2 = 10;
+        let freq = normalize_frequencies(&counts, table_log2);
+        let spread = spread_symbols(&freq, table_log2);
+        let first = build_decode_table(&spread, &freq, table_log2);
+        let second = build_decode_table(&spread, &freq, table_log2);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn single_symbol_whole_table_needs_zero_bits_and_is_an_identity_map() {
+        // A source with only one possible symbol needs 0 bits per decode
+        // (probability 1), and there is really only one conceptual state,
+        // so every slot maps straight back to its own index.
+        let table_log2 = 4;
+        let table_size = 1usize << table_log2;
+        let freq = vec![u32::try_from(table_size).unwrap()];
+        let spread = spread_symbols(&freq, table_log2);
+        let decode = build_decode_table(&spread, &freq, table_log2);
+        for (u, slot) in decode.iter().enumerate() {
+            assert_eq!(slot.symbol, 0);
+            assert_eq!(slot.nb_bits, 0);
+            assert_eq!(slot.new_state_base, u32::try_from(u).unwrap());
         }
     }
 }
