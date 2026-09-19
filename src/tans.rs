@@ -69,6 +69,22 @@
 //! reads back. Both are standalone and not yet callable from any `Method`:
 //! this closes the "read/write state machine" item, leaving `Method`
 //! wiring and the `FORMAT_VERSION` bump as the only remaining scope.
+//! S2-A86 (`bench/src/bin/tans_measure.rs`, not this module) then measured
+//! that state machine for real: within noise of the order-0 entropy floor,
+//! 21x-305x faster than the champion, exactly the ratio-for-speed trade a
+//! fast tier needs.
+//!
+//! **This slice.** [`write_freq_table`] and [`read_freq_table`]: a decoder
+//! has no access to the original byte counts [`normalize_frequencies`] was
+//! computed from, so a real bitstream has to carry the normalized
+//! frequency table itself -- the piece every slice through S2-A86 left
+//! implicit by threading `freq` straight from `normalize_frequencies` into
+//! `spread_symbols` in the same process. `read_freq_table` is also this
+//! coder's first byte-level contact with untrusted input: it validates
+//! `table_log2`, the declared alphabet length, every varint, and the
+//! parsed table's sum fully before returning, so hard rule 2's
+//! never-panics guarantee holds for whatever `Method` wiring calls it
+//! next. Both are standalone and not yet callable from any `Method`.
 //!
 //! **Remaining S1-P6 scope.** Wiring this coder behind a new fast `Method`
 //! variant, and the `FORMAT_VERSION` bump and real-bitstream measurement
@@ -211,6 +227,148 @@ pub fn normalize_frequencies(counts: &[u32], table_log2: u32) -> Vec<u32> {
     freq.into_iter()
         .map(|f| u32::try_from(f).expect("every entry stays within target, itself a valid u32"))
         .collect()
+}
+
+/// Upper bound [`read_freq_table`] accepts for a deserialized
+/// `table_log2`. S2-A86's measurement used `table_log2 = 10`; 16 leaves
+/// headroom for tuning while keeping `1 << table_log2` -- the eventual
+/// decode table's slot count, once a `Method` wires this primitive to a
+/// real bitstream -- capped in the hundreds of thousands regardless of
+/// how small the actual coded payload is. Checked once, here, at the
+/// single point a future decode path first parses this untrusted byte,
+/// rather than leaving each downstream table-building call site to
+/// remember its own cap (`rust-craft` skill, allocation-discipline; hard
+/// rule 2, `CLAUDE.md`).
+pub(crate) const MAX_TABLE_LOG2: u32 = 16;
+
+/// Writes `value` as an unsigned little-endian-base-128 varint: 7 payload
+/// bits per byte, continuation bit (`0x80`) set on every byte but the
+/// last. Standard LEB128; this module's only use for it is
+/// [`write_freq_table`]'s per-entry encoding, so it stays private.
+fn write_varint_u32(mut value: u32, out: &mut Vec<u8>) {
+    loop {
+        let byte = u8::try_from(value & 0x7F).expect("masked to 7 bits, always fits u8");
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// Reads one [`write_varint_u32`]-encoded value off the front of `bytes`,
+/// returning it alongside whatever bytes follow it -- the same
+/// value-plus-remainder shape `crate::codec`'s own header parsing already
+/// returns from `split_at_checked`-based helpers.
+///
+/// Never panics on adversarial input: accumulates in `u64` (5 bytes * 7
+/// bits = 35, safely inside `u64` regardless of which bits are set, so no
+/// intermediate shift can overflow) and only converts down to `u32` once
+/// a terminating byte is found, rejecting a value too wide to fit
+/// ([`Error::Corrupt`]) instead of silently truncating it. Rejects a 6th
+/// continuation byte ([`Error::Corrupt`]): an encoded `u32` never needs
+/// one, so a stream still requesting more at that point is malformed, not
+/// merely large -- otherwise a crafted input could hold this loop reading
+/// forever. Returns [`Error::Truncated`] if `bytes` runs out before a
+/// terminating byte appears.
+fn read_varint_u32(bytes: &[u8]) -> Result<(u32, &[u8]), crate::Error> {
+    let mut value: u64 = 0;
+    for (i, &byte) in bytes.iter().enumerate() {
+        if i == 5 {
+            return Err(crate::Error::Corrupt);
+        }
+        value |= u64::from(byte & 0x7F) << (7 * i);
+        if byte & 0x80 == 0 {
+            return u32::try_from(value)
+                .map(|v| (v, &bytes[i + 1..]))
+                .map_err(|_| crate::Error::Corrupt);
+        }
+    }
+    Err(crate::Error::Truncated)
+}
+
+/// Serializes `freq` for embedding in a frame payload, the piece missing
+/// between a normalized frequency table and a real bitstream: a decoder
+/// has no access to the original byte counts [`normalize_frequencies`]
+/// was computed from, so the table itself must ride in the compressed
+/// output. Layout: `table_log2` as a varint, `freq.len()` as a varint
+/// (this module's primitives never assume a 256-symbol alphabet, so
+/// neither does this serialization), then each entry as a varint, in
+/// order. [`read_freq_table`] reads this back, fully validating what an
+/// adversarial decoder input claims instead of trusting it.
+///
+/// # Panics
+///
+/// Panics under the same precondition [`build_decode_table`] and
+/// [`build_encode_table`] already share: `freq` must be
+/// [`normalize_frequencies`]'s own output for `table_log2` (its entries
+/// sum to exactly `1 << table_log2`). This primitive is not yet reachable
+/// from any decode path -- only an encoder, which always calls it on its
+/// own `normalize_frequencies` output, calls this today.
+#[must_use]
+pub fn write_freq_table(freq: &[u32], table_log2: u32) -> Vec<u8> {
+    assert_normalized_freq(freq, table_log2);
+    let mut out = Vec::new();
+    write_varint_u32(table_log2, &mut out);
+    let len = u32::try_from(freq.len())
+        .expect("caller's own alphabet size, never large enough to overflow u32");
+    write_varint_u32(len, &mut out);
+    for &f in freq {
+        write_varint_u32(f, &mut out);
+    }
+    out
+}
+
+/// Reads a [`write_freq_table`]-encoded frequency table back off `bytes`,
+/// fully validating instead of trusting: this is the boundary where a
+/// future `Method`'s decode path first touches untrusted bytes for this
+/// coder, so every check hard rule 2 (`CLAUDE.md`) needs lives here once,
+/// rather than at each downstream table-building call site.
+///
+/// Returns the parsed `table_log2`, the frequency table, and whatever
+/// bytes came after it (the coded message itself, once a `Method` wires
+/// one).
+///
+/// # Errors
+///
+/// [`Error::Truncated`] if `bytes` ends before a complete table does.
+/// [`Error::Corrupt`] if: `table_log2` exceeds this module's own
+/// `MAX_TABLE_LOG2` cap; the declared alphabet length exceeds the bytes
+/// actually remaining (each entry needs at least one byte to encode, so
+/// this also bounds the returned `Vec`'s allocation by `bytes.len()`,
+/// never by the untrusted length field alone -- the same "cap a hostile
+/// length field against what the input can actually supply" discipline
+/// `crate::codec`'s own declared-length checks use); any varint is
+/// malformed (an overlong or overflowing encoding); or the parsed entries
+/// do not sum to exactly `1 << table_log2`, the invariant
+/// [`normalize_frequencies`] always produces and
+/// [`build_decode_table`]/[`build_encode_table`] both require.
+///
+/// [`Error::Truncated`]: crate::Error::Truncated
+/// [`Error::Corrupt`]: crate::Error::Corrupt
+pub fn read_freq_table(bytes: &[u8]) -> Result<(u32, Vec<u32>, &[u8]), crate::Error> {
+    let (table_log2, rest) = read_varint_u32(bytes)?;
+    if table_log2 > MAX_TABLE_LOG2 {
+        return Err(crate::Error::Corrupt);
+    }
+    let (len, mut rest) = read_varint_u32(rest)?;
+    let len = usize::try_from(len).map_err(|_| crate::Error::Corrupt)?;
+    if len > rest.len() {
+        return Err(crate::Error::Corrupt);
+    }
+    let mut freq = Vec::with_capacity(len);
+    let mut sum: u64 = 0;
+    for _ in 0..len {
+        let (f, remaining) = read_varint_u32(rest)?;
+        sum += u64::from(f);
+        freq.push(f);
+        rest = remaining;
+    }
+    if sum != 1u64 << table_log2 {
+        return Err(crate::Error::Corrupt);
+    }
+    Ok((table_log2, freq, rest))
 }
 
 /// The stride a table of `table_size` slots advances by per placement in
@@ -1395,6 +1553,130 @@ mod tests {
             assert_eq!(slot.new_state_base, u32::try_from(u).unwrap());
         }
     }
+
+    #[test]
+    fn varint_round_trips_for_representative_values() {
+        for value in [
+            0,
+            1,
+            0x7F,   // largest single-byte value
+            0x80,   // smallest two-byte value
+            0x3FFF, // largest two-byte value
+            0x4000, // smallest three-byte value
+            u32::from(u16::MAX),
+            u32::MAX / 2,
+            u32::MAX,
+        ] {
+            let mut bytes = Vec::new();
+            write_varint_u32(value, &mut bytes);
+            let (read, rest) = read_varint_u32(&bytes).unwrap();
+            assert_eq!(read, value, "value={value}");
+            assert!(rest.is_empty());
+        }
+    }
+
+    #[test]
+    fn read_varint_u32_reads_only_its_own_bytes_and_leaves_the_rest() {
+        let mut bytes = Vec::new();
+        write_varint_u32(300, &mut bytes);
+        bytes.extend_from_slice(&[1, 2, 3]);
+        let (value, rest) = read_varint_u32(&bytes).unwrap();
+        assert_eq!(value, 300);
+        assert_eq!(rest, [1, 2, 3]);
+    }
+
+    #[test]
+    fn read_varint_u32_rejects_a_sixth_continuation_byte() {
+        // 5 bytes cover every u32 (5*7=35 >= 32 bits); a 6th still
+        // requesting more is malformed, not merely a larger value.
+        let bytes = [0x80, 0x80, 0x80, 0x80, 0x80, 0x00];
+        assert_eq!(read_varint_u32(&bytes), Err(crate::Error::Corrupt));
+    }
+
+    #[test]
+    fn read_varint_u32_rejects_a_value_too_wide_for_u32() {
+        // 5 bytes, each contributing bits, whose combined value exceeds
+        // u32::MAX (the high nibble of the 5th byte pushes past bit 31).
+        let bytes = [0xFF, 0xFF, 0xFF, 0xFF, 0x1F];
+        assert_eq!(read_varint_u32(&bytes), Err(crate::Error::Corrupt));
+    }
+
+    #[test]
+    fn read_varint_u32_rejects_truncated_input() {
+        assert_eq!(read_varint_u32(&[]), Err(crate::Error::Truncated));
+        // Continuation bit set, then nothing: never terminates.
+        assert_eq!(read_varint_u32(&[0x80]), Err(crate::Error::Truncated));
+    }
+
+    #[test]
+    fn write_then_read_freq_table_round_trips() {
+        let cases: &[(&[u32], u32)] = &[
+            (&[1, 1, 1], 2),
+            (&[100, 1, 1], 3),
+            (&[7, 5, 3, 1], 5),
+            (&[255, 254, 253, 1], 10),
+        ];
+        for &(counts, table_log2) in cases {
+            let freq = normalize_frequencies(counts, table_log2);
+            let bytes = write_freq_table(&freq, table_log2);
+            let (read_log2, read_freq, rest) = read_freq_table(&bytes).unwrap();
+            assert_eq!(read_log2, table_log2, "counts={counts:?}");
+            assert_eq!(read_freq, freq, "counts={counts:?}");
+            assert!(rest.is_empty(), "counts={counts:?}");
+        }
+    }
+
+    #[test]
+    fn read_freq_table_leaves_trailing_bytes_for_the_caller() {
+        let freq = normalize_frequencies(&[3, 1], 2);
+        let mut bytes = write_freq_table(&freq, 2);
+        bytes.extend_from_slice(&[0xAB, 0xCD]);
+        let (_, _, rest) = read_freq_table(&bytes).unwrap();
+        assert_eq!(rest, [0xAB, 0xCD]);
+    }
+
+    #[test]
+    fn read_freq_table_rejects_table_log2_above_the_cap() {
+        let mut bytes = Vec::new();
+        write_varint_u32(MAX_TABLE_LOG2 + 1, &mut bytes);
+        write_varint_u32(0, &mut bytes); // alphabet length, never reached
+        assert_eq!(read_freq_table(&bytes), Err(crate::Error::Corrupt));
+    }
+
+    #[test]
+    fn read_freq_table_rejects_an_alphabet_length_past_the_remaining_bytes() {
+        let mut bytes = Vec::new();
+        write_varint_u32(4, &mut bytes); // table_log2
+        write_varint_u32(1_000_000, &mut bytes); // far more entries than follow
+        write_varint_u32(1, &mut bytes); // one lone entry, nowhere near enough
+        assert_eq!(read_freq_table(&bytes), Err(crate::Error::Corrupt));
+    }
+
+    #[test]
+    fn read_freq_table_rejects_entries_that_do_not_sum_to_the_table_size() {
+        let mut bytes = Vec::new();
+        write_varint_u32(2, &mut bytes); // table_log2 -> table_size 4
+        write_varint_u32(3, &mut bytes); // alphabet length
+        for entry in [1, 1, 1] {
+            // sums to 3, not the required 4
+            write_varint_u32(entry, &mut bytes);
+        }
+        assert_eq!(read_freq_table(&bytes), Err(crate::Error::Corrupt));
+    }
+
+    #[test]
+    fn read_freq_table_rejects_every_truncation_without_panicking() {
+        // Whether a given cut lands mid-varint (Truncated) or leaves a
+        // declared length with nothing behind it (Corrupt) depends on
+        // exactly where it falls; either is an acceptable, non-panicking
+        // rejection (hard rule 2), so this only pins "never Ok, never a
+        // panic" rather than which variant.
+        let freq = normalize_frequencies(&[3, 1], 2);
+        let bytes = write_freq_table(&freq, 2);
+        for cut in 0..bytes.len() {
+            assert!(read_freq_table(&bytes[..cut]).is_err(), "cut={cut}");
+        }
+    }
 }
 
 // Not under Miri: interpretation costs 300-5000x per case on this crate
@@ -1409,7 +1691,7 @@ mod proptests {
 
     use super::{
         build_decode_table, build_encode_table, decode_message, encode_message,
-        normalize_frequencies, spread_symbols,
+        normalize_frequencies, read_freq_table, spread_symbols, write_freq_table,
     };
 
     /// Every originally-nonzero symbol stays nonzero
@@ -1452,6 +1734,22 @@ mod proptests {
             let (bytes, initial_state) = encode_message(&symbols, &encode, &decode);
             let decoded = decode_message(&bytes, initial_state, symbols.len(), &decode);
             prop_assert_eq!(decoded, symbols);
+        }
+
+        /// [`read_freq_table`] recovers exactly what [`write_freq_table`]
+        /// wrote, over arbitrary alphabets and table sizes, and leaves
+        /// nothing unconsumed when nothing followed the table -- the
+        /// serialization counterpart of this module's own round-trip
+        /// property above.
+        #[test]
+        fn write_then_read_freq_table_round_trips_for_arbitrary_tables(
+            (freq, table_log2, _symbols) in freq_table_log2_and_symbols()
+        ) {
+            let bytes = write_freq_table(&freq, table_log2);
+            let (read_log2, read_freq, rest) = read_freq_table(&bytes).unwrap();
+            prop_assert_eq!(read_log2, table_log2);
+            prop_assert_eq!(read_freq, freq);
+            prop_assert!(rest.is_empty());
         }
     }
 }

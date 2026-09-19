@@ -3084,6 +3084,38 @@ record.
   large and structural, not a bug to fix. Remaining S1-P6 scope
   unchanged: `Method` wiring, the `FORMAT_VERSION` bump, and a real-
   bitstream sealed-validation measurement, still open (issue #447).
+- S2-A87 | ACCEPTED | S1-P6's remaining tANS fast path (issue #447, after
+  S2-A86's measurement): the piece every prior slice left implicit by
+  threading `freq` straight from `normalize_frequencies` into
+  `spread_symbols` inside one process. A decoder has no access to the
+  original byte counts `normalize_frequencies` was computed from, so a
+  real bitstream needs the normalized frequency table itself on the
+  wire. `src/tans.rs` gained `write_freq_table`/`read_freq_table`
+  (varint `table_log2`, varint alphabet length, then one varint per
+  entry) plus the private `write_varint_u32`/`read_varint_u32` pair they
+  ride on. `read_freq_table` is this coder's first byte-level contact
+  with untrusted input, so it is fully validating, not merely correct:
+  it rejects a `table_log2` past a new `MAX_TABLE_LOG2` (16, generous
+  headroom past S2-A86's `table_log2=10`, capping the eventual decode
+  table's slot count regardless of how small the coded payload is), an
+  alphabet length past the bytes actually remaining (bounding the
+  returned `Vec`'s allocation by the input's own size, never by the
+  untrusted length field alone), a malformed varint (an overlong
+  encoding past the 5 bytes a `u32` ever needs, or one that overflows
+  `u32`), and a table whose entries do not sum to exactly
+  `1 << table_log2`. Still standalone: nothing calls either function
+  outside this module's own tests. | 19 unit tests (varint round trips
+  and rejections, freq-table round trips, and one rejection per
+  validation clause above, including a truncate-at-every-prefix sweep
+  that only pins "never `Ok`, never a panic" since which error variant a
+  given cut lands on depends on exactly where it falls) plus a proptest
+  extending S2-A85's own `freq_table_log2_and_symbols` strategy to cover
+  `write_freq_table`/`read_freq_table` round trips over arbitrary
+  alphabets and table sizes; `cargo x check`: 4 stages green; `baseline_gate
+  check`: 11 cases, no regression (nothing wired, unaffected). Remaining
+  S1-P6 scope unchanged: `Method` wiring, the `FORMAT_VERSION` bump, and
+  a real-bitstream sealed-validation measurement, still open (issue
+  #447).
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
