@@ -18,10 +18,9 @@ All notable changes to this project are documented here. Format follows
   the `filters` module): a documented public API with a crate-root doctest;
   internal modules stay `pub` for the sibling `bench` crate's own use but are
   hidden from docs.rs.
-- Codec: a filter bank (delta, transpose, x86 BCJ, base64-unwrap,
-  byte-reversal) feeding an optimal-parse LZ with in-DP repeat offsets and a
-  six-expert, SSE-calibrated context-mixing adaptive range coder. Zero
-  runtime dependencies.
+- Codec: a filter bank (delta, transpose, x86 BCJ) feeding an optimal-parse
+  LZ with in-DP repeat offsets and a six-expert, SSE-calibrated
+  context-mixing adaptive range coder. Zero runtime dependencies.
 - Bitstream format frozen at `FORMAT_VERSION` 4
   ([`docs/format/SPEC.md`](docs/format/SPEC.md), ADR-0041): every version
   from 2 onward decodes forever, whatever the format grows into next.
