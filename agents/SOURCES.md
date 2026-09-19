@@ -121,11 +121,15 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   generated 2026-09-19T03:44Z over 166 runs), applied to the BDFL thrift
   rung: `claude-opus-5`/high to `claude-sonnet-5`/xhigh in
   `agents/models.json`. **The director is 47.3% of the fleet's seven-day
-  projected cost**, $141.83 at $4.07 a wake, against the reviewer's $0.71
-  and the maintainer's $1.19. The governor is throttling the two seats
-  that ship the compressor to fund the one that directs them, and the
-  director's last four throttled wakes each reported the delta core clean
-  and the discretionary work dropped. The 2026-08-30 entry below set the
+  projected cost**, $141.83 at a $4.07 median per run, against the
+  reviewer's $0.71 and the maintainer's $1.19. The governor is throttling
+  the two seats that ship the compressor to fund the one that directs
+  them. The case is rate, not idleness: a first draft of this entry
+  claimed the last four throttled wakes shipped nothing, and PR #614's
+  review disproved it from the run record. Three of them merged #601,
+  #603, #609 and #612. The seat is expensive and productive, and thrift
+  exists to make an expensive seat cheaper when the projection misses the
+  reset, not to switch off an idle one. The 2026-08-30 entry below set the
   opus rung against a dark director at sonnet-5/MEDIUM; it moved model and
   effort together and credited the model, and it priced the saving at
   "roughly ten cents" when thrift was rare and per-seat cost was
@@ -135,7 +139,10 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   dark-director tell, free on the next wake because retrospect prints
   every session's model and turn count: a thrifted wake that skips the
   sweep, the drain or the status line, or lands under ~20 turns having
-  posted nothing, sends this rung back to opus.
+  posted nothing, sends this rung back to opus. Because the review
+  established that thrifted wakes merge real PRs, a second tell binds
+  too: a wake that stays lit but stops shipping, or that retrospect
+  judges the wrong result, falsifies this just as a dark one does.
 
   Same reading clears a gate the 2026-09-01 entry left open: it deferred
   the reviewer and maintainer raises until #439 made per-seat burn share
