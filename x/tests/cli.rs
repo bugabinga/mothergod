@@ -123,6 +123,21 @@ fn lint_reports_locations_and_applies_safe_fixes() {
 }
 
 #[test]
+fn lint_rejects_a_duplicate_changelog_subheading() {
+    let repository = Repository::new();
+    repository.write(
+        "CHANGELOG.md",
+        "## [Unreleased]\n\n### Added\n\n- a\n\n### Added\n\n- b\n",
+    );
+    repository.track();
+
+    let check = repository.x(&["lint", "--", "CHANGELOG.md"]);
+    assert_eq!(check.status.code(), Some(1));
+    let stderr = String::from_utf8(check.stderr).unwrap();
+    assert!(stderr.contains("duplicate `### Added` heading under `## [Unreleased]`"));
+}
+
+#[test]
 fn unsupported_explicit_paths_fail_with_the_next_valid_command() {
     let repository = Repository::new();
     repository.write("script.py", "print('x')\n");

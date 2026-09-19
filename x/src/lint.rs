@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,6 +15,11 @@ const DISABLED_MARKDOWN_RULES: &[&str] = &[
     "MD004", "MD013", "MD018", "MD024", "MD032", "MD033", "MD034", "MD040", "MD041", "MD057",
     "MD076",
 ];
+
+// GitHub rejects a release body over 125,000 characters. Warn at 80% of that
+// so `## [Unreleased]` gets flagged before a cut release would actually fail
+// (issue #607: it once reached 87,159, 70% of the limit, unnoticed).
+const CHANGELOG_UNRELEASED_WARN_CHARS: usize = 100_000;
 
 pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
     let mut findings = 0;
@@ -59,6 +65,17 @@ pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
 
         findings += warnings.len();
         report_markdown(relative, &warnings, fix);
+
+        if relative.file_name().and_then(|name| name.to_str()) == Some("CHANGELOG.md") {
+            let check = check_changelog(relative, &source);
+            findings += check.findings.len();
+            for finding in &check.findings {
+                eprintln!("{finding}");
+            }
+            if let Some(warning) = &check.unreleased_size_warning {
+                eprintln!("{warning}");
+            }
+        }
     }
 
     if !rust_files.is_empty() && !run_clippy(&selection.root, &rust_files)? {
@@ -124,6 +141,61 @@ fn report_markdown(path: &Path, warnings: &[LintWarning], fixing: bool) {
     }
     if !fixing && warnings.iter().any(|warning| warning.fix.is_some()) {
         eprintln!("  fix available: cargo x lint --fix -- {}", path.display());
+    }
+}
+
+struct ChangelogCheck {
+    findings: Vec<String>,
+    unreleased_size_warning: Option<String>,
+}
+
+/// Rejects a `### X` heading repeated under the same `## [...]` release
+/// (the drift #602 fixed by hand, PR #606) and warns, without failing, when
+/// `## [Unreleased]`'s body approaches GitHub's release-body size limit.
+fn check_changelog(relative: &Path, source: &str) -> ChangelogCheck {
+    let mut findings = Vec::new();
+    let mut release: Option<&str> = None;
+    let mut seen_subheadings: BTreeSet<&str> = BTreeSet::new();
+    let mut in_unreleased = false;
+    let mut unreleased_chars = 0usize;
+
+    for (index, line) in source.lines().enumerate() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            let heading = heading.trim();
+            release = Some(heading);
+            seen_subheadings.clear();
+            in_unreleased = heading.eq_ignore_ascii_case("[Unreleased]");
+            continue;
+        }
+        if let Some(heading) = line.strip_prefix("### ") {
+            let heading = heading.trim();
+            if !seen_subheadings.insert(heading) {
+                findings.push(format!(
+                    "{}:{}: duplicate `### {heading}` heading under `## {}`",
+                    relative.display(),
+                    index + 1,
+                    release.unwrap_or("(no release heading)"),
+                ));
+            }
+            continue;
+        }
+        if in_unreleased {
+            unreleased_chars += line.len() + 1;
+        }
+    }
+
+    let unreleased_size_warning = (unreleased_chars > CHANGELOG_UNRELEASED_WARN_CHARS).then(|| {
+        format!(
+            "{}: `## [Unreleased]` body is {unreleased_chars} characters, over the \
+             {CHANGELOG_UNRELEASED_WARN_CHARS}-character warning ceiling (GitHub's release-body \
+             limit is 125,000); curate it before the next release cut",
+            relative.display(),
+        )
+    });
+
+    ChangelogCheck {
+        findings,
+        unreleased_size_warning,
     }
 }
 
@@ -207,5 +279,48 @@ mod tests {
                 .any(|warning| warning.rule_name.as_deref() == Some("MD009"))
         );
         assert!(warnings.iter().any(|warning| warning.fix.is_some()));
+    }
+
+    #[test]
+    fn changelog_rejects_a_duplicate_subheading_within_one_release() {
+        let source =
+            "## [Unreleased]\n\n### Added\n\n- a\n\n### Fixed\n\n- b\n\n### Added\n\n- c\n";
+        let check = check_changelog(Path::new("CHANGELOG.md"), source);
+        assert_eq!(check.findings.len(), 1);
+        assert!(
+            check.findings[0].contains("duplicate `### Added` heading under `## [Unreleased]`")
+        );
+        assert!(check.unreleased_size_warning.is_none());
+    }
+
+    #[test]
+    fn changelog_allows_the_same_subheading_reused_across_releases() {
+        let source =
+            "## [Unreleased]\n\n### Added\n\n- a\n\n## [0.1.0] - 2026-01-01\n\n### Added\n\n- b\n";
+        let check = check_changelog(Path::new("CHANGELOG.md"), source);
+        assert!(check.findings.is_empty());
+    }
+
+    #[test]
+    fn changelog_warns_but_does_not_fail_past_the_unreleased_size_ceiling() {
+        let body = "x".repeat(CHANGELOG_UNRELEASED_WARN_CHARS + 1);
+        let source = format!("## [Unreleased]\n\n### Added\n\n{body}\n");
+        let check = check_changelog(Path::new("CHANGELOG.md"), &source);
+        assert!(check.findings.is_empty());
+        assert!(
+            check
+                .unreleased_size_warning
+                .as_deref()
+                .is_some_and(
+                    |warning| warning.contains("over the") && warning.contains("warning ceiling")
+                )
+        );
+    }
+
+    #[test]
+    fn changelog_stays_quiet_under_the_unreleased_size_ceiling() {
+        let source = "## [Unreleased]\n\n### Added\n\n- a\n";
+        let check = check_changelog(Path::new("CHANGELOG.md"), source);
+        assert!(check.unreleased_size_warning.is_none());
     }
 }
