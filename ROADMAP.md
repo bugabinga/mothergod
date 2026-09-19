@@ -208,7 +208,7 @@ so the heartbeat works these ahead of M5 and M6's open items. M3 stays
 the researcher's program, unaffected. Strategy in `docs/TESTING.md`;
 mechanisms in the issues.
 
-- [ ] Trust ledger + status page TRUST panel (#449). Lands first; the
+- [x] Trust ledger + status page TRUST panel (#449). Lands first; the
       other items append to it.
 - [x] Fuzzing that compounds: persistent corpus, nightly 10-minute
       runs (#450).
@@ -219,7 +219,7 @@ mechanisms in the issues.
 - [x] Allocation torture sweep (#453).
 - [ ] Weekly region coverage, published never gated (#454).
 - [ ] Monthly whole-crate mutation score (#455).
-- [ ] Miri lane in monster (#456).
+- [x] Miri lane in monster (#456).
 - [x] test-craft skill for the agents (#457, agent-system, BDFL queue).
 - Exploratory, researcher's option: Kani proof harnesses on the coder's
   renormalization/update math; adopt only if it proves an invariant
