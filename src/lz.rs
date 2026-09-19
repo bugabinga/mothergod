@@ -997,6 +997,14 @@ const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63]
 /// on, matching the archive's `lh` (16 contexts of 256 symbols each).
 const LITERAL_CONTEXTS: usize = 16;
 
+/// Flat index into a [`LITERAL_CONTEXTS`]-by-256 literal table for `byte`,
+/// given the byte preceding it in the stream (`None` at the very start,
+/// context 0).
+fn literal_price_index(prev_byte: Option<u8>, byte: u8) -> usize {
+    let context = prev_byte.map_or(0, |b| usize::from(b >> 4));
+    context * 256 + usize::from(byte)
+}
+
 /// [`bucket`] values a match/rep length ever falls into: `bucket(1)` is 0,
 /// `bucket(MAX_MATCH_LEN)` (65535) is 15, one slot of headroom kept as in
 /// the archive's `lb`.
@@ -1149,8 +1157,7 @@ impl PriceCounts {
     fn observe(&mut self, token: Token, prev_byte: Option<u8>) {
         match token {
             Token::Literal(byte) => {
-                let context = prev_byte.map_or(0, |b| usize::from(b >> 4));
-                self.literal[context * 256 + usize::from(byte)] += 1;
+                self.literal[literal_price_index(prev_byte, byte)] += 1;
             }
             Token::Match { len, distance } => {
                 self.length[bucket(len)] += 1;
@@ -1418,13 +1425,9 @@ fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
         let base = state.dp[i];
         let reps = state.cache[i];
 
-        let context = if i > 0 {
-            usize::from(data[i - 1] >> 4)
-        } else {
-            0
-        };
+        let prev_byte = if i > 0 { Some(data[i - 1]) } else { None };
         let literal_cost =
-            base + prices.literal[context * 256 + usize::from(data[i])] + FLAG_BIT_PRICE;
+            base + prices.literal[literal_price_index(prev_byte, data[i])] + FLAG_BIT_PRICE;
         state.relax(literal_cost, i + 1, Move::Literal, reps);
 
         state.relax_rep_candidates(prices, data, i, base, reps, &mut rep_carry);
