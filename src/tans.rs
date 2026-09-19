@@ -74,6 +74,41 @@
 //! variant, and the `FORMAT_VERSION` bump and real-bitstream measurement
 //! that wiring needs.
 
+/// Panics unless `table_log2` fits the `u32` shift every table operation
+/// in this module uses to turn it into a table size.
+fn assert_table_log2_fits_u32(table_log2: u32) {
+    assert!(
+        table_log2 < 32,
+        "table_log2 must fit a u32 shift; got {table_log2}"
+    );
+}
+
+/// Panics unless `freq` is a valid [`normalize_frequencies`] output for
+/// `table_log2`: `table_log2` fits `u32`, and `freq` sums to exactly
+/// `1 << table_log2`. Returns that table size, the precondition every
+/// table-building step below this one shares.
+fn assert_normalized_freq(freq: &[u32], table_log2: u32) -> usize {
+    assert_table_log2_fits_u32(table_log2);
+    let table_size = 1usize << table_log2;
+    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
+    assert!(
+        sum == table_size as u64,
+        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
+         Call normalize_frequencies first."
+    );
+    table_size
+}
+
+/// Panics unless `table_symbol` has exactly `table_size` entries, the
+/// shape [`spread_symbols`]'s output always has.
+fn assert_table_symbol_len(table_symbol: &[u32], table_size: usize) {
+    assert!(
+        table_symbol.len() == table_size,
+        "table_symbol must have exactly 1 << table_log2 ({table_size}) entries; got {}",
+        table_symbol.len()
+    );
+}
+
 /// Rescales `counts` onto a table of exactly `1 << table_log2` slots,
 /// preserving every originally-nonzero entry's nonzero-ness.
 ///
@@ -107,10 +142,7 @@
 /// -- this primitive is not yet reachable from any decode path.
 #[must_use]
 pub fn normalize_frequencies(counts: &[u32], table_log2: u32) -> Vec<u32> {
-    assert!(
-        table_log2 < 32,
-        "table_log2 must fit a u32 shift; got {table_log2}"
-    );
+    assert_table_log2_fits_u32(table_log2);
     let target: u64 = 1u64 << table_log2;
     let total: u64 = counts.iter().map(|&c| u64::from(c)).sum();
     if total == 0 {
@@ -217,17 +249,7 @@ fn spread_stride(table_size: usize) -> usize {
 /// decode path.
 #[must_use]
 pub fn spread_symbols(freq: &[u32], table_log2: u32) -> Vec<u32> {
-    assert!(
-        table_log2 < 32,
-        "table_log2 must fit a u32 shift; got {table_log2}"
-    );
-    let table_size = 1usize << table_log2;
-    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
-    assert!(
-        sum == table_size as u64,
-        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
-         Call normalize_frequencies first."
-    );
+    let table_size = assert_normalized_freq(freq, table_log2);
 
     let mask = table_size - 1;
     let stride = spread_stride(table_size);
@@ -301,22 +323,8 @@ pub struct DecodeSlot {
 /// not yet reachable from any decode path.
 #[must_use]
 pub fn build_decode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -> Vec<DecodeSlot> {
-    assert!(
-        table_log2 < 32,
-        "table_log2 must fit a u32 shift; got {table_log2}"
-    );
-    let table_size = 1usize << table_log2;
-    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
-    assert!(
-        sum == table_size as u64,
-        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
-         Call normalize_frequencies first."
-    );
-    assert!(
-        table_symbol.len() == table_size,
-        "table_symbol must have exactly 1 << table_log2 ({table_size}) entries; got {}",
-        table_symbol.len()
-    );
+    let table_size = assert_normalized_freq(freq, table_log2);
+    assert_table_symbol_len(table_symbol, table_size);
     let table_size_u32 =
         u32::try_from(table_size).expect("table_log2 < 32 keeps table_size within u32");
     let table_size_u64 = u64::from(table_size_u32);
@@ -373,22 +381,8 @@ pub fn build_decode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -
 /// not yet reachable from any decode path.
 #[must_use]
 pub fn build_encode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -> Vec<Vec<u32>> {
-    assert!(
-        table_log2 < 32,
-        "table_log2 must fit a u32 shift; got {table_log2}"
-    );
-    let table_size = 1usize << table_log2;
-    let sum: u64 = freq.iter().map(|&f| u64::from(f)).sum();
-    assert!(
-        sum == table_size as u64,
-        "freq must sum to exactly 1 << table_log2 ({table_size}); got {sum}. \
-         Call normalize_frequencies first."
-    );
-    assert!(
-        table_symbol.len() == table_size,
-        "table_symbol must have exactly 1 << table_log2 ({table_size}) entries; got {}",
-        table_symbol.len()
-    );
+    let table_size = assert_normalized_freq(freq, table_log2);
+    assert_table_symbol_len(table_symbol, table_size);
 
     let mut table: Vec<Vec<u32>> = freq
         .iter()
