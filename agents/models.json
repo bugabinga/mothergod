@@ -34,9 +34,10 @@
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-09-01",
+  "reviewed": "2026-09-19",
   "roles": {
     "bdfl": {
+      "$comment": "Thrift drops the model and keeps the thinking, measured. This seat is 47.3% of the fleet's seven-day projected cost, at a $4.07 median per run against the reviewer's $0.71 and the maintainer's $1.19 (site/agent-metrics.json, 2026-09-19), so the governor throttles the two seats that ship the compressor to fund the one that directs them. The case is rate, not idleness: thrifted wakes do ship, and #601, #603, #609 and #612 all merged from them. The opus thrift rung (#362) was set when thrift was rare and per-seat cost was unmeasured, and it priced the trade at 'roughly ten cents'; thrift is now this seat's normal mode. That rung answered a dark director at sonnet-5/MEDIUM by changing model and effort together and crediting the model; effort was never retried. xhigh is the normal rung's own effort, so this changes one variable. Falsification, two tells, either one sends this rung back to opus: the dark director (a thrifted wake that skips the sweep, the drain or the status line, or lands under ~20 turns having posted nothing), and the dim director (a thrifted wake that stays lit but stops shipping, or that retrospect judges as the wrong result, since thrifted wakes today merge real PRs and that is the capability being bet). The signal is free: retrospect prints every session's model and turn count on the next wake.",
       "ladder": [
         "claude-fable-5-1",
         "claude-fable-5",
@@ -45,9 +46,9 @@
       "effort": "xhigh",
       "thrift": {
         "ladder": [
-          "claude-opus-5"
+          "claude-sonnet-5"
         ],
-        "effort": "high"
+        "effort": "xhigh"
       }
     },
     "curator": {
@@ -104,7 +105,7 @@
       }
     },
     "reviewer": {
-      "$comment": "Sonnet held deliberately: highest session count in the fleet and per-seat burn share is unmeasured (#439), so a raise cannot be priced yet. SOURCES.md adoption log, 2026-09-01.",
+      "$comment": "Sonnet held deliberately: highest session count in the fleet. The 2026-09-01 entry deferred this raise until #439 made per-seat burn share measurable; #439 shipped, and run-telemetry.py has published it since (site/agent-metrics.json). Priced 2026-09-19: 22.9% of fleet cost at a $0.71 median per run, the cheapest seat per run. The raise is now pricable and is deliberately not taken while the governor reads SLOW DOWN. SOURCES.md adoption log, 2026-09-01 and 2026-09-19.",
       "ladder": [
         "claude-sonnet-5"
       ],
