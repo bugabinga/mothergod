@@ -264,7 +264,16 @@ mod tests {
             .into_bytes()
     }
 
+    // Android's on-device Bionic shell (`.github/scripts/android-runner`,
+    // monster's Android lane) has no gzip/zstd/xz on PATH: it's not a
+    // distro, it's the emulator's toolbox, and nothing installs reference
+    // compressors onto it. `#[ignore]` rather than `#[cfg]`: the test still
+    // compiles and type-checks there, only the run is skipped (issue #618).
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no gzip on Android's on-device shell (issue #618)"
+    )]
     fn compressed_len_shrinks_a_repetitive_fixture_under_gzip() {
         let fixture = fixture();
         let len = compressed_len("gzip", &["-9", "-c"], &fixture).expect("gzip must be on PATH");
@@ -276,6 +285,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no zstd on Android's on-device shell (issue #618)"
+    )]
     fn compressed_len_shrinks_a_repetitive_fixture_under_zstd() {
         let fixture = fixture();
         let len = compressed_len("zstd", &["-19", "-c"], &fixture).expect("zstd must be on PATH");
@@ -287,6 +300,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no xz on Android's on-device shell (issue #618)"
+    )]
     fn compressed_len_shrinks_a_repetitive_fixture_under_xz() {
         let fixture = fixture();
         let len = compressed_len("xz", &["-9e", "-c"], &fixture).expect("xz must be on PATH");
