@@ -320,6 +320,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no gzip on Android's on-device shell (issue #618)"
+    )]
     fn compressed_len_handles_empty_input() {
         // gzip/zstd/xz all still emit a (nonzero-length) container/header
         // for zero bytes of input; the point of this test is that an empty
@@ -329,6 +333,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no gzip/zstd/xz on Android's on-device shell (issue #618)"
+    )]
     fn tool_version_reads_a_nonempty_line_for_every_reference_compressor() {
         for cmd in ["gzip", "zstd", "xz"] {
             let version = tool_version(cmd).unwrap_or_else(|err| panic!("{cmd}: {err}"));
@@ -377,6 +385,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no gzip/zstd/xz on Android's on-device shell (issue #618)"
+    )]
     fn measure_all_measures_every_file_and_preserves_input_order() {
         let files = vec![
             ("b.txt".to_string(), b"bbbbbbbbbbbbbbbbbbbb".to_vec()),
