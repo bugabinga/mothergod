@@ -3031,6 +3031,59 @@ record.
   wiring this coder behind a new fast `Method` variant, and the
   `FORMAT_VERSION` bump and real-bitstream measurement that wiring
   needs.
+- S2-A86 | ACCEPTED | S1-P6's remaining tANS fast path (issue #447, after
+  S2-A85's `encode_symbol`/`encode_message`/`decode_message`): the first
+  real measurement of `src/tans.rs`'s standalone primitives, still
+  without any `Method` wiring or `FORMAT_VERSION` change. A new
+  `bench/src/bin/tans_measure.rs` binary builds an order-0 static tANS
+  coder per buffer (`table_log2=10`: `normalize_frequencies`,
+  `spread_symbols`, `build_decode_table`, `build_encode_table`,
+  `encode_message`, `decode_message`), asserts an exact round trip, and
+  compares its bits/byte against `order0_entropy_bits` (the theoretical
+  floor) and against `mothergod::compress`/`decompress`'s (`Method::Lz`,
+  the champion) real bits/byte and MB/s on the identical buffer — no
+  network fetch, four `mothergod_bench` generator buffers at 200,000
+  bytes, seed `0xC0FFEE123456789A` (S2-A1's own convention):
+  `entropy_ladder(h=2)`, `entropy_ladder(h=6)`, `markov_h8_2_trap`,
+  `access_log`. | Real numbers (`cargo run -p mothergod-bench --release
+  --bin tans_measure`): tANS lands within 0.0005–0.2546 bits of the
+  entropy floor on every buffer (`entropy_ladder(h=2)`: 2.0058 vs 1.9980;
+  `entropy_ladder(h=6)`: 6.2504 vs 5.9958, the widest gap, `table_log2=10`
+  granularity coarsening at a flatter/higher-entropy distribution;
+  `markov_h8_2_trap`: 8.0012 vs 7.9982; `access_log`: 4.7910 vs 4.7905) —
+  the primitives are a tight, efficient order-0 coder, not merely a
+  correct one. Against the champion, tANS wins only on pure iid noise
+  (`entropy_ladder(h=2)`: 2.0058 vs 2.3432 bpb, the champion's
+  context-mixing overhead costing it on data with no context to mix) and
+  loses everywhere order-1+ structure exists (`entropy_ladder(h=6)`:
+  6.2504 vs 6.1345; `markov_h8_2_trap`: 8.0012 vs 2.3432, the trap's
+  whole point — order-1 correlation no order-0 histogram can see;
+  `access_log`: 4.7910 vs 0.7951, LZ matches an order-0 coder cannot
+  exploit) — expected for an order-0 coder measured against a
+  context-mixing one, not a competition. Speed is the actual finding: on
+  the same buffers, tANS's `encode_message`/`decode_message` ran
+  23×–342× faster encode and 21×–305× faster decode than
+  `mothergod::compress`/`decompress` in every single case (e.g.
+  `access_log`: 26.29 vs 0.53 MB/s encode, 213.79 vs 10.12 MB/s decode).
+  | 5 focused unit tests (histogram counting, a small-fixed-buffer round
+  trip, the MB/s arithmetic, a single-symbol buffer's near-zero bpb) plus
+  a round-trip assertion inside the measurement itself for every
+  generated buffer; `cargo x check`: 4 stages green; `cargo clippy
+  --all-targets -- --deny warnings` clean; `cargo doc --no-deps` clean;
+  `baseline_gate check`: 11 cases, no regression (nothing wired,
+  unaffected). No bpb measurement against the champion in
+  `progress.jsonl`: this characterizes a different tool for a different
+  tier, not a champion-replacement candidate, same reason S2-A81 through
+  S2-A85 used null deltas; `research/progress.jsonl` it135. Verdict on
+  continuing toward the wiring slice: numbers support it. tANS sits
+  within noise of its own theoretical floor and runs one to two orders of
+  magnitude faster than the champion on every buffer measured, exactly
+  the ratio-for-speed trade a `level -1` fast path needs — but only as an
+  additional low tier alongside the champion, never a replacement: the
+  ratio gap on any data with order-1+ structure (the common case) is
+  large and structural, not a bug to fix. Remaining S1-P6 scope
+  unchanged: `Method` wiring, the `FORMAT_VERSION` bump, and a real-
+  bitstream sealed-validation measurement, still open (issue #447).
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -3061,9 +3114,17 @@ record.
   also standalone and not yet wired. S2-A85 took the coder's actual
   read/write state machine over both tables (`encode_symbol`,
   `encode_message`, `decode_message`), standalone over a real (if
-  scratch) byte buffer and still not wired to any `Method`. Remaining
-  scope: `Method` wiring and the `FORMAT_VERSION` bump and real-bitstream
-  measurement that wiring needs.
+  scratch) byte buffer and still not wired to any `Method`. S2-A86 then
+  measured the whole standalone coder for real without wiring it to
+  anything: within 0.0005–0.2546 bits of the order-0 entropy floor on
+  every buffer tested (`bench/src/bin/tans_measure.rs`), 23×–342× faster
+  encode and 21×–305× faster decode than the champion
+  (`mothergod::compress`/`decompress`) on the same buffers, losing on
+  ratio wherever order-1+ structure exists (expected, not a defect) —
+  numbers that support continuing toward wiring, as an additional fast
+  tier, not a replacement. Remaining scope: `Method` wiring and the
+  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
+  needs.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
