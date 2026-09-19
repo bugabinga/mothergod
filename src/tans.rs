@@ -50,7 +50,7 @@
 //! lookup, "symbol `s`'s occurrence `n` sits at which slot" -- the table
 //! state a real tANS encoder transitions to.
 //!
-//! **This slice.** [`encode_symbol`], [`encode_message`] and
+//! **Sixth slice (S2-A85).** [`encode_symbol`], [`encode_message`] and
 //! [`decode_message`]: the coder's actual read/write state machine over
 //! both tables. Decoding a slot is already fully specified by
 //! [`DecodeSlot`] itself (index the table by state, read `nb_bits` bits,
@@ -233,7 +233,7 @@ pub fn normalize_frequencies(counts: &[u32], table_log2: u32) -> Vec<u32> {
 /// `table_log2`. S2-A86's measurement used `table_log2 = 10`; 16 leaves
 /// headroom for tuning while keeping `1 << table_log2` -- the eventual
 /// decode table's slot count, once a `Method` wires this primitive to a
-/// real bitstream -- capped in the hundreds of thousands regardless of
+/// real bitstream -- capped in the tens of thousands regardless of
 /// how small the actual coded payload is. Checked once, here, at the
 /// single point a future decode path first parses this untrusted byte,
 /// rather than leaving each downstream table-building call site to
