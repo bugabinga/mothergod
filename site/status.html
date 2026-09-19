@@ -93,11 +93,14 @@
       padding: .6rem .8rem; border-radius: 10px; background: var(--nebula);
       border: 1px solid var(--line);
     }
+    .milestones .title { color: var(--starlight); font-size: .92rem; }
+    /* The M-number is a reference, not a rank, so it trails the title it
+       names: leading it made a list ordered by priority read as a broken
+       sort (operator report, 2026-09-19). */
     .milestones .id {
-      font-family: "JetBrains Mono", monospace; font-size: .8rem; color: var(--dim);
-      min-width: 2.4rem;
+      font-family: "JetBrains Mono", monospace; font-size: .72rem; color: var(--dim);
+      flex: 1;
     }
-    .milestones .title { flex: 1; color: var(--starlight); font-size: .92rem; }
     .milestones .badge {
       font-family: "JetBrains Mono", monospace; font-size: .72rem; letter-spacing: .06em;
       text-transform: uppercase; padding: .15rem .5rem; border-radius: 999px;
@@ -107,9 +110,6 @@
     .milestones li[data-status="active"] .badge { color: var(--gold); border-color: var(--gold); }
     .milestones li[data-status="pending"] .badge { color: var(--dim); }
     .milestones li[data-status="ongoing"] .badge { color: var(--amber); border-color: var(--amber); }
-    .milestones li[data-status="done"] .id { color: var(--green); }
-    .milestones li[data-status="active"] .id { color: var(--gold); }
-    .milestones li[data-status="ongoing"] .id { color: var(--amber); }
 
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .8rem; }
     .stat {
@@ -187,8 +187,9 @@
         <h2>Is it alive?</h2>
         <p>
           Milestones in ROADMAP.md's order, top to bottom. That order is
-          priority, so M7 sits above M5; the numbers are creation order and rank
-          nothing. A milestone is a deliverable, so its status is its checklist:
+          priority; the M-numbers are creation order and rank nothing, which is
+          why they run out of sequence. A milestone is a deliverable, so its
+          status is its checklist:
           <code>done</code>, <code>active</code>, or
           <code>pending</code> before the first box is ticked.
           <code>ongoing</code> marks a program instead: continuous work with a
@@ -327,8 +328,8 @@
       list.removeAttribute('data-loading');
       list.innerHTML = data.milestones.map((m) => `
         <li data-status="${escapeHtml(m.status)}">
-          <span class="id">${escapeHtml(m.id)}</span>
           <span class="title">${escapeHtml(m.title)}</span>
+          <span class="id">${escapeHtml(m.id)}</span>
           <span class="badge">${escapeHtml(m.status)}</span>
         </li>
       `).join('');
