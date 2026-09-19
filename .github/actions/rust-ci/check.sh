@@ -46,8 +46,13 @@ case "$checks" in
       echo "check set 'runtime' requires a target; the native plan is 'test'" >&2
       exit 2
     fi
-    cargo test --all-targets --target "$target"
-    cargo test --doc --target "$target"
+    # mothergod-bench excluded: its reference.rs module shells out to the
+    # host's zstd/xz/gzip binaries (research/corpus/POLICY.md), which
+    # verify nothing about mothergod's own cross-compiled runtime and
+    # don't exist on-device in Android's Bionic shell (issue #618).
+    # `cargo x test` already runs the crate natively, every PR.
+    cargo test --workspace --exclude mothergod-bench --all-targets --target "$target"
+    cargo test --workspace --exclude mothergod-bench --doc --target "$target"
     ;;
   *)
     echo "unsupported check set: $checks" >&2
