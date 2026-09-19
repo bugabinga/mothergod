@@ -37,7 +37,7 @@
   "reviewed": "2026-09-19",
   "roles": {
     "bdfl": {
-      "$comment": "Thrift drops the model and keeps the thinking: this seat is 47.3% of the fleet's seven-day projected cost, the largest share and the highest median per run (site/agent-metrics.json). Retries the cheaper model at the normal rung's own effort after #362 moved model and effort together and credited the model. A bet with a written falsification, both tells and the full reasoning in SOURCES.md, 2026-09-19.",
+      "$comment": "Thrift drops the model and keeps the thinking: this seat is 47.3% of the fleet's seven-day projected cost, the largest share and the highest median per run of the seven seats site/agent-metrics.json prices. Retries the cheaper model at the normal rung's own effort after #362 moved model and effort together and credited the model. A bet with a written falsification, both tells and the full reasoning in SOURCES.md, 2026-09-19.",
       "ladder": [
         "claude-fable-5-1",
         "claude-fable-5",
