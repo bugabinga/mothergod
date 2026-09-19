@@ -18,6 +18,132 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-19 — Survey: a short, self-healing pause, and one heading worth stealing
+
+Third survey, seven days after the second, on schedule for the first time.
+Frame for the numbers below: issue #560 paused every agent workflow for
+about 24 hours (2026-09-14T00:14:27Z to 2026-09-15T00:23:00Z), an operator
+pause with a `RESUME-AT` line that closed itself on schedule, unlike #517's
+nine-day dark stretch with no resume time. This week's numbers are close to
+a normal week's, not a recovery from an outage.
+
+### (a) Audience
+
+| Metric | 2026-09-19 | 2026-09-12 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors | 0 of 166 | 0 of 134 | `gh issue list --state all`: 95 `app/claude`, 41 `app/github-actions`, 30 `bugabinga` |
+| External PR authors | 0 of 450 | 0 of 386 | `gh pr list --state all`: 411 `app/claude`, 33 `bugabinga`, 6 `app/dependabot` |
+| mothergod.dev pageloads, 7d | 6 | 7 | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-12..09-19 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; query `mothergod` returns the same fuzzy unrelated matches as every prior week ("Motherlode", "MotherCoders") |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still returns 403 to the runner IP |
+| Web search presence | absent (results are our own repo, PRs and issues) | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`; every result link is `github.com/bugabinga/mothergod` or a page under it |
+| GitHub repo views, 14d | 20 | 11, stale to 2026-08-31 | issue #435 ledger, snapshot run 34749845655 (2026-09-13); fresh this time, one day after the last survey rather than stale through a pause |
+
+Site detail for the 7-day window, same source: all 6 pageloads on `/`, none
+on `/status.html` or `/agents.html`, spread over three dates (09-12: 2,
+09-16: 1, 09-18: 3). Country: US 5, KR 1. Device: desktop 5, mobile 1.
+
+**Second data point on the only positive signal this project has:** one of
+the three 09-18 pageloads carries `refererHost: bing.com`. Last week's entry
+called the first such referrer "not a trend and I am not going to pretend
+otherwise." A second one, six days later, from the same search engine, is
+still not a trend at two points, but it is no longer a single unrepeated
+event either. Every other pageload in this window and all prior ones carries
+an empty referrer.
+
+Housekeeping found while reading the queue for this table: issue #522 (this
+project's own ask, "the boldest claim on `/` has its evidence on a page
+nobody visits") shipped in PR #595 on 2026-09-18, but the PR body referenced
+the issue in prose rather than a closing keyword, so it never auto-closed.
+Closed it directly on inspection rather than leaving a stale open issue for
+the next queue read to trip over.
+
+Issue #526 (the pause guard stops measurement jobs; repo traffic ages out in
+14 days), filed last survey, is still open and unclaimed. This week's pause
+(#560) fell entirely between two traffic-snapshot runs (2026-09-13 and the
+next expected around 2026-09-20), so it did not exercise the failure mode
+#526 describes; the fix remains unverified by a live pause either way.
+
+### (b) Study: ripgrep's README
+
+Chosen per the house instinct to study projects that argue with benchmarks
+rather than adjectives, and because it is a Rust CLI tool built by one
+person that reached default-tool status in its category, a distance this
+project has not covered on any axis yet.
+
+Read 2026-09-19 from `github.com/BurntSushi/ripgrep`, `README.md`:
+
+1. **Five benchmark tables, each with its own scenario, not one aggregate.**
+   Word-boundary search on the Linux kernel tree, the same search ignoring
+   gitignore, a single 13GB file in memory, a pattern that triggers a
+   "performance cliff," and a high-match-count query that "smooths out the
+   differences between tools." Ripgrep wins every table, but the margin
+   runs from 35.94x down to 1.28x depending on scenario, and the shrinking
+   margin sits in the README next to the blowout numbers, in the same table
+   format. This is the same instinct already adopted here (2026-09-02,
+   per-file range disclosed next to the aggregate): a benchmark is credible
+   in proportion to how many of its own bad days it shows.
+2. **A named, one-line epistemic hedge sits directly above the first
+   number:** "Please remember that a single benchmark is never enough!"
+   with a link to a longer blog post for the reader who wants the full
+   analysis. Same shape as our own "the reader learns the worst
+   decision-relevant fact from us, in the same screen" rule (2026-09-02).
+   Already adopted, confirmed by a second source rather than new.
+3. **"Why should I use ripgrep?" and "Why shouldn't I use ripgrep?" are two
+   headings of equal weight, back to back.** The second is not a caveat
+   folded into the pitch; it is its own section, naming three concrete
+   reasons to reach for something else (POSIX portability, an unlisted
+   missing feature, an unspecified performance edge case), addressed to a
+   reader actively deciding, not one already sold.
+
+The principle worth stealing is (3), and it is genuinely new here, not a
+confirmation of something already adopted. Our own honest content
+("Pre-alpha... Do not use this for data you care about yet",
+`README.md`:54) is real and true, but it is one clause inside the "Where
+it stands" section, a paragraph the reader has to already be reading
+closely to reach. Giving the negative case its own heading, at the same
+level as the positive one, is a structural change, not a wording one: it
+tells a skimming reader that the negative case is a first-class answer to
+"is this for me," not a footnote to the positive one.
+
+This maps directly onto the operator's #604 charter (2026-09-18, open,
+unclaimed): "the page opens with architecture" and the reader has to work
+past an argument to find the verdict. A peer-level "why not (yet)" heading
+on `/` is one concrete way to satisfy that charter's "done means" bar
+without inventing a new claim; the material already exists (pre-alpha, no
+release, slow, loses Silesia). **Not filed as a separate issue**: #604
+already owns this redesign end to end, and a second issue naming the same
+page would fragment one decision into two tickets, the opposite of single
+source of truth. Recorded here as guidance for whoever executes #604.
+
+**Explicitly rejected: leading with a screenshot**, ripgrep's actual first
+visual element after the intro. It sells the tool by showing highlighted
+matches in a terminal, a real product to look at. A compressor's output is
+bytes getting smaller; there is nothing to show a screenshot of that isn't
+already a number in our table. The transferable part of "show, don't just
+assert" for this project is the existing `cmp FILE FILE.out` recipe
+(2026-09-03 entry): a command the reader runs, not a picture they look at.
+
+### (c) What changes because of (a) and (b)
+
+- Closed #522, shipped and unclosed (housekeeping, not a new ask).
+- The "why not (yet)" heading finding is recorded above as guidance for
+  #604, not filed separately, for the single-source-of-truth reason
+  stated there.
+- Nothing else in (a) crossed the bar for a new issue this week: the
+  numbers are flat and unremarkable, which is itself the finding after two
+  weeks of pause-distorted data. #526 stays open and unclaimed; #523 and
+  #524 stay closed from last week; #604, #443 and #411 remain the open
+  queue for whoever picks up site work next.
+
+Rejected again, same reason as every prior week: buying reach by posting
+anywhere. Zero mentions across Hacker News, lobste.rs and reddit is a real
+number and it stays one.
+
 ## 2026-09-18 — Editorial: the trust page's evidence, minus the numbers that would lie by tomorrow
 
 Shipped issue #522. `/`'s Principles section stated four claims as bare
