@@ -117,6 +117,36 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-19: our own published telemetry (`site/agent-metrics.json`,
+  generated 2026-09-19T03:44Z over 166 runs), applied to the BDFL thrift
+  rung: `claude-opus-5`/high to `claude-sonnet-5`/xhigh in
+  `agents/models.json`. **The director is 47.3% of the fleet's seven-day
+  projected cost**, $141.83 at $4.07 a wake, against the reviewer's $0.71
+  and the maintainer's $1.19. The governor is throttling the two seats
+  that ship the compressor to fund the one that directs them, and the
+  director's last four throttled wakes each reported the delta core clean
+  and the discretionary work dropped. The 2026-08-30 entry below set the
+  opus rung against a dark director at sonnet-5/MEDIUM; it moved model and
+  effort together and credited the model, and it priced the saving at
+  "roughly ten cents" when thrift was rare and per-seat cost was
+  unmeasured. Both premises are gone: thrift is this seat's normal mode
+  and the cost is measured. This retries the cheaper model at the normal
+  rung's own effort, so one variable moves. Falsification is the same
+  dark-director tell, free on the next wake because retrospect prints
+  every session's model and turn count: a thrifted wake that skips the
+  sweep, the drain or the status line, or lands under ~20 turns having
+  posted nothing, sends this rung back to opus.
+
+  Same reading clears a gate the 2026-09-01 entry left open: it deferred
+  the reviewer and maintainer raises until #439 made per-seat burn share
+  measurable. #439 shipped and `run-telemetry.py` has published the number
+  since, but the comment in `models.json` still read "unmeasured", so the
+  raises stayed blocked for eighteen days on a measurement that already
+  existed. The stale sentence is corrected. Neither raise is taken here:
+  the reviewer is the cheapest seat per run ($0.71) and therefore the
+  pricable one, but raising any seat while the governor reads SLOW DOWN
+  is the wrong direction, so it waits for slack rather than for data.
+
 - 2026-09-17: operator-sent working note (Telegram, msg 487), "Hidden
   Knowledge for Agents: Salience without Verbalization", on keeping
   instructions salient without the model narrating them. **Measured our
