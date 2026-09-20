@@ -2443,13 +2443,26 @@ record.
   pointing at a recency bias in what a partial file prefix's counts
   represent instead. Intra-round adaptive pricing has now failed on two
   different, deliberately-chosen observation rules; the next attempt, if
-  any, is not a third variant of the same idea. Remaining S1-P2 scope:
-  unclear — the sqlite/json/jsonl target has moved only slightly across
-  every slice tried since S2-A46 (S2-A56's three-round DP: json_records
-  −0.00256; S2-R5: json_records +0.00208, sqlite_like_records −0.00208,
-  a wash), so the DP-pricing angle on this lead may be near its ceiling;
-  a differently-shaped idea, not a pricing-cadence or observation-rule
-  tweak, is owed before spending another slice here.
+  any, is not a third variant of the same idea. Fourteenth slice, S2-R10:
+  answered the differently-shaped question this entry itself posed —
+  whether the match finder's *search quality* (`NICE_LEN_OPTIMAL`,
+  `MAX_TREE_DEPTH_OPTIMAL`, both frozen at their issue-#179-speed-guard
+  values since S2-A46/S2-A48 and never independently tested as ratio
+  levers) rather than pricing was the unmoved target's real bottleneck.
+  Rejected: raising either constant, alone or measured up to a 4,000,000-byte
+  scale on `json_records`/`sqlite_like_records` directly, changed the
+  compressed output by at most one byte, because neither bound ever binds
+  on this target's own structure (fixed 20-byte rows, short inter-digit
+  literal runs) — the parse already sees every candidate worth seeing at
+  the current values. Full mechanism and numbers: S2-R10's own entry.
+  Remaining S1-P2 scope: unclear, more so than before — both the
+  intra-round pricing angle (S2-A51 through S2-R5) and now the
+  match-finder search-quality angle (S2-R10) are closed on this evidence.
+  What's left is either a modeling primitive that reaches structure a
+  binary-tree parse cannot (e.g. a schema-aware/typed-field literal model,
+  in the spirit of S1-P5's per-column direction but for pre-transpose or
+  mixed-type records) or accepting that sqlite/json/jsonl residue sits
+  near this architecture's ceiling absent one.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4). First
   slice: S2-A57 (standalone `Ppm` primitive, PPM Method C escape pricing,
   not yet wired). Second slice, S2-R6: measured the most-reasoned fallback
@@ -4568,3 +4581,75 @@ record.
   alignment blind spot at a different period. The large-file-mode
   alternative (ROADMAP M5 SPEED territory) remains the other untried
   branch.
+- S2-R10 | REJECTED | S1-P2's own closing note (S2-R5's entry, restated in
+  the lead's own summary): "a differently-shaped idea, not a
+  pricing-cadence or observation-rule tweak, is owed before spending
+  another slice here." Hypothesis: the binary-tree match finder's *search
+  quality*, not its pricing, was the untried lever — `dp_round` has passed
+  `NICE_LEN_OPTIMAL` (128) and `MAX_TREE_DEPTH_OPTIMAL` (640) to
+  `BinaryTreeMatchFinder::insert_and_find` unchanged since S2-A46/S2-A48
+  wired them, and both were tuned there purely to satisfy the issue #179
+  speed guard and a near-duplicate-block micro-benchmark (S2-A44/S2-A46),
+  never independently measured as a bits/byte lever on S1-P2's own named
+  target (sqlite/json/jsonl-shaped structured records, unmoved by every
+  pricing-cadence slice so far, S2-A47 through S2-R5). Raising either
+  constant — more candidates considered (`MAX_TREE_DEPTH_OPTIMAL`) or a
+  longer match reportable/scannable before the early exit
+  (`NICE_LEN_OPTIMAL`) — is a match-quality change, not a pricing one, so
+  it is a genuinely different shape. Measured directly (constants edited
+  locally, never committed) rather than assumed: at `bench::baseline`'s
+  own `CASE_LEN` (50,000), `NICE_LEN_OPTIMAL` 128→273 (LZMA's own
+  `nice_len` ceiling, `MAX_TREE_DEPTH_OPTIMAL` held at 640) changed zero
+  of the 11 train cases' compressed bytes and zero of the two sealed-only
+  kinds' (`access_log`, `gradient_image`, measured the way S2-A48's
+  `measure_sealed_tmp.rs` did), byte-for-byte; separately,
+  `MAX_TREE_DEPTH_OPTIMAL` 640→5,000 (`NICE_LEN_OPTIMAL` held at 128)
+  changed zero of the same 13 cases too. Recognized the same trap S2-R7's
+  own text names ("`CASE_LEN` 50,000... cannot show any window effect at
+  all... needed its own, much larger, ad hoc length") could apply here as
+  well, so re-measured `json_records`/`sqlite_like_records` directly (S1-P2's
+  own named target, train seed `0xC0FFEE123456789A`, no sealed-set peeking
+  since this is feasibility exploration) at an ad hoc 4,000,000 bytes: at
+  that scale, `NICE_LEN_OPTIMAL` 273 alone left both cases' compressed
+  length byte-for-byte unchanged (284,234 and 1,678,319 bytes) and wall
+  clock unchanged (47.4s vs 47.5s baseline, both release builds, `dp_round`
+  called through `mothergod::compress`); `MAX_TREE_DEPTH_OPTIMAL` 5,000
+  alone left `sqlite_like_records` byte-for-byte unchanged and moved
+  `json_records` by exactly one byte (284,234 → 284,233, ~3.5e-6
+  relative), at roughly double the wall clock (96.9s). The two issue #179
+  speed-guard tests
+  (`optimal_roundtrip_long_run_of_one_repeated_byte_stays_linear`,
+  `binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse`) stayed
+  well inside their budgets at every combination tried (debug build, both
+  together: 1.73s baseline, 2.03s at `nice_len` 273, 1.72s at `max_depth`
+  5,000; budgets 15s and 3s respectively) — the speed side of this
+  hypothesis was never in doubt, only the ratio side. **Rejected**:
+  neither constant binds on this target's own structure at either scale,
+  so there is nothing for a higher bound to find. Mechanism:
+  `sqlite_like_records`' fixed 8+4+8-byte rows and `json_records`'
+  literal-text-between-incrementing-digits shape both produce match runs
+  far shorter than even the current 128-byte `nice_len`, let alone 273 —
+  the record layout itself caps match length, not the search bound, so
+  raising the cap changes nothing regardless of scale. `HASH_BITS` (17,
+  131,072 buckets) keeps average per-bucket candidate counts (≈30 at
+  4,000,000 bytes) far under even the *current* 640-deep budget, so a
+  5,000-deep budget has essentially nothing extra, in-window, to visit;
+  the one-byte `json_records` change is consistent with a single
+  unusually deep bucket's tie-break flipping, not a systematic quality
+  gain, and does not begin to pay for the ~2x encode-time cost measured
+  alongside it. This falsifies the search-quality hypothesis cleanly: the
+  parse already sees every candidate worth seeing at today's constants,
+  on today's target data, at both the CI-gate scale and a realistic
+  multi-megabyte scale. Candidate code: none committed. Two scratch
+  binaries used for measurement, `bench/src/bin/measure_sealed_tmp.rs`
+  (S2-A48's own naming convention, re-created and re-deleted here) and
+  `bench/src/bin/nice_len_depth_scale_tmp.rs`, both deleted after
+  measurement per S2-R6/S2-R7/S2-R9's convention; `src/lz.rs`'s constants
+  reverted to their committed values (128/640) in every case.
+  `research/progress.jsonl` it141. Remaining S1-P2 scope: see the lead's
+  own entry above, updated — both the intra-round pricing angle and now
+  the match-finder search-quality angle are closed on the evidence
+  gathered so far; a modeling primitive that reaches structure a
+  binary-tree parse cannot see at all (schema-aware/typed-field literal
+  contexts, or accepting the residue as near this architecture's ceiling)
+  is what is owed next, not another parse-level lever.
