@@ -3184,6 +3184,63 @@ record.
   same question: standalone tANS-as-automatic-candidate is closed,
   negative; the LZ-preserving fast-literal-stage direction is untried and
   is S1-P6's actual remaining scope.
+- S2-A90 | REJECTED | S1-P6's remaining LZ-preserving fast-literal-stage
+  direction (issue #447, after S2-A88): before building the integration
+  (`Method` wiring, `FORMAT_VERSION` bump, decoder support) S2-A88 flagged
+  as materially bigger than any prior slice, measure whether it is even
+  bit-cost-plausible by pricing only the literal-byte stream a real
+  optimal parse produces, so the redundancy LZ's matches already remove
+  is out of the comparison on both sides. | New
+  `bench/src/bin/tans_literal_measure.rs`: for each of `tans_measure`'s 10
+  buffers (mothergod_bench generators, 200,000-byte samples, seed
+  0xC0FFEE123456789A, sealed-only kinds at `sealed_seed`), runs
+  `lz::parse_optimal`, walks the tokens exactly as `codec`'s private
+  `walk_tokens` does (`Context::after_literal`/`after_copy`, same order),
+  and splits the walk into the literal-byte stream plus the champion's
+  real per-literal cost (`Literal::ideal_cost_bits_sse`, the `encode_sse`
+  path every non-`Transpose` candidate actually codes literals through).
+  An order-0 static tANS coder (`normalize_frequencies` through
+  `encode_message`, `table_log2=10`) then codes that same literal-byte
+  stream, freq-table bytes charged in (S2-A87/S2-A88's accounting). Real
+  numbers: tANS loses on **10 of 10** buffers, not just most — even
+  `entropy_ladder(h=2)`, the one buffer where whole-buffer tANS won in
+  S2-A88, loses here (2.7727 vs 2.7374 bits/literal-byte) because the
+  champion's context state (word-hash bank, SSE calibration) keeps
+  adapting across a match boundary while an order-0 coder starts fresh
+  every buffer. The loss is small in whole-buffer terms on the four
+  kinds where literals are a small fraction of the parse (`access_log`
+  6.3% literal: +0.0256 bits/byte of the whole buffer; `json_records`
+  4.5%: +0.0187; `base64_wrapped` 3.8%: +0.0709; `entropy_ladder(h=2)`
+  17.6%: +0.0062) but severe on the kinds a genuine fast tier would most
+  need to survive, where literals dominate the parse: `gradient_image`
+  95.5% literal, +2.1217 bits/byte of the whole buffer; `interleaved_
+  audio16` 89.8%, +1.5386; `entropy_ladder(h=6)` 93.1%, +0.2141;
+  `markov_h8_2_trap` only 13.6% literal but the champion's context model
+  crushes this trap by design (3.1938 bits/literal-byte) while an
+  order-0 coder cannot see past its flat marginal histogram at all
+  (8.0403), the widest per-literal gap measured (+4.8466). 4 unit tests
+  (literal extraction preserves order and byte-for-byte content on an
+  all-literal buffer, a long single-byte run leaves only a handful of
+  leading literals, the empty-stream `None` case, a round-trip-verified
+  positive measurement on a real buffer) plus the existing
+  `cases_cover_every_dataset_kind` shape from `tans_measure`; `cargo x
+  check`: 4 stages green; `baseline_gate check`: 11 cases, no regression
+  (nothing wired, unaffected). | Closes the LZ-preserving fast-literal-
+  stage direction, negative: an order-0 static coder loses to the
+  context-mixing champion on every buffer tested, catastrophically on
+  literal-heavy data, because the champion's context keeps adapting
+  through match boundaries in a way a fresh-per-buffer order-0 table
+  cannot match regardless of how few bytes it prices. This was S1-P6's
+  last open branch that respects the crate's own constraints (S2-A78
+  closed the incremental-cumulative direction as `FORMAT_VERSION`-bump-
+  class, S2-A80 closed explicit AVX2 as blocked by `forbid(unsafe_code)`
+  independent of measurement). S1-P6 has no further small-slice avenue
+  left unmeasured; reopening it needs either a genuinely new idea (an
+  adaptive/context-conditioned fast coder, which reintroduces the
+  per-byte adaptation cost this lead exists to amortize away) or lifting
+  `forbid(unsafe_code)` (ADR-0017's call, not this lead's). CHANGELOG.md
+  untouched: nothing wired to a `Method`, no public API or user-visible
+  behavior changed.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -3233,11 +3290,22 @@ record.
   matching and swap only the entropy stage, where S2-A81 through S2-A87
   built a whole-buffer order-0 coder with no match stage, which is why
   S2-A86's structured-data losses were so large (LZ's matches vanishing
-  entirely, not an entropy-coder gap). Remaining S1-P6 scope: threading
-  tANS into the LZ token stream's literal coding as a fast entropy-stage
-  swap, untried and not a small slice — the bit-decomposed-coding and
-  incremental-cumulative directions above are both closed, so this is the
-  lead's only open branch.
+  entirely, not an entropy-coder gap). S2-A90 then measured that
+  remaining branch directly, pricing only the literal-byte stream a real
+  optimal parse produces (so LZ's own redundancy removal is out of the
+  comparison on both sides): an order-0 static tANS coder loses to the
+  champion on 10 of 10 buffers, catastrophically on literal-dominated
+  ones (`gradient_image` 95.5% literal: +2.12 bits/byte of the whole
+  buffer), because the champion's context state keeps adapting across
+  match boundaries in a way a fresh-per-buffer order-0 table cannot
+  match. Closed, negative. S1-P6 has no further small-slice avenue left
+  that respects the crate's own constraints: bit-decomposed coding
+  shipped without reaching the floor, the incremental-cumulative
+  direction is `FORMAT_VERSION`-bump-class, explicit AVX2 is blocked by
+  `forbid(unsafe_code)` (ADR-0017), and both tANS directions (whole-
+  buffer automatic candidate, LZ-preserving literal-stage swap) lose on
+  bits/byte. Reopening this lead needs a genuinely new idea, not a next
+  slice of what is already here.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
