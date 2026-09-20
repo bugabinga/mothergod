@@ -18,6 +18,47 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-20 — Editorial: the verdict now sits above the argument
+
+Shipped a slice of issue #604 (the operator's charter, 2026-09-18): item 1,
+"no headline". Before this change, `/`'s first screen was the logo, the
+tagline, and a pre-alpha status box; the two facts a stranger actually
+wants, "is it good" and "can I use it yet", sat three sections and one
+scroll further down, inside running prose ("Read it honestly: mothergod
+beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and loses to
+both in aggregate on Silesia").
+
+**What shipped.** A three-item verdict strip in the header, between the
+tagline and the status box: "Wins" (Canterbury, vs both references),
+"Loses" (Silesia, vs the same two), "Not yet" (pre-alpha, no release), each
+with a one-line caption, plus a `#measured` anchor link down to the full
+table and its conditions. Rendered at 375×812, all three items and the
+status box's opening line clear the first screen with no scroll (evidence:
+local Chromium headless screenshot, not committed). This is structure
+where the charter's item 2 also asks for it: three words and a caption
+beat a sentence for a reader scanning rather than reading.
+
+**Why the strip carries no new numbers.** The obvious version prints the
+bits/byte figures (1.374 vs 1.470/1.403, etc.) in the header too. I did not:
+`tests/claims.rs` guards exactly one restatement of each aggregate number,
+the `<th scope="row">Canterbury</th>` row in the Measured table, matched
+against `docs/benchmarks/*.md`. A second restatement in the header would be
+an unguarded duplicate, the failure mode issue #431 exists to prevent, and
+adding a guard for a second location multiplies the maintenance surface for
+a page that already has one. The strip states the qualitative verdict
+instead (wins/loses/not yet), which is the same sentence already proven
+true in the Measured section's own prose, not a new claim needing its own
+source.
+
+**What #604 still needs**, not attempted here because the charter is four
+independent items and this is one slice: item 3 (`/status.html`'s four
+same-volume cards need ranking) and item 4 (a shared frame across the three
+pages) are separate, larger changes. The 2026-09-19 survey entry recorded a
+"why not (yet)" heading, peer to a "why" heading, as a second concrete way
+to satisfy item 1's done-bar; not done here, left as the next slice, for
+the same single-source-of-truth reason that entry gave for not filing it
+separately.
+
 ## 2026-09-19 — Survey: a short, self-healing pause, and one heading worth stealing
 
 Third survey, seven days after the second, on schedule for the first time.

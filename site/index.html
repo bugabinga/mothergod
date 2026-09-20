@@ -60,6 +60,18 @@
     }
     .tagline { color: var(--muted); max-width: 46ch; }
 
+    .verdict {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 1.6rem 2.2rem;
+    }
+    .verdict-item { display: flex; flex-direction: column; align-items: center; gap: .2rem; }
+    .verdict-figure {
+      font-family: "Unbounded", "Albert Sans", sans-serif; font-weight: 600;
+      font-size: 1.05rem;
+    }
+    .verdict-figure.win { color: var(--gold); }
+    .verdict-caption { color: var(--muted); font-size: .78rem; max-width: 16ch; text-align: center; }
+    .verdict-link { font-size: .85rem; }
+
     .status {
       background: var(--nebula); border: 1px solid var(--line); border-radius: 14px;
       padding: 1.1rem 1.3rem; display: flex; flex-direction: column; gap: .4rem;
@@ -141,6 +153,23 @@
           ratio rather than speed, and meant to be judged on bits per byte
           against <code>zstd -19</code> and <code>xz -9e</code>.
         </p>
+        <div class="verdict" role="group" aria-label="Verdict at a glance">
+          <div class="verdict-item">
+            <span class="verdict-figure win">Wins</span>
+            <span class="verdict-caption">Canterbury, vs <code>zstd -19</code>
+              and
+              <code>xz -9e</code></span>
+          </div>
+          <div class="verdict-item">
+            <span class="verdict-figure">Loses</span>
+            <span class="verdict-caption">Silesia, vs the same two</span>
+          </div>
+          <div class="verdict-item">
+            <span class="verdict-figure">Not yet</span>
+            <span class="verdict-caption">pre-alpha, no release</span>
+          </div>
+        </div>
+        <p class="verdict-link"><a href="#measured">See the numbers ↓</a></p>
       </header>
 
       <div class="status">
@@ -173,7 +202,7 @@
         </p>
       </section>
 
-      <section>
+      <section id="measured">
         <h2>Measured</h2>
         <p>
           Aggregate bits per byte on the two named corpora, lower is better.
