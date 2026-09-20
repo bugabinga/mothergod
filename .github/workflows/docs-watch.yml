@@ -33,7 +33,7 @@ on:
     # hours before this job ever ran, so that week's ledger content went
     # unread for a full cycle (caught live, 2026-09-20, first run of the
     # marker-gated survey). 22:47 Saturday clears monster.yml's 03:17
-    # Saturday run by a day and finishes well over an hour before any
+    # Saturday run by 19.5 hours and finishes well over an hour before any
     # Sunday wake can read it.
     - cron: "47 22 * * 6"
   workflow_dispatch:
