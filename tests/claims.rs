@@ -271,10 +271,10 @@ fn throughput_from_report(report_file: &str) -> [f64; 2] {
 }
 
 /// The first two numbers immediately followed by `MB/s`, scanning from
-/// `marker` onward. Both surfaces name a corpus once and then give its two
-/// rates in encode-then-decode order ("encoded Canterbury at 0.133 MB/s and
-/// decoded it at 4.422 MB/s"), so the corpus name is the only anchor this
-/// needs and the prose stays free to reword around it.
+/// `marker` onward. README states a corpus name once and then gives its two
+/// rates in encode-then-decode order in prose ("encoded Canterbury at 0.133
+/// MB/s and decoded it at 4.422 MB/s"), so the corpus name is the only
+/// anchor this needs and the prose stays free to reword around it.
 fn throughput_after(text: &str, marker: &str) -> [f64; 2] {
     let start = text
         .find(marker)
@@ -296,6 +296,26 @@ fn throughput_after(text: &str, marker: &str) -> [f64; 2] {
     [encode, decode]
 }
 
+/// The Speed table's encode/decode MB/s for `corpus`, scoped to `id="speed"`
+/// so it cannot match the Measured table's own `<th scope="row">{corpus}</th>`
+/// row (issue #604 item 2: the Speed section states its rates in a table,
+/// not prose, so this reads cells the way `aggregate_from_site` does).
+fn throughput_from_site(corpus: &str) -> [f64; 2] {
+    let site = read("site/index.html");
+    let table_start = site
+        .find("id=\"speed\"")
+        .unwrap_or_else(|| panic!("no #speed table in site/index.html"));
+    let table = &site[table_start..];
+    let marker = format!("<th scope=\"row\">{corpus}</th>");
+    let start = table
+        .find(&marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found in the #speed table"));
+    let fragment = &table[start..];
+    let end = fragment.find("</tr>").unwrap_or(fragment.len());
+    let numbers = html_numbers(&fragment[..end]);
+    [numbers[0], numbers[1]]
+}
+
 #[test]
 fn published_throughput_matches_its_generated_reports() {
     let corpora = [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")];
@@ -304,7 +324,7 @@ fn published_throughput_matches_its_generated_reports() {
         let truth = throughput_from_report(report_file);
         let marker = format!("encoded {corpus} at");
         let readme = throughput_after(&read("README.md"), &marker);
-        let site = throughput_after(&read("site/index.html"), &marker);
+        let site = throughput_from_site(corpus);
 
         for (index, direction) in ["encode", "decode"].iter().enumerate() {
             // The reports already print three decimals, so the surfaces

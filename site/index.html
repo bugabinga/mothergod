@@ -273,15 +273,37 @@
           internal parallelism; the reports measure it one thread per file,
           several files at once, on one CI machine (AMD EPYC 9V74, 4 logical
           cores), more threads than cores, so the rate is a lower bound on what
-          an isolated single-file run would show. On that same run, mothergod
-          encoded Canterbury at
-          <strong class="rate">0.133 MB/s</strong> and decoded it at
-          <strong class="rate">4.422 MB/s</strong>; it encoded Silesia at
-          <strong class="rate">0.059 MB/s</strong> and decoded it at
-          <strong class="rate">1.879 MB/s</strong>. Silesia's 212 MB took about
-          an hour to compress and under two minutes to read back. Encoding
-          carries the optimal parse, so it runs roughly thirty times slower than
-          decoding.
+          an isolated single-file run would show.
+        </p>
+        <table class="bench" id="speed">
+          <caption class="visually-hidden">
+            Aggregate encode and decode throughput by corpus, same run as the
+            Measured table
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">corpus</th>
+              <th scope="col">encode MB/s</th>
+              <th scope="col">decode MB/s</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Canterbury</th>
+              <td>0.133</td>
+              <td>4.422</td>
+            </tr>
+            <tr>
+              <th scope="row">Silesia</th>
+              <td>0.059</td>
+              <td>1.879</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Silesia's 212 MB took about an hour to compress and under two minutes
+          to read back. Encoding carries the optimal parse, so it runs roughly
+          thirty times slower than decoding.
         </p>
         <p>
           One caveat the reports state themselves: these are single-run figures
