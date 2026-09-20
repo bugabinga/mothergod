@@ -2517,7 +2517,17 @@ record.
   regression it exists to prevent. Remaining S1-P4 scope: the detector's
   fixed-position sampling needs replacing with content-defined anchor
   selection before this trigger is trustworthy, or the large-file-mode
-  alternative, either still open. A window past `2^21 - 1` itself
+  alternative, either still open. Eighth slice, S2-A91: built that
+  replacement, `lz::likely_benefits_from_larger_window_content_defined`,
+  standalone; proved directly that it closes the alignment blind spot
+  S2-R9 found (a planted repeat off the fixed-stride grid is missed by
+  the old detector and found by the new one, same test) but left the
+  other half of S2-R9's rejection — incidental-collision false positives
+  on densely-sampled real data — untested and open. Remaining S1-P4
+  scope: answer the false-positive question (a longer anchor, or
+  requiring agreement past `DETECTOR_ANCHOR_LEN`) before either detector
+  is worth gating a window bump on, or the large-file-mode alternative,
+  still open. A window past `2^21 - 1` itself
   still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
@@ -4653,3 +4663,65 @@ record.
   binary-tree parse cannot see at all (schema-aware/typed-field literal
   contexts, or accepting the residue as near this architecture's ceiling)
   is what is owed next, not another parse-level lever.
+- S2-A91 | ACCEPTED | S1-P4's own remaining scope after S2-R9: "the
+  detector's fixed-position sampling needs replacing with content-defined
+  anchor selection before this trigger is trustworthy." Built that
+  replacement as a standalone primitive, same first-slice shape S2-A89
+  itself took, not yet wired to any parse call site.
+  `lz::likely_benefits_from_larger_window_content_defined(data,
+  base_window)` answers the identical question S2-A89's detector does
+  (does an exact-byte recurrence past `base_window` exist) but selects
+  candidate anchor positions with `is_content_defined_anchor`, a
+  polynomial hash (`CONTENT_HASH_BASE`, wrapping `u64` arithmetic) over
+  each `DETECTOR_ANCHOR_LEN`-byte window, firing on low
+  `DETECTOR_STRIDE`-1 bits of the hash — a pure function of a window's own
+  bytes, so two identical windows anywhere in `data` always agree on
+  whether they are sampled, unlike S2-A89's fixed absolute-position grid.
+  Directly demonstrates the fix S2-R9 called for: a repeat planted at
+  `5 * DETECTOR_STRIDE + 7` (deliberately off the fixed-stride grid) is
+  missed by `likely_benefits_from_larger_window` and found by the new
+  function, both assertions in the same test
+  (`content_defined_detector_finds_a_repeat_the_fixed_stride_detector_misses`),
+  the same "a direct manipulation, not just inferred" standard S2-R9's own
+  rejection used. Does not address S2-R9's other, independent finding
+  (false positives from incidental anchor collisions on data sampled
+  densely enough to hit the birthday bound, e.g. `access_log`):
+  content-defined selection changes *where* anchors fall, not how many,
+  so that failure mode is untested by this slice and stays open — this
+  closes only the alignment blind spot, not the whole wiring question.
+  Recomputes the rolling hash from scratch per position rather than
+  incrementally (documented as a known follow-up, not a rolling-hash
+  bug): correctness over cost for a detector-only primitive not yet on
+  any wired path. Review round (PR #634) caught the public function
+  underflowing on `base_window < data.len() < DETECTOR_ANCHOR_LEN`: the
+  `for i in 0..=data.len() - DETECTOR_ANCHOR_LEN` loop assumed a length
+  the early return did not guarantee, panicking on ordinary short input
+  the sibling detector's `while i + DETECTOR_ANCHOR_LEN <= data.len()`
+  shape handles by degrading to zero iterations. Fixed to match the
+  sibling's loop-condition shape; the "rolling polynomial hash" language
+  above was also imprecise (it recomputes from scratch, as the next
+  paragraph already said correctly) and is now just "polynomial hash". |
+  6 new unit tests (367 lib tests total, up from 361):
+  early-return at/under `base_window` (mirroring S2-A89's own), the
+  underflow regression at `data.len() = 3 < DETECTOR_ANCHOR_LEN`, false on
+  a splitmix64 pseudorandom stream with no accidental 8-byte collision
+  (the zero-padded counter pattern S2-A89's own noise test used is not
+  noise enough here — this detector examines every position, not just
+  `DETECTOR_STRIDE`-aligned ones, and a zero-heavy window recurs
+  legitimately across the padding; verified by direct construction before
+  concluding it was a real recurrence and not a bug, then replaced with
+  data that has none), true on a stride-aligned planted repeat, false when
+  the same repeat sits inside `base_window`, and the off-grid
+  find/miss contrast above. `cargo x check`: 4 stages green.
+  `baseline_gate check`: 11 cases, no regression (nothing wired,
+  unaffected). | No bpb measurement: this is a detector, not a parse
+  change, so there is no champion to diff against — `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas, same reason
+  S2-A89 did for its own first slice. Remaining S1-P4 scope: the
+  birthday-bound false-positive question S2-R9 raised is still
+  unaddressed by either detector; wiring either one into `parse_optimal`'s
+  window choice still needs that answered (a longer anchor, or requiring
+  agreement past `DETECTOR_ANCHOR_LEN` before reporting `true`, are the
+  two untried ideas) before a gated window bump is worth re-measuring
+  against `bench::baseline`'s sealed set the way S2-R9 did. `research/
+  progress.jsonl` it142.

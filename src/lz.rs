@@ -1637,6 +1637,94 @@ pub fn likely_benefits_from_larger_window(data: &[u8], base_window: usize) -> bo
     false
 }
 
+/// Multiplier for [`is_content_defined_anchor`]'s polynomial hash. Any odd
+/// constant works under wrapping `u64` arithmetic; this is the standard
+/// Fibonacci-hashing multiplier, chosen for decent bit mixing, not tuned
+/// against any corpus.
+const CONTENT_HASH_BASE: u64 = 0x9E37_79B9_7F4A_7C15;
+
+/// True when the [`DETECTOR_ANCHOR_LEN`]-byte window at `data[i..]` is a
+/// content-defined anchor: a pure function of that window's own bytes,
+/// true for roughly one window in [`DETECTOR_STRIDE`] on average (the same
+/// density [`likely_benefits_from_larger_window`]'s fixed stride samples
+/// at), independent of `i` itself. Two equal windows anywhere in `data`
+/// always agree on this result, which is the property
+/// [`likely_benefits_from_larger_window_content_defined`] needs and a
+/// fixed absolute stride cannot offer (`research/JOURNAL.md` S2-R9).
+///
+/// Recomputes the hash from scratch per call rather than rolling it
+/// incrementally: correctness over cost for this detector-only primitive,
+/// not yet on any wired path. A future wiring slice that adopts this
+/// should roll the hash in O(1) per position instead, the way real
+/// content-defined chunkers (rsync, restic) do.
+///
+/// # Panics
+///
+/// Panics if `i + DETECTOR_ANCHOR_LEN > data.len()`.
+fn is_content_defined_anchor(data: &[u8], i: usize) -> bool {
+    let window = &data[i..i + DETECTOR_ANCHOR_LEN];
+    let mut hash: u64 = 0;
+    for &byte in window {
+        hash = hash
+            .wrapping_mul(CONTENT_HASH_BASE)
+            .wrapping_add(u64::from(byte));
+    }
+    hash & (DETECTOR_STRIDE as u64 - 1) == 0
+}
+
+/// Content-defined variant of [`likely_benefits_from_larger_window`],
+/// answering the same question ("does an exact-byte recurrence past
+/// `base_window` exist in `data`") by sampling at `is_content_defined_anchor`
+/// positions instead of every [`DETECTOR_STRIDE`]th absolute position.
+///
+/// `research/JOURNAL.md` S2-R9 measured the fixed-stride detector
+/// structurally blind to any repeat whose distance is not itself a
+/// multiple of [`DETECTOR_STRIDE`] (about 63 in 64 of possible distances,
+/// with no relationship to whether a real recurrence exists): two
+/// occurrences of the same [`DETECTOR_ANCHOR_LEN`]-byte content only both
+/// land on sampled positions if their distance happens to preserve the
+/// stride's alignment. This function has no such blind spot by
+/// construction: `is_content_defined_anchor` depends only on a window's
+/// own bytes, so if `data[a..a+DETECTOR_ANCHOR_LEN] ==
+/// data[b..b+DETECTOR_ANCHOR_LEN]`, either both positions select an anchor
+/// or neither does — the same distinction content-defined chunking
+/// (rsync, restic/borg) exploits for chunk-boundary stability under
+/// insertions, applied here to recurrence detection instead.
+///
+/// Not a fix for S2-R9's other finding (false positives from incidental
+/// anchor collisions on data sampled densely enough to hit the birthday
+/// bound, e.g. `access_log`): content-defined selection changes *where*
+/// anchors fall, not how many, so that failure mode is untested by this
+/// function and remains open. This is a detector, not a parse change;
+/// nothing calls it yet.
+///
+/// Returns `false` immediately when `data` cannot possibly contain a gap
+/// wider than `base_window` (`data.len() <= base_window`), before
+/// sampling anything.
+#[must_use]
+pub fn likely_benefits_from_larger_window_content_defined(data: &[u8], base_window: usize) -> bool {
+    if data.len() <= base_window {
+        return false;
+    }
+    let mut last_seen: HashMap<&[u8], usize> = HashMap::new();
+    let mut i = 0;
+    while i + DETECTOR_ANCHOR_LEN <= data.len() {
+        if !is_content_defined_anchor(data, i) {
+            i += 1;
+            continue;
+        }
+        let anchor = &data[i..i + DETECTOR_ANCHOR_LEN];
+        if let Some(&prev) = last_seen.get(anchor)
+            && i - prev > base_window
+        {
+            return true;
+        }
+        last_seen.insert(anchor, i);
+        i += 1;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2437,6 +2525,158 @@ mod tests {
         let base_window = far_offset;
         let data = planted_repeat(*b"anchor42", far_offset);
         assert!(!likely_benefits_from_larger_window(&data, base_window));
+    }
+
+    /// Finds an [`DETECTOR_ANCHOR_LEN`]-byte value whose own window
+    /// satisfies [`is_content_defined_anchor`] at position 0, so tests can
+    /// plant a repeat that the content-defined detector is actually able to
+    /// select (an arbitrary literal like `b"anchor42"` has no reason to
+    /// satisfy a hash condition). Also excludes the all-zero value so it
+    /// stays distinguishable from the zero-filled padding
+    /// `planted_repeat_content_defined` uses elsewhere.
+    fn find_content_defined_anchor_value() -> [u8; DETECTOR_ANCHOR_LEN] {
+        for n in 1u64.. {
+            let candidate = n.to_le_bytes();
+            if is_content_defined_anchor(&candidate, 0) {
+                return candidate;
+            }
+        }
+        unreachable!("density ~1/DETECTOR_STRIDE guarantees a hit well before u64 exhausts")
+    }
+
+    /// Finds a single filler byte whose repeated [`DETECTOR_ANCHOR_LEN`]-byte
+    /// window is never itself a content-defined anchor, so padding built
+    /// from it contributes zero entries to
+    /// [`likely_benefits_from_larger_window_content_defined`]'s `last_seen`
+    /// map regardless of how often it repeats — isolating a planted anchor
+    /// as the only detectable recurrence.
+    fn find_non_anchor_filler_byte() -> u8 {
+        for byte in 0u8..=255 {
+            if !is_content_defined_anchor(&[byte; DETECTOR_ANCHOR_LEN], 0) {
+                return byte;
+            }
+        }
+        unreachable!("density ~1/DETECTOR_STRIDE guarantees most byte values are non-anchors")
+    }
+
+    /// Same shape as [`planted_repeat`], but `anchor` is a content-defined
+    /// anchor value (see [`find_content_defined_anchor_value`]) and
+    /// `far_offset` is deliberately **not** required to be
+    /// [`DETECTOR_STRIDE`]-aligned: the whole point of this helper is to
+    /// exercise offsets the fixed-stride detector's sampling grid cannot
+    /// reach. Padding is a single non-anchor filler byte
+    /// ([`find_non_anchor_filler_byte`]) so no unrelated recurrence in the
+    /// padding can produce a spurious detection.
+    fn planted_repeat_content_defined(
+        anchor: [u8; DETECTOR_ANCHOR_LEN],
+        far_offset: usize,
+    ) -> Vec<u8> {
+        let filler = find_non_anchor_filler_byte();
+        let mut data = vec![filler; far_offset + DETECTOR_ANCHOR_LEN];
+        data[..DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
+        data[far_offset..].copy_from_slice(&anchor);
+        data
+    }
+
+    #[test]
+    fn content_defined_detector_is_false_when_data_cannot_exceed_the_window() {
+        assert!(!likely_benefits_from_larger_window_content_defined(
+            &[7; 100], 200
+        ));
+        assert!(!likely_benefits_from_larger_window_content_defined(
+            &[7; 200], 200
+        ));
+    }
+
+    #[test]
+    fn content_defined_detector_does_not_underflow_below_anchor_len() {
+        // Regression for the reviewer-caught panic on PR #634: data.len() <
+        // DETECTOR_ANCHOR_LEN but > base_window skipped the early return and
+        // underflowed `data.len() - DETECTOR_ANCHOR_LEN` in a bare `for`
+        // loop. The sibling detector's `while i + ANCHOR_LEN <= len` shape
+        // degrades to zero iterations instead; this must match it.
+        // DETECTOR_ANCHOR_LEN is 8, so 3 bytes is short of it by construction.
+        assert!(!likely_benefits_from_larger_window_content_defined(
+            &[1, 2, 3],
+            0
+        ));
+    }
+
+    #[test]
+    fn content_defined_detector_is_false_on_noise_with_no_recurrence() {
+        // Unlike likely_benefits_from_larger_window (sampled only at
+        // DETECTOR_STRIDE-aligned positions), this detector examines every
+        // position, so a zero-padded counter pattern is not noise enough:
+        // the all-zero window straddling two blocks' zero prefixes recurs
+        // legitimately (verified by direct construction) and is not a bug.
+        // A splitmix64 pseudorandom stream has no such structure, and at
+        // this length (16,000 bytes) an accidental 8-byte collision is
+        // astronomically unlikely (birthday bound over a 2^64 space).
+        let mut data = Vec::new();
+        let mut state = 0x00C0_FFEE_u64;
+        for _ in 0..2000 {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            data.extend_from_slice(&z.to_le_bytes());
+        }
+        assert!(!likely_benefits_from_larger_window_content_defined(
+            &data, 64
+        ));
+    }
+
+    #[test]
+    fn content_defined_detector_is_true_when_a_far_repeat_exists_at_a_stride_aligned_offset() {
+        let anchor = find_content_defined_anchor_value();
+        let far_offset = 5 * DETECTOR_STRIDE;
+        let base_window = far_offset - 1;
+        let data = planted_repeat_content_defined(anchor, far_offset);
+        assert!(likely_benefits_from_larger_window_content_defined(
+            &data,
+            base_window
+        ));
+    }
+
+    #[test]
+    fn content_defined_detector_is_false_when_the_only_repeat_fits_inside_the_window() {
+        let anchor = find_content_defined_anchor_value();
+        let far_offset = 5 * DETECTOR_STRIDE;
+        let base_window = far_offset;
+        let data = planted_repeat_content_defined(anchor, far_offset);
+        assert!(!likely_benefits_from_larger_window_content_defined(
+            &data,
+            base_window
+        ));
+    }
+
+    #[test]
+    fn content_defined_detector_finds_a_repeat_the_fixed_stride_detector_misses() {
+        // The exact failure mode research/JOURNAL.md S2-R9 measured: a
+        // repeat whose distance is not a multiple of DETECTOR_STRIDE sits
+        // outside the fixed-stride detector's sampling grid entirely, so it
+        // never even reads the second occurrence's bytes. The
+        // content-defined detector selects anchors by content, not
+        // position, so alignment cannot hide the same repeat from it.
+        let anchor = find_content_defined_anchor_value();
+        let far_offset = 5 * DETECTOR_STRIDE + 7;
+        assert_ne!(
+            far_offset % DETECTOR_STRIDE,
+            0,
+            "test setup must be off the fixed-stride grid"
+        );
+        let base_window = far_offset - 1;
+        let data = planted_repeat_content_defined(anchor, far_offset);
+
+        assert!(
+            !likely_benefits_from_larger_window(&data, base_window),
+            "fixed-stride detector must miss this off-grid repeat"
+        );
+        assert!(
+            likely_benefits_from_larger_window_content_defined(&data, base_window),
+            "content-defined detector must find it"
+        );
     }
 }
 
