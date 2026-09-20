@@ -98,10 +98,20 @@ jobs:
       # restores the binary without ~/.cargo/.crates.toml, so an unguarded
       # install rebuilds from source on every hit (fuzz-check learned this).
       - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version 27.1.0 --locked
+      # cache-bin: false, because this workflow already caches
+      # ~/.cargo/bin/cargo-mutants itself (above): Swatinem's own bin
+      # management defaults on and prunes untracked binaries from that same
+      # directory in its post-job step, which runs before the plain
+      # actions/cache save (post-job hooks unwind LIFO, and this step is
+      # declared after it) — the binary was gone by the time the save ran,
+      # so `cargo-mutants-${{ runner.os }}-27.1.0` never landed and every
+      # PR run rebuilt it from source (~67s, observed on runs 34970585316
+      # through 35443870161, 2026-09-15 through 09-19).
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: mutants
           workspaces: . -> target
+          cache-bin: false
 
       - name: Mutate the changed lines
         if: github.event_name == 'pull_request'
