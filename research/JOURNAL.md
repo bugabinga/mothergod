@@ -2494,7 +2494,13 @@ record.
   cheap pre-pass suggests recurrence past the current window exists, so
   the encode-time cost is paid only where the bpb win is real) or a
   deliberate large-file mode distinct from the default (ROADMAP M5 SPEED
-  territory) — neither designed here. A window past `2^21 - 1` itself
+  territory). Sixth slice, S2-A89: built the content-adaptive trigger's own
+  first piece — `lz::likely_benefits_from_larger_window`, a cheap sampled
+  detector, standalone, not yet wired to `parse_optimal`'s window choice.
+  Remaining S1-P4 scope: wire it (decide the candidate window and
+  threshold, measure the resulting train/sealed bpb and encode-time cost
+  on the conditional path) or design the large-file-mode alternative,
+  either still open. A window past `2^21 - 1` itself
   still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
@@ -4229,6 +4235,45 @@ record.
   S2-A62/S2-A64): standalone, not yet wired to a different value than
   today's — `progress.jsonl` records this as `kind: "patch"` with null
   bpb deltas. `research/progress.jsonl` it111.
+- S2-A89 | ACCEPTED | S1-P4's own remaining scope after S2-R7's rejection of
+  an unconditional `WINDOW` bump: "grow the window only when a cheap
+  pre-pass suggests recurrence past it exists, paying the encode-time cost
+  only where the bpb win is real," named as one of two untried directions
+  and, unlike the other (a deliberate large-file mode, ROADMAP M5
+  territory), buildable as a standalone primitive ahead of any wiring
+  decision — the same first-slice shape every other lead opened with
+  (S2-A42 for S1-P2, S2-A57 for S1-P3, S2-A64 for S1-P5, S2-A81 for S1-P6).
+  `lz::likely_benefits_from_larger_window(data, base_window)` samples an
+  8-byte anchor (`DETECTOR_ANCHOR_LEN`) every 64 bytes (`DETECTOR_STRIDE`),
+  remembers the most recent position each exact anchor was seen at, and
+  reports `true` the first time two occurrences sit more than `base_window`
+  bytes apart — never measuring match length or cost, never choosing a
+  window itself, and never touching `dp_round`, `parse_optimal_with_window`,
+  or any wired call site. Anchors compare byte-for-byte through a `HashMap`
+  key, so a `true` result names a real recurrence, never a hash collision
+  (S2-R7's own blanket-bump measurement paid real sealed-set bpb and
+  1.05x-1.41x encode time on data without this kind of recurrence at all;
+  this function exists so a future wiring slice can pay that cost
+  conditionally instead). | 4 new unit tests: false below and exactly at
+  `base_window` (data cannot contain a wider gap, the early-return case),
+  false on stride-aligned noise with no repeated anchor, true when a
+  planted repeat sits just past `base_window`, false when the same planted
+  repeat sits at or under `base_window` (the actual filtering logic, not
+  just non-sampling) — all four share a `planted_repeat` test helper that
+  fills each 64-byte block with a distinct byte so no sampled anchor
+  collides by construction. `cargo x check`: 4 stages green, 361 lib tests
+  (up from 357). `baseline_gate check`: 11 cases, no regression (nothing
+  wired, unaffected). | No bpb measurement: this is a detector, not a parse
+  change, so there is no champion to diff against — `progress.jsonl`
+  records this as `kind: "patch"` with null bpb deltas. Remaining S1-P4
+  scope: the wiring decision itself — call this detector before choosing
+  `parse_optimal`'s window, decide the actual candidate window and
+  threshold (this slice picked `DETECTOR_ANCHOR_LEN`/`DETECTOR_STRIDE` for
+  cheapness, not tuned against any corpus), and measure the resulting
+  train/sealed bpb and encode-time cost on the conditional path, which
+  S2-R7 never did because nothing before this slice could tell the wired
+  parse when to pay the larger window's cost. `research/progress.jsonl`
+  it138.
 - S2-A66 | ACCEPTED | Second slice of ROADMAP M3's fifth standing lead
   (S1-P5, per-column modeling after transpose): `column::column_bank
   (column, max_banks)` (`column % max_banks.get()`), the bound

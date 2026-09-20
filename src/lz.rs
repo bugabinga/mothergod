@@ -27,6 +27,7 @@
 //! confusion class the session-1 port bug came from (`rust-craft` skill,
 //! type-precision).
 
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 /// Largest backward distance a match may reference (`JOURNAL` S1-A3: 1 MiB
@@ -1577,6 +1578,65 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
     dp_round(data, &prices, window)
 }
 
+/// Exact-match byte width an anchor in [`likely_benefits_from_larger_window`]
+/// must share before two positions count as recurring. Matches the crate's
+/// own hash-chain match finder's hash prefix width in spirit (a short exact
+/// prefix is enough to make a false positive from hash collision alone
+/// vanishingly unlikely) but is compared byte-for-byte here, not hashed, so
+/// there is no collision to guard against at all.
+pub const DETECTOR_ANCHOR_LEN: usize = 8;
+
+/// Spacing between sampled anchors in [`likely_benefits_from_larger_window`].
+/// Coarser than any real match finder's per-byte insertion on purpose: this
+/// is a cheap pre-pass, not a parse, so it trades recall (a recurrence
+/// entirely between two samples goes unseen) for a cost close to a linear
+/// scan.
+pub const DETECTOR_STRIDE: usize = 64;
+
+/// Cheap pre-pass for `research/JOURNAL.md` S1-P4's own named remaining
+/// scope: "grow the window only when a cheap pre-pass suggests recurrence
+/// past it exists, paying the encode-time cost only where the bpb win is
+/// real." S2-R7 measured that growing the wired [`WINDOW`] unconditionally
+/// regresses the sealed set on data without such recurrence while costing
+/// every position real encode time; this function is the untried
+/// alternative that named result called for, not a re-run of it — it never
+/// grows a window itself, it only answers whether growing one might pay off
+/// on `data`.
+///
+/// Samples an anchor of [`DETECTOR_ANCHOR_LEN`] bytes every
+/// [`DETECTOR_STRIDE`] positions and remembers the most recent position
+/// each exact anchor was seen at. Reports `true` the first time two
+/// occurrences of the same anchor sit more than `base_window` bytes apart —
+/// a real match [`WINDOW`] misses today but a larger one could reach —
+/// without ever measuring how long the match past the anchor actually runs
+/// or what it would cost to encode; that is `dp_round`'s job, on a window
+/// this function never chooses. Anchors are compared byte-for-byte (not
+/// hashed), so a `true` result names a real recurrence, never a hash
+/// collision.
+///
+/// Returns `false` immediately when `data` cannot possibly contain a gap
+/// wider than `base_window` (`data.len() <= base_window`), before sampling
+/// anything.
+#[must_use]
+pub fn likely_benefits_from_larger_window(data: &[u8], base_window: usize) -> bool {
+    if data.len() <= base_window {
+        return false;
+    }
+    let mut last_seen: HashMap<&[u8], usize> = HashMap::new();
+    let mut i = 0;
+    while i + DETECTOR_ANCHOR_LEN <= data.len() {
+        let anchor = &data[i..i + DETECTOR_ANCHOR_LEN];
+        if let Some(&prev) = last_seen.get(anchor)
+            && i - prev > base_window
+        {
+            return true;
+        }
+        last_seen.insert(anchor, i);
+        i += DETECTOR_STRIDE;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2310,6 +2370,73 @@ mod tests {
         assert_eq!(via_tally.length, via_observe.length);
         assert_eq!(via_tally.offset, via_observe.offset);
         assert_eq!(via_tally.rep, via_observe.rep);
+    }
+
+    #[test]
+    fn likely_benefits_from_larger_window_is_false_when_data_cannot_exceed_the_window() {
+        // Shorter than base_window: no gap wider than it can exist at all,
+        // so the function must return before sampling anything.
+        assert!(!likely_benefits_from_larger_window(&[7; 100], 200));
+        // Exactly base_window: still no position sits more than base_window
+        // bytes from another (the boundary case for the `<=` early return).
+        assert!(!likely_benefits_from_larger_window(&[7; 200], 200));
+    }
+
+    #[test]
+    fn likely_benefits_from_larger_window_is_false_on_noise_with_no_recurrence() {
+        // Every anchor here is 4 zero bytes followed by 4 bytes of a
+        // strictly increasing counter, so no two anchors at any stride are
+        // byte-for-byte equal: the detector must never claim a recurrence
+        // that is not there, whatever base_window is given.
+        let mut data = Vec::new();
+        for i in 0..2000u32 {
+            data.extend_from_slice(&[0, 0, 0, 0]);
+            data.extend_from_slice(&i.to_le_bytes());
+        }
+        assert!(!likely_benefits_from_larger_window(&data, 64));
+    }
+
+    /// Builds `len` bytes with a distinct fill byte per [`DETECTOR_STRIDE`]
+    /// block (so no two sampled anchors collide by construction) and then
+    /// stamps `anchor` at position 0 and again at `far_offset`, both
+    /// required to be [`DETECTOR_STRIDE`]-aligned so the detector's fixed
+    /// sampling grid is guaranteed to land on both occurrences.
+    fn planted_repeat(anchor: [u8; DETECTOR_ANCHOR_LEN], far_offset: usize) -> Vec<u8> {
+        assert_eq!(
+            far_offset % DETECTOR_STRIDE,
+            0,
+            "test setup must stay grid-aligned"
+        );
+        let mut data = vec![0u8; far_offset + DETECTOR_ANCHOR_LEN];
+        for (block, chunk) in data[..far_offset].chunks_mut(DETECTOR_STRIDE).enumerate() {
+            let fill = u8::try_from(block + 1).expect("test uses far below 255 blocks");
+            chunk.fill(fill);
+        }
+        data[..DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
+        data[far_offset..].copy_from_slice(&anchor);
+        data
+    }
+
+    #[test]
+    fn likely_benefits_from_larger_window_is_true_when_a_far_repeat_exists() {
+        // The only recurrence in otherwise-distinct filler sits past
+        // base_window, so a true result can only come from finding it.
+        let far_offset = 5 * DETECTOR_STRIDE;
+        let base_window = far_offset - 1;
+        let data = planted_repeat(*b"anchor42", far_offset);
+        assert!(likely_benefits_from_larger_window(&data, base_window));
+    }
+
+    #[test]
+    fn likely_benefits_from_larger_window_is_false_when_the_only_repeat_fits_inside_the_window() {
+        // Same shape as the true case above, but the second occurrence sits
+        // at or under base_window away: a real match finder already reaches
+        // it, so a larger window would buy nothing and the detector must
+        // say so.
+        let far_offset = DETECTOR_STRIDE;
+        let base_window = far_offset;
+        let data = planted_repeat(*b"anchor42", far_offset);
+        assert!(!likely_benefits_from_larger_window(&data, base_window));
     }
 }
 
