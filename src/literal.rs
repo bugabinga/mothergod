@@ -501,6 +501,19 @@ impl Literal {
         (bank_indices, weight_index, cum)
     }
 
+    /// Each real expert's own probability estimate for `symbol`: its bank's
+    /// frequency count over its bank's total. Shared by [`Self::update`] and
+    /// [`Self::update_column_expert`] so both weight adaptations start from
+    /// the identical six numbers.
+    fn expert_estimates(&self, bank_indices: &[usize; EXPERTS], symbol: usize) -> [f64; EXPERTS] {
+        let mut estimate = [0f64; EXPERTS];
+        for (expert, &bank) in bank_indices.iter().enumerate() {
+            estimate[expert] =
+                f64::from(self.freq[bank * ALPHABET + symbol]) / f64::from(self.total[bank]);
+        }
+        estimate
+    }
+
     /// Adapts mixing weights toward whichever experts predicted `symbol`
     /// best (exponentiated gradient, Mahoney 2005), then updates every
     /// expert's own frequency table the same way
@@ -517,11 +530,7 @@ impl Literal {
         symbol: usize,
         exp_fn: fn(f64) -> f64,
     ) {
-        let mut estimate = [0f64; EXPERTS];
-        for (expert, bank) in bank_indices.iter().enumerate() {
-            estimate[expert] =
-                f64::from(self.freq[bank * ALPHABET + symbol]) / f64::from(self.total[*bank]);
-        }
+        let estimate = self.expert_estimates(bank_indices, symbol);
         let weights = &mut self.weights[weight_index];
         let weight_sum: f64 = weights.iter().sum();
         let mixed: f64 = (0..EXPERTS)
@@ -695,11 +704,7 @@ impl Literal {
 
         let column_estimate =
             f64::from(column_state.freq[column_bank * ALPHABET + symbol]) / column_total;
-        let mut estimate6 = [0f64; EXPERTS];
-        for (expert, &bank) in bank_indices.iter().enumerate() {
-            estimate6[expert] =
-                f64::from(self.freq[bank * ALPHABET + symbol]) / f64::from(self.total[bank]);
-        }
+        let estimate6 = self.expert_estimates(bank_indices, symbol);
         let mixed_estimate = (weights6
             .iter()
             .zip(estimate6.iter())
