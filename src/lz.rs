@@ -1637,10 +1637,10 @@ pub fn likely_benefits_from_larger_window(data: &[u8], base_window: usize) -> bo
     false
 }
 
-/// Multiplier for [`is_content_defined_anchor`]'s rolling polynomial hash.
-/// Any odd constant works under wrapping `u64` arithmetic; this is the
-/// standard Fibonacci-hashing multiplier, chosen for decent bit mixing, not
-/// tuned against any corpus.
+/// Multiplier for [`is_content_defined_anchor`]'s polynomial hash. Any odd
+/// constant works under wrapping `u64` arithmetic; this is the standard
+/// Fibonacci-hashing multiplier, chosen for decent bit mixing, not tuned
+/// against any corpus.
 const CONTENT_HASH_BASE: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// True when the [`DETECTOR_ANCHOR_LEN`]-byte window at `data[i..]` is a
@@ -1707,8 +1707,10 @@ pub fn likely_benefits_from_larger_window_content_defined(data: &[u8], base_wind
         return false;
     }
     let mut last_seen: HashMap<&[u8], usize> = HashMap::new();
-    for i in 0..=data.len() - DETECTOR_ANCHOR_LEN {
+    let mut i = 0;
+    while i + DETECTOR_ANCHOR_LEN <= data.len() {
         if !is_content_defined_anchor(data, i) {
+            i += 1;
             continue;
         }
         let anchor = &data[i..i + DETECTOR_ANCHOR_LEN];
@@ -1718,6 +1720,7 @@ pub fn likely_benefits_from_larger_window_content_defined(data: &[u8], base_wind
             return true;
         }
         last_seen.insert(anchor, i);
+        i += 1;
     }
     false
 }
@@ -2582,6 +2585,20 @@ mod tests {
         ));
         assert!(!likely_benefits_from_larger_window_content_defined(
             &[7; 200], 200
+        ));
+    }
+
+    #[test]
+    fn content_defined_detector_does_not_underflow_below_anchor_len() {
+        // Regression for the reviewer-caught panic on PR #634: data.len() <
+        // DETECTOR_ANCHOR_LEN but > base_window skipped the early return and
+        // underflowed `data.len() - DETECTOR_ANCHOR_LEN` in a bare `for`
+        // loop. The sibling detector's `while i + ANCHOR_LEN <= len` shape
+        // degrades to zero iterations instead; this must match it.
+        // DETECTOR_ANCHOR_LEN is 8, so 3 bytes is short of it by construction.
+        assert!(!likely_benefits_from_larger_window_content_defined(
+            &[1, 2, 3],
+            0
         ));
     }
 

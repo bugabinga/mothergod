@@ -4671,7 +4671,7 @@ record.
   `lz::likely_benefits_from_larger_window_content_defined(data,
   base_window)` answers the identical question S2-A89's detector does
   (does an exact-byte recurrence past `base_window` exist) but selects
-  candidate anchor positions with `is_content_defined_anchor`, a rolling
+  candidate anchor positions with `is_content_defined_anchor`, a
   polynomial hash (`CONTENT_HASH_BASE`, wrapping `u64` arithmetic) over
   each `DETECTOR_ANCHOR_LEN`-byte window, firing on low
   `DETECTOR_STRIDE`-1 bits of the hash — a pure function of a window's own
@@ -4692,8 +4692,18 @@ record.
   Recomputes the rolling hash from scratch per position rather than
   incrementally (documented as a known follow-up, not a rolling-hash
   bug): correctness over cost for a detector-only primitive not yet on
-  any wired path. | 5 new unit tests (366 lib tests total, up from 361):
-  early-return at/under `base_window` (mirroring S2-A89's own), false on
+  any wired path. Review round (PR #634) caught the public function
+  underflowing on `base_window < data.len() < DETECTOR_ANCHOR_LEN`: the
+  `for i in 0..=data.len() - DETECTOR_ANCHOR_LEN` loop assumed a length
+  the early return did not guarantee, panicking on ordinary short input
+  the sibling detector's `while i + DETECTOR_ANCHOR_LEN <= data.len()`
+  shape handles by degrading to zero iterations. Fixed to match the
+  sibling's loop-condition shape; the "rolling polynomial hash" language
+  above was also imprecise (it recomputes from scratch, as the next
+  paragraph already said correctly) and is now just "polynomial hash". |
+  6 new unit tests (367 lib tests total, up from 361):
+  early-return at/under `base_window` (mirroring S2-A89's own), the
+  underflow regression at `data.len() = 3 < DETECTOR_ANCHOR_LEN`, false on
   a splitmix64 pseudorandom stream with no accidental 8-byte collision
   (the zero-padded counter pattern S2-A89's own noise test used is not
   noise enough here — this detector examines every position, not just
