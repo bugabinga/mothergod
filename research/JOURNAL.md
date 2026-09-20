@@ -2527,7 +2527,19 @@ record.
   scope: answer the false-positive question (a longer anchor, or
   requiring agreement past `DETECTOR_ANCHOR_LEN`) before either detector
   is worth gating a window bump on, or the large-file-mode alternative,
-  still open. A window past `2^21 - 1` itself
+  still open. Ninth slice, S2-A92: answered that question — built
+  `lz::likely_benefits_from_larger_window_content_defined_confirmed`,
+  requiring `DETECTOR_CONFIRM_LEN` (24) bytes past each anchor to also
+  agree byte-for-byte before reporting `true`, which the exact S2-R9
+  divergent-tail shape now fails while a real extending recurrence still
+  passes. Remaining S1-P4 scope: both of S2-R9's failure modes now have a
+  candidate fix (S2-A91 for the alignment blind spot, S2-A92 for the
+  incidental-agreement false positive); wiring
+  `likely_benefits_from_larger_window_content_defined_confirmed` into
+  `parse_optimal`'s window choice and re-measuring against
+  `bench::baseline`'s sealed set — including whether `DETECTOR_CONFIRM_LEN`'s
+  starting value of 24 is right — is next, still open. A window past
+  `2^21 - 1` itself
   still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
