@@ -158,6 +158,108 @@ fn aggregate_ratios_match_their_generated_reports() {
     }
 }
 
+/// The verdict strip's per-corpus judgment word ("Wins"/"Loses") and its
+/// caption text, in strip order. Scoped between the `class="verdict"`
+/// container and its closing `</div>` so a same-named span elsewhere on
+/// the page cannot match.
+fn verdict_items(page: &str) -> Vec<(String, String)> {
+    let container_start = page
+        .find("class=\"verdict\"")
+        .unwrap_or_else(|| panic!("no .verdict container in site/index.html"));
+    let container_end = page[container_start..]
+        .find("<p class=\"verdict-link\"")
+        .map_or(page.len(), |offset| container_start + offset);
+    let container = &page[container_start..container_end];
+
+    let mut items = Vec::new();
+    let mut rest = container;
+    while let Some(item_start) = rest.find("class=\"verdict-item\"") {
+        let item = &rest[item_start..];
+        let item_end = item
+            .find("</div>")
+            .unwrap_or_else(|| panic!("unterminated verdict-item div"));
+        let item = &item[..item_end];
+
+        let figure = {
+            let marker = "verdict-figure";
+            let marker_start = item
+                .find(marker)
+                .unwrap_or_else(|| panic!("verdict-item has no verdict-figure span"));
+            let tag_end = item[marker_start..]
+                .find('>')
+                .unwrap_or_else(|| panic!("unterminated verdict-figure span"))
+                + marker_start;
+            let text_end = item[tag_end..]
+                .find('<')
+                .unwrap_or_else(|| panic!("unterminated verdict-figure span"))
+                + tag_end;
+            item[tag_end + 1..text_end].trim().to_string()
+        };
+        let caption = {
+            let marker = "verdict-caption";
+            let marker_start = item
+                .find(marker)
+                .unwrap_or_else(|| panic!("verdict-item has no verdict-caption span"));
+            let tag_end = item[marker_start..]
+                .find('>')
+                .unwrap_or_else(|| panic!("unterminated verdict-caption span"))
+                + marker_start;
+            let text_end = item[tag_end..]
+                .find("</span>")
+                .unwrap_or_else(|| panic!("unterminated verdict-caption span"))
+                + tag_end;
+            item[tag_end + 1..text_end].to_string()
+        };
+        items.push((figure, caption));
+        rest = &rest[item_start + item_end..];
+    }
+    items
+}
+
+/// Whether the aggregate in `report_file` beats, or loses to, both
+/// reference compressors: the only two outcomes the verdict strip's
+/// binary Wins/Loses word can represent honestly.
+fn verdict_truth(report_file: &str) -> &'static str {
+    let [mothergod, _gzip, zstd, xz] = aggregate_from_report(report_file);
+    if mothergod < zstd && mothergod < xz {
+        "Wins"
+    } else if mothergod > zstd && mothergod > xz {
+        "Loses"
+    } else {
+        panic!(
+            "docs/benchmarks/{report_file}'s aggregate beats one reference and loses to the \
+             other; the verdict strip's binary Wins/Loses word cannot represent that honestly"
+        )
+    }
+}
+
+#[test]
+fn verdict_strip_words_match_their_aggregate_comparisons() {
+    // The header's verdict strip restates a qualitative claim the Measured
+    // section's numbers already prove (issue #604 item 1), but as a second,
+    // separate location: nothing but this test ties its "Wins"/"Loses"
+    // words to the comparison they name, so a regenerated report that flips
+    // one could leave the header stale (site/index.html itself calls
+    // "Closing Silesia" the project's current milestone, i.e. the exact
+    // word this strip hardcodes for Silesia today is a live target).
+    let site = read("site/index.html");
+    let items = verdict_items(&site);
+
+    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
+        let truth = verdict_truth(report_file);
+        let (word, _caption) = items
+            .iter()
+            .find(|(_, caption)| caption.starts_with(corpus))
+            .unwrap_or_else(|| {
+                panic!("no verdict-item caption in site/index.html mentions {corpus}")
+            });
+        assert_eq!(
+            word, truth,
+            "site/index.html's verdict strip says {corpus} {word:?}, but docs/benchmarks/{report_file} says mothergod {truth} it"
+        );
+    }
+}
+
 /// The aggregate row's encode and decode MB/s, from the generated report.
 fn throughput_from_report(report_file: &str) -> [f64; 2] {
     let text = read(&format!("docs/benchmarks/{report_file}"));
