@@ -35,9 +35,19 @@ env:
 jobs:
   fuzz:
     runs-on: ubuntu-24.04
-    # ~2 min build and setup (observed on the weekly runs), FUZZ_BUDGET_S
-    # of fuzzing whatever the target count, cmin and cache save on top.
-    timeout-minutes: 45
+    # Overhead (checkout through seed_corpus) stays under a minute;
+    # FUZZ_BUDGET_S is a fixed 30 min regardless of target count; cmin is
+    # the variable cost, because it re-executes every input in the
+    # persisted corpus and that corpus grows every night by design (#450).
+    # Three straight nights (2026-09-17/18/19) hit 45 with cmin still
+    # running, and a timeout-cancelled job skips the post-job cache save
+    # (observed directly: those runs' `Post Run actions/cache` steps report
+    # `skipped`), losing the whole night's learned corpus, not just cmin's
+    # trim of it. 65 buys headroom for cmin's current size; cmin cost keeps
+    # growing with the corpus, so a future survey may need to raise this
+    # again or move cmin off the hot path (e.g. a separate, less frequent
+    # job) rather than treat this number as settled.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # The corpus persists across runs (#450). Cache keys are write-once,
