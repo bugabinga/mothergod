@@ -24,12 +24,18 @@ name: docs-watch
 
 on:
   schedule:
-    # Sundays 04:47 UTC, clear of the other Sunday crons (codeql 04:07,
-    # traffic-snapshot 04:23, model-intel 05:07, corpus-fetch-check 05:41)
-    # and ahead of the Sunday survey that reads it. Verified against the
-    # files, not against a neighbouring comment: the list this was first
-    # copied from had fuzz-check at Sunday 06:13, and it is 02:13 daily.
-    - cron: "47 4 * * 0"
+    # Saturday 22:47 UTC, not Sunday morning: the BDFL wakes every 4 hours
+    # on the hour+11 (infra/telegram-worker/wrangler.toml), so the earliest
+    # possible Sunday survey wake is 00:11 UTC Sunday. A Sunday-morning slot
+    # (the original 04:47, clustered with codeql 04:07/traffic-snapshot
+    # 04:23/model-intel 05:07/corpus-fetch-check 05:41) reliably lost that
+    # race: the 00:11 wake claims the week's survey and posts its marker
+    # hours before this job ever ran, so that week's ledger content went
+    # unread for a full cycle (caught live, 2026-09-20, first run of the
+    # marker-gated survey). 22:47 Saturday clears monster.yml's 03:17
+    # Saturday run by 19.5 hours and finishes well over an hour before any
+    # Sunday wake can read it.
+    - cron: "47 22 * * 6"
   workflow_dispatch:
 
 permissions: {}
