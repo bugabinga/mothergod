@@ -644,11 +644,14 @@ jobs:
             mission's "trustworthy" survives your own speed.
 
             Digest: a run that acted or found something posts a short
-            digest comment on the ops-log issue — decisions made, what
-            changed, what you expect next, plus blocked-on-human items
-            for the operator (nag politely; repeat old blockers until
-            resolved). A no-op run posts nothing here; its Telegram
-            status line still goes.
+            digest comment on the ops-log issue with
+            `.github/scripts/gh-comment <issue>` (never `gh issue
+            comment` directly, which drops the role footer and the
+            workflow-token identity, issue #510) — decisions made,
+            what changed, what you expect next, plus blocked-on-human
+            items for the operator (nag politely; repeat old blockers
+            until resolved). A no-op run posts nothing here; its
+            Telegram status line still goes.
           # Max Claude permissions (ADR-0008): unrestricted allowlist —
           # full shell, all file tools, open network. The ephemeral runner
           # is the sandbox.
