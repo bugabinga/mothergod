@@ -3184,7 +3184,7 @@ record.
   same question: standalone tANS-as-automatic-candidate is closed,
   negative; the LZ-preserving fast-literal-stage direction is untried and
   is S1-P6's actual remaining scope.
-- S2-A89 | REJECTED | S1-P6's remaining LZ-preserving fast-literal-stage
+- S2-A90 | REJECTED | S1-P6's remaining LZ-preserving fast-literal-stage
   direction (issue #447, after S2-A88): before building the integration
   (`Method` wiring, `FORMAT_VERSION` bump, decoder support) S2-A88 flagged
   as materially bigger than any prior slice, measure whether it is even
@@ -3290,7 +3290,7 @@ record.
   matching and swap only the entropy stage, where S2-A81 through S2-A87
   built a whole-buffer order-0 coder with no match stage, which is why
   S2-A86's structured-data losses were so large (LZ's matches vanishing
-  entirely, not an entropy-coder gap). S2-A89 then measured that
+  entirely, not an entropy-coder gap). S2-A90 then measured that
   remaining branch directly, pricing only the literal-byte stream a real
   optimal parse produces (so LZ's own redundancy removal is out of the
   comparison on both sides): an order-0 static tANS coder loses to the
