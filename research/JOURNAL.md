@@ -2497,10 +2497,14 @@ record.
   territory). Sixth slice, S2-A89: built the content-adaptive trigger's own
   first piece — `lz::likely_benefits_from_larger_window`, a cheap sampled
   detector, standalone, not yet wired to `parse_optimal`'s window choice.
-  Remaining S1-P4 scope: wire it (decide the candidate window and
-  threshold, measure the resulting train/sealed bpb and encode-time cost
-  on the conditional path) or design the large-file-mode alternative,
-  either still open. A window past `2^21 - 1` itself
+  Seventh slice, S2-R9: measured the wiring decision S2-A89 left open —
+  gate the window bump on the detector's verdict instead of applying it
+  unconditionally — and rejected it: the detector both misses the exact
+  scenario this lead targets and still lets through part of the sealed
+  regression it exists to prevent. Remaining S1-P4 scope: the detector's
+  fixed-position sampling needs replacing with content-defined anchor
+  selection before this trigger is trustworthy, or the large-file-mode
+  alternative, either still open. A window past `2^21 - 1` itself
   still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
@@ -4430,3 +4434,69 @@ record.
   `xargs.1`. Finding, not fixed here. No bpb measurement:
   `research/progress.jsonl` records this as `kind: "patch"` with null
   deltas, it116.
+- S2-R9 | REJECTED | S1-P4's own remaining scope after S2-A89 (issue-less
+  standing lead): wire `lz::likely_benefits_from_larger_window` as a gate
+  on whether `parse_optimal` grows its window from `lz::WINDOW`
+  (1,048,576) to the `2^21 - 1` (2,097,151) ceiling S2-A63 proved free of
+  format cost, so S2-R7's blanket-bump sealed-set regression is paid only
+  where a real recurrence past `WINDOW` exists. Measured with a throwaway
+  (uncommitted) scratch binary, `bench/src/bin/window_detector_experiment.rs`
+  (deleted after this measurement, per S2-R6/S2-R7's own convention),
+  `codec::ideal_cost_bits_with_window` at `old_window = lz::WINDOW` vs
+  `new_window = 2,097,151`, gated per-case by
+  `likely_benefits_from_larger_window(data, old_window)`, release build:
+  S2-R7's own four train-eligible non-ladder kinds at 4,000,000 bytes,
+  train seed `0xC0FFEE123456789A`, plus both sealed-only kinds at
+  `sealed_seed` of the same key, plus S2-A63's own planted
+  `long_range_repeat` case (len 1,222,672, distance 1,198,576) at both
+  seeds. Every non-gated number reproduces S2-R7/S2-A63 exactly to six
+  decimal places (cross-check that this harness measures the same thing
+  they did): `markov_h8_2_trap` -0.025424, `sqlite_like_records` -0.006542,
+  `x86_dense_code` +0.000505, `json_records` +0.000273, `access_log`
+  +0.000189, `gradient_image` +0.000092, `long_range_repeat` -0.021443
+  (train) / -0.021401 (sealed). | **Rejected**, two independent failure
+  modes, either one sufficient on its own: (1) the detector fires `false`
+  on both `long_range_repeat` seeds — the exact scenario this lead
+  targets — missing a real -0.0214 b/B win entirely, and (2) it fires
+  `true` on the sealed-only `access_log`, letting through +0.000189 b/B of
+  exactly the regression this trigger exists to prevent (`gradient_image`
+  is the one sealed kind it correctly gates away). Mechanism, confirmed by
+  a direct manipulation, not just inferred from the miss: `long_range_repeat`'s
+  distance (1,198,576) is not a multiple of `DETECTOR_STRIDE` (64) —
+  `1,198,576 mod 64 = 48` — so no two of the detector's fixed
+  absolute-position samples (`0, 64, 128, ...`) ever land on matching
+  offsets into the planted 4,096-byte repeat; re-running the identical
+  case with the distance rounded down to the nearest multiple of 64
+  (1,198,528) flips the detector to `true` and recovers the win
+  (-0.021446 b/B, matching the -0.021443 unrounded number to three
+  decimal places). `likely_benefits_from_larger_window` can therefore
+  only ever see a repeat whose distance happens to be a multiple of
+  `DETECTOR_STRIDE` — a ~1/64 chance for a real-world repeat's distance,
+  not a property any actual recurrence has reason to satisfy — while
+  `access_log`'s false-positive comes from the opposite direction:
+  sampling ~62,500 positions over 4,000,000 bytes makes an incidental
+  8-byte anchor collision likely by the birthday bound even with no
+  exploitable long-range structure at all (S2-R7 already named this shape
+  for `markov_h8_2_trap`'s real win; here the same sampling-volume effect
+  fires without a matching win behind it). Both S2-A89's own unit tests
+  and this rejection's own `long_range_repeat` case used a
+  stride-aligned or unaligned offset respectively by construction, which
+  is why S2-A89's tests never exposed this: `planted_repeat`
+  (`src/lz.rs`) deliberately rounds `far_offset` to a `DETECTOR_STRIDE`
+  multiple before asserting `true`, so the detector's contract was tested
+  exactly on the one alignment case it handles and never on the general
+  one. S2-A89 itself is not wrong: its doc comment never claimed anchor
+  selection is alignment-invariant, and the primitive still does exactly
+  what it says. This slice found the assumption that would have made it
+  useful for this wiring, and falsified it, before any code reached
+  `parse_optimal`. No source under `src/` changed; the scratch binary
+  is not committed. `research/progress.jsonl` it139. Remaining S1-P4
+  scope: a content-defined anchor selection (Rabin-fingerprint-style,
+  choosing sample positions by a rolling hash of local content instead of
+  fixed absolute offsets, the way rsync/content-defined chunking picks
+  chunk boundaries) would make detection distance-invariant and is the
+  next concrete idea; a fixed-stride detector is not salvageable by
+  tuning `DETECTOR_STRIDE` alone, since any fixed stride has the same
+  alignment blind spot at a different period. The large-file-mode
+  alternative (ROADMAP M5 SPEED territory) remains the other untried
+  branch.
