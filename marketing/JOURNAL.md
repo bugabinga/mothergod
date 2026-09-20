@@ -18,6 +18,53 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-20 — Editorial: the Speed numbers stopped wearing prose
+
+Shipped another slice of issue #604: item 2, "prose where structure
+belongs." The Speed section's four rate figures sat embedded inside a
+sentence ("mothergod encoded Canterbury at 0.133 MB/s and decoded it at
+4.422 MB/s; it encoded Silesia at 0.059 MB/s and decoded it at 1.879
+MB/s"), the same shape the charter named as the defect: "the facts here
+are wearing prose."
+
+**What shipped.** A two-column table, styled identically to the Measured
+table two sections up (same `.bench` class, same right-aligned monospace
+cells), corpus by encode/decode MB/s. The surrounding sentences stay
+prose, because they are argument, not fact: the machine caveat, the "roughly
+thirty times slower" comparison, and the two disclosed uncertainties
+(single-machine, aggregate-not-typical-file) are reasoning a table cannot
+carry. Only the four numbers that were doing a table's job moved into one.
+Rendered at 375×812 and 1440×900, no horizontal scroll needed at either
+width (local Chromium headless screenshots, not committed).
+
+**The guard moved with the claim, not around it.** `tests/claims.rs`
+previously read both README.md's and site/index.html's throughput claims
+with the same prose-scanning function, anchored on "encoded Canterbury
+at ... MB/s ... decoded it at ... MB/s" appearing in both files verbatim.
+Restructuring only the site half of that shared text would have desynced
+the two without breaking either extractor silently: README still says the
+old sentence, but the site sentence is gone, and a scanner still hunting
+for it there would read stale cached values or panic opaquely depending on
+what text happened to remain. Added `throughput_from_site`, scoped to the
+table's own `id="speed"` so it cannot collide with the Measured table's
+identical `<th scope="row">Canterbury</th>` markup, mirroring the existing
+`aggregate_from_site` html-cell reader rather than inventing a second
+parsing strategy. README's extractor is untouched: its numbers are still
+prose and stay guarded the prose way.
+
+**Not touched.** Item 3 (status.html card ranking) turned out already
+substantially addressed: PRs #601, #603, #605, #609, #612, none of them
+mine and none citing #604, landed 2026-09-18 through 09-19 on the
+milestone tracker and the ratio panel, and between them the ratio card
+now sits above the synthetic gate table with the reasoning recorded
+inline, and the milestone list carries its own "ranked, not chronological"
+comment. Coincidence of timing with the charter, not response to it;
+checked by reading each PR's own title and body rather than assuming from
+the numbering. Item 4 (a shared frame across the three pages) and the
+remaining prose-heavy sections ("What this is," "Try it") are unattempted;
+"Try it" is a recipe, which is the one place prose is the right shape for
+a command sequence. Left for the next slice.
+
 ## 2026-09-20 — Editorial: the verdict now sits above the argument
 
 Shipped a slice of issue #604 (the operator's charter, 2026-09-18): item 1,
