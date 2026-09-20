@@ -4725,3 +4725,47 @@ record.
   two untried ideas) before a gated window bump is worth re-measuring
   against `bench::baseline`'s sealed set the way S2-R9 did. `research/
   progress.jsonl` it142.
+- S2-A92 | ACCEPTED | S1-P4's own remaining scope after S2-A91: S2-R9's
+  second, still-open failure mode — an incidental `DETECTOR_ANCHOR_LEN`-byte
+  agreement (a real 8-byte recurrence, not a hash collision) firing `true`
+  with no exploitable long match behind it, measured on `access_log` — and
+  S2-A91's own closing note naming "requiring agreement past
+  `DETECTOR_ANCHOR_LEN` before reporting `true`" as one of two untried
+  fixes (the other, a longer anchor, only lowers the incidence without
+  changing the mechanism). Built that fix as
+  `lz::likely_benefits_from_larger_window_content_defined_confirmed`, a
+  third sibling alongside the fixed-stride and content-defined-only
+  detectors (same first-slice, not-yet-wired shape). It runs the identical
+  content-defined sampling S2-A91 built, then additionally requires
+  `DETECTOR_CONFIRM_LEN` (24, a 32-byte total confirmed run, chosen as a
+  starting value pending the wiring slice's own measurement, not tuned
+  against any corpus) bytes past each anchor to also agree byte-for-byte
+  before reporting `true` (`confirms_past_anchor`), the same
+  agrees-past-the-anchor test a real long-range recurrence passes almost
+  for free and a merely-common short substring usually does not.
+  Deliberately still just a bounds-checked byte comparison, not a match-
+  length measurement: `dp_round`'s job stays `dp_round`'s. A confirmation
+  window that would run past `data`'s end reports `false` for that
+  candidate rather than panicking, symmetric with the anchor step's own
+  end-of-data handling. | 3 new unit tests (370 lib tests total, up from
+  367): a real extending recurrence (same anchor and same confirmation
+  tail at both occurrences) stays `true`, the exact S2-R9 failure shape —
+  same anchor, deliberately divergent confirmation tail — is `true` on the
+  unconfirmed content-defined detector and `false` on this one (the direct
+  A/B proof S2-A91's own off-grid test used, applied to this failure mode
+  instead), and a candidate whose confirmation window runs past `data`'s
+  end returns `false` without panicking. `cargo x check`: 4 stages green.
+  `baseline_gate check`: 11 cases, no regression (nothing wired,
+  unaffected). | No bpb measurement, same reason as S2-A89/S2-A91: not yet
+  wired to any parse call site, so there is no champion to diff against —
+  `progress.jsonl` records this as `kind: "patch"` with null bpb deltas.
+  Remaining S1-P4 scope: both of S2-R9's failure modes now have a
+  candidate fix (S2-A91 for the alignment blind spot, this entry for the
+  incidental-agreement false positive); wiring
+  `likely_benefits_from_larger_window_content_defined_confirmed` into
+  `parse_optimal`'s window choice and re-measuring against
+  `bench::baseline`'s sealed set the way S2-R9 did — including whether
+  `DETECTOR_CONFIRM_LEN`'s starting value of 24 is the right one, untested
+  here — is the next slice; a large-file-mode alternative (ROADMAP M5
+  SPEED territory) remains the other untried branch, unaffected by this
+  entry either way. `research/progress.jsonl` it143.
