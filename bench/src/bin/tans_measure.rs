@@ -21,19 +21,37 @@
 //! to the champion, the actual inputs that slice's cost/benefit call
 //! needs.
 //!
-//! Every buffer is one of [`mothergod_bench`]'s own in-repo generators
-//! (`entropy_ladder`, [`markov_h8_2_trap`], [`access_log`]) at
-//! `SAMPLE_LEN` bytes and `SEED`, matching `research/JOURNAL.md` S2-A1's
-//! own convention for this style of measurement. No network fetch, no
-//! `corpus-fetch` feature gate: this binary builds under default
-//! features, like `baseline_gate`.
+//! S2-A86 answered both questions on four hand-picked buffers. This binary
+//! extends that to every [`mothergod_bench::DatasetKind`] `mothergod_bench` defines, and
+//! fixes a policy gap S2-A86 left open: it used [`access_log`]'s raw `SEED`
+//! directly even though [`mothergod_bench::DatasetKind::AccessLog`] is sealed-only
+//! (`research/corpus/POLICY.md`, "held-out seeds AND held-out dataset
+//! kinds"). Every sealed-only kind here instead runs at
+//! [`mothergod_bench::sealed_seed`] of `SEED`, so this is the "real-bitstream
+//! sealed-validation measurement" S2-A87 left as S1-P6's remaining scope,
+//! not just more of S2-A86's ad hoc sampling. Each [`Measurement`] also
+//! reports [`Measurement::tans_would_win`]: whether trial-selecting tANS as
+//! a third `compress` candidate alongside `Method::Stored`/`Method::Lz`
+//! would ever change the output on that buffer, the concrete number a
+//! wiring decision needs instead of a ratio competition it cannot win by
+//! design.
+//!
+//! Every buffer is one of [`mothergod_bench`]'s own in-repo generators, one
+//! per [`mothergod_bench::DatasetKind`] (the entropy ladder contributes two: a skewed and a
+//! near-flat order-0 histogram, bracketing the class), at `SAMPLE_LEN`
+//! bytes, matching `research/JOURNAL.md` S2-A1's own convention for this
+//! style of measurement. No network fetch, no `corpus-fetch` feature gate:
+//! this binary builds under default features, like `baseline_gate`.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --bin tans_measure`, run
 //! by hand like `finals_report`, not wired into CI.
 
 use mothergod::tans::{self, DecodeSlot};
 use mothergod_bench::baseline::bits_per_byte;
-use mothergod_bench::{access_log, entropy_ladder, markov_h8_2_trap, order0_entropy_bits};
+use mothergod_bench::{
+    access_log, base64_wrapped, entropy_ladder, gradient_image, interleaved_audio16, json_records,
+    markov_h8_2_trap, order0_entropy_bits, sealed_seed, sqlite_like_records, x86_dense_code,
+};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -69,12 +87,15 @@ struct Case {
     data: Vec<u8>,
 }
 
-/// The representative buffers this binary measures: two `entropy_ladder`
-/// points (a skewed and a near-flat order-0 histogram), the
-/// histogram-coder trap ([`markov_h8_2_trap`], uniform order-0 histogram
-/// but low order-1 conditional entropy — the shape an order-0 coder
-/// cannot exploit and a context-mixing coder can), and one structured,
-/// non-IID generator ([`access_log`]) standing in for realistic text.
+/// Every buffer this binary measures: two `entropy_ladder` points (a
+/// skewed and a near-flat order-0 histogram, bracketing
+/// [`mothergod_bench::DatasetKind::EntropyLadder`]) plus one buffer per remaining
+/// [`mothergod_bench::DatasetKind`], full coverage rather than S2-A86's hand-picked four.
+/// A sealed-only kind ([`mothergod_bench::DatasetKind::sealed_only`]) generates at
+/// [`sealed_seed`] of `SEED` instead of `SEED` directly, the seed half of
+/// "held-out seeds AND held-out dataset kinds"
+/// (`research/corpus/POLICY.md`); a train kind uses `SEED` since nothing
+/// here tunes against these buffers; there is nothing to leak.
 fn cases() -> Vec<Case> {
     vec![
         Case {
@@ -90,8 +111,32 @@ fn cases() -> Vec<Case> {
             data: markov_h8_2_trap(SAMPLE_LEN, SEED),
         },
         Case {
-            name: "access_log",
-            data: access_log(SAMPLE_LEN, SEED),
+            name: "access_log (sealed)",
+            data: access_log(SAMPLE_LEN, sealed_seed(SEED)),
+        },
+        Case {
+            name: "json_records",
+            data: json_records(SAMPLE_LEN, SEED),
+        },
+        Case {
+            name: "base64_wrapped",
+            data: base64_wrapped(SAMPLE_LEN, SEED),
+        },
+        Case {
+            name: "interleaved_audio16",
+            data: interleaved_audio16(SAMPLE_LEN, SEED),
+        },
+        Case {
+            name: "gradient_image (sealed)",
+            data: gradient_image(SAMPLE_LEN, sealed_seed(SEED)),
+        },
+        Case {
+            name: "sqlite_like_records",
+            data: sqlite_like_records(SAMPLE_LEN, SEED),
+        },
+        Case {
+            name: "x86_dense_code",
+            data: x86_dense_code(SAMPLE_LEN, SEED),
         },
     ]
 }
@@ -115,6 +160,11 @@ struct TansTables {
     encode_table: Vec<Vec<u32>>,
     /// Slot -> symbol/bits/baseline, decode's direction.
     decode_table: Vec<DecodeSlot>,
+    /// The normalized frequency table itself, [`tans::write_freq_table`]'s
+    /// input — a real decoder needs this on the wire (S2-A87), so a fair
+    /// frame-size comparison against the champion charges its serialized
+    /// bytes too, not just `encode_message`'s output.
+    freq: Vec<u32>,
 }
 
 /// Builds [`TansTables`] from a byte histogram via the four standalone
@@ -128,6 +178,7 @@ fn build_tans_tables(counts: &[u32; 256]) -> TansTables {
     TansTables {
         encode_table,
         decode_table,
+        freq,
     }
 }
 
@@ -165,7 +216,8 @@ struct Measurement {
     /// [`order0_entropy_bits`] of the buffer, the theoretical floor an
     /// order-0 coder is measured against.
     entropy_floor_bpb: f64,
-    /// tANS's achieved bits/byte.
+    /// tANS's achieved bits/byte, `encode_message`'s output plus the
+    /// serialized freq table a real decoder would need on the wire.
     tans_bpb: f64,
     /// The champion's (`mothergod::compress`) achieved bits/byte.
     champion_bpb: f64,
@@ -177,6 +229,13 @@ struct Measurement {
     champion_encode_mb_s: f64,
     /// `mothergod::decompress` throughput.
     champion_decode_mb_s: f64,
+    /// Whether tANS's frame would be smaller than `mothergod::compress`'s
+    /// actual output on this buffer — the concrete question a `Method`-
+    /// wiring decision needs, not a bits/byte comparison in the abstract.
+    /// `champion_bpb` already reflects `compress`'s own best-of
+    /// [`mothergod::Method::Stored`]/[`mothergod::Method::Lz`] choice, so
+    /// this is a fair three-way comparison, not tANS vs `Lz` alone.
+    tans_would_win: bool,
 }
 
 /// Runs one [`Case`] through both coders, asserting both round trips are
@@ -201,6 +260,11 @@ fn measure(case: &Case) -> Measurement {
         "{}: tANS round trip must be exact (decode(encode(x)) == x)",
         case.name
     );
+    // A real frame ships the freq table too (S2-A87); charge its bytes so
+    // `tans_would_win` compares the size a decoder would actually receive,
+    // not just `encode_message`'s bare output.
+    let tans_freq_table_bytes = tans::write_freq_table(&tables.freq, TABLE_LOG2);
+    let tans_frame_len = tans_bytes.len() + tans_freq_table_bytes.len();
 
     let champion_bytes = mothergod::compress(data);
     let champion_decoded = mothergod::decompress(&champion_bytes)
@@ -236,18 +300,19 @@ fn measure(case: &Case) -> Measurement {
         name: case.name,
         len: data.len(),
         entropy_floor_bpb: order0_entropy_bits(data),
-        tans_bpb: bits_per_byte(tans_bytes.len(), data.len()),
+        tans_bpb: bits_per_byte(tans_frame_len, data.len()),
         champion_bpb: bits_per_byte(champion_bytes.len(), data.len()),
         tans_encode_mb_s: mb_per_s(data.len(), tans_encode_time),
         tans_decode_mb_s: mb_per_s(data.len(), tans_decode_time),
         champion_encode_mb_s: mb_per_s(data.len(), champion_encode_time),
         champion_decode_mb_s: mb_per_s(data.len(), champion_decode_time),
+        tans_would_win: tans_frame_len < champion_bytes.len(),
     }
 }
 
 /// Prints one [`Measurement`] as a labeled block: bits/byte for tANS vs
-/// the entropy floor vs the champion, then encode/decode MB/s for both
-/// coders.
+/// the entropy floor vs the champion, the win verdict, then encode/decode
+/// MB/s for both coders.
 fn report(m: &Measurement) {
     println!("=== {} ({} bytes) ===", m.name, m.len);
     println!(
@@ -257,6 +322,7 @@ fn report(m: &Measurement) {
         m.tans_bpb - m.entropy_floor_bpb,
         m.champion_bpb
     );
+    println!("  tANS-as-third-candidate would win: {}", m.tans_would_win);
     println!(
         "  encode MB/s: tANS {:.2}  |  champion {:.2}",
         m.tans_encode_mb_s, m.champion_encode_mb_s
@@ -270,17 +336,24 @@ fn report(m: &Measurement) {
 
 fn main() {
     println!(
-        "tANS primitive measurement (research/JOURNAL.md S2-A86, issue #447); \
+        "tANS primitive measurement (research/JOURNAL.md S2-A86/S2-A88, issue #447); \
          sample_len={SAMPLE_LEN}, seed={SEED:#x}, table_log2={TABLE_LOG2}, reps={REPS}\n"
     );
-    for case in cases() {
-        report(&measure(&case));
+    let measurements: Vec<Measurement> = cases().iter().map(measure).collect();
+    for m in &measurements {
+        report(m);
     }
+    let wins = measurements.iter().filter(|m| m.tans_would_win).count();
+    println!(
+        "tANS-as-third-candidate would win on {wins}/{} buffers.",
+        measurements.len()
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mothergod_bench::DatasetKind;
 
     #[test]
     fn byte_histogram_counts_every_occurrence() {
@@ -294,6 +367,15 @@ mod tests {
     #[test]
     fn byte_histogram_of_empty_data_is_all_zero() {
         assert_eq!(byte_histogram(&[]), [0u32; 256]);
+    }
+
+    #[test]
+    fn cases_cover_every_dataset_kind() {
+        // The entropy ladder contributes two cases for one `DatasetKind`;
+        // every other kind contributes exactly one. A `DatasetKind` added
+        // to `mothergod_bench` and never added here should fail this,
+        // rather than silently going unmeasured.
+        assert_eq!(cases().len(), DatasetKind::ALL.len() + 1);
     }
 
     #[test]
@@ -320,12 +402,17 @@ mod tests {
     fn measure_reports_a_zero_gap_when_tans_hits_the_entropy_floor() {
         // A single-symbol buffer has an order-0 entropy floor of exactly
         // 0 bits, and normalize_frequencies gives a single symbol the
-        // whole table, so tANS should encode it in essentially no space
-        // relative to the buffer's own length (bpb near 0), matching the
-        // floor.
+        // whole table, so encode_message's own output is essentially free.
+        // write_freq_table still charges one varint per byte-alphabet
+        // slot (256, mostly zero for a single-symbol buffer) regardless of
+        // payload size, a fixed ~258-byte cost that only amortizes to
+        // near-zero bits/byte on a buffer large enough to dwarf it -- 1000
+        // bytes was too small for that once tans_bpb started charging the
+        // freq table (this test's own regression, single-symbol buffer at
+        // 1000 bytes landed at 2.08 bpb, almost entirely table overhead).
         let case = Case {
             name: "single-symbol",
-            data: vec![b'x'; 1000],
+            data: vec![b'x'; 50_000],
         };
         let m = measure(&case);
         assert!((m.entropy_floor_bpb - 0.0).abs() < 1e-9);
@@ -334,5 +421,33 @@ mod tests {
             "single-symbol buffer should compress far below 1 bit/byte, got {}",
             m.tans_bpb
         );
+    }
+
+    #[test]
+    fn tans_does_not_win_over_the_champion_on_a_run_of_one_byte() {
+        // A 1000-byte run of one symbol is the case Method::Lz's own
+        // match-based redundancy elimination crushes to a handful of
+        // bytes; an order-0 tANS frame still pays its table-plus-header
+        // overhead on top of an already-near-zero payload, so it should
+        // not come out ahead here.
+        let case = Case {
+            name: "single-symbol",
+            data: vec![b'x'; 1000],
+        };
+        assert!(!measure(&case).tans_would_win);
+    }
+
+    #[test]
+    fn tans_wins_over_the_champion_on_skewed_iid_noise() {
+        // research/JOURNAL.md S2-A86: tANS wins only on pure iid noise,
+        // where the champion's context-mixing machinery has no context to
+        // mix and pays for the attempt. This pins that finding as a
+        // regression guard on the actual win/lose computation, not just a
+        // printed number a human has to notice drifted.
+        let case = Case {
+            name: "entropy_ladder(h=2)",
+            data: entropy_ladder(2, SAMPLE_LEN, SEED),
+        };
+        assert!(measure(&case).tans_would_win);
     }
 }

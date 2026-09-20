@@ -3116,6 +3116,64 @@ record.
   S1-P6 scope unchanged: `Method` wiring, the `FORMAT_VERSION` bump, and
   a real-bitstream sealed-validation measurement, still open (issue
   #447).
+- S2-A88 | ACCEPTED | S1-P6's remaining tANS fast path (issue #447, after
+  S2-A87's `write_freq_table`/`read_freq_table`): the "real-bitstream
+  sealed-validation measurement" S2-A87 left as remaining scope, still
+  without wiring anything to a `Method`. S2-A86 measured 4 hand-picked
+  buffers and used `access_log`'s raw generator seed directly even though
+  `DatasetKind::AccessLog` is sealed-only (`research/corpus/POLICY.md`,
+  "held-out seeds AND held-out dataset kinds") — a policy gap, not just
+  thin coverage. `bench/src/bin/tans_measure.rs` now covers all 9
+  `DatasetKind`s (the entropy ladder at two points bracketing the class,
+  one buffer per remaining kind), every sealed-only kind (`AccessLog`,
+  `GradientImage`) generated at `sealed_seed` of the shared seed instead
+  of the seed directly, and charges `write_freq_table`'s serialized bytes
+  into the tANS frame size, not just `encode_message`'s bare output — a
+  real decoder needs that table on the wire (S2-A87), so leaving it
+  uncharged would understate every case's real cost. Each measurement now
+  also reports `tans_would_win`: whether `tans_frame_len <
+  champion_bytes.len()`, the literal question a `Method`-wiring decision
+  needs, not a bits/byte comparison in the abstract. | Real numbers
+  (`cargo run -p mothergod-bench --release --bin tans_measure`, 200,000-byte
+  samples, `table_log2=10`): tANS-as-third-candidate would win on exactly
+  **1 of 10** buffers — `entropy_ladder(h=2)` (2.0162 vs champion 2.3432
+  bpb, tANS's own frame-size accounting now including its ~258-byte fixed
+  freq-table overhead, one varint per byte-alphabet slot regardless of how
+  few symbols actually occur). Every other buffer loses, including two
+  kinds S2-A86 never measured (`sqlite_like_records`: 6.1234 vs 3.4004;
+  `x86_dense_code`: 5.7047 vs 2.5534) and the two sealed-only kinds under
+  their policy-correct seed (`access_log`: 4.8003 vs 0.7960; `gradient_image`:
+  7.9075 vs 5.7550). A run of one repeated byte (a case wiring would also
+  need to survive) does not flip either: the champion's match-based
+  redundancy elimination crushes it far below tANS's fixed table overhead.
+  | 2 new unit tests pinning the win/lose computation itself as a
+  regression guard (`tans_wins_over_the_champion_on_skewed_iid_noise`,
+  `tans_does_not_win_over_the_champion_on_a_run_of_one_byte`), 1 new test
+  confirming every `DatasetKind` is represented in `cases()`, the existing
+  entropy-floor test's buffer size raised (1,000 → 50,000 bytes) since the
+  freq-table charge added above meant 1,000 bytes no longer amortized it
+  to the sub-0.5-bpb bar that test asserts; `cargo x check`: 4 stages
+  green; `baseline_gate check`: 11 cases, no regression (nothing wired,
+  unaffected). | Verdict on the wiring question S2-A86 left open: **park
+  it.** A 1/10 win rate, on a class (skewed-but-not-flat iid byte
+  distributions) narrow enough that `compress`'s existing `Stored`/`Lz`
+  choice already handles it acceptably (2.3432 bpb, not 8), does not
+  justify a `FORMAT_VERSION` bump, an ADR, and a permanent new public
+  `Method` variant (SIMPLICITY: public API surface grows for a case that
+  loses on 9 of 10 realistic buffers). The "zstd-class -1 mode" the LEAD
+  entry below names is a different, larger design than what S2-A81
+  through S2-A87 built: zstd's own fast levels keep LZ matching and swap
+  only the entropy stage, where every slice here built a whole-buffer
+  order-0 coder with no match stage at all — S2-A86's `access_log` result
+  (4.79 vs 0.80 bpb, a 6× ratio loss) is LZ's matches disappearing
+  entirely, not an entropy-coder gap tANS could close. A genuine fast tier
+  needs tANS threaded into the LZ token stream's literal coding, not a
+  parallel whole-frame `Method`; that is a materially different, bigger
+  integration this issue's remaining checklist item ("Method wiring")
+  undersold. Recorded here so the next session does not re-measure the
+  same question: standalone tANS-as-automatic-candidate is closed,
+  negative; the LZ-preserving fast-literal-stage direction is untried and
+  is S1-P6's actual remaining scope.
 - S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
@@ -3152,11 +3210,24 @@ record.
   every buffer tested (`bench/src/bin/tans_measure.rs`), 23×–342× faster
   encode and 21×–305× faster decode than the champion
   (`mothergod::compress`/`decompress`) on the same buffers, losing on
-  ratio wherever order-1+ structure exists (expected, not a defect) —
-  numbers that support continuing toward wiring, as an additional fast
-  tier, not a replacement. Remaining scope: `Method` wiring and the
-  `FORMAT_VERSION` bump and real-bitstream measurement that wiring
-  needs.
+  ratio wherever order-1+ structure exists (expected, not a defect).
+  S2-A88 then ran the real-bitstream sealed-validation measurement this
+  entry's own "remaining scope" line used to name: full 9-`DatasetKind`
+  coverage, policy-correct sealed seeding, freq-table bytes charged into
+  the frame size. Verdict: **park whole-buffer tANS-as-automatic-`Method`-
+  candidate**, closed negative — it would win on only 1 of 10 realistic
+  buffers, a class `compress`'s existing `Stored`/`Lz` choice already
+  handles acceptably, not worth a `FORMAT_VERSION` bump and a permanent
+  public API addition. This lead's own "zstd-class -1 mode" framing named
+  a different design than what got built: zstd's fast levels keep LZ
+  matching and swap only the entropy stage, where S2-A81 through S2-A87
+  built a whole-buffer order-0 coder with no match stage, which is why
+  S2-A86's structured-data losses were so large (LZ's matches vanishing
+  entirely, not an entropy-coder gap). Remaining S1-P6 scope: threading
+  tANS into the LZ token stream's literal coding as a fast entropy-stage
+  swap, untried and not a small slice — the bit-decomposed-coding and
+  incremental-cumulative directions above are both closed, so this is the
+  lead's only open branch.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
