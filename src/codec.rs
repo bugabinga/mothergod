@@ -647,6 +647,149 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
     Ok(())
 }
 
+/// Where a decoded token's literal byte and match/rep copy land: real
+/// output for [`decode`]'s [`VecSink`], undone-and-written-immediately
+/// output for [`decode_undoable_streaming`]'s `StreamingSink`. The two
+/// walks must decode the same flag/length/offset/slot symbols, in the same
+/// order, off the same token stream, or one silently drifts from what the
+/// other produces; routing both through [`decode_tokens`] makes that a
+/// single piece of code instead of two loops kept in sync by hand, mirroring
+/// [`TokenSink`]/[`walk_tokens`] on the encode side.
+trait DecodeSink {
+    /// Widens with every accepted output byte, checked against
+    /// `declared_len` before decoding one more.
+    type Err: From<Error>;
+
+    /// Bytes produced so far, for [`ensure_room`]'s bound.
+    fn len(&self) -> usize;
+
+    /// Decodes and applies one literal byte at `context`.
+    fn literal(
+        &mut self,
+        models: &mut Models,
+        ac: &mut Decoder,
+        context: Context,
+    ) -> Result<u8, Self::Err>;
+
+    /// Applies an already-decoded `len`-byte copy from `distance` bytes
+    /// back, returning the context after it.
+    fn copy(
+        &mut self,
+        len: u32,
+        distance: NonZeroU32,
+        context: Context,
+    ) -> Result<Context, Self::Err>;
+}
+
+/// The shared skeleton behind [`decode`] and [`decode_undoable_streaming`]:
+/// decodes `token_count` tokens off `ac` in coding order, routing every
+/// literal byte and copy through `sink`, and advancing the literal-model
+/// context and `reps` exactly as [`decode`] and [`decode_undoable_streaming`]
+/// both require. See [`DecodeSink`]'s docs for why this exists.
+fn decode_tokens<S: DecodeSink>(
+    token_count: u32,
+    declared_len: usize,
+    models: &mut Models,
+    ac: &mut Decoder,
+    reps: &mut RepCache,
+    sink: &mut S,
+) -> Result<(), S::Err> {
+    let mut context = Context::default();
+    for _ in 0..token_count {
+        let flag_table = usize::from(context.after_copy);
+        match models.flag[flag_table].decode(ac) {
+            FLAG_LITERAL => {
+                ensure_room(sink.len(), 1, declared_len)?;
+                let byte = sink.literal(models, ac, context)?;
+                context = context.after_literal(byte);
+            }
+            FLAG_MATCH => {
+                let len = decode_bucketed(&mut models.length, ac);
+                let distance = decode_bucketed(&mut models.offset, ac);
+                // decode_bucketed always ORs in `1 << bits`, which is >= 1
+                // regardless of the residual bits: never zero.
+                let distance =
+                    NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
+                ensure_within_window(distance)?;
+                ensure_room(sink.len(), len as usize, declared_len)?;
+                context = sink.copy(len, distance, context)?;
+                reps.push_front(distance);
+            }
+            _ => {
+                // models.flag's alphabet is FLAG_ALPHABET (3), so this arm
+                // is FLAG_REP (2), never a fourth flag value.
+                // RepSlot::from_index documents why models.slot's decode
+                // is safe to feed it directly.
+                let slot = RepSlot::from_index(models.slot.decode(ac));
+                let len = decode_bucketed(&mut models.length, ac);
+                let distance = reps.get(slot);
+                ensure_room(sink.len(), len as usize, declared_len)?;
+                context = sink.copy(len, distance, context)?;
+                reps.promote(slot);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`DecodeSink`] for [`decode`]'s whole-buffer path: a literal byte is
+/// pushed onto `output`, and a copy replays [`copy_checked`] over what
+/// `output` already holds. `column` mirrors [`encode_tokens`]'s
+/// `ColumnCoding`, but owned here rather than borrowed (there is no
+/// per-candidate trial to share it across): `Some` exactly when this
+/// frame's candidate is [`Candidate::Transpose`] and its declared version
+/// selects the column-keyed literal expert (`COLUMN_EXPERT_MIN_VERSION`).
+struct VecSink<'a> {
+    output: &'a mut Vec<u8>,
+    version: u8,
+    declared_len: usize,
+    column: Option<(NonZeroUsize, &'a mut ColumnExpertState)>,
+}
+
+impl DecodeSink for VecSink<'_> {
+    type Err = Error;
+
+    fn len(&self) -> usize {
+        self.output.len()
+    }
+
+    fn literal(
+        &mut self,
+        models: &mut Models,
+        ac: &mut Decoder,
+        context: Context,
+    ) -> Result<u8, Error> {
+        let byte = match &mut self.column {
+            Some((columns, state)) => {
+                let bank = column::bank_of(
+                    context.position,
+                    *columns,
+                    self.declared_len,
+                    MAX_COLUMN_BANKS,
+                );
+                models.literal.decode_column(ac, context, bank, state)
+            }
+            None if self.version >= LITERAL_SSE_MIN_VERSION => {
+                models.literal.decode_sse(ac, context)
+            }
+            None => models.literal.decode(ac, context),
+        };
+        self.output.push(byte);
+        Ok(byte)
+    }
+
+    fn copy(
+        &mut self,
+        len: u32,
+        distance: NonZeroU32,
+        mut context: Context,
+    ) -> Result<Context, Error> {
+        copy_checked(self.output, len, distance)?;
+        context = context.after_copy(&self.output[self.output.len() - len as usize..]);
+        Ok(context)
+    }
+}
+
 /// Decodes a payload produced by [`encode`] back into the original bytes.
 ///
 /// Bounds decode work and allocation to the frame's declared output size,
@@ -722,13 +865,12 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
-    let mut context = Context::default();
     let mut reps = RepCache::initial();
     // Some exactly when this frame's candidate is Candidate::Transpose and
     // its declared version codes the column-expert path (COLUMN_EXPERT_MIN_VERSION):
     // mirrors encode_tokens's ColumnCoding, but `state` is owned here
     // (there is no per-candidate trial to share it across).
-    let mut column: Option<(NonZeroUsize, ColumnExpertState)> = match candidate {
+    let mut column_state: Option<(NonZeroUsize, ColumnExpertState)> = match candidate {
         Candidate::Transpose(columns) if version >= COLUMN_EXPERT_MIN_VERSION => Some((
             columns,
             ColumnExpertState::try_new(MAX_COLUMN_BANKS).map_err(|_| Error::OutOfMemory)?,
@@ -747,57 +889,22 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
         .try_reserve_exact(declared_len)
         .map_err(|_| Error::OutOfMemory)?;
 
-    for _ in 0..token_count {
-        let flag_table = usize::from(context.after_copy);
-        match models.flag[flag_table].decode(&mut ac) {
-            FLAG_LITERAL => {
-                ensure_room(output.len(), 1, declared_len)?;
-                let byte = match &mut column {
-                    Some((columns, state)) => {
-                        let bank = column::bank_of(
-                            context.position,
-                            *columns,
-                            declared_len,
-                            MAX_COLUMN_BANKS,
-                        );
-                        models.literal.decode_column(&mut ac, context, bank, state)
-                    }
-                    None if version >= LITERAL_SSE_MIN_VERSION => {
-                        models.literal.decode_sse(&mut ac, context)
-                    }
-                    None => models.literal.decode(&mut ac, context),
-                };
-                output.push(byte);
-                context = context.after_literal(byte);
-            }
-            FLAG_MATCH => {
-                let len = decode_bucketed(&mut models.length, &mut ac);
-                let distance = decode_bucketed(&mut models.offset, &mut ac);
-                // decode_bucketed always ORs in `1 << bits`, which is >= 1
-                // regardless of the residual bits: never zero.
-                let distance =
-                    NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
-                ensure_within_window(distance)?;
-                ensure_room(output.len(), len as usize, declared_len)?;
-                copy_checked(&mut output, len, distance)?;
-                reps.push_front(distance);
-                context = context.after_copy(&output[output.len() - len as usize..]);
-            }
-            _ => {
-                // models.flag's alphabet is FLAG_ALPHABET (3), so this arm
-                // is FLAG_REP (2), never a fourth flag value.
-                // RepSlot::from_index documents why models.slot's decode
-                // is safe to feed it directly.
-                let slot = RepSlot::from_index(models.slot.decode(&mut ac));
-                let len = decode_bucketed(&mut models.length, &mut ac);
-                let distance = reps.get(slot);
-                ensure_room(output.len(), len as usize, declared_len)?;
-                copy_checked(&mut output, len, distance)?;
-                reps.promote(slot);
-                context = context.after_copy(&output[output.len() - len as usize..]);
-            }
-        }
-    }
+    let mut sink = VecSink {
+        output: &mut output,
+        version,
+        declared_len,
+        column: column_state
+            .as_mut()
+            .map(|(columns, state)| (*columns, state)),
+    };
+    decode_tokens(
+        token_count,
+        declared_len,
+        &mut models,
+        &mut ac,
+        &mut reps,
+        &mut sink,
+    )?;
 
     if output.len() != declared_len {
         return Err(Error::Corrupt);
@@ -920,6 +1027,52 @@ impl StreamUndo {
     }
 }
 
+/// [`DecodeSink`] for [`decode_undoable_streaming`]'s path: a literal byte
+/// (and a copy's replayed bytes) land in `window`, then are undone through
+/// `undo` and written to `writer` immediately. Never carries column-expert
+/// state: [`decode_to_writer`] never builds this sink for
+/// [`Candidate::Transpose`], which falls back to [`decode`]'s whole-buffer
+/// path instead (see that function's docs).
+struct StreamingSink<'a, W: std::io::Write> {
+    window: &'a mut lz::Window,
+    undo: &'a mut StreamUndo,
+    writer: &'a mut W,
+    version: u8,
+}
+
+impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
+    type Err = crate::WriteError;
+
+    fn len(&self) -> usize {
+        self.window.written_len()
+    }
+
+    fn literal(
+        &mut self,
+        models: &mut Models,
+        ac: &mut Decoder,
+        context: Context,
+    ) -> Result<u8, crate::WriteError> {
+        let byte = if self.version >= LITERAL_SSE_MIN_VERSION {
+            models.literal.decode_sse(ac, context)
+        } else {
+            models.literal.decode(ac, context)
+        };
+        self.window.push(byte);
+        self.undo.apply(byte, self.writer)?;
+        Ok(byte)
+    }
+
+    fn copy(
+        &mut self,
+        len: u32,
+        distance: NonZeroU32,
+        context: Context,
+    ) -> Result<Context, crate::WriteError> {
+        copy_streamed(self.window, self.undo, self.writer, len, distance, context)
+    }
+}
+
 /// [`decode_to_writer`]'s streaming path for candidates whose `undo_filter`
 /// step can run one byte at a time ([`StreamUndo`]): the same token loop as
 /// [`decode`], replaying matches and reps through a fixed-capacity
@@ -945,48 +1098,23 @@ fn decode_undoable_streaming<W: std::io::Write>(
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
-    let mut context = Context::default();
     let mut reps = RepCache::initial();
     let mut window = lz::Window::try_new().map_err(|_| Error::OutOfMemory)?;
 
-    for _ in 0..token_count {
-        let flag_table = usize::from(context.after_copy);
-        match models.flag[flag_table].decode(&mut ac) {
-            FLAG_LITERAL => {
-                ensure_room(window.written_len(), 1, declared_len)?;
-                let byte = if version >= LITERAL_SSE_MIN_VERSION {
-                    models.literal.decode_sse(&mut ac, context)
-                } else {
-                    models.literal.decode(&mut ac, context)
-                };
-                window.push(byte);
-                undo.apply(byte, writer)?;
-                context = context.after_literal(byte);
-            }
-            FLAG_MATCH => {
-                let len = decode_bucketed(&mut models.length, &mut ac);
-                let distance = decode_bucketed(&mut models.offset, &mut ac);
-                // decode_bucketed always ORs in `1 << bits`, which is >= 1
-                // regardless of the residual bits: never zero.
-                let distance =
-                    NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
-                ensure_within_window(distance)?;
-                ensure_room(window.written_len(), len as usize, declared_len)?;
-                context = copy_streamed(&mut window, undo, writer, len, distance, context)?;
-                reps.push_front(distance);
-            }
-            _ => {
-                // models.flag's alphabet is FLAG_ALPHABET (3), so this arm
-                // is FLAG_REP (2), never a fourth flag value.
-                let slot = RepSlot::from_index(models.slot.decode(&mut ac));
-                let len = decode_bucketed(&mut models.length, &mut ac);
-                let distance = reps.get(slot);
-                ensure_room(window.written_len(), len as usize, declared_len)?;
-                context = copy_streamed(&mut window, undo, writer, len, distance, context)?;
-                reps.promote(slot);
-            }
-        }
-    }
+    let mut sink = StreamingSink {
+        window: &mut window,
+        undo: &mut *undo,
+        writer: &mut *writer,
+        version,
+    };
+    decode_tokens(
+        token_count,
+        declared_len,
+        &mut models,
+        &mut ac,
+        &mut reps,
+        &mut sink,
+    )?;
 
     undo.finish(writer)?;
 
