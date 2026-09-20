@@ -1696,7 +1696,9 @@ fn is_content_defined_anchor(data: &[u8], i: usize) -> bool {
 /// bound, e.g. `access_log`): content-defined selection changes *where*
 /// anchors fall, not how many, so that failure mode is untested by this
 /// function and remains open. This is a detector, not a parse change;
-/// nothing calls it yet.
+/// nothing calls it yet. See
+/// [`likely_benefits_from_larger_window_content_defined_confirmed`] for
+/// that remaining failure mode.
 ///
 /// Returns `false` immediately when `data` cannot possibly contain a gap
 /// wider than `base_window` (`data.len() <= base_window`), before
@@ -1716,6 +1718,88 @@ pub fn likely_benefits_from_larger_window_content_defined(data: &[u8], base_wind
         let anchor = &data[i..i + DETECTOR_ANCHOR_LEN];
         if let Some(&prev) = last_seen.get(anchor)
             && i - prev > base_window
+        {
+            return true;
+        }
+        last_seen.insert(anchor, i);
+        i += 1;
+    }
+    false
+}
+
+/// Extra bytes, beyond [`DETECTOR_ANCHOR_LEN`], that two candidate
+/// occurrences of the same anchor must also agree on before
+/// [`likely_benefits_from_larger_window_content_defined_confirmed`] reports
+/// `true`. Answers `research/JOURNAL.md` S2-R9's second, independent
+/// finding: an [`DETECTOR_ANCHOR_LEN`]-byte agreement alone recurs often
+/// enough on real structured text (`access_log`'s repeated request lines
+/// and timestamp prefixes) to fire with no long match behind it — S2-R9
+/// measured this exact false positive on `access_log` at 4,000,000 bytes.
+/// That is not a hash collision (the anchor bytes really do recur); it is a
+/// short, common substring that is not itself worth reaching a larger
+/// window for. Requiring more bytes to agree past the anchor is a direct,
+/// cheap test of exactly that: whether the recurrence keeps going into
+/// something long enough to matter, without computing the match's actual
+/// length (still `dp_round`'s job, not this pre-pass's). 24, giving a
+/// 32-byte total confirmed run, is a starting value pending the wiring
+/// slice's own measurement against `bench::baseline`; it is not tuned
+/// against any corpus.
+const DETECTOR_CONFIRM_LEN: usize = 24;
+
+/// True when the [`DETECTOR_CONFIRM_LEN`] bytes immediately following each
+/// of two equal [`DETECTOR_ANCHOR_LEN`]-byte anchors (already known equal,
+/// at `prev` and `i`) also agree byte-for-byte. `false`, not a panic, when
+/// either confirmation window would run past `data`'s end: there is
+/// nothing there to compare, and a candidate this close to the end of
+/// `data` cannot be confirmed one way or the other, so it is treated the
+/// same as a failed confirmation.
+fn confirms_past_anchor(data: &[u8], prev: usize, i: usize) -> bool {
+    let prev_start = prev + DETECTOR_ANCHOR_LEN;
+    let i_start = i + DETECTOR_ANCHOR_LEN;
+    let Some(prev_end) = prev_start.checked_add(DETECTOR_CONFIRM_LEN) else {
+        return false;
+    };
+    let Some(i_end) = i_start.checked_add(DETECTOR_CONFIRM_LEN) else {
+        return false;
+    };
+    if prev_end > data.len() || i_end > data.len() {
+        return false;
+    }
+    data[prev_start..prev_end] == data[i_start..i_end]
+}
+
+/// [`likely_benefits_from_larger_window_content_defined`], additionally
+/// requiring a run of bytes past the anchor to also agree
+/// (`confirms_past_anchor`, `DETECTOR_CONFIRM_LEN` bytes) before reporting
+/// `true`. Closes S2-R9's second failure mode (documented on
+/// `DETECTOR_CONFIRM_LEN` above) on top of its own fix for S2-R9's first
+/// (the alignment blind spot, documented on
+/// [`likely_benefits_from_larger_window_content_defined`]). Not yet wired
+/// to any parse call site; see that function's own doc for why measuring
+/// the wired result is a separate, later slice.
+///
+/// Returns `false` immediately when `data` cannot possibly contain a gap
+/// wider than `base_window` (`data.len() <= base_window`), before
+/// sampling anything.
+#[must_use]
+pub fn likely_benefits_from_larger_window_content_defined_confirmed(
+    data: &[u8],
+    base_window: usize,
+) -> bool {
+    if data.len() <= base_window {
+        return false;
+    }
+    let mut last_seen: HashMap<&[u8], usize> = HashMap::new();
+    let mut i = 0;
+    while i + DETECTOR_ANCHOR_LEN <= data.len() {
+        if !is_content_defined_anchor(data, i) {
+            i += 1;
+            continue;
+        }
+        let anchor = &data[i..i + DETECTOR_ANCHOR_LEN];
+        if let Some(&prev) = last_seen.get(anchor)
+            && i - prev > base_window
+            && confirms_past_anchor(data, prev, i)
         {
             return true;
         }
@@ -2677,6 +2761,90 @@ mod tests {
             likely_benefits_from_larger_window_content_defined(&data, base_window),
             "content-defined detector must find it"
         );
+    }
+
+    /// Same shape as [`planted_repeat_content_defined`], but plants
+    /// [`DETECTOR_ANCHOR_LEN`] + [`DETECTOR_CONFIRM_LEN`] matching bytes
+    /// (`anchor` then `tail`) at both occurrences, giving
+    /// [`likely_benefits_from_larger_window_content_defined_confirmed`]'s
+    /// extra confirmation step a real run to agree on.
+    fn planted_repeat_content_defined_confirmed(
+        anchor: [u8; DETECTOR_ANCHOR_LEN],
+        tail: [u8; DETECTOR_CONFIRM_LEN],
+        far_offset: usize,
+    ) -> Vec<u8> {
+        let filler = find_non_anchor_filler_byte();
+        let run_len = DETECTOR_ANCHOR_LEN + DETECTOR_CONFIRM_LEN;
+        let mut data = vec![filler; far_offset + run_len];
+        data[..DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
+        data[DETECTOR_ANCHOR_LEN..run_len].copy_from_slice(&tail);
+        data[far_offset..far_offset + DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
+        data[far_offset + DETECTOR_ANCHOR_LEN..far_offset + run_len].copy_from_slice(&tail);
+        data
+    }
+
+    #[test]
+    fn confirmed_detector_is_true_when_the_repeat_extends_past_the_anchor() {
+        // A real long-range recurrence: both occurrences agree on the
+        // anchor AND the confirmation run past it, so requiring that
+        // agreement must not cost the true positive the unconfirmed
+        // detector already finds.
+        let anchor = find_content_defined_anchor_value();
+        let tail = [0xAAu8; DETECTOR_CONFIRM_LEN];
+        let far_offset = 5 * DETECTOR_STRIDE + 7;
+        let base_window = far_offset - 1;
+        let data = planted_repeat_content_defined_confirmed(anchor, tail, far_offset);
+        assert!(likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window));
+    }
+
+    #[test]
+    fn confirmed_detector_is_false_on_an_anchor_match_that_does_not_extend() {
+        // The exact failure mode research/JOURNAL.md S2-R9's second finding
+        // named: the anchor recurs (a real 8-byte match, not a hash
+        // collision) but the bytes past it differ, so there is no long
+        // match behind it. S2-R9 measured this firing `true` on
+        // `access_log`; the unconfirmed detector cannot tell this case
+        // apart from a genuine long-range repeat, and must still say
+        // `true` here, which is exactly the gap this test isolates before
+        // showing the confirmed detector closes it.
+        let anchor = find_content_defined_anchor_value();
+        let far_offset = 5 * DETECTOR_STRIDE + 7;
+        let base_window = far_offset - 1;
+        let mut data = planted_repeat_content_defined_confirmed(
+            anchor,
+            [0xAAu8; DETECTOR_CONFIRM_LEN],
+            far_offset,
+        );
+        // Diverge only the far occurrence's confirmation run so the anchor
+        // itself still matches at both positions.
+        let tail_start = far_offset + DETECTOR_ANCHOR_LEN;
+        data[tail_start..tail_start + DETECTOR_CONFIRM_LEN].fill(0xBBu8);
+
+        assert!(
+            likely_benefits_from_larger_window_content_defined(&data, base_window),
+            "unconfirmed detector cannot distinguish this from a real long match"
+        );
+        assert!(
+            !likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window),
+            "confirmed detector must reject an anchor match that does not extend"
+        );
+    }
+
+    #[test]
+    fn confirmed_detector_is_false_when_confirmation_would_run_past_data_end() {
+        // A candidate whose confirmation window would read past data's end
+        // cannot be confirmed either way; it must be treated as a miss,
+        // not panic on an out-of-bounds slice.
+        let anchor = find_content_defined_anchor_value();
+        let far_offset = 5 * DETECTOR_STRIDE + 7;
+        let base_window = far_offset - 1;
+        // planted_repeat_content_defined only lays down the anchor itself
+        // at far_offset, so data ends right after it: the far occurrence's
+        // confirmation window necessarily runs past the end.
+        let data = planted_repeat_content_defined(anchor, far_offset);
+        assert_eq!(data.len(), far_offset + DETECTOR_ANCHOR_LEN);
+
+        assert!(!likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window));
     }
 }
 
