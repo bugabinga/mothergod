@@ -5166,7 +5166,7 @@ record.
   swept range (edge 0: +0.005874, edge 4: +0.005886 — briefly *worse*,
   a DP-reachability side effect of removing an option rather than a
   mispriced one — edge 8/16: +0.005878, edge 24: +0.005800, recovering
-  at most ~1.3% of S2-R12's ~0.0016 b/B residual at the largest edge
+  at most ~4.6% of S2-R12's ~0.0016 b/B residual at the largest edge
   measured), while `access_log`'s already-accepted matched-window win
   eroded well before that: unchanged at edge 0/4 (-0.001108), then
   -0.001020 at edge 8 and -0.000910 at edge 16, roughly half its win
