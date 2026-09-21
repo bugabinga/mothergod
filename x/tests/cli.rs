@@ -237,6 +237,23 @@ fn test_doc_failure_names_the_rerun_command() {
 }
 
 #[test]
+fn test_doc_reports_a_stale_api_surface_ledger() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write("docs/api-surface.txt", "99\n");
+
+    let output = repository.x(&["doc"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("public API surface is 1 items"), "{stderr}");
+    assert!(stderr.contains("docs/api-surface.txt says 99"), "{stderr}");
+    assert!(
+        stderr.contains("next: printf '1\\n' > docs/api-surface.txt"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn check_stops_at_the_first_failing_stage_before_running_later_ones() {
     let repository = Repository::new();
     repository.write("a.json", "{\"a\":1}");
@@ -277,8 +294,11 @@ fn write_passing_fixture(repository: &Repository) {
     );
     repository.write(
         "src/lib.rs",
-        "//! ```\n//! assert_eq!(1 + 1, 2);\n//! ```\n\n#[test]\nfn core_passes() {}\n",
+        "//! ```\n//! assert_eq!(1 + 1, 2);\n//! ```\n\n/// A no-op.\npub fn noop() {}\n\n#[test]\nfn core_passes() {}\n",
     );
+    // rustdoc's all.html lists exactly this one item (`noop`); the doc gate
+    // checks it against this file (#651).
+    repository.write("docs/api-surface.txt", "1\n");
     repository.write(
         "x/Cargo.toml",
         "[package]\nname = \"fixture-x\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[workspace]\n\n[lib]\npath = \"src/lib.rs\"\n",

@@ -337,6 +337,16 @@
 
       const stats = document.getElementById('stats-grid');
       stats.removeAttribute('data-loading');
+      // api_surface has no trend until a second reading exists (#651); the
+      // label carries the delta instead of a separate stat tile, since it
+      // is one number's history, not a second number.
+      let apiSurfaceLabel = 'public API items on docs.rs';
+      if (data.api_surface?.previous_count != null) {
+        const delta = data.api_surface.count - data.api_surface.previous_count;
+        const sign = delta > 0 ? '+' : '';
+        apiSurfaceLabel =
+          `public API items on docs.rs (${sign}${delta} since ${data.api_surface.previous_computed_at})`;
+      }
       const statEntries = [
         [data.experiments?.total, 'experiments recorded'],
         [data.experiments?.accepted, 'accepted'],
@@ -346,6 +356,7 @@
         [data.sloc_code_src, 'code lines in src/'],
         [data.sloc_test_src, 'test lines in src/'],
         [data.test_functions_src, 'unit tests in src/'],
+        [data.api_surface?.count, apiSurfaceLabel],
       ];
       stats.innerHTML = statEntries.map(([n, label]) => `
         <div class="stat"><span class="n">${escapeHtml(n ?? 'n/a')}</span><span class="label">${escapeHtml(label)}</span></div>

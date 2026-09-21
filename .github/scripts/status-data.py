@@ -23,6 +23,8 @@ else:
 - experiments            research/progress.jsonl
 - merged_commits_7d      git history (deploy checks out full depth)
 - sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
+- api_surface            docs/api-surface.txt (SIMPLICITY's other half,
+                         #651) + its git history for the trend
 
 Self-diagnosing, per run-telemetry.py's rule that observability does not
 get to break the thing it observes: a field whose source cannot be read
@@ -358,6 +360,44 @@ def _test_functions_src():
         for p in (ROOT / "src").rglob("*.rs")
         for line in p.read_text(encoding="utf-8").splitlines()
     )
+
+
+@field("api_surface")
+def _api_surface():
+    """SIMPLICITY's other half: public items visible on docs.rs (#651).
+
+    `cargo x doc` keeps `docs/api-surface.txt` honest against what rustdoc
+    actually built (x/src/doc.rs), the same way the `ratio` field above
+    trusts `bench/baseline.json`: a committed number a gate can compute
+    verifies on every run, so this script only has to read it back. The
+    date is the file's own git history (deploy checks out full depth), not
+    a stored timestamp, so the two can never disagree; the previous
+    reading is the file's content as of the commit before that, giving a
+    trend once a second one exists with no separate ledger to retain.
+    """
+    path = ROOT / "docs" / "api-surface.txt"
+    count = int(path.read_text(encoding="utf-8").strip())
+    log = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-2", "--format=%H %cs", "--", "docs/api-surface.txt"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip().splitlines()
+    if not log:
+        raise ValueError("no commit touches docs/api-surface.txt")
+    _newest_sha, computed_at = log[0].split(" ", 1)
+    result = {"count": count, "computed_at": computed_at}
+    if len(log) > 1:
+        older_sha, previous_computed_at = log[1].split(" ", 1)
+        previous = subprocess.run(
+            ["git", "-C", str(ROOT), "show", f"{older_sha}:docs/api-surface.txt"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        result["previous_count"] = int(previous)
+        result["previous_computed_at"] = previous_computed_at
+    return result
 
 
 out_path = Path(sys.argv[1])
