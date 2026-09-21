@@ -2559,7 +2559,22 @@ record.
   separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
-  reach regardless of any of this.
+  reach regardless of any of this. Thirteenth slice, S2-A95: isolated
+  the mechanism directly — 484 of the 1,529 far matches (32%) displace
+  an active `Token::Rep` at the same position, and 463 of those 484
+  (96%) are a genuine length win over the rep they replaced, not a tie
+  or a shorter trade, ruling out "same length, needlessly pricier" and
+  ruling out detector error (S2-R11 already confirmed the matches are
+  real, non-colliding recurrences). The real driver is
+  `relax_match_candidate`'s fixed bucket-20 distance tax (20 raw bits
+  plus header, paid identically 1 byte or 1 MiB past `WINDOW`) against
+  `relax_rep_candidates`' near-zero marginal cost for the same-slot
+  continuation it displaces: a longer match is not automatically a
+  cheaper one once it has to pay that tax instead of reusing a live rep.
+  Remaining S1-P4 scope: a gate or price adjustment that accounts for
+  what a far match displaces (an active rep, in particular) rather than
+  only whether the detector confirms a real recurrence, or the
+  large-file-mode alternative, still open.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -4945,3 +4960,42 @@ record.
   (`bench/src/bin/adaptive_window_wiring_experiment.rs`, deleted after
   this measurement, same convention as S2-A93's own).
   `research/progress.jsonl` it146.
+- S2-A95 | ACCEPTED | S1-P4's own remaining scope after S2-R11: isolate
+  why `Base64Wrapped(train)`'s confirmed far matches net-lose, left open
+  as "mechanism not isolated further" by S2-R11. Standalone token-level
+  diagnostic, no wiring change: ran both `lz::parse_optimal_with_window(data,
+  WINDOW)` and `lz::parse_optimal_adaptive_window(data)` on S2-R11's own
+  case (`base64_wrapped`, 4,000,000 bytes, train seed
+  `0xC0FFEE123456789A`), then classified each of the adaptive parse's
+  1,529 far-distance `Match` tokens (`distance > WINDOW`) by what the
+  `WINDOW`-capped parse chose at the identical byte position: 484 (32%)
+  displaced an active `Token::Rep`, 581 (38%) displaced an in-window
+  `Token::Match`, 464 (30%) displaced a literal run. Of the 484
+  rep-displacements, 463 (96%) are a real length win over the rep they
+  replaced (median far length 60 bytes vs median displaced-rep length
+  30), not a tie or a shorter trade — ruling out "same length, needlessly
+  pricier" as the mechanism, and S2-R11 already ruled out detector error
+  (the far matches are real, non-colliding recurrences). Traced instead
+  to `relax_match_candidate`'s own fixed distance-bucket tax: any
+  `distance > WINDOW` lands in `bucket` 20 (`ADAPTIVE_WINDOW` is
+  `2^21 - 1`, one bucket wide), so `offset_cost` pays `extra_bits(20)`
+  (20 raw bits) plus `EXTRA_HEADER_BITS_PRICE` (1.6) on top of the
+  modeled offset-symbol price — a tax paid identically whether the match
+  lands 1 byte or 1 MiB past `WINDOW` — while `relax_rep_candidates`
+  prices the same-slot continuation with no distance cost at all. The DP
+  is optimal against its own reseeded ideal price table; the real coder
+  still nets a loss because that fixed tax, amortized over roughly 2x
+  more literal-equivalent bytes at base64's near-uniform alphabet, does
+  not out-earn a rep's near-zero marginal cost 484 times over. Confirms
+  a pricing/gating mechanism, not a detector one: rules out a fourth
+  detector-confirmation condition as this lead's next move and points at
+  gating or pricing that accounts for what a far match displaces, not
+  just whether it is a real recurrence. | Measured with a throwaway,
+  uncommitted scratch binary (`bench/src/bin/adaptive_window_base64_diag.rs`,
+  deleted after this measurement, same convention as
+  S2-A93/S2-A94/S2-R11's own). No new bpb number: this diagnostic
+  classifies S2-R11's already-recorded regression rather than measuring a
+  new candidate; `research/progress.jsonl` records it as `kind: "patch"`
+  with null bpb deltas, the same shape as S2-A89/S2-A91/S2-A92/S2-A94
+  (standalone, not wired, no champion to diff against). Full record:
+  `research/progress.jsonl` it147.
