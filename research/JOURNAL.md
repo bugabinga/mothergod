@@ -2544,7 +2544,7 @@ record.
   (`codec::compressed_len_with_window`/`compressed_len_adaptive_window`),
   still not wired to `encode_tokens` itself, so the next slice's
   real-bitstream measurement would not be flying blind on the
-  ideal-vs-real coder gap ADR-0024 documents. Twelfth slice, S2-R11: used
+  ideal-vs-real coder gap ADR-0038 documents. Twelfth slice, S2-R11: used
   it to re-measure S2-A93's wiring decision for real, across every
   train-eligible kind this crate defines rather than S2-R9's own four —
   and rejected it: `Base64Wrapped(train)` regresses **+0.005874** b/B
@@ -4882,7 +4882,7 @@ record.
   `Method::Lz` path, built the real-bitstream counterpart to
   `ideal_cost_bits_with_window`/`ideal_cost_bits_adaptive_window`, so
   the next slice's measurement would not be flying blind on the
-  ideal-vs-real coder gap ADR-0024 documents. `codec::
+  ideal-vs-real coder gap ADR-0038 documents. `codec::
   encode_tokens` factored into a thin wrapper over a new
   `encode_tokens_with(data, columns, tokens)` taking already-parsed
   tokens, letting two new `pub` entry points reuse its real `Encoder`

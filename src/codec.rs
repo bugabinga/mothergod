@@ -1957,6 +1957,23 @@ mod tests {
     }
 
     #[test]
+    fn compressed_len_with_window_matches_wired_encode_tokens_at_wired_window() {
+        // Real-Encoder counterpart to the fixed-window ideal-cost test
+        // above: lz::parse_optimal(data) is defined as
+        // parse_optimal_with_window(data, WINDOW), so
+        // compressed_len_with_window at that same window must match
+        // encode_tokens's own wired length exactly, not just
+        // approximately.
+        let data: Vec<u8> = (0..5000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        assert_eq!(
+            compressed_len_with_window(&data, lz::WINDOW),
+            encode_tokens(&data, None).len()
+        );
+    }
+
+    #[test]
     fn compressed_len_adaptive_window_matches_wired_encode_tokens_within_window() {
         // Real-Encoder counterpart to
         // ideal_cost_bits_adaptive_window_matches_wired_window_within_window,
