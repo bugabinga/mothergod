@@ -48,4 +48,4 @@ else in the project — name, logo, architecture, code, roadmap, processes —
 is the BDFL's to change (ADR-0011).
 
 Moved here from `ROADMAP.md`'s Mission section with the wording above
-unchanged, three location words aside (ADR-0048).
+unchanged, three location edits aside (ADR-0048).
