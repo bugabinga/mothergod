@@ -15,7 +15,7 @@ Reuse the existing site before inventing another visual language.
 Read only what the screen needs:
 
 - `site/` owns current implementation and visual vocabulary;
-- `ROADMAP.md` owns mission and lifecycle;
+- `MISSION.md` owns the mission and `ROADMAP.md` the lifecycle;
 - executable or generated evidence owns volatile product claims;
 - `README.md` is existing public copy, not factual authority;
 - `assets/logo.svg` is canonical and `site/logo.svg` is its deployment copy.

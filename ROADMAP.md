@@ -1,96 +1,62 @@
 # Roadmap
 
-## Mission
-
-Build the best general-purpose lossless compressor — "mother god of all
-general purpose compressors" — as a real open-source project that **real
-human users** choose, trust, and enjoy. Three non-negotiables define "best":
-
-1. **Trustworthy**: lossless always, decoder safe on any input, deterministic
-   across platforms. A ratio win that costs trust is a loss.
-2. **Honest**: every claim measured on named corpora with real bitstreams,
-   every design decision traceable to a recorded experiment. We beat the
-   incumbents on their benchmarks, not ours. Honesty extends to marketing:
-   no astroturfing, no manufactured engagement, ever.
-3. **Wanted**: the target audience is people, not benchmarks. Ease of
-   building, integrating, and understanding the project are first-class
-   outcomes; the more happy users, the better. A technically superior
-   compressor nobody adopts has failed.
-
-Guiding principles:
-
-- **The less code, the better.** Simplicity is a feature; every line is a
-  liability some future session must understand and maintain. Prefer
-  deleting to adding; quality and performance come from design, not
-  accretion.
-- **Beat the competition, and learn from it shamelessly.** Study how zstd,
-  lz4, brotli, xz — and great OSS beyond compression (ripgrep, SQLite,
-  curl) and OSS history at large — do engineering, docs, releases, and
-  community. Write down what was learned and applied.
-- **Every aspect of open source is in scope**, not just code: README first
-  impressions, docs, release notes, the blog, positioning, community tone.
-  The BDFL steers all of it — and **publishes only on channels mothergod
-  owns** (this repo, its blog, its releases). External platforms — Hacker
-  News, lobste.rs, reddit, socials — are queried as success proxies, never
-  posted to by the system; any thread there is organic or the operator's
-  own doing.
-
-The BDFL owns this mission; it runs on the agent clock (ADR-0035), judges the
-project against the scorecard below — in full on its weekly deep run — and
-reports in the ops-log digest. Its default is to solve problems by improving
-the agent system itself, not by one-off work. A metric that cannot yet be
-measured is itself a top gap — the BDFL schedules the work that makes it
-measurable before the work it would measure.
-
-**Amendment clause (ADR-0011).** This Mission section — the mission
-statement, the three non-negotiables, and the guiding principles above — is
-the one thing in this repository agents do not change. Amendments are the
-operator's alone; the BDFL proposes them via `blocked-on-human`. Everything
-below this section, and everything else in the project — name, logo,
-architecture, code, roadmap, processes — is the BDFL's to change (ADR-0011).
+Where mothergod is going, ranked, and how it is judged. The mission this
+serves is [`MISSION.md`](MISSION.md), the operator's to amend and nobody
+else's (ADR-0011). Deliverable state is in the GitHub Milestones each
+section links (ADR-0047). A measured number lives where it is generated
+and never here (ADR-0048); each metric below names that home.
 
 ## Scorecard
 
 Outcome metrics (the product):
 
-- **RATIO** — aggregate bits/byte on the held-out finals (whole-file
+- **RATIO**: aggregate bits/byte on the held-out finals (whole-file
   Silesia + Canterbury, real bitstreams) vs pinned `gzip -9`, `zstd -19`,
-  `xz -9e`. Success ladder: (1) reclaim the founding v0.6 standing —
-  aggregate below zstd -19. Whole-file numbers are established in
-  `docs/benchmarks/` (2026-08-29): Canterbury aggregate beats both zstd -19
-  and xz -9e; Silesia aggregate trails zstd -19 (2.061 vs 1.997 b/B), so
-  rung 1 is Silesia's to close. (2) win or tie every file vs zstd -19;
+  `xz -9e`. Success ladder: (1) aggregate below zstd -19 on each corpus,
+  the founding v0.6 standing; (2) win or tie every file vs zstd -19;
   (3) aggregate below xz -9e; (4) hold all of it as the corpus grows
-  adversarially.
-- **TRUST** — zero known round-trip violations and zero decoder
-  panics/overallocations, ever; adversarial suite green; and, once the
-  trust ledger lands (#449), cumulative clean fuzz CPU-hours growing
-  week over week, whole-crate mutation score, and region coverage,
-  each reported with trend (ADR-0043).
-- **SPEED** — tracked, not yet optimized: report encode/decode MB/s on the
-  finals each benchmark run; floor of ≥1 MB/s decode single-thread until M5
-  makes speed a first-class target.
-- **USERS** — evidence real humans use and like it: GitHub stars/forks/
-  watchers and their trend, external (non-agent, non-operator) issue and PR
+  adversarially. Published: per file in `docs/benchmarks/`; the aggregate
+  gap to the field, and when it last moved, on
+  [/status](https://mothergod.dev/status.html).
+- **TRUST**: zero known round-trip violations and zero decoder
+  panics/overallocations, ever; adversarial suite green; cumulative clean
+  fuzz CPU-hours growing week over week, whole-crate mutation score, and
+  region coverage, each with trend (ADR-0043). Published: the trust ledger
+  on /status, written by the test workflows themselves (#449).
+- **SPEED**: tracked, not yet optimized: encode/decode MB/s on the finals
+  each benchmark run; floor of ≥1 MB/s decode single-thread until M5 makes
+  speed a first-class target. Published: the throughput columns of
+  `docs/benchmarks/`, one machine, indicative only.
+- **USERS**: evidence real humans use and like it: GitHub stars, forks and
+  watchers with trend, external (non-agent, non-operator) issue and PR
   authors, crates.io downloads once published, and mentions found in the
-  wild — Hacker News, lobste.rs, reddit, blogs — queried read-only as
-  success proxies. Report weekly. These are outcomes to earn, never to
-  manufacture — the system never posts on those platforms, and gaming the
-  numbers in any form is a HONESTY incident.
-- **SIMPLICITY** — total `src/` SLOC and public API surface, reported with
-  weekly delta; growth must be justified by wins elsewhere on this
-  scorecard. Dependency count stays zero (ADR-0002). Deletions are
-  celebrated in the digest.
+  wild (Hacker News, lobste.rs, reddit, blogs), queried read-only as
+  success proxies. Outcomes to earn, never to manufacture: the system never
+  posts on those platforms, and gaming the numbers in any form is a HONESTY
+  incident. Published: `marketing/JOURNAL.md`, weekly, from the traffic
+  ledger (#435).
+- **SIMPLICITY**: total `src/` SLOC and public API surface, with weekly
+  delta; growth must be justified by wins elsewhere on this scorecard.
+  Dependency count stays zero (ADR-0002). Deletions are celebrated in the
+  digest. Published: line counts on /status; the API surface has no
+  publisher yet (#651).
 
-Process metrics (the team — BDFL's machinery gauge):
+Process metrics (the team, the BDFL's machinery gauge):
 
-- **FLOW** — ≥1 merged PR and ≥1 recorded experiment (accept or reject) per
-  week; median PR open→merge under 7 days; no PR red or stalled >14 days.
-- **HEALTH** — <20% of agent sessions in a week wasted (failed, stalled, or
-  produced no artifact); pause downtime reported; new issues triaged <48 h.
-- **HONESTY** — every published number names corpus+version; sealed-set
+- **FLOW**: ≥1 merged PR and ≥1 recorded experiment (accept or reject) per
+  week; median PR open to merge under 7 days; no PR red or stalled over
+  14 days. Published: merged commits and experiment count on /status; PR
+  ages in the weekly survey digest on the ops log.
+- **HEALTH**: <20% of agent sessions in a week wasted (failed, stalled, or
+  produced no artifact); pause downtime reported; new issues triaged within
+  48 h. Published: per-run outcomes and cost on
+  [/agents](https://mothergod.dev/agents.html); the wasted share in the
+  weekly survey digest.
+- **HONESTY**: every published number names corpus and version; sealed-set
   discipline unbroken (no experiment tuned against validation or finals).
   Any violation is an incident: journal entry plus process fix, same week.
+  Published: incident entries in `research/JOURNAL.md`; the survey reports
+  their count, target zero.
 
 ## Milestones
 
@@ -111,10 +77,9 @@ rank, and the status page renders it top to bottom.
 
 Release 0.1 (M6) therefore gates on its own items alone. It promises what
 M0/M1/M2/M4 delivered: lossless, adversarially tested, deterministic across
-platforms, a frozen format, a CLI and a library. It does not promise the
-RATIO ladder, whose first rung is open (Silesia aggregate 2.061 b/B against
-zstd -19's 1.997, `docs/benchmarks/`). Waiting on a program is waiting
-forever, because a program has no state in which it is finished.
+platforms, a frozen format, a CLI and a library. It does not promise any
+rung of the RATIO ladder, whose standing is on /status. Waiting on a program
+is waiting forever, because a program has no state in which it is finished.
 
 The daily heartbeat picks the top unblocked item and ships the smallest useful
 slice of it. Items marked `blocked-on-human` need the operator.

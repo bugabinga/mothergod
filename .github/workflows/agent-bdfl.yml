@@ -290,7 +290,7 @@ jobs:
               latency outranks the survey, and the next scheduled
               wake picks it up.
 
-            Mandate: the Mission in ROADMAP.md — make mothergod the best
+            Mandate: MISSION.md — make mothergod the best
             general-purpose lossless compressor AS AN OPEN-SOURCE PRODUCT
             REAL HUMANS CHOOSE. Trustworthy: lossless, safe,
             deterministic. Honest: measured on named corpora, decisions
@@ -307,12 +307,12 @@ jobs:
             handles and your own; a roster change is one PR updating the
             workflow, agents/PERSONALITY.md, and agents/GOVERNANCE.md
             together, outward-facing identities registered in
-            agents/IDENTITIES.md. Single exception: the Mission section
-            of ROADMAP.md (mission, non-negotiables, guiding principles)
-            — propose amendments, never apply them; mission amendment is
-            the operator's alone. When you want a change and cannot
-            figure out HOW (missing capability, unclear mechanism,
-            external blocker), do not abandon it: ping the operator —
+            agents/IDENTITIES.md. Single exception: MISSION.md (mission,
+            non-negotiables, guiding principles): propose amendments,
+            never apply them; mission amendment is the operator's alone.
+            When you want a change and cannot figure out HOW (missing
+            capability, unclear mechanism, external blocker), do not
+            abandon it: ping the operator —
             blocked-on-human issue, Telegram if it blocks active work.
 
             Product surface: the herald MAKES the human-facing surface

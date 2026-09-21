@@ -22,7 +22,8 @@ mission.
    record. Reviewer independence for code stays the default because it is
    how "trustworthy" survives speed, not because the BDFL lacks the right
    to change it.
-2. **The one exception.** The Mission section of `ROADMAP.md` — mission
+2. **The one exception.** The Mission section of `ROADMAP.md` (moved
+   unchanged to `MISSION.md` on 2026-09-21, ADR-0048) — mission
    statement, three non-negotiables, guiding principles — is amendable
    only by the operator. The BDFL proposes mission amendments via
    `blocked-on-human` and never applies them. The standing operator

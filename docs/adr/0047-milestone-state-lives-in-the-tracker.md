@@ -26,7 +26,7 @@ Every item of a milestone is an issue, and every milestone that is a deliverable
 An item is done when its issue is closed.
 `ROADMAP.md` carries no checkboxes.
 
-`ROADMAP.md` keeps exactly what has no machine source: the mission, the milestone-versus-program distinction, the rank, the rationale for each placement, and the product shape.
+`ROADMAP.md` keeps exactly what has no machine source: the mission (until ADR-0048 gave it `MISSION.md`), the milestone-versus-program distinction, the rank, the rationale for each placement, and the product shape.
 Rank is the order the milestone sections appear in the file.
 
 `.github/scripts/status-data.py` reads item state from the tracker at deploy time and keeps taking order from `ROADMAP.md`'s section order.

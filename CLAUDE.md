@@ -199,7 +199,8 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 | `docs/TESTING.md` | test strategy: the 7 layers and what runs when |
 | `docs/adr/` | architecture decision records (single series, both realms) |
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
-| `ROADMAP.md` | mission, success scorecard, milestones; heartbeat picks work from here |
+| `MISSION.md` | the mission: the operator's to amend, nobody else's (ADR-0011) |
+| `ROADMAP.md` | scorecard definitions and ranked milestones; heartbeat picks work from here; item state is in GitHub Milestones (ADR-0047), numbers on /status (ADR-0048) |
 | `.github/workflows/` | the agent processes themselves — changeable by PR like any code |
 | `.claude/skills/` | agent operating manuals, one directory per skill (ADR-0016) |
 
