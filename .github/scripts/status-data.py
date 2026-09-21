@@ -13,7 +13,9 @@ never committed.
 Every field names its source, and each source is parsed here and nowhere
 else:
 
-- phase, milestones      ROADMAP.md milestone headers and checkboxes
+- phase, milestones      ROADMAP.md section order and ✅ marks; item counts
+                         from the GitHub Milestones the sections link
+                         (`gh api` on GH_TOKEN, ADR-0047)
 - format_version, methods  src/lib.rs (the const and the Method enum docs)
 - benchmarks             bench/baseline.json (the CI ratio gate's baseline)
 - ratio                  docs/benchmarks/*.md aggregates + baseline.json's
@@ -72,16 +74,44 @@ def _commit():
     ).stdout.strip()
 
 
+MILESTONE_LINK = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/milestone/(\d+)")
+
+
+def tracker_counts(owner, repo, number):
+    """Open and closed item counts of one GitHub Milestone.
+
+    `gh api`, because it is on every runner and authenticates from GH_TOKEN.
+    A failure (no token, no network, no such milestone) raises with gh's
+    own words, and the field wrapper turns that into a null and a problem
+    line rather than a published guess.
+    """
+    proc = subprocess.run(
+        [
+            "gh", "api", f"repos/{owner}/{repo}/milestones/{number}",
+            "--jq", "{open: .open_issues, closed: .closed_issues}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise ValueError(f"milestone {number}: {proc.stderr.strip() or 'gh api failed'}")
+    counts = json.loads(proc.stdout)
+    return counts["open"], counts["closed"]
+
+
 @field("milestones")
 def _milestones():
-    """ROADMAP.md `## M<n> — Title` headers; ✅ or checkbox states below.
+    """ROADMAP.md `## M<n> — Title` sections in file order; state from the tracker.
 
     Four statuses, because three could not tell a program from unstarted
-    work. ROADMAP.md's Milestones intro draws the line: a milestone is a
-    deliverable with a checklist, a program is continuous work that has
-    none. Inferring "pending" from an absent checklist told the live page
-    that M3 had not been started, on a day the experiment ledger held 93
-    entries against it (operator report, 2026-09-18).
+    work (operator report, 2026-09-18, #601). ADR-0047 moved item state out
+    of the file: a section linking a GitHub Milestone is a deliverable and
+    reads that milestone's item counts, `done` once every item is closed,
+    `active` while some are, `pending` before the first. A ✅ in the title
+    is a milestone delivered before the tracker held items (no retroactive
+    issues), `done`. A section with neither is a program, `ongoing`. The
+    link is the join key rather than the title, so a reworded header
+    cannot silently turn a deliverable into a program.
     """
     text = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     milestones = []
@@ -93,18 +123,20 @@ def _milestones():
             continue
         mid, title = match.group(1), match.group(2).strip()
         body = body.split("\n## ")[0]
-        done_by_mark = "✅" in title
-        title = title.replace("✅", "").strip()
-        checked = len(re.findall(r"^- \[x\]", body, flags=re.M))
-        unchecked = len(re.findall(r"^- \[ \]", body, flags=re.M))
-        if done_by_mark or (checked and not unchecked):
+        link = MILESTONE_LINK.search(body)
+        if "✅" in title:
             status = "done"
-        elif checked:
-            status = "active"
-        elif unchecked:
-            status = "pending"
+        elif link:
+            open_items, closed_items = tracker_counts(*link.groups())
+            if open_items == 0 and closed_items > 0:
+                status = "done"
+            elif closed_items:
+                status = "active"
+            else:
+                status = "pending"
         else:
             status = "ongoing"
+        title = title.replace("✅", "").strip()
         milestones.append({"id": mid, "title": title, "status": status})
     if not milestones:
         raise ValueError("no `## M<n>` sections found in ROADMAP.md")
