@@ -471,6 +471,32 @@ pub fn compressed_len_adaptive_window(data: &[u8]) -> usize {
     encode_tokens_with(data, None, &lz::parse_optimal_adaptive_window(data)).len()
 }
 
+/// Same as [`compressed_len_with_window`], but exposes both of
+/// `lz::parse_optimal_with_seed_and_search_window`'s windows as
+/// independent parameters instead of fixing the seed pass to [`lz::WINDOW`]
+/// (`research/JOURNAL.md` S1-P4). [`compressed_len_adaptive_window`] always
+/// passes the same value for both (the matched-window contract its own
+/// gate relies on); this entry point lets a mismatch be re-measured on a
+/// new candidate data class without touching that wired caller. S2-R9
+/// found a mismatch (seed capped at [`lz::WINDOW`] while every `dp_round`
+/// searched past it) that regressed `access_log`/`json_records`; S2-A93
+/// fixed it by matching the windows. Whether the same mismatch helps or
+/// hurts `Base64Wrapped`, whose far matches are S1-P4's current open
+/// failure (S2-R11/S2-A95), is exactly what this measures.
+#[must_use]
+pub fn compressed_len_with_seed_and_search_window(
+    data: &[u8],
+    seed_window: usize,
+    search_window: usize,
+) -> usize {
+    encode_tokens_with(
+        data,
+        None,
+        &lz::parse_optimal_with_seed_and_search_window(data, seed_window, search_window),
+    )
+    .len()
+}
+
 /// Shared body of [`encode_tokens`], [`compressed_len_with_window`], and
 /// [`compressed_len_adaptive_window`]: encodes already-parsed `tokens`
 /// through the context-mixing pipeline and returns the real payload bytes.
@@ -1993,6 +2019,22 @@ mod tests {
         assert_eq!(
             compressed_len_adaptive_window(&data),
             encode_tokens(&data, None).len()
+        );
+    }
+
+    #[test]
+    fn compressed_len_with_seed_and_search_window_matches_matched_window_call() {
+        // compressed_len_with_window(data, w) is
+        // parse_optimal_with_seed_and_search_window(data, lz::WINDOW, w)
+        // by lz::parse_optimal_with_window's own documented contract, so
+        // this capability must match it exactly at seed_window = lz::WINDOW,
+        // not just approximately.
+        let data: Vec<u8> = (0..5000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        assert_eq!(
+            compressed_len_with_seed_and_search_window(&data, lz::WINDOW, lz::WINDOW),
+            compressed_len_with_window(&data, lz::WINDOW)
         );
     }
 
