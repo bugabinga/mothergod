@@ -2574,7 +2574,29 @@ record.
   Remaining S1-P4 scope: a gate or price adjustment that accounts for
   what a far match displaces (an active rep, in particular) rather than
   only whether the detector confirms a real recurrence, or the
-  large-file-mode alternative, still open.
+  large-file-mode alternative, still open. Fourteenth slice, S2-A96:
+  standalone capability for the next question this scope note raised —
+  `codec::compressed_len_with_seed_and_search_window` exposes the seed
+  and search windows as independent parameters, the real-bitstream
+  counterpart `parse_optimal_adaptive_window`'s own matched-window
+  contract does not let through. Fifteenth slice, S2-R12: used it to
+  re-test whether S2-R9's own rejected seed/search mismatch (a possible
+  self-reinforcement fix, not this scope note's own displacement
+  question) explains S2-A95's tax — rejected, it recovers roughly 73% of
+  `Base64Wrapped(train)`'s loss but regresses both sealed-only kinds and
+  still leaves a genuine ~0.0016 b/B residual, closing the seed-window
+  lever for this lead. Sixteenth slice, S2-A97: standalone primitive for
+  this scope note's own displacement question — `lz::best_active_rep_len`
+  factors the per-slot carry-aware rep scan `relax_rep_candidates`
+  already runs into a reusable query, the longest active rep continuation
+  at a position, that `relax_match_candidate`'s eventual displacement-aware
+  pricing needs before it can weigh a far match's fixed bucket-20 tax
+  against what it would cost to keep extending a live rep instead; not
+  yet called from `dp_round`. Remaining S1-P4 scope: wire it into
+  `relax_match_candidate` behind a threshold (how much of a length edge a
+  far match needs over the rep it displaces to earn its tax) and measure
+  against S2-R12's own residual, or accept the large-file-mode
+  alternative if no threshold clears every prior slice's per-case bar.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -5082,3 +5104,38 @@ record.
   accounts for what a far match displaces — not a fourth detector
   condition, not a seed-window policy — is what is owed next.
   `research/progress.jsonl` it149.
+- S2-A97 | ACCEPTED | S1-P4's own remaining scope after S2-R12: the
+  pricing/gating fix S2-R12 named — weighing a far match against the rep
+  continuation it displaces — needs to know that continuation's length
+  before it can price anything, and nothing in `dp_round`'s current shape
+  exposes it without a fresh scan. Standalone primitive, no wiring:
+  `lz::best_active_rep_len(data, i, reps, rep_carry)` factors the
+  per-slot `rep_match_len` scan `relax_rep_candidates` already runs into
+  a reusable query, the single longest active rep continuation at `i` (or
+  `None` below `MIN_REP_LEN`), reusing the same carry so a call across
+  consecutive positions on one run stays O(1) — the same issue #179
+  hazard that makes `best_rep`'s plain `match_len` loop safe only for
+  `parse_greedy`'s once-per-token caller, not a per-position one.
+  `#[allow(dead_code)]`, justified inline: `RepCache` is `pub(crate)`, so
+  this can't dodge `dead_code` the way `lib.rs`'s doc-hidden `pub`
+  modules do for a whole unwired research primitive (`src/lib.rs`'s own
+  comment on that pattern, S2-A2). Deliberately leaves the actual wiring
+  decision open: how much of a length edge a far match needs over the rep
+  it displaces to be worth bucket 20's fixed tax is exactly the kind of
+  threshold S2-R3/S2-R5 warn against picking by eye rather than
+  measuring. | 4 new unit tests (380 lib tests, up from 376): no cached
+  distance reaches back at `i = 0`;
+  the one matching cached distance on a planted 5-byte repeat; the
+  longest of two matching distances at the same position (not just
+  whichever slot is checked first — the losing distance's shorter length
+  is independently verified); a length-1 match (below `MIN_REP_LEN`)
+  filtered to `None`. `cargo x check`: 4 stages green. `baseline_gate
+  check`: 11 cases, no regression (nothing wired). | No bpb measurement:
+  standalone capability, not yet a priced candidate — `research/
+  progress.jsonl` records this as `kind: "patch"` with null bpb deltas,
+  same reason as S2-A50/S2-A89/S2-A94/S2-A96. Remaining S1-P4 scope: wire
+  this into `relax_match_candidate` behind a length-edge threshold and
+  measure against S2-R12's own residual (~0.0016 b/B on
+  `Base64Wrapped(train)`), or accept the large-file-mode alternative if
+  no threshold clears every prior slice's per-case accept bar.
+  `research/progress.jsonl` it150.
