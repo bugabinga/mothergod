@@ -32,14 +32,15 @@ Two questions, answered from GitHub, never from a local clock alone:
                 research is "the most expensive wake per tick" (worker.js
                 CLOCK comment).
 
-Fails open: A GITHUB READ THIS CANNOT PERFORM ANSWERS DUE, NEVER NOT-DUE, the
-same asymmetry survey-due documents for the same reason. Answering due
-wrongly costs one extra, genuinely fresh experiment; answering not-due
-wrongly is the silent skip issue #541 exists to end.
-
-Unlike survey-due, whose only caller reads the printed prose, this script's
-caller is a workflow `if:` condition, so the exit code is also the signal:
-0 when due, 1 when not.
+Fails open: ANYTHING THIS CANNOT DECIDE ANSWERS DUE, NEVER NOT-DUE, the same
+asymmetry survey-due documents for the same reason. Answering due wrongly
+costs one extra, genuinely fresh experiment; answering not-due wrongly is
+the silent skip issue #541 exists to end. "Anything", not just an unreadable
+`gh` call: unlike survey-due, whose only caller reads the printed prose, this
+script's caller is a workflow `if:` condition that greps the exit code, so a
+crash anywhere in main() (an unexpected API shape, a bad timestamp) has to
+answer due too, or it is indistinguishable from a deliberate not-due to the
+one reader that matters (review, PR #660).
 
 Usage: research-due
 """
@@ -144,12 +145,23 @@ def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
     now = datetime.now(timezone.utc)
 
-    flight, flight_error = in_flight(repo)
-    newest, newest_error = (None, None)
-    if flight_error is None and not flight:
-        newest, newest_error = newest_merge(repo)
+    # The caller reads the exit code, not the prose (unlike survey-due), so
+    # the fail-open contract has to hold for the whole call chain, not just
+    # the two explicit gh_json sites decide() already covers: an uncaught
+    # KeyError on an unexpected `gh api` shape, or a bad timestamp reaching
+    # fromisoformat, would otherwise exit 1, indistinguishable from a
+    # deliberate not-due, and the workflow step that greps this exit code
+    # would report due=false with nothing red anywhere (review, PR #660).
+    try:
+        flight, flight_error = in_flight(repo)
+        newest, newest_error = (None, None)
+        if flight_error is None and not flight:
+            newest, newest_error = newest_merge(repo)
+        verdict, detail = decide(flight, flight_error, newest, newest_error, now)
+    except Exception as error:  # noqa: broad on purpose, see comment above
+        verdict, detail = "due", f"research-due crashed: {error!r}"
 
-    verdict = render(*decide(flight, flight_error, newest, newest_error, now))
+    verdict = render(verdict, detail)
     return 0 if verdict == "due" else 1
 
 

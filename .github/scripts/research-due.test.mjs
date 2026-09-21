@@ -38,6 +38,36 @@ function decide(payload) {
   return JSON.parse(run.stdout);
 }
 
+// main()'s own fail-open contract, exercised by actually crashing in_flight,
+// not by reasoning about the try/except: the caller here is a workflow `if:`
+// that greps the exit code (unlike survey-due, whose caller reads prose), so
+// an uncaught exception exiting 1 would read as a deliberate not-due with
+// nothing red anywhere. This is the failure PR #660's review reproduced.
+const mainDriver = `
+import importlib.machinery, importlib.util, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("research_due", sys.argv[1] + "/research-due")
+spec = importlib.util.spec_from_loader("research_due", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+def boom(repo):
+    raise KeyError("unexpected gh api shape")
+mod.in_flight = boom
+code = mod.main()
+print(f"EXITCODE:{code}")
+`;
+
+function crashedMain() {
+  // render()'s \`out=sys.stdout\` default binds the real stream at module
+  // load time, before any in-process redirect could intercept it, so this
+  // reads the subprocess's actual stdout rather than trying to capture it
+  // from inside the driver.
+  const run = spawnSync("python3", ["-c", mainDriver, scriptsDir], { encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  const match = run.stdout.match(/EXITCODE:(\d+)/);
+  return { code: Number(match[1]), output: run.stdout };
+}
+
 const NOW = "2026-09-21T12:00:00Z";
 const base = (over = {}) => ({
   flight: false,
@@ -88,4 +118,11 @@ test("a merge older than the window is due", () => {
 test("no research PR ever merged is due", () => {
   const { verdict } = decide(base());
   assert.equal(verdict, "due");
+});
+
+test("a crash mid-decision answers due with exit 0, never a bare exit 1", () => {
+  const { code, output } = crashedMain();
+  assert.equal(code, 0, "exit 0 is what makes `if research-due` in the workflow read this as due");
+  assert.match(output, /research-due: due/);
+  assert.match(output, /research-due crashed: KeyError/);
 });
