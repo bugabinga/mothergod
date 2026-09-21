@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use taplo::parser::parse as parse_toml;
+
 /// Builds crate documentation with rustdoc warnings denied, exactly the
 /// CLAUDE.md doc gate: `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`.
 /// Then checks `docs/api-surface.txt` against what rustdoc just built
@@ -71,34 +73,13 @@ fn package_name(root: &Path) -> Result<String, String> {
     let path = root.join("Cargo.toml");
     let text = std::fs::read_to_string(&path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let mut in_package = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[package]" {
-            in_package = true;
-            continue;
-        }
-        if !in_package {
-            continue;
-        }
-        if trimmed.starts_with('[') {
-            break;
-        }
-        let Some(value) = trimmed.strip_prefix("name") else {
-            continue;
-        };
-        let Some(value) = value.trim_start().strip_prefix('=') else {
-            continue;
-        };
-        let value = value.trim();
-        if let Some(name) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-            return Ok(name.to_string());
-        }
-    }
-    Err(format!(
-        "{}: no [package] name = \"...\" found",
-        path.display()
-    ))
+    parse_toml(&text)
+        .into_dom()
+        .get("package")
+        .get("name")
+        .as_str()
+        .map(|name| name.value().to_string())
+        .ok_or_else(|| format!("{}: no [package] name = \"...\" found", path.display()))
 }
 
 /// Every item rustdoc lists in `all.html`'s `<ul class="all-items">`
