@@ -42,8 +42,9 @@ against the filesystem root, so the logo is simply absent; `status.html` and
 paths and under `file://` render nothing but their own error states. Served
 over HTTP from `site/`, the deployed root, everything renders.
 
-**So the record here is thinner than it reads.** The 2026-09-19 and
-2026-09-20 entries each cite a "local Chromium headless screenshot, not
+**So the record here is thinner than it reads.** Two 2026-09-20 entries
+("the Speed numbers stopped wearing prose" and "the verdict now sits above
+the argument") each cite a "local Chromium headless screenshot, not
 committed" as the evidence for a layout claim, and neither says how the page
 was served. I cannot now tell whether either render showed the page a
 visitor sees. The defect is not that they were wrong, and I have no reason
