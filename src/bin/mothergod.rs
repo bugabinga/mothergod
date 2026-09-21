@@ -59,11 +59,7 @@ fn main() -> ExitCode {
     }
 
     match command.as_deref().and_then(OsStr::to_str) {
-        Some("compress") => run(
-            path.as_ref(),
-            |input| Ok(mothergod::compress(input)),
-            |path| Ok(add_suffix(path)),
-        ),
+        Some("compress") => run_compress(path.as_ref()),
         Some("decompress") => run_decompress(path.as_ref()),
         Some("-h" | "--help") => {
             println!("{USAGE}");
@@ -80,42 +76,25 @@ fn main() -> ExitCode {
     }
 }
 
-/// Reads input (stdin, or `path` if given), applies `transform`, writes the
-/// result (stdout, or `path` renamed by `derive_output` if given). Shared by
-/// both subcommands: `transform` carries the compress/decompress difference,
-/// `derive_output` carries the `.mgdc` suffix direction.
-fn run(
-    path: Option<&OsString>,
-    transform: impl FnOnce(&[u8]) -> Result<Vec<u8>, String>,
-    derive_output: impl FnOnce(&Path) -> Result<PathBuf, String>,
-) -> ExitCode {
+/// Reads input (stdin, or `path` if given), compresses it, and writes the
+/// result (stdout, or `path` with [`SUFFIX`] appended if given).
+fn run_compress(path: Option<&OsString>) -> ExitCode {
     let input = match read_input(path) {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
-
-    let output = match transform(&input) {
-        Ok(output) => output,
-        Err(err) => return fail(&err),
-    };
-
+    let output = mothergod::compress(&input);
     match path {
         None => write_stdout(&output),
-        Some(path) => {
-            let out_path = match derive_output(Path::new(path)) {
-                Ok(out_path) => out_path,
-                Err(err) => return fail(&err),
-            };
-            write_new_file(&out_path, &output)
-        }
+        Some(path) => write_new_file(&add_suffix(Path::new(path)), &output),
     }
 }
 
-/// Like [`run`], but for `decompress`: streams the decoded bytes straight to
-/// the destination writer via [`mothergod::decompress_to_writer`] instead of
+/// Like [`run_compress`], but streams the decoded bytes straight to the
+/// destination writer via [`mothergod::decompress_to_writer`] instead of
 /// collecting them into a `Vec<u8>` first, bounding resident memory on the
 /// output side even when a small frame decodes to a much larger buffer.
-/// Not built on [`run`] itself: `run`'s `transform` returns a whole
+/// Not built on [`run_compress`]'s shape: that function collects a whole
 /// `Vec<u8>` for its caller to write, which is exactly the buffering this
 /// function exists to avoid.
 fn run_decompress(path: Option<&OsString>) -> ExitCode {
