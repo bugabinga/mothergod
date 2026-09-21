@@ -2539,18 +2539,27 @@ record.
   own seed pass staying bound to `WINDOW` regardless of the DP's search
   window; binding both to the same chosen window turned every previously
   regressing gated case into an improvement, closing both of S2-R9's
-  failure modes for real. Remaining S1-P4 scope: every earlier slice was
-  a standalone primitive; this one is too (not wired to `compress`/
-  `encode`), so the next slice is the first that must touch them —
-  wiring `parse_optimal_adaptive_window` into `encode`'s `Method::Lz`
-  path and re-measuring through a real bitstream against
-  `bench::baseline`'s sealed set, encoder-only per CLAUDE.md hard rule 5
-  (no `FORMAT_VERSION` bump) but owing a golden-fixture regen
-  (`tests/golden.rs`, issue #290) and a `bench/baseline.json` update. A
-  window past `2^21 - 1` itself still separately needs
-  `OFFSET_BUCKETS`/`bucket()` widened and a `FORMAT_VERSION` bump before
-  it is measurable at all, which still leaves the Silesia finals named
-  above (several 10s of MiB) out of reach regardless of any of this.
+  failure modes for real. Eleventh slice, S2-A94: built the real-bitstream
+  counterpart to `ideal_cost_bits_with_window`/`ideal_cost_bits_adaptive_window`
+  (`codec::compressed_len_with_window`/`compressed_len_adaptive_window`),
+  still not wired to `encode_tokens` itself, so the next slice's
+  real-bitstream measurement would not be flying blind on the
+  ideal-vs-real coder gap ADR-0038 documents. Twelfth slice, S2-R11: used
+  it to re-measure S2-A93's wiring decision for real, across every
+  train-eligible kind this crate defines rather than S2-R9's own four —
+  and rejected it: `Base64Wrapped(train)` regresses **+0.005874** b/B
+  even though the confirmed detector fires on genuine, non-colliding far
+  matches there, a third distinct failure mode neither S2-A91's nor
+  S2-A92's fix addresses. Remaining S1-P4 scope: isolate why
+  `Base64Wrapped`'s confirmed far matches net-lose before either
+  tightening the detector with a fourth condition or accepting that
+  closing this lead needs gating per-kind local-match density, not just
+  a byte-content anchor; `parse_optimal_adaptive_window` stays unwired
+  from `compress`/`encode`. A window past `2^21 - 1` itself still
+  separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
+  `FORMAT_VERSION` bump before it is measurable at all, which still
+  leaves the Silesia finals named above (several 10s of MiB) out of
+  reach regardless of any of this.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -4868,3 +4877,71 @@ record.
   fires true on. The several-10s-of-MiB Silesia finals this lead targets
   (`mozilla`, `nci`, `samba`, `sao`, `webster`) stay out of reach either
   way: `ADAPTIVE_WINDOW` is still under 2 MiB.
+- S2-A94 | ACCEPTED | S1-P4's own remaining scope after S2-A93: before
+  wiring `parse_optimal_adaptive_window` into `encode`'s real
+  `Method::Lz` path, built the real-bitstream counterpart to
+  `ideal_cost_bits_with_window`/`ideal_cost_bits_adaptive_window`, so
+  the next slice's measurement would not be flying blind on the
+  ideal-vs-real coder gap ADR-0038 documents. `codec::
+  encode_tokens` factored into a thin wrapper over a new
+  `encode_tokens_with(data, columns, tokens)` taking already-parsed
+  tokens, letting two new `pub` entry points reuse its real `Encoder`
+  body: `compressed_len_with_window(data, window)` (parses with
+  `lz::parse_optimal_with_window`) and `compressed_len_adaptive_window(data)`
+  (parses with `lz::parse_optimal_adaptive_window`), returning the real
+  payload byte length rather than a modeled cost sum. `encode_tokens`
+  itself is untouched — still `lz::parse_optimal(data)` unconditionally
+  — so this is purely additive: `compress`/`decompress` behavior does
+  not change. Standalone primitive, same shape every earlier S1-P4 slice
+  took. | 1 new unit test (374 lib tests, up from 373):
+  `compressed_len_adaptive_window` matches `encode_tokens`'s own wired
+  length exactly for data at or under `WINDOW`, the gate being
+  unconditionally false there (same reason
+  `ideal_cost_bits_adaptive_window_matches_wired_window_within_window`
+  holds at the ideal-cost layer). `cargo x check`: 4 stages green.
+  `baseline_gate check`: 11 cases, no regression (nothing wired to
+  `compress`/`encode`, unaffected). | No bpb measurement of its own:
+  this is infra enabling the next slice's real-bitstream measurement,
+  same as S2-A1/S2-A50/S2-A61 before it; `research/progress.jsonl`
+  records it as `kind: "patch"` with null bpb deltas.
+- S2-R11 | REJECTED | S1-P4's own remaining scope after S2-A94: used
+  `compressed_len_with_window`/`compressed_len_adaptive_window` to
+  re-measure S2-A93's wiring decision through a real bitstream, not
+  just ideal cost, at S2-R9/S2-A93's exact scale (4,000,000 bytes, train
+  seed `0xC0FFEE123456789A`) but across every train-eligible non-ladder
+  `DatasetKind` this crate currently defines — five, not the four S2-R9
+  happened to test: `JsonRecords`, `Base64Wrapped`, `InterleavedAudio16`,
+  `SqliteLikeRecords`, `X86DenseCode` — plus both sealed-only kinds and
+  `long_range_repeat` at both seeds. Every case S2-A93 already tested
+  reproduced its ideal-cost numbers closely through the real coder too
+  (`access_log` sealed -0.001108 vs S2-A93's -0.001109; `json_records`
+  -0.000384 vs -0.000383; `long_range_repeat` train -0.021481/sealed
+  -0.021422, both matching to five decimal places), confirming the
+  ideal-vs-real gap never flips an accept/reject verdict on any of them.
+  But `Base64Wrapped(train)`, outside S2-R9's own four-kind sweep,
+  regressed: 0.470048 -> 0.475922 b/B, **+0.005874**, a third distinct
+  confirmed-detector failure mode after S2-R9's alignment blind spot
+  (fixed by S2-A91) and incidental-collision false positive (fixed by
+  S2-A92). Traced by direct manipulation, not inference: the detector
+  fires `true` on this data, and the 1,529 resulting match tokens
+  landing past `WINDOW` (lengths 60-81 bytes) are confirmed genuine
+  recurrences, not hash collisions — the same "detector right, gate
+  still costs bits" shape S2-A93 diagnosed for `access_log`, but this
+  time not explained by the seed/search window mismatch S2-A93 fixed
+  (both are already bound to the same window here). Mechanism not
+  isolated further: whether these far matches displace cheaper local
+  matches/reps outright, or just carry bucket 20's flat 20-raw-bits
+  price (paid identically whether the match lands 1 byte or 1 MiB past
+  `WINDOW`) for too little length to earn it, needs a slice of its own.
+  `research/corpus/POLICY.md`'s accept bar is per-case by this lead's
+  own precedent (S2-A93: "every detector=false case stayed exactly at
+  zero"); a new real regression on a previously-untested train kind
+  fails it regardless of the aggregate direction. `encode_tokens` stays
+  unwired from the adaptive gate. Remaining S1-P4 scope: isolate why
+  `Base64Wrapped`'s confirmed far matches net-lose before either adding
+  a fourth detector condition or accepting that closing this lead needs
+  gating on a kind's own local-match density, not just a byte-content
+  anchor. | Measured with a throwaway, uncommitted scratch binary
+  (`bench/src/bin/adaptive_window_wiring_experiment.rs`, deleted after
+  this measurement, same convention as S2-A93's own).
+  `research/progress.jsonl` it146.

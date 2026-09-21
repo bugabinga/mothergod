@@ -434,6 +434,46 @@ impl TokenSink for CostSink {
 /// `columns` is `Some` exactly when this trial's candidate is
 /// [`Candidate::Transpose`] with that column count, selecting the
 /// column-expert literal path for the whole trial (see [`EncodeSink`]).
+/// Panics under the same condition as [`encode_tokens_with`], which this
+/// delegates to.
+fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>) -> Vec<u8> {
+    encode_tokens_with(data, columns, &lz::parse_optimal(data))
+}
+
+/// `encode_tokens`'s real-bitstream length, but parsed with
+/// [`lz::parse_optimal_with_window`] under `window` instead of the wired
+/// [`lz::WINDOW`] (`research/JOURNAL.md` S1-P4): the real-`Encoder`
+/// counterpart to [`ideal_cost_bits_with_window`], which prices the same
+/// candidate through modeled cost only. Lets a candidate window's actual
+/// compressed size be measured without wiring it into `encode_tokens` or
+/// `compress`/`encode`, and without bumping `FORMAT_VERSION`: the returned
+/// length is a real payload byte count, but not itself guaranteed
+/// decodable by this crate's current [`decode`] if `window` exceeds
+/// [`lz::WINDOW`] (`ensure_within_window` still rejects a distance past
+/// it, same as [`ideal_cost_bits_with_window`]'s own ideal-cost-only
+/// caveat). See [`lz::parse_optimal_with_window`]'s docs for the bucket
+/// ceiling `window` must stay under.
+#[must_use]
+pub fn compressed_len_with_window(data: &[u8], window: usize) -> usize {
+    encode_tokens_with(data, None, &lz::parse_optimal_with_window(data, window)).len()
+}
+
+/// Same as [`compressed_len_with_window`], but parsed with
+/// [`lz::parse_optimal_adaptive_window`] instead of a fixed candidate
+/// `window`: the real-`Encoder` counterpart to
+/// [`ideal_cost_bits_adaptive_window`], which prices the same parse
+/// through modeled cost only. Not wired to `encode_tokens` itself
+/// (`research/JOURNAL.md` S1-P4's own remaining-scope note on that lead):
+/// a real-bitstream measurement first, the same shape every earlier S1-P4
+/// slice took before any wiring decision.
+#[must_use]
+pub fn compressed_len_adaptive_window(data: &[u8]) -> usize {
+    encode_tokens_with(data, None, &lz::parse_optimal_adaptive_window(data)).len()
+}
+
+/// Shared body of [`encode_tokens`], [`compressed_len_with_window`], and
+/// [`compressed_len_adaptive_window`]: encodes already-parsed `tokens`
+/// through the context-mixing pipeline and returns the real payload bytes.
 ///
 /// # Panics
 ///
@@ -441,11 +481,9 @@ impl TokenSink for CostSink {
 /// header field is a `u32`, the same bound [`lz::parse_greedy`] already
 /// enforces. [`crate::compress`] checks this before calling in, so
 /// nothing reachable from the public API hits it today.
-fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>) -> Vec<u8> {
+fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Token]) -> Vec<u8> {
     let declared_len = u32::try_from(data.len())
         .expect("codec::encode: input longer than u32::MAX is not supported yet");
-
-    let tokens = lz::parse_optimal(data);
     let token_count = u32::try_from(tokens.len())
         .expect("token count bounded by input length, already checked to fit u32 above");
 
@@ -460,7 +498,7 @@ fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>) -> Vec<u8> {
             state,
         });
     walk_tokens(
-        &tokens,
+        tokens,
         data,
         &mut models,
         &mut EncodeSink {
@@ -1915,6 +1953,46 @@ mod tests {
         assert_eq!(
             ideal_cost_bits_adaptive_window(&data),
             ideal_cost_bits(&data)
+        );
+    }
+
+    #[test]
+    fn compressed_len_with_window_matches_wired_encode_tokens_at_wired_window() {
+        // Real-Encoder counterpart to the fixed-window ideal-cost test
+        // above: lz::parse_optimal(data) is defined as
+        // parse_optimal_with_window(data, WINDOW), so
+        // compressed_len_with_window at that same window must match
+        // encode_tokens's own wired length exactly, not just
+        // approximately.
+        let data: Vec<u8> = (0..5000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        assert_eq!(
+            compressed_len_with_window(&data, lz::WINDOW),
+            encode_tokens(&data, None).len()
+        );
+    }
+
+    #[test]
+    fn compressed_len_adaptive_window_matches_wired_encode_tokens_within_window() {
+        // Real-Encoder counterpart to
+        // ideal_cost_bits_adaptive_window_matches_wired_window_within_window,
+        // same reason: lz::parse_optimal_adaptive_window's gate is
+        // unconditionally false for data.len() <= lz::WINDOW, so this
+        // capability's real compressed length must match encode_tokens's
+        // own wired length exactly, not just approximately, below that
+        // scale. Not yet a decode()-level round-trip test: the whole point
+        // of this capability (research/JOURNAL.md S1-P4) is measuring a
+        // window past lz::WINDOW, and encode_tokens is not wired to use
+        // one, so ensure_within_window still rejects a payload that
+        // exercises it — the same caveat ideal_cost_bits_adaptive_window
+        // has always carried.
+        let data: Vec<u8> = (0..5000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        assert_eq!(
+            compressed_len_adaptive_window(&data),
+            encode_tokens(&data, None).len()
         );
     }
 
