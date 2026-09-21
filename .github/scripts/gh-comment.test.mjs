@@ -61,6 +61,21 @@ test("--new creates an issue with the labels, the footer, and the workflow token
   assert.equal(called.admin, null);
 });
 
+test("a completion-announcement opener is trimmed before the body is posted", () => {
+  const { status, called, stderr } = run(["489"], {
+    body: "Ops-log posted. PR #641 passed review and merged.",
+  });
+  assert.equal(status, 0);
+  assert.match(called.argv[4], /^PR #641 passed review and merged\.\n\n---/);
+  assert.match(stderr, /trimmed 1 completion-announcement opener/);
+});
+
+test("a body with no opener reaches gh unchanged", () => {
+  const { called, stderr } = run(["489"], { body: "PR #641 passed review and merged." });
+  assert.match(called.argv[4], /^PR #641 passed review and merged\.\n\n---/);
+  assert.equal(stderr, "");
+});
+
 test("commenting and closing keep their shapes", () => {
   assert.deepEqual(run(["489"]).called.argv.slice(0, 2), ["issue", "comment"]);
   assert.deepEqual(run(["489", "--close"]).called.argv.slice(0, 2), ["issue", "close"]);
