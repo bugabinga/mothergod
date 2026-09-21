@@ -29,13 +29,15 @@ three. That is not a fallback path with a trigger condition to remember; it
 is the only path, which is why there is nothing here to get wrong.
 
 This is also the trim point for the completion-announcement opener
-(`opener.py`, issue behind PR #645): run-notice.py trims it from the
-Telegram notice, but an issue or PR comment posted straight through this
-script is the permanent project surface CLAUDE.md's Voice rules actually
-mean, and nothing was trimming it there. Two of nine sessions in one
-retrospect window (2026-09-21) still opened a gh-comment body with
-"Ops-log posted." or similar after that PR shipped, because it only ever
-touched the ephemeral notice.
+(`opener.py`, PR #645): run-notice.py trims it from the Telegram notice,
+but an issue comment posted straight through this script is permanent
+project surface CLAUDE.md's Voice rules actually mean, and nothing was
+trimming it there. Two of nine sessions in one retrospect window
+(2026-09-21) still opened a gh-comment body with "Ops-log posted." or
+similar after that PR shipped, because it only ever touched the ephemeral
+notice. PR bodies and PR comments are a separate, still-open gap: they
+never reach this script (below), so they keep the hand-typed footer and
+get no trim.
 
 Scope: issues only, and that boundary is load-bearing, not laziness. This
 credential must NEVER open a pull request, because GitHub raises no workflow
