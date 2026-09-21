@@ -40,6 +40,15 @@ on:
       - agent-research
       - agent-deslop
       - agent-model-intel
+      # Curator and herald are absent on purpose (BDFL ruling,
+      # 2026-09-21, after curator run 35600620955 died on an API 529
+      # and woke nobody): neither red strands work the next tick
+      # cannot redo. The curator only judges and routes; a herald
+      # branch left open is stalled-prs's to catch. The BDFL's next
+      # scheduled retrospect shows the red anyway, so a line here
+      # would buy at most that latency, priced at one discretionary
+      # BDFL run per transient API error. Add a seat when its red
+      # strands work.
       # Not an agent seat, but it ships the clock (ADR-0035): a red
       # deploy means the next cadence change silently never arrives,
       # the exact failure class the clock migration exists to end.
