@@ -58,7 +58,11 @@ jobs:
       # branch is in flight and none merged within the window. Its own
       # docstring is the contract; skipped when the guard already paused,
       # since an unreadable-GitHub retry would be wasted on a run that is
-      # not going to proceed anyway.
+      # not going to proceed anyway. Its verdict only gates a cron tick,
+      # below: a human dispatch keeps the same always-runs guarantee
+      # `discretionary` already gives it against the allowance governor,
+      # so an operator forcing a session sooner than the window is never
+      # silently overruled by a claim check they cannot see coming.
       - id: due
         if: steps.guard.outputs.paused != 'true'
         env:
@@ -71,15 +75,15 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.guard.outputs.paused != 'true' && steps.due.outputs.due == 'true'
+        if: steps.guard.outputs.paused != 'true' && (inputs.source != 'cron' || steps.due.outputs.due == 'true')
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-        if: steps.guard.outputs.paused != 'true' && steps.due.outputs.due == 'true'
+        if: steps.guard.outputs.paused != 'true' && (inputs.source != 'cron' || steps.due.outputs.due == 'true')
 
       - id: claude
-        if: steps.guard.outputs.paused != 'true' && steps.due.outputs.due == 'true'
+        if: steps.guard.outputs.paused != 'true' && (inputs.source != 'cron' || steps.due.outputs.due == 'true')
         uses: anthropics/claude-code-action@v1
         env:
           # Job-scoped fallback for gh writes after the claude app token
