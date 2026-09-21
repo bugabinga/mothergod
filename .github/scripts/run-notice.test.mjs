@@ -118,3 +118,11 @@ test("wrong arguments are a caller bug and do exit non-zero", () => {
   assert.equal(run.status, 2);
   assert.match(run.stderr, /usage:/);
 });
+
+test("a completion announcement does not get the first line", () => {
+  // The rule in CLAUDE.md failed a third of the time as prose (opener.py's
+  // docstring has the count); the notice enforces it where the reader is.
+  const { out } = notice({ metadata: ok(), response: "Heartbeat done. Summary:\n\nMerged #545." });
+  assert.match(out, /^Merged #545\./);
+  assert.ok(!out.includes("Heartbeat done"), `opener survived: ${out}`);
+});
