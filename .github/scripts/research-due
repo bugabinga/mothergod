@@ -40,7 +40,12 @@ the silent skip issue #541 exists to end. "Anything", not just an unreadable
 script's caller is a workflow `if:` condition that greps the exit code, so a
 crash anywhere in main() (an unexpected API shape, a bad timestamp) has to
 answer due too, or it is indistinguishable from a deliberate not-due to the
-one reader that matters (review, PR #660).
+one reader that matters (review, PR #660). Bounded to main()'s own body: a
+failure before Python starts running it (a missing interpreter, a stripped
+executable bit) or after (render's own print) is outside what a try/except
+in here can reach, and reads as a bare nonzero exit to the same caller.
+Low-probability on the runner this runs on, both committed and unchanged by
+this script; noted so it is not mistaken for covered.
 
 Usage: research-due
 """

@@ -38,6 +38,81 @@ function decide(payload) {
   return JSON.parse(run.stdout);
 }
 
+// in_flight()'s own ref-walking logic, exercised directly by monkeypatching
+// gh_json rather than the higher-level in_flight itself: `decide()` never
+// contained round 1's bug (a closed-unmerged-PR ref reported as in flight
+// forever), `in_flight()` did, and testing only `decide()` and the crash
+// wrapper below left that fix's own regression uncovered (review, PR #660).
+const inFlightDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("research_due", sys.argv[1] + "/research-due")
+spec = importlib.util.spec_from_loader("research_due", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+responses = iter(json.loads(sys.argv[2]))
+def fake_gh_json(args):
+    return tuple(next(responses))
+mod.gh_json = fake_gh_json
+flight, error = mod.in_flight("owner/repo")
+print(json.dumps({"flight": flight, "error": error}))
+`;
+
+function inFlight(responses) {
+  const run = spawnSync("python3", ["-c", inFlightDriver, scriptsDir, JSON.stringify(responses)], {
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+test("an open claude/research-* PR is in flight, and no other read runs", () => {
+  // A second gh_json call would throw StopIteration inside the driver and
+  // fail the subprocess, so this also pins the short-circuit.
+  const { flight, error } = inFlight([[[{ number: 7 }], null]]);
+  assert.equal(error, null);
+  assert.equal(flight, true);
+});
+
+test("no matching branch at all is not in flight", () => {
+  const { flight, error } = inFlight([
+    [[], null],
+    [[], null],
+  ]);
+  assert.equal(error, null);
+  assert.equal(flight, false);
+});
+
+test("a branch with no PR history at all is in flight (pushed, then crashed before opening one)", () => {
+  const { flight, error } = inFlight([
+    [[], null],
+    [[{ ref: "refs/heads/claude/research-x" }], null],
+    [[], null], // pr list --state all for that branch: no history
+  ]);
+  assert.equal(error, null);
+  assert.equal(flight, true);
+});
+
+test("a branch whose only PR was closed unmerged is not in flight", () => {
+  // The bug round 1 fixed: this ref must not block every later tick forever.
+  const { flight, error } = inFlight([
+    [[], null],
+    [[{ ref: "refs/heads/claude/research-y" }], null],
+    [[{ number: 42 }], null], // pr list --state all: one closed PR
+  ]);
+  assert.equal(error, null);
+  assert.equal(flight, false);
+});
+
+test("an unreadable matching-refs read surfaces as an error, not a false negative", () => {
+  const { flight, error } = inFlight([
+    [[], null],
+    [null, "gh: rate limited"],
+  ]);
+  assert.equal(flight, null);
+  assert.match(error, /rate limited/);
+});
+
 // main()'s own fail-open contract, exercised by actually crashing in_flight,
 // not by reasoning about the try/except: the caller here is a workflow `if:`
 // that greps the exit code (unlike survey-due, whose caller reads prose), so
