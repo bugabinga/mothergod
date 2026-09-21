@@ -18,6 +18,55 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-21 — Editorial: the last source-identifier on the front page
+
+Closed the remaining slice of #411's "zero internal vocabulary" half.
+The curator's last two grooms on that issue both named the same live
+defect: `site/index.html`'s status box showed a first-time visitor the
+literal Rust constant name, `<code>FORMAT_VERSION</code> 4`, inside
+"The container format (`FORMAT_VERSION` 4) carries `Stored` and
+`Lz`...". A source-code identifier is not a fact a stranger needs; the
+fact is "the on-disk format is versioned, frozen, and this build is on
+version 4." Replaced the tag with plain prose: "The container format
+(version 4) carries...". Nothing else in the sentence changed: the
+frozen-format guarantee, the link to `docs/format/SPEC.md`, and the
+"do not use this for data you care about yet" caveat all stay exactly
+as they read before.
+
+**Scope: `site/index.html` only, not `README.md`.** `README.md:55`
+carries the identical `` `FORMAT_VERSION` `` restatement, plus journal
+entry ids (`S2-D2`/`S2-D3`) in the same sentence, which is the same
+class of internal vocabulary #411's original filing named. Left alone
+here because the curator's grooms on #411 pointed at the site line
+specifically, not the README, and because the two surfaces already
+serve different readers by construction: `mothergod.dev` is the
+polished landing page for a stranger with no context, while the GitHub
+README is read by someone already looking at source control, a
+self-selecting more technical audience where a Rust constant name and
+a journal entry id cost less. That distinction is a judgment call, not
+yet written down anywhere else; recording it here so the next slice
+does not have to re-derive it, and flagging it as debatable: if a
+future survey finds visitors arriving at the README first rather than
+the site, this split stops making sense and the two surfaces should
+match.
+
+**The guard moved with the claim, matching the pattern from
+2026-09-20's Speed-table entry.** `tests/claims.rs`'s
+`format_version_is_current_everywhere_it_is_restated` anchored the
+site half of its check on the literal substring
+`<code>FORMAT_VERSION</code>`, now absent from the page it was reading.
+Re-anchored it on `container format (version`, the phrase that
+replaced it, unique in the file and still adjacent to the digit the
+test extracts and compares against `mothergod::FORMAT_VERSION`. The
+guard still fails naming both values if a future codec change bumps
+the constant and nobody updates the sentence; only the anchor string
+changed, not what the test verifies.
+
+Not touched: #411's other open half, "one page per audience" (the
+broader site restructure), and the remainder of #443 (ADR rendering).
+Both are larger design work than this slice; #411 stays open as the
+tracking umbrella per the curator's last groom.
+
 ## 2026-09-20 — Editorial: the Speed numbers stopped wearing prose
 
 Shipped another slice of issue #604: item 2, "prose where structure

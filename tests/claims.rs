@@ -90,10 +90,10 @@ fn format_version_is_current_everywhere_it_is_restated() {
         "README.md claims FORMAT_VERSION {readme_claim}, src/lib.rs's FORMAT_VERSION is {true_version}"
     );
 
-    let site_claim = digits_after(&read("site/index.html"), "<code>FORMAT_VERSION</code>");
+    let site_claim = digits_after(&read("site/index.html"), "container format (version");
     assert_eq!(
         site_claim, true_version,
-        "site/index.html claims FORMAT_VERSION {site_claim}, src/lib.rs's FORMAT_VERSION is {true_version}"
+        "site/index.html claims container format version {site_claim}, src/lib.rs's FORMAT_VERSION is {true_version}"
     );
 }
 
