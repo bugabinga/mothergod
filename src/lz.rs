@@ -1520,15 +1520,16 @@ fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
     tokens
 }
 
-/// Three-round DP-priced optimal parse (`JOURNAL` S1-A3, S2-D2's `lz_opt`
-/// slice; round count raised from the archive's original two by S2-A56): a
-/// first pass with [`parse_greedy`] seeds a price table, then each of three
-/// `dp_round` rounds finds the min-price path under the current table and
-/// reseeds a sharper one from its own output for the next round (the
-/// archive stopped after one reseed; S2-A56 measured a second reseed as a
-/// further net win with no sealed-validation regression, not yet iterated
-/// to full convergence). Below `OPTIMAL_MIN_LEN` (64 bytes) the DP's fixed
-/// setup cost isn't worth paying: falls back to [`parse_greedy`] directly,
+/// `DP_ROUNDS`-round DP-priced optimal parse (`JOURNAL` S1-A3, S2-D2's
+/// `lz_opt` slice; round count raised from the archive's original two by
+/// S2-A56): a first pass with [`parse_greedy`] seeds a price table, then
+/// each `DP_ROUNDS` `dp_round` round finds the min-price path under the
+/// current table and reseeds a sharper one from its own output for the
+/// next round (the archive stopped after one reseed; S2-A56 measured a
+/// second reseed as a further net win with no sealed-validation
+/// regression, not yet iterated to full convergence). Below
+/// `OPTIMAL_MIN_LEN` (64 bytes) the DP's fixed setup cost isn't worth
+/// paying: falls back to [`parse_greedy`] directly,
 /// matching the archive.
 ///
 /// See `dp_round`'s docs for one deliberate correctness fix over the
@@ -1550,7 +1551,7 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 /// `window` instead of the wired [`WINDOW`] (`research/JOURNAL.md` S1-P4,
 /// S2-A61's own primitive-parameterization pattern carried one level up
 /// the call stack): lets a candidate window be measured through the real
-/// three-round DP before any wiring or `FORMAT_VERSION` decision is made.
+/// `DP_ROUNDS`-round DP before any wiring or `FORMAT_VERSION` decision is made.
 /// [`parse_greedy`]'s own seed pass stays bound by the wired [`WINDOW`]
 /// regardless of `window`: it only informs the first round's starting
 /// price table, so a seed that cannot see as far as `window` costs the DP
@@ -1570,7 +1571,7 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
 }
 
 /// Shared body of [`parse_optimal_with_window`] and
-/// [`parse_optimal_adaptive_window`]: three `dp_round` rounds at
+/// [`parse_optimal_adaptive_window`]: [`DP_ROUNDS`] `dp_round` rounds at
 /// `search_window`, seeded by [`parse_greedy_with_window`] at
 /// `seed_window`. [`parse_optimal_with_window`] always passes
 /// [`WINDOW`] as `seed_window` (its own documented contract); the adaptive
@@ -1596,14 +1597,21 @@ pub(crate) fn parse_optimal_with_seed_and_search_window(
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
-    let seed = parse_greedy_with_window(data, seed_window);
-    let prices = PriceCounts::tally(&seed, data).prices(seed.len());
-    let first_round = dp_round(data, &prices, search_window);
-    let prices = PriceCounts::tally(&first_round, data).prices(first_round.len());
-    let second_round = dp_round(data, &prices, search_window);
-    let prices = PriceCounts::tally(&second_round, data).prices(second_round.len());
-    dp_round(data, &prices, search_window)
+    let mut round = parse_greedy_with_window(data, seed_window);
+    for _ in 0..DP_ROUNDS {
+        let prices = PriceCounts::tally(&round, data).prices(round.len());
+        round = dp_round(data, &prices, search_window);
+    }
+    round
 }
+
+/// Number of `dp_round` reseed-and-relax passes [`parse_optimal_with_seed_and_search_window`]
+/// runs. Raised from the archive's original two to three by S2-A56, which
+/// measured a further net win with no sealed-validation regression; S2-R4
+/// then measured a fourth round losing on the sealed split, so the count
+/// stays three until new evidence reopens it (`research/JOURNAL.md`
+/// S1-P2).
+const DP_ROUNDS: usize = 3;
 
 /// Exact-match byte width an anchor in [`likely_benefits_from_larger_window`]
 /// must share before two positions count as recurring. Matches the crate's
