@@ -28,6 +28,15 @@ clock, so an issue filed at minute 130 lands exactly like one filed at minute
 three. That is not a fallback path with a trigger condition to remember; it
 is the only path, which is why there is nothing here to get wrong.
 
+This is also the trim point for the completion-announcement opener
+(`opener.py`, issue behind PR #645): run-notice.py trims it from the
+Telegram notice, but an issue or PR comment posted straight through this
+script is the permanent project surface CLAUDE.md's Voice rules actually
+mean, and nothing was trimming it there. Two of nine sessions in one
+retrospect window (2026-09-21) still opened a gh-comment body with
+"Ops-log posted." or similar after that PR shipped, because it only ever
+touched the ephemeral notice.
+
 Scope: issues only, and that boundary is load-bearing, not laziness. This
 credential must NEVER open a pull request, because GitHub raises no workflow
 run from an event its own `GITHUB_TOKEN` caused, so the PR would be born
@@ -47,6 +56,7 @@ import os
 import subprocess
 import sys
 
+from opener import trim
 from secret_scrub import scrub
 
 FOOTER = "\n\n---\n_{role} · [Claude Code](https://claude.ai/code)_"
@@ -88,6 +98,10 @@ def main() -> int:
     body = sys.stdin.read().strip()
     if not body:
         die("empty body; refusing to post")
+    body, removed = trim(body)
+    if removed:
+        print(f"gh-comment: trimmed {len(removed)} completion-announcement "
+              "opener sentence(s) per CLAUDE.md Voice rules", file=sys.stderr)
     # An issue comment is permanent, public, unmasked project surface (hard
     # rule 10 names it). Redact rather than refuse: a blocked post costs the
     # run its report, and the scrubbed body is already safe. Warn loudly so
