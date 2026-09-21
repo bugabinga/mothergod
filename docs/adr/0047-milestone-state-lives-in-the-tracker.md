@@ -46,7 +46,7 @@ No tracker field holds it, it is editorial by nature, and a rank a reader disagr
 Deploy gains an authenticated tracker read and the network dependency that comes with it.
 The page's failure mode moves from quietly stale to loudly absent, which is the trade this project already makes everywhere else.
 
-Until the migration in #611 lands, the checkboxes are still the live source, so this record describes the target rather than the present.
+The migration is #611; until it landed on 2026-09-21 the checkboxes were still the live source and this record described a target rather than the present.
 
 Historical checklists for delivered milestones (M0, M1, M2, M4) become a prose line naming what shipped.
 They are closed history, and minting retroactive issues to represent them would manufacture a record that never existed.

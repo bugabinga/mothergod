@@ -98,18 +98,23 @@ Two kinds of entry live here, and conflating them is how the status page came
 to call this project's most-worked area "pending" (operator report,
 2026-09-18).
 
-A **milestone** is a deliverable with a definition of done, so it carries a
-checklist: M0, M1, M2, M4, M6, M7. A **program** is continuous work with a
-target but no finish line, so it carries none: M3 (ratio) and M5 (speed). The
-numbering is creation order, not a dependency chain, and a program gates
-nothing; M7 already says this of itself.
+A **milestone** is a deliverable with a definition of done. Its items are
+issues in a GitHub Milestone of the same name, linked from its section
+below, and an item is done when its issue closes (ADR-0047): M6 and M7
+today. A **program** is continuous work with a target but no finish line,
+so it has no tracker milestone and nothing to count: M3 (ratio) and M5
+(speed). Milestones delivered before the tracker held items (M0, M1, M2,
+M4) keep one paragraph each naming what shipped, and no retroactive
+issues. The numbering is creation order, not a dependency chain, and a
+program gates nothing; M7 already says this of itself. Section order is
+rank, and the status page renders it top to bottom.
 
-Release 0.1 (M6) therefore gates on its own two open items alone. It promises
-what M0/M1/M2/M4 delivered: lossless, adversarially tested, deterministic
-across platforms, a frozen format, a CLI and a library. It does not promise
-the RATIO ladder, whose first rung is open (Silesia aggregate 2.061 b/B
-against zstd -19's 1.997, `docs/benchmarks/`). Waiting on a program is
-waiting forever, because a program has no state in which it is finished.
+Release 0.1 (M6) therefore gates on its own items alone. It promises what
+M0/M1/M2/M4 delivered: lossless, adversarially tested, deterministic across
+platforms, a frozen format, a CLI and a library. It does not promise the
+RATIO ladder, whose first rung is open (Silesia aggregate 2.061 b/B against
+zstd -19's 1.997, `docs/benchmarks/`). Waiting on a program is waiting
+forever, because a program has no state in which it is finished.
 
 The daily heartbeat picks the top unblocked item and ships the smallest useful
 slice of it. Items marked `blocked-on-human` need the operator.
@@ -129,35 +134,24 @@ agent processes. Done 2026-08-20.
 
 ## M1 — Port the founding-session codec ✅
 
-- [x] Founding artifacts imported to `research/imports/session-1/` and the
-      codec import-verified lossless (2026-08-20).
-- [x] Port `research/imports/session-1/mothergod.rs` into `src/` as
-      reviewable modules (filters, parse, models, coder) behind the frame
-      format, one PR per module, tests per module, invariants written down
-      (JOURNAL S1-A*). The archive file stays untouched; the port must meet
-      the crate's rules the archive predates: decoder never panics on
-      adversarial input (the archive uses assert/unwrap), docs, strict lints.
-- [x] Python harness verified (reproduces the it31 champion's sealed
-      validation exactly), then moved to git history (commit `1a3b1c8`) to
-      keep the tree single-language (ADR-0006).
+The founding artifacts imported to `research/imports/session-1/` and
+import-verified lossless; the archive codec ported into `src/` as
+reviewable modules (filters, parse, models, coder) behind the frame
+format, under the crate's rules the archive predates (decoder never
+panics, docs, strict lints, invariants written down, JOURNAL S1-A*); the
+Python harness verified against the it31 champion's sealed validation,
+then retired to git history (commit `1a3b1c8`, ADR-0006). Done 2026-08-28.
 
-## M2 — Honest benchmarking (JOURNAL S1-D2)
+## M2 — Honest benchmarking (JOURNAL S1-D2) ✅
 
-- [x] `bench/` harness, in Rust (ADR-0006): `bench/corpus.toml` manifest
-      pinning Silesia + Canterbury by URL + SHA-256 (fetch-and-cache, never
-      committed), deterministic in-repo generators (entropy ladder,
-      markov-H8/2, structured classes), three-tier train/sealed/finals split
-      per `research/corpus/POLICY.md`.
-- [x] Adversarial decode seed corpus + suite (`tests/adversarial/`,
-      `docs/TESTING.md` layer 2).
-- [x] Ideal-cost accounting mode in the Rust models (sum −log₂(p) without
-      emitting bits) — recovers the archive's proxy-speed experiment loop
-      inside the codec of record.
-- [x] CI benchmark gate: PR fails on regression vs `bench/baseline.json`
-      (required `ratio` check, docs/TESTING.md layer 7).
-- [x] Report: bits/byte vs gzip/zstd/xz, per-dataset, in `docs/benchmarks/`
-      (`canterbury.md`, `silesia.md`). By hand, not nightly/weekly yet —
-      no scheduled job regenerates either file on a cadence.
+The Rust `bench/` harness (ADR-0006) pinning Silesia and Canterbury by
+URL and SHA-256 with the train/sealed/finals split of
+`research/corpus/POLICY.md`; the adversarial decode seed corpus and suite
+(`tests/adversarial/`, `docs/TESTING.md` layer 2); ideal-cost accounting
+inside the codec of record; the required `ratio` check against
+`bench/baseline.json` (layer 7); and the per-file reports in
+`docs/benchmarks/`, which no scheduled job regenerates yet. Done
+2026-08-28.
 
 ## M3 — Close the gaps (research program)
 
@@ -170,35 +164,17 @@ Work the journal's standing leads in order: SSE (S1-P1), btultra2-class parse
 (S1-P5). Target: beat zstd -19 per-file on all of Silesia/Canterbury with
 real bitstreams; then xz -9e.
 
-## M4 — Production hardening
+## M4 — Production hardening ✅
 
-- [x] cargo-fuzz targets in scheduled CI and cargo-mutants in the PR gate
-      (`docs/TESTING.md` layers 3–4): `fuzz-check` runs both targets
-      weekly, `mutants-check` mutates a PR's own changed lines and reds the
-      PR that leaves one alive. Survivors surface where they are made
-      instead of becoming issues later.
-- [x] Cross-platform determinism CI + golden frames per `FORMAT_VERSION`
-      (layer 5): `tests/golden/` pins a decode+re-encode pair per version
-      (v2, v3, `superseded/` for retired pairs), runs in the `test`
-      required check on every PR, and the weekly `monster` matrix runs the
-      same suite across all 10 hosted runtime/ABI lanes plus Android.
-- [x] Streaming/block API, bounded-memory decode guarantees:
-      `mothergod::decompress_bounded` (caller ceiling below
-      `codec::MAX_DECODED_LEN`), `decode` rejects a match distance beyond
-      `lz::WINDOW`, and `decompress_to_writer` streams `Identity`/`Delta`/
-      `Bcj` frames to any `Write` sink bounded to `lz::WINDOW` resident
-      memory. `Transpose` keeps a whole-buffer decode by design
-      (`research/JOURNAL.md` S2-D4: its column-major write order needs the
-      full buffer regardless of decoder shape); `decodes_incrementally`
-      lets a caller ask which case a frame is. Closes `research/JOURNAL.md`
-      S1-P7. Encode still takes a whole buffer (the optimal-parse encoder
-      needs the full input regardless) and the CLI still reads its whole
-      input up front; only decode's memory bound was this item's target.
-- [x] Frozen format spec v1: `docs/format/SPEC.md` declared stable by
-      ADR-0041, at `FORMAT_VERSION` 3 then; it tracks the current version
-      (4 since ADR-0046) because the freeze is a process, not a number.
-      Versions 2 and later decode forever, evolution continues by version
-      bump per hard rule 5.
+Fuzzing and mutation testing in CI (`fuzz-check` weekly, `mutants-check`
+on a PR's own changed lines; `docs/TESTING.md` layers 3 and 4);
+cross-platform determinism with golden frames per `FORMAT_VERSION`
+(`tests/golden/`, the weekly `monster` matrix across 10 hosted lanes plus
+Android; layer 5); bounded-memory streaming decode (`decompress_bounded`,
+`decompress_to_writer`, `decodes_incrementally`; `Transpose` keeps a
+whole-buffer decode by design, JOURNAL S2-D4, and encode still takes a
+whole buffer); and the format spec frozen by ADR-0041, versions 2 and
+later decoding forever. Done 2026-09-01.
 
 ## M7 — Trust engineering (ADR-0043)
 
@@ -208,22 +184,17 @@ so the heartbeat works these ahead of M5 and M6's open items. M3 stays
 the researcher's program, unaffected. Strategy in `docs/TESTING.md`;
 mechanisms in the issues.
 
-- [x] Trust ledger + status page TRUST panel (#449). Lands first; the
-      other items append to it.
-- [x] Fuzzing that compounds: persistent corpus, nightly 10-minute
-      runs (#450).
-- [x] `frame_gen` valid-frame generator + structure-aware fuzzing
-      (#451).
-- [x] proptest: shrinking properties + decode-API differential
-      agreement (#452).
-- [x] Allocation torture sweep (#453).
-- [ ] Weekly region coverage, published never gated (#454).
-- [ ] Monthly whole-crate mutation score (#455).
-- [x] Miri lane in monster (#456).
-- [x] test-craft skill for the agents (#457, agent-system, BDFL queue).
-- Exploratory, researcher's option: Kani proof harnesses on the coder's
-  renormalization/update math; adopt only if it proves an invariant
-  fuzzing cannot, journal rules apply.
+Items, in [milestone M7](https://github.com/bugabinga/mothergod/milestone/2):
+the trust ledger and the status page's TRUST panel (#449), which the
+others append to; fuzzing that compounds (#450); the `frame_gen`
+valid-frame generator and structure-aware fuzzing (#451); proptest
+shrinking properties and decode-API differential agreement (#452); the
+allocation torture sweep (#453); weekly region coverage, published never
+gated (#454); the monthly whole-crate mutation score (#455); the Miri lane
+in monster (#456); and the test-craft skill for the agents (#457).
+Exploratory, the researcher's option and no item: Kani proof harnesses on
+the coder's renormalization/update math, adopted only if it proves an
+invariant fuzzing cannot, journal rules apply.
 
 ## M5 — Speed tiers
 
@@ -235,12 +206,9 @@ blend, measured multi-core scaling (S1-P6).
 
 ## M6 — Release 0.1
 
-- [x] CLI binary (`mothergod` compress/decompress), first slice: stdin-in,
-      stdout-out subcommands (`src/bin/mothergod.rs`), zero dependencies.
-      File arguments and the `.mgdc` suffix landed in #359; remaining scope
-      is streaming I/O, shared with M4's streaming/block API item.
-- [x] Library surface reviewed for 0.1 (#360): internals `#[doc(hidden)]`,
-      documented API is `MAGIC`, `FORMAT_VERSION`, `Method`, `Error`,
-      `compress`, `decompress`, `filters`, with a crate-root doctest.
-- [ ] GitHub release with binaries, agent-drafted changelog.
-- [ ] `blocked-on-human` crates.io publish (operator holds the token).
+Items, in [milestone M6](https://github.com/bugabinga/mothergod/milestone/1):
+the `mothergod` CLI with file arguments and the `.mgdc` suffix (#359); the
+library surface reviewed for 0.1 (#360); the release workflow that builds
+binaries and drafts the notes from `CHANGELOG.md` (#445); the first GitHub
+release, operator-dispatched (#537, `blocked-on-human`); and the crates.io
+publish, on the operator's token (#644, `blocked-on-human`).
