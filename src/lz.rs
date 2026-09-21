@@ -1578,7 +1578,17 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
 /// (`research/JOURNAL.md` S1-P4: S2-R9's rejected gate mismatched the two,
 /// which measured as its regression's actual cause, not the detector
 /// finding an unexploitable match).
-fn parse_optimal_with_seed_and_search_window(
+///
+/// `pub(crate)`, not private: `research/JOURNAL.md` S1-P4's S2-A95 diagnosed
+/// `Base64Wrapped`'s far-match net-loss (S2-R11) as a pricing gap, not a
+/// detector one, and the next slice re-tests S2-R9's own rejected mismatch
+/// (seed capped at [`WINDOW`] while every `dp_round` searches wider) against
+/// that specific data class through [`crate::codec::compressed_len_with_seed_and_search_window`]
+/// — the mismatch that regressed `access_log`/`json_records` might cut the
+/// other way for base64's far-recurrence-heavy content, and the cheapest way
+/// to find out is measuring this exact function under both seed policies,
+/// not re-deriving it.
+pub(crate) fn parse_optimal_with_seed_and_search_window(
     data: &[u8],
     seed_window: usize,
     search_window: usize,

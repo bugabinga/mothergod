@@ -4999,3 +4999,86 @@ record.
   with null bpb deltas, the same shape as S2-A89/S2-A91/S2-A92/S2-A94
   (standalone, not wired, no champion to diff against). Full record:
   `research/progress.jsonl` it147.
+- S2-A96 | ACCEPTED | S1-P4's own remaining scope after S2-A95: before
+  re-testing S2-R9's own rejected seed/search window mismatch on
+  `base64_wrapped`, exposed
+  `lz::parse_optimal_with_seed_and_search_window` as `pub(crate)` (was
+  private to `lz.rs`) and added `codec::
+  compressed_len_with_seed_and_search_window(data, seed_window,
+  search_window)`, the real-`Encoder` counterpart to
+  `compressed_len_with_window`/`compressed_len_adaptive_window` that
+  exposes both windows as independent parameters instead of only the two
+  matched policies those two already wire. `encode_tokens` itself is
+  untouched, so `compress`/`decompress` behavior does not change.
+  Standalone capability, same shape S2-A94 took for the matched-window
+  case. | 1 new unit test (375 lib tests, up from 374):
+  `compressed_len_with_seed_and_search_window(data, WINDOW, w)` matches
+  `compressed_len_with_window(data, w)` exactly, the identity
+  `parse_optimal_with_window`'s own contract guarantees. `cargo x check`:
+  4 stages green. `baseline_gate check`: 11 cases, no regression (nothing
+  wired). | No bpb measurement of its own: infra enabling the next
+  slice's measurement, same reason as S2-A1/S2-A50/S2-A61/S2-A94;
+  `research/progress.jsonl` records it as `kind: "patch"` with null bpb
+  deltas. Full record: `research/progress.jsonl` it148.
+- S2-R12 | REJECTED | S1-P4's own remaining scope after S2-A96: S2-A95
+  traced `Base64Wrapped(train)`'s far-match net-loss to the fixed
+  bucket-20 distance tax outearning a rep's near-zero marginal cost, but
+  left open whether that tax is itself inflated by the price table's own
+  self-reinforcement — the seed pass and every `dp_round` round share the
+  SAME window under `parse_optimal_adaptive_window`'s matched-window
+  contract (S2-A93), so a round-1 far match (chosen by
+  `parse_greedy_with_window`, not cost-aware) cheapens bucket 20's
+  reseeded price for rounds 2 and 3, entrenching more far matches whether
+  or not they earn their keep. Hypothesis: decoupling the seed pass from
+  the search window (S2-R9's own original, since-rejected mismatch:
+  seed capped at `WINDOW`, `dp_round` searching `ADAPTIVE_WINDOW`) starves
+  that reinforcement loop of its round-1 seed and should recover most, if
+  not all, of `Base64Wrapped(train)`'s loss. | Measured with a
+  throwaway, uncommitted scratch binary
+  (`bench/src/bin/adaptive_window_seed_ablation.rs`, deleted after this
+  measurement, same convention as S2-A93/S2-A94/S2-R11/S2-A95's own),
+  using S2-A96's new capability: `base64_wrapped(4_000_000,
+  0xC0FFEE123456789A)`, baseline `compressed_len_with_window(data,
+  WINDOW)` = 235,024 bytes (0.470048 b/B, reproducing S2-R11's own number
+  exactly, confirming this harness measures the identical thing), matched
+  (`compressed_len_with_seed_and_search_window(data, ADAPTIVE_WINDOW,
+  ADAPTIVE_WINDOW)`) = 237,961 bytes (0.475922 b/B, **+0.005874**,
+  reproducing S2-R11's own regression exactly), mismatched
+  (`compressed_len_with_seed_and_search_window(data, WINDOW,
+  ADAPTIVE_WINDOW)`) = 235,826 bytes (0.471652 b/B, **+0.001604**). Same
+  capability against both sealed-only kinds at the same length and
+  `sealed_seed` of the same key, as a fresh cross-check rather than a
+  reference to a different slice's numbers: `access_log` mismatched
+  +0.000190 (matched -0.001108, both reproducing S2-R9's +0.000189 and
+  S2-A93's -0.001109 to the fifth decimal place) and `gradient_image`
+  mismatched +0.000092 (exactly reproducing S2-R9's own unconditional-bump
+  number, itself `ideal_cost_bits_with_window`'s seed-always-`WINDOW`
+  contract — S2-R9's "unconditional bump" was already the mismatched
+  policy throughout this lead, never the matched one); matched forces
+  +0.056180 on `gradient_image`, far worse than either, confirming why
+  `parse_optimal_adaptive_window`'s detector gate declining to fire on it
+  at all (S2-A93: "every detector=false case stayed exactly at zero")
+  is load-bearing, not incidental. **Rejected**: the mismatch recovers
+  most of `Base64Wrapped(train)`'s loss (+0.005874 -> +0.001604, roughly
+  73% smaller) but does not flip it to an improvement, and it regresses
+  both sealed-only kinds versus their matched numbers (`access_log`
+  +0.000190 vs -0.001108, `gradient_image` +0.000092 vs the gate's actual
+  0.0) — failing this lead's own per-case accept bar on every axis
+  measured. Confirms the self-reinforcement mechanism is real and
+  explains most, not all, of S2-A95's diagnosed tax: a genuine residual
+  (~0.0016 b/B, roughly a quarter of the original loss) survives even
+  with round-1's price table blind to the far match, so bucket 20's tax
+  outearning a rep's cost is not solely an artifact of adaptive
+  reseeding. No single global seed-window policy serves every case:
+  matched is strictly better for every previously-accepted detector=true
+  case (and for the gate itself, since it is what the gate actually
+  runs), mismatched is merely less-bad for `Base64Wrapped` alone. Closes
+  the seed-window lever as a viable fix for this lead: the seed/search
+  mismatch stays rejected globally (S2-R9 stands), and
+  `parse_optimal_adaptive_window`'s matched-window contract is unchanged.
+  Remaining S1-P4 scope: the residual bucket-20-tax-vs-rep-cost gap
+  S2-A95 named is now quantified (~0.0016 b/B on this case) and confirmed
+  independent of seed reinforcement; a pricing or gating change that
+  accounts for what a far match displaces — not a fourth detector
+  condition, not a seed-window policy — is what is owed next.
+  `research/progress.jsonl` it149.
