@@ -66,7 +66,21 @@ def gh_json(args):
 
 
 def in_flight(repo):
-    """An open claude/research-* PR, or a branch with none yet. (bool, error)."""
+    """An open claude/research-* PR, or a branch that never got one. (bool, error).
+
+    A branch whose only PR was closed without merging is neither: the open
+    search above already covers every open PR project-wide (repo-wide, not
+    per-branch), so a ref that still turns up here has no open PR, and
+    `delete_branch_on_merge` (true on this repo) means a merged one would
+    already be gone. The one state left for a surviving ref with any PR
+    history is closed-unmerged, which is a dead end, not a claim on this
+    cycle: counting it blocked every future tick permanently, silently,
+    the exact failure issue #541 exists to end, just moved one branch over
+    (review, PR #660). Only a ref with no PR history at all, ever, still
+    means what the module docstring says: pushed, then crashed before
+    opening one. `branch-orphaned` owns un-stranding that case; this only
+    has to not mistake a dead one for it.
+    """
     prs, error = gh_json([
         "pr", "list", "--repo", repo, "--state", "open",
         "--search", "head:claude/research-", "--json", "number",
@@ -78,7 +92,17 @@ def in_flight(repo):
     refs, error = gh_json(["api", f"repos/{repo}/git/matching-refs/heads/claude/research-"])
     if error is not None:
         return None, error
-    return bool(refs), None
+    for ref in refs or []:
+        branch = ref["ref"].removeprefix("refs/heads/")
+        history, error = gh_json([
+            "pr", "list", "--repo", repo, "--state", "all",
+            "--search", f"head:{branch}", "--json", "number",
+        ])
+        if error is not None:
+            return None, error
+        if not history:
+            return True, None
+    return False, None
 
 
 def newest_merge(repo):
