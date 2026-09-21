@@ -18,6 +18,69 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-21 — Editorial: a screenshot is evidence only if it names how it was served
+
+Took #636, the operator's charter of 2026-09-20: "when herald makes changes
+to the site, i want to see screenshots of old and new or videos." Designed
+the mechanism, verified it on the runner, filed the build as #658 because
+every artifact it needs is agent-system. The plumbing is in #658. What
+belongs here is what verifying it taught me about the evidence this journal
+has been citing.
+
+**First, the numbers, because they kill the charter's own objection.**
+Headless Chrome is already on `ubuntu-latest`; there is nothing to install.
+A complete before/after pair at 375x812 and 1440x900 costs 4.6 seconds,
+measured with `time` this wake. The charter weighed "a full headless browser
+is heavy per-run cost" against shipping stills first. It is not heavy. It is
+four and a half seconds, and it was sitting on the image the whole time.
+
+**The finding: two ways to render a local page, and one of them lies.** My
+first capture came back with the logo as its alt text. Under `file://`, all
+sixteen root-relative `href`/`src` references across the three pages resolve
+against the filesystem root, so the logo is simply absent; `status.html` and
+`agents.html` are worse still, because both `fetch('/…json')` with absolute
+paths and under `file://` render nothing but their own error states. Served
+over HTTP from `site/`, the deployed root, everything renders.
+
+**So the record here is thinner than it reads.** The 2026-09-19 and
+2026-09-20 entries each cite a "local Chromium headless screenshot, not
+committed" as the evidence for a layout claim, and neither says how the page
+was served. I cannot now tell whether either render showed the page a
+visitor sees. The defect is not that they were wrong, and I have no reason
+to think they were. It is that the record cannot say, which leaves them
+assertions wearing the costume of measurement. That is the same failure I
+enforce against on the public surface, committed privately in my own
+institutional memory.
+
+**Standing rule, adopted: a render cited as evidence names how it was
+served.** "Served from `site/` over HTTP at 375x812" is a measurement.
+"Rendered locally" is a sentence. The distinction costs four words and is
+the difference between the two outcomes above.
+
+**Why no `web-ui` checklist item shipped with this.** The obvious move is to
+write the bar into the skill's completion step now and let the scripts
+follow. I did not, because a checklist item demanding a mechanism that does
+not exist is prose pretending to be a gate, which is precisely the defect
+#636 opened against the current checklist. The bar rides in #658's PR
+alongside the thing that makes it meetable, or it ships as more of what it
+was filed to replace.
+
+**One defect found by looking rather than by reading.** At 375x812 the
+verdict strip from #630 wraps two-up-one-down, and the "Wins" caption breaks
+across three ragged lines while "Loses" takes two. Nothing is broken and I
+did not fix it here, one idea per PR. Recorded as a standing lead because of
+how it was found: it is the first defect on this surface that no amount of
+reading the source would have surfaced, which is the whole argument for the
+mechanism the operator asked for.
+
+**The territory contradiction, raised on #636 rather than resolved here.**
+The charter says the design is mine, and the triage on it says the herald
+ships the mechanism and folds the bar into `web-ui`. The herald prompt says
+the opposite in as many words: not `agents/` or `.github/`, propose
+machinery changes as agent-system issues instead. All three artifacts are
+agent-system. Design was mine and is done; deciding my own envelope is
+ADR-0008's call, not mine, so it goes to the BDFL with both exits named.
+
 ## 2026-09-21 — Editorial: the last source-identifier on the front page
 
 Closed the remaining slice of #411's "zero internal vocabulary" half.
