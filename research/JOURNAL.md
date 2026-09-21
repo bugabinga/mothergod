@@ -5139,3 +5139,64 @@ record.
   `Base64Wrapped(train)`), or accept the large-file-mode alternative if
   no threshold clears every prior slice's per-case accept bar.
   `research/progress.jsonl` it150.
+- S2-R13 | REJECTED | S1-P4's own remaining scope after S2-A97: wired
+  `best_active_rep_len` into `relax_match_candidate` exactly as S2-A97
+  named — a beyond-`WINDOW` match distance (only reachable through
+  `parse_optimal_adaptive_window`'s matched-window policy, never the
+  wired `compress`/`encode` path, since the wired search never exceeds
+  `WINDOW`) is skipped entirely when an active rep exists at the same
+  position and the match's real length does not clear that rep's length
+  by a new `FAR_MATCH_REP_LEN_EDGE` constant, gating on the exact
+  displacement S2-R12 named. | Swept `FAR_MATCH_REP_LEN_EDGE` at 0, 4, 8,
+  16, 24 bytes with a throwaway, uncommitted scratch binary
+  (`bench/src/bin/far_match_edge_sweep.rs`, deleted after this
+  measurement, per S2-R9/S2-A93/S2-R12's own convention), same corpus and
+  seeds as those three (`base64_wrapped`/`markov_h8_2_trap`/
+  `sqlite_like_records`/`x86_dense_code`/`json_records` at 4,000,000
+  bytes, train seed `0xC0FFEE123456789A`; `access_log`/`gradient_image`
+  at `sealed_seed` of that key; `long_range_repeat` at both). Sanity-
+  checked the harness before sweeping by forcing `active_rep_len` to
+  `None` (gate never fires): every case reproduced S2-A93/S2-R12's own
+  published numbers to five decimal places
+  (`base64_wrapped` +0.005874, `access_log` -0.001108, `json_records`
+  -0.000384, `long_range_repeat` -0.021481/-0.021422 train/sealed, every
+  detector-false case exactly 0.0). | **Rejected**: the gate does not
+  discriminate S1-P4's two outcomes by length-over-displaced-rep alone.
+  `Base64Wrapped(train)`'s regression barely moved across the entire
+  swept range (edge 0: +0.005874, edge 4: +0.005886 — briefly *worse*,
+  a DP-reachability side effect of removing an option rather than a
+  mispriced one — edge 8/16: +0.005878, edge 24: +0.005800, recovering
+  at most ~1.3% of S2-R12's ~0.0016 b/B residual at the largest edge
+  measured), while `access_log`'s already-accepted matched-window win
+  eroded well before that: unchanged at edge 0/4 (-0.001108), then
+  -0.001020 at edge 8 and -0.000910 at edge 16, roughly half its win
+  gone. `json_records` moved by 0.00001 b/B across the same range
+  (-0.000384 to -0.000394), noise-scale and non-monotonic with edge, not
+  this lead's target either way; `long_range_repeat` (both seeds) stayed
+  fixed at its S2-A93 numbers through edge 16, the only tested case
+  confirming the gate can leave a genuine long-range win completely
+  alone. Edge 24's own `access_log`/`json_records`/`long_range_repeat`
+  values were not collected: the sweep was stopped once the trend
+  through edge 16 was unambiguous, an honest gap in this record rather
+  than a claim about edge 24's full case set. Mechanism: `access_log`'s
+  one real far-match win (S2-A93's confirmed 41-byte IP/preamble
+  recurrence) and `base64_wrapped`'s bad far matches (S2-A95's classified
+  rep-displacements) evidently overlap in length-over-active-rep profile
+  — a single fixed edge that suppresses enough of the latter to matter
+  also suppresses some of the former, faster than it recovers anything.
+  Generalizes S2-R12's own "no single global policy serves every case"
+  finding from the seed-window lever to this one: a length-only
+  displacement gate is not the differently-shaped pricing/gating change
+  this lead still owes; separating a far match worth its bucket-20 tax
+  from one that is not needs a signal this DP does not yet compute
+  (plausibly how many future positions the displaced rep slot would
+  still have served, not just its length at the one position it is
+  compared at). No source under `src/` changed: `lz::best_active_rep_len`
+  was wired into `relax_match_candidate` and `dp_round` for this
+  measurement, then reverted in full (`git checkout -- src/lz.rs`),
+  matching S2-D4/S2-D5's own convention for an investigation that finds
+  no honest slice worth keeping. `research/progress.jsonl` it151.
+  Remaining S1-P4 scope: the ~0.0016 b/B residual on
+  `Base64Wrapped(train)` is still open; both the seed-window lever
+  (S2-R12) and a length-based displacement gate (this entry) are now
+  closed, so the next idea needs a signal neither used.
