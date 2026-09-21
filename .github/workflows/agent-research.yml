@@ -1,14 +1,18 @@
-# Researcher: the weekly autoresearch-loop session (JOURNAL / ADR-0003).
+# Researcher: the autoresearch-loop session (JOURNAL / ADR-0003).
 # One experiment per session: propose → guard → benchmark → verdict → record.
 name: agent-research
 
 on:
-  # Saturdays, via the Telegram worker's cron (ADR-0035); the line in
-  # infra/telegram-worker/wrangler.toml is the cadence's source of
-  # truth. Never a native `schedule:` trigger here: schedule-run actor
-  # attribution follows the file's last committer, and a bot actor
-  # kills the OIDC token exchange silently (GOVERNANCE.md "Push
-  # identity", issue #413).
+  # Twice daily, via the Telegram worker's cron (ADR-0035); the line in
+  # infra/telegram-worker/wrangler.toml is the cadence's ceiling, not
+  # the rate. The `due` step below (research-due, issue #541) is the
+  # rate: it skips a tick that already has a research PR in flight or
+  # merged within the window, so the realized cadence self-heals from a
+  # missed tick in half a day instead of a week and only actually costs
+  # a full session roughly twice a week. Never a native `schedule:`
+  # trigger here: schedule-run actor attribution follows the file's
+  # last committer, and a bot actor kills the OIDC token exchange
+  # silently (GOVERNANCE.md "Push identity", issue #413).
   workflow_dispatch:
     inputs:
       source:
@@ -50,16 +54,32 @@ jobs:
           role: researcher
           discretionary: ${{ inputs.source == 'cron' }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The claim check (issue #541): due when no claude/research-* PR or
+      # branch is in flight and none merged within the window. Its own
+      # docstring is the contract; skipped when the guard already paused,
+      # since an unreadable-GitHub retry would be wasted on a run that is
+      # not going to proceed anyway.
+      - id: due
         if: steps.guard.outputs.paused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if .github/scripts/research-due; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "due=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.guard.outputs.paused != 'true' && steps.due.outputs.due == 'true'
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-        if: steps.guard.outputs.paused != 'true'
+        if: steps.guard.outputs.paused != 'true' && steps.due.outputs.due == 'true'
 
       - id: claude
-        if: steps.guard.outputs.paused != 'true'
+        if: steps.guard.outputs.paused != 'true' && steps.due.outputs.due == 'true'
         uses: anthropics/claude-code-action@v1
         env:
           # Job-scoped fallback for gh writes after the claude app token

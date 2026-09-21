@@ -798,13 +798,16 @@ export const CLOCK = {
     // minutes. `source: cron` marks the wake discretionary, so the
     // allowance governor may skip it (ADR-0039).
     { workflow: "agent-herald.yml", inputs: { source: "cron" } },
-  ],
-  "23 6 * * 6": [
-    // agent-research, Saturdays, the slot it held as a native trigger
-    // (issue #413). `source: cron` marks the wake discretionary
-    // (ADR-0039) on purpose: this is the most expensive wake per tick,
-    // so a tight week sheds it first, at the known price of one week's
-    // experiment. It carries no sweeps, so nothing else is lost.
+    // agent-research shares the tick (issue #541, operator request,
+    // Telegram, 2026-09-21): the account caps at five cron expressions,
+    // so a seat that no longer needs its own weekly slot joins an
+    // existing list rather than freeing a line nothing uses. Its own
+    // research-due claim check (agent-research.yml) turns most of these
+    // ticks into a cheap skip, so the real cadence is roughly twice
+    // weekly, not fourteen times. `source: cron` marks the wake
+    // discretionary (ADR-0039) on purpose: this is still the most
+    // expensive wake per tick that runs, so a tight week sheds it
+    // first, at the known price of one experiment.
     { workflow: "agent-research.yml", inputs: { source: "cron" } },
   ],
 };
