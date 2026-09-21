@@ -638,8 +638,10 @@ test("Clock ticks (ADR-0035)", async (t) => {
     // TRIGGER_EVENT=schedule downstream, and agent-guard reads it to decide
     // whether the allowance governor may skip this wake (ADR-0039). Both
     // seats the governor throttles must carry it, or the second gear is
-    // wired to a lever nothing pulls.
-    for (const workflow of ["agent-bdfl.yml", "agent-heartbeat.yml", "agent-herald.yml", "agent-research.yml"]) {
+    // wired to a lever nothing pulls. agent-herald.yml and
+    // agent-research.yml are governed too, but they share a tick, so
+    // their own dispatch shape is pinned by the shared-tick test below.
+    for (const workflow of ["agent-bdfl.yml", "agent-heartbeat.yml"]) {
       const setup = harness(() => new Response(null, { status: 204 }));
       const cron = cronFor(workflow);
       await tick(setup, cron);
@@ -653,6 +655,23 @@ test("Clock ticks (ADR-0035)", async (t) => {
         { cron, at: "2023-11-14T22:13:20.000Z", woke: [workflow], failed: [] },
       ]);
     }
+  });
+
+  await t.test("the shared herald/research tick wakes both, both governed", async () => {
+    // One expression, two seats (Workers Free caps crons at 5, issue #541
+    // moved research off its own weekly line onto this one). Both carry
+    // `source: cron`: research's own research-due claim check, not the
+    // allowance governor alone, keeps most of these ticks cheap.
+    const setup = harness(() => new Response(null, { status: 204 }));
+    const cron = cronFor("agent-herald.yml");
+    assert.equal(cron, cronFor("agent-research.yml"), "herald and research must share one expression");
+    await tick(setup, cron);
+    const dispatches = setup.calls.filter((call) => call.url.includes("/dispatches"));
+    const bodyFor = (workflow) => JSON.parse(dispatches.find((call) => call.url.includes(workflow)).init.body);
+    const cronInputs = { ref: "main", inputs: { source: "cron" } };
+    assert.deepEqual(bodyFor("agent-herald.yml"), cronInputs);
+    assert.deepEqual(bodyFor("agent-research.yml"), cronInputs);
+    assert.deepEqual(clocklog(setup)[0].woke, ["agent-herald.yml", "agent-research.yml"]);
   });
 
   await t.test("the shared deslop/curator tick wakes both, each with its own inputs", async () => {

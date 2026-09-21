@@ -1,5 +1,5 @@
 name: 🔬 Research proposal
-description: An idea to improve compression — becomes a candidate for the weekly research session
+description: An idea to improve compression — becomes a candidate for a research session
 labels: [research, triage]
 body:
   - type: markdown

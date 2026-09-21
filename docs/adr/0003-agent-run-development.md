@@ -31,6 +31,12 @@ ADR-0040 and ADR-0044, the latter moving issue triage from the heartbeat to
 the curator; `agents/GOVERNANCE.md` carries the current roster and is the
 only place that tracks it.)
 
+(Correction, 2026-09-21, issue #541: the researcher's cadence below is no
+longer a fixed weekly cron; it shares a twice-daily tick gated by a claim
+check (`research-due`) that skips a tick already covered, landing roughly
+twice a week in practice. `infra/telegram-worker/wrangler.toml` and
+`worker.js`'s `CLOCK` are the only place that tracks the actual cadence.)
+
 Separation of duties is the safety mechanism replacing human review: the
 proposer never merges its own work; the reviewer runs in a separate session
 with an adversarial prompt; CI guards are independent of both. Process files

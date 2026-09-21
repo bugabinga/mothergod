@@ -91,7 +91,7 @@
       "effort": ""
     },
     "researcher": {
-      "$comment": "Opus first: the weekly Saturday wake is the fleet's judgment-densest single session, so the raise costs one sonnet-to-opus delta a week (operator directive, Telegram, 2026-09-01).",
+      "$comment": "Opus first: each research session is the fleet's judgment-densest, so the raise costs one sonnet-to-opus delta per session (operator directive, Telegram, 2026-09-01). Cadence moved off a fixed weekly wake to research-due's claim check (issue #541, operator request, Telegram, 2026-09-21), roughly twice weekly now, so this raise now costs about twice what it did when priced.",
       "ladder": [
         "claude-opus-5",
         "claude-sonnet-5"

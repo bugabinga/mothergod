@@ -248,8 +248,13 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   The researcher wakes once a week (Saturday, `23 6 * * 6`), and that
   single session is the fleet's judgment-densest, so the raise costs one
   sonnet-to-opus delta a week, well inside the slack; thrift (ADR-0039)
-  bounds the downside. A reviewer raise was proposed in the same PR and
-  withdrawn in review: the reviewer is the fleet's highest session count
+  bounds the downside. (Correction, 2026-09-21, issue #541: the researcher
+  no longer wakes on a fixed weekly Saturday cron; `wrangler.toml`'s cron
+  lines and `worker.js`'s `CLOCK` table are the only place that tracks
+  the real cadence now, roughly twice weekly, so this raise costs about
+  twice what it did when priced here.) A reviewer raise was proposed in
+  the same PR and withdrawn in review: the reviewer is the fleet's
+  highest session count
   (about 25 substantive a day over the measured week), so it is the
   expensive raise, and per-seat burn share is unmeasured, so it cannot
   be priced; #439 makes it measurable before that raise or the

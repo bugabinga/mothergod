@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Decide whether this tick owes the researcher a dispatch, and say why.
+
+Extensionless and executable, like survey-due, operator-sweep, retrospect,
+stalled-prs and security-alerts: a decision an agent used to make by reading
+prose gets read here instead.
+
+issue #541: the researcher's only wake was a single weekly cron
+(`23 6 * * 6` in infra/telegram-worker/wrangler.toml, misdocumented as
+Saturday when Cloudflare's day-of-week numbering makes it Friday). A tick the
+pause guard or the allowance governor skipped (ADR-0039) was never retried;
+the next chance was next week, and two weeks running went quiet with no red
+check anywhere (research/progress.jsonl silent since it125, 2026-09-01).
+
+The fix moves the researcher onto the twice-daily tick (`49 6,18 * * *`,
+shared with the herald) and puts this script in front of the session: a tick
+that already owes nothing skips cheaply, and a missed tick now costs at most
+half a day, not a week.
+
+Two questions, answered from GitHub, never from a local clock alone:
+
+    in flight   an open `claude/research-*` PR, or a `claude/research-*`
+                branch with no PR yet (a session that crashed after pushing
+                but before opening one). Either means a session already
+                claimed this cycle; dispatching another would only queue
+                behind it in the `agent-research` concurrency group and
+                spend a second budget-governed wake for nothing.
+    recent      the newest `claude/research-*` PR's merge time, inside
+                WINDOW_DAYS. Half the pre-fix weekly cadence, a deliberate
+                bump (operator request, Telegram, 2026-09-21): twice as
+                often, not the ~14x a bare daily cadence would cost, since
+                research is "the most expensive wake per tick" (worker.js
+                CLOCK comment).
+
+Fails open: ANYTHING THIS CANNOT DECIDE ANSWERS DUE, NEVER NOT-DUE, the same
+asymmetry survey-due documents for the same reason. Answering due wrongly
+costs one extra, genuinely fresh experiment; answering not-due wrongly is
+the silent skip issue #541 exists to end. "Anything", not just an unreadable
+`gh` call: unlike survey-due, whose only caller reads the printed prose, this
+script's caller is a workflow `if:` condition that greps the exit code, so a
+crash anywhere in main() (an unexpected API shape, a bad timestamp) has to
+answer due too, or it is indistinguishable from a deliberate not-due to the
+one reader that matters (review, PR #660). Bounded to main()'s own body: a
+failure before Python starts running it (a missing interpreter, a stripped
+executable bit) or after (render's own print) is outside what a try/except
+in here can reach, and reads as a bare nonzero exit to the same caller.
+Low-probability on the runner this runs on, both committed and unchanged by
+this script; noted so it is not mistaken for covered.
+
+Usage: research-due
+"""
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+
+WINDOW_DAYS = 3  # ~twice the pre-fix weekly cadence; see module docstring.
+
+
+def gh_json(args):
+    """Run a `gh` command, returning (data, error). Never raises."""
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        reason = proc.stderr.strip().splitlines()
+        return None, (reason[-1] if reason else f"gh exited {proc.returncode}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "response was not JSON"
+
+
+def in_flight(repo):
+    """An open claude/research-* PR, or a branch that never got one. (bool, error).
+
+    A branch whose only PR was closed without merging is neither: the open
+    search above already covers every open PR project-wide (repo-wide, not
+    per-branch), so a ref that still turns up here has no open PR, and
+    `delete_branch_on_merge` (true on this repo) means a merged one would
+    already be gone. The one state left for a surviving ref with any PR
+    history is closed-unmerged, which is a dead end, not a claim on this
+    cycle: counting it blocked every future tick permanently, silently,
+    the exact failure issue #541 exists to end, just moved one branch over
+    (review, PR #660). Only a ref with no PR history at all, ever, still
+    means what the module docstring says: pushed, then crashed before
+    opening one. `branch-orphaned` owns un-stranding that case; this only
+    has to not mistake a dead one for it.
+    """
+    prs, error = gh_json([
+        "pr", "list", "--repo", repo, "--state", "open",
+        "--search", "head:claude/research-", "--json", "number",
+    ])
+    if error is not None:
+        return None, error
+    if prs:
+        return True, None
+    refs, error = gh_json(["api", f"repos/{repo}/git/matching-refs/heads/claude/research-"])
+    if error is not None:
+        return None, error
+    for ref in refs or []:
+        branch = ref["ref"].removeprefix("refs/heads/")
+        history, error = gh_json([
+            "pr", "list", "--repo", repo, "--state", "all",
+            "--search", f"head:{branch}", "--json", "number",
+        ])
+        if error is not None:
+            return None, error
+        if not history:
+            return True, None
+    return False, None
+
+
+def newest_merge(repo):
+    """The newest claude/research-* merge time, or None. (datetime | None, error)."""
+    prs, error = gh_json([
+        "pr", "list", "--repo", repo, "--state", "merged",
+        "--search", "head:claude/research-", "--json", "mergedAt",
+        "--limit", "20",
+    ])
+    if error is not None:
+        return None, error
+    dates = [p["mergedAt"] for p in prs if p.get("mergedAt")]
+    if not dates:
+        return None, None
+    newest = max(datetime.fromisoformat(d.replace("Z", "+00:00")) for d in dates)
+    return newest, None
+
+
+def decide(flight, flight_error, newest, newest_error, now, window_days=WINDOW_DAYS):
+    """Pure verdict from already-fetched state. Returns (verdict, detail)."""
+    if flight_error is not None:
+        return "due", f"open-PR/branch read UNREADABLE: {flight_error}"
+    if flight:
+        return "not-due", "a claude/research-* PR or branch already covers this cycle"
+    if newest_error is not None:
+        return "due", f"merged-PR read UNREADABLE: {newest_error}"
+    if newest is not None and now - newest < timedelta(days=window_days):
+        return "not-due", f"last research PR merged {newest.isoformat()}, inside the {window_days}-day window"
+    return "due", f"no research PR in flight or merged within {window_days} days"
+
+
+def render(verdict, detail, out=sys.stdout):
+    """Print the verdict and return it, so main() can turn it into an exit code."""
+    print(f"research-due: {verdict} ({detail})", file=out)
+    return verdict
+
+
+def main():
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    now = datetime.now(timezone.utc)
+
+    # The caller reads the exit code, not the prose (unlike survey-due), so
+    # the fail-open contract has to hold for the whole call chain, not just
+    # the two explicit gh_json sites decide() already covers: an uncaught
+    # KeyError on an unexpected `gh api` shape, or a bad timestamp reaching
+    # fromisoformat, would otherwise exit 1, indistinguishable from a
+    # deliberate not-due, and the workflow step that greps this exit code
+    # would report due=false with nothing red anywhere (review, PR #660).
+    try:
+        flight, flight_error = in_flight(repo)
+        newest, newest_error = (None, None)
+        if flight_error is None and not flight:
+            newest, newest_error = newest_merge(repo)
+        verdict, detail = decide(flight, flight_error, newest, newest_error, now)
+    except Exception as error:  # noqa: broad on purpose, see comment above
+        verdict, detail = "due", f"research-due crashed: {error!r}"
+
+    verdict = render(verdict, detail)
+    return 0 if verdict == "due" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
