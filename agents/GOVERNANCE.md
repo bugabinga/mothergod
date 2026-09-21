@@ -69,9 +69,9 @@ reviewer treats as high-risk (see below).
 
 ## Decision rules
 
-The one-line rule (ADR-0011): is it the Mission section of ROADMAP.md?
-Operator. Anything else? BDFL. The table below describes the default
-mechanisms, all of which the BDFL may reshape on the record.
+The one-line rule (ADR-0011): is it `MISSION.md`? Operator. Anything else?
+BDFL. The table below describes the default mechanisms, all of which the
+BDFL may reshape on the record.
 
 | Change class | Who decides |
 |---|---|
@@ -82,7 +82,7 @@ mechanisms, all of which the BDFL may reshape on the record.
 | Agent permission envelopes (workflow `permissions:`, tool allowlists, turn budgets) | BDFL, on the record (ADR-0008); the BDFL itself runs at maximum permissions and open network |
 | Model and effort per agent role | BDFL, on the record (ADR-0031), by editing `agents/models.json`: ladders per ADR-0018, effort levels per ADR-0021. Every rung including the BDFL's own is the BDFL's to set, against the standard "most capable this project can afford". The `model-limits` ledger issue is machine-written and never hand-edited |
 | Repo settings, rulesets, GitHub features, repo secrets, project identities/accounts | BDFL via the operator-issued admin token, recorded in `agents/IDENTITIES.md` where identities are involved (ADR-0009) |
-| The Mission section of `ROADMAP.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011) |
+| `MISSION.md` | Operator only; BDFL proposes amendments via `blocked-on-human` (ADR-0011, location ADR-0048) |
 | Subscription-only Claude auth + pause-on-limit behavior | Mission-tier standing operator requirements: preserved by every agent, changed only by the operator (ADR-0004/0009/0011) |
 | Releases | Agent-prepared, operator-triggered until further notice |
 | Security-report triage, CoC enforcement | Operator only; confirm, publish, CVE, and release stay operator-only even under ADR-0032, which lets a BDFL-directed agent privately draft a candidate advisory and, post-confirmation, prepare a fix |

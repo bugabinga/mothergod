@@ -27,8 +27,9 @@ This skill applies both without copying them.
    Compile it only when that skill's hotness, ownership, substrate, and
    liveness tests all pass.
 7. Preserve work ownership.
-   Scoped work lives in a routed issue; mission, milestones, scorecard, and
-   priority state live in `ROADMAP.md`.
+   Scoped work lives in a routed issue; the mission in `MISSION.md`;
+   scorecard definitions and priority in `ROADMAP.md`; milestone state in
+   the tracker (ADR-0047).
 
 ## Completion gate
 
