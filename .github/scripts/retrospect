@@ -42,6 +42,13 @@ seats did it three days apart with prompt text already forbidding it
 a predicate in `attribution.py` and its findings print here, beside the
 sessions that produced them.
 
+OPENERS is the fourth reading. A final response that begins "Heartbeat
+done." spends the notice's first line, the one the operator reads, on the
+label the notice already prints last; CLAUDE.md forbids it and a third of
+sessions did it anyway. `opener.py` holds the predicate, run-notice.py
+drops the opener from the notice, and this flags it beside the session
+and counts it in the summary, so the rule's failure rate is a number.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -87,6 +94,7 @@ from datetime import datetime, timezone
 from allowance import WEEK, project, valid_fraction, valid_reset, window_readings
 from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
 from attribution import report as attribution_report
+from opener import trim
 
 # Only these produce a judgeable session. Everything else in the repository is
 # graded by exit code.
@@ -223,7 +231,13 @@ def short_model(name):
 
 
 def describe(run, meta, response):
-    """One session as the auditor's four judgements, then what it posted."""
+    """One session as the auditor's four judgements, then what it posted.
+
+    Returns whether the response opened with a completion announcement, the
+    voice defect `opener.py` compiles; the flag rides the session line and
+    the count rides the summary, so the drift is a number the next survey
+    can compare rather than a feeling.
+    """
     telemetry = meta.get("telemetry") or {}
     usage = telemetry.get("usage") or {}
     count, tools = denials(telemetry)
@@ -243,6 +257,9 @@ def describe(run, meta, response):
         flags.append(f"denied {count} ({', '.join(str(t) for t in tools[:3])})")
     if run["conclusion"] != "success":
         flags.append(run["conclusion"])
+    _, opener = trim(response)
+    if opener:
+        flags.append(f'opener "{opener[0]}"')
 
     print(
         f"\n{iso(run['updatedAt'])}  {role}  {event}  "
@@ -256,6 +273,7 @@ def describe(run, meta, response):
         body = f"{body[:RESPONSE_CAP]}\n[cut, {len(response) - RESPONSE_CAP} more characters]"
     for line in body.splitlines():
         print(f"    {line}")
+    return bool(opener)
 
 
 def governor(observed, resets, used):
@@ -428,7 +446,7 @@ def main():
     window.sort(key=lambda r: r["updatedAt"])
 
     workspace = tempfile.mkdtemp(prefix="retrospect-")
-    read, skipped, orphans, phantoms, samples = 0, 0, [], [], []
+    read, skipped, openers, orphans, phantoms, samples = 0, 0, 0, [], [], []
     try:
         for run in window:
             directory = download(run["databaseId"], workspace)
@@ -442,7 +460,7 @@ def main():
                     orphans.append(run)
                 continue
             meta, response = read_session(directory)
-            describe(run, meta, response)
+            openers += describe(run, meta, response)
             read += 1
             when = iso(run["updatedAt"])
             for info in meta.get("rate_limit_events") or []:
@@ -473,9 +491,9 @@ def main():
 
     budget(samples, anchor)
     print(
-        f"\nretrospect: sessions {read} | skipped {skipped} | no-artifact {len(orphans)} "
-        f"| phantom {len(phantoms)} | pending {len(pending)} | issue-comments {comments} "
-        f"| bypassed {bypassed} | since {anchor}"
+        f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
+        f"| no-artifact {len(orphans)} | phantom {len(phantoms)} | pending {len(pending)} "
+        f"| issue-comments {comments} | bypassed {bypassed} | since {anchor}"
     )
 
 

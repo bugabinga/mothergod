@@ -33,6 +33,8 @@ import json
 import os
 import sys
 
+from opener import trim
+
 # Chars of response kept. 500 cut mid-sentence and lost the conclusion the
 # operator actually wanted, which reads as the run hiding something; a clip
 # this size ends most summaries at their real end, and the ones it does cut
@@ -109,7 +111,10 @@ def clipped_response(audit_dir: str) -> tuple[str, bool]:
     no result entry; that is absence, not content. Markdown is left alone:
     tg-send renders the house dialect into Telegram's markup now, so
     stripping emphasis here would only throw away the structure that makes a
-    bulleted summary scannable.
+    bulleted summary scannable. A completion announcement in front of the
+    result is not left alone: `opener.trim` drops it, because the first line
+    is the whole message to a reader who stops there and "Heartbeat done."
+    is not a message.
 
     The cut lands where the writer already paused, preferring a paragraph
     break to a line break to a word break, and never before halfway, because
@@ -126,6 +131,7 @@ def clipped_response(audit_dir: str) -> tuple[str, bool]:
         return "", False
     if not text or text.startswith("("):
         return "", False
+    text, _ = trim(text)
     if len(text) <= CLIP:
         return text, False
     head = text[:CLIP]
