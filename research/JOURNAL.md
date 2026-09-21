@@ -2532,18 +2532,25 @@ record.
   requiring `DETECTOR_CONFIRM_LEN` (24) bytes past each anchor to also
   agree byte-for-byte before reporting `true`, which the exact S2-R9
   divergent-tail shape now fails while a real extending recurrence still
-  passes. Remaining S1-P4 scope: both of S2-R9's failure modes now have a
-  candidate fix (S2-A91 for the alignment blind spot, S2-A92 for the
-  incidental-agreement false positive); wiring
-  `likely_benefits_from_larger_window_content_defined_confirmed` into
-  `parse_optimal`'s window choice and re-measuring against
-  `bench::baseline`'s sealed set — including whether `DETECTOR_CONFIRM_LEN`'s
-  starting value of 24 is right — is next, still open. A window past
-  `2^21 - 1` itself
-  still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
-  `FORMAT_VERSION` bump before it is measurable at all, which still
-  leaves the Silesia finals named above (several 10s of MiB) out of
-  reach regardless of this slice's verdict.
+  passes. Tenth slice, S2-A93: did that wiring — `lz::
+  parse_optimal_adaptive_window`, gated by the confirmed detector between
+  `WINDOW` and `ADAPTIVE_WINDOW` (`2^21 - 1`) — and found the regression
+  S2-R9 blamed on the detector was actually `parse_optimal_with_window`'s
+  own seed pass staying bound to `WINDOW` regardless of the DP's search
+  window; binding both to the same chosen window turned every previously
+  regressing gated case into an improvement, closing both of S2-R9's
+  failure modes for real. Remaining S1-P4 scope: every earlier slice was
+  a standalone primitive; this one is too (not wired to `compress`/
+  `encode`), so the next slice is the first that must touch them —
+  wiring `parse_optimal_adaptive_window` into `encode`'s `Method::Lz`
+  path and re-measuring through a real bitstream against
+  `bench::baseline`'s sealed set, encoder-only per CLAUDE.md hard rule 5
+  (no `FORMAT_VERSION` bump) but owing a golden-fixture regen
+  (`tests/golden.rs`, issue #290) and a `bench/baseline.json` update. A
+  window past `2^21 - 1` itself still separately needs
+  `OFFSET_BUCKETS`/`bucket()` widened and a `FORMAT_VERSION` bump before
+  it is measurable at all, which still leaves the Silesia finals named
+  above (several 10s of MiB) out of reach regardless of any of this.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -4781,3 +4788,83 @@ record.
   here — is the next slice; a large-file-mode alternative (ROADMAP M5
   SPEED territory) remains the other untried branch, unaffected by this
   entry either way. `research/progress.jsonl` it143.
+- S2-A93 | ACCEPTED | S1-P4's own remaining scope after S2-A92: wire
+  `likely_benefits_from_larger_window_content_defined_confirmed` into
+  `parse_optimal`'s window choice and re-measure against
+  `bench::baseline`'s sealed set the way S2-R9 did. Built
+  `lz::parse_optimal_adaptive_window(data)`: `WINDOW` unless the confirmed
+  detector finds a real recurrence past it, in which case
+  `lz::ADAPTIVE_WINDOW` (`2^21 - 1`, S2-A63's proven-free-of-format-cost
+  ceiling); `codec::ideal_cost_bits_adaptive_window` measures it through
+  the real adaptive models the way `ideal_cost_bits_with_window` measures
+  a fixed window. First measurement reproduced S2-R9's own rejection
+  almost exactly: `access_log` (sealed) still regressed (+0.000189 b/B)
+  even gated on the confirmed detector, and tracing the exact anchor pair
+  it fired on found a genuine, if narrow, 41-byte recurrence (a repeated
+  IP address plus fixed log-line preamble recurring at a rare joint
+  distance past `WINDOW`, not a birthday-bound collision as S2-R9's
+  framing assumed) — the detector was *right*, and gating on it still
+  cost bits. Falsified the working hypothesis (S2-A92's framing: "an
+  incidental agreement... with no exploitable long match behind it")
+  before accepting or rejecting: the confirmed detector already finds
+  only real recurrences, so a still-regressing gated case meant the
+  regression's cause was elsewhere. Traced it to
+  `parse_optimal_with_window`'s own documented contract: `parse_greedy`'s
+  seed pass stays bound to the wired `WINDOW` regardless of the `dp_round`
+  rounds' window (S2-A61's original design, never load-bearing-tested
+  until now), so growing only the search window leaves the DP's first
+  price table blind to the far match it is about to reconsider, a worse
+  initial guess the iterative reseeding never fully recovers from.
+  Confirmed by direct manipulation, not inference: binding both the seed
+  pass (via `parse_greedy_with_window`, S2-A65's own primitive) and every
+  `dp_round` to the SAME chosen window flipped `access_log` from +0.000189
+  to **-0.001109** and `json_records` from +0.000273 to **-0.000383**,
+  the exact two cases S2-R9 and this slice's first pass both regressed on.
+  Every detector=`true` case improved (`long_range_repeat`: train
+  -0.021482, sealed -0.021422, both slightly past even S2-A63's
+  unconditional-window numbers; `json_records` -0.000383; `access_log`
+  sealed -0.001109); every detector=`false` case stayed exactly at zero
+  (`markov_h8_2_trap`, `sqlite_like_records`, `x86_dense_code`,
+  `gradient_image` sealed), correctly declining the diffuse,
+  no-single-exact-recurrence wins S2-R7 traced to incidental
+  multi-megabyte-scale structure rather than a real long-range repeat —
+  this gate is deliberately narrower than "any window growth helps," and
+  that narrowness is why it never regresses. `DETECTOR_CONFIRM_LEN`'s
+  starting value of 24 needed no change: nothing in this measurement
+  motivated one. | 3 new unit tests (373 lib tests total, up from 370):
+  two in `src/lz.rs` (`parse_optimal_adaptive_window` reproduces
+  `parse_optimal`'s output byte-for-byte for `data.len() <= WINDOW`, the
+  gate's own early return making this unconditional; a planted confirmed
+  repeat just past `WINDOW` round-trips through the real three-round DP
+  with at least one token carrying a distance beyond `WINDOW`, the first
+  round-trip test in this crate to exercise `bucket()`/`dp_round` against
+  a real out-of-`WINDOW` distance end-to-end rather than `dp_round`
+  called directly with a wider window parameter), one in `src/codec.rs`
+  (the adaptive and wired ideal-cost entry points agree exactly within
+  `WINDOW`). `cargo x check`:
+  4 stages green. `baseline_gate check`: 11 cases, no regression (nothing
+  wired to `compress`/`encode`, unaffected). | Measured with a throwaway
+  (uncommitted) scratch binary, `bench/src/bin/
+  window_wiring_confirmed_experiment.rs` (deleted after this measurement,
+  per S2-R6/S2-R7/S2-R9's convention), on the same cases S2-R9 used so
+  the numbers are directly comparable: S2-R9's own four train-eligible
+  non-ladder kinds at 4,000,000 bytes (train seed
+  `0xC0FFEE123456789A`), both sealed-only kinds at the same length
+  (`sealed_seed` of that key), plus S2-A63's own planted
+  `long_range_repeat` (len 1,222,672, distance 1,198,576) at both seeds;
+  every unconditional-window number reproduced S2-R9's own cross-check
+  values to six decimal places. `research/progress.jsonl` it144.
+  Remaining S1-P4 scope: this closes the standalone-primitive arc S2-A61
+  opened — every slice from here needs to touch `compress`/`encode`
+  itself. Wiring `parse_optimal_adaptive_window` into the real codec
+  (`encode`'s `Method::Lz` path) and re-measuring through a real
+  bitstream against `bench::baseline`'s sealed set (not just ideal cost)
+  is the next slice; that wiring is encoder-only (`dp_round`'s
+  `Token`/`Move` shape and `bucket()`'s ceiling are unchanged, so decode
+  needs no new case and no `FORMAT_VERSION` bump, CLAUDE.md hard rule 5's
+  encoder-only carve-out) but regenerates the current-version golden
+  fixture per `tests/golden.rs` (issue #290's ruling) and updates
+  `bench/baseline.json` for whichever gate cases the detector newly
+  fires true on. The several-10s-of-MiB Silesia finals this lead targets
+  (`mozilla`, `nci`, `samba`, `sao`, `webster`) stay out of reach either
+  way: `ADAPTIVE_WINDOW` is still under 2 MiB.

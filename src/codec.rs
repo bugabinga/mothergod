@@ -510,6 +510,20 @@ pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
     sink.bits
 }
 
+/// Same as [`ideal_cost_bits`], but parses `data` with
+/// [`lz::parse_optimal_adaptive_window`] instead of the wired
+/// [`lz::WINDOW`] (`research/JOURNAL.md` S1-P4): measures the gated
+/// window's real coding-cost effect through this crate's actual adaptive
+/// models, without wiring it into [`encode`] or bumping `FORMAT_VERSION`.
+#[must_use]
+pub fn ideal_cost_bits_adaptive_window(data: &[u8]) -> f64 {
+    let tokens = lz::parse_optimal_adaptive_window(data);
+    let mut models = Models::new();
+    let mut sink = CostSink::default();
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    sink.bits
+}
+
 /// Whether `body_len` beats `best_len` in `encode`'s shortest-wins
 /// candidate search. Strict: a tie keeps the earlier (lower-indexed)
 /// candidate, so filter order in [`filters::select::pick`] is a stable
@@ -1877,6 +1891,30 @@ mod tests {
             large_bits < small_bits - f64::from(u16::try_from(template.len()).unwrap()),
             "a window reaching the planted repeat ({large_bits} bits) should cost at least a \
              template's worth of bits less than one that cannot ({small_bits} bits)"
+        );
+    }
+
+    #[test]
+    #[allow(
+        clippy::float_cmp,
+        reason = "both sides run the identical token stream through the identical models \
+                  (lz::parse_optimal_adaptive_window's gate is unconditionally false for \
+                  data.len() <= lz::WINDOW), so exact equality, not tolerance, is the claim"
+    )]
+    fn ideal_cost_bits_adaptive_window_matches_wired_window_within_window() {
+        // research/JOURNAL.md S1-P4's next slice after S2-A92:
+        // lz::parse_optimal_adaptive_window's own gate is unconditionally
+        // false for data.len() <= lz::WINDOW (lz::tests::
+        // adaptive_window_matches_wired_window_within_window proves the
+        // token streams are identical at that scale), so the models-wired
+        // cost through this codec-layer entry point must match the wired
+        // one exactly too, not just approximately.
+        let data: Vec<u8> = (0..5000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        assert_eq!(
+            ideal_cost_bits_adaptive_window(&data),
+            ideal_cost_bits(&data)
         );
     }
 

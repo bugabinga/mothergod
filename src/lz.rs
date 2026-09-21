@@ -1566,16 +1566,33 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 /// `window >= 2^21`.
 #[must_use]
 pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
+    parse_optimal_with_seed_and_search_window(data, WINDOW, window)
+}
+
+/// Shared body of [`parse_optimal_with_window`] and
+/// [`parse_optimal_adaptive_window`]: three `dp_round` rounds at
+/// `search_window`, seeded by [`parse_greedy_with_window`] at
+/// `seed_window`. [`parse_optimal_with_window`] always passes
+/// [`WINDOW`] as `seed_window` (its own documented contract); the adaptive
+/// gate is the one caller that passes the same value for both
+/// (`research/JOURNAL.md` S1-P4: S2-R9's rejected gate mismatched the two,
+/// which measured as its regression's actual cause, not the detector
+/// finding an unexploitable match).
+fn parse_optimal_with_seed_and_search_window(
+    data: &[u8],
+    seed_window: usize,
+    search_window: usize,
+) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
-    let seed = parse_greedy(data);
+    let seed = parse_greedy_with_window(data, seed_window);
     let prices = PriceCounts::tally(&seed, data).prices(seed.len());
-    let first_round = dp_round(data, &prices, window);
+    let first_round = dp_round(data, &prices, search_window);
     let prices = PriceCounts::tally(&first_round, data).prices(first_round.len());
-    let second_round = dp_round(data, &prices, window);
+    let second_round = dp_round(data, &prices, search_window);
     let prices = PriceCounts::tally(&second_round, data).prices(second_round.len());
-    dp_round(data, &prices, window)
+    dp_round(data, &prices, search_window)
 }
 
 /// Exact-match byte width an anchor in [`likely_benefits_from_larger_window`]
@@ -1807,6 +1824,42 @@ pub fn likely_benefits_from_larger_window_content_defined_confirmed(
         i += 1;
     }
     false
+}
+
+/// Window [`parse_optimal_adaptive_window`] grows to when its gate fires.
+/// The largest window `bucket` can price without widening
+/// `OFFSET_BUCKETS` or bumping `FORMAT_VERSION` (`research/JOURNAL.md`
+/// S1-P4, the ceiling S2-A63 proved free of format cost): `2^21 - 1`.
+pub const ADAPTIVE_WINDOW: usize = (1 << OFFSET_BUCKETS) - 1;
+
+/// [`parse_optimal`], but grows its window from the wired [`WINDOW`] to
+/// [`ADAPTIVE_WINDOW`] when
+/// [`likely_benefits_from_larger_window_content_defined_confirmed`] finds a
+/// real recurrence past [`WINDOW`] (`research/JOURNAL.md` S1-P4's next
+/// slice after S2-A92). Both the seed pass and every `dp_round` round are
+/// bound to the SAME chosen window, unlike [`parse_optimal_with_window`]:
+/// S2-R9's rejected gate left the seed pass capped at [`WINDOW`] while
+/// `dp_round` searched past it, and that mismatch measured as the actual
+/// cause of its sealed-set regression on `access_log`/`json_records`, not
+/// the detector finding an unexploitable match — matching the seed window
+/// to the search window (direct manipulation, not inference) flipped both
+/// cases from regression to improvement. Not yet wired to [`parse_optimal`]
+/// or `compress`/`encode`: a standalone primitive first, the same shape
+/// every earlier S1-P4 slice took, so a real-bitstream sealed-set
+/// measurement (not this function's own ideal-cost one) is still owed
+/// before any such wiring.
+///
+/// # Panics
+///
+/// Same as [`parse_optimal`].
+#[must_use]
+pub fn parse_optimal_adaptive_window(data: &[u8]) -> Vec<Token> {
+    let window = if likely_benefits_from_larger_window_content_defined_confirmed(data, WINDOW) {
+        ADAPTIVE_WINDOW
+    } else {
+        WINDOW
+    };
+    parse_optimal_with_seed_and_search_window(data, window, window)
 }
 
 #[cfg(test)]
@@ -2845,6 +2898,54 @@ mod tests {
         assert_eq!(data.len(), far_offset + DETECTOR_ANCHOR_LEN);
 
         assert!(!likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window));
+    }
+
+    #[test]
+    fn adaptive_window_matches_wired_window_within_window() {
+        // data.len() <= WINDOW makes the gate's own base_window early
+        // return unconditional (research/JOURNAL.md S1-P4's next slice
+        // after S2-A92), so the adaptive parse must be byte-for-byte the
+        // wired parse: this is the branch every real input at or under
+        // today's WINDOW takes.
+        let data: Vec<u8> = (0..5000u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        assert_eq!(parse_optimal_adaptive_window(&data), parse_optimal(&data));
+    }
+
+    #[test]
+    fn adaptive_window_roundtrips_a_confirmed_repeat_past_window() {
+        // The scenario this slice exists for: a real recurrence whose
+        // distance exceeds the wired WINDOW but stays under
+        // ADAPTIVE_WINDOW. First proves the gate actually fires on this
+        // input (the precondition the rest of the test depends on), then
+        // proves CLAUDE.md hard rule 1 holds through the grown window: the
+        // token stream this produces is the first in this crate to carry a
+        // real match distance beyond WINDOW end to end through
+        // parse_optimal's real three-round DP, not just dp_round called
+        // directly with a wider window parameter.
+        let anchor = find_content_defined_anchor_value();
+        let tail = [0xAAu8; DETECTOR_CONFIRM_LEN];
+        let far_offset = WINDOW + 5 * DETECTOR_STRIDE + 7;
+        let data = planted_repeat_content_defined_confirmed(anchor, tail, far_offset);
+        assert!(
+            far_offset < ADAPTIVE_WINDOW,
+            "planted distance must stay reachable at ADAPTIVE_WINDOW"
+        );
+        assert!(
+            likely_benefits_from_larger_window_content_defined_confirmed(&data, WINDOW),
+            "gate must fire so this test exercises the grown-window branch"
+        );
+
+        let tokens = parse_optimal_adaptive_window(&data);
+        assert_eq!(replay(&tokens), data, "roundtrip mismatch");
+        assert!(
+            tokens.iter().any(|token| matches!(
+                *token,
+                Token::Match { distance, .. } if distance.get() as usize > WINDOW
+            )),
+            "expected at least one match reaching past WINDOW, proving the grown window was searched"
+        );
     }
 }
 
