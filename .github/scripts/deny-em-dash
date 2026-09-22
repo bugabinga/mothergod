@@ -25,8 +25,12 @@ the final response it carries to the operator has no writer left.
 
 Posting and committing commands, anywhere in the command text: `gh pr
 comment|create|review|edit|close`, `gh issue comment|create|edit|close`,
-`gh api`, `gh-comment`, `tg-send`, `git commit`. Anything else carrying
-the character passes: `grep`, `rg`, `sed` and the searches an audit like
+`gh api`, `gh-comment`, `tg-send`, `git commit`. A body the command
+takes from a file (`--body-file <path>`, `-F <path>`, gh api's
+`-F key=@<path>`) is read and checked too, because the heredoc is not the
+only way a body travels (review on PR #669 reproduced the gap); a path
+that does not exist yet passes, and `-` means the body is in the command
+string, already checked. Anything else carrying the character passes: `grep`, `rg`, `sed` and the searches an audit like
 the one above runs are legitimate and never posted. The en dash (U+2013)
 passes too: the rule names the em dash, and a spaced en dash standing in
 for one is a defect the retrospect will show before this guard widens. No
@@ -61,6 +65,9 @@ POSTS = re.compile(
     r"|\btg-send\b"
     r"|\bgit\s+commit\b"
 )
+# A body taken from a file rather than the command string: gh's
+# --body-file and -F, git commit's -F, gh api's -F key=@path.
+BODY_FILES = re.compile(r"(?:--body-file(?:=|\s+)|-F\s+(?:\w+=@)?)(\S+)")
 
 MESSAGE = (
     "This command posts or commits text carrying an em dash (U+2014). "
@@ -70,8 +77,26 @@ MESSAGE = (
 
 
 def denied(command: str) -> bool:
-    """True when the command posts or commits and carries an em dash."""
-    return EM_DASH in command and POSTS.search(command) is not None
+    """True when the command posts or commits and carries an em dash, in
+    its own text or in a body file it names."""
+    if POSTS.search(command) is None:
+        return False
+    if EM_DASH in command:
+        return True
+    return any(EM_DASH in text for text in body_files(command))
+
+
+def body_files(command: str):
+    """Contents of the body files the command names and that exist now."""
+    for path in BODY_FILES.findall(command):
+        path = path.strip("'\"")
+        if path == "-":
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                yield fh.read()
+        except OSError:
+            continue
 
 
 def main() -> int:
@@ -93,7 +118,7 @@ def main() -> int:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-em-dash: denied, {command.count(EM_DASH)} em dash(es)\n")
+            fh.write("deny-em-dash: denied\n")
     print(MESSAGE, file=sys.stderr)
     return 2
 
