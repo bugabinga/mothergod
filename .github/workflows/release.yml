@@ -44,6 +44,16 @@ jobs:
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
             || { echo "tag '$TAG' is not vX.Y.Z" >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # crates.io versions are immutable, so a tag that disagrees with
+      # Cargo.toml can only be appended to, never corrected (#667).
+      - name: Check tag matches crate version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          [[ "$TAG" == "v$version" ]] \
+            || { echo "tag '$TAG' does not match Cargo.toml version 'v$version'" >&2; exit 1; }
 
   build:
     needs: tag-check
