@@ -47,9 +47,32 @@
       font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
       font-size: 17px;
       line-height: 1.65;
-      padding: 4rem 1.25rem 5rem;
+      padding: 1.6rem 1.25rem 5rem;
     }
     main { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 3rem; }
+
+    /* The frame (issue #604 item 4): the same four links, in the same order,
+       in the same place on all three pages, so "what else is here" is
+       answered before the first scroll instead of in the footer. The current
+       page is marked by weight and a rule, never by color alone. Duplicated
+       inline in each page because the site has no build step and no shared
+       stylesheet; tests/claims.rs fails if the three copies drift apart. */
+    .frame {
+      max-width: 720px; margin: 0 auto 2.6rem;
+      display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem 1.4rem;
+      font-family: "JetBrains Mono", monospace; font-size: .8rem;
+    }
+    .frame a {
+      color: var(--muted); text-decoration: none;
+      padding-bottom: .15rem; border-bottom: 1px solid transparent;
+    }
+    .frame a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+    .frame a:focus-visible {
+      color: var(--gold); outline: 2px solid var(--gold); outline-offset: 3px;
+    }
+    .frame a[aria-current="page"] {
+      color: var(--starlight); font-weight: 500; border-bottom-color: var(--gold);
+    }
 
     header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
     h1 {
@@ -58,7 +81,6 @@
       letter-spacing: .02em;
     }
     .tagline { color: var(--muted); max-width: 52ch; text-align: center; }
-    .back { font-family: "JetBrains Mono", monospace; font-size: .8rem; }
 
     h2 {
       font-family: "Unbounded", "Albert Sans", sans-serif;
@@ -120,9 +142,14 @@
     </style>
   </head>
   <body>
+    <nav class="frame" aria-label="Site">
+      <a href="/">mothergod</a>
+      <a href="/status.html">Status</a>
+      <a href="/agents.html" aria-current="page">Agents</a>
+      <a href="https://github.com/bugabinga/mothergod">Source</a>
+    </nav>
     <main>
       <header>
-        <p class="back"><a href="/">← mothergod</a></p>
         <h1>Agent telemetry</h1>
         <p class="tagline">
           mothergod is built and operated by Claude agents. Every run uploads a
