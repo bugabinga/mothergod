@@ -72,6 +72,12 @@ KV = ("https://api.cloudflare.com/client/v4/accounts/{}"
 CHATLOG = "chatlog"
 KEEP = 40  # entries retained; this number is the whole retention policy
 SUMMARY = 200  # chars of an entry's text; 40 entries must stay one screenful
+# The em dash CLAUDE.md forbids. Where a writer is still present the rule is
+# compiled as a deny (deny-em-dash); this is the destination with no writer
+# left, because run-notice pipes a finished final response through here. A
+# mid-sentence dash becomes the comma the rule names first; one opening a
+# line just goes.
+EM_DASH = re.compile("(?m)^\u2014[ \t]*|[ \t]*\u2014[ \t]*")
 
 # The house markdown dialect, as one left-to-right pass. Alternation order is
 # precedence: code wins, so a `**x**` inside backticks stays literal, and a
@@ -138,6 +144,7 @@ def main() -> int:
               "from the body; a secret reached your text (CLAUDE.md rule 10)",
               file=sys.stderr)
 
+    body = EM_DASH.sub(swap_dash, body)
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
     text = render(body, repo)
     # Length is checked after rendering, because the markup is what actually
@@ -183,6 +190,12 @@ def main() -> int:
         record(sent["result"], reply_to, body)
     print(f"message_id={sent['result']['message_id']}")
     return 0
+
+
+def swap_dash(match: re.Match) -> str:
+    """A comma for a dash mid-sentence, nothing for one that opens a line."""
+    at_line_start = match.start() == 0 or match.string[match.start() - 1] == "\n"
+    return "" if at_line_start else ", "
 
 
 def render(body: str, repo: str) -> str:

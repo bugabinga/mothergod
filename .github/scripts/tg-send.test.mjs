@@ -119,6 +119,17 @@ test("house markdown becomes Telegram's own markup", async () => {
   );
 });
 
+// The final response run-notice pipes through here has no writer left to
+// rewrite it, so the em dash CLAUDE.md forbids is swapped here, and only here;
+// everywhere a writer is still present, deny-em-dash makes them do it.
+test("an em dash becomes the comma the house rule names first", async () => {
+  const { status } = await send("tok-ok", {
+    body: "shipped \u2014 verified\u2014twice\n\u2014 trailing",
+  });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "shipped, verified, twice\ntrailing");
+});
+
 test("a code span is literal, markup and refs inside it included", async () => {
   const { status } = await send("tok-ok", { body: "`**x**` and `#1` stay literal" });
   assert.equal(status, 0);

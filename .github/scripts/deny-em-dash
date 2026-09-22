@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Deny a Bash command that posts or commits text carrying an em dash (PreToolUse hook).
+
+CLAUDE.md's Voice rules: "No em dash, ever. Comma, colon, semicolon,
+period. The em dash is the LLM default; this shop's prose is not." Prose
+since 2026-08, and prose is what the model gets wrong, because the dash is
+the habit its training set taught it. Counted 2026-09-22 over everything
+posted since 2026-09-15: 16 of 30 reviewer PR comments and 12 of 20 PR
+bodies carried one, as did 4 of 8 final responses in one retrospect
+window. Issue comments ran 7 of 57, and those come through gh-comment from
+the two seats on the largest models. Hot, wrong more often than not on the
+PR surface, on a substrate that is one code point: ADR-0022's test for
+compiling a rule, passed.
+
+Compiled at the Bash boundary, where nearly all posted text leaves a
+session, not where it is typed. A Bash command that posts or commits and
+carries U+2014 is denied with the rule on stderr, and the model rewrites
+its own sentence with the punctuation it meant. The one other exit,
+`mcp__github_file_ops__commit_files` on the BDFL seat, is not covered;
+GOVERNANCE already steers pushes off it on other grounds (#78). A formatter could swap the character but not choose between a
+comma, a colon and a period, and a sentence built around a dash usually
+wants restructuring, not substitution; here the writer is still present,
+so the writer does it. tg-send is the one place that does swap, because
+the final response it carries to the operator has no writer left.
+
+Posting and committing commands, anywhere in the command text: `gh pr
+comment|create|review|edit|close`, `gh issue comment|create|edit|close`,
+`gh api`, `gh-comment`, `tg-send`, `git commit`. A body the command
+takes from a file (`--body-file <path>`, `-F <path>`, gh api's
+`-F key=@<path>`) is read and checked too, because the heredoc is not the
+only way a body travels (review on PR #669 reproduced the gap); a path
+that does not exist yet passes, and `-` means the body is in the command
+string, already checked. A path carried in a shell variable
+(`--body-file "$TMP"`) is not resolved and passes: resolving it means
+parsing shell, and this is a guardrail aimed at a forgetful model, not an
+adversary, the posture deny-review-recompute's `bash -c` residual already
+accepted (#333). Anything else carrying the character passes: `grep`, `rg`, `sed` and the searches an audit like
+the one above runs are legitimate and never posted. The en dash (U+2013)
+passes too: the rule names the em dash, and a spaced en dash standing in
+for one is a defect the retrospect will show before this guard widens. No
+segment splitting, deliberately: a heredoc body spans lines and may carry
+`;` or `|`, and the command word that posts it sits before the `<<`. The
+residual false deny, a search for the character piped into a post, is a
+post of em dashes and correctly denied. Repo prose written through Edit
+or Write is not this guard's either: 655 lines of it carry the dash today,
+nineteen ADRs among them, and a lint there starts with a cleanup nobody
+has asked for.
+
+Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions or
+for any tool but Bash everything is allowed, as are malformed JSON and a
+null tool_input (the #324 shape). Exit 2 denies; stderr is shown to the
+model.
+
+Liveness: every deny appends a fixed-vocabulary line to
+GITHUB_STEP_SUMMARY, so the run page shows the guard working and a
+retrospect can count what the prompt alone did not prevent.
+"""
+
+import json
+import os
+import re
+import sys
+
+EM_DASH = "—"
+POSTS = re.compile(
+    r"\bgh\s+(?:pr|issue)\s+(?:comment|create|review|edit|close)\b"
+    r"|\bgh\s+api\b"
+    r"|\bgh-comment\b"
+    r"|\btg-send\b"
+    r"|\bgit\s+commit\b"
+)
+# A body taken from a file rather than the command string: gh's
+# --body-file and -F, git commit's -F, gh api's -F key=@path.
+BODY_FILES = re.compile(r"(?:--body-file(?:=|\s+)|-F\s+(?:\w+=@)?)(\S+)")
+
+MESSAGE = (
+    "This command posts or commits text carrying an em dash (U+2014). "
+    "CLAUDE.md Voice: no em dash, ever; comma, colon, semicolon or period. "
+    "Rewrite the sentence with the punctuation you meant, then rerun."
+)
+
+
+def denied(command: str) -> bool:
+    """True when the command posts or commits and carries an em dash, in
+    its own text or in a body file it names."""
+    if POSTS.search(command) is None:
+        return False
+    if EM_DASH in command:
+        return True
+    return any(EM_DASH in text for text in body_files(command))
+
+
+def body_files(command: str):
+    """Contents of the body files the command names and that exist now."""
+    for path in BODY_FILES.findall(command):
+        path = path.strip("'\"")
+        if path == "-":
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                yield fh.read()
+        except OSError:
+            continue
+
+
+def main() -> int:
+    """Allow (0) or deny (2) the tool call described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if call.get("tool_name") != "Bash":
+        return 0
+    tool_input = call.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not denied(command):
+        return 0
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write("deny-em-dash: denied\n")
+    print(MESSAGE, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
