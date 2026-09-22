@@ -32,7 +32,8 @@ The journal's next slice is the one surface two seats write.
 
 ## Consequences
 
-A research tick that lands during a heartbeat waits for it, and the reverse; a heartbeat session typically runs under twenty minutes.
+A research tick that lands during a heartbeat waits for it, and the reverse.
+Over the twenty heartbeat runs before this record, that wait would have been a median of fifteen minutes and at most forty-two (run durations from the Actions API, 2026-09-22).
 GitHub keeps one running and one pending run per group, so a third arrival evicts the older pending run.
 A research tick evicted that way returns at the next tick, because `research-due` answers `due` for anything it cannot decide (#541).
 Operator wakes are untouched: the BDFL keeps its own group.
