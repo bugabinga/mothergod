@@ -30,7 +30,11 @@ takes from a file (`--body-file <path>`, `-F <path>`, gh api's
 `-F key=@<path>`) is read and checked too, because the heredoc is not the
 only way a body travels (review on PR #669 reproduced the gap); a path
 that does not exist yet passes, and `-` means the body is in the command
-string, already checked. Anything else carrying the character passes: `grep`, `rg`, `sed` and the searches an audit like
+string, already checked. A path carried in a shell variable
+(`--body-file "$TMP"`) is not resolved and passes: resolving it means
+parsing shell, and this is a guardrail aimed at a forgetful model, not an
+adversary, the posture deny-review-recompute's `bash -c` residual already
+accepted (#333). Anything else carrying the character passes: `grep`, `rg`, `sed` and the searches an audit like
 the one above runs are legitimate and never posted. The en dash (U+2013)
 passes too: the rule names the em dash, and a spaced en dash standing in
 for one is a defect the retrospect will show before this guard widens. No
