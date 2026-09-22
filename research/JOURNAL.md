@@ -2462,7 +2462,26 @@ record.
   binary-tree parse cannot (e.g. a schema-aware/typed-field literal model,
   in the spirit of S1-P5's per-column direction but for pre-transpose or
   mixed-type records) or accepting that sqlite/json/jsonl residue sits
-  near this architecture's ceiling absent one.
+  near this architecture's ceiling absent one. Fifteenth slice, S2-A99:
+  took that remaining scope's own first branch — a standalone primitive
+  for a schema-aware/typed-field signal, the same "first slice, not yet
+  wired" shape every other lead opened with (S2-A42, S2-A57, S2-A61,
+  S2-A64). `fieldtype::FieldState`/`FieldClass`/`field_bank`: a rolling
+  state machine over JSON-shaped syntax (quote-toggling with
+  backslash-escape absorption, then digit/structural/whitespace/text
+  classification of the byte outside any open string) that answers "what
+  kind of field is this byte in" without the fixed stride
+  `column::column_of` needs `transpose::encode` to have already imposed —
+  the "for pre-transpose or mixed-type records" half of this entry's own
+  framing, since JSON/JSONL/sqlite-dump row-major bytes carry no such
+  stride. Standalone: proven only by 17 unit tests (a realistic JSON
+  record byte-by-byte, escape/double-escape edge cases, the bank space
+  bound), not measured against `bench::baseline` and not blended into
+  `Literal`'s mix. Remaining S1-P2 scope: the ideal-cost pairing
+  `S2-A69`'s methodology used for the column expert's own equivalent
+  question — blend a field-class-keyed eighth expert into the shipped six
+  under `sqlite_like_records`/`json_records` and the sealed set, before
+  any real wiring — still unbuilt.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4). First
   slice: S2-A57 (standalone `Ppm` primitive, PPM Method C escape pricing,
   not yet wired). Second slice, S2-R6: measured the most-reasoned fallback
@@ -5390,3 +5409,52 @@ record.
   mode distinct from the default rather than a parse heuristic), or
   accepting that far-match residue on this data is not a pricing
   problem at all.
+- S2-A99 | ACCEPTED | S1-P2's own remaining scope after S2-R10: its own
+  closing paragraph named two branches once both the intra-round pricing
+  angle and the match-finder search-quality angle closed — "a modeling
+  primitive that reaches structure a binary-tree parse cannot (e.g. a
+  schema-aware/typed-field literal model, in the spirit of S1-P5's
+  per-column direction but for pre-transpose or mixed-type records)" or
+  accepting the ceiling. Also weighed against S1-P8 (GLN-style
+  predictors/more experts), unblocked since S1-P1's SSE resolution but a
+  one-line lead with zero design decisions recorded anywhere in this
+  repo about what a gated linear network should look like here: a first
+  slice there would have meant inventing the gating architecture from
+  scratch under this session's time budget, real risk of the "half
+  understood" failure this lead's own selection criteria warn against.
+  S1-P2's own named branch, by contrast, already has a worked precedent
+  (S1-P5's column expert) and a concretely specified target
+  (sqlite/json/jsonl), so it is the better-grounded pick. New module
+  `src/fieldtype.rs`: `FieldClass` (`Whitespace`/`Structural`/`Numeric`/
+  `Text`), `FieldState` (`in_quotes`, `escaped`, `class`), and
+  `FieldState::advance` folding one byte at a time into the next state —
+  the same "cheap rolling state, no lookahead" shape
+  `literal::advance_word_hash` already uses for its own alnum-run signal,
+  applied to JSON-shaped syntax instead: outside a quoted string, a byte
+  classifies as `Structural` (`{ } [ ] : , "`), `Whitespace`
+  (` \t\n\r`), `Numeric` (`- . 0-9`), or `Text` (everything else);
+  inside a quoted string every byte is `Text` regardless of shape (a
+  digit or brace inside a string is string content, not a numeric or
+  structural field), with `escaped` absorbing the byte immediately after
+  an unescaped `\` unconditionally so `\"` never closes the string and
+  `\\` never leaves a dangling escape. `field_bank` maps a `FieldState`
+  into a fixed `0..FIELD_BANKS` (8: four classes times in/out of quotes,
+  so quoted-string `Text` and unclassified `Text` occupy different banks)
+  the same way `column::column_bank` wraps `column_of`'s unbounded result
+  — moot for overflow here since every input is already bounded by
+  construction, kept as the one named constant a future bank-sizing
+  caller reads instead of re-deriving `4 * 2`. Hypothesis this slice
+  itself does not test: unwired, so no bits/byte claim. Standalone,
+  same "first slice, not yet wired" shape as S2-A42/S2-A57/S2-A61/S2-A64:
+  17 unit tests (structural/whitespace/numeric/text classification
+  outside quotes, digits and braces reclassified to `Text` inside
+  quotes, single and double backslash escape handling, a realistic JSON
+  record classified byte-by-byte end to end, the bank-space bound, and
+  that `field_bank` is a pure function of `(class, in_quotes)` alone, not
+  of byte history). `cargo x check`: 4 stages green. `baseline_gate
+  check`: 11 cases, no regression (nothing wired). Remaining S1-P2 scope:
+  the ideal-cost pairing S2-A69's methodology used for the column
+  expert's own equivalent question — blend a field-class-keyed eighth
+  expert into the shipped six under `sqlite_like_records`/`json_records`
+  and the sealed set, before any real wiring — still unbuilt.
+  `research/progress.jsonl` it154.
