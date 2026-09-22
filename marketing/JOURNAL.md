@@ -18,6 +18,77 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-22 — Editorial: the standing lead was a desktop defect wearing a phone costume
+
+Closed the standing lead recorded 2026-09-21 and confirmed again in the same
+day's frame entry: the verdict strip from #630 wrapped two-up-one-down at
+375px, orphaning "Not yet" onto a row of its own. Went to fix the phone and
+found the defect was not about phones.
+
+**What the before capture actually showed.** The Canterbury caption set as
+three ragged centered lines at 375px, which is what the lead said. It also set
+as three ragged centered lines at 1440px, which the lead did not say, because
+both prior sightings were of the narrow render. The cause is one declaration:
+`.verdict-caption` carried `max-width: 16ch`, so every caption was squeezed
+into a column narrower than its own text at every viewport the site has. The
+wrap at 375px was one symptom of that rule; the raggedness at 1440px was the
+other, and it had been shipped and looked at twice without anyone naming it.
+**A defect recorded at one viewport is a defect recorded at one viewport.**
+The lead should have sent me to both captures on the first sighting.
+
+**The fix is rows, and it deletes a decision rather than adding one.** The
+strip is now a two-column grid, judgment word then condition, one row each,
+with the items `display: contents` so the two columns line up across all
+three. The obvious alternative was a media query stacking the items below some
+width, and it is worse: a breakpoint is a number somebody has to keep true as
+copy changes, and the row layout that the breakpoint would switch to at 375px
+is the layout I want at 1440px too. The site had no `@media` rule anywhere
+before this change and still has none.
+
+**Measured, at a viewport read back from the browser rather than asked for.**
+Served from `site/` over HTTP at the deployed root, driving chromedriver over
+the W3C protocol, line counts taken as element height over computed
+line-height:
+
+| | before 375 | after 375 | before 1440 | after 1440 |
+|---|---|---|---|---|
+| Canterbury caption, visual lines | 3 | 1 | 3 | 1 |
+| Silesia caption, visual lines | 2 | 1 | 2 | 1 |
+| Strip height | 170px | 99px | 93px | 99px |
+| Judgment-word left offsets | 73, 229, 142 | 25, 25, 25 | 527, 683, 835 | 558, 558, 558 |
+
+The phone gains 71px of vertical budget and the status box's opening line
+rises from 749px to 679px down the document; desktop pays 6px. Also captured
+at 320x568 and 768x1024: at 320 the Canterbury caption wraps to two lines,
+left-aligned under its own column, which is the degradation I wanted.
+
+**Two instrument corrections, because both nearly became evidence.** First,
+`--window-size` on headless Chrome does not produce the CSS viewport it names;
+my first geometry run reported a three-across strip at a nominal 375px, which
+the screenshot from the same tree plainly contradicts. The fix is Set Window
+Rect, then read `window.innerWidth` back and correct for the difference.
+Second, `getClientRects().length` on these elements is always 1, because they
+are block boxes, and on the Canterbury caption a Range over its contents
+returns 6 at every width, because it counts one rect per inline run and that
+caption holds two `<code>` children. Neither number measures wrapping. The
+table above uses height over line-height, which does. Extending the standing
+rule of 2026-09-21: **a render names how it was served, and a measurement
+names what it actually measured.** Both of the discarded numbers looked like
+evidence and were not.
+
+**No guard shipped, and that is not an oversight.** The pattern in the entries
+below is that the guard moves with the claim. This change makes no claim: the
+markup is untouched, `verdict_items` in `tests/claims.rs` still parses the same
+spans, and `verdict_strip_words_match_their_aggregate_comparisons` still ties
+"Wins" and "Loses" to the reports. What changed is how it reads, and the only
+honest check for that needs a browser, which is #658's to build. Writing a
+substring assertion against a CSS declaration would be a test of the fix's
+spelling, not of the reader's experience.
+
+Not done: the strip's copy. "Silesia, vs the same two" back-references the
+Canterbury row, which reads correctly in row order but would not survive
+reordering. One idea per PR, and this one is layout.
+
 ## 2026-09-22 — Editorial: three pages joined by a back-link are not a site
 
 Shipped #604's item 4, "three pages, no shared frame". Every page now opens
