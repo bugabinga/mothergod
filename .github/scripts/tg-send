@@ -50,7 +50,7 @@ import urllib.request
 
 # `scrub` redacts every credential shape from the outgoing body;
 # `scrub_token` below removes one known token from API error text.
-from secret_scrub import scrub
+from secret_scrub import REDACTION, scrub
 import kv
 
 # The host is overridable so tg-send.test.mjs can stand in for Telegram and
@@ -90,8 +90,15 @@ EM_DASH = re.compile("(?m)^\u2014[ \t]*|[ \t]*\u2014[ \t]*")
 # character on both outsides, because `seven_day: 56% used` is a budget
 # footer, not emphasis, and the naive form runs from that underscore to
 # whichever one comes next, three lines later.
+#
+# The scrubber's marker goes first and comes out as typed. It is three
+# asterisks a side and bold is two, so the bold rule read `***REDACTED***`
+# as `*<b>REDACTED</b>*` (#598). The marker is one constant across every
+# exit so a reader recognises it anywhere; teaching this renderer the
+# constant is what keeps it one.
 INLINE = re.compile(
-    r"`(?P<code>[^`\n]+)`"
+    rf"(?P<marker>{re.escape(REDACTION)})"
+    r"|`(?P<code>[^`\n]+)`"
     r"|\[(?P<label>[^\]\n]+)\]\((?P<href>[^)\s\"]+)\)"
     r"|\*\*(?P<bold>[^*\n]+)\*\*"
     r"|(?<!\w)_(?P<italic>[^_\n]+)_(?!\w)"
@@ -227,6 +234,8 @@ def render(body: str, repo: str) -> str:
 
 def inline(match: re.Match, repo: str) -> str:
     """One inline form, rendered. Exactly one group of INLINE is ever set."""
+    if match["marker"] is not None:
+        return match["marker"]
     if match["code"] is not None:
         return f"<code>{match['code']}</code>"
     if match["href"] is not None:
