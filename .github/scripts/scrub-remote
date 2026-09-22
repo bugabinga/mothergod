@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Strip the credential claude-code-action embeds in the git remote (SessionStart hook).
+
+`.claude/settings.json` wires this as a SessionStart hook; the harness runs
+it once, after the action has configured git and before the model's first
+tool call. Extensionless and executable like the deny-* hooks; no agent
+types it.
+
+claude-code-action authenticates git by rewriting `remote.origin.url` to
+`https://x-access-token:<token>@github.com/<owner>/<repo>.git`
+(src/github/operations/git-config.ts, replaceCheckoutCredentials). From
+then on `git remote -v`, `git config --list`, `cat .git/config` and any
+git error that quotes the URL print a live installation token, and two
+runs did: 33435174432 (#425) and the herald's 35316583064 (#596). Nothing
+in this repository consumes that credential: push-branch replaced
+`git push` with four data-API calls on an explicitly passed token, and
+the repository is public, so `git fetch` needs none. secret_scrub.py
+filters the token's echoes at every exit; this hook removes the source
+(issue #597).
+
+Upstream offers no switch. The action's credential-helper path keeps the
+URL clean but is keyed to `allowed_non_write_users`, which also widens who
+may trigger a run and scrubs the environment out of every subprocess, so
+a repository that only wants a clean remote cannot reach it. A hook is
+the one in-repo point that runs after the action writes the URL and
+before any tool can print it.
+
+Contract: outside GitHub Actions (GITHUB_ACTIONS != "true") this does
+nothing; a human's local remote is theirs. In CI it reads
+`remote.origin.url` of the checkout (CLAUDE_PROJECT_DIR, else the working
+directory) and, if the URL carries userinfo (`https://<anything>@host`),
+rewrites it without. The URL itself is never printed, in either state.
+Always exits 0: a hook that fails a session start over git cosmetics is a
+worse defect than the leak it prevents.
+
+Liveness: one line on stdout, which the harness adds to the model's
+context, and the same line appended to GITHUB_STEP_SUMMARY, the durable
+trace. `credential removed` means the hook earns its keep. `already
+clean` means the action stopped embedding the token and this file is
+dead weight to delete.
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+# Userinfo in an http(s) URL is a credential by construction, at any length
+# and in any format; secret_scrub.URL_USERINFO makes the same argument. The
+# scheme is kept, everything up to and including the `@` is dropped.
+CREDENTIALED = re.compile(r"^(?P<scheme>https?://)[^/@]+@(?P<rest>.+)$", re.IGNORECASE)
+
+
+def git(repo, *args):
+    """Run git against `repo`, capturing both streams so no URL escapes."""
+    return subprocess.run(
+        ["git", "-C", repo, *args], capture_output=True, text=True, check=False
+    )
+
+
+def report(line):
+    """The one liveness line, to the model's context and the durable summary."""
+    print(line)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+
+
+def main() -> int:
+    """Rewrite a credentialed origin without its userinfo; always exit 0."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    repo = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    try:
+        got = git(repo, "config", "--get", "remote.origin.url")
+        if got.returncode != 0:
+            # No origin, or no repository: nothing to leak.
+            return 0
+        match = CREDENTIALED.match(got.stdout.strip())
+        if not match:
+            report("scrub-remote: origin already clean")
+            return 0
+        clean = match["scheme"] + match["rest"]
+        if git(repo, "remote", "set-url", "origin", clean).returncode != 0:
+            print("scrub-remote: could not rewrite origin", file=sys.stderr)
+            return 0
+    except OSError as error:
+        print(f"scrub-remote: {error.__class__.__name__}, left as is", file=sys.stderr)
+        return 0
+    report("scrub-remote: origin credential removed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

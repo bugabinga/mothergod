@@ -23,6 +23,10 @@ any length, in any format, so this rule cannot go stale the same way.
 The prefix rules stay as defence in depth: they catch a bare token pasted
 outside a URL, which the userinfo rule by definition cannot see.
 
+The remote URL itself, the source of both leaks, is cleaned at session
+start by the scrub-remote hook (#597); this scrubber stays as the exit-side
+defence for whatever else echoes a credential.
+
 Unprefixed secrets (Cloudflare's bare-alnum token) are indistinguishable from
 ordinary prose and must be passed in as `values`; no pattern can find them
 without redacting the whole document.
