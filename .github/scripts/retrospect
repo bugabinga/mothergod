@@ -260,6 +260,11 @@ def describe(run, meta, response):
     _, opener = trim(response)
     if opener:
         flags.append(f'opener "{opener[0]}"')
+    # tg-send swaps these out of the operator's notice, so the session line
+    # is where the defect stays visible (deny-em-dash's docstring has the
+    # counts that made it a mechanism).
+    if (dashes := response.count("\u2014")):
+        flags.append(f"em dash x{dashes}")
 
     print(
         f"\n{iso(run['updatedAt'])}  {role}  {event}  "
