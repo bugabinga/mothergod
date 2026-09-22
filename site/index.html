@@ -83,16 +83,24 @@
     }
     .tagline { color: var(--muted); max-width: 46ch; }
 
-    .verdict {
-      display: flex; flex-wrap: wrap; justify-content: center; gap: 1.6rem 2.2rem;
-    }
-    .verdict-item { display: flex; flex-direction: column; align-items: center; gap: .2rem; }
+    /* Three peer verdicts, so they read as three peers at every width: one
+       row each, judgment word in a column that sizes itself to the widest
+       word, condition beside it. Centered columns capped at 16ch were the
+       shape before, and they broke twice over: at 375px the three items
+       wrapped two-up-one-down and orphaned "Not yet" into a row of its own,
+       and at every width the Canterbury condition set as three ragged
+       centered lines. Rows fix both without a breakpoint, because a row
+       list is already the narrow layout. The items are display: contents so
+       the two columns line up across all three of them; that is safe on a
+       plain div, which carries no role for it to drop. */
+    .verdict { display: grid; grid-template-columns: auto 1fr; gap: .5rem .8rem; align-items: baseline; }
+    .verdict-item { display: contents; }
     .verdict-figure {
       font-family: "Unbounded", "Albert Sans", sans-serif; font-weight: 600;
-      font-size: 1.05rem;
+      font-size: 1.05rem; text-align: left;
     }
     .verdict-figure.win { color: var(--gold); }
-    .verdict-caption { color: var(--muted); font-size: .78rem; max-width: 16ch; text-align: center; }
+    .verdict-caption { color: var(--muted); font-size: .78rem; text-align: left; }
     .verdict-link { font-size: .85rem; }
 
     .status {
