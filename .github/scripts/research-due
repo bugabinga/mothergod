@@ -23,7 +23,7 @@ Two questions, answered from GitHub, never from a local clock alone:
                 branch with no PR yet (a session that crashed after pushing
                 but before opening one). Either means a session already
                 claimed this cycle; dispatching another would only queue
-                behind it in the `agent-research` concurrency group and
+                behind it in the `journal-slice` concurrency group and
                 spend a second budget-governed wake for nothing.
     recent      the newest `claude/research-*` PR's merge time, inside
                 WINDOW_DAYS. Half the pre-fix weekly cadence, a deliberate

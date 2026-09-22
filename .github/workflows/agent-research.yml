@@ -26,10 +26,12 @@ on:
 
 permissions: {}
 
-# Per-agent group (ADR-0014): research runs debounce against each other
-# only, never blocking an operator-priority BDFL wake.
+# Shared with agent-heartbeat (ADR-0049): the two seats that take the
+# journal's next slice run one at a time, so the claim check at session
+# start sees the other's PR (#594). Never blocks an operator-priority
+# BDFL wake, which keeps its own group (ADR-0014).
 concurrency:
-  group: agent-research
+  group: journal-slice
   cancel-in-progress: false
 
 jobs:

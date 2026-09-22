@@ -42,7 +42,10 @@ is fully autonomous by design (ADR-0003).
   and ships one small PR. Its queue is the `product` realm;
   `agent-system` issues belong to the BDFL (operator directive, Telegram,
   2026-08-23). Cadence rides the worker clock (ADR-0035), like every
-  seat's.
+  seat's. On an empty product queue it works the journal's top standing
+  lead, the researcher's source too, so the two seats share one
+  concurrency group and never build one slice twice (ADR-0049); which
+  seat should own the journal is #682.
 - *Curator*, daily: stewards the issue tracker (ADR-0044). Bootstraps
   labels and the ops-log issue, triages every new issue to a realm
   and a fate, grooms open ones for staleness, duplicates, and scope,
@@ -55,8 +58,9 @@ is fully autonomous by design (ADR-0003).
 - *Deslopper*, twice daily: removes slop from `src/` without changing
   observable behaviour, one scope per PR (ADR-0016). Never merges; the
   reviewer approves. Its operating manual is the `deslop` skill.
-- *Researcher* — weekly: runs one experiment from the journal's standing
-  leads (or a wild swing), records verdicts in `research/`.
+- *Researcher*, about twice weekly as `research-due` realizes it (#541):
+  runs one experiment from the journal's standing leads (or a wild
+  swing), records verdicts in `research/`.
 
 (An interactive `@claude` mention agent existed until 2026-08-21;
 removed by operator directive. Questions go in issues, which the
@@ -254,7 +258,12 @@ ALL open PRs, not just labeled ones, for zero check runs on the head
 SHA older than a few minutes — that is the tell. `settle-push` on such
 a PR names the class and prints this rescue instead of reporting
 missing runs (issue #338). Rescue is the same mechanical merge as the
-`dirty` case above, just reached by a different detection path.
+`dirty` case above, just reached by a different detection path, after
+one look the `dirty` case does not need: a head whose change `main`
+already carries is not a stall but a duplicate, two sessions having
+built one slice (PR #592, issue #594), and it closes as raced with its
+branch preserved. Resolving that conflict by hand would settle a codec
+design inside a merge commit.
 
 A fourth signature is the reviewer's own death. The `review` check
 ends failure, cancelled, or timed out, usually leaving no verdict

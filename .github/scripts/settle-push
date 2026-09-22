@@ -95,6 +95,8 @@ def die_conflicting(pr, branch):
         "GitHub builds no merge ref for it, so ci and agent-review will not",
         "fire on this head and the PR cannot merge. Runs are not the problem;",
         "the conflict is. Rescue:",
+        "0. Check main first: if it already carries this change, the PR is a",
+        "   duplicate, not a stall (issue #594); close it as raced and stop.",
         f"1. In a checkout of `{branch}`: git fetch origin && git merge origin/main",
         "   Resolve mechanically (append conflicts keep both sides), commit.",
         f"2. .github/scripts/push-branch {pr} --merge $(git rev-parse origin/main)",

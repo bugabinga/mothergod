@@ -178,6 +178,9 @@ test("no checks at all, past the grace, is conflicted at birth", () => {
   const found = classify(pr({ statusCheckRollup: [] }));
   assert.equal(found.kind, "never-fired");
   assert.match(found.detail, /no merge ref/);
+  // #594: the same signature covers a duplicate, whose rescue is not a merge.
+  assert.match(found.rescue, /read the conflict first/);
+  assert.match(found.rescue, /raced/);
 });
 
 test("no checks yet, inside the grace, is a PR that was just opened", () => {

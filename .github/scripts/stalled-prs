@@ -21,6 +21,9 @@ Signatures, most specific first, at most one reported per PR:
                          grace. Conflicted at birth, so GitHub built no
                          merge ref and `ci`/`agent-review` never fired --
                          not failed, not skipped, never fired (issue #200).
+                         Read the conflict before rescuing: a head whose
+                         change main already carries is a duplicate, not a
+                         stall, and closes as raced (PR #592, issue #594).
     dirty                mergeable state DIRTY: `main` moved and conflicted
                          the branch (first hit PR #34).
     reviewer-died        the `review` check ended failure, cancelled, or
@@ -227,8 +230,10 @@ def classify(pr, now):
         return finding(
             "never-fired",
             f"no required gate ran on {pr['headRefName']}; GitHub built no merge ref",
-            "GOVERNANCE 'Stalled auto-merge', third signature: mechanical merge of "
-            f"main, then push-branch {pr['number']} --merge <sha>, settle-push, merge-pr",
+            "GOVERNANCE 'Stalled auto-merge', third signature: read the conflict "
+            "first, a change main already carries closes as raced (#594); otherwise "
+            f"merge main, then push-branch {pr['number']} --merge <sha>, settle-push, "
+            "merge-pr",
         )
 
     if pr["mergeStateStatus"] == "DIRTY":
