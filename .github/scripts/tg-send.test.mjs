@@ -159,3 +159,17 @@ test("markup characters in the body stay text", async () => {
   assert.equal(status, 0);
   assert.equal(seen.at(-1).text, "5 &lt; 6 &lt;b&gt;not a tag&lt;/b&gt;");
 });
+
+// The scrubber's marker is three asterisks a side and the bold rule is two,
+// so a redacted body reached the operator as `*<b>REDACTED</b>*` (#598): the
+// secret was gone, the message looked broken. The marker is matched whole,
+// ahead of bold, and travels as typed. The token is assembled, never spelled,
+// so no scanner reads this file as a leak.
+test("the redaction marker is literal text, not a bold run", async () => {
+  const { status, stderr } = await send("tok-ok", {
+    body: "token ghp_" + "A1".repeat(12) + " leaked",
+  });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "token ***REDACTED*** leaked");
+  assert.match(stderr, /redacted 1 credential-shaped/);
+});
