@@ -10,8 +10,24 @@
 # else (ADR-0010).
 #
 # Not a required check. The `gate` ruleset requires exactly `fmt`, `clippy`,
-# `test` and `doc`, verified against the live ruleset before this landed, so
-# nothing here can deadlock a merge.
+# `test`, `doc` and `ratio` (live ruleset, read 2026-09-22), so nothing
+# here can deadlock a merge.
+#
+# On a pull request the filter below narrows, GitHub's aggregate `CodeQL`
+# check-run concludes `neutral`, titled "N configurations not found". The
+# code scanning results check expects every category the base branch
+# carries, all four here because the weekly sweep keeps them current, and
+# counts each one the filter skipped as missing. That is the statement
+# `ci.yml`'s skipped `test`, `doc` and `ratio` make on a prose-only PR, and
+# `gh pr checks` buckets both the same way, `skipping`, so `--fail-fast`
+# walks past it. Issue #552 chased it as a red check on one `fail` reading
+# (PR #549, 2026-09-13). Of the 94 PR heads opened since, 73 carry the
+# check as `neutral`, 21 prose-only heads carry none, and none reads
+# `failure` (check-runs API, read 2026-09-22). The alternative, an
+# unfiltered matrix on every PR, spends the five-minute rust
+# analysis on every workflow edit to turn a grey mark green. Should the
+# check-run ever conclude `failure` on a green PR, its title carries the
+# reason: `gh api repos/{owner}/{repo}/commits/<sha>/check-runs`.
 #
 # This is a reduction in scan FREQUENCY, never in coverage: every query still
 # runs on every change to code it can analyze, and the weekly cron below
