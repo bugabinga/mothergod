@@ -2608,11 +2608,25 @@ record.
   case this lead has an accept/reject verdict on — falsified, future
   service left on the table tracks no consistent relationship to
   accept/reject status (`access_log`'s accepted win leaves the least on
-  the table, `json_records`'s accepted win leaves the most). Remaining
-  S1-P4 scope: every displacement-availability signal tried is now
-  closed; either a pricing model that amortizes the far match's own
-  fixed tax against how likely its *own* introduced distance is to
-  recur (untried) or the large-file-mode alternative.
+  the table, `json_records`'s accepted win leaves the most).
+  Nineteenth slice, S2-R14: spent that last untried pricing angle:
+  amortizing a fresh match's distance tax across the near-future reuses
+  of the distance it introduces. Rejected, and hard: every cell of a
+  4x3 parameter grid regressed every case, train mean +0.144495 b/B at
+  the primary point and still +0.085804 at the gentlest, monotone in
+  the discount. A token-mix diagnostic named the mechanism. The
+  rebate double-counts a saving `relax_rep_candidates` already books
+  where it actually occurs, so the DP buys mispriced fresh matches by
+  spending the rep tokens that justified the discount (`json_records`
+  match tokens 2.9x, rep-covered bytes 33,343 -> 19,621). That result
+  also reframes the lead: S2-A95's asymmetry is correct accounting, not
+  a defect, so the four slices since have been hunting a bug in a
+  number that was never wrong. Remaining S1-P4 scope: no pricing or
+  gating signal proposed for this lead since S2-R11 survives contact.
+  What is left is the large-file-mode alternative (ROADMAP M5
+  territory, a deliberate mode distinct from the default rather than a
+  parse heuristic), or accepting that far-match residue on this data is
+  not a pricing problem at all.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -5271,3 +5285,108 @@ record.
   `kind: "patch"` with null bpb deltas, the same shape as
   S2-A89/S2-A91/S2-A92/S2-A94/S2-A95. Full record: `research/
   progress.jsonl` it152.
+- S2-R14 | REJECTED | S1-P4's sole remaining pricing angle after S2-A98,
+  named there as untried: amortize a fresh match's distance tax against
+  the expected reuse of the *new* distance that match introduces, so a
+  far match's price falls the more likely its own distance is to recur,
+  "the same reasoning `relax_rep_candidates` already gives an existing
+  rep, which nothing in `relax_match_candidate` currently does."
+  Implemented as `lz::distance_reuse_count(data, end, distance)`, a
+  bounded forward walk over the `REUSE_LOOKAHEAD` positions past a
+  match's end counting how many times that distance matches again for at
+  least `MIN_REP_LEN` bytes (capped at `MAX_COUNTED_REUSES`; the walk
+  advances by at least one position per step and stops at the lookahead,
+  so it is O(1) per DP position, not O(remaining data)), with
+  `relax_match_candidate`'s `offset_cost` divided by `1 + reuses`. Taken
+  once per position from the full match's end and applied to every
+  `LENGTH_STEPS` breakpoint, since the quantity estimated is a property
+  of the distance and its neighbourhood, not of where the DP cuts the
+  match. Encoder-only by construction: prices feed `dp_round`'s ranking
+  and never the token stream's own bookkeeping, so `replay`/`decode` are
+  untouched and any count whatsoever still yields a round-trippable
+  parse, confirmed (not assumed) by a `decompress(compress(x)) == x`
+  assertion on all 13 buffers at every measured point (169 round-trips
+  across the grid below, none failed).
+  Measured on `bench::baseline`'s 11 train-tier cases and the two
+  sealed-only kinds (`access_log`, `gradient_image` at
+  `sealed_seed(CASE_SEED)`), `CASE_LEN` 50,000, real bitstreams through
+  `mothergod::compress`, baseline and candidate from the same binary on
+  the same host so the per-case deltas are paired. **Train mean
+  +0.144495 b/B** at `REUSE_LOOKAHEAD` 64 / `MAX_COUNTED_REUSES` 3:
+  `entropy_ladder_h4` +0.384960, `x86_dense_code` +0.308960,
+  `markov_h8_2_trap` +0.223680, `entropy_ladder_h2` +0.223520,
+  `base64_wrapped` +0.134080, `json_records` +0.123040,
+  `sqlite_like_records` +0.109760, `entropy_ladder_h1` +0.080640,
+  `entropy_ladder_h6` +0.000800, `entropy_ladder_h8` and
+  `interleaved_audio16` exactly flat. Sealed: `access_log` +0.089760,
+  `gradient_image` flat. **Not a tuning failure.** Swept the full 4x3
+  grid (`REUSE_LOOKAHEAD` 8/16/64/256 x `MAX_COUNTED_REUSES` 1/2/3) on
+  train only, as `research/corpus/POLICY.md` permits: no case improved
+  at any of the twelve points, and the damage is monotone in the
+  discount at fixed lookahead (`entropy_ladder_h1` +0.023520 / +0.051520
+  / +0.080640 at lookahead 64 for cap 1 / 2 / 3). The gentlest point in
+  the grid, lookahead 8 with cap 1, a discount of at most 2x looking
+  8 bytes ahead, still costs **+0.085804 b/B** train mean. Dose-response
+  in the wrong direction across a grid with no improving cell is the
+  signature of a wrong rule, not an undertuned one.
+  Mechanism, measured rather than reasoned: a token-mix diagnostic over
+  `parse_optimal`'s output, same cases, baseline vs candidate. The
+  discount converts rep tokens into fresh matches, which is precisely
+  backwards. `json_records`: `Token::Match` 415 -> 1,208 (2.9x),
+  `Token::Rep` 1,483 -> 1,003, rep-covered bytes 33,343 -> 19,621.
+  `sqlite_like_records`: match 971 -> 4,955 (5.1x), rep 3,636 -> 1,363,
+  rep bytes 20,178 -> 2,737. `base64_wrapped`: match 369 -> 1,120, rep
+  1,316 -> 664. `access_log`: match 1,379 -> 1,921, rep 152 -> 26. The
+  four cases whose distances genuinely recur, exactly the four the
+  reuse signal fires hardest on, are the four that shed the most free
+  rep coverage. `entropy_ladder_h1` states it most sharply: total tokens
+  *fell* 5,945 -> 3,984 (literals 3,198 -> 571 absorbed into longer
+  matches) while bits/byte *rose* 6.4%, so the parse got shorter in
+  tokens and more expensive in bits. On `json_records` the +0.123040
+  b/B is 6,152 bits over 793 extra match tokens, ~7.8 bits each, the
+  same order as a fresh distance at this data's bucket range (10-12 raw
+  bits plus modeled price plus `EXTRA_HEADER_BITS_PRICE`) net of the
+  literals and reps those matches absorbed.
+  So the rebate double-counts a saving that already exists. Every reuse
+  the lookahead counts is a rep the DP *already* prices at near-zero
+  where it actually occurs, via `relax_rep_candidates`. Crediting the
+  introducing match for those same reps books the saving twice: once at
+  the cheap rep token that really earns it, and again as a discount on a
+  token that will pay the full distance on the wire. `dp_round`'s price
+  then stops estimating emitted bits, so its shortest path stops being
+  the shortest bitstream, and it buys that mispriced match by spending
+  the very rep tokens whose existence justified the discount. This also
+  corrects the framing S2-A95 bequeathed to this lead: the asymmetry it
+  measured (a match pays for its distance, a following rep does not) is
+  *correct accounting*, not a mispricing. The distance genuinely costs
+  what it costs, once, at the token that emits it, and the reps that
+  follow genuinely cost near nothing. The DP was right; four slices
+  (S2-R12, S2-R13, S2-A98, this one) have now looked for a defect in a
+  number that was never wrong.
+  Encode time also rose, modestly and as designed-for rather than as a
+  surprise (the lookahead is O(1) per position but not free):
+  compress-plus-decompress wall clock at the primary point grew
+  `markov_h8_2_trap` 0.235s -> 0.299s and `x86_dense_code` 0.176s ->
+  0.226s; at lookahead 256, `json_records` 0.116s -> 0.181s.
+  Candidate code (`distance_reuse_count`, `REUSE_LOOKAHEAD`,
+  `MAX_COUNTED_REUSES`, and `relax_match_candidate`'s `data` parameter
+  and divided `offset_cost`) reverted in full, per the
+  `compression-experiment` skill; measured with throwaway, uncommitted
+  scratch binaries (`bench/src/bin/reuse_amortization_measure.rs`,
+  `bench/src/bin/reuse_token_diag.rs`, a sweep driver), deleted after
+  measurement, the same convention as S2-A93 through S2-A98. One
+  incidental honesty note, which is why the baseline column above is
+  measured rather than read from the committed file: this host measures
+  `entropy_ladder_h6` at 6.178240 against `bench/baseline.json`'s
+  6.1792, a 0.00096 b/B *improvement* some past encoder change earned
+  without regenerating the file. `baseline_gate check` is green on a
+  clean tree, correctly: it fails on regression past `TOLERANCE_BITS`
+  and has no reason to chase an improvement. But a paired comparison
+  against a stale column would have credited this candidate 0.00096 b/B
+  it did not earn. `research/progress.jsonl` it153. Remaining S1-P4
+  scope: with reuse amortization closed, no pricing or gating signal
+  proposed for this lead since S2-R11 survives contact. What is left is
+  the large-file-mode alternative (ROADMAP M5 territory, a deliberate
+  mode distinct from the default rather than a parse heuristic), or
+  accepting that far-match residue on this data is not a pricing
+  problem at all.
