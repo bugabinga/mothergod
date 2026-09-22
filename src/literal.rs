@@ -297,8 +297,8 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let prev1 = usize::from(context.prev1);
     let prev2 = usize::from(context.prev2);
     let after_copy = usize::from(context.after_copy);
-    let rate_context = prev1 | (after_copy * 256);
-    let order2 = ((prev1 << 8) | prev2) & 0xFFF;
+    let rate_context = prev1 | (after_copy * ALPHABET);
+    let order2 = ((prev1 << 8) | prev2) & (ORDER2_BANKS - 1);
     let align = ((context.position & 3) << 4) | (prev1 >> 4);
     let word_hash =
         usize::try_from(context.word_hash & 0xFFF).expect("masked to 12 bits, always fits usize");
