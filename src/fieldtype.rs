@@ -31,13 +31,23 @@
 //! [`field_bank`] are pure functions over a byte stream, proven only by
 //! their own unit tests below, not measured against
 //! `bench::baseline` and not blended into [`crate::literal::Literal`]'s
-//! mix. The next slice owed here is the same one S1-P5 took after its own
-//! first slice (S2-A64): an ideal-cost pairing
-//! (`research/JOURNAL.md` S2-A69's methodology) that blends a
-//! field-class-keyed eighth expert into the shipped six-expert mix and
-//! measures whether the signal earns its keep on `bench::baseline`'s
-//! `sqlite_like_records`/`json_records` cases and the sealed set, before
-//! any real wiring or `FORMAT_VERSION` bump.
+//! mix. The next slice owed here, the same before-wiring ideal-cost
+//! pairing `research/JOURNAL.md` S2-A69 used for S1-P5's column expert
+//! (blend a field-class-keyed eighth expert into the shipped six-expert
+//! mix), was tried and rejected (`JOURNAL` S2-R15): net train improvement
+//! on both named targets (`sqlite_like_records` −0.001709 b/B,
+//! `json_records` −0.000936 b/B) and on one sealed-only kind (`access_log`
+//! −0.004075 b/B), but the other sealed-only kind, `gradient_image`,
+//! regressed (+0.001598 b/B) — a validation regression fails corpus
+//! policy's accept rule outright, independent of how small the train wins
+//! are. Mechanism: `gradient_image`'s raw pixel bytes carry no JSON-shaped
+//! syntax for [`FieldState::advance`] to track, so its bank assignment is
+//! close to noise there, and blending that noise in as an eighth expert
+//! costs a small but real mixing tax the six real experts' own weights do
+//! not fully suppress. What is left, per the same shape S1-P3 reached
+//! after its own repeated rejections (`JOURNAL` S2-R6's own closing note):
+//! unclear, since the narrower "blended in, not replacing" hypothesis this
+//! slice tested was the lead's own best-reasoned remaining branch.
 
 /// A byte's syntactic role in a JSON-shaped stream, independent of any
 /// fixed column position.
