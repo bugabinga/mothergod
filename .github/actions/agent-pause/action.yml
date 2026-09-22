@@ -31,6 +31,14 @@ description: >-
   Fable 5 limit" matched none of the five markers this list carried on
   2026-08-23), which is exactly why it is no longer the primary path.
 
+  Alerts go through `.github/scripts/tg-send`, never a raw curl (issue
+  #527). tg-send is the one sender that writes the chat-log receipt, and a
+  pause alert is the message whose delivery the next outage triage most
+  needs to see: the #517 retrospective could not tell "operator warned"
+  from "alert failed silently", because these two sends predated it. They
+  land as conversation turns, not `--notice`: rare enough to cost the
+  40-entry memory nothing, and exactly the context the next chat needs.
+
   Invariant (issue #11 post-mortem): only error result objects are
   scanned, never the conversation transcript. This repo's prompts and docs
   legitimately contain phrases like "usage limit" because they describe
@@ -52,6 +60,13 @@ inputs:
     description: Operator's Telegram chat id (optional; alerts skip if empty)
     required: false
     default: ""
+  cloudflare_api_token:
+    description: >-
+      Cloudflare KV bearer for tg-send's chat-log receipt (optional; the
+      alert still sends without it and tg-send says on stderr that nothing
+      recorded it)
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -59,8 +74,9 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         EXEC_FILE: ${{ inputs.execution_file }}
-        TG_TOKEN: ${{ inputs.telegram_bot_token }}
-        TG_CHAT: ${{ inputs.telegram_chat_id }}
+        TELEGRAM_BOT_TOKEN: ${{ inputs.telegram_bot_token }}
+        OPERATOR_TELEGRAM_CHAT_ID: ${{ inputs.telegram_chat_id }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare_api_token }}
       run: |
         set -euo pipefail
         if [ -z "$EXEC_FILE" ] || [ ! -f "$EXEC_FILE" ]; then
@@ -207,12 +223,10 @@ runs:
               --title "🔒 Model availability ledger" --label model-limits --body "$body"
             echo "Ledgered $model until $resets (new issue). Other agents unaffected."
           fi
-          if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$OPERATOR_TELEGRAM_CHAT_ID" ]; then
             until_h="$(date -u -d "@$resets" +%Y-%m-%dT%H:%MZ)"
-            curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-              --data-urlencode "chat_id=${TG_CHAT}" \
-              --data-urlencode "text=🔒 mothergod: ${model} rate-limited until ${until_h}. Agents on other models keep running; any agent whose ladder still has a rung falls back automatically." \
-              >/dev/null && echo "Telegram alert sent." || echo "Telegram alert failed (non-fatal)."
+            printf '🔒 mothergod: %s rate-limited until %s. Agents on other models keep running; any agent whose ladder still has a rung falls back automatically.\n' "$model" "$until_h" \
+              | .github/scripts/tg-send && echo "Telegram alert sent." || echo "Telegram alert failed (non-fatal)."
           fi
           exit 0
           ;;
@@ -245,14 +259,12 @@ runs:
         fi
         issue_url="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label agents-paused --label agent-system --body "$body")"
         echo "Agent system paused (${kind})."
-        if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+        if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$OPERATOR_TELEGRAM_CHAT_ID" ]; then
           if [ "$kind" = auth ]; then
             text="⏸️ mothergod agents paused: Claude auth failed (${hit}). Fix the CLAUDE_CODE_OAUTH_TOKEN secret; the fleet probes daily (next: ${resume_at} UTC) and resumes itself once the token works. Probe sooner: close ${issue_url}"
           else
             text="⏸️ mothergod agents paused (${kind}, marker: ${hit}). Auto-resume at ${resume_at} UTC; resume sooner: close ${issue_url}"
           fi
-          curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TG_CHAT}" \
-            --data-urlencode "text=${text}" \
-            >/dev/null && echo "Telegram pause alert sent." || echo "Telegram alert failed (non-fatal)."
+          printf '%s\n' "$text" \
+            | .github/scripts/tg-send && echo "Telegram pause alert sent." || echo "Telegram alert failed (non-fatal)."
         fi

@@ -113,13 +113,6 @@ jobs:
       '[Claude Code](https://claude.ai/code)')
     runs-on: ubuntu-latest
     timeout-minutes: 300
-    # The inbox's address for the agent's own drain. Ids, not secrets;
-    # the bearer token is the secret. Job-level so the agent session
-    # inherits them and the prompt can name variables instead of
-    # carrying a second copy of the path.
-    env:
-      KV_ACCOUNT: c9526445475a4d62fd6e330810573ef0
-      KV_NAMESPACE: 06ae14f739f14d55b5d3c72c6b7e815f
     # Maximum practical GITHUB_TOKEN grant (ADR-0008). Note: neither
     # GITHUB_TOKEN nor the Claude app's own installation token (verified
     # 2026-08-21, issue #24) can push commits touching
@@ -682,6 +675,7 @@ jobs:
           execution_file: ${{ steps.claude.outputs.execution_file }}
           telegram_bot_token: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       # No live run, no "typing..." (PR #155 review). The worker starts
       # the indicator when the operator's message lands and counts down
