@@ -2597,6 +2597,22 @@ record.
   far match needs over the rep it displaces to earn its tax) and measure
   against S2-R12's own residual, or accept the large-file-mode
   alternative if no threshold clears every prior slice's per-case bar.
+  Seventeenth slice, S2-R13: did that wiring and swept the threshold —
+  rejected, `base64_wrapped`'s regression barely moved across the swept
+  range while `access_log`'s already-accepted win eroded well before
+  that; a length-only displacement gate cannot separate the two.
+  Remaining S1-P4 scope: the residual needs a signal neither the
+  seed-window lever nor a length-based gate used, plausibly how many
+  future positions the displaced rep slot would still have served.
+  Eighteenth slice, S2-A98: tested exactly that signal across every
+  case this lead has an accept/reject verdict on — falsified, future
+  service left on the table tracks no consistent relationship to
+  accept/reject status (`access_log`'s accepted win leaves the least on
+  the table, `json_records`'s accepted win leaves the most). Remaining
+  S1-P4 scope: every displacement-availability signal tried is now
+  closed; either a pricing model that amortizes the far match's own
+  fixed tax against how likely its *own* introduced distance is to
+  recur (untried) or the large-file-mode alternative.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -5200,3 +5216,58 @@ record.
   `Base64Wrapped(train)` is still open; both the seed-window lever
   (S2-R12) and a length-based displacement gate (this entry) are now
   closed, so the next idea needs a signal neither used.
+- S2-A98 | ACCEPTED | S1-P4's own remaining scope after S2-R13: tested
+  the signal S2-R13's own closing paragraph named — "how many future
+  positions the displaced rep slot would still have served, not just
+  its length at the one position it is compared at" — before wiring
+  anything. Standalone token-level diagnostic, no `src/` change: for
+  every far-distance (`distance > lz::WINDOW`) `Token::Match` the
+  adaptive parse chose where the `WINDOW`-capped parse's token covering
+  that same byte position was a `Token::Rep` (S2-A95's own
+  classification, extended to cover a far match starting mid-token, not
+  only at a small-parse token boundary — a boundary-only version of this
+  same classification reproduced the literal bucket exactly (464) but
+  undercounted match (372 of 581) and rep (196 of 484) by conflating
+  "no small-parse token starts here" with "no small-parse token covers
+  here"), checked whether the displaced rep's distance still
+  matches at least 2 bytes starting exactly where the far match ends.
+  Ran across every case this lead has measured a real accept/reject
+  verdict on: `base64_wrapped` (train, the bad case), `access_log`
+  (sealed, the one genuine win), `json_records` (train, also an
+  accepted win), `long_range_repeat` (both seeds, the strongest genuine
+  win — zero far matches displace a rep there, the repeat is reached
+  from a cold cache). **Falsified**: `base64_wrapped`'s bad far matches
+  leave future rep service on the table 27.7% of the time (134 of 484);
+  `access_log`'s genuinely-accepted far matches do so *less* often,
+  5.1% (4 of 78), and `json_records`'s own accepted win does so *more*
+  often than either, 47.8% (66 of 138). A signal that tracked "far match
+  is bad" would show `base64_wrapped` highest and the two accepted wins
+  lowest; the actual ordering is `access_log` (accepted) <
+  `base64_wrapped` (rejected) < `json_records` (accepted), no monotonic
+  relationship to accept/reject status at all. Mechanism: this
+  falsifies "far match is bad because it cuts off a rep that still had
+  more to give" as a per-case story. S2-A95's own diagnosis stands
+  unchallenged instead — the fixed bucket-20 distance tax (20 raw bits
+  plus `EXTRA_HEADER_BITS_PRICE`) is an amortized-cost problem, paid
+  identically whether the displaced rep was about to run dry or not, so
+  whether it *would* have kept serving is the wrong axis to gate on.
+  Remaining S1-P4 scope: both signals S2-R12/S2-R13/this entry tried
+  (seed reinforcement, raw displaced length, future displaced service)
+  are closed; what is left is either a pricing model that actually
+  amortizes bucket 20's fixed tax against expected reuse of the *new*
+  distance a far match introduces (an untried angle: a far match's
+  price should fall the more likely its own distance is to recur, the
+  same reasoning `relax_rep_candidates` already gives an existing rep,
+  which nothing in `relax_match_candidate` currently does) or the
+  large-file-mode alternative. | Measured with a throwaway, uncommitted
+  scratch binary (`bench/src/bin/far_match_future_service_diag.rs`,
+  deleted after this measurement, same convention as
+  S2-A93/S2-A94/S2-R11/S2-A95/S2-R12/S2-R13's own). Harness
+  cross-checked against S2-A95's own published counts before adding the
+  future-service check: reproduced 1,529 total far-distance tokens,
+  464/581/484 literal/match/rep displacement split, exactly. | No bpb
+  measurement: this diagnostic classifies existing parses rather than
+  measuring a new candidate; `research/progress.jsonl` records it as
+  `kind: "patch"` with null bpb deltas, the same shape as
+  S2-A89/S2-A91/S2-A92/S2-A94/S2-A95. Full record: `research/
+  progress.jsonl` it152.
