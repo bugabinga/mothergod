@@ -21,8 +21,10 @@
 # `ci.yml`'s skipped `test`, `doc` and `ratio` make on a prose-only PR, and
 # `gh pr checks` buckets both the same way, `skipping`, so `--fail-fast`
 # walks past it. Issue #552 chased it as a red check on one `fail` reading
-# (PR #549, 2026-09-13) that 34 of 34 PR heads since did not reproduce. The
-# alternative, an unfiltered matrix on every PR, spends the five-minute rust
+# (PR #549, 2026-09-13). Of the 94 PR heads opened since, 73 carry the
+# check as `neutral`, 21 prose-only heads carry none, and none reads
+# `failure` (check-runs API, read 2026-09-22). The alternative, an
+# unfiltered matrix on every PR, spends the five-minute rust
 # analysis on every workflow edit to turn a grey mark green. Should the
 # check-run ever conclude `failure` on a green PR, its title carries the
 # reason: `gh api repos/{owner}/{repo}/commits/<sha>/check-runs`.
