@@ -51,6 +51,7 @@ import urllib.request
 # `scrub` redacts every credential shape from the outgoing body;
 # `scrub_token` below removes one known token from API error text.
 from secret_scrub import scrub
+import kv
 
 # The host is overridable so tg-send.test.mjs can stand in for Telegram and
 # pin what each exit prints; nothing in production sets it.
@@ -250,16 +251,14 @@ def record(sent: dict, reply_to: int | None, body: str) -> None:
     state this function replaces, and it says so on stderr rather than
     pretending.
     """
-    account = os.environ.get("KV_ACCOUNT")
-    namespace = os.environ.get("KV_NAMESPACE")
     token = os.environ.get("CLOUDFLARE_API_TOKEN")
-    if not (account and namespace and token):
-        print("tg-send: sent, but no Cloudflare credentials in the environment,"
+    if not token:
+        print("tg-send: sent, but no CLOUDFLARE_API_TOKEN in the environment,"
               " so nothing recorded it; a later context cannot tell that this "
               "run already spoke", file=sys.stderr)
         return
 
-    url = KV.format(account, namespace, CHATLOG)
+    url = KV.format(kv.ACCOUNT, kv.NAMESPACE, CHATLOG)
     # Building the entry sits inside the guard with the network calls, and
     # KeyError with them, because "never fatal" has to hold for every way this
     # can fail and not just the ones that seem likely. Telegram always returns

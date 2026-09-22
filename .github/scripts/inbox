@@ -46,7 +46,8 @@ read. `done` is what a run calls once it has actually replied.
 Never calls Telegram's getUpdates. Webhook mode owns that stream, and polling
 it would race the worker for the same updates.
 
-Reads KV_ACCOUNT, KV_NAMESPACE and CLOUDFLARE_API_TOKEN from the environment.
+Reads CLOUDFLARE_API_TOKEN from the environment; the namespace it opens is
+named once, in kv.py.
 The token is spent inside this process and scrubbed from any error text before
 printing (hard rule 10).
 
@@ -60,6 +61,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+
+import kv
 
 # The host is overridable so inbox.test.mjs can stand in for Cloudflare and
 # pin what each exit prints; nothing in production sets it. Same seam tg-send
@@ -312,13 +315,10 @@ def kv_base() -> str:
     A missing credential is Unreadable and not an empty inbox, for the same
     reason a 403 is: both end with a run that believes nobody wrote to it.
     """
-    account = os.environ.get("KV_ACCOUNT")
-    namespace = os.environ.get("KV_NAMESPACE")
-    if not (account and namespace and os.environ.get("CLOUDFLARE_API_TOKEN")):
+    if not os.environ.get("CLOUDFLARE_API_TOKEN"):
         raise Unreadable(
-            "KV_ACCOUNT, KV_NAMESPACE and CLOUDFLARE_API_TOKEN must all be in "
-            "the environment; one of them is not, so no inbox was read")
-    return BASE.format(account, namespace)
+            "CLOUDFLARE_API_TOKEN is not in the environment, so no inbox was read")
+    return BASE.format(kv.ACCOUNT, kv.NAMESPACE)
 
 
 def call(url: str, method: str = "GET", envelope: bool = False):
