@@ -12,10 +12,12 @@ the two seats on the largest models. Hot, wrong more often than not on the
 PR surface, on a substrate that is one code point: ADR-0022's test for
 compiling a rule, passed.
 
-Compiled where text leaves the session, not where it is typed. A Bash
-command that posts or commits and carries U+2014 is denied with the rule
-on stderr, and the model rewrites its own sentence with the punctuation it
-meant. A formatter could swap the character but not choose between a
+Compiled at the Bash boundary, where nearly all posted text leaves a
+session, not where it is typed. A Bash command that posts or commits and
+carries U+2014 is denied with the rule on stderr, and the model rewrites
+its own sentence with the punctuation it meant. The one other exit,
+`mcp__github_file_ops__commit_files` on the BDFL seat, is not covered;
+GOVERNANCE already steers pushes off it on other grounds (#78). A formatter could swap the character but not choose between a
 comma, a colon and a period, and a sentence built around a dash usually
 wants restructuring, not substitution; here the writer is still present,
 so the writer does it. tg-send is the one place that does swap, because

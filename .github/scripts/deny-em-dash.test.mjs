@@ -19,7 +19,10 @@ function run(stdin, env = ciEnv) {
 const bash = (command) => JSON.stringify({ tool_name: "Bash", tool_input: { command } });
 
 const denied = [
-  ["gh pr comment 5 --body-file - <<'EOF'\nPASS — verified independently\nEOF", "the reviewer's PR comment, heredoc body"],
+  [
+    "gh pr comment 5 --body-file - <<'EOF'\nPASS — verified independently\nEOF",
+    "the reviewer's PR comment, heredoc body",
+  ],
   ["gh pr create --title t --body 'one idea — one PR'", "a PR body"],
   ["gh pr review 5 --approve --body 'fine — ship'", "a review body"],
   [".github/scripts/gh-comment 3 <<'EOF'\nDigest — nothing moved\nEOF", "an issue comment"],
