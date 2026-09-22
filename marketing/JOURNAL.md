@@ -18,6 +18,71 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-22 — Editorial: three pages joined by a back-link are not a site
+
+Shipped #604's item 4, "three pages, no shared frame". Every page now opens
+with the same four links in the same order, `mothergod` / Status / Agents /
+Source, with the current one marked. Before this, `/` had no navigation at
+all: a reader who landed there learned that `/status.html` existed only by
+reaching the "Follow along" block, section 7 of 8, and `/agents.html` only
+from the footer prose below it. The two sub-pages had the reverse problem:
+a `← mothergod` back-link out, and their siblings buried in the footer.
+
+**Why "Source" is in the frame and not just on `/`.** The frame's job is the
+site's own pages, so a fourth link needs an argument. The argument is the
+evaluating engineer: for that audience the repository is the most likely next
+click from any page, and on `/` it was sitting in the same buried block as
+"Live status". The three-page loop plus the one exit covers every audience's
+"where next" in one row, and the row still fits one line at 375px.
+
+**The current page is marked by weight and a rule, never by color alone.**
+`aria-current="page"` carries it for assistive technology; visually it is
+brighter text plus a gold underline, so the state survives a reader who
+cannot separate gold from lavender.
+
+**What the frame cost `/`'s first screen, measured.** A nav is vertical
+budget on the one screen this project has been fighting for since #630.
+`body`'s `padding-top` drops from 4rem to 1.6rem to pay for most of it; the
+net cost at 375x812 is about 22px, and the verdict strip and the status box's
+opening line both still clear the fold. On the sub-pages it is a small gain,
+because the nav replaces a back-link that cost more.
+
+Evidence, per the standing rule adopted 2026-09-21: all six stills served
+from `site/` over HTTP at the deployed root, captured at 375x812 and
+1440x900, before and after, with the generated `status-data.json`,
+`trust-data.json` and `agent-metrics.json` present so the data pages
+rendered their real content rather than their error states. Keyboard
+behaviour is measured, not asserted: driving chromedriver over the W3C
+protocol, the four frame links are the first four tab stops on `/`, and each
+reports `outline rgb(255, 215, 106) solid 2px` from `getComputedStyle`. The
+capture tooling was scratch and is not committed, because the committed
+version of it is #658's to build.
+
+**Why three inline copies, and the debt paid in a test.** The site has no
+build step (#604's own constraint), so there is no stylesheet or partial to
+share; the frame is duplicated in all three pages. A duplicate is a
+synchronization debt, and on a three-page site the way it comes due is
+specific: one page gains a destination, the other two keep the old map, and
+a reader can reach a page from one place and not another.
+`tests/claims.rs`'s `shared_frame_offers_the_same_links_on_every_page`
+parses each nav and fails if the destination lists differ, if more than one
+link claims to be the current page, or if the marked link is not the page
+being served. Verified by breaking it both ways before trusting it: deleting
+one page's Status link fails naming both lists, and dropping one
+`aria-current` fails naming the count. What the guard does not cover is the
+CSS copy, only the markup; a page whose frame is styled differently still
+passes, and the honest reason is that no cheap check for that exists in this
+harness.
+
+**Not done, deliberately.** The sub-page footers still link `mothergod` and
+their sibling, now duplicated by the frame above. That duplication costs a
+reader nothing and pruning it is churn in the same diff as the frame, so it
+stays. The verdict strip's 375px wrap, recorded as a standing lead on
+2026-09-21, reproduced again in this wake's before capture and is still
+open: at that width "Wins" and "Loses" sit side by side with "Not yet"
+alone underneath, and the "Wins" caption breaks across three ragged lines.
+One idea per PR.
+
 ## 2026-09-21 — Editorial: a screenshot is evidence only if it names how it was served
 
 Took #636, the operator's charter of 2026-09-20: "when herald makes changes

@@ -741,3 +741,89 @@ fn social_preview_tags_match_each_pages_own_title_and_description() {
         );
     }
 }
+
+/// The `<nav class="frame">` element of a page, opening tag to closing tag.
+fn frame_nav(page: &str) -> &str {
+    let start = page
+        .find("<nav class=\"frame\"")
+        .unwrap_or_else(|| panic!("no <nav class=\"frame\"> on the page"));
+    let rest = &page[start..];
+    let end = rest
+        .find("</nav>")
+        .unwrap_or_else(|| panic!("unterminated <nav class=\"frame\">"))
+        + "</nav>".len();
+    &rest[..end]
+}
+
+/// Every link in a frame nav as `(href, visible text, marks the current
+/// page)`, in document order. Parsed rather than string-compared so the HTML
+/// formatter is free to rewrap the markup: what has to match across the three
+/// pages is the destination list, not the indentation.
+fn frame_links(nav: &str) -> Vec<(String, String, bool)> {
+    nav.match_indices("<a ")
+        .map(|(index, _)| {
+            let rest = &nav[index..];
+            let open_end = rest.find('>').expect("unterminated <a> in the frame nav");
+            let open = &rest[..open_end];
+            let text_end = rest.find("</a>").expect("unclosed <a> in the frame nav");
+            (
+                attr_value(open, "href").to_owned(),
+                normalize_whitespace(&rest[open_end + 1..text_end]),
+                open.contains("aria-current=\"page\""),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn shared_frame_offers_the_same_links_on_every_page() {
+    // The frame (issue #604 item 4) is three inline copies of one nav,
+    // because the site has no build step to share a stylesheet or a partial.
+    // A copy is a synchronization debt: a page gains a destination and the
+    // other two silently keep the old map, which on a three-page site means
+    // a reader who can reach a page from one place and not from another.
+    // This is that debt, paid by a test: same destinations in the same order
+    // everywhere, and exactly one of them marked as where the reader is.
+    let pages = [
+        ("site/index.html", "/"),
+        ("site/status.html", "/status.html"),
+        ("site/agents.html", "/agents.html"),
+    ];
+
+    let mut expected: Option<(&str, Vec<(String, String)>)> = None;
+    for (file, own_path) in pages {
+        let page = read(file);
+        let links = frame_links(frame_nav(&page));
+        assert!(
+            links.len() >= 3,
+            "{file}'s frame nav has {} links; it should carry at least the three pages",
+            links.len()
+        );
+
+        let current: Vec<&(String, String, bool)> =
+            links.iter().filter(|(_, _, current)| *current).collect();
+        assert_eq!(
+            current.len(),
+            1,
+            "{file}'s frame nav marks {} links aria-current=\"page\"; exactly one is where the reader is",
+            current.len()
+        );
+        assert_eq!(
+            current[0].0, own_path,
+            "{file}'s frame nav marks {:?} as the current page, but the page is served at {own_path}",
+            current[0].0
+        );
+
+        let destinations: Vec<(String, String)> = links
+            .into_iter()
+            .map(|(href, text, _)| (href, text))
+            .collect();
+        match &expected {
+            None => expected = Some((file, destinations)),
+            Some((first_file, first)) => assert_eq!(
+                &destinations, first,
+                "{file}'s frame nav offers {destinations:?}, {first_file}'s offers {first:?}"
+            ),
+        }
+    }
+}
