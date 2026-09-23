@@ -2519,11 +2519,35 @@ record.
   table's own (which ordinary training does, at different rates per
   expert), costing the most on exactly the fixed-record/short-period data
   this project's generators exist to probe. Full numbers and mechanism:
-  S2-R16's own entry. Remaining scope: all three of `src/ppm.rs`'s own
-  named fallback candidates are now tried and rejected — the same
-  "unclear, no further named branch" shape S1-P2 reached after its own
-  repeated rejections. What is left is either a substitution rule that
-  needs no cross-table rescaling, or accepting the ceiling.
+  S2-R16's own entry. Remaining scope, at the time: all three of
+  `src/ppm.rs`'s own named fallback candidates were tried and rejected,
+  the same "unclear, no further named branch" shape S1-P2 reached after
+  its own repeated rejections; what was left was either a substitution
+  rule that needs no cross-table rescaling, or accepting the ceiling.
+  Fourth slice, S2-R17: built exactly that substitution rule, reviving
+  `NibbleFallback` (S2-R16's own 16-context table) with a mechanism that
+  never rescales a probability onto another table's total at all, instead
+  of S2-R16's "convert to an effective frequency, rescaled onto the
+  target bank's own total" rounding step. Rejected anyway, on nearly the
+  same shape S2-R16 reached: train net regressed (+0.0278 b/B, 5
+  improved, 6 regressed, the same split count as S2-R16), both
+  sealed-only kinds improved, and the same three fixed-record/
+  short-period generators (`interleaved_audio16`, `sqlite_like_records`,
+  `x86_dense_code`) regressed worst. Full numbers and mechanism: S2-R17's
+  own entry. Remaining scope: every substitution mechanism this doc's own
+  module named, or S2-R17 could construct, rescale-based and
+  rescale-free alike, now fails on the same data, for what looks like the
+  same underlying reason: not a rounding artifact specific to one
+  mechanism, but the six-expert mixer's own adaptive weights, tuned to
+  expect an honest Laplace floor from a sparse expert, mishandling
+  whatever a foreign substitute reports in its place instead (S2-R17's
+  own entry names this the likely mechanism, itself untested). What is
+  left, if anything, is a fallback that never enters the six-expert
+  mix's per-expert floor at all: an escape event priced and blended as a
+  separate, eighth expert-like signal, the same additive (not
+  substitutive) architectural shape S1-P5's column expert used, or
+  accepting that this lead's ceiling, absent one, sits where S1-P2's own
+  repeated-rejection shape already landed.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -5672,3 +5696,79 @@ record.
   reintroduce this slice's own drift mechanism) or accepting that this
   lead's ceiling, absent one, sits at the same "unclear, no further named
   branch" shape S1-P2 reached after its own repeated rejections.
+- S2-R17 | REJECTED | S1-P3's own remaining scope after S2-R16: a
+  substitution rule that never rescales one table's estimate onto
+  another's total. Revived S2-R16's own `NibbleFallback` (16 contexts
+  keyed on the previous byte's high nibble) but replaced its substitution
+  mechanism entirely: instead of converting `NibbleFallback`'s estimate
+  into an integer "effective frequency" against the target expert's own
+  bank total (S2-R16's own rounding step, diagnosed there as the drift
+  source), a new `fixed_point_contribution_from_probability` plugs
+  `NibbleFallback`'s own probability directly into the exact fixed-point
+  unit `fixed_point_scale` already lands every real contribution in
+  (`weight_fraction * probability * FIXED_POINT_SCALE`), no bank total
+  of any kind entering this formula, so there is nothing for two tables'
+  totals to disagree about. `Literal::ideal_cost_bits_nibble_fallback_direct_pair`
+  prices a literal twice from the same pre-update state: the baseline
+  side reuses `Self::mix` directly (unlike S2-R16's own first, rejected
+  draft, a hand-rolled float recomputation that missed `mix`'s own
+  per-symbol `+1` fixed-point floor and diverged from the true baseline
+  by about 0.08 bits even with nothing substituted; this slice avoids
+  that specific bug by construction, calling `mix` verbatim for one side
+  of the pair); the substituted side rebuilds the identical two-pass
+  `u64` scale/`+1`-floor structure, branching per `(expert, symbol)` only
+  where that expert's own bank has never observed that symbol
+  (`freq == 1`). Two unit tests exercise this pairing method's own
+  control cases before any corpus measurement: a fresh model paired with
+  a fresh, equally-uniform `NibbleFallback` must match baseline exactly
+  on the very first call (both tables start in genuine agreement, so
+  even though the substitution branch fires everywhere, the value it
+  computes is the same number the floor already gave); a `NibbleFallback`
+  trained to favor one symbol must make that symbol strictly cheaper than
+  the unsubstituted floor. Both held. | Measured the same way S2-R16 did:
+  `mothergod_bench::baseline`'s 11 train cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` at
+  `sealed_seed(CASE_SEED)`, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_nibble_fallback_direct_experiment.rs`, deleted
+  after this measurement). Train net **+0.027803 b/B** (5 improved:
+  `entropy_ladder_h1` -0.002353, `h2` -0.001276, `h6` -0.000612,
+  `markov_h8_2_trap` -0.053073, `json_records` -0.001710; 6 regressed:
+  `entropy_ladder_h4` +0.000850, `h8` +0.057303, `base64_wrapped`
+  +0.009312, `interleaved_audio16` +0.147638, `sqlite_like_records`
+  +0.068857, `x86_dense_code` +0.080897). Sealed: `access_log`
+  **-0.001629**, `gradient_image` **-0.155227**, both improved. **Rejected**:
+  corpus policy's accept rule needs train improvement AND no validation
+  regression; train net regressed, the same failure side S2-R16 fell on,
+  even though the specific rounding bug S2-R16 named is provably absent
+  here (the unit tests above rule it out directly, and this slice's
+  formula never computes an integer frequency against a foreign total at
+  all). Mechanism: the near-identical shape of this rejection to
+  S2-R16's own (same 5/6 train split, same three worst regressions
+  `interleaved_audio16`/`sqlite_like_records`/`x86_dense_code`, same two
+  sealed-only kinds improving) despite a genuinely different substitution
+  formula falsifies the hypothesis this slice was built to test: the
+  drift S2-R16 diagnosed was not the real cause of those regressions, or
+  at best only a minor contributor. The more likely mechanism, untested
+  as its own claim: `Literal`'s six mixing weights adapt per
+  weight-context assuming each expert reports its *own* honest estimate,
+  including an honest Laplace floor when it has nothing to say; a
+  foreign substitute in that slot, however it is computed, is a
+  different number than the one the weight was calibrated against,
+  and the fixed-record generators this project probes are exactly the
+  data where the fast-rate expert (bank 0) most reliably earns a high
+  weight once trained, making its floor entries the ones a substitute
+  most disrupts. Candidate code (`literal::NibbleFallback`,
+  `fixed_point_contribution_from_probability`,
+  `Literal::ideal_cost_bits_nibble_fallback_direct_pair`, their seven
+  unit tests, `codec::NibbleFallbackDirectCostSink`/
+  `ideal_cost_bits_nibble_fallback_direct_experiment`, the scratch
+  binary) reverted in full, per the `compression-experiment` skill's
+  "delete rejected candidate code"; `Ppm` itself (S2-A57) is unaffected,
+  same basis as S2-R6/S2-R16. `research/progress.jsonl` it157. Remaining
+  S1-P3 scope: every substitution mechanism named or attempted so far
+  fails on the same data regardless of its rescale arithmetic, pointing
+  at the six-expert mix's own weight calibration rather than any one
+  formula; what is left, if anything, is an escape signal that never
+  enters a real expert's own floor at all (a separate, additive
+  eighth-expert-style blend, S1-P5's own architectural shape) or
+  accepting the ceiling.
