@@ -30,7 +30,10 @@ and it does one of four things, printed on one line:
                      tier, so the fix lands while the diff is still warm
 
 The issue is written by gh-comment (footer, credential), never by `gh issue
-create`. It names the three answers a survivor takes in the house's order:
+create`, and posted as the reviewer: the survivor rule is agent-review.yml
+step 3's, and this is that rule's arm on a thread the reviewer has left. A
+seat's name, because gh-comment.test.mjs's roster test refuses a footer for
+a seat nobody staffs (review, PR #693). It names the three answers a survivor takes in the house's order:
 delete the line, then a test, then a proven exclusion. Deletion first
 because a survivor in code nothing calls is dead code, not a missing test
 (PR #690's 19 codec.rs survivors were all in a measurement sink with no

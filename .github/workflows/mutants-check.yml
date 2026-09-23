@@ -60,17 +60,13 @@
 # elsewhere, so a required check would have blocked both on an equivalent
 # mutant. The clock restarts when those two are excluded with their proofs.
 #
-# An advisory red has a reader only while the PR is open: the reviewer's
-# session ends with its verdict, merge-pr lands the PR on the required
-# gates alone, and a red that finishes afterwards sits on a thread no seat
-# sweeps. #676, #677 and #690 all merged that way in two days, #690 with
-# 50 survivors among 84 decided mutants and 20 never run inside the
-# 25-minute budget. The last step, `mutants-debt`, closes that gap: on a
-# merged PR the survivors become one `product`+`bug` issue, the heartbeat's
-# first pickup tier; on an open PR the annotations stay the reader. Its
-# docstring is the contract. Forks are skipped by the `if:` because their
-# token cannot write issues, and a fork PR's red is the reviewer's to read
-# before merging, same as before.
+# An advisory red has a reader only while the PR is open; three PRs merged
+# past theirs in two days (#676, #677, #690). The last step, `mutants-debt`,
+# files a merged PR's survivors as one issue and leaves an open PR's red on
+# the diff. Its docstring holds the incident and the contract; nothing here
+# restates either. Forks are skipped by the `if:` because their token
+# cannot write issues, and a fork PR's red is the reviewer's to read before
+# merging, same as before.
 name: mutants-check
 
 on:
@@ -195,7 +191,9 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
           GH_WORKFLOW_TOKEN: ${{ github.token }}
-          ROLE: mutants-check
+          # The survivor rule is the reviewer's (agent-review.yml, step 3);
+          # this step is that rule's arm on a thread the reviewer has left.
+          ROLE: reviewer
         run: .github/scripts/mutants-debt "$PR_NUMBER" mutants.out
 
       - name: Upload report

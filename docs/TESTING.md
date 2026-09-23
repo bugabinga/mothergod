@@ -230,8 +230,7 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `.github/scripts/mutants-debt` files that PR's survivors as one
   `product`+`bug` issue, the heartbeat's first pickup tier. An open PR's
   red stays on the diff, where the review reads it. Its docstring is the
-  contract; three PRs merged past their red in two days before it existed
-  (#676, #677, #690).
+  contract.
 - Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
   at ~3.8h is a one-time backlog measurement, not weekly news.
 - Planned (#455): a monthly sharded whole-crate sweep, mutation score to
