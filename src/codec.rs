@@ -2027,6 +2027,120 @@ mod tests {
         );
     }
 
+    /// A fresh [`PpmExpertCostSink`] over a fresh [`Models`]/[`PpmExpertState`]
+    /// pair, for asserting each [`TokenSink`] method against a value computed
+    /// independently from the same starting state.
+    fn fresh_ppm_expert_sink() -> (Models, PpmExpertState) {
+        (Models::new(), PpmExpertState::new())
+    }
+
+    #[test]
+    fn ppm_expert_cost_sink_flag_adds_the_model_cost_to_both_totals() {
+        let (mut expected_models, _) = fresh_ppm_expert_sink();
+        let expected = expected_models.flag[0].ideal_cost_bits(FLAG_LITERAL);
+
+        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
+        let mut sink = PpmExpertCostSink {
+            ppm_state: &mut ppm_state,
+            baseline_bits: 0.0,
+            with_ppm_bits: 0.0,
+        };
+        sink.flag(&mut models, 0, FLAG_LITERAL);
+
+        assert!((sink.baseline_bits - expected).abs() < 1e-9);
+        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ppm_expert_cost_sink_length_adds_the_bucketed_cost_to_both_totals() {
+        let (mut expected_models, _) = fresh_ppm_expert_sink();
+        let expected = ideal_cost_bucketed(&mut expected_models.length, 17);
+
+        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
+        let mut sink = PpmExpertCostSink {
+            ppm_state: &mut ppm_state,
+            baseline_bits: 0.0,
+            with_ppm_bits: 0.0,
+        };
+        sink.length(&mut models, 17);
+
+        assert!((sink.baseline_bits - expected).abs() < 1e-9);
+        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ppm_expert_cost_sink_offset_adds_the_bucketed_cost_to_both_totals() {
+        let (mut expected_models, _) = fresh_ppm_expert_sink();
+        let expected = ideal_cost_bucketed(&mut expected_models.offset, 123);
+
+        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
+        let mut sink = PpmExpertCostSink {
+            ppm_state: &mut ppm_state,
+            baseline_bits: 0.0,
+            with_ppm_bits: 0.0,
+        };
+        sink.offset(&mut models, 123);
+
+        assert!((sink.baseline_bits - expected).abs() < 1e-9);
+        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ppm_expert_cost_sink_slot_adds_the_model_cost_to_both_totals() {
+        let (mut expected_models, _) = fresh_ppm_expert_sink();
+        let expected = expected_models.slot.ideal_cost_bits(0);
+
+        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
+        let mut sink = PpmExpertCostSink {
+            ppm_state: &mut ppm_state,
+            baseline_bits: 0.0,
+            with_ppm_bits: 0.0,
+        };
+        sink.slot(&mut models, 0);
+
+        assert!((sink.baseline_bits - expected).abs() < 1e-9);
+        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ppm_expert_cost_sink_literal_adds_the_baseline_and_with_ppm_pair_separately() {
+        // Enough repeats for the additive PPM bank's own history to pull
+        // away from the six-expert mix's baseline, so a sink that swaps or
+        // drops one half of the pair is distinguishable from a correct one.
+        let bytes = b"aaaaaaaaaaaaaaaaaab";
+
+        let (mut expected_models, mut expected_ppm_state) = fresh_ppm_expert_sink();
+        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
+        let mut sink = PpmExpertCostSink {
+            ppm_state: &mut ppm_state,
+            baseline_bits: 0.0,
+            with_ppm_bits: 0.0,
+        };
+
+        let mut context = Context::default();
+        let mut expected_baseline_total = 0.0;
+        let mut expected_with_ppm_total = 0.0;
+        for &byte in bytes {
+            let (baseline, with_ppm) = expected_models.literal.ideal_cost_bits_ppm_expert_pair(
+                context,
+                byte,
+                &mut expected_ppm_state,
+            );
+            expected_baseline_total += baseline;
+            expected_with_ppm_total += with_ppm;
+            sink.literal(&mut models, context, byte);
+            context = context.after_literal(byte);
+        }
+
+        assert!(
+            (expected_baseline_total - expected_with_ppm_total).abs() > 1e-6,
+            "baseline_total={expected_baseline_total} with_ppm_total={expected_with_ppm_total}, \
+             test cannot tell the pair's two halves apart"
+        );
+        assert!((sink.baseline_bits - expected_baseline_total).abs() < 1e-6);
+        assert!((sink.with_ppm_bits - expected_with_ppm_total).abs() < 1e-6);
+    }
+
     #[test]
     fn ideal_cost_bits_with_window_drops_once_a_repeat_becomes_reachable() {
         // research/JOURNAL.md S1-P4: a repeat past the window is priced as
