@@ -48,7 +48,17 @@ When measurement is possible:
    the corpus policy's train and sealed-validation procedure.
 5. Apply the corpus policy's verdict and number-provenance rules unchanged.
 6. Record the mechanism and verdict in both research records.
-   Keep accepted code and its focused tests; delete rejected candidate code.
+   Keep accepted candidate code the wiring slice will call, with its focused
+   tests; delete rejected candidate code.
+   Measurement scaffolding leaves in the same PR whatever the verdict:
+   cost sinks, pairing functions, experiment entry points, scratch drivers.
+   Once the numbers are recorded it has no caller, and a `pub` with no caller
+   is dead code no test can distinguish from its mutations
+   (PR #690: 19 survivors, all in one sink).
+   Numbers live in the research records only.
+   A module doc cites the journal id and never restates a figure;
+   PR #690 carried one count in four places and needed two review rounds to
+   correct them all.
 7. Run the project quality gates and leave exactly the recorded PR scope.
 
 ## Environmental failure
