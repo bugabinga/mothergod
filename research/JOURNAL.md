@@ -2547,7 +2547,56 @@ record.
   separate, eighth expert-like signal, the same additive (not
   substitutive) architectural shape S1-P5's column expert used, or
   accepting that this lead's ceiling, absent one, sits where S1-P2's own
-  repeated-rejection shape already landed.
+  repeated-rejection shape already landed. Fifth slice, S2-A100: built
+  exactly that additive shape and it worked. `PpmExpertState`
+  (`src/literal.rs`) wraps one `Ppm` table per bank, keyed the same
+  coarse way `NibbleFallback` was (previous byte's high nibble, 16
+  contexts, deliberately reused to isolate the mechanism question from
+  the keying question S2-R16/S2-R17 already answered), plus its own
+  mixing weight, blended into the mix as a genuinely new term via
+  `Literal::mix_ppm`/`update_ppm_expert` — never written into any of the
+  six real experts' own banks or totals, unlike every prior slice here.
+  Measured the same before-wiring ideal-cost pairing S2-R16/S2-R17 used:
+  train net **-0.005530 b/B** (8 of 11 cases improved; `markov_h8_2_trap`
+  -0.038598, `interleaved_audio16` -0.007128, `x86_dense_code` -0.005872,
+  `json_records` -0.003686 led; `entropy_ladder_h8` +0.000861,
+  `base64_wrapped` +0.000031, and S1-P3's own named target
+  `sqlite_like_records` +0.000944 were the three regressions, all an
+  order of magnitude or more smaller than any regression in
+  S2-R6/S2-R16/S2-R17). Sealed: `access_log` **-0.006145**,
+  `gradient_image` **-0.176711** — both improved, `gradient_image` by the
+  widest margin of any S1-P3 slice measured so far (the same case every
+  substitution mechanism helped most when it helped at all, S2-R6/S2-R16/
+  S2-R17). Corpus policy's accept rule (train improvement AND no
+  validation regression) passes outright. **Accepted.** Mechanism: a
+  `Ppm` bank starts every symbol at frequency 0, so on data where its
+  16-context key carries no real signal (`entropy_ladder_h8`) it stays
+  sparse and contributes near-zero mass everywhere rather than a
+  confidently-wrong one (`JOURNAL` S2-R6's order-0 substitution and
+  S2-R16/S2-R17's `NibbleFallback` substitution both went the other way:
+  a Laplace-smoothed or rescaled substitute injects a specific, often
+  wrong, non-zero value straight into an existing expert's own floor).
+  More fundamentally, this slice never touches an existing expert's own
+  reported estimate at all: the six real experts keep reporting their own
+  honest numbers exactly as `Self::update` already calibrates their
+  weights to expect, and the new expert's own weight is free to fall
+  toward zero wherever it is unhelpful, the same "mixer discounts what
+  doesn't help" mechanism `JOURNAL` S2-A69's column expert and S2-A76's
+  SSE-survival follow-up both used to explain their own worst case
+  merely breaking even. That is the structural difference from every
+  rejected substitution in this lead: S2-R17's own diagnosis named the
+  six-expert mixer's weights as "tuned to expect an honest Laplace floor
+  from a sparse expert, mishandling whatever a foreign substitute reports
+  in its place instead" — an additive slot never puts a foreign number in
+  another expert's place, so that mishandling has nothing to act on.
+  `research/progress.jsonl` it158. Remaining S1-P3 scope: the real
+  wiring slice — a `Method`/`FORMAT_VERSION` bump and an ADR (hard rule
+  5), decode support for every earlier version, and a real-bitstream
+  measurement through `mothergod::compress`/`decode`, the same shape
+  S1-P5's own `ADR-0046` took after S2-A69's pre-SSE accept — plus the
+  still-open, deliberately deferred SSE-interaction question S2-A76 asked
+  for the column expert (does this win survive `encode_sse`'s
+  calibration stage): both untested for this expert.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -5772,3 +5821,115 @@ record.
   enters a real expert's own floor at all (a separate, additive
   eighth-expert-style blend, S1-P5's own architectural shape) or
   accepting the ceiling.
+- S2-A100 | ACCEPTED | Fifth slice of ROADMAP M3's third standing lead
+  (S1-P3, PPM-style escape for literal contexts), S2-R17's own closing
+  note: build the one untried shape, an escape signal blended as a
+  genuinely additive expert rather than substituted into any of
+  `Literal`'s six real experts' own banks. Hypothesis: `src/ppm.rs`'s
+  `Ppm` primitive (S2-A57, accepted but unwired since), given its own
+  bank space and its own adaptive mixing weight and blended into
+  `Literal`'s mix as one more additive term — never touching the six
+  real experts' own banks or totals — reduces ideal-cost bits/byte on
+  data with genuine local structure without regressing the sealed set,
+  because an additive slot's own weight can fall toward zero wherever it
+  is unhelpful (the mechanism `JOURNAL` S2-A69's column expert already
+  relies on), unlike a substitute that overwrites an existing,
+  already-calibrated expert's own floor value (S2-R17's own diagnosed
+  failure mode). New `Literal::PpmExpertState` (`src/literal.rs`): one
+  `Ppm` table per bank, `PPM_EXPERT_BANKS` (16) of them, keyed by
+  `PpmExpertState::bank_of` on the previous byte's high nibble alone —
+  deliberately the same coarse key S2-R16/S2-R17's `NibbleFallback` used,
+  reused on purpose so this slice isolates the mechanism question
+  (additive vs. substitutive) from the keying question those two entries
+  already answered — plus one mixing weight per `WEIGHT_CONTEXTS` key,
+  same shape `ColumnExpertState` (S1-P5) uses. `Literal::mix_ppm` is
+  `Self::mix7`'s own shape, but `ppm_probability` (new, private) reads a
+  bank's per-symbol contribution as `0.0` when `Ppm::is_escape` is `true`
+  and as the linear-space inverse of `Ppm::price_symbol`'s `-log2(p)`
+  bits otherwise (`probability_from_price_bits`, the one place a caller
+  outside `ppm.rs` undoes that log, since `Ppm` exposes no raw
+  frequency/total pair): unlike every real expert's own bank, which
+  starts Laplace-smoothed to a floor of 1, a `Ppm` bank starts every
+  symbol at frequency 0, so a genuinely unobserved symbol contributes
+  exactly zero mass here, never a false floor. `Literal::update_ppm_expert`
+  adapts `PpmExpertState`'s own weight via the same `adapt_weight` rule
+  `Self::update`'s six real weights use, restricted to this one
+  component, and advances its own bank via `Ppm::observe` (Method C's own
+  bookkeeping, not `crate::rescale_bank` — this bank is a `Ppm` table,
+  never a plain frequency array). `Literal::ideal_cost_bits_ppm_expert_pair`
+  prices a literal twice from the same pre-update six-expert state, the
+  identical paired methodology S2-A69/S2-R15 both used: once as
+  `Self::ideal_cost_bits` exactly (so the six real experts adapt on
+  their one real trajectory regardless of this method running), once
+  with `PpmExpertState` blended in via `mix_ppm`. `codec::
+  ideal_cost_bits_ppm_expert_experiment` pairs this against the shared
+  flag/length/offset/slot costs the same way `CostSink` does, via a new
+  `PpmExpertCostSink`, run from an uncommitted scratch binary
+  (`bench/src/bin/scratch_ppm_expert_experiment.rs`, deleted after this
+  measurement, same convention as every prior scratch driver). 6 new unit
+  tests in `literal.rs` (paired baseline matches plain `ideal_cost_bits`
+  exactly; a `PpmExpertState` update touches only its own keyed bank,
+  every other bank stays untouched; costs stay finite and positive over a
+  mixed byte stream), 2 in `codec.rs` (zero on empty input, finite and
+  positive on a real file). Deliberately pre-SSE, matching S2-A69's own
+  methodology exactly (a separable question for a real wiring slice, not
+  this one, per that entry's own scoping note). | Measured on
+  `bench::baseline`'s 11 train-tier cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) and both sealed-only kinds at
+  `sealed_seed(CASE_SEED)`, matching S2-R16/S2-R17's own convention: train
+  net **-0.005530 b/B** (8 of 11 improved: `entropy_ladder_h1` -0.001557,
+  `h2` -0.002289, `h4` -0.003062, `h6` -0.000473, `markov_h8_2_trap`
+  -0.038598, `json_records` -0.003686, `interleaved_audio16` -0.007128,
+  `x86_dense_code` -0.005872; 3 regressed: `entropy_ladder_h8` +0.000861,
+  `base64_wrapped` +0.000031, and S1-P3's own named target
+  `sqlite_like_records` +0.000944 — all roughly two orders of magnitude
+  smaller than any train regression S2-R6/S2-R16/S2-R17 measured on the
+  same cases). Sealed: `access_log` **-0.006145**, `gradient_image`
+  **-0.176711** — both improved, `gradient_image` by the widest margin any
+  S1-P3 slice has measured, the same case every rejected substitution
+  mechanism also improved most when it improved at all (S2-R6's order-0
+  -inapplicable there, it regressed +0.541159; S2-R16/S2-R17's
+  `NibbleFallback` improved it -0.1517/-0.1552). Corpus policy's accept
+  rule (train improvement AND no validation regression) passes outright,
+  the first S1-P3 slice to clear it. **Accepted.** | Mechanism: a `Ppm`
+  bank's frequency-0 start means it contributes nothing on data where its
+  16-context key carries no real signal (`entropy_ladder_h8`'s iid noise)
+  rather than a confidently wrong value the way a Laplace-smoothed or
+  rescaled substitute could — the residual +0.000861 there is the
+  bounded cost of one more mixing weight adapting away from an unhelpful
+  signal, not a corrupted floor. More fundamentally, this slice never
+  writes into any of the six real experts' own reported estimates: `Self::update`
+  still calibrates their weights against their own honest numbers exactly
+  as before, untouched, and `PpmExpertState`'s own weight is free to fall
+  toward zero wherever it is unhelpful, the same "the mixer is free to
+  downweight it where it is not useful" mechanism `JOURNAL` S2-A69's
+  column expert's own entry used to explain its own worst case merely
+  breaking even. That is the structural difference from S2-R6/S2-R16/
+  S2-R17: S2-R17's own diagnosis named the six-expert mixer's weights as
+  "tuned to expect an honest Laplace floor from a sparse expert,
+  mishandling whatever a foreign substitute reports in its place
+  instead" — an additive slot never puts a foreign number in another
+  expert's place, so that mishandling has nothing to act on here.
+  `sqlite_like_records`'s tiny regression (S1-P3's own named target,
+  again moving the wrong direction, but by 0.000944 against S2-R16's
+  +0.095198 and S2-R17's +0.068857 in the same case) is consistent with
+  this reading: whatever residual cost an additive expert imposes on
+  already-well-modeled fixed-record data is the bounded cost of adapting
+  one more weight, not the unbounded cost of corrupting an existing,
+  load-bearing expert's own calibration. Candidate code
+  (`literal::PpmExpertState`, `literal::PPM_EXPERT_BANKS`,
+  `literal::probability_from_price_bits`, `literal::ppm_probability`,
+  `literal::fixed_point_contribution_from_probability`,
+  `Literal::mix_ppm`/`update_ppm_expert`/`ideal_cost_bits_ppm_expert_pair`,
+  their six unit tests, `codec::PpmExpertCostSink`/
+  `ideal_cost_bits_ppm_expert_experiment`, their two unit tests) kept:
+  this is an accepted step at the ideal-cost-pairing layer, the same
+  status S2-A69's own candidate code held before its real wiring landed.
+  The scratch binary that ran this measurement is not: deleted after
+  recording these numbers, same as every prior scratch driver regardless
+  of verdict. `src/ppm.rs`'s own module doc updated to record this
+  outcome. `research/progress.jsonl` it158. Remaining S1-P3 scope: see
+  the updated S1-P3 entry above (the real `Method`/`FORMAT_VERSION`
+  wiring slice, an ADR, and the still-open SSE-interaction question
+  S2-A76 answered for the column expert but this expert has not yet been
+  asked).

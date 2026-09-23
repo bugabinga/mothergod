@@ -56,6 +56,7 @@ use std::num::NonZeroUsize;
 
 use crate::bittree;
 use crate::coder::{Decoder, Encoder};
+use crate::ppm::Ppm;
 use crate::sse::Sse;
 
 /// Number of context predictors blended for every literal byte.
@@ -374,6 +375,113 @@ impl ColumnExpertState {
             weight: crate::try_filled_vec(WEIGHT_CONTEXTS, 1.0)?,
             sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
         })
+    }
+}
+
+/// Bank count for [`PpmExpertState`]: the previous byte's high nibble,
+/// the same coarse key `research/JOURNAL.md` S2-R16/S2-R17's
+/// `NibbleFallback` used for its own (rejected, substitutive) fallback
+/// table.
+const PPM_EXPERT_BANKS: usize = 16;
+
+/// `research/JOURNAL.md` S1-P3's own remaining scope after S2-R17: a
+/// genuinely additive, [`Ppm`]-backed expert, never substituted into any
+/// of [`Literal`]'s six real experts' own banks the way every prior S1-P3
+/// slice (S2-R6, S2-R16, S2-R17) tried and had rejected. Same
+/// "own bank space, own adaptive weight, own additive contribution" shape
+/// as [`ColumnExpertState`] (S1-P5) — the difference is what each bank is:
+/// a [`Ppm`] table, not a plain Laplace-smoothed frequency bank, so a
+/// symbol this bank has never observed contributes exactly zero mass
+/// (Method C's own "genuinely unseen" floor is 0, not 1), never a false
+/// floor competing with the six real experts' own Laplace-smoothed ones.
+/// Keyed the same coarse way `research/JOURNAL.md` S2-R16/S2-R17's
+/// `NibbleFallback` was (the previous byte's high nibble, `PPM_EXPERT_BANKS`
+/// contexts), deliberately reusing that context signal so this slice
+/// isolates the mechanism question (additive vs. substitutive) from the
+/// keying question those two entries already answered.
+#[derive(Debug, Clone)]
+pub struct PpmExpertState {
+    /// One [`Ppm`] table per bank ([`PPM_EXPERT_BANKS`] of them).
+    tables: Vec<Ppm>,
+    /// This expert's own mixing weight, one per [`WEIGHT_CONTEXTS`] key.
+    weight: Vec<f64>,
+}
+
+impl PpmExpertState {
+    /// A fresh PPM-expert state: every bank starts as a fresh [`Ppm`]
+    /// table (every symbol unseen), every weight starts at 1.0 (equally
+    /// trusted), the same convention [`ColumnExpertState::new`] uses for
+    /// its own fresh state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            tables: (0..PPM_EXPERT_BANKS).map(|_| Ppm::new(ALPHABET)).collect(),
+            weight: vec![1.0; WEIGHT_CONTEXTS],
+        }
+    }
+
+    /// Which of this state's [`PPM_EXPERT_BANKS`] tables `context` keys:
+    /// the previous byte's high nibble alone.
+    #[must_use]
+    fn bank_of(context: Context) -> usize {
+        usize::from(context.prev1) >> 4
+    }
+}
+
+impl Default for PpmExpertState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The linear-space probability [`Ppm::price_symbol`]'s `-log2(p)` bits
+/// describes: the inverse transform [`ppm_probability`] needs, since
+/// [`Literal::mix`]/[`Literal::mix7`] both scale a raw frequency ratio
+/// directly into fixed-point space, but [`Ppm`] only exposes its own
+/// distribution as an already-logged advisory price, never a raw
+/// frequency/total pair a caller outside `ppm.rs` could read.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "advisory measurement-only inverse of Ppm::price_symbol, off the coding path, same carve-out that method's own doc claims (ADR-0024's determinism rule doesn't apply here)"
+)]
+fn probability_from_price_bits(bits: f64) -> f64 {
+    2f64.powf(-bits)
+}
+
+/// `table`'s own linear-space probability estimate for `symbol`: `0.0` if
+/// `table` has never observed it ([`Ppm::is_escape`]), converted back from
+/// [`Ppm::price_symbol`]'s bits otherwise. Shared by [`Literal::mix_ppm`]
+/// and [`Literal::update_ppm_expert`] so both price the identical number.
+fn ppm_probability(table: &Ppm, symbol: usize) -> f64 {
+    if table.is_escape(symbol) {
+        0.0
+    } else {
+        probability_from_price_bits(
+            table
+                .price_symbol(symbol)
+                .expect("is_escape returned false, so price_symbol must return Some"),
+        )
+    }
+}
+
+/// [`fixed_point_scale`]'s own shape, but for an expert like
+/// [`PpmExpertState`] whose own per-symbol estimate is already a
+/// probability in `[0, 1]` ([`ppm_probability`]), not a raw frequency over
+/// a bank total: an escaped symbol's probability is `0.0` by construction,
+/// so there is no bank total this could sensibly divide by.
+fn fixed_point_contribution_from_probability(
+    weight: f64,
+    weight_sum: f64,
+    probability: f64,
+) -> u64 {
+    let normalized = weight / weight_sum;
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "fixed-point contribution: normalized weight and probability are both in [0,1], the product is always non-negative and truncation is the intended floor"
+    )]
+    {
+        (normalized * probability * FIXED_POINT_SCALE) as u64
     }
 }
 
@@ -818,6 +926,134 @@ impl Literal {
         );
         self.update(&bank_indices, weight_index, symbol, exp);
         byte
+    }
+
+    /// Eighth-expert-style counterpart of [`Self::mix`]/[`Self::mix7`]:
+    /// the same fixed-point blend with `ppm_state`'s bank folded in as one
+    /// more, genuinely additive term (`research/JOURNAL.md` S1-P3's own
+    /// remaining scope after S2-R17: "an escape signal that never enters
+    /// a real expert's own floor at all"). Unlike [`Self::mix7`]'s
+    /// `column_state` bank (a Laplace-smoothed frequency table, same
+    /// shape as the six real experts), `ppm_state`'s own [`Ppm`] table
+    /// starts every symbol at frequency 0: [`ppm_probability`] reports
+    /// `0.0` for a symbol this bank has never observed, so this expert's
+    /// own contribution is silent exactly where it has nothing to say,
+    /// never a false floor competing with the six real experts' own
+    /// Laplace-smoothed ones.
+    fn mix_ppm(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        weight_index: usize,
+        ppm_bank: usize,
+        ppm_state: &PpmExpertState,
+    ) -> [u64; ALPHABET + 1] {
+        let weights6 = self.weights[weight_index];
+        let w7 = ppm_state.weight[weight_index];
+        let weight_sum = weights6.iter().sum::<f64>() + w7;
+
+        let mut scale6 = [0u64; EXPERTS];
+        for expert in 0..EXPERTS {
+            let bank_total = f64::from(self.total[bank_indices[expert]]);
+            scale6[expert] = fixed_point_scale(weights6[expert], weight_sum, bank_total);
+        }
+
+        let table = &ppm_state.tables[ppm_bank];
+
+        let mut cum = [0u64; ALPHABET + 1];
+        let mut acc = 0u64;
+        for s in 0..ALPHABET {
+            let mut mixed = 0u64;
+            for expert in 0..EXPERTS {
+                let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + s]);
+                mixed += scale6[expert] * freq;
+            }
+            mixed += fixed_point_contribution_from_probability(
+                w7,
+                weight_sum,
+                ppm_probability(table, s),
+            );
+            acc += (mixed >> 16) + 1;
+            cum[s + 1] = acc;
+        }
+        cum
+    }
+
+    /// Adapts `ppm_state`'s own weight and bank toward `symbol`, the
+    /// PPM-expert counterpart of [`Self::update_column_expert`]: its
+    /// weight adapts on the same continuous-probability-space rule
+    /// [`Self::update`] uses for the six real weights, restricted to this
+    /// one component, and its bank observes `symbol` through [`Ppm::observe`]
+    /// (Method C's own bookkeeping, not [`crate::rescale_bank`] — this
+    /// bank is a [`Ppm`] table, never a plain frequency array).
+    fn update_ppm_expert(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        weight_index: usize,
+        symbol: usize,
+        ppm_bank: usize,
+        ppm_state: &mut PpmExpertState,
+    ) {
+        let weights6 = self.weights[weight_index];
+        let w7 = ppm_state.weight[weight_index];
+        let weight_sum = weights6.iter().sum::<f64>() + w7;
+
+        let ppm_estimate = ppm_probability(&ppm_state.tables[ppm_bank], symbol);
+        let estimate6 = self.expert_estimates(bank_indices, symbol);
+        let mixed_estimate = (weights6
+            .iter()
+            .zip(estimate6.iter())
+            .map(|(&w, &e)| w * e)
+            .sum::<f64>()
+            + w7 * ppm_estimate)
+            / weight_sum;
+        ppm_state.weight[weight_index] = adapt_weight(w7, ppm_estimate, mixed_estimate, exp);
+
+        ppm_state.tables[ppm_bank].observe(symbol);
+    }
+
+    /// `research/JOURNAL.md` S1-P3's before-wiring measurement, the same
+    /// paired methodology S1-P5's column expert (`JOURNAL` S2-A69) and
+    /// S1-P2's fieldtype expert (`JOURNAL` S2-R15) both used: prices
+    /// `byte` twice from the same pre-update six-expert state — once
+    /// under the shipped mix ([`Self::ideal_cost_bits`] exactly,
+    /// including its own `update` call, so the six real experts adapt on
+    /// their one real trajectory regardless of this method ever running),
+    /// once with `ppm_state`'s own [`Ppm`] table blended in as a
+    /// genuinely additive expert via [`Self::mix_ppm`], never substituted
+    /// into any of the six real experts' own banks (`JOURNAL`
+    /// S2-R6/S2-R16/S2-R17's shared failure shape). `ppm_state` adapts on
+    /// its own trajectory via [`Self::update_ppm_expert`], independent of
+    /// the six real weights.
+    ///
+    /// Returns `(baseline_bits, with_ppm_bits)`.
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits_ppm_expert_pair(
+        &mut self,
+        context: Context,
+        byte: u8,
+        ppm_state: &mut PpmExpertState,
+    ) -> (f64, f64) {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+        let ppm_bank = PpmExpertState::bank_of(context);
+
+        let cum7 = self.mix_ppm(&bank_indices, weight_index, ppm_bank, ppm_state);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "same bound as ideal_cost_bits: fixed-point sums stay well under 2^53"
+        )]
+        let with_ppm_probability = (cum7[symbol + 1] - cum7[symbol]) as f64 / cum7[ALPHABET] as f64;
+        let with_ppm_bits = -with_ppm_probability.log2();
+
+        self.update_ppm_expert(&bank_indices, weight_index, symbol, ppm_bank, ppm_state);
+
+        let baseline_bits = self.ideal_cost_bits(context, byte);
+
+        (baseline_bits, with_ppm_bits)
     }
 }
 
@@ -1401,5 +1637,76 @@ mod tests {
         assert_eq!(via_column.freq, via_sse.freq);
         assert_eq!(via_column.total, via_sse.total);
         assert_eq!(via_column.weights, via_sse.weights);
+    }
+
+    /// `research/JOURNAL.md` S1-P3: the pair's baseline side is
+    /// `Self::ideal_cost_bits` verbatim
+    /// (`Self::ideal_cost_bits_ppm_expert_pair`'s own docs), the same
+    /// claim S1-P5's `column_expert_pair_baseline_matches_plain_ideal_cost_bits`
+    /// made for `ideal_cost_bits_column_expert_pair`.
+    #[test]
+    fn ppm_expert_pair_baseline_matches_plain_ideal_cost_bits() {
+        let mut paired = Literal::new();
+        let mut plain = Literal::new();
+        let mut ppm_state = PpmExpertState::new();
+        let mut context = Context::default();
+        for &b in b"the quick brown fox jumps over the lazy dog" {
+            let (baseline, _) = paired.ideal_cost_bits_ppm_expert_pair(context, b, &mut ppm_state);
+            let expected = plain.ideal_cost_bits(context, b);
+            assert!(
+                (baseline - expected).abs() < 1e-9,
+                "byte {b:?}: paired baseline {baseline} vs plain {expected}"
+            );
+            context = context.after_literal(b);
+        }
+    }
+
+    #[test]
+    fn ppm_expert_pair_updates_only_its_own_ppm_bank() {
+        let mut model = Literal::new();
+        let mut ppm_state = PpmExpertState::new();
+        // prev1 = 0x25: high nibble 2, so bank_of must select bank 2.
+        let context = Context {
+            prev1: 0x25,
+            ..Context::default()
+        };
+        let bank = PpmExpertState::bank_of(context);
+        assert_eq!(bank, 2);
+
+        let symbol = usize::from(b'x');
+        let _ = model.ideal_cost_bits_ppm_expert_pair(context, b'x', &mut ppm_state);
+
+        assert!(
+            !ppm_state.tables[bank].is_escape(symbol),
+            "the observed bank must clear its own escape flag for this symbol"
+        );
+        for other in 0..PPM_EXPERT_BANKS {
+            if other != bank {
+                assert!(
+                    ppm_state.tables[other].is_escape(symbol),
+                    "bank {other} must stay untouched"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ppm_expert_pair_costs_stay_finite_and_positive() {
+        let mut model = Literal::new();
+        let mut ppm_state = PpmExpertState::new();
+        let mut context = Context::default();
+        for &b in b"0123456789abcdefghijklmnopqrstuvwxyz" {
+            let (baseline, with_ppm) =
+                model.ideal_cost_bits_ppm_expert_pair(context, b, &mut ppm_state);
+            assert!(
+                baseline.is_finite() && baseline > 0.0,
+                "baseline={baseline}"
+            );
+            assert!(
+                with_ppm.is_finite() && with_ppm > 0.0,
+                "with_ppm={with_ppm}"
+            );
+            context = context.after_literal(b);
+        }
     }
 }

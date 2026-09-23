@@ -67,7 +67,7 @@ use crate::Error;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
-use crate::literal::{ColumnExpertState, Context, Literal};
+use crate::literal::{ColumnExpertState, Context, Literal, PpmExpertState};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
 
@@ -586,6 +586,79 @@ pub fn ideal_cost_bits_adaptive_window(data: &[u8]) -> f64 {
     let mut sink = CostSink::default();
     walk_tokens(&tokens, data, &mut models, &mut sink);
     sink.bits
+}
+
+/// `research/JOURNAL.md` S1-P3's paired measurement, [`walk_tokens`]'s use
+/// in [`ideal_cost_bits_ppm_expert_experiment`]: sums the same
+/// flag/length/offset/slot costs [`CostSink`] does, so any delta between
+/// `baseline_bits` and `with_ppm_bits` is attributable to the literal
+/// model alone, and prices every literal byte twice through
+/// [`Literal::ideal_cost_bits_ppm_expert_pair`] — the shipped six-expert
+/// mix, and the same mix with `ppm_state`'s own [`crate::ppm::Ppm`]-backed
+/// bank blended in as a genuinely additive expert, never substituted into
+/// any of the six real experts' own banks.
+struct PpmExpertCostSink<'a> {
+    ppm_state: &'a mut PpmExpertState,
+    baseline_bits: f64,
+    with_ppm_bits: f64,
+}
+
+impl TokenSink for PpmExpertCostSink<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
+        let bits = models.flag[flag_table].ideal_cost_bits(kind);
+        self.baseline_bits += bits;
+        self.with_ppm_bits += bits;
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        let (baseline, with_ppm) =
+            models
+                .literal
+                .ideal_cost_bits_ppm_expert_pair(context, byte, self.ppm_state);
+        self.baseline_bits += baseline;
+        self.with_ppm_bits += with_ppm;
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        let bits = ideal_cost_bucketed(&mut models.length, value);
+        self.baseline_bits += bits;
+        self.with_ppm_bits += bits;
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        let bits = ideal_cost_bucketed(&mut models.offset, value);
+        self.baseline_bits += bits;
+        self.with_ppm_bits += bits;
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        let bits = models.slot.ideal_cost_bits(symbol);
+        self.baseline_bits += bits;
+        self.with_ppm_bits += bits;
+    }
+}
+
+/// `research/JOURNAL.md` S1-P3's before-wiring measurement: does blending
+/// [`crate::ppm::Ppm`] in as a genuinely additive expert help, priced
+/// through [`Literal::ideal_cost_bits_ppm_expert_pair`], the same
+/// "measure before wiring" shape S1-P5's column expert (`JOURNAL` S2-A69)
+/// and S1-P2's fieldtype expert (`JOURNAL` S2-R15) each used for their own
+/// candidate expert. Not reachable from [`encode`]/[`decode`]: no
+/// `Method`/`FORMAT_VERSION` wiring, measurement only.
+///
+/// Returns `(baseline_bits, with_ppm_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut ppm_state = PpmExpertState::new();
+    let mut sink = PpmExpertCostSink {
+        ppm_state: &mut ppm_state,
+        baseline_bits: 0.0,
+        with_ppm_bits: 0.0,
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.baseline_bits, sink.with_ppm_bits)
 }
 
 /// Whether `body_len` beats `best_len` in `encode`'s shortest-wins
@@ -1926,6 +1999,31 @@ mod tests {
             repetitive_bpb < random_bpb / 2.0,
             "repetitive data's ideal cost ({repetitive_bpb} bits/byte) should be far below \
              random data's ({random_bpb} bits/byte)"
+        );
+    }
+
+    #[test]
+    fn ideal_cost_bits_ppm_expert_experiment_is_zero_on_empty_input() {
+        let (baseline, with_ppm) = ideal_cost_bits_ppm_expert_experiment(b"");
+        assert!(baseline.abs() < 1e-9);
+        assert!(with_ppm.abs() < 1e-9);
+    }
+
+    #[test]
+    fn ideal_cost_bits_ppm_expert_experiment_stays_finite_and_positive() {
+        // research/JOURNAL.md S1-P3: no accuracy claim here, just that the
+        // paired walk runs to completion and both totals land somewhere
+        // sane — the actual accept/reject verdict is a train/sealed
+        // measurement recorded in the journal, not a unit test assertion.
+        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+        let (baseline, with_ppm) = ideal_cost_bits_ppm_expert_experiment(data);
+        assert!(
+            baseline.is_finite() && baseline > 0.0,
+            "baseline={baseline}"
+        );
+        assert!(
+            with_ppm.is_finite() && with_ppm > 0.0,
+            "with_ppm={with_ppm}"
         );
     }
 
