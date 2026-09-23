@@ -745,6 +745,78 @@ impl Literal {
         bits
     }
 
+    /// `weights6`, the extra expert's own weight, and their sum: the
+    /// shared three-number prelude [`Self::mix7`]/[`Self::mix_ppm`] and
+    /// their [`Self::update_column_expert`]/[`Self::update_ppm_expert`]
+    /// counterparts each start from, keyed by the same `weight_index`
+    /// [`banks`] selected for the six real experts.
+    fn weights6_and_sum(&self, weight_index: usize, w7: f64) -> ([f64; EXPERTS], f64) {
+        let weights6 = self.weights[weight_index];
+        let weight_sum = weights6.iter().sum::<f64>() + w7;
+        (weights6, weight_sum)
+    }
+
+    /// The six real experts' fixed-point scale factors under `weights6`
+    /// and `weight_sum`: the shared middle step [`Self::mix7`] and
+    /// [`Self::mix_ppm`] both compute identically before folding in
+    /// their own seventh/eighth term.
+    fn scale6(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        weights6: &[f64; EXPERTS],
+        weight_sum: f64,
+    ) -> [u64; EXPERTS] {
+        let mut scale6 = [0u64; EXPERTS];
+        for expert in 0..EXPERTS {
+            let bank_total = f64::from(self.total[bank_indices[expert]]);
+            scale6[expert] = fixed_point_scale(weights6[expert], weight_sum, bank_total);
+        }
+        scale6
+    }
+
+    /// The six real experts' combined fixed-point contribution to
+    /// `symbol` under `scale6`: the shared inner-loop term
+    /// [`Self::mix7`] and [`Self::mix_ppm`] each add their own
+    /// seventh/eighth term to.
+    fn six_expert_mixed(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        scale6: &[u64; EXPERTS],
+        symbol: usize,
+    ) -> u64 {
+        let mut mixed = 0u64;
+        for expert in 0..EXPERTS {
+            let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + symbol]);
+            mixed += scale6[expert] * freq;
+        }
+        mixed
+    }
+
+    /// The extra expert's own weight, adapted toward how well
+    /// `estimate7` did against the six-real-experts-plus-extra mixed
+    /// estimate: the shared update rule
+    /// [`Self::update_column_expert`] and [`Self::update_ppm_expert`]
+    /// each apply to their own bank.
+    fn adapt_seventh_weight(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        weights6: &[f64; EXPERTS],
+        weight_sum: f64,
+        symbol: usize,
+        w7: f64,
+        estimate7: f64,
+    ) -> f64 {
+        let estimate6 = self.expert_estimates(bank_indices, symbol);
+        let mixed_estimate = (weights6
+            .iter()
+            .zip(estimate6.iter())
+            .map(|(&w, &e)| w * e)
+            .sum::<f64>()
+            + w7 * estimate7)
+            / weight_sum;
+        adapt_weight(w7, estimate7, mixed_estimate, exp)
+    }
+
     /// Seven-wide counterpart of [`Self::mix`]: the same fixed-point blend
     /// with `column_state`'s bank folded in as a seventh expert, keyed by
     /// `column_bank`. Shared by [`Self::encode_column`] and
@@ -757,26 +829,17 @@ impl Literal {
         column_bank: usize,
         column_state: &ColumnExpertState,
     ) -> [u64; ALPHABET + 1] {
-        let weights6 = self.weights[weight_index];
         let w7 = column_state.weight[weight_index];
-        let weight_sum = weights6.iter().sum::<f64>() + w7;
+        let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
 
-        let mut scale6 = [0u64; EXPERTS];
-        for expert in 0..EXPERTS {
-            let bank_total = f64::from(self.total[bank_indices[expert]]);
-            scale6[expert] = fixed_point_scale(weights6[expert], weight_sum, bank_total);
-        }
+        let scale6 = self.scale6(bank_indices, &weights6, weight_sum);
         let column_total = f64::from(column_state.total[column_bank]);
         let scale7 = fixed_point_scale(w7, weight_sum, column_total);
 
         let mut cum = [0u64; ALPHABET + 1];
         let mut acc = 0u64;
         for s in 0..ALPHABET {
-            let mut mixed = 0u64;
-            for expert in 0..EXPERTS {
-                let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + s]);
-                mixed += scale6[expert] * freq;
-            }
+            let mut mixed = self.six_expert_mixed(bank_indices, &scale6, s);
             let freq7 = u64::from(column_state.freq[column_bank * ALPHABET + s]);
             mixed += scale7 * freq7;
             acc += (mixed >> 16) + 1;
@@ -802,22 +865,20 @@ impl Literal {
         column_bank: usize,
         column_state: &mut ColumnExpertState,
     ) {
-        let weights6 = self.weights[weight_index];
         let w7 = column_state.weight[weight_index];
-        let weight_sum = weights6.iter().sum::<f64>() + w7;
+        let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
         let column_total = f64::from(column_state.total[column_bank]);
-
         let column_estimate =
             f64::from(column_state.freq[column_bank * ALPHABET + symbol]) / column_total;
-        let estimate6 = self.expert_estimates(bank_indices, symbol);
-        let mixed_estimate = (weights6
-            .iter()
-            .zip(estimate6.iter())
-            .map(|(&w, &e)| w * e)
-            .sum::<f64>()
-            + w7 * column_estimate)
-            / weight_sum;
-        column_state.weight[weight_index] = adapt_weight(w7, column_estimate, mixed_estimate, exp);
+
+        column_state.weight[weight_index] = self.adapt_seventh_weight(
+            bank_indices,
+            &weights6,
+            weight_sum,
+            symbol,
+            w7,
+            column_estimate,
+        );
 
         crate::rescale_bank(
             &mut column_state.freq[column_bank * ALPHABET..column_bank * ALPHABET + ALPHABET],
@@ -947,26 +1008,16 @@ impl Literal {
         ppm_bank: usize,
         ppm_state: &PpmExpertState,
     ) -> [u64; ALPHABET + 1] {
-        let weights6 = self.weights[weight_index];
         let w7 = ppm_state.weight[weight_index];
-        let weight_sum = weights6.iter().sum::<f64>() + w7;
-
-        let mut scale6 = [0u64; EXPERTS];
-        for expert in 0..EXPERTS {
-            let bank_total = f64::from(self.total[bank_indices[expert]]);
-            scale6[expert] = fixed_point_scale(weights6[expert], weight_sum, bank_total);
-        }
+        let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
+        let scale6 = self.scale6(bank_indices, &weights6, weight_sum);
 
         let table = &ppm_state.tables[ppm_bank];
 
         let mut cum = [0u64; ALPHABET + 1];
         let mut acc = 0u64;
         for s in 0..ALPHABET {
-            let mut mixed = 0u64;
-            for expert in 0..EXPERTS {
-                let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + s]);
-                mixed += scale6[expert] * freq;
-            }
+            let mut mixed = self.six_expert_mixed(bank_indices, &scale6, s);
             mixed += fixed_point_contribution_from_probability(
                 w7,
                 weight_sum,
@@ -993,20 +1044,18 @@ impl Literal {
         ppm_bank: usize,
         ppm_state: &mut PpmExpertState,
     ) {
-        let weights6 = self.weights[weight_index];
         let w7 = ppm_state.weight[weight_index];
-        let weight_sum = weights6.iter().sum::<f64>() + w7;
-
+        let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
         let ppm_estimate = ppm_probability(&ppm_state.tables[ppm_bank], symbol);
-        let estimate6 = self.expert_estimates(bank_indices, symbol);
-        let mixed_estimate = (weights6
-            .iter()
-            .zip(estimate6.iter())
-            .map(|(&w, &e)| w * e)
-            .sum::<f64>()
-            + w7 * ppm_estimate)
-            / weight_sum;
-        ppm_state.weight[weight_index] = adapt_weight(w7, ppm_estimate, mixed_estimate, exp);
+
+        ppm_state.weight[weight_index] = self.adapt_seventh_weight(
+            bank_indices,
+            &weights6,
+            weight_sum,
+            symbol,
+            w7,
+            ppm_estimate,
+        );
 
         ppm_state.tables[ppm_bank].observe(symbol);
     }
