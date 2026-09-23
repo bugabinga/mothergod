@@ -46,7 +46,7 @@ One signature has no PR to hang on, which is the whole point of it:
 
     branch-orphaned      a pushed `claude/*` branch with no PR in any
                          state, past its own grace. The session that
-                         pushed it died before `gh pr create`, usually on
+                         pushed it died before `gh-pr`, usually on
                          an expired app token (issue #489, first hit run
                          33677765718). No other credential may open that
                          PR, which is why this is detected rather than
@@ -143,7 +143,7 @@ GRACE = timedelta(minutes=15)
 BRANCH_PREFIX = "claude/"
 
 # A branch gets longer, because it is waiting on a live session rather than on
-# GitHub's scheduler: a push and its `gh pr create` are seconds apart, but the
+# GitHub's scheduler: a push and its `gh-pr` are seconds apart, but the
 # session in between can be doing anything. Costs a false line when a run is
 # unusually slow between the two, which is why the rescue checks for a live
 # session before opening anything.
@@ -437,8 +437,8 @@ def classify_branch(branch, now):
         "branch-orphaned",
         f"pushed {pushed or 'before the activity window'} and never became a PR",
         "GOVERNANCE 'Stalled auto-merge', sixth signature: confirm no session is "
-        f"still running, then `gh pr create --head {branch['name']}` with the body "
-        "from its commit message",
+        f"still running, then `.github/scripts/gh-pr {branch['name']} \"<title>\"` "
+        "with the body from its commit message",
     )
 
 

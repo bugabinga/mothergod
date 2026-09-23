@@ -25,7 +25,7 @@ the final response it carries to the operator has no writer left.
 
 Posting and committing commands, anywhere in the command text: `gh pr
 comment|create|review|edit|close`, `gh issue comment|create|edit|close`,
-`gh api`, `gh-comment`, `tg-send`, `git commit`. A body the command
+`gh api`, `gh-comment`, `gh-pr`, `tg-send`, `git commit`. A body the command
 takes from a file (`--body-file <path>`, `-F <path>`, gh api's
 `-F key=@<path>`) is read and checked too, because the heredoc is not the
 only way a body travels (review on PR #669 reproduced the gap); a path
@@ -66,6 +66,7 @@ POSTS = re.compile(
     r"\bgh\s+(?:pr|issue)\s+(?:comment|create|review|edit|close)\b"
     r"|\bgh\s+api\b"
     r"|\bgh-comment\b"
+    r"|\bgh-pr\b"
     r"|\btg-send\b"
     r"|\bgit\s+commit\b"
 )

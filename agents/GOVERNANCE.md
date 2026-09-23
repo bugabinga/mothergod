@@ -296,16 +296,16 @@ by hand.
 
 A sixth signature has no PR at all. The session's app token expires
 about an hour in, so a run whose work outlasts that pushes its branch
-and then dies on `gh pr create` (issue #489; run 33677765718 spent two
+and then dies before `gh-pr` (issue #489; run 33677765718 spent two
 hours measuring Miri, then could not open PR #488). The work is
 finished, pushed, and invisible: no PR, no checks, nothing for the
 five signatures above to match, and the only reason the next session
 found it was a prose handoff the dead one had thought to write.
 `stalled-prs` reports it as `branch-orphaned`. Rescue: confirm no
 session is still running (`gh run list --status in_progress`), then
-`gh pr create --head <branch>` with the body taken from the branch's
-commit message, which is where a session that expects to die should
-have put its rationale.
+`.github/scripts/gh-pr <branch> "<title>"` with the body taken from
+the branch's commit message, which is where a session that expects to
+die should have put its rationale.
 
 This one cannot be fixed the way the comment half was. Issue creation
 moved to the workflow token and stopped expiring; PR creation cannot
@@ -351,15 +351,17 @@ it is why the script exists and what it protects.
   `http.extraheader`, it wins, and the recipe this file carried for
   clearing it appended an empty header instead of replacing the real
   one, so it never worked (issue #151).
-  **The PAT pushes; it never opens the PR.** Creating a PR is not a
-  push, so `gh pr create` runs on the app token even when the commits
-  it carries needed the PAT. PR #127 opened as `claude[bot]` while
-  touching `agent-heartbeat.yml`, so this costs nothing. Skip it and
-  the PR is operator-attributed, which wakes a full BDFL run on its
-  own PR: five BDFL PRs did that in 85 minutes on 2026-08-23 (#111,
-  #112, #113, #114, #122), burning 22 runner-minutes and the lane
-  (issue #141). Issues are stricter still: `gh-comment --new` is the
-  only path, on the workflow token, per "Token lifetime" below.
+  **The PAT pushes; it never opens the PR.** `.github/scripts/gh-pr`
+  opens every PR on the app token, whatever credential the commits
+  needed, and refuses the other two (issue #590): the PAT, because an
+  operator-attributed PR wakes a full BDFL run on its own PR, which
+  five BDFL PRs did in 85 minutes on 2026-08-23 (#111, #112, #113,
+  #114, #122), burning 22 runner-minutes and the lane (issue #141);
+  the workflow token, because its PR is born with no checks (issue
+  #489, above). PR #127 opened as `claude[bot]` while touching
+  `agent-heartbeat.yml`, so the split costs nothing. Issues are
+  stricter still: `gh-comment --new` is the only path, on the
+  workflow token, per "Token lifetime" below.
 
 Token lifetime (issue #81): the claude app token expires about an hour
 into a session; past that, every `gh` call riding the default

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post one issue comment, close an issue with one, or open an issue, on the credential meant for it.
+"""Post one comment on an issue or PR, close either with one, or open an issue, on the credential meant for it.
 
 Extensionless and executable because agents type it as a command mid-session,
 like tg-send and push-branch.
@@ -30,25 +30,29 @@ is the only path, which is why there is nothing here to get wrong.
 
 This is also the trim point for the completion-announcement opener
 (`opener.py`, PR #645): run-notice.py trims it from the Telegram notice,
-but an issue comment posted straight through this script is permanent
-project surface CLAUDE.md's Voice rules actually mean, and nothing was
-trimming it there. Two of nine sessions in one retrospect window
-(2026-09-21) still opened a gh-comment body with "Ops-log posted." or
-similar after that PR shipped, because it only ever touched the ephemeral
-notice. PR bodies and PR comments are a separate, still-open gap: they
-never reach this script (below), so they keep the hand-typed footer and
-get no trim.
+but a comment posted straight through this script is permanent project
+surface CLAUDE.md's Voice rules actually mean, and nothing was trimming it
+there. Two of nine sessions in one retrospect window (2026-09-21) still
+opened a gh-comment body with "Ops-log posted." or similar after that PR
+shipped, because it only ever touched the ephemeral notice.
 
-Scope: issues only, and that boundary is load-bearing, not laziness. This
-credential must NEVER open a pull request, because GitHub raises no workflow
-run from an event its own `GITHUB_TOKEN` caused, so the PR would be born
-with no `ci` and no reviewer, forever (the argument in full, and what
-catches the run that needed one: GOVERNANCE "Stalled auto-merge", sixth
-signature). A PR is also an issue node, but `gh issue comment` fails on a PR
-argument, and PR review threads have their own posting path; wire those in
-when the need shows up rather than guessing the shape now.
+The footer is assembled, never typed (footer.py, issue #590): any
+attribution line the body already carries comes off before the role footer
+goes on, so a body that arrives with one ends with one, not two.
 
-Usage: gh-comment <issue-number> [--close] < body
+Scope: comments and closes on issues AND pull requests, issue creation, and
+never a pull request's creation. A PR is an issue node and `gh issue
+comment` and `gh issue close` both take its number (verified on #589 and
+#683; this docstring claimed the opposite for weeks because nothing had
+tried). The load-bearing boundary is `--new`: this credential must NEVER
+open a pull request, because GitHub raises no workflow run from an event
+its own `GITHUB_TOKEN` caused, so the PR would be born with no `ci` and no
+reviewer, forever (the argument in full, and what catches the run that
+needed one: GOVERNANCE "Stalled auto-merge", sixth signature). PRs open
+through `gh-pr`, on the session's token. Review bodies (`gh pr review`) are
+posted from nowhere: a verdict is a label and a comment (agent-review.yml).
+
+Usage: gh-comment <issue-or-pr-number> [--close] < body
        gh-comment --new "<title>" [--label NAME]... < body
 Prints the comment's or the new issue's URL on stdout.
 """
@@ -58,10 +62,9 @@ import os
 import subprocess
 import sys
 
+from footer import attribute
 from opener import trim
 from secret_scrub import scrub
-
-FOOTER = "\n\n---\n_{role} · [Claude Code](https://claude.ai/code)_"
 
 
 def die(*lines):
@@ -72,7 +75,7 @@ def die(*lines):
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="gh-comment", description=__doc__.splitlines()[0])
-    parser.add_argument("number", nargs="?", help="the issue to comment on or close")
+    parser.add_argument("number", nargs="?", help="the issue or PR to comment on or close")
     parser.add_argument("--close", action="store_true", help="close it, body as the closing comment")
     parser.add_argument("--new", metavar="TITLE", help="open a new issue with this title")
     parser.add_argument("--label", action="append", default=[], metavar="NAME",
@@ -88,7 +91,7 @@ def main() -> int:
             die("--new opens an issue; it takes no number and cannot --close one")
     else:
         if not args.number or not args.number.isdigit():
-            die("usage: gh-comment <issue-number> [--close] < body",
+            die("usage: gh-comment <issue-or-pr-number> [--close] < body",
                 "       gh-comment --new \"<title>\" [--label NAME]... < body")
         if args.label:
             die("--label applies to --new only; label an existing issue with `gh issue edit`")
@@ -113,7 +116,11 @@ def main() -> int:
         print(f"gh-comment: redacted {redactions} credential-shaped string(s) "
               "from the body; a secret reached your text (CLAUDE.md rule 10)",
               file=sys.stderr)
-    full_body = body + FOOTER.format(role=role)
+    full_body, stripped = attribute(body, role)
+    if stripped:
+        print(f"gh-comment: stripped {stripped} typed attribution line(s); the "
+              "footer is assembled here, never typed (CLAUDE.md, #590)",
+              file=sys.stderr)
 
     token = os.environ.get("GH_WORKFLOW_TOKEN", "")
     if not token:
@@ -134,7 +141,7 @@ def main() -> int:
     else:
         call = ["issue", "close" if args.close else "comment", args.number]
         call += ["--comment" if args.close else "--body", full_body]
-        target = f"issue {args.number}"
+        target = f"#{args.number}"
     result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
     if result.returncode != 0:
         die(f"gh {' '.join(call[:2])} on {target} failed: {result.stderr.strip()}")
