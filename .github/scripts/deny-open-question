@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Block ending the turn on a question nobody can answer (Stop hook).
+
+`.claude/settings.json` wires this as a Stop hook; the harness runs it
+each time the model tries to end its turn.
+
+A GitHub Actions session is headless and single-shot: when the turn ends
+the run ends, and the final response reaches its reader only after that
+(CLAUDE.md rule 12). A final response that ends on a question parks the
+session's decision on a reader who does not exist. Run 35842553330
+(2026-09-23, the maintainer): the harness denied an Edit under a
+protected path, the model wrote "OK to proceed?", the turn ended, the
+issue stayed untouched and the operator's phone carried a question with
+nobody to answer it. Run 32723091059 (2026-08-24, the BDFL) asked the
+empty inbox a question the same way. Two seats, two prompts, one shape;
+the prose already forbade it, and prose is what failed.
+
+Predicate: the final assistant message, with trailing whitespace and
+markdown emphasis stripped, ends in `?`. A quoted question ('the run
+ended with "OK to proceed?"') ends in the quote and passes: reporting a
+question is not asking one. A question mid-message followed by a
+decision passes too, because the decision is what a headless turn owes.
+Narrow on purpose: a false block costs one turn of rephrasing, a missed
+question costs the run.
+
+One warning only: on stop_hook_active (the retry after our own block)
+the stop is allowed, because a hook that re-blocks forever holds a dead
+session open. The residual is recorded, not prevented.
+
+Contract: reads the Stop JSON on stdin. Outside GitHub Actions
+(GITHUB_ACTIONS != "true") everything is allowed; an interactive session
+has a human to answer. Malformed JSON allows. A payload without
+`last_assistant_message` allows and writes a summary line naming the
+missing field, because a silent fail-open is how this guard would die
+unnoticed the day the harness renames the field it reads. In CI, a
+closing question blocks with {"decision": "block"} and a reason telling
+the model what a headless turn does instead: decide under a stated
+assumption and act, or file the decision where someone will read it,
+then end with what changed.
+
+Liveness: every decision that mattered appends a line to
+GITHUB_STEP_SUMMARY, the durable trace: a block, a second-stop allow that
+let a question out, or a payload missing the field the predicate reads.
+"""
+
+import json
+import os
+import sys
+
+FIELD = "last_assistant_message"
+
+# Markdown emphasis a model closes a sentence with; stripped before the
+# terminal character is read so "Shall I proceed?**" is still a question.
+EMPHASIS = "*_~"
+
+MESSAGE = (
+    "Your final response ends on a question, and nobody is there to answer "
+    "it: this session is headless and ends when your turn ends (CLAUDE.md "
+    "rule 12). A question here parks the work on a reader who does not "
+    "exist; run 35842553330 ended that way with its issue untouched. Decide "
+    "it yourself under a stated assumption and act, or, if only the operator "
+    "can decide, file it where they will read it (`.github/scripts/gh-comment "
+    '--new "<title>" --label blocked-on-human`, body on stdin), then end '
+    "your turn with what changed, not with the question."
+)
+
+
+def closing_question(text: str) -> bool:
+    """True when the message's last sentence is a question."""
+    tail = text.rstrip()
+    while tail and tail[-1] in EMPHASIS:
+        tail = tail[:-1].rstrip()
+    return tail.endswith("?")
+
+
+def note(line: str) -> None:
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"deny-open-question: {line}\n")
+
+
+def main() -> int:
+    """Allow (empty) or block (decision JSON) the stop described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(call, dict):
+        return 0
+    text = call.get(FIELD)
+    if not isinstance(text, str):
+        note(f"allowed; payload carries no {FIELD}, predicate unread")
+        return 0
+    if not closing_question(text):
+        return 0
+    if call.get("stop_hook_active"):
+        note("allowed second stop; final response still ends on a question")
+        return 0
+    note("blocked stop; final response ends on a question")
+    print(json.dumps({"decision": "block", "reason": MESSAGE}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
