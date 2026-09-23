@@ -21,20 +21,6 @@
 
 use crate::coder::{Decoder, Encoder};
 
-/// Frequency increment applied to a symbol every time it is coded.
-///
-/// Ported unchanged from the archive's `INC`
-/// (`research/imports/session-1/mothergod.rs`): higher favors recent
-/// symbols, lower favors long-run accuracy.
-const INCREMENT: u32 = 12;
-
-/// Total frequency past which [`Model::update`] halves every count.
-///
-/// Ported unchanged from the archive's `LIM`. Keeps `total`, and every
-/// per-symbol frequency, comfortably inside `u32` with room to spare, and
-/// bounds how long stale evidence can outweigh recent symbols.
-const RESCALE_LIMIT: u32 = 65536;
-
 /// An order-0 adaptive frequency table over `0..alphabet_len` symbols.
 ///
 /// Every symbol starts at frequency 1 (nothing is ever impossible to code),
@@ -93,8 +79,8 @@ impl Model {
             &mut self.freq,
             &mut self.total,
             symbol,
-            INCREMENT,
-            RESCALE_LIMIT,
+            crate::DEFAULT_RESCALE_INCREMENT,
+            crate::DEFAULT_RESCALE_LIMIT,
         );
     }
 
@@ -208,10 +194,10 @@ mod tests {
 
     #[test]
     fn rescale_triggers_and_round_trip_still_holds() {
-        // RESCALE_LIMIT is 65536 and every update adds INCREMENT=12, so a
-        // two-symbol alphabet coded 10,000 times crosses the halving
-        // threshold several times over; round-trip must still hold on the
-        // far side of every halving.
+        // DEFAULT_RESCALE_LIMIT is 65536 and every update adds
+        // DEFAULT_RESCALE_INCREMENT=12, so a two-symbol alphabet coded
+        // 10,000 times crosses the halving threshold several times over;
+        // round-trip must still hold on the far side of every halving.
         let symbols: Vec<usize> = (0..10_000).map(|i| usize::from(i % 3 == 0)).collect();
         roundtrip_symbols(&symbols, 2);
     }
@@ -254,8 +240,8 @@ mod tests {
     #[test]
     fn ideal_cost_drops_as_a_symbol_gets_more_likely() {
         // Coding the same symbol repeatedly raises its own frequency
-        // (INCREMENT), so its ideal cost must strictly decrease call over
-        // call as the table adapts toward it.
+        // (DEFAULT_RESCALE_INCREMENT), so its ideal cost must strictly
+        // decrease call over call as the table adapts toward it.
         let mut model = Model::new(4);
         let first = model.ideal_cost_bits(0);
         let second = model.ideal_cost_bits(0);

@@ -312,6 +312,20 @@ fn check_stored_bound(payload: &[u8], stored_bound: Option<u32>) -> Result<(), E
     Ok(())
 }
 
+/// Frequency increment and rescale ceiling shared by every adaptive
+/// frequency table in the crate that runs at the archive's original rate:
+/// [`model::Model`], [`ppm::Ppm`], and every [`literal::Literal`] bank
+/// except its fast-rate bank 0 (which tunes its own, faster-forgetting
+/// `FAST_INCREMENT`/`FAST_LIMIT`). Ported unchanged from the archive's
+/// `INC`/`LIM` (`research/imports/session-1/mothergod.rs`): before this
+/// pair was pulled out from under them, each of the three had
+/// independently declared the same two values, the same duplication
+/// [`rescale_bank`] itself already closed for the arithmetic that consumes
+/// them.
+pub(crate) const DEFAULT_RESCALE_INCREMENT: u32 = 12;
+/// See [`DEFAULT_RESCALE_INCREMENT`].
+pub(crate) const DEFAULT_RESCALE_LIMIT: u32 = 65536;
+
 /// Increments `freq[symbol]`/`*total` by `increment`, then halves every
 /// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
 /// rescales down to an impossible-to-code symbol) once `*total` exceeds
