@@ -94,15 +94,18 @@
 //! previous byte's high nibble) plus its own mixing weight, blended into
 //! [`crate::literal::Literal`]'s mix as a genuinely additive term via
 //! `Literal::mix_ppm`, never written into any of the six real experts'
-//! own banks or totals. **Accepted**: train net -0.005530 b/B (9 of 11
-//! `bench::baseline` cases improved), sealed `access_log` -0.006145 and
-//! `gradient_image` -0.176711 (both improved, the widest sealed margin
-//! any S1-P3 slice has measured). Mechanism: a `Ppm` bank starts every
-//! symbol at frequency 0, so it contributes nothing where its context
-//! carries no signal rather than a confidently wrong value the way a
-//! Laplace-smoothed or rescaled substitute could, and — unlike every
-//! rejected substitution above — this slice never writes into an
-//! existing expert's own reported estimate at all, so the six-expert
+//! own banks or totals. **Accepted**: train net -0.005530 b/B (8 of 11
+//! `bench::baseline` cases improved; `entropy_ladder_h8`, `base64_wrapped`,
+//! and `sqlite_like_records` regressed, each an order of magnitude or
+//! more smaller than any regression in prior S1-P3 slices), sealed
+//! `access_log` -0.006145 and `gradient_image` -0.176711 (both improved,
+//! the widest sealed margin any S1-P3 slice has measured). Mechanism: a
+//! `Ppm` bank starts every symbol at frequency 0, so it contributes
+//! nothing where its context carries no signal rather than a confidently
+//! wrong value the way a Laplace-smoothed or rescaled substitute could,
+//! and — unlike every rejected substitution above — this slice never
+//! writes into an existing expert's own reported estimate at all, so the
+//! six-expert
 //! mixer's weights keep calibrating against the same honest numbers they
 //! always have; only the new expert's own weight has to learn whether it
 //! is useful. Full record: `JOURNAL` S2-A100. Remaining S1-P3 scope: the
