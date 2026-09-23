@@ -2,17 +2,20 @@
 //! decode-forever promise CLAUDE.md rule 5 makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
 //! encode/decode MB/s, the measurement date, the reference compressor
-//! versions, and the CLI recipe a reader is told to type, instead of
-//! deriving any of them, so a codec change, a report regeneration or a
+//! versions, the pre-alpha/no-release state of the project, and the CLI
+//! recipe a reader is told to type, instead of
+//! deriving any of them, so a codec change, a report regeneration, a
+//! release or a
 //! renamed subcommand can leave any of them stale with nothing catching it
 //! (issue #431: twice in seven days, PR #243 and again the day this test
 //! was added; issue #469: the report regenerated under an unchanged ratio
 //! left only the restated date stale, and nothing compared it). Compares
-//! every restated claim against its single source of truth —
+//! every restated claim against its single source of truth:
 //! `FORMAT_VERSION` against `src/lib.rs`'s own constant, the aggregate
 //! figures, date and tool versions against the matching generated
-//! `docs/benchmarks/*.md` report, the recipe against the binary's own
-//! usage output — and fails naming the file, the claimed value, and the
+//! `docs/benchmarks/*.md` report, the release state against
+//! `CHANGELOG.md`'s own headings, the recipe against the binary's own
+//! usage output, and fails naming the file, the claimed value, and the
 //! true value.
 
 // Not under Miri: prose-vs-source string comparison, no codec code runs
@@ -135,6 +138,105 @@ fn frozen_format_promise_is_open_ended_on_every_surface_that_makes_it() {
             tail.starts_with("or later"),
             "{file} states the decode-forever promise as \"version {claimed_floor} {opener}...\"; it has to read \"or later\", because a closed list of versions goes stale on the next FORMAT_VERSION bump"
         );
+    }
+}
+
+/// Every version `CHANGELOG.md` records as released: the bracket content of
+/// each `## [...]` heading that is not `Unreleased`. Keep a Changelog's
+/// release step renames that one heading, so this file carries the release
+/// in the commit that cuts it, earlier than a tag reaches a shallow
+/// checkout and earlier than a generated field can be regenerated.
+fn changelog_released_versions() -> Vec<String> {
+    read("CHANGELOG.md")
+        .lines()
+        .filter_map(|line| {
+            let heading = line.strip_prefix("## [")?;
+            let version = heading.split_once(']')?.0;
+            (version != "Unreleased").then(|| version.to_owned())
+        })
+        .collect()
+}
+
+/// Every occurrence of `marker` in `file`, quoted with the words around it,
+/// matched case-insensitively against whitespace-normalized text so a claim
+/// wrapped across source lines still matches. A window rather than the
+/// enclosing sentence, because these surfaces include HTML: markup carries
+/// few sentence boundaries, so a sentence-scoped quote of `site/index.html`
+/// runs to hundreds of characters of tags and reads as noise. Lowercasing is
+/// ASCII-only, which leaves every byte offset into `text` valid.
+fn quotes_containing(file: &str, marker: &str) -> Vec<String> {
+    /// Characters of surrounding prose to quote on each side.
+    const CONTEXT: usize = 40;
+
+    let text = normalize_whitespace(&read(file));
+    let haystack = text.to_ascii_lowercase();
+    let mut quotes = Vec::new();
+    let mut from = 0;
+    while let Some(offset) = haystack[from..].find(marker) {
+        let at = from + offset;
+        let start = text[..at]
+            .char_indices()
+            .rev()
+            .take(CONTEXT)
+            .last()
+            .map_or(at, |(index, _)| index);
+        let end = text[at..]
+            .char_indices()
+            .nth(marker.len() + CONTEXT)
+            .map_or(text.len(), |(index, _)| at + index);
+        quotes.push(text[start..end].to_owned());
+        from = at + marker.len();
+    }
+    quotes
+}
+
+#[test]
+fn release_state_claims_agree_with_the_changelog() {
+    // Five sentences on `/` and two in README.md tell the reader that
+    // mothergod is pre-alpha and that no release exists, including the
+    // `description`/`og:description` copy that is all an unfurled link
+    // shows. `status-data.py` derives the same fact as `phase`, but it
+    // renders only on `/status.html`, which no measured pageload has ever
+    // landed on (marketing/JOURNAL.md, 2026-08-31, 09-12, 09-19). So the
+    // copies that matter are hand-typed, and cutting 0.1.0 touches none of
+    // the files they live in (issue #703). `/` is JavaScript-free by
+    // decision (issue #431), so the mechanism is a guard on the copies
+    // rather than a fetch of the generated field.
+    //
+    // Residual gap, named rather than hidden: this watches a fixed
+    // vocabulary of denials, so a sixth sentence that denies the release in
+    // other words goes unguarded. That is why the pre-release branch below
+    // asserts each marker still matches live prose. A marker matching
+    // nothing is dead machinery guarding nobody, and it would pass forever.
+    const SURFACES: [&str; 4] = [
+        "README.md",
+        "site/index.html",
+        "site/status.html",
+        "site/agents.html",
+    ];
+    // Both fall with the first release: a project with a published version
+    // has a release, and does not call itself pre-alpha on its landing page.
+    const DENIALS: [&str; 2] = ["no release", "pre-alpha"];
+
+    let released = changelog_released_versions();
+    for marker in DENIALS {
+        let found: Vec<(&str, Vec<String>)> = SURFACES
+            .iter()
+            .map(|file| (*file, quotes_containing(file, marker)))
+            .filter(|(_, quotes)| !quotes.is_empty())
+            .collect();
+
+        if let Some(version) = released.first() {
+            assert!(
+                found.is_empty(),
+                "CHANGELOG.md records release {version}, so {marker:?} is false wherever it is still written: {found:?}"
+            );
+        } else {
+            assert!(
+                !found.is_empty(),
+                "no surface says {marker:?} anymore, so this guard watches a phrase nobody writes; re-anchor it on the words the surfaces use now"
+            );
+        }
     }
 }
 

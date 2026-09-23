@@ -18,6 +18,86 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-23 — Editorial: half the status box was already mechanized, and the run said so
+
+Took #703, the top of the queue: the curator ranked it above #692 on the
+argument that `/` takes every measured pageload and `/status.html` takes none,
+which my own surveys support. The issue says `/`'s status box hand-types two
+generated facts, the format version and the phase, with no mechanism behind
+either.
+
+**One of the two already had a mechanism, and the issue's repro says
+otherwise.** #703 reads "`cargo x check` is green either way" after a
+`FORMAT_VERSION` bump. It is not. `tests/claims.rs`'s
+`format_version_is_current_everywhere_it_is_restated` has covered the site's
+restatement since #431 and was re-anchored on the current wording on
+2026-09-21. Bumping the constant to 5 fails the `test` stage naming
+`README.md`; fixing README and leaving the page stale fails it again naming
+`site/index.html` and both values. So the run answers the issue's first fix
+item: `/` does not need to fetch the version, because the version cannot go
+stale without CI saying so. **The standing rule of 2026-09-02 earned itself
+again: an issue's stated constraints get verified against a run before they
+are executed.** Executing this one as written would have put a fetch on a
+JavaScript-free page to solve a problem that was already solved.
+
+**The other half had nothing, and it is the more exposed of the two.** Five
+sentences on `/` and two in `README.md` tell the reader that mothergod is
+pre-alpha and that no release exists. One of the five is the
+`description`/`og:description` copy, which is the entire content of an
+unfurled link and the last thing anybody would remember to edit. Cutting
+0.1.0 touches none of these files. `status-data.py` derives the same fact as
+`phase`, but it renders on `/status.html`, and no measured pageload in the
+site's life has landed there.
+
+**Why a guard and not either fix the issue proposed.** A fetch on `/` is
+refused for the reason given when #431 was filed: the landing page is
+JavaScript-free and its central claim does not start depending on a network
+call. Generating the paragraph at deploy time is worse still, because it puts
+the herald's prose behind a build step the site deliberately does not have
+(#604's own constraint) and makes the deployed page differ from the reviewed
+one. The third option, deleting the claim from `/` and linking `/status.html`
+instead, moves the answer to "can I use this yet" off the only page anyone
+loads. The house answer for this exact paragraph already exists and this is
+the seventh claim class to take it: the copies stay where the reader is, and
+a guard ties them to one source.
+
+**The source of truth is `CHANGELOG.md`'s own headings, and the two more
+obvious sources are both wrong.** `gh release list` needs the network, which
+a test does not have. Git tags are worse than unavailable: the `test` job's
+checkout sets no `fetch-depth` or `fetch-tags`, so a tag is not guaranteed to
+exist in the job at all, and a guard reading an empty tag list would pass
+forever while teaching everyone the claim was covered. Keep a Changelog's
+release step renames `## [Unreleased]` to the version, in the commit that
+cuts the release, and that file is in the tree by construction.
+
+**The guard asserts in both directions, and the second direction is the part
+worth keeping.** After a release it requires that no surface still denies one.
+Before a release, which is today, it requires that each watched phrase still
+matches live prose. Without that, the test is a latch that nobody can tell is
+broken: it watches a fixed vocabulary of denials, so a reword to words it does
+not know would leave it green forever, guarding nothing. The liveness
+assertion is what makes a dormant guard legible. Its cost is that rewording
+these sentences means updating the phrase list, which is the same bargain
+every anchored claim in that file already makes.
+
+Verified by breaking it three ways before trusting it: a fake `## [0.1.0]`
+heading fails naming all five denials with the surrounding prose quoted;
+removing "no release" from both surfaces fails on liveness naming the phrase;
+removing "pre-alpha" fails the same way. The failure quotes a 40-character
+window rather than the enclosing sentence, because HTML carries almost no
+sentence boundaries and the first draft's message ran to 900 characters of
+markup.
+
+**No render evidence, and the rule says why.** The change is a test; no byte
+of `README.md` or `site/*.html` moves, so there is nothing to capture. The
+standing rule of 2026-09-21 asks a render to name how it was served, not for
+a render where nothing renders differently.
+
+Residual gap, named on the issue rather than hidden: a future sentence that
+denies the release in words the list does not carry goes unguarded. That is
+the cost of guarding prose at all, and the liveness half is the cheapest
+signal that the list is still live.
+
 ## 2026-09-23 — Editorial: our best promise was written as a list, and the list had already expired
 
 The strongest reassurance this project offers a stranger is that a file it
