@@ -252,13 +252,12 @@ jobs:
               then run the sweeps, cutting any that the chat work
               crowded out (the next scheduled wake catches up). Behave
               like a person in a chat: answer each message as a
-              Telegram reply to it (sendMessage with
-              reply_parameters.message_id), acknowledge a directive
-              you are about to work on by switching its reaction
-              from the webhook's 👀 (stored) to ✍ (setMessageReaction,
-              working) instead of a filler sentence, match the
-              operator's register, never re-explain what the thread
-              already shows. The bot types while the operator waits
+              Telegram reply to it (`tg-send --reply-to`), acknowledge
+              a directive you are about to work on with `inbox ack
+              <key>` (✍ on the message, replacing the webhook's 👀)
+              instead of a filler sentence, match the operator's
+              register, never re-explain what the thread already
+              shows. The bot types while the operator waits
               and stops when tg-send lands your reply, so progress
               costs you nothing. Before your last Telegram message:
               re-list the inbox and drain anything that arrived

@@ -222,7 +222,7 @@ test("done needs exactly one key", () => {
 test("an unknown verb names the usage that would have worked", () => {
   const run = cli(["slurp"]);
   assert.equal(run.status, 2);
-  assert.match(run.stderr, /drain \| done <key> \| chatlog/);
+  assert.match(run.stderr, /drain \| ack <key> \| done <key> \| chatlog/);
 });
 
 test("done on a key another run already drained is success, not a red run", async () => {
@@ -268,6 +268,122 @@ test("done deletes, and says the reply was the receipt", async () => {
   } finally {
     stub.close();
   }
+});
+
+// A stub that is Cloudflare on KV paths and Telegram on `/bot...` paths,
+// because `ack` reads one and writes the other. Telegram calls are recorded so
+// a test pins the payload that travelled, not just the exit code. `update` is
+// what KV holds under the key, or null for a key another run already deleted.
+async function stubAck(update, telegram) {
+  const reactions = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      response.setHeader("content-type", "application/json");
+      if (request.url.startsWith("/bot")) {
+        reactions.push({ url: request.url, method: request.method, body: JSON.parse(body) });
+        response.writeHead(telegram.status);
+        response.end(JSON.stringify(telegram.body));
+        return;
+      }
+      if (update === null) {
+        response.writeHead(404);
+        response.end(JSON.stringify({ success: false, errors: [{ code: 10009 }] }));
+        return;
+      }
+      response.writeHead(200);
+      response.end(JSON.stringify(update));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return {
+    reactions,
+    env: {
+      KV_API_BASE: base,
+      KV_ACCOUNT: "acct",
+      KV_NAMESPACE: "ns",
+      CLOUDFLARE_API_TOKEN: "planted-token",
+      TELEGRAM_API_BASE: base,
+      TELEGRAM_BOT_TOKEN: "planted-bot-token",
+    },
+    close: () => server.close(),
+  };
+}
+
+// One stored update, the shape the worker writes (worker.js `INBOX.put`).
+const stored = {
+  update_id: 42,
+  message: { message_id: 618, date: 1758643168, chat: { id: 77 }, text: "Is it wise?" },
+};
+
+test("ack reacts \u270d on the stored message, and pins the payload that travelled", async () => {
+  const stub = await stubAck(stored, { status: 200, body: { ok: true, result: true } });
+  try {
+    const run = await cliAsync(["ack", "u:000000000042"], stub.env);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /acknowledged \| \u270d on message 618/);
+    assert.equal(run.stderr, "");
+    assert.equal(stub.reactions.length, 1);
+    const [call] = stub.reactions;
+    assert.equal(call.method, "POST");
+    assert.equal(call.url, "/botplanted-bot-token/setMessageReaction");
+    assert.deepEqual(call.body, {
+      chat_id: 77,
+      message_id: 618,
+      reaction: [{ type: "emoji", emoji: "\u270d" }],
+    });
+  } finally {
+    stub.close();
+  }
+});
+
+test("ack on a key another run already drained is success, and Telegram is not called", async () => {
+  const stub = await stubAck(null, { status: 200, body: { ok: true, result: true } });
+  try {
+    const run = await cliAsync(["ack", "u:000000000042"], stub.env);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /already gone/);
+    assert.equal(stub.reactions.length, 0, "nothing left to acknowledge");
+  } finally {
+    stub.close();
+  }
+});
+
+test("ack stays red when Telegram refuses, with the reason and without the token", async () => {
+  const stub = await stubAck(stored, {
+    status: 400,
+    body: { ok: false, error_code: 400, description: "Bad Request: REACTION_INVALID" },
+  });
+  try {
+    const run = await cliAsync(["ack", "u:000000000042"], stub.env);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /NOT acknowledged: Telegram answered 400: Bad Request: REACTION_INVALID/);
+    assert.doesNotMatch(run.stderr, /planted-bot-token/);
+    assert.equal(run.stdout, "");
+  } finally {
+    stub.close();
+  }
+});
+
+test("ack without a bot token names the token, before any KV read", () => {
+  const run = cli(["ack", "u:000000000042"], { ...noCreds, TELEGRAM_BOT_TOKEN: "" });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /TELEGRAM_BOT_TOKEN/);
+  assert.doesNotMatch(run.stderr, /UNREADABLE/, "the missing bot token is the fault, not the inbox");
+});
+
+test("ack refuses a key that is not an update, in done's words", () => {
+  const run = cli(["ack", "chatlog"]);
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /not an update key/);
+});
+
+test("ack needs exactly one key, in done's words", () => {
+  const run = cli(["ack"]);
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /ack needs exactly one key/);
 });
 
 test("a listed key that vanishes before the read does not fail the drain", async () => {
