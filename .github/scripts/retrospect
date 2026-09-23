@@ -49,6 +49,14 @@ sessions did it anyway. `opener.py` holds the predicate, run-notice.py
 drops the opener from the notice, and this flags it beside the session
 and counts it in the summary, so the rule's failure rate is a number.
 
+WALLS is the fifth. A denial flag with a count and a tool name says a
+session was refused something, not what: "denied 1 (Edit)" on run
+35842553330 was the harness's protected-path check on `.cargo/`, and the
+BDFL learned that from the docs an hour later, not from this line. The
+audit now records each denial's typed reason (audit-extract.py), and
+every distinct one prints under the session, so the wall is read where
+the session is judged. Older artifacts carry no reasons and print none.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -273,6 +281,9 @@ def describe(run, meta, response):
         + (f"  [{'; '.join(flags)}]" if flags else "")
     )
     print(f"    {run['url']}")
+    raw = telemetry.get("permission_denials")
+    for wall in (raw.get("reasons") or []) if isinstance(raw, dict) else []:
+        print(f"    denied {wall.get('tool', '?')}: {wall.get('type', '?')}: {wall.get('reason', '')}")
     body = response.strip() or "(posted nothing)"
     if len(body) > RESPONSE_CAP:
         body = f"{body[:RESPONSE_CAP]}\n[cut, {len(response) - RESPONSE_CAP} more characters]"
