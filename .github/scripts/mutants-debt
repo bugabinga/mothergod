@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""File the mutants that outlived their pull request, so a red that lands after the merge still has a reader.
+
+Extensionless and executable, like research-due and stalled-prs: a decision
+nobody was making gets made here, every run, by the workflow itself.
+
+mutants-check is advisory (docs/TESTING.md, tier "Advisory"), and the reviewer
+reads its red on the PR thread when the red exists by the time the review
+posts. When it does not, nobody does: the reviewer's session ends with its
+verdict, merge-pr lands the PR on the required gates alone, and the check
+finishes minutes later on a thread no seat sweeps. Three PRs merged that way
+in two days (2026-09-22/23): #676 and #677 with one and two survivors each,
+#690 with 50 survivors among 84 decided mutants and 20 never run, its
+mutate step cut at the 25-minute budget. Every one of those survivors is a
+line on main no test distinguishes from its mutation, and the only record
+was a `::warning` annotation on a closed PR.
+
+Run as the mutants job's last step, after the report exists:
+
+    mutants-debt <pr-number> [mutants-out-dir]
+
+and it does one of four things, printed on one line:
+
+    no survivors     missed.txt absent or empty; nothing to file
+    open             the PR is still open, so the annotations on its diff
+                     are the reader (agent-review.yml's step 3 names them)
+    filed already    an open issue already carries this PR's survivors
+    filed #N         the PR is merged: the survivors become one issue,
+                     labeled `product` + `bug`, the heartbeat's first pickup
+                     tier, so the fix lands while the diff is still warm
+
+The issue is written by gh-comment (footer, credential), never by `gh issue
+create`. It names the three answers a survivor takes in the house's order:
+delete the line, then a test, then a proven exclusion. Deletion first
+because a survivor in code nothing calls is dead code, not a missing test
+(PR #690's 19 codec.rs survivors were all in a measurement sink with no
+caller), and PERSONALITY.md ranks deletion over addition.
+
+Not covered, by design: a PR that merges in the seconds between the state
+read and the filing; the monthly whole-crate sweep (#455) is the backstop
+for that gap and for everything that predates this step. Fail direction: an
+unreadable PR state or a failed filing exits 1 so the run's red says why,
+because printing the survivors to a log nobody opens is the exact failure
+this script exists to end.
+
+`decide` and `render` are pure so mutants-debt.test.mjs can pin both
+failure directions without spawning gh.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+LABELS = ("product", "bug")
+TITLE_MARK = "outlived PR #"
+
+
+def gh_json(args):
+    """(parsed stdout, error text): gh's JSON or why it could not be read."""
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None, proc.stderr.strip() or f"gh exited {proc.returncode}"
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError as exc:
+        return None, f"gh printed non-JSON: {exc}"
+
+
+def read_report(out_dir):
+    """(sorted missed lines, mutants generated, mutants decided) from a cargo-mutants output directory."""
+    out = Path(out_dir)
+    missed_path = out / "missed.txt"
+    missed = []
+    if missed_path.is_file():
+        missed = sorted(line for line in missed_path.read_text().splitlines() if line.strip())
+    generated = decided = None
+    try:
+        generated = len(json.loads((out / "mutants.json").read_text()))
+    except (OSError, ValueError):
+        pass
+    try:
+        decided = json.loads((out / "outcomes.json").read_text()).get("total_mutants")
+    except (OSError, ValueError, AttributeError):
+        pass
+    return missed, generated, decided
+
+
+def decide(missed, merged, filed):
+    """The verdict and its one-line reason.
+
+    missed: survivor lines; merged: the PR's merged state, None when unreadable;
+    filed: an existing open issue number, None when absent or unreadable.
+    """
+    if not missed:
+        return "no survivors", "missed.txt empty or absent"
+    if merged is None:
+        return "unreadable", "PR state could not be read"
+    if not merged:
+        return "open", f"{len(missed)} survivor(s) annotate the open diff; the review reads them there"
+    if filed:
+        return "filed already", f"#{filed} carries this PR's survivors"
+    return "file", f"{len(missed)} survivor(s) on merged code"
+
+
+def render(pr, missed, generated, decided, run_url):
+    """(title, body) for the issue the merged PR's survivors become."""
+    files = sorted({line.split(":", 1)[0] for line in missed})
+    n = len(missed)
+    title = f"mutants: {n} survivor{'s' if n != 1 else ''} {TITLE_MARK}{pr} ({', '.join(files)})"
+    lines = [
+        f"PR #{pr} merged while its mutants-check was still running; the check",
+        "finished red afterwards, on a thread no seat reads.",
+        "",
+        "Survivors, each a line on main no test distinguishes from its mutation:",
+        "",
+        "```",
+        *missed,
+        "```",
+    ]
+    if generated is not None and decided is not None and generated > decided:
+        lines += [
+            "",
+            f"{generated - decided} of {generated} mutants never ran: the step's time budget",
+            "ended first. Undecided, not counted, unknown until the next run over this code.",
+        ]
+    lines += [
+        "",
+        "Each survivor takes one of three answers, in this order: delete the line",
+        "(a survivor in code nothing calls is dead code, not a missing test), a test",
+        "that fails under the mutation, or an exclusion in `.cargo/mutants.toml` with",
+        "the equivalence proof (#391's shape). Procedure: the `test-craft` skill.",
+        "",
+        f"Run: {run_url}",
+    ]
+    return title, "\n".join(lines)
+
+
+def pr_merged(repo, pr):
+    data, err = gh_json(["pr", "view", str(pr), "--repo", repo, "--json", "state"])
+    if err:
+        return None, err
+    return data.get("state") == "MERGED", None
+
+
+def already_filed(repo, pr):
+    data, err = gh_json([
+        "issue", "list", "--repo", repo, "--state", "open", "--label", LABELS[1],
+        "--search", f'in:title "{TITLE_MARK}{pr} "', "--json", "number,title",
+    ])
+    if err:
+        return None, err
+    for issue in data:
+        if f"{TITLE_MARK}{pr} " in issue.get("title", ""):
+            return issue["number"], None
+    return None, None
+
+
+def file_issue(title, body):
+    """The new issue's number via gh-comment --new, or None with gh-comment's complaint."""
+    script = Path(__file__).with_name("gh-comment")
+    cmd = [str(script), "--new", title]
+    for label in LABELS:
+        cmd += ["--label", label]
+    proc = subprocess.run(cmd, input=body, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None, proc.stderr.strip() or proc.stdout.strip()
+    return proc.stdout.strip(), None
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("usage: mutants-debt <pr-number> [mutants-out-dir]", file=sys.stderr)
+        return 2
+    pr = int(sys.argv[1])
+    out_dir = sys.argv[2] if len(sys.argv) > 2 else "mutants.out"
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    run_url = os.environ.get("RUN_URL", "(run url unset)")
+
+    missed, generated, decided = read_report(out_dir)
+    merged = filed = None
+    err = None
+    if missed:
+        merged, err = pr_merged(repo, pr)
+        if merged:
+            filed, err = already_filed(repo, pr)
+            if err:
+                filed = None  # a dedup read that failed must not suppress the filing
+    verdict, detail = decide(missed, merged, filed)
+    if verdict == "unreadable":
+        print(f"::error::mutants-debt: {detail}: {err}")
+        return 1
+    if verdict != "file":
+        print(f"mutants-debt: {verdict} | {detail}")
+        return 0
+    title, body = render(pr, missed, generated, decided, run_url)
+    created, err = file_issue(title, body)
+    if err:
+        print(f"::error::mutants-debt: filing failed: {err}")
+        return 1
+    print(f"mutants-debt: filed {created} | {detail}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

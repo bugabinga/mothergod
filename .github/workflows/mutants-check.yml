@@ -54,7 +54,23 @@
 # annotations, so a missed mutant lands on the changed line in the PR diff
 # where a reviewer already looks. Promote it to a required check once four
 # weeks pass with no false positive, counted from the exclusion baseline
-# (.cargo/mutants.toml, merged 2026-08-31).
+# (.cargo/mutants.toml, merged 2026-08-31). Counted on 2026-09-23: two,
+# not zero. #676 and #677 each merged with a `|`/`^` survivor in bank
+# hashing, the disjoint-field class mutants.toml already excludes by proof
+# elsewhere, so a required check would have blocked both on an equivalent
+# mutant. The clock restarts when those two are excluded with their proofs.
+#
+# An advisory red has a reader only while the PR is open: the reviewer's
+# session ends with its verdict, merge-pr lands the PR on the required
+# gates alone, and a red that finishes afterwards sits on a thread no seat
+# sweeps. #676, #677 and #690 all merged that way in two days, #690 with
+# 50 survivors among 84 decided mutants and 20 never run inside the
+# 25-minute budget. The last step, `mutants-debt`, closes that gap: on a
+# merged PR the survivors become one `product`+`bug` issue, the heartbeat's
+# first pickup tier; on an open PR the annotations stay the reader. Its
+# docstring is the contract. Forks are skipped by the `if:` because their
+# token cannot write issues, and a fork PR's red is the reviewer's to read
+# before merging, same as before.
 name: mutants-check
 
 on:
@@ -68,8 +84,8 @@ on:
       - ".github/workflows/mutants-check.yml"
   workflow_dispatch:
 
-permissions:
-  contents: read
+# Raised per job below; the mutants job writes one issue on a merged PR.
+permissions: {}
 
 concurrency:
   group: mutants-check-${{ github.event.pull_request.number || github.ref }}
@@ -81,6 +97,10 @@ env:
 jobs:
   mutants:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout
+      pull-requests: read # mutants-debt reads the PR's merged state
+      issues: write # mutants-debt files a merged PR's survivors
     # The ceiling for the dispatched full sweep; each mode's real budget is
     # its own step timeout below, so a hung PR gate never holds a runner for
     # the sweep's allowance.
@@ -160,6 +180,23 @@ jobs:
           echo
           echo "Add a test that fails under the mutation, or explain on the PR why the line is not worth distinguishing."
           exit 1
+
+      # Runs whatever the verdict, on the report as it stands: a timed-out
+      # mutate step skips the verdict but still leaves a partial missed.txt
+      # (#690's 50 survivors were exactly that), and a PR merged during the
+      # run is the case this step exists for. Same-repo PRs only: a fork's
+      # token cannot file, and its red is read on the open thread.
+      - name: File the survivors of a merged PR
+        if: >-
+          always() && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          GH_WORKFLOW_TOKEN: ${{ github.token }}
+          ROLE: mutants-check
+        run: .github/scripts/mutants-debt "$PR_NUMBER" mutants.out
 
       - name: Upload report
         if: always()
