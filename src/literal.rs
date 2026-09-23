@@ -97,12 +97,6 @@ const BANKS: usize = WORD_BASE + WORD_BANKS;
 const FAST_INCREMENT: u32 = 32;
 const FAST_LIMIT: u32 = 6144;
 
-/// Frequency increment and rescale ceiling for the other five experts.
-/// Ported unchanged from the archive's `INC`/`LIM`, the same values
-/// [`crate::model::Model`] uses for the flag/length/offset stages.
-const DEFAULT_INCREMENT: u32 = 12;
-const DEFAULT_LIMIT: u32 = 65536;
-
 /// Exponentiated-gradient learning rate and weight clamp, ported
 /// unchanged from the archive's inline `0.05`/`1e-4`/`1e4`.
 const LEARNING_RATE: f64 = 0.05;
@@ -544,7 +538,10 @@ impl Literal {
             let (increment, limit) = if expert == 0 {
                 (FAST_INCREMENT, FAST_LIMIT)
             } else {
-                (DEFAULT_INCREMENT, DEFAULT_LIMIT)
+                (
+                    crate::DEFAULT_RESCALE_INCREMENT,
+                    crate::DEFAULT_RESCALE_LIMIT,
+                )
             };
             crate::rescale_bank(
                 &mut self.freq[bank * ALPHABET..bank * ALPHABET + ALPHABET],
@@ -718,8 +715,8 @@ impl Literal {
             &mut column_state.freq[column_bank * ALPHABET..column_bank * ALPHABET + ALPHABET],
             &mut column_state.total[column_bank],
             symbol,
-            DEFAULT_INCREMENT,
-            DEFAULT_LIMIT,
+            crate::DEFAULT_RESCALE_INCREMENT,
+            crate::DEFAULT_RESCALE_LIMIT,
         );
     }
 

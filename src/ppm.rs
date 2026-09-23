@@ -80,24 +80,6 @@
 
 use crate::coder::{Decoder, Encoder};
 
-/// Frequency increment applied to a symbol every time it is observed.
-///
-/// Same increment/rescale idiom as [`crate::model::Model`] (`INCREMENT`),
-/// so this table decays stale evidence the same way every other adaptive
-/// table in this crate does, rather than introducing a second tuning
-/// constant with no stated reason to differ.
-const INCREMENT: u32 = 12;
-
-/// Total frequency past which [`Ppm::observe`] halves every count.
-///
-/// Same value as [`crate::model::Model::update`]'s `RESCALE_LIMIT`, for the
-/// same reason: keeps `total` comfortably inside `u32`, and bounds how long
-/// stale evidence can outweigh recent symbols. `(freq + 1) >> 1` rounds up,
-/// but a zero entry stays zero (`(0 + 1) >> 1 == 0`), which is exactly the
-/// invariant [`Ppm`] needs: rescaling must never turn "never seen" into
-/// "seen".
-const RESCALE_LIMIT: u32 = 65536;
-
 /// An order-0 adaptive frequency table over `0..alphabet_len` symbols that
 /// distinguishes a genuinely unseen symbol from one merely rare, and prices
 /// that distinction as an explicit escape event (PPM Method C).
@@ -162,8 +144,8 @@ impl Ppm {
             &mut self.freq,
             &mut self.total,
             symbol,
-            INCREMENT,
-            RESCALE_LIMIT,
+            crate::DEFAULT_RESCALE_INCREMENT,
+            crate::DEFAULT_RESCALE_LIMIT,
         );
     }
 
@@ -473,8 +455,9 @@ mod tests {
 
     #[test]
     fn rescale_triggers_and_round_trip_still_holds() {
-        // RESCALE_LIMIT is 65536 and every observe adds INCREMENT=12, so
-        // 10,000 repeats of one already-known symbol crosses the halving
+        // DEFAULT_RESCALE_LIMIT is 65536 and every observe adds
+        // DEFAULT_RESCALE_INCREMENT=12, so 10,000 repeats of one
+        // already-known symbol crosses the halving
         // threshold several times over; round-trip must still hold on the
         // far side of every halving, and the symbol's frequency must never
         // decay back to zero (is_escape must stay false throughout).
