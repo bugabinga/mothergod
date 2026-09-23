@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Open one pull request on the session's token, with the role footer assembled.
+
+Extensionless and executable because agents type it as a command mid-session,
+like gh-comment and push-branch.
+
+The credential is the whole reason this is a script and not a `gh pr create`
+an agent remembers. Three tokens can reach GitHub from a session, and two of
+them open a PR that is broken from birth:
+
+- the workflow token (GH_WORKFLOW_TOKEN, `github-actions[bot]`): GitHub
+  raises no workflow run from an event its own `GITHUB_TOKEN` caused, so the
+  PR has no `ci` and no reviewer, forever (issue #489; GOVERNANCE "Stalled
+  auto-merge", sixth signature). That is why gh-comment, which rides that
+  token, must never open a PR, and why this script cannot share its credential.
+- the admin PAT (GH_ADMIN_TOKEN, the operator): an operator-attributed PR
+  wakes a full BDFL run on its own PR; five did in 85 minutes on 2026-08-23
+  (issue #141).
+
+The app token, the session's own GH_TOKEN (`claude[bot]`), is the one that
+raises `ci` and `agent-review` and wakes nothing, even when the commits it
+carries needed the PAT (push-branch derives that per path; PR #127 opened as
+`claude[bot]` while touching agent-heartbeat.yml). This script uses it and
+only it: GH_ADMIN_TOKEN is removed from gh's environment, and a GH_TOKEN
+equal to GH_WORKFLOW_TOKEN is refused before anything opens.
+
+The footer is assembled, never typed (footer.py, issue #590): whatever
+attribution line the body carries comes off first, so the PR body, and the
+squash commit `main` builds from it (the repository squashes with PR_BODY),
+ends with exactly one `_<role> · [Claude Code](...)_`. That puts the seat's
+name in git history, the PR-body half of #485.
+
+Never draft (CLAUDE.md rule 11), so there is no flag for it. Base is the
+repository's default branch; nothing here targets another.
+
+The app token expires about an hour into a session (issue #81), and this
+script cannot outlive it: a run whose work outlasts the token pushes its
+branch and dies here, which `stalled-prs` reports as `branch-orphaned` and
+GOVERNANCE's sixth signature rescues. Put the rationale in the commit
+message, where that rescue reads it.
+
+Usage: gh-pr <head-branch> "<title>" [--label NAME]... < body
+Prints the PR's URL on stdout.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+
+from footer import attribute
+from secret_scrub import scrub
+
+
+def die(*lines):
+    for line in lines:
+        print(f"gh-pr: {line}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="gh-pr", description=__doc__.splitlines()[0])
+    parser.add_argument("head", help="the branch to merge, already pushed")
+    parser.add_argument("title", help="the PR title")
+    parser.add_argument("--label", action="append", default=[], metavar="NAME",
+                        help="label to apply, repeatable")
+    args = parser.parse_args()
+
+    if not args.title.strip():
+        die("a PR needs a title; one nobody can scan is nobody's review")
+    role = os.environ.get("ROLE", "")
+    if not role:
+        die("ROLE is not set; the calling workflow must export it")
+
+    body = sys.stdin.read().strip()
+    if not body:
+        die("empty body; a PR body states what changed and why, and becomes "
+            "the squash commit's message")
+    # A PR body is permanent, public, unmasked project surface, and the squash
+    # copies it into `main`'s history (hard rule 10). Redact, warn loudly.
+    body, redactions = scrub(body)
+    if redactions:
+        print(f"gh-pr: redacted {redactions} credential-shaped string(s) from "
+              "the body; a secret reached your text (CLAUDE.md rule 10)",
+              file=sys.stderr)
+    full_body, stripped = attribute(body, role)
+    if stripped:
+        print(f"gh-pr: stripped {stripped} typed attribution line(s); the "
+              "footer is assembled here, never typed (CLAUDE.md, #590)",
+              file=sys.stderr)
+
+    env = dict(os.environ)
+    # An ambient admin PAT must not win this call: its PR wakes the BDFL on
+    # its own thread (issue #141).
+    env.pop("GH_ADMIN_TOKEN", None)
+    token = env.get("GH_TOKEN") or subprocess.run(
+        ["gh", "auth", "token"], env=env, capture_output=True, text=True
+    ).stdout.strip()
+    if not token:
+        die("no session token: GH_TOKEN is unset and `gh auth token` answered "
+            "nothing; a PR needs the app token to raise ci and a review")
+    if token == env.get("GH_WORKFLOW_TOKEN"):
+        die("GH_TOKEN is the workflow token; a PR opened on it raises no ci and "
+            "no review, forever (issue #489)",
+            "open it on the session's app token, which gh-comment never holds")
+    env["GH_TOKEN"] = token
+
+    call = ["pr", "create", "--head", args.head, "--title", args.title, "--body", full_body]
+    for label in args.label:
+        call += ["--label", label]
+    result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
+    if result.returncode != 0:
+        die(f"gh pr create from {args.head} failed: {result.stderr.strip()}")
+    print(result.stdout.strip())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

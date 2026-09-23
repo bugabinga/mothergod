@@ -498,7 +498,7 @@ def main():
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
         f"| no-artifact {len(orphans)} | phantom {len(phantoms)} | pending {len(pending)} "
-        f"| issue-comments {comments} | bypassed {bypassed} | since {anchor}"
+        f"| comments {comments} | bypassed {bypassed} | since {anchor}"
     )
 
 

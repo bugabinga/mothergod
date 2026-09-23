@@ -33,10 +33,10 @@ commits as `claude[bot]`, admin PAT commits as the operator. Nothing to
 configure, and `git commit` never runs, so the runner's missing git ident
 cannot fail the step.
 
-What this does NOT do, deliberately: open the PR. Creating a PR is not a push,
-so `gh pr create` rides the app token even when the commits needed the PAT, and
-a PAT-opened PR is operator-attributed and wakes a full BDFL run on its own PR
-(issue #141). Open it yourself, on the default credential.
+What this does NOT do, deliberately: open the PR. That is `gh-pr`, on the app
+token whatever the commits rode: a PAT-opened PR is operator-attributed and
+wakes a full BDFL run on its own PR (issue #141), and a workflow-token PR is
+born with no checks (issue #489).
 
 Prints the new commit SHA on stdout and records it per branch
 (push-branch-refs.json), where `settle-push` reads its default, so the pair

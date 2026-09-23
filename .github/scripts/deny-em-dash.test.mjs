@@ -26,6 +26,7 @@ const denied = [
   ["gh pr create --title t --body 'one idea — one PR'", "a PR body"],
   ["gh pr review 5 --approve --body 'fine — ship'", "a review body"],
   [".github/scripts/gh-comment 3 <<'EOF'\nDigest — nothing moved\nEOF", "an issue comment"],
+  [".github/scripts/gh-pr claude/x 'footer — assembled' <<'EOF'\nbody\nEOF", "a PR through gh-pr"],
   ["printf 'no-op — quiet' | .github/scripts/tg-send", "the Telegram status line"],
   ["git commit -m 'lz: prune — dead code'", "a commit message"],
   ["gh api repos/o/r/issues/1/comments -f body='x — y'", "the raw API"],

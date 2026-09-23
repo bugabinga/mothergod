@@ -249,11 +249,11 @@ test("a branch pushed and never PR'd, past grace, is stalled work", () => {
   );
   assert.equal(found.kind, "branch-orphaned");
   assert.match(found.detail, /2026-09-02T22:20:48Z/);
-  assert.match(found.rescue, /gh pr create --head claude\/bdfl-miri-lane/);
+  assert.match(found.rescue, /gh-pr claude\/bdfl-miri-lane/);
 });
 
 test("a branch pushed minutes ago is a live session, not a stall", () => {
-  // push-branch and `gh pr create` are seconds apart, but the session between
+  // push-branch and `gh-pr` are seconds apart, but the session between
   // them can be doing anything. Reporting that is a false line every wake.
   assert.equal(
     classifyBranch(
