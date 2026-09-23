@@ -1,5 +1,6 @@
 //! Guard: `README.md` and `site/index.html` restate `FORMAT_VERSION`, the
-//! published aggregate bits/byte numbers, the published aggregate
+//! decode-forever promise CLAUDE.md rule 5 makes about it, the published
+//! aggregate bits/byte numbers, the published aggregate
 //! encode/decode MB/s, the measurement date, the reference compressor
 //! versions, and the CLI recipe a reader is told to type, instead of
 //! deriving any of them, so a codec change, a report regeneration or a
@@ -35,18 +36,23 @@ fn read(relative: &str) -> String {
 /// The first run of ASCII digits after `marker`, skipping intervening
 /// whitespace: a line wrap can sit between a closing tag and its number.
 fn digits_after(text: &str, marker: &str) -> u8 {
+    number_and_tail_after(text, marker).0
+}
+
+/// `digits_after`'s number, plus the prose that follows it with leading
+/// whitespace trimmed. A claim of the shape "version 2 or later" states its
+/// floor in the number and whether it is open-ended in the tail, and only
+/// the pair says whether the claim still covers the current version.
+fn number_and_tail_after<'a>(text: &'a str, marker: &str) -> (u8, &'a str) {
     let after = text.find(marker).map_or_else(
         || panic!("{marker:?} not found"),
-        |index| &text[index + marker.len()..],
+        |index| text[index + marker.len()..].trim_start(),
     );
-    let digits: String = after
-        .trim_start()
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    digits
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    let number = digits
         .parse()
-        .unwrap_or_else(|_| panic!("no number follows {marker:?}"))
+        .unwrap_or_else(|_| panic!("no number follows {marker:?}"));
+    (number, after[digits.len()..].trim_start())
 }
 
 /// Numbers found between a `>` and the following `<`, in encounter order:
@@ -95,6 +101,41 @@ fn format_version_is_current_everywhere_it_is_restated() {
         site_claim, true_version,
         "site/index.html claims container format version {site_claim}, src/lib.rs's FORMAT_VERSION is {true_version}"
     );
+}
+
+#[test]
+fn frozen_format_promise_is_open_ended_on_every_surface_that_makes_it() {
+    // CLAUDE.md rule 5 owns this promise: from one floor version upward,
+    // every format version decodes forever. README.md and site/index.html
+    // restate it, and both spelled it as a closed list, "a version 2 or 3
+    // frame". That list stopped being true the moment FORMAT_VERSION reached
+    // 4: a reader compressing a file today was told the guarantee covers two
+    // versions, neither of them theirs, by a sentence that then concluded
+    // "so a frame written today stays readable". A closed list has to be
+    // re-edited on every bump by whoever remembers these two files, so the
+    // guard is on the open form rather than on the list's contents.
+    let claude_md = normalize_whitespace(&read("CLAUDE.md"));
+    let (floor, _) = number_and_tail_after(&claude_md, "that carve-out is retired for version ");
+    let true_version = mothergod::FORMAT_VERSION;
+    assert!(
+        floor <= true_version,
+        "CLAUDE.md rule 5 floors the decode-forever promise at version {floor}, above this build's FORMAT_VERSION {true_version}"
+    );
+
+    for file in ["README.md", "site/index.html"] {
+        let surface = normalize_whitespace(&read(file));
+        let (claimed_floor, tail) =
+            number_and_tail_after(&surface, "decode support for a version ");
+        assert_eq!(
+            claimed_floor, floor,
+            "{file} promises decode support from version {claimed_floor} up, CLAUDE.md rule 5 promises it from version {floor} up"
+        );
+        let opener: String = tail.chars().take(20).collect();
+        assert!(
+            tail.starts_with("or later"),
+            "{file} states the decode-forever promise as \"version {claimed_floor} {opener}...\"; it has to read \"or later\", because a closed list of versions goes stale on the next FORMAT_VERSION bump"
+        );
+    }
 }
 
 /// The aggregate row's mothergod/gzip -9/zstd -19/xz -9e bits/byte, read

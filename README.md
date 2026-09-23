@@ -55,7 +55,7 @@ tuned for it.
 format (`FORMAT_VERSION` 4) carries `Stored` and `Lz` (optimal-parse LZ over
 an adaptive, context-mixing range coder; `research/JOURNAL.md` S2-D2/S2-D3).
 That format is frozen ([`docs/format/SPEC.md`](docs/format/SPEC.md),
-ADR-0041): no future version may drop decode support for a version 2 or 3
+ADR-0041): no future version may drop decode support for a version 2 or later
 frame, so a frame written today stays readable. Everything around it still
 moves: the library API, the CLI, and the ratio above. Do not use this for
 data you care about yet.
