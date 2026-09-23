@@ -47,11 +47,36 @@
 //! worst regression, +0.128 b/B). "One of [`crate::literal::Literal`]'s other five
 //! experts?" was not tried (a context-specific bank is exactly as likely
 //! to be sparse as whichever is escaping, per this doc's own reasoning
-//! above); "a fresh dedicated table?" was not tried either. Remaining
-//! S1-P3 scope: unclear, same shape S1-P2 reached after its own repeated
-//! rejections — a fallback target other than "the global marginal," not
-//! a third variant of "which existing bank," is owed before spending
-//! another slice here.
+//! above); "a fresh dedicated table?" was tried next and rejected too
+//! (`JOURNAL` S2-R16): a coarse order-1 table keyed only by the previous
+//! byte's high nibble (16 contexts, distinct from every one of `Literal`'s
+//! six banks), substituted the same way order-0 was but rescaled onto
+//! each sparse expert's own bank total instead of assumed to sum to 1. Net
+//! train regression (+0.0348 b/B average over `bench::baseline`'s 11
+//! cases, S1-P3's own named target `sqlite_like_records` moving the wrong
+//! direction again, +0.0952 b/B, worse than order-0's own +0.0397) despite
+//! both sealed-only kinds improving this time (`gradient_image` −0.1517,
+//! the same case order-0 hurt worst) — a genuinely different failure
+//! shape than S2-R6's (train regressed instead of a sealed case), so the
+//! corpus policy's binary accept rule failed on the other side of the
+//! "AND" this time. Mechanism: this fallback target does fix exactly
+//! order-0's own failure mode (context-free blindness on
+//! `markov_h8_2_trap`/`gradient_image`, both flipped from S2-R6's worst
+//! regressions to this candidate's best improvements) but its own
+//! rescaling step, needed because a coarse table's total and a sparse
+//! expert's own bank total diverge over time (the fast-rate expert's
+//! `FAST_INCREMENT` (32) grows its own total roughly 2.7x faster than the
+//! fallback table's `DEFAULT_INCREMENT` (12)-driven one), silently
+//! inflates the "unobserved" floor away from a true 1 count on exactly
+//! the fixed-record/short-period data (`interleaved_audio16`,
+//! `sqlite_like_records`, `x86_dense_code`) this project's structured
+//! generators exist to probe — full record and numbers, `JOURNAL` S2-R16.
+//! Remaining S1-P3 scope: all three of this doc's own named fallback
+//! candidates are now tried and rejected; what is left is either a
+//! substitution rule that does not need cross-table rescaling (so it
+//! cannot reintroduce this mechanism) or accepting that this lead's
+//! ceiling, absent one, sits where S1-P2's own repeated-rejection shape
+//! already landed.
 
 use crate::coder::{Decoder, Encoder};
 

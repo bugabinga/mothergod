@@ -2494,16 +2494,36 @@ record.
   architecture's ceiling absent one.
 - S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4). First
   slice: S2-A57 (standalone `Ppm` primitive, PPM Method C escape pricing,
-  not yet wired). Second slice, S2-R6: measured the most-reasoned fallback
-  target (order-0, the mixer's one non-context-keyed bank) via an
-  ideal-cost pairing, before committing to a real wiring. Rejected: net
-  regression on `bench::baseline` (+0.0458 b/B train average, a severe
-  `gradient_image` sealed regression), worst on data where a byte's
-  likelihood genuinely depends on context — `markov_h8_2_trap` and every
-  structured generator tested — which order-0's global marginal cannot
-  represent. Remaining scope: unclear, the same shape S1-P2 reached after
-  repeated rejections; a fallback target other than the global marginal is
-  owed before spending another slice here.
+  not yet wired), whose own module doc named three candidate fallback
+  targets: order-0, one of `Literal`'s other five experts, or a fresh
+  dedicated table. Second slice, S2-R6: measured the first (order-0, the
+  mixer's one non-context-keyed bank) via an ideal-cost pairing, before
+  committing to a real wiring. Rejected: net regression on
+  `bench::baseline` (+0.0458 b/B train average, a severe `gradient_image`
+  sealed regression), worst on data where a byte's likelihood genuinely
+  depends on context — `markov_h8_2_trap` and every structured generator
+  tested — which order-0's global marginal cannot represent; also ruled
+  out the second candidate on the reasoning that a context-specific bank
+  is exactly as likely to be sparse as whichever one is escaping. Third
+  slice, S2-R16: measured the third and last named candidate, a fresh
+  dedicated 16-context table keyed on the previous byte's high nibble,
+  the same before-wiring ideal-cost-pairing methodology. Rejected too, on
+  a different failure shape: train net *regressed* (+0.0348 b/B) even
+  though both sealed-only kinds improved this time (`gradient_image`
+  −0.1517, the exact case order-0 hurt worst), and S1-P3's own named
+  target `sqlite_like_records` moved the wrong direction again, further
+  than order-0's own miss. Mechanism: this fallback target genuinely
+  fixes order-0's own blind spot (coarse, but not zero, context), but its
+  own rescale-onto-bank-total step drifts a genuinely-unobserved symbol's
+  floor away from 1 whenever a bank's total diverges from the fallback
+  table's own (which ordinary training does, at different rates per
+  expert), costing the most on exactly the fixed-record/short-period data
+  this project's generators exist to probe. Full numbers and mechanism:
+  S2-R16's own entry. Remaining scope: all three of `src/ppm.rs`'s own
+  named fallback candidates are now tried and rejected — the same
+  "unclear, no further named branch" shape S1-P2 reached after its own
+  repeated rejections. What is left is either a substitution rule that
+  needs no cross-table rescaling, or accepting the ceiling.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -5550,3 +5570,105 @@ record.
   `field_bank` themselves (S2-A99) are unaffected, standalone and unwired,
   same status as `column::column_of`/`column_bank` after S2-R8.
   `research/progress.jsonl` it155.
+- S2-R16 | REJECTED | S1-P3's own remaining scope (`src/ppm.rs`'s module
+  doc, restated in S2-A57/S2-R6's own text): the third of its three named
+  fallback-target candidates, "a fresh dedicated table," after S2-R6
+  rejected the first (order-0's context-free global marginal) and ruled
+  out the second (any of `Literal`'s other five experts, on the reasoning
+  that a context-specific bank is exactly as likely to be sparse as
+  whichever one is escaping). Before spending a real `Ppm`/`Method`/
+  `FORMAT_VERSION` wiring slice, measured the same before-wiring ideal-cost
+  pairing S2-R6/S2-A69 both used. `NibbleFallback` (`src/literal.rs`): a
+  new, dedicated 16-context table keyed only by the previous byte's high
+  nibble — deliberately coarser than every one of `Literal`'s six banks
+  (the sparsest, the alignment expert, still has 64), so it converges on
+  real local structure faster than any of them while still respecting
+  *some* context, unlike order-0's total blindness.
+  `Literal::ideal_cost_bits_nibble_fallback_pair` prices a literal byte
+  twice from the same pre-update six-expert state — once as
+  `Self::ideal_cost_bits` exactly, once with any expert whose own bank has
+  never observed this symbol beyond its initial Laplace floor (`freq ==
+  1`) substituting an *effective frequency* rescaled from
+  `NibbleFallback`'s own estimate onto that expert's own bank total —
+  updating `self` from the real frequencies exactly once (the shared-
+  trajectory principle S2-A69/S2-R6 both used) and `NibbleFallback`
+  unconditionally, every literal byte. Deliberately reuses `Literal::mix`'s
+  exact two-pass fixed-point arithmetic rather than a hand-rolled
+  probability-space recomputation the way an earlier draft of this slice
+  first tried: `mix` adds its own `+1`-per-symbol fixed-point floor on top
+  of every bank's already-Laplace-smoothed counts, and a separate
+  floating-point reimplementation did not reproduce that second floor,
+  making a "nothing is sparse, so nothing should differ from baseline"
+  unit test fail by construction on a real difference of about 0.08 bits
+  even with no substitution firing on the priced symbol — caught by that
+  test itself before landing, not by the corpus measurement below, fixed
+  by rebuilding the candidate distribution through `mix`'s own scale/`+1`-
+  floor code path with only the effective-frequency source changed per
+  expert, after which the same test's tolerance tightened from 1e-3 back
+  to 1e-9 and passed. A whole-file `TokenSink` (`codec::
+  NibbleFallbackCostSink`/`ideal_cost_bits_nibble_fallback_experiment`)
+  accumulates both totals over one `lz::parse_optimal` token walk, sharing
+  the identical flag/length/offset/slot costs on both sides so only the
+  literal term can differ, run via an uncommitted scratch binary
+  (`bench/src/bin/scratch_nibble_fallback_experiment.rs`, deleted after
+  this measurement, same convention as every prior scratch driver).
+  Deliberately pre-SSE, matching S2-R6's own methodology exactly (a
+  separable question for a real wiring slice, not this one, per S2-A69's
+  own scoping note) — `codec::ideal_cost_bits`'s own `CostSink` already
+  prices literals through the SSE-calibrated `ideal_cost_bits_sse` today,
+  so this measurement's absolute bits/byte run below the real shipped
+  path's, the same gap S2-A69's own pre-SSE numbers had against S2-A76's
+  post-SSE follow-up; only the *train/sealed accept-rule verdict* is
+  claimed here, not an absolute-bpb comparison to `bench/baseline.json`.
+  | Measured on `bench::baseline`'s 11 train-tier cases (`CASE_LEN`
+  50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) and the two sealed-only kinds at
+  `sealed_seed(CASE_SEED)`: train net **+0.034795 b/B** (5 improved, 6
+  regressed) — `entropy_ladder_h1` −0.002681, `h2` −0.001457, `h6`
+  −0.000639, `markov_h8_2_trap` −0.067481, `json_records` −0.002422
+  improved; `entropy_ladder_h4` +0.000854, `h8` +0.080206, `base64_wrapped`
+  +0.008129, `interleaved_audio16` +0.166017, `sqlite_like_records`
+  +0.095198, `x86_dense_code` +0.107023 regressed. S1-P3's own named
+  target, `sqlite_like_records`, moved the wrong direction again, further
+  than order-0's own +0.039703 (S2-R6). Sealed: `access_log` **−0.002250**,
+  `gradient_image` **−0.151653** — both improved, `gradient_image` by a
+  wide margin (the same case order-0's own substitution regressed worst,
+  +0.541159, S2-R6). **Rejected**: corpus policy's accept rule needs train
+  improvement AND no validation regression; train net regressed, so this
+  fails on the train side even though both sealed-only kinds improved — a
+  different failure shape than every prior S1-P2/S1-P3/S1-P4 rejection in
+  this journal, which failed on a sealed regression despite an improving
+  train mean. Mechanism, traced rather than assumed: this fallback target
+  does fix order-0's own specific failure (`markov_h8_2_trap` and
+  `gradient_image`, S2-R6's two worst regressions, are this candidate's
+  best improvements — both are cases where the global/coarse structure a
+  16-bucket table can see genuinely helps over order-0's total blindness).
+  But the "rescale onto this bank's own total" step needed to combine a
+  differently-normalized fallback source with a sparse expert's own bank
+  introduces its own bias whenever the two totals diverge, which they do
+  by ordinary training, not just by substitution: the fast-rate expert's
+  `FAST_INCREMENT` (32) grows its own bank total roughly 2.7x faster than
+  `NibbleFallback`'s `DEFAULT_INCREMENT` (12)-driven one, so a genuinely
+  never-observed symbol's rescaled "floor" drifts away from a true count
+  of 1 in that expert specifically, the moment *any* other symbol has been
+  observed there — confirmed directly in this slice's own unit tests (a
+  50-repeat same-context fixture left every relevant bank's own total
+  diverged from `NibbleFallback`'s, and a naive rescale reproduced a
+  floor of 2, not 1, in the fast-rate bank alone). That drift is exactly
+  the mechanism behind the regressions: `interleaved_audio16`,
+  `sqlite_like_records`, and `x86_dense_code` are this project's three
+  fixed-record/short-period generators, precisely the data the fast-rate
+  expert is best placed to track well once trained, and precisely where a
+  silently-inflated floor costs the most. Candidate code
+  (`literal::NibbleFallback`, `Literal::ideal_cost_bits_nibble_fallback_pair`,
+  `Literal::substituted_cost_bits`, their nine unit tests,
+  `codec::NibbleFallbackCostSink`/`ideal_cost_bits_nibble_fallback_experiment`,
+  the scratch driver) reverted in full, per the `compression-experiment`
+  skill's "delete rejected candidate code"; `Ppm` itself (S2-A57) is
+  unaffected, same basis as S2-R6. `research/progress.jsonl` it156.
+  Remaining S1-P3 scope: all three of `src/ppm.rs`'s own named fallback
+  candidates (order-0, another of `Literal`'s six experts, a fresh
+  dedicated table) are now tried and rejected. What is left is either a
+  substitution rule that does not need cross-table rescaling (so it cannot
+  reintroduce this slice's own drift mechanism) or accepting that this
+  lead's ceiling, absent one, sits at the same "unclear, no further named
+  branch" shape S1-P2 reached after its own repeated rejections.
