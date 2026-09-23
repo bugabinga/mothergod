@@ -226,6 +226,9 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   never the exit code, which conflates the two.
 - Advisory, not a required check, until four weeks pass with no false
   positive. Missed mutants appear as annotations on the changed lines.
+- Mutants no test can decide are excluded in `tests/mutants.toml`, each
+  with its proof (#391's ruling); its header says why it does not live
+  in `.cargo/`.
 - A red that finishes after the PR merged has no reader on the thread, so
   `.github/scripts/mutants-debt` files that PR's survivors as one
   `product`+`bug` issue, slot a of the heartbeat's product queue. An open PR's

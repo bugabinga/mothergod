@@ -43,7 +43,7 @@
 #       HALF or QUARTER can leave the loop with no exit at all. These do
 #       not time out because the budget is tight, they time out because
 #       the mutant does not terminate, and a bigger budget buys 80s of
-#       hanging instead of 40s. `.cargo/mutants.toml` excludes that class
+#       hanging instead of 40s. `tests/mutants.toml` excludes that class
 #       and the equivalent mutants, each with its proof (#391's ruling).
 #
 # So the flag recovers 28, decides 20, and wastes time on 8. 10x is a
@@ -54,11 +54,12 @@
 # annotations, so a missed mutant lands on the changed line in the PR diff
 # where a reviewer already looks. Promote it to a required check once four
 # weeks pass with no false positive, counted from the exclusion baseline
-# (.cargo/mutants.toml, merged 2026-08-31). Counted on 2026-09-23: two,
-# not zero. #676 and #677 each merged with a `|`/`^` survivor in bank
-# hashing, the disjoint-field class mutants.toml already excludes by proof
-# elsewhere, so a required check would have blocked both on an equivalent
-# mutant. The clock restarts when those two are excluded with their proofs.
+# (tests/mutants.toml, merged 2026-08-31 as .cargo/mutants.toml). Counted
+# on 2026-09-23: two, not zero. #676 and #677 each merged with a `|`/`^`
+# survivor in bank hashing, the disjoint-field class mutants.toml already
+# excludes by proof elsewhere, so a required check would have blocked both
+# on an equivalent mutant. The clock restarts when those two are excluded
+# with their proofs.
 #
 # An advisory red has a reader only while the PR is open; three PRs merged
 # past theirs in two days (#676, #677, #690). The last step, `mutants-debt`,
@@ -76,7 +77,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
-      - ".cargo/mutants.toml"
+      - "tests/mutants.toml"
       - ".github/workflows/mutants-check.yml"
   workflow_dispatch:
 
@@ -137,7 +138,7 @@ jobs:
         run: |
           git diff --merge-base "origin/$BASE_REF" HEAD -- src > pr.diff
           set +e
-          cargo mutants --package mothergod --in-diff pr.diff --timeout-multiplier 10 -j 4
+          cargo mutants --config tests/mutants.toml --package mothergod --in-diff pr.diff --timeout-multiplier 10 -j 4
           status=$?
           set -e
           # 2 and 3 are outcomes cargo-mutants reports, not a broken run; the
@@ -154,7 +155,7 @@ jobs:
         timeout-minutes: 330
         run: |
           set +e
-          cargo mutants --package mothergod --timeout-multiplier 10 -j 4
+          cargo mutants --config tests/mutants.toml --package mothergod --timeout-multiplier 10 -j 4
           status=$?
           set -e
           case $status in
