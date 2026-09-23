@@ -38,7 +38,11 @@ already reachable through the tools the seat holds today.
 `agent-bdfl.yml` runs with `--permission-mode bypassPermissions`. The other
 four workflows (review, heartbeat, research, deslop) are unchanged and keep
 their restricted permission modes; none of them author skills or otherwise
-need protected-path writes.
+need protected-path writes. (Correction, 2026-09-23: `.cargo/` is on the
+same list, and the heartbeat needed `.cargo/mutants.toml`; run 35842553330
+was denied the write. The file moved to `tests/mutants.toml`, so the claim
+holds by construction: a restricted seat's files live outside protected
+paths, GOVERNANCE.md "Tool envelopes".)
 
 ## Consequences
 

@@ -132,7 +132,7 @@ def render(pr, missed, generated, decided, run_url):
         "",
         "Each survivor takes one of three answers, in this order: delete the line",
         "(a survivor in code nothing calls is dead code, not a missing test), a test",
-        "that fails under the mutation, or an exclusion in `.cargo/mutants.toml` with",
+        "that fails under the mutation, or an exclusion in `tests/mutants.toml` with",
         "the equivalence proof (#391's shape). Procedure: the `test-craft` skill.",
         "",
         f"Run: {run_url}",

@@ -8,6 +8,12 @@
 #   non-terminating   the mutation destroys the renorm loop's only exit
 #                     condition, so the mutant hangs instead of failing
 #
+# Lives in tests/, not .cargo/: .cargo/ is a Claude Code protected
+# directory, so no restricted seat can write it, and the maintainer's run
+# 35842553330 died on that wall answering #695 (agents/GOVERNANCE.md
+# "Tool envelopes"). mutants-check.yml passes `--config tests/mutants.toml`;
+# a local run needs the same flag or it sees none of these exclusions.
+#
 # The fail direction is chosen deliberately. An entry that drifts out of
 # match lets noise resurface in the next sweep, which is visible and
 # self-healing; an entry that over-matches hides a real mutant silently.
@@ -17,7 +23,8 @@
 # is catchable garbage, not a hang, and stays live).
 #
 # After editing src/coder.rs's constants or renormalization, re-verify:
-# diff `cargo mutants --package mothergod --list --colors=never` from
+# diff `cargo mutants --config tests/mutants.toml --package mothergod --list
+# --colors=never` from
 # before and after the edit; every newly excluded or re-appearing mutant
 # must be explainable against this list.
 

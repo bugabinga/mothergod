@@ -451,6 +451,15 @@ Withhold a tool only where withholding states a real role boundary — the
 reviewer and the curator get no `Edit`/`Write` because they judge and do
 not modify, and that denial is the design working.
 
+One wall no allowlist opens: the harness denies every write under its
+protected paths (`.git`, `.cargo`, `.claude`, `.vscode` and the rest of the
+list in Claude Code's permission-modes reference) in every restricted seat,
+before it reads `--allowedTools`; only the BDFL's bypassPermissions clears
+it (ADR-0033). So a file a restricted seat must edit never lives under one.
+The mutants exclusion list moved from `.cargo/` to `tests/mutants.toml` the
+day the maintainer's run 35842553330 was denied the write it was sent to
+make and ended asking permission of nobody (#695).
+
 ## Humans other than the operator
 
 Human contributions are welcome and go through the same pipeline: file issues,
