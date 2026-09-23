@@ -228,7 +228,7 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   positive. Missed mutants appear as annotations on the changed lines.
 - A red that finishes after the PR merged has no reader on the thread, so
   `.github/scripts/mutants-debt` files that PR's survivors as one
-  `product`+`bug` issue, the heartbeat's first pickup tier. An open PR's
+  `product`+`bug` issue, slot a of the heartbeat's product queue. An open PR's
   red stays on the diff, where the review reads it. Its docstring is the
   contract.
 - Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants

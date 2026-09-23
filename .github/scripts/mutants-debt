@@ -26,8 +26,8 @@ and it does one of four things, printed on one line:
                      are the reader (agent-review.yml's step 3 names them)
     filed already    an open issue already carries this PR's survivors
     filed #N         the PR is merged: the survivors become one issue,
-                     labeled `product` + `bug`, the heartbeat's first pickup
-                     tier, so the fix lands while the diff is still warm
+                     labeled `product` + `bug`, slot a of the heartbeat's product
+                     queue, so the fix lands while the diff is still warm
 
 The issue is written by gh-comment (footer, credential), never by `gh issue
 create`, and posted as the reviewer: the survivor rule is agent-review.yml
