@@ -30,7 +30,8 @@ const DASH = "\u2014";
 // Run 35881083464's first words, verbatim in shape.
 const ANNOUNCING = "Heartbeat done. No open PRs needed attention, so I took #695.";
 // Run 35861671444's shape: two issues, each introduced with the dash.
-const DASHED = `Two issues filed:\n\n- #702 ${DASH} nothing compares the exclusions.\n- #703 ${DASH} the status box hand-types two facts.`;
+const DASHED =
+  `Two issues filed:\n\n- #702 ${DASH} nothing compares the exclusions.\n- #703 ${DASH} the status box hand-types two facts.`;
 
 test("blocks a stop whose final response opens on an announcement", () => {
   const res = run({ last_assistant_message: ANNOUNCING, stop_hook_active: false });
