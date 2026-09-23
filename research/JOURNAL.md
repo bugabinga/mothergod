@@ -2557,11 +2557,12 @@ record.
   `Literal::mix_ppm`/`update_ppm_expert` — never written into any of the
   six real experts' own banks or totals, unlike every prior slice here.
   Measured the same before-wiring ideal-cost pairing S2-R16/S2-R17 used:
-  train net **-0.005530 b/B** (9 of 11 cases improved; `markov_h8_2_trap`
+  train net **-0.005530 b/B** (8 of 11 cases improved; `markov_h8_2_trap`
   -0.038598, `interleaved_audio16` -0.007128, `x86_dense_code` -0.005872,
-  `json_records` -0.003686 led; `entropy_ladder_h8` +0.000861 and S1-P3's
-  own named target `sqlite_like_records` +0.000944 were the only
-  regressions, both an order of magnitude smaller than any regression in
+  `json_records` -0.003686 led; `entropy_ladder_h8` +0.000861,
+  `base64_wrapped` +0.000031, and S1-P3's own named target
+  `sqlite_like_records` +0.000944 were the three regressions, all an
+  order of magnitude or more smaller than any regression in
   S2-R6/S2-R16/S2-R17). Sealed: `access_log` **-0.006145**,
   `gradient_image` **-0.176711** — both improved, `gradient_image` by the
   widest margin of any S1-P3 slice measured so far (the same case every
@@ -5876,12 +5877,12 @@ record.
   `bench::baseline`'s 11 train-tier cases (`CASE_LEN` 50,000, `CASE_SEED`
   0xBA5E11E5BA5E11E5) and both sealed-only kinds at
   `sealed_seed(CASE_SEED)`, matching S2-R16/S2-R17's own convention: train
-  net **-0.005530 b/B** (9 of 11 improved: `entropy_ladder_h1` -0.001557,
+  net **-0.005530 b/B** (8 of 11 improved: `entropy_ladder_h1` -0.001557,
   `h2` -0.002289, `h4` -0.003062, `h6` -0.000473, `markov_h8_2_trap`
-  -0.038598, `json_records` -0.003686, `base64_wrapped` -0.000031,
-  `interleaved_audio16` -0.007128, `x86_dense_code` -0.005872; 2
-  regressed: `entropy_ladder_h8` +0.000861, and S1-P3's own named target
-  `sqlite_like_records` +0.000944 — both roughly two orders of magnitude
+  -0.038598, `json_records` -0.003686, `interleaved_audio16` -0.007128,
+  `x86_dense_code` -0.005872; 3 regressed: `entropy_ladder_h8` +0.000861,
+  `base64_wrapped` +0.000031, and S1-P3's own named target
+  `sqlite_like_records` +0.000944 — all roughly two orders of magnitude
   smaller than any train regression S2-R6/S2-R16/S2-R17 measured on the
   same cases). Sealed: `access_log` **-0.006145**, `gradient_image`
   **-0.176711** — both improved, `gradient_image` by the widest margin any
