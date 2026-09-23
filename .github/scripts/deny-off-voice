@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Block ending the turn on a final response that is off voice (Stop hook).
+
+`.claude/settings.json` wires this as a Stop hook; the harness runs it
+each time the model tries to end its turn.
+
+A final response is posted text (CLAUDE.md Voice): run-notice.py sends
+its opening lines to the operator's phone, the audit artifact keeps it,
+the retrospect reads it. Two of its rules have compiled predicates and
+still fail in prose. The completion announcement ("Heartbeat done.",
+"The run is complete.") opened sixteen of forty-nine audited responses
+from 2026-09-19 to 2026-09-21, and two of ten on 2026-09-23, one of them
+the director's own (runs 35858955966 and 35881083464), the seat whose
+prompt states the rule. The em dash rode three of those ten (runs
+35861671444 and 35882177422) after deny-em-dash had already compiled the
+rule at the Bash boundary, where posted comments leave; the final
+response leaves through no tool call, so that guard never sees it.
+
+Both defects are repaired downstream today, where the writer is gone:
+run-notice.py trims the opener with `opener.py`, tg-send swaps the dash.
+deny-em-dash's docstring drew the line this hook stands on: where the
+writer is still present, the writer fixes the sentence, because a swap
+cannot choose between a comma, a colon and a period, and a trim cannot
+supply the content an announcement stood in for. At Stop the writer is
+present. The trim and the swap stay as the net for what walks out on the
+second stop.
+
+Predicates, on `last_assistant_message`. Opener: `opener.py`'s
+`announcement` read on the first sentence alone, the same predicate the
+retrospect flags with and run-notice.py trims with, one source. Not
+`trim`, deliberately: `trim` keeps a bare "Heartbeat complete for this
+cycle." because deleting it would leave the notice empty, and here the
+writer can write what changed instead, so the bare announcement blocks
+too. Em dash: any U+2014 in the text. A quoted dash is denied like a
+typed one, the residual deny-em-dash also accepted; one turn of
+rephrasing is the cost.
+
+One warning only: on stop_hook_active (the retry after our own block)
+the stop is allowed, because a hook that re-blocks forever holds a dead
+session open. The residual is recorded, not prevented.
+
+Contract: reads the Stop JSON on stdin. Outside GitHub Actions
+(GITHUB_ACTIONS != "true") everything is allowed; an interactive session
+has a reader who can say so. Malformed JSON allows. A payload without
+`last_assistant_message` allows and writes a summary line naming the
+missing field, because a silent fail-open is how this guard would die
+unnoticed the day the harness renames the field it reads. In CI, an off
+voice response blocks with {"decision": "block"} and a reason naming each
+finding and the sentence to write instead.
+
+Liveness: every decision that mattered appends a line per finding to
+GITHUB_STEP_SUMMARY, the durable trace: a block, a second-stop allow that
+let the defect out, or a payload missing the field the predicate reads.
+Downstream, the retrospect's `openers` and `em dash x` counts are the
+number this hook exists to hold at zero; a count that climbs while the
+summary shows no blocks means the hook stopped firing.
+"""
+
+import json
+import os
+import sys
+
+from opener import announcement, split_first
+
+FIELD = "last_assistant_message"
+EM_DASH = "\u2014"
+
+OPENER = (
+    'Your final response opens with a completion announcement, "{sentence}". '
+    "Several workflows send the opening lines to the operator's phone "
+    "(run-notice.py), and the first line is the entire message to a reader "
+    "who stops there. Delete it: open with what changed, concretely, or with "
+    "the one clause why nothing did (CLAUDE.md Voice)."
+)
+DASH = (
+    "Your final response carries {count} em dash{plural} (U+2014). CLAUDE.md "
+    "Voice: no em dash, ever; comma, colon, semicolon or period. Rewrite each "
+    "sentence with the punctuation you meant."
+)
+
+
+def findings(text: str) -> list[tuple[str, str]]:
+    """(summary phrase, reason for the model) per Voice rule the text breaks."""
+    found = []
+    first, _ = split_first(text.strip())
+    if announcement(first):
+        found.append(
+            ("opens on an announcement", OPENER.format(sentence=first.strip()))
+        )
+    if count := text.count(EM_DASH):
+        plural = "es" if count > 1 else ""
+        found.append(
+            (f"carries {count} em dash{plural}", DASH.format(count=count, plural=plural))
+        )
+    return found
+
+
+def note(line: str) -> None:
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"deny-off-voice: {line}\n")
+
+
+def main() -> int:
+    """Allow (empty) or block (decision JSON) the stop described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(call, dict):
+        return 0
+    text = call.get(FIELD)
+    if not isinstance(text, str):
+        note(f"allowed; payload carries no {FIELD}, predicate unread")
+        return 0
+    found = findings(text)
+    if not found:
+        return 0
+    if call.get("stop_hook_active"):
+        for phrase, _ in found:
+            note(f"allowed second stop; final response still {phrase}")
+        return 0
+    for phrase, _ in found:
+        note(f"blocked stop; final response {phrase}")
+    reason = " ".join(reason for _, reason in found)
+    print(json.dumps({"decision": "block", "reason": reason}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
