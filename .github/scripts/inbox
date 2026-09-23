@@ -26,10 +26,11 @@ delayed, it is silently never answered, and nothing anywhere records that it
 was missed. `security-alerts` learned this lesson for the Security tab (#555);
 the inbox is the louder channel and had none of it.
 
-Three verbs, because an agent does exactly three things here:
+Four verbs, one per thing an agent does here:
 
     drain            every pending update, oldest first, with the key to pass
-                     to `done` (default when no verb is given)
+                     to `ack` and `done` (default when no verb is given)
+    ack <key>        react ✍ on one message: a run has it and is working
     done <key>       delete one processed key, after acting on it
     chatlog [-n N]   conversation memory, oldest first; the whole log unless
                      `-n` narrows it
@@ -44,14 +45,16 @@ next wake, because the confirmation to the operator is the receipt, not the
 read. `done` is what a run calls once it has actually replied.
 
 Never calls Telegram's getUpdates. Webhook mode owns that stream, and polling
-it would race the worker for the same updates.
+it would race the worker for the same updates. `ack` is the one Telegram call
+here, setMessageReaction, and it is a verb because the prompt used to name
+that API and every chat wake hand-rolled the curl, bot token in the URL.
 
-Reads CLOUDFLARE_API_TOKEN from the environment; the namespace it opens is
-named once, in kv.py.
-The token is spent inside this process and scrubbed from any error text before
-printing (hard rule 10).
+Reads CLOUDFLARE_API_TOKEN from the environment, and TELEGRAM_BOT_TOKEN for
+`ack`; the namespace it opens is named once, in kv.py. Both tokens are spent
+inside this process and scrubbed from any error text before printing (hard
+rule 10).
 
-Usage: inbox [drain | done <key> | chatlog [-n N]]
+Usage: inbox [drain | ack <key> | done <key> | chatlog [-n N]]
 """
 
 import json
@@ -87,6 +90,15 @@ CHATLOG = "chatlog"
 TURNS = 40  # worker.js KEEP, the storage ceiling; -n narrows it
 SUMMARY = 200  # per-turn width, matching tg-send's SUMMARY so display loses
                # nothing the chat log actually stored
+# The bot's own API, for the one Telegram call this script makes. Same seam
+# tg-send opens, so inbox.test.mjs can stand in for Telegram too.
+TELEGRAM = (os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
+            + "/bot{}/setMessageReaction")
+# "A run has this and is working on it", replacing the worker's 👀
+# ("stored", infra/telegram-worker/worker.js). A bot holds one reaction per
+# message, so setting this one is what removes the eyes. Bare U+270D, the form
+# on Telegram's allowed-reaction list; the prompt has typed it since 2026-08-23.
+WORKING = "\u270d"
 
 
 class Unreadable(Exception):
@@ -109,20 +121,20 @@ def main(argv: list[str]) -> int:
     try:
         if verb == "drain":
             return drain()
-        if verb == "done":
+        if verb in ("ack", "done"):
             if len(argv) != 2:
-                print("inbox: done needs exactly one key, e.g. "
-                      "`inbox done u:000033118156`", file=sys.stderr)
+                print(f"inbox: {verb} needs exactly one key, e.g. "
+                      f"`inbox {verb} u:000033118156`", file=sys.stderr)
                 return 2
-            return done(argv[1])
+            return (ack if verb == "ack" else done)(argv[1])
         if verb == "chatlog":
             return chatlog(turns(argv[1:]))
     except Unreadable as error:
         print(f"\ninbox: UNREADABLE, which is not the same as empty. {error}",
               file=sys.stderr)
         return 1
-    print(f"inbox: no verb {verb!r}. Usage: inbox [drain | done <key> | "
-          f"chatlog [-n N]]", file=sys.stderr)
+    print(f"inbox: no verb {verb!r}. Usage: inbox [drain | ack <key> | "
+          f"done <key> | chatlog [-n N]]", file=sys.stderr)
     return 2
 
 
@@ -141,6 +153,65 @@ def drain() -> int:
     return 0
 
 
+def ack(key: str) -> int:
+    """React ✍ on one stored message: a run has it and is working on it.
+
+    The worker reacts 👀 the moment a message is stored; this is the
+    next signal the operator watches for, so it fires before the work, not
+    after, and the reply is what completes the message. Decoration, never
+    data: a key already gone was taken by another run (ADR-0014) and has
+    nothing left to acknowledge, a quiet success. A Telegram refusal is still
+    a non-zero exit carrying the API's own description, because silence is
+    never success; the caller notes it and moves on to the reply.
+
+    Checked before any network call: the key shape, then the bot token. A
+    run without the token learns that, not UNREADABLE, which would send it
+    hunting in the wrong namespace.
+    """
+    if not_an_update(key):
+        return 2
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("inbox: TELEGRAM_BOT_TOKEN is not in the environment, so no "
+              "reaction was set", file=sys.stderr)
+        return 2
+    message = message_of(fetch(key))
+    chat = message.get("chat")
+    chat_id = chat.get("id") if isinstance(chat, dict) else None
+    message_id = message.get("message_id")
+    if chat_id is None or message_id is None:
+        print(f"inbox: {key} already gone | another run has it")
+        return 0
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "reaction": [{"type": "emoji", "emoji": WORKING}],
+    }
+    request = urllib.request.Request(
+        TELEGRAM.format(token),
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": UA},
+    )
+    try:
+        urllib.request.urlopen(request, timeout=20).close()
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        try:
+            detail = json.loads(detail).get("description", detail)
+        except json.JSONDecodeError:
+            pass
+        print(f"inbox: {key} NOT acknowledged: Telegram answered {error.code}: "
+              f"{scrub(detail, token)}", file=sys.stderr)
+        return 1
+    except OSError as error:
+        print(f"inbox: {key} NOT acknowledged: {scrub(str(error), token)}",
+              file=sys.stderr)
+        return 1
+    print(f"inbox: {key} acknowledged | {WORKING} on message {message_id}, "
+          "the reply completes it")
+    return 0
+
+
 def done(key: str) -> int:
     """Delete one processed key.
 
@@ -148,10 +219,7 @@ def done(key: str) -> int:
     same drain (ADR-0014) must not turn the loser into a red exit over work
     that did happen.
     """
-    if not key.startswith(PREFIX):
-        print(f"inbox: {key!r} is not an update key; they start with "
-              f"{PREFIX!r}. `chatlog` is memory and is never deleted here.",
-              file=sys.stderr)
+    if not_an_update(key):
         return 2
     url = f"{kv_base()}/values/{urllib.parse.quote(key)}"
     try:
@@ -168,6 +236,20 @@ def done(key: str) -> int:
         return 1
     print(f"inbox: {key} deleted | the reply was the receipt")
     return 0
+
+
+def not_an_update(key: str) -> bool:
+    """True, having said why, when `key` is not something `drain` handed out.
+
+    `chatlog` and `clocklog` share the namespace and are never message keys;
+    both verbs that take a key refuse them in one voice.
+    """
+    if key.startswith(PREFIX):
+        return False
+    print(f"inbox: {key!r} is not an update key; they start with "
+          f"{PREFIX!r}. `chatlog` is memory and is never deleted here.",
+          file=sys.stderr)
+    return True
 
 
 def chatlog(keep: int) -> int:
