@@ -289,3 +289,45 @@ test("a run with no Claude step at all is not skipped either", () => {
 test("run 35205833235: zero jobs is a phantom, not a death with a log to read", () => {
   assert.equal(hollow([], 0), "phantom");
 });
+
+// The session line's "denied N (tool)" names no wall; run 35842553330's
+// (2026-09-23) was the harness's protected-path check on .cargo/, and the
+// BDFL learned that from the docs, not the retrospect. Each distinct typed
+// reason the audit kept prints under the session; an artifact from before
+// the field existed prints the flag alone, no crash, no empty line.
+const describeDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+run = {"event": "workflow_dispatch", "conclusion": "success",
+       "updatedAt": "2026-09-23T09:24:10Z", "url": "https://example.test/run"}
+mod.describe(run, json.loads(sys.argv[2]), "OK to proceed?")
+`;
+
+function describeWith(denials) {
+  const meta = { role: "maintainer", telemetry: { num_turns: 14, permission_denials: denials } };
+  const proc = spawnSync("python3", ["-c", describeDriver, scriptsDir, JSON.stringify(meta)], {
+    encoding: "utf8",
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  return proc.stdout;
+}
+
+test("a denial's wall prints under the session line", () => {
+  const out = describeWith({
+    count: 1,
+    tools: ["Edit"],
+    reasons: [{ tool: "Edit", type: "protectedPath", reason: ".cargo/ is protected" }],
+  });
+  assert.match(out, /\[denied 1 \(Edit\)\]/);
+  assert.match(out, /^    denied Edit: protectedPath: \.cargo\/ is protected$/m);
+});
+
+test("an artifact without reasons prints the flag alone", () => {
+  const out = describeWith({ count: 1, tools: ["Edit"] });
+  assert.match(out, /\[denied 1 \(Edit\)\]/);
+  assert.doesNotMatch(out, /^    denied Edit:/m);
+});

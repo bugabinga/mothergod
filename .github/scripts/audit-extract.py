@@ -161,6 +161,41 @@ for e in entries:
                                  for d in denials if isinstance(d, dict)}),
             }
 
+# Why each denial happened (run 35842553330): the result entry counts
+# denials and names tools, so the retrospect read "denied 1 (Edit)" on a
+# session that had hit the harness's protected-path wall at .cargo/ and
+# ended its headless turn asking permission of nobody. The count named
+# no wall, and the transcript that did is withheld by design. Each
+# `system/permission_denied` entry carries decision_reason_type (an
+# enum) and decision_reason, text authored by the harness or by one of
+# our own PreToolUse hooks, whose messages are fixed constants that
+# never quote the tool input; so the keys-only rule for model text does
+# not apply, and REASON_CAP bounds the exposure should either author
+# ever start echoing an input. Distinct triples only: one wall hit
+# three times is one line to read.
+REASON_CAP = 240
+reasons = []
+for e in entries:
+    if not (isinstance(e, dict) and e.get("type") == "system"
+            and e.get("subtype") == "permission_denied"):
+        continue
+    why = e.get("decision_reason")
+    if not isinstance(why, str):
+        why = json.dumps(why, sort_keys=True) if why is not None else ""
+    entry = {
+        "tool": str(e.get("tool_name") or "?"),
+        "type": str(e.get("decision_reason_type") or "?"),
+        "reason": why[:REASON_CAP],
+    }
+    if entry not in reasons:
+        reasons.append(entry)
+if reasons:
+    summary_block = telemetry.setdefault("permission_denials", {
+        "count": len(reasons),
+        "tools": sorted({r["tool"] for r in reasons}),
+    })
+    summary_block["reasons"] = reasons
+
 # Rate-limit state (issue #63): the typed rate_limit_event payload is
 # API-authored metadata, published verbatim so its semantics can be
 # decided from evidence. Presence alone is NOT a pause signal: it

@@ -202,6 +202,65 @@ test("token-shaped strings are scrubbed from every audit file", () => {
   }
 });
 
+// Run 35842553330 (2026-09-23): the retrospect read "denied 1 (Edit)" and
+// nothing else, for a session refused a protected-path write it then died
+// asking about. The typed system entry carries the wall; this pins that
+// the audit keeps it, once per distinct wall, capped, beside the count
+// the result entry already gave.
+test("a denial's typed reason reaches metadata.json, distinct and capped", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
+  try {
+    const out = join(directory, "agent-audit");
+    mkdirSync(out);
+    const execution = join(directory, "execution.json");
+    const wall = {
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Edit",
+      tool_use_id: "toolu_1",
+      decision_reason_type: "protectedPath",
+      decision_reason: "x".repeat(300),
+    };
+    writeFileSync(
+      execution,
+      JSON.stringify([
+        wall,
+        { ...wall, tool_use_id: "toolu_2" },
+        { ...wall, tool_use_id: "toolu_3", decision_reason: { hook: "deny-em-dash" }, decision_reason_type: "hook" },
+        {
+          type: "result",
+          result: "done",
+          permission_denials: [{ tool_name: "Edit", tool_input: {} }, { tool_name: "Edit", tool_input: {} }, {
+            tool_name: "Edit",
+            tool_input: {},
+          }],
+        },
+      ]),
+    );
+    const result = spawnSync("python3", [script, out], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EXEC_FILE: execution,
+        GITHUB_OUTPUT: join(directory, "github-output"),
+        GITHUB_WORKSPACE: new URL("../../../", import.meta.url).pathname,
+        RUNNER_TEMP: directory,
+        ROLE: "maintainer",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const denials = JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")).telemetry.permission_denials;
+    assert.equal(denials.count, 3, "the result entry's count stays authoritative");
+    assert.deepEqual(denials.tools, ["Edit"]);
+    assert.equal(denials.reasons.length, 2, "one wall hit twice is one line");
+    assert.equal(denials.reasons[0].type, "protectedPath");
+    assert.equal(denials.reasons[0].reason.length, 240, "capped");
+    assert.deepEqual(denials.reasons[1], { tool: "Edit", type: "hook", reason: "{\"hook\": \"deny-em-dash\"}" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("agent-audit allowance index fixtures", async (t) => {
   for (const fixture of fixtures) {
     await t.test(fixture.name, () => {
