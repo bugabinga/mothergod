@@ -71,12 +71,22 @@
 //! the fixed-record/short-period data (`interleaved_audio16`,
 //! `sqlite_like_records`, `x86_dense_code`) this project's structured
 //! generators exist to probe — full record and numbers, `JOURNAL` S2-R16.
-//! Remaining S1-P3 scope: all three of this doc's own named fallback
-//! candidates are now tried and rejected; what is left is either a
-//! substitution rule that does not need cross-table rescaling (so it
+//! Remaining S1-P3 scope, at the time: all three of this doc's own named
+//! fallback candidates were tried and rejected; what was left was either
+//! a substitution rule that does not need cross-table rescaling (so it
 //! cannot reintroduce this mechanism) or accepting that this lead's
 //! ceiling, absent one, sits where S1-P2's own repeated-rejection shape
-//! already landed.
+//! already landed. `JOURNAL` S2-R17 tried exactly that rescale-free
+//! substitution rule (reviving S2-R16's own dedicated table with a
+//! mechanism that plugs a foreign probability directly into the mixer's
+//! own fixed-point units, never converting it into a frequency against
+//! any bank's own total) and it failed on nearly the same data, nearly
+//! the same way, even with the diagnosed rounding bug provably absent:
+//! evidence the real driver is the six-expert mixer's own weight
+//! calibration, not any one substitution formula's arithmetic. Remaining
+//! scope: an escape signal that never enters a real expert's own floor
+//! at all (a separate, additive eighth-expert-style blend, S1-P5's own
+//! architectural shape), or accepting the ceiling.
 
 use crate::coder::{Decoder, Encoder};
 
