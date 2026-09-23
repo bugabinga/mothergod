@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Deny, once, a Bash call past the token's clock while edits sit unpushed (PreToolUse hook).
+
+`.claude/settings.json` wires this as a PreToolUse hook on Bash; the
+harness runs it before each shell command.
+
+The claude app token a session pushes with is a GitHub App installation
+token: minted seconds before the session starts, dead sixty minutes
+later (issue #81, first hit run 32590951126). Past that no credential
+pushes: the workflow token's pushes trigger nothing and the admin PAT is
+the operator's (GOVERNANCE.md "Push identity"). #81 closed on a
+sentence, "front-load token-dependent writes", and the sentence failed
+three times in thirty-two days. The 2026-08-22 director lost its ops-log
+comment seconds after its merges landed. The 2026-09-13 director could
+not push #557's one-line fix. The 2026-09-23 maintainer verified fifty
+mutants for an hour, then posted the patch as a comment on #697 because
+the branch would not go up. Each time the work existed and the push did
+not.
+
+The sentence stated an ordering: push before the clock runs out.
+Ordering is what a PreToolUse hook can see. The first Bash call in a
+session stamps its start; the first later call past the threshold, while
+the working tree carries edits and nothing has been pushed this session,
+is denied with the push command in the reason. Then the hook allows: the
+writer is present and may judge the edits not ready, and a hook that
+denies forever holds a dead session open.
+
+The threshold is derived, not chosen: sixty minutes of token life, minus
+the longest a single Bash call may run (BASH_MAX_TIMEOUT_MS, thirty
+minutes in settings.json and assumed when unset), minus five minutes for
+the gap between the token's minting and the first stamped call. A call
+that starts before the threshold ends before the token does.
+
+Predicates. Age: now minus the stamp, a file in the temp directory keyed
+by session_id, written by this hook on its first call. Unpushed: `git
+status --porcelain` in the call's cwd is non-empty, and the file
+push-branch writes on every push (`git rev-parse --git-path
+push-branch-refs.json`) is absent, so a session that pushed early is
+never nagged. Exempt: a command naming push-branch is the fix itself.
+The reviewer edits nothing and runs minutes; it never meets the
+threshold.
+
+Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions
+(GITHUB_ACTIONS != "true") or for any tool but Bash everything is
+allowed, as are malformed JSON and a null tool_input. Exit 2 denies;
+stderr is shown to the model.
+
+Liveness: the one deny per session appends a line to GITHUB_STEP_SUMMARY
+naming the age and the path count. Downstream, a retrospect session past
+an hour whose posted output says it could not push, while the summary
+shows no deny, means the hook stopped firing.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+TOKEN_TTL_S = 60 * 60
+LEAD_S = 5 * 60
+DEFAULT_BASH_MAX_MS = 30 * 60 * 1000
+PUSH = "push-branch"
+REFS = "push-branch-refs.json"
+SHOWN = 6
+
+MESSAGE = (
+    "Session {age} min old, {count} edited path{plural} unpushed: {paths}. "
+    "The claude app token dies about 60 min after the session starts "
+    '(agents/GOVERNANCE.md "Push identity", #81); past that no credential '
+    "pushes and the work stays on this runner. Push now: "
+    "`.github/scripts/push-branch claude/<slug> <paths>`, commit message on "
+    "stdin. A branch without a PR triggers no run, so push what you have and "
+    "open the PR with gh-pr when the work is done. This check fires once; "
+    "rerun your command after the push."
+)
+
+
+def threshold_s() -> int:
+    """Seconds after the stamp from which a call may outlive the token."""
+    try:
+        bash_max_ms = int(os.environ.get("BASH_MAX_TIMEOUT_MS", ""))
+    except ValueError:
+        bash_max_ms = DEFAULT_BASH_MAX_MS
+    return TOKEN_TTL_S - bash_max_ms // 1000 - LEAD_S
+
+
+def stamp_path(session_id: str) -> str:
+    """One stamp per session, in the temp directory, filename-safe."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+    return os.path.join(tempfile.gettempdir(), f"deny-unpushed-work-{safe}.json")
+
+
+def save_stamp(path: str, stamp: dict) -> None:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(stamp, fh)
+
+
+def load_stamp(path: str, now: float) -> dict:
+    """The session's stamp, written now if this is the first call."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            stamp = json.load(fh)
+        if isinstance(stamp, dict) and isinstance(stamp.get("start"), (int, float)):
+            return stamp
+    except (OSError, json.JSONDecodeError):
+        pass
+    stamp = {"start": now, "fired": False}
+    save_stamp(path, stamp)
+    return stamp
+
+
+def git(cwd: str, *args: str) -> str | None:
+    proc = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def unpushed_paths(cwd: str) -> list[str]:
+    """Edited paths in cwd, or none if the tree is clean or a push already landed."""
+    status = git(cwd, "status", "--porcelain")
+    if not status:
+        return []
+    refs = git(cwd, "rev-parse", "--git-path", REFS)
+    if refs and os.path.exists(os.path.join(cwd, refs.strip())):
+        return []
+    return [line[3:] for line in status.splitlines() if line.strip()]
+
+
+def main() -> int:
+    """Allow (0) or deny (2) the tool call described on stdin."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(call, dict) or call.get("tool_name") != "Bash":
+        return 0
+    tool_input = call.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return 0
+    now = time.time()
+    session = call.get("session_id")
+    path = stamp_path(session if isinstance(session, str) and session else "unknown")
+    stamp = load_stamp(path, now)
+    age = now - stamp["start"]
+    if age < threshold_s() or stamp.get("fired") or PUSH in command:
+        return 0
+    cwd = call.get("cwd")
+    if not isinstance(cwd, str) or not os.path.isdir(cwd):
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    paths = unpushed_paths(cwd)
+    if not paths:
+        return 0
+    stamp["fired"] = True
+    save_stamp(path, stamp)
+    minutes = int(age // 60)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(
+                f"deny-unpushed-work: denied at {minutes} min, "
+                f"{len(paths)} paths unpushed\n"
+            )
+    shown = ", ".join(paths[:SHOWN]) + (", ..." if len(paths) > SHOWN else "")
+    print(
+        MESSAGE.format(
+            age=minutes,
+            count=len(paths),
+            plural="" if len(paths) == 1 else "s",
+            paths=shown,
+        ),
+        file=sys.stderr,
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

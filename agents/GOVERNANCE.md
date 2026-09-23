@@ -367,7 +367,11 @@ Token lifetime (issue #81): the claude app token expires about an hour
 into a session; past that, every `gh` call riding the default
 credential returns 401 Bad credentials (first hit: run 32590951126,
 whose ops-log comment died seconds after its merges succeeded).
-Front-load token-dependent writes. For comments that must land late in
+Front-load token-dependent writes; `.github/scripts/deny-unpushed-work`
+compiles that order, denying once a Bash call past the token's clock
+while edits sit unpushed, because the sentence alone lost three
+sessions' late writes in a month (run 32590951126, #557's addendum,
+#697's patch). For comments that must land late in
 a long run, fall back to the job-scoped workflow token, exposed to
 agent sessions as `GH_WORKFLOW_TOKEN`:
 `GH_TOKEN="$GH_WORKFLOW_TOKEN" gh api ...`. That identity is
