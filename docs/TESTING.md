@@ -13,7 +13,7 @@ blocking PRs.
 | Tier | When | Blocks PRs | What runs |
 |---|---|---|---|
 | Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
-| Advisory | every PR | no, annotates | `mutants-check` (diff-scoped) |
+| Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
 | Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451) |
 | Weekly | schedule | no, alarmed | monster matrix, large property profile (#452), coverage (#454), Miri (#456) |
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
@@ -226,6 +226,11 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   never the exit code, which conflates the two.
 - Advisory, not a required check, until four weeks pass with no false
   positive. Missed mutants appear as annotations on the changed lines.
+- A red that finishes after the PR merged has no reader on the thread, so
+  `.github/scripts/mutants-debt` files that PR's survivors as one
+  `product`+`bug` issue, slot a of the heartbeat's product queue. An open PR's
+  red stays on the diff, where the review reads it. Its docstring is the
+  contract.
 - Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
   at ~3.8h is a one-time backlog measurement, not weekly news.
 - Planned (#455): a monthly sharded whole-crate sweep, mutation score to
