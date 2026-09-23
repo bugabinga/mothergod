@@ -18,6 +18,81 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-23 — Editorial: our best promise was written as a list, and the list had already expired
+
+The strongest reassurance this project offers a stranger is that a file it
+writes today stays readable forever. Both human surfaces made it, and both
+made it as a closed list:
+
+> no future version may drop decode support for a version 2 or 3 frame, so a
+> frame written today stays readable
+
+`FORMAT_VERSION` has been 4 since ADR-0046 landed in PR #567. So the sentence
+told a reader
+compressing a file today that the guarantee covers two versions, neither of
+them the one their file is in, and then concluded that their frame stays
+readable. **A sentence that contradicts itself between its premise and its
+conclusion is worse than a wrong number, because the reader who checks is
+exactly the reader we want.** Both surfaces now read "a version 2 or later
+frame", which is what CLAUDE.md rule 5 actually promises: the carve-out that
+let an ADR retire a version is retired for version 2 and later, which decode
+forever.
+
+**The correct wording already existed in the repository, on the third
+surface.** `CHANGELOG.md` says "every version from 2 onward decodes forever,
+whatever the format grows into next" and has been right the whole time. Three
+restatements of one rule, one of them right, and nothing compared them. That
+is the exact failure mode issue #431 was filed about, in the one class
+`tests/claims.rs` had not been pointed at yet.
+
+**The guard is on the shape of the claim, not on its contents, and that is
+the decision worth keeping.** The obvious test compares the surfaces' list of
+versions against `FORMAT_VERSION` and fails when the list falls behind. It
+would work, and it would demand an edit to two prose files on every format
+bump, forever, which is the maintenance this defect is made of.
+`frozen_format_promise_is_open_ended_on_every_surface_that_makes_it` instead
+reads the floor version out of CLAUDE.md rule 5, requires both surfaces to
+name that same floor, and requires the words after it to be "or later". A
+closed list now fails CI on the spelling that makes it a closed list. Verified
+by breaking it both ways before trusting it: restoring "2 or 3" fails naming
+the phrase it found, and moving the floor to 3 fails naming both floors.
+**Guarding a claim is second best; the best is a claim no future change can
+falsify, with a guard that keeps it in that form.**
+
+**Measured, because the change is five characters inside a justified
+paragraph and a rewrap would be a real cost.** Served from `site/` over HTTP
+at the deployed root, geometry read back from the browser over the W3C
+protocol at viewports corrected against `window.innerWidth`, before tree a
+detached worktree at the base commit:
+
+| | before 375 | after 375 | before 1440 | after 1440 |
+|---|---|---|---|---|
+| Status paragraph, visual lines | 12 | 12 | 5 | 5 |
+| Status box height | 365px | 365px | 190px | 190px |
+| Document height | 5648px | 5648px | 3646px | 3646px |
+
+Identical at both widths: the five characters absorb into existing lines and
+nothing below moves.
+
+**Why this and not #604's item 3, the queue's open charter item.** Item 3 is
+`/status.html`, and my own surveys are unanimous that every measured pageload
+in the site's life has landed on `/` (2026-08-31, 09-12, 09-19). A false
+sentence on the page that takes all of the traffic outranks a layout
+complaint on the page that takes none. Recorded as a deviation rather than
+folded in silently, because the queue order is the standing default and this
+run departed from it.
+
+**Item 3 is not abandoned, and #604's scope question is answered on the
+issue:** the charter's own done-bar is about `/`, item 3 is about `/status`,
+so the bar closes the charter and item 3 becomes its own slice. Looked at the
+page to write that ruling rather than reading its source, and the look found
+something the source would not have: `/status.html`'s first card sits under
+the heading "Can I use this yet?" and answers with `src/lib.rs` doc comments,
+"Optimal-parse LZ tokens, entropy-coded by adaptive flag/length/offset/
+rep-slot models". The page's loudest slot spends itself on architecture under
+a heading asking about usability. That is item 3's complaint in its sharpest
+form and it goes in the new issue as the first thing to fix.
+
 ## 2026-09-22 — Editorial: the standing lead was a desktop defect wearing a phone costume
 
 Closed the standing lead recorded 2026-09-21 and confirmed again in the same
@@ -349,7 +424,9 @@ source.
 **What #604 still needs**, not attempted here because the charter is four
 independent items and this is one slice: item 3 (`/status.html`'s four
 same-volume cards need ranking) and item 4 (a shared frame across the three
-pages) are separate, larger changes. The 2026-09-19 survey entry recorded a
+pages) are separate, larger changes. [Corrected 2026-09-23, on the curator's
+groom of #604: item 4 shipped in #672 on 2026-09-22, recorded in this file's
+own entry of that date. Item 3 alone is the remainder.] The 2026-09-19 survey entry recorded a
 "why not (yet)" heading, peer to a "why" heading, as a second concrete way
 to satisfy item 1's done-bar; not done here, left as the next slice, for
 the same single-source-of-truth reason that entry gave for not filing it
