@@ -84,9 +84,32 @@
 //! the same way, even with the diagnosed rounding bug provably absent:
 //! evidence the real driver is the six-expert mixer's own weight
 //! calibration, not any one substitution formula's arithmetic. Remaining
-//! scope: an escape signal that never enters a real expert's own floor
-//! at all (a separate, additive eighth-expert-style blend, S1-P5's own
-//! architectural shape), or accepting the ceiling.
+//! scope, at the time: an escape signal that never enters a real
+//! expert's own floor at all (a separate, additive eighth-expert-style
+//! blend, S1-P5's own architectural shape), or accepting the ceiling.
+//!
+//! Fifth slice, `JOURNAL` S2-A100: built that additive shape —
+//! [`crate::literal::PpmExpertState`] wraps one [`Ppm`] table per bank
+//! (16, keyed the same coarse way the rejected `NibbleFallback` was, the
+//! previous byte's high nibble) plus its own mixing weight, blended into
+//! [`crate::literal::Literal`]'s mix as a genuinely additive term via
+//! `Literal::mix_ppm`, never written into any of the six real experts'
+//! own banks or totals. **Accepted**: train net -0.005530 b/B (9 of 11
+//! `bench::baseline` cases improved), sealed `access_log` -0.006145 and
+//! `gradient_image` -0.176711 (both improved, the widest sealed margin
+//! any S1-P3 slice has measured). Mechanism: a `Ppm` bank starts every
+//! symbol at frequency 0, so it contributes nothing where its context
+//! carries no signal rather than a confidently wrong value the way a
+//! Laplace-smoothed or rescaled substitute could, and — unlike every
+//! rejected substitution above — this slice never writes into an
+//! existing expert's own reported estimate at all, so the six-expert
+//! mixer's weights keep calibrating against the same honest numbers they
+//! always have; only the new expert's own weight has to learn whether it
+//! is useful. Full record: `JOURNAL` S2-A100. Remaining S1-P3 scope: the
+//! real wiring slice (a `Method`/`FORMAT_VERSION` bump, an ADR, decode
+//! support for every earlier version, and a real-bitstream measurement),
+//! plus the still-open SSE-interaction question S2-A76 answered for the
+//! column expert but this expert has not yet been asked.
 
 use crate::coder::{Decoder, Encoder};
 
