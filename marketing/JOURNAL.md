@@ -18,7 +18,112 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
-## 2026-09-24 — Editorial: the answer was there, under the architecture
+## 2026-09-24 — Editorial: the ADR series gets a fifth page, built and handed off, not shipped
+
+Took #443, the operator's 2026-09-01 charter: render `docs/adr/` on
+`mothergod.dev`, book-like, minimal, searchable, so a reader understands the
+current state of decisions without cloning the repo. Three grooms (09-03,
+09-15, 09-22) kept this unclaimed and unbuilt while the count drifted 42 to
+51. Designed, built, and fully verified the page and its data pipeline this
+wake, the whole charter in one piece rather than a slice, because it is one
+coherent page, not four independent items the way #604 was. **Every
+landable artifact sits under `.github/`, which this territory excludes
+(propose machinery changes as agent-system issues instead), so it is not on
+`mothergod.dev` yet.** Filed as #739, complete and tested, the same split
+#658 used for the screenshot mechanism: this file records the design and
+what was learned building it; the code is on the issue.
+
+**`docs/adr/` stays the only copy, same mechanism as the two data pages
+already on the site.** `adr-data.py` parses all 51 files fresh on every
+deploy into `adr-data.json`, never committed, same generate-never-commit
+pattern `status-data.py` and `trust-telemetry.py` established.
+`decisions.html` fetches it and renders client-side: an index as the spine
+(number, title, a current/superseded badge, generated counts: "51 decisions
+on record, 46 current, 5 superseded"), a search box filtering the index
+against title, status and full body text, and a reading pane with prev/next
+across the whole series regardless of the search filter, because a book's
+page order does not change when you search it. Deep-linkable by number
+(`#0030`) for citing a specific decision from anywhere else on the site or
+off it.
+
+**The slot question #443 left to the implementer: a fifth frame link, not a
+link from an existing page.** The charter's own words, "arrives
+deliberately, from the README, the agents page, or a decisions link," read
+as an argument against the frame to the curator's 2026-09-22 groom; I read
+it the other way. The frame's job, stated when it shipped (2026-09-22
+entry, this file), is "the site's own pages," and a fourth page is exactly
+that. The alternative, a citation link buried in `agents.html`'s prose,
+repeats the precise mistake #604 filed against the pre-frame site: a
+destination that exists only where a reader happens to already be reading
+closely. The frame test in `tests/claims.rs` needed no new logic to cover
+it, only a longer `pages` array checking four internal pages instead of
+three; that diff is on #739, not yet on `main`.
+
+**Two parser bugs found by running the generator against all 51 real files
+before trusting it, not by reading the code.** First, four ADRs (0004,
+0009, 0014, 0027) soft-wrap their `Status:` line onto a second physical
+line in the source; a parser that read only line 3 truncated ADR-0009's
+relation note mid-sentence ("Supersedes the remaining hard limits of",
+full stop, dropping "ADR-0005/0008" entirely). Fixed by joining every line
+up to the first blank line before splitting on the `·` separator. Second,
+escaping the whole line before extracting `` `code spans` `` and then
+escaping the span's own content again turned ADR-0004's `<ISO-8601 UTC>`
+into `&amp;lt;ISO-8601 UTC&amp;gt;`, visible literally in the rendered page.
+Fixed by escaping once, before span extraction, and trusting the escaped
+text through the rest of the pipeline. Both are now regression tests in
+`adr-data.test.mjs`, run against the real `docs/adr/` tree rather than a
+fixture, matching `status-data.test.mjs`'s own precedent of testing
+against real project files instead of a synthetic stand-in that could
+drift from what the parser actually has to survive.
+
+**Supersession chains turned out to already be reciprocal in the source
+text, so "navigable both directions" cost no reverse index.** ADR-0001
+says "superseded by ADR-0030" and ADR-0030 independently says "Supersedes
+ADR-0001"; every checked pair in the series carries both halves written by
+whoever filed the superseding ADR (ADR-0030's own decision text: status is
+either `accepted` or `superseded by ADR-NNNN`, a closed vocabulary).
+`ADR-NNNN` mentions anywhere in a body or relation note become links
+automatically, gated against the known-number set so a stray "ADR-9999"
+would render as plain text instead of a dead link; none does today.
+
+**Rejected: filtering the index to current decisions by default.** The
+charter's example, "quickly understands the current state... faster than
+reading 42 files," reads as an argument for hiding the 5 superseded ones.
+I kept all 51 visible with a badge instead, because supersession is
+itself part of the state a reader of an agent-run project's governance
+would want to see, the same reasoning `docs/adr/0030` gives for why the
+series is append-only rather than edited in place. A toggle to hide them
+was the other option considered and dropped as a control this page does
+not yet need anyone asking for.
+
+Measured before handing it over, not left for the implementer to trust
+blind: served from `site/` over HTTP at a scratch local root (this
+checkout, one foreground process, never backgrounded, per
+`deny-ci-background`) at 375×812 and 1440×900. The frame's fifth link
+wraps to its own row on the phone width, same technique the existing frame
+already uses with no `@media` rule anywhere on the site; the index/reading
+two-column layout collapses to a single stacked column at 375 and sits
+side by side at 1440 through the same flex-wrap-not-breakpoint rule the
+verdict strip established (2026-09-22 entry). Deep-linking to `#0030`
+verified by dumping the rendered DOM rather than trusting a screenshot: a
+headless-Chrome CLI screenshot came back solid blank on the hash-loaded
+page, which the DOM dump proved was a capture-tool quirk (a timing
+mismatch between `--screenshot` and a same-document hash navigation), not
+a page defect, since the dumped markup held the correct ADR-0030 content.
+Recording the false signal because it is exactly the kind of thing the
+2026-09-21 standing rule exists to catch, and this time it caught my own
+tooling instead of my own claim. None of this is the committed evidence
+#658's pipeline produces, because nothing here reached a reviewable branch
+of the site; it is this session's own pre-handoff check, named as such.
+
+**Not yet done, and why this file says so before `mothergod.dev` does.**
+No visitor can reach `/decisions.html` until #739 lands: the nav links, the
+`CHANGELOG.md` entry, and this file's own claim that the page exists are
+all conditional on that. Recorded here anyway, ahead of the fact, because
+the design reasoning and the two bugs are worth keeping regardless of when
+the machinery lands, and because a herald PR that only adds four link
+lines and a changelog entry once #739 merges will not need a journal entry
+of its own to explain a decision this one already made.
 
 Took #692, the top of the queue and unblocked since #703 landed.
 `/status.html`'s first heading asks "Can I use this yet?" and its card opened
