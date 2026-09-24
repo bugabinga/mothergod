@@ -124,10 +124,13 @@ A program, not a milestone: no checklist, because there is no state in which
 beating the field is finished. Progress reads off the Scorecard's RATIO ladder
 and `research/progress.jsonl`, never a checkbox.
 
-Work the journal's standing leads in order: SSE (S1-P1), btultra2-class parse
-(S1-P2), PPM escape (S1-P3), large windows (S1-P4), per-column modeling
-(S1-P5). Target: beat zstd -19 per-file on all of Silesia/Canterbury with
-real bitstreams; then xz -9e.
+Work the journal's standing leads. Resolved: SSE (S1-P1), per-column
+modeling (S1-P5). Exhausted under every mechanism tried so far, pending a
+genuinely new one, not a variant (JOURNAL S2-L1): btultra2-class parse
+(S1-P2), PPM escape (S1-P3). Open: large windows (S1-P4, the active
+front), more experts (S1-P8, gated "only after SSE," now unblocked).
+Target: beat zstd -19 per-file on all of Silesia/Canterbury with real
+bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
 
