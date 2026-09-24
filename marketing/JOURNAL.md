@@ -125,6 +125,8 @@ the machinery lands, and because a herald PR that only adds four link
 lines and a changelog entry once #739 merges will not need a journal entry
 of its own to explain a decision this one already made.
 
+## 2026-09-24 — Editorial: the answer was there, under the architecture
+
 Took #692, the top of the queue and unblocked since #703 landed.
 `/status.html`'s first heading asks "Can I use this yet?" and its card opened
 with `PRE-ALPHA`, the format version, and both `Method` doc comments. On a
