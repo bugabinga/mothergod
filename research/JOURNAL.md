@@ -2589,14 +2589,34 @@ record.
   from a sparse expert, mishandling whatever a foreign substitute reports
   in its place instead" — an additive slot never puts a foreign number in
   another expert's place, so that mishandling has nothing to act on.
-  `research/progress.jsonl` it158. Remaining S1-P3 scope: the real
-  wiring slice — a `Method`/`FORMAT_VERSION` bump and an ADR (hard rule
-  5), decode support for every earlier version, and a real-bitstream
-  measurement through `mothergod::compress`/`decode`, the same shape
-  S1-P5's own `ADR-0046` took after S2-A69's pre-SSE accept — plus the
-  still-open, deliberately deferred SSE-interaction question S2-A76 asked
-  for the column expert (does this win survive `encode_sse`'s
-  calibration stage): both untested for this expert.
+  `research/progress.jsonl` it158. Remaining S1-P3 scope, at the time:
+  the real wiring slice — a `Method`/`FORMAT_VERSION` bump and an ADR
+  (hard rule 5), decode support for every earlier version, and a
+  real-bitstream measurement through `mothergod::compress`/`decode`, the
+  same shape S1-P5's own `ADR-0046` took after S2-A69's pre-SSE accept —
+  plus the still-open, deliberately deferred SSE-interaction question
+  S2-A76 asked for the column expert (does this win survive
+  `encode_sse`'s calibration stage): both untested for this expert.
+  Sixth slice, S2-R18: asked exactly that SSE-interaction question, and
+  found the opposite answer S2-A76 found for the column expert — the
+  train win flips to a net regression (+0.002604 b/B, 3 of 11 improved,
+  `interleaved_audio16` regressing 2-3 orders of magnitude worse than
+  every other case) once the additive PPM contribution is calibrated
+  through a tree-position-only SSE key, even though both sealed-only
+  cases still improve, at roughly a quarter to a half of S2-A100's own
+  pre-SSE margin. Rejected on the train side of corpus policy's accept
+  rule. Mechanism: S2-A76's own tree-position-only SSE key helped a
+  dense, systematic signal (every byte carries a column identity) but
+  cannot distinguish "PPM bank silent" from "PPM bank active," so it
+  blends two very different `cum7` shapes into one calibration
+  trajectory per node, diluting exactly the sparse, intermittent signal
+  that makes the additive expert work pre-SSE. Full numbers and
+  mechanism: S2-R18's own entry. Remaining S1-P3 scope: the real wiring
+  slice alone — a `Method`/`FORMAT_VERSION` bump, an ADR, decode support
+  for every earlier version, and a real-bitstream measurement — with the
+  SSE-interaction question now closed (negative): a real wiring slice
+  should expect roughly S2-A100's own pre-SSE margin, not S2-R18's
+  smaller post-SSE one.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -5933,3 +5953,83 @@ record.
   wiring slice, an ADR, and the still-open SSE-interaction question
   S2-A76 answered for the column expert but this expert has not yet been
   asked).
+- S2-R18 | REJECTED | S1-P3's own remaining scope after S2-A100: the
+  still-open SSE-interaction question S2-A76 answered for S1-P5's column
+  expert, applied to the additive PPM expert instead. Hypothesis:
+  blending `PpmExpertState`'s bank into the mix via `Literal::mix_ppm` and
+  calibrating the result through the same bittree/SSE decomposition
+  `Literal::encode_sse` uses reduces ideal-cost bits/byte on
+  `bench::baseline`'s train cases without regressing the sealed set, the
+  same accept bar S2-A100 cleared pre-SSE. New (all reverted, see below)
+  `Literal::ideal_cost_bits_ppm_expert_pair_sse`, S2-A76's own shape
+  applied to the PPM expert: prices `byte` twice through the SSE-calibrated
+  path — once as `Self::ideal_cost_bits_sse` exactly (so `self.sse`'s one
+  real trajectory adapts identically to production regardless of this
+  method running), once with `Self::mix_ppm`'s eight-expert `cum` table
+  calibrated through `bittree::ideal_cost_bits_sse` against a new
+  independent `Sse` field added to `PpmExpertState` — its own trajectory,
+  never `self.sse`'s, so probing the with-PPM path never perturbs the
+  six-expert model's real calibration state. Update order matches
+  S2-A100's own pair and S2-A76's own before-wiring measurement:
+  `update_ppm_expert` first (reading the six real experts' pre-update
+  state), then the six-expert update inside `ideal_cost_bits_sse`.
+  `codec::PpmExpertSseCostSink`/`ideal_cost_bits_ppm_expert_experiment_sse`
+  mirrored `PpmExpertCostSink`'s flag/length/offset/slot pass-through,
+  differing only in routing the literal price through the SSE-paired
+  method. Measured through an uncommitted scratch binary
+  (`bench/src/bin/scratch_ppm_expert_sse_experiment.rs`), the same
+  `bench::baseline` train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) and both sealed-only kinds at
+  `sealed_seed(CASE_SEED)` S2-A100 itself used. | Measured: train net
+  **+0.002604 b/B** (3 of 11 improved: `entropy_ladder_h1` -0.000251, `h2`
+  -0.000593, `markov_h8_2_trap` -0.000467; 8 regressed: `h4` +0.000097,
+  `h6` +0.000851, `h8` +0.000576, `json_records` +0.000317,
+  `base64_wrapped` +0.000873, `interleaved_audio16` **+0.026353** (the
+  single largest swing in either direction, roughly 30x every other
+  case), `sqlite_like_records` +0.000580, `x86_dense_code` +0.000302).
+  Sealed: `access_log` -0.001461, `gradient_image` -0.090821 — both still
+  improved, but each shrunk to roughly a quarter to a half of S2-A100's
+  own pre-SSE size (-0.006145 and -0.176711 respectively). Corpus
+  policy's accept rule (train improvement AND no validation regression)
+  fails outright on the train side, independent of sealed staying in the
+  improving direction (the same "either side alone is sufficient to
+  reject" reading `JOURNAL` S2-R7 applied). **Rejected.** | Mechanism: the
+  opposite interaction from S2-A76's own finding for the column expert.
+  There, SSE calibration held or grew the win, because the column
+  signal's own bias is systematic and dense (every byte carries a column
+  identity), the kind of regularity `bittree::sse_context`'s
+  tree-position-only key can partially reconstruct even without seeing
+  the column index directly (S2-A76's own reading). The PPM expert's own
+  signal is the opposite shape: sparse and intermittent by construction
+  (`ppm_probability` reports exactly `0.0` whenever a bank has not yet
+  observed the symbol, S2-A100's own accepted mechanism for why the
+  additive slot costs nothing where it has no signal). Once that
+  same intermittent contribution is folded into `cum7` and pushed through
+  a calibration keyed only by tree position, not by whether the PPM
+  bank had anything to say this byte, the same coarse key that helped a
+  dense signal now blends two very different `cum7` shapes — "PPM
+  silent, cum7 close to the six-expert baseline" and "PPM active, cum7
+  meaningfully shifted" — into one calibration trajectory per node,
+  diluting exactly the differentiated signal the additive expert exists
+  to contribute. `interleaved_audio16`'s outsized regression (2-3 orders
+  of magnitude above every other train case) is consistent with this
+  reading: its periodic 2-byte structure means the PPM bank's own
+  on/off pattern is itself highly periodic, the worst case for a
+  position-keyed calibration to average over. Not confirmed by a
+  dedicated mechanism test here, same evidentiary limit S2-A76's own
+  entry accepted for its own converse finding. Per the
+  `compression-experiment` skill's "delete rejected candidate code":
+  every added artifact reverted in full in this same PR —
+  `Literal::ideal_cost_bits_ppm_expert_pair_sse`, the `sse` field added to
+  `PpmExpertState`, their unit tests, `codec::PpmExpertSseCostSink`/
+  `ideal_cost_bits_ppm_expert_experiment_sse` and their unit tests, and
+  the scratch binary; `PpmExpertState`/`Literal::mix_ppm`/
+  `ideal_cost_bits_ppm_expert_pair` (S2-A100, still accepted and unwired)
+  are unaffected. `src/ppm.rs`'s own module doc updated to record this
+  outcome. `research/progress.jsonl` it159. Remaining S1-P3 scope: the
+  real wiring slice — a `Method`/`FORMAT_VERSION` bump and an ADR (hard
+  rule 5), decode support for every earlier version, and a real-bitstream
+  measurement through `mothergod::compress`/`decode` — with the
+  SSE-interaction question now closed (negative: the pre-SSE pairing's
+  own gain is what a real wiring slice should expect to measure, not a
+  larger one).

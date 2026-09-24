@@ -108,11 +108,29 @@
 //! six-expert
 //! mixer's weights keep calibrating against the same honest numbers they
 //! always have; only the new expert's own weight has to learn whether it
-//! is useful. Full record: `JOURNAL` S2-A100. Remaining S1-P3 scope: the
-//! real wiring slice (a `Method`/`FORMAT_VERSION` bump, an ADR, decode
-//! support for every earlier version, and a real-bitstream measurement),
-//! plus the still-open SSE-interaction question S2-A76 answered for the
-//! column expert but this expert has not yet been asked.
+//! is useful. Full record: `JOURNAL` S2-A100.
+//!
+//! Sixth slice, `JOURNAL` S2-R18: asked the SSE-interaction question
+//! S2-A100 left open (does this win survive `Literal::encode_sse`'s
+//! calibration stage) and got the opposite answer S2-A76 found for
+//! S1-P5's column expert — train flips to a net regression
+//! (+0.002604 b/B) once the additive contribution is calibrated through
+//! a tree-position-only SSE key, even though both sealed-only cases
+//! still improve, at a fraction of S2-A100's own pre-SSE margin.
+//! **Rejected**: SSE's tree-position key cannot distinguish "PPM bank
+//! silent" from "PPM bank active," so it blends two very different mixed
+//! distributions into one calibration trajectory per node, diluting
+//! exactly the sparse, intermittent signal this expert relies on (unlike
+//! the column expert's dense, systematic one, which that same coarse key
+//! could partially reconstruct). Every candidate artifact this slice
+//! added was reverted in full, per the `compression-experiment` skill;
+//! [`crate::literal::PpmExpertState`]/`Literal::mix_ppm`/
+//! `Literal::ideal_cost_bits_ppm_expert_pair` (S2-A100) are unaffected.
+//! Full record: `JOURNAL` S2-R18. Remaining
+//! S1-P3 scope: the real wiring slice alone (a `Method`/`FORMAT_VERSION`
+//! bump, an ADR, decode support for every earlier version, and a
+//! real-bitstream measurement) — the SSE-interaction question is now
+//! closed, negative.
 
 use crate::coder::{Decoder, Encoder};
 
