@@ -571,11 +571,7 @@ pub fn ideal_cost_bits(data: &[u8]) -> f64 {
 /// `window` must stay under.
 #[must_use]
 pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
-    let tokens = lz::parse_optimal_with_window(data, window);
-    let mut models = Models::new();
-    let mut sink = CostSink::default();
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    sink.bits
+    ideal_cost_for_tokens(data, &lz::parse_optimal_with_window(data, window))
 }
 
 /// Same as [`ideal_cost_bits`], but parses `data` with
@@ -585,10 +581,18 @@ pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
 /// models, without wiring it into [`encode`] or bumping `FORMAT_VERSION`.
 #[must_use]
 pub fn ideal_cost_bits_adaptive_window(data: &[u8]) -> f64 {
-    let tokens = lz::parse_optimal_adaptive_window(data);
+    ideal_cost_for_tokens(data, &lz::parse_optimal_adaptive_window(data))
+}
+
+/// Shared body of [`ideal_cost_bits_with_window`] and
+/// [`ideal_cost_bits_adaptive_window`]: prices already-parsed `tokens`
+/// through [`CostSink`] and returns the total. Mirrors
+/// [`encode_tokens_with`], the same already-parsed-tokens-in shape on the
+/// real-`Encoder` side of this same pair of measurements.
+fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
     let mut models = Models::new();
     let mut sink = CostSink::default();
-    walk_tokens(&tokens, data, &mut models, &mut sink);
+    walk_tokens(tokens, data, &mut models, &mut sink);
     sink.bits
 }
 
