@@ -22,15 +22,17 @@ offset  size  field
 A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
 (`BadMagic`), version greater than it supports (`UnsupportedVersion`),
 unknown method (`UnknownMethod`). A `Method::Lz` payload additionally
-requires format version >= 2 (`codec::LZ_MIN_VERSION`): version 1 named a
+requires format version >= 3 (`codec::LZ_MIN_VERSION`): version 1 named a
 different, incompatible `Lz` payload layout (ADR-0026, superseded by
 ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
-rather than parsed under the current layout. Versions 2, 3, and 4
-`Lz` frames share the same outer payload layout below; only the literal
-sub-stream's internal shape differs between them (see "Lz" below,
-ADR-0038, ADR-0046) — a decoder dispatches on the declared version (and,
-for version 4, the frame's own filter selector) rather than rejecting
-any of them.
+rather than parsed under the current layout; version 2 named this same
+outer layout but coded its literal sub-stream through a direct 256-way
+range division, and was retired outright under ADR-0050, no release ever
+having written it. Versions 3 and 4 `Lz` frames share the same outer
+payload layout below; only the literal sub-stream's internal shape
+differs between them (see "Lz" below, ADR-0038, ADR-0046) — a decoder
+dispatches on the declared version (and, for version 4, the frame's own
+filter selector) rather than rejecting either of them.
 
 ## Methods
 
@@ -58,11 +60,9 @@ offset  size  field
 ```
 
 **Literal sub-stream shape is version- (and, at version 4, candidate-)
-gated (ADR-0038, ADR-0046).** At format version 2, each literal byte is
-one direct 256-way range division over the six-expert mixer's cumulative
-table (`literal::Literal::encode`/`decode`). At format version 3 and
-above (`codec::LITERAL_SSE_MIN_VERSION`), each literal byte is instead 8
-chained binary decisions over the same table
+gated (ADR-0038, ADR-0046).** At format version 3 (`codec::LZ_MIN_VERSION`)
+and above, each literal byte is 8 chained binary decisions over the
+six-expert mixer's cumulative table
 (`bittree::encode_symbol`/`decode_symbol`'s chain-rule decomposition),
 each calibrated by a secondary symbol estimation (SSE) stage keyed on
 tree position (`bittree::sse_context`, 255 contexts) before it drives the

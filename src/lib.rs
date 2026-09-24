@@ -65,8 +65,9 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Bumped to 1 when [`Method::Lz`] was added
 /// (`docs/adr/0026-wire-the-lz-context-mixing-method.md`), to 2 when
 /// filter selection was wired into its payload
-/// (`docs/adr/0028-wire-filter-selection.md`), to 3 when the literal
-/// sub-stream switched to SSE-calibrated binary-tree coding
+/// (`docs/adr/0028-wire-filter-selection.md`; that version was later retired
+/// outright, below), to 3 when the literal sub-stream switched to
+/// SSE-calibrated binary-tree coding
 /// (`docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
 /// S1-P1), and to 4 when a `Candidate::Transpose` frame's literal
 /// sub-stream gained a column-keyed seventh expert
@@ -74,22 +75,23 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// `research/JOURNAL.md` S1-P5): all four are bitstream format changes
 /// (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
-/// separate version-0 decode path is needed. A version-1 frame can contain
-/// a `Method::Lz` payload in a layout this build no longer parses (see
-/// [`codec`]'s module docs); [`decompress`] rejects that combination
-/// explicitly (`codec::LZ_MIN_VERSION`) rather than silently misreading it.
-/// A version-2 frame's `Method::Lz` payload has the same outer layout as
-/// later versions but a different literal sub-stream shape (the old direct
-/// 256-way mix, [`literal::Literal::decode`], instead of
-/// [`literal::Literal::decode_sse`]); a version-4 frame whose filter
-/// selector names `Candidate::Transpose` codes its literals through
-/// [`literal::Literal::decode_column`] instead of `decode_sse`, every other
-/// candidate unchanged. [`codec::decode`] takes the frame's declared
-/// version (and, for the version-4 case, its already-parsed candidate) and
-/// picks between them, so hard rule 5's "decode support for all previous
-/// versions, unless an ADR drops one" is satisfied by dispatch, not by
-/// dropping an old path (`tests/golden/v2-lz-repeated-text.mgdc` and
-/// `tests/golden/v3-*.mgdc` pin that forever).
+/// separate version-0 decode path is needed. A version-1 or version-2 frame
+/// is rejected as `UnsupportedVersion` before [`codec::decode`] is ever
+/// called (`codec::LZ_MIN_VERSION`, 3): version 1 named a `Method::Lz`
+/// payload in a layout this build no longer parses (see [`codec`]'s module
+/// docs), and version 2 named the current outer layout but coded its
+/// literal sub-stream through a direct 256-way mix instead of
+/// [`literal::Literal::decode_sse`] — retired outright, no release having
+/// ever written it
+/// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`). A
+/// version-4 frame whose filter selector names `Candidate::Transpose` codes
+/// its literals through [`literal::Literal::decode_column`] instead of
+/// `decode_sse`, every other candidate unchanged. [`codec::decode`] takes
+/// the frame's declared version (and, for the version-4 case, its
+/// already-parsed candidate) and picks between them, so hard rule 5's
+/// "decode support for every version the spec still covers" is satisfied by
+/// dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc` and
+/// `tests/golden/v4-*.mgdc` pin that forever).
 pub const FORMAT_VERSION: u8 = 4;
 
 /// Payload encoding methods.
