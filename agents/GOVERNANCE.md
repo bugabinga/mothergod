@@ -53,7 +53,7 @@ is fully autonomous by design (ADR-0003).
   Judges and routes only: no `Edit`/`Write`, no PRs, never merges,
   never removes `blocked-on-human`. The label set and the ops-log
   issue are created state, not a standing duty: ADR-0044's bootstrap
-  never found either missing and was retired (#486).
+  never found either missing and is retired (ADR-0051).
 - *Reviewer* — adversarial review of every PR; verifies claims by running
   them; merges when CI is green and the review passes. Never reviews work it
   authored in the same run.
