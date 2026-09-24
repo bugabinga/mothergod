@@ -1688,6 +1688,48 @@ mod tests {
         assert_eq!(via_column.weights, via_sse.weights);
     }
 
+    /// #705: `update_column_expert`'s own probability estimate,
+    /// `column_state.freq[column_bank * ALPHABET + symbol] / column_total`,
+    /// read from a freq slot the `+`/`/` mutants at the `*` cannot reach:
+    /// bank 2's slot for `symbol` gets a frequency no other bank's slot for
+    /// `symbol` shares, so a wrong index reads back the untouched Laplace
+    /// floor instead and adapts the weight to a value other than the one
+    /// computed here from the intended index's estimate.
+    #[test]
+    fn update_column_expert_estimates_from_bank_times_alphabet_plus_symbol() {
+        let model = Literal::new();
+        let context = Context::default();
+        let (bank_indices, weight_index) = banks(context);
+        let column_bank = 2;
+        let symbol = 5;
+
+        let mut column_state = ColumnExpertState::new(crate::test_support::nz(3));
+        column_state.freq[column_bank * ALPHABET + symbol] = 100;
+        let w7 = column_state.weight[weight_index];
+        let (weights6, weight_sum) = model.weights6_and_sum(weight_index, w7);
+        let column_total = f64::from(column_state.total[column_bank]);
+        let column_estimate =
+            f64::from(column_state.freq[column_bank * ALPHABET + symbol]) / column_total;
+        let expected_weight = model.adapt_seventh_weight(
+            &bank_indices,
+            &weights6,
+            weight_sum,
+            symbol,
+            w7,
+            column_estimate,
+        );
+
+        model.update_column_expert(
+            &bank_indices,
+            weight_index,
+            symbol,
+            column_bank,
+            &mut column_state,
+        );
+
+        assert!((column_state.weight[weight_index] - expected_weight).abs() < 1e-12);
+    }
+
     /// `research/JOURNAL.md` S1-P3: the pair's baseline side is
     /// `Self::ideal_cost_bits` verbatim
     /// (`Self::ideal_cost_bits_ppm_expert_pair`'s own docs), the same
