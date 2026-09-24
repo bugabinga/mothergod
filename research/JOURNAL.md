@@ -49,6 +49,31 @@ record.
   adversarial corpus additions scored by REGRET vs a reference compressor
   (pure noise has zero regret → auto-rejected). Validation curve stayed
   monotone over ~10h of experiments under these guards.
+- S2-L1 | LAW | A new literal expert's ideal-cost, pre-SSE measurement does
+  not predict its real-bitstream value: `encode_sse`'s bittree calibration
+  (`FORMAT_VERSION` ≥3) is worth far more than any one additive expert, and
+  its own calibration context is too coarse to isolate a sparse expert's
+  signal from the six real experts' own. Direct isolation on an
+  interleaved-audio-like fixture (S2-R19): production `encode_sse` cost
+  27,377 bytes; the same six experts through plain bittree with no SSE cost
+  36,943 bytes (+34.9%); six experts plus the additive PPM expert (S1-P3,
+  S2-A100) through that same plain bittree cost 36,825 bytes, a small
+  genuine PPM gain dwarfed by the SSE gap. Whether an expert's own signal
+  survives real SSE calibration depends on how dense it is: the column
+  expert's dense, always-present signal (S1-P5) survived partially (S2-A76:
+  pre-SSE −0.032494 b/B shrank to −0.012452 post-SSE on
+  `sqlite_like_records`; fully washed on `interleaved_audio16`, −0.021819 to
+  +0.000604) and shipped (ADR-0046). The PPM expert's sparse, intermittent
+  signal (reports 0.0 whenever its bank has never seen the context) did
+  not: a dedicated SSE table for it (S2-R18) flipped its train net from
+  S2-A100's pre-SSE −0.005530 b/B to +0.002604 b/B, because a calibration
+  key that cannot distinguish "expert silent" from "expert active" blends
+  both into one trajectory per node. Consequence: judge a new mixer expert
+  on a real bittree+SSE bitstream, never a pre-SSE ideal-cost number alone,
+  and expect an intermittent signal (S1-P8 and beyond) to need a coding
+  mechanism that gives SSE the missing "is this expert active" axis, not
+  another calibration variant on the ones S1-P3 already exhausted (S2-R16
+  through S2-R19).
 
 ## Accepted (architecture as of Rust v0.6)
 
