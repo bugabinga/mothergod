@@ -1,4 +1,4 @@
-# Deslopper: twice a day, removes slop from src/ without changing
+# Deslopper: six times a day, removes slop from src/ without changing
 # behaviour. Slop is code that works and costs too much to read, change,
 # and trust. The operating manual is .claude/skills/deslop/SKILL.md,
 # read explicitly by path rather than invoked as a slash command, so the
@@ -9,12 +9,21 @@
 name: agent-deslop
 
 on:
-  # Woken at 00:37 and 12:37 UTC by the worker clock (ADR-0035); the
-  # cron lines in infra/telegram-worker/wrangler.toml are the cadence's
-  # source of truth. Never a native `schedule:` trigger here: GitHub's
-  # schedule-actor attribution breaks the app-token exchange on
-  # bot-edited files (GOVERNANCE.md "Push identity").
+  # Woken at 37 past every fourth hour UTC by the worker clock
+  # (ADR-0035); the cron lines in infra/telegram-worker/wrangler.toml are
+  # the cadence's source of truth. Never a native `schedule:` trigger
+  # here: GitHub's schedule-actor attribution breaks the app-token
+  # exchange on bot-edited files (GOVERNANCE.md "Push identity").
   workflow_dispatch:
+    inputs:
+      source:
+        description: >-
+          'cron' when the worker clock's tick dispatched this run
+          (ADR-0035); left at the default for a human dispatch. Only
+          the clock's tick is discretionary, so only it can be skipped
+          by the allowance governor (ADR-0039).
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -44,6 +53,7 @@ jobs:
         with:
           token: ${{ github.token }}
           role: deslopper
+          discretionary: ${{ inputs.source == 'cron' }}
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.guard.outputs.paused != 'true'

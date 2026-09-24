@@ -674,23 +674,26 @@ test("Clock ticks (ADR-0035)", async (t) => {
     assert.deepEqual(clocklog(setup)[0].woke, ["agent-herald.yml", "agent-research.yml"]);
   });
 
-  await t.test("the shared deslop/curator tick wakes both, each with its own inputs", async () => {
-    // One expression, two seats (Workers Free caps crons at 5). The
-    // deslopper stays ungoverned by choice: two wakes a day is not
-    // where the allowance goes, and a seat with no `source` input
-    // would reject one (ADR-0039). The curator is governed like any
-    // discretionary wake.
-    const setup = harness(() => new Response(null, { status: 204 }));
-    const cron = cronFor("agent-deslop.yml");
-    await tick(setup, cron);
-    const dispatches = setup.calls.filter((call) => call.url.includes("/dispatches"));
-    const bodyFor = (workflow) => JSON.parse(dispatches.find((call) => call.url.includes(workflow)).init.body);
-    assert.deepEqual(bodyFor("agent-deslop.yml"), { ref: "main" });
-    assert.deepEqual(bodyFor("agent-curator.yml"), {
-      ref: "main",
-      inputs: { source: "cron" },
-    });
-    assert.deepEqual(clocklog(setup)[0].woke, ["agent-deslop.yml", "agent-curator.yml"]);
+  await t.test("the deslopper and the curator each wake alone, both governed", async () => {
+    // The deslopper left the curator's tick on 2026-09-24 for one six
+    // times a day, and became governed with the move: at that cadence
+    // it is a real share of the allowance, not the rounding error
+    // ADR-0039 left ungoverned. A wake that carries `source: cron` to a
+    // workflow with no such input is rejected outright (ADR-0039), so
+    // the dispatch shape is pinned here beside agent-deslop.yml's input.
+    for (const workflow of ["agent-deslop.yml", "agent-curator.yml"]) {
+      const setup = harness(() => new Response(null, { status: 204 }));
+      const cron = cronFor(workflow);
+      await tick(setup, cron);
+      const dispatches = setup.calls.filter((call) => call.url.includes("/dispatches"));
+      assert.equal(dispatches.length, 1, `${cron} wakes ${workflow} alone`);
+      assert.ok(dispatches[0].url.includes(workflow));
+      assert.deepEqual(JSON.parse(dispatches[0].init.body), {
+        ref: "main",
+        inputs: { source: "cron" },
+      });
+      assert.deepEqual(clocklog(setup)[0].woke, [workflow]);
+    }
   });
 
   await t.test("a failed dispatch is logged as failed, never thrown", async () => {
