@@ -44,4 +44,10 @@ GITHUB_REPO = "bugabinga/mothergod"
 # use, so a new seat joins an existing tick's CLOCK list in worker.js
 # instead of adding a line; worker.test.mjs enforces the cap.
 [triggers]
-crons = ["11 */4 * * *", "22 */3 * * *", "37 */4 * * *", "37 */12 * * *", "49 6,18 * * *"]
+crons = [
+  "11 */4 * * *",
+  "22 */3 * * *",
+  "37 */4 * * *",
+  "37 */12 * * *",
+  "49 6,18 * * *",
+]
