@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Send site-shots' before/after stills to the operator's Telegram, adjacent.
+
+Extensionless and executable because agents type it as a command mid-session,
+like tg-send.
+
+One `sendMediaGroup` per (branch, page): before and after at the narrow
+viewport, then before and after at the wide one, so the pair the operator
+compares sits side by side instead of two messages they align by hand
+(issue #658). The caption rides the first item, which is how Telegram
+captions a group, and names the PR and the page.
+
+The rules tg-send proved out carry over verbatim: the token is read from the
+environment and never appears in argv, an API error is a non-zero exit with
+Telegram's own description, and that description is scrubbed of the token
+before it is printed, because urllib puts the request URL in its exceptions.
+No chat-log receipt and no typing decrement: a media group is a notification
+from a deterministic workflow step, not a turn in the operator conversation,
+the same reasoning as tg-send's `--notice`.
+
+Reads `manifest.json` as site-shots writes it. Nothing to send is exit 0
+with one line, because the herald run that never touched site/ is the
+common case and must not read as a failure.
+
+Usage: tg-photo <shots-dir>
+"""
+
+import html
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+API = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org") + "/bot{}/{}"
+UA = "mothergod-tg-photo"
+GROUP_MAX = 10  # Telegram's cap on items in one media group
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("Usage: tg-photo <shots-dir>", file=sys.stderr)
+        return 2
+    shots_dir = sys.argv[1]
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("OPERATOR_TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        print("tg-photo: TELEGRAM_BOT_TOKEN and OPERATOR_TELEGRAM_CHAT_ID must be set",
+              file=sys.stderr)
+        return 2
+    try:
+        with open(os.path.join(shots_dir, "manifest.json"), encoding="utf-8") as fh:
+            rows = json.load(fh).get("shots", [])
+    except (OSError, ValueError, AttributeError) as err:
+        print(f"tg-photo: no readable manifest in {shots_dir}: {err}", file=sys.stderr)
+        return 2
+    groups = grouped(rows)
+    if not groups:
+        print("tg-photo: nothing to send")
+        return 0
+
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    sent = []
+    for (branch, page), items in groups.items():
+        photos = [os.path.join(shots_dir, row[phase])
+                  for row in items for phase in ("before", "after") if row[phase]]
+        caption = caption_for(items, repo)
+        try:
+            sent.append(send(token, chat, photos[:GROUP_MAX], caption))
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode(errors="replace")
+            try:
+                detail = json.loads(detail).get("description", detail)
+            except json.JSONDecodeError:
+                pass
+            print(f"tg-photo: HTTP {error.code}: {detail.replace(token, '<redacted>')}",
+                  file=sys.stderr)
+            return 1
+        except OSError as error:
+            print(f"tg-photo: {str(error).replace(token, '<redacted>')}", file=sys.stderr)
+            return 1
+    print(f"message_ids={','.join(str(i) for group in sent for i in group)}")
+    return 0
+
+
+def grouped(rows: list) -> dict:
+    """Rows by (branch, page), each in the manifest's viewport order."""
+    groups = {}
+    for row in rows:
+        if row.get("before") or row.get("after"):
+            groups.setdefault((row["branch"], row["page"]), []).append(row)
+    return groups
+
+
+def caption_for(items: list, repo: str) -> str:
+    """Names the PR (or the branch), the page, and every viewport in the group."""
+    first = items[0]
+    viewports = ", ".join(dict.fromkeys(row["viewport"] for row in items))
+    head = (f'<a href="https://github.com/{repo}/pull/{first["pr"]}">#{first["pr"]}</a>'
+            if first.get("pr") else f"<code>{html.escape(first['branch'])}</code>")
+    return f"{head} {html.escape(first['page'])}: before and after at {html.escape(viewports)}"
+
+
+def send(token: str, chat: str, photos: list, caption: str) -> list:
+    """One media group (or one photo when the group has a single item)."""
+    boundary = "----mothergod-tg-photo"
+    parts = []
+
+    def field(name, value):
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                     f"{value}\r\n".encode())
+
+    field("chat_id", chat)
+    if len(photos) == 1:
+        method = "sendPhoto"
+        field("caption", caption)
+        field("parse_mode", "HTML")
+        field("photo", "attach://p0")
+    else:
+        method = "sendMediaGroup"
+        media = []
+        for i in range(len(photos)):
+            item = {"type": "photo", "media": f"attach://p{i}"}
+            if i == 0:
+                item["caption"] = caption
+                item["parse_mode"] = "HTML"
+            media.append(item)
+        field("media", json.dumps(media))
+    for i, path in enumerate(photos):
+        with open(path, "rb") as fh:
+            data = fh.read()
+        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"p{i}\"; "
+                      f"filename=\"{os.path.basename(path)}\"\r\n"
+                      f"Content-Type: image/png\r\n\r\n").encode() + data + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    request = urllib.request.Request(
+        API.format(token, method),
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "User-Agent": UA},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        result = json.load(response)["result"]
+    return [m["message_id"] for m in (result if isinstance(result, list) else [result])]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

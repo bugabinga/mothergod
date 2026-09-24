@@ -58,4 +58,9 @@ Keep both logo files identical until a separate change removes the duplication.
 3. Render at 375x812 and 1440x900.
 4. Exercise keyboard-only and no-JavaScript behavior where relevant.
 5. Verify root-relative links and assets.
-6. Record viewport and interaction evidence in the PR's verification section.
+6. Push every change a browser renders: the run's post-run step captures
+   before and after stills of each `site/` page your pushed branch changes,
+   at both viewports above, and sends them to the operator (#658).
+   Do not describe pixels in prose; record interaction evidence (keyboard,
+   no-JavaScript) in the PR's verification section, which the stills do not
+   cover.
