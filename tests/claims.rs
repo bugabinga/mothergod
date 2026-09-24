@@ -1,5 +1,5 @@
 //! Guard: `README.md` and `site/index.html` restate `FORMAT_VERSION`, the
-//! decode-forever promise CLAUDE.md rule 5 makes about it, the published
+//! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
 //! encode/decode MB/s, the measurement date, the reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
@@ -107,37 +107,39 @@ fn format_version_is_current_everywhere_it_is_restated() {
 }
 
 #[test]
-fn frozen_format_promise_is_open_ended_on_every_surface_that_makes_it() {
-    // CLAUDE.md rule 5 owns this promise: from one floor version upward,
-    // every format version decodes forever. README.md and site/index.html
-    // restate it, and both spelled it as a closed list, "a version 2 or 3
-    // frame". That list stopped being true the moment FORMAT_VERSION reached
-    // 4: a reader compressing a file today was told the guarantee covers two
-    // versions, neither of them theirs, by a sentence that then concluded
-    // "so a frame written today stays readable". A closed list has to be
-    // re-edited on every bump by whoever remembers these two files, so the
-    // guard is on the open form rather than on the list's contents.
-    let claude_md = normalize_whitespace(&read("CLAUDE.md"));
-    let (floor, _) = number_and_tail_after(&claude_md, "that carve-out is retired for version ");
-    let true_version = mothergod::FORMAT_VERSION;
-    assert!(
-        floor <= true_version,
-        "CLAUDE.md rule 5 floors the decode-forever promise at version {floor}, above this build's FORMAT_VERSION {true_version}"
-    );
+fn format_promise_claims_agree_with_the_changelog() {
+    // docs/format/SPEC.md's status paragraph owns the format promise
+    // (ADR-0050): until 1.0 a version can be retired, and from the first
+    // version a 1.0 build writes none ever is. README.md and
+    // site/index.html restate it in plain words, and the restatement has
+    // one stale mode, the pre-1.0 framing outliving 1.0. Same shape as
+    // `release_state_claims_agree_with_the_changelog`: CHANGELOG.md is the
+    // source for whether 1.0 has shipped, and before it ships the marker
+    // has to match live prose, so a rewording cannot leave this guarding a
+    // phrase nobody writes.
+    const SURFACES: [&str; 2] = ["README.md", "site/index.html"];
+    const PRE_1_0: &str = "until 1.0";
 
-    for file in ["README.md", "site/index.html"] {
-        let surface = normalize_whitespace(&read(file));
-        let (claimed_floor, tail) =
-            number_and_tail_after(&surface, "decode support for a version ");
-        assert_eq!(
-            claimed_floor, floor,
-            "{file} promises decode support from version {claimed_floor} up, CLAUDE.md rule 5 promises it from version {floor} up"
-        );
-        let opener: String = tail.chars().take(20).collect();
-        assert!(
-            tail.starts_with("or later"),
-            "{file} states the decode-forever promise as \"version {claimed_floor} {opener}...\"; it has to read \"or later\", because a closed list of versions goes stale on the next FORMAT_VERSION bump"
-        );
+    let released_1_0 = changelog_released_versions().into_iter().find(|version| {
+        version
+            .split('.')
+            .next()
+            .and_then(|major| major.parse::<u32>().ok())
+            .is_some_and(|major| major >= 1)
+    });
+    for file in SURFACES {
+        let quotes = quotes_containing(file, PRE_1_0);
+        if let Some(version) = &released_1_0 {
+            assert!(
+                quotes.is_empty(),
+                "CHANGELOG.md records release {version}, so {file} may no longer frame the format promise as pre-1.0: {quotes:?}"
+            );
+        } else {
+            assert!(
+                !quotes.is_empty(),
+                "{file} no longer says {PRE_1_0:?}; before 1.0 it states the format promise in ADR-0050's pre-1.0 form, or this guard watches a phrase nobody writes"
+            );
+        }
     }
 }
 

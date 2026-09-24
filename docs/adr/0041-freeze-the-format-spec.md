@@ -1,6 +1,6 @@
 # ADR-0041: Freeze the format spec
 
-Status: accepted · Date: 2026-09-01 · Prompted by issue #422, ROADMAP M4
+Status: superseded by ADR-0050 · Date: 2026-09-01 · Prompted by issue #422, ROADMAP M4
 
 ## Context
 

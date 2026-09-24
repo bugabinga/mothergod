@@ -1,11 +1,13 @@
-# mothergod bitstream format (FORMAT_VERSION 4, frozen)
+# mothergod bitstream format (FORMAT_VERSION 4)
 
-Status: **stable, frozen** (ADR-0041). Every version this document
-covers — 2, 3, and 4 — decodes forever: no future ADR may drop decode
-support for any of them (CLAUDE.md hard rule 5). Evolution continues
-only by adding a new version via a `FORMAT_VERSION` bump; this
-document is normative for the current code, and code and spec change
-in the same PR.
+Status: **normative, versioned** (ADR-0050). This document describes the
+current code; code and spec change in the same PR, and evolution adds a
+version via a `FORMAT_VERSION` bump. A version is retired only by its own
+ADR: one no release has written goes at once, decode path and fixture
+included; one a release has written goes only after a later release that
+still reads it and writes its successor has shipped and `CHANGELOG.md`
+has named the retirement, so a user can re-compress first. From the first
+version a 1.0 build writes, no version is ever retired.
 
 ## Frame layout
 

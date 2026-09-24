@@ -77,7 +77,7 @@ rank, and the status page renders it top to bottom.
 
 Release 0.1 (M6) therefore gates on its own items alone. It promises what
 M0/M1/M2/M4 delivered: lossless, adversarially tested, deterministic across
-platforms, a frozen format, a CLI and a library. It does not promise any
+platforms, a versioned format, a CLI and a library. It does not promise any
 rung of the RATIO ladder, whose standing is on /status. Waiting on a program
 is waiting forever, because a program has no state in which it is finished.
 
@@ -138,8 +138,8 @@ cross-platform determinism with golden frames per `FORMAT_VERSION`
 Android; layer 5); bounded-memory streaming decode (`decompress_bounded`,
 `decompress_to_writer`, `decodes_incrementally`; `Transpose` keeps a
 whole-buffer decode by design, JOURNAL S2-D4, and encode still takes a
-whole buffer); and the format spec frozen by ADR-0041, versions 2 and
-later decoding forever. Done 2026-09-01.
+whole buffer); and the format spec made normative by ADR-0041 (its
+decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 
 ## M7 — Trust engineering (ADR-0043)
 
