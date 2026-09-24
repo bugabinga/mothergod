@@ -2611,12 +2611,38 @@ record.
   blends two very different `cum7` shapes into one calibration
   trajectory per node, diluting exactly the sparse, intermittent signal
   that makes the additive expert work pre-SSE. Full numbers and
-  mechanism: S2-R18's own entry. Remaining S1-P3 scope: the real wiring
-  slice alone — a `Method`/`FORMAT_VERSION` bump, an ADR, decode support
-  for every earlier version, and a real-bitstream measurement — with the
-  SSE-interaction question now closed (negative): a real wiring slice
-  should expect roughly S2-A100's own pre-SSE margin, not S2-R18's
-  smaller post-SSE one.
+  mechanism: S2-R18's own entry. Remaining S1-P3 scope, at the time: the
+  real wiring slice alone — a `Method`/`FORMAT_VERSION` bump, an ADR,
+  decode support for every earlier version, and a real-bitstream
+  measurement — with the SSE-interaction question now closed (negative): a
+  real wiring slice should expect roughly S2-A100's own pre-SSE margin, not
+  S2-R18's smaller post-SSE one. Seventh slice, S2-R19: built that real
+  wiring (`Literal::encode_ppm`/`decode_ppm`, plain non-SSE bittree,
+  matching the configuration S2-A100's own ideal-cost pairing measured) and
+  found the prediction false: real-bitstream train net **+0.140771 b/B**
+  (five improved, all `entropy_ladder`; six regressed, every structured
+  case, led by `interleaved_audio16` +0.383680), a regression two orders of
+  magnitude larger than S2-A100's own pre-SSE ideal-cost estimate ever
+  suggested. Mechanism, isolated directly: the regression is not PPM's own
+  contribution (small and net-positive in isolation) but the loss of
+  `encode_sse`'s SSE calibration on the six real experts themselves, which
+  `ideal_cost_bits`'s direct-N-ary-division accounting (S2-A100's own
+  "baseline" side) never modeled — the *only* real coding path this
+  format's decoder ever drives for a 256-symbol literal is bittree's binary
+  decomposition, and skipping its SSE stage costs far more than any
+  additive expert can recover, on precisely the structured data classes
+  this lead exists to help. The one calibrated real-wiring configuration
+  (an independent SSE table, S2-R18) was already rejected on the same train
+  side, more mildly. With both real-coding configurations this lead can
+  name now rejected, S1-P3 reaches the same "unclear, no further named
+  branch" state S1-P2 reached: `PpmExpertState`/`Literal::mix_ppm`/
+  `update_ppm_expert`/`ideal_cost_bits_ppm_expert_pair` (S2-A100) stay on
+  `main`, accepted and unwired, an ideal-cost-only primitive — real-
+  bitstream wiring costs more than it saves under every coding
+  configuration measured so far. A future slice needs a coding mechanism
+  this lead has not yet named, not another substitution or calibration
+  variant on the ones already tried. Full record and numbers in S2-R19's
+  own entry.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -6033,3 +6059,80 @@ record.
   SSE-interaction question now closed (negative: the pre-SSE pairing's
   own gain is what a real wiring slice should expect to measure, not a
   larger one).
+- S2-R19 | REJECTED | S1-P3's own remaining scope after S2-R18: the real
+  wiring slice itself, coding a `Candidate::Transpose`-excluded literal
+  through `Literal::encode_ppm`/`decode_ppm` — `Literal::mix_ppm`'s cum
+  table (six real experts plus `PpmExpertState`'s additive bank) coded
+  through the plain, non-SSE-calibrated bittree decomposition
+  (`bittree::encode_symbol`/`decode_symbol`), exactly the configuration
+  S2-A100's own ideal-cost pairing measured and S2-R18's own closing note
+  named as the untested real-wiring shape. Hypothesis: a real wiring
+  slice built this way should measure roughly S2-A100's own pre-SSE
+  margin (train net -0.005530 b/B), per that entry's own prediction, since
+  the SSE-interaction question S2-R18 asked was independently closed
+  (negative) and this configuration never adds a new SSE stage at all.
+  `FORMAT_VERSION` bumped to 5 (`codec::PPM_EXPERT_MIN_VERSION`), gated the
+  same way `COLUMN_EXPERT_MIN_VERSION` gates the column expert but on the
+  opposite candidate set (every candidate except `Candidate::Transpose`,
+  the two paths mutually exclusive); decode support added for the
+  version-4 and version-3 paths unchanged; a new golden fixture pinned the
+  version-5 path; an ADR drafted. | Measured two ways, both real
+  `Encoder`/`Decoder` runs, no ideal-cost accounting: (1)
+  `cargo run -p mothergod-bench --release --bin baseline_gate -- check`
+  against the wired `encode()`/`decode()` (full LZ + literal pipeline,
+  same 11 `bench/baseline.json` train cases) found one case outside
+  `TOLERANCE_BITS` (0.02): `interleaved_audio16` 5.839680 -> 6.196320 b/B
+  (**+0.356640**), every other case within tolerance. (2) A dedicated
+  literal-only isolation (an uncommitted scratch binary,
+  `bench/src/bin/scratch_ppm_real_wiring.rs`, and a scratch
+  `Literal::encode_ppm_scratch` method, both reverted in full after
+  measurement) compared `Literal::encode_sse` (production) against the
+  exact real-wiring path over `bench::baseline`'s 11 train cases plus
+  `access_log`/`gradient_image` at `sealed_seed(CASE_SEED)`, isolating the
+  literal sub-stream alone from LZ parse variance: train net
+  **+0.140771 b/B** (five improved, every `entropy_ladder` target,
+  -0.0144 to -0.0317; six regressed, every structured generator,
+  `entropy_ladder`'s iid neighbors aside — `markov_h8_2_trap` +0.197280,
+  `json_records` +0.263840, `base64_wrapped` +0.336960,
+  `interleaved_audio16` +0.383680, `sqlite_like_records` +0.240000,
+  `x86_dense_code` +0.252480). Sealed: `access_log` **+0.317760**
+  (regressed), `gradient_image` **-0.036000** (improved). Corpus policy's
+  accept rule fails outright on the train side, independent of the mixed
+  sealed result. **Rejected.** | Mechanism: isolated directly by adding a
+  third measurement to the same scratch binary, six real experts only (no
+  PPM at all) coded through the identical plain bittree decomposition —
+  on a representative 50,000-byte interleaved-audio-like fixture,
+  `encode_sse` (production) cost 27,377 bytes, the same six experts alone
+  through plain bittree cost 36,943 bytes (+34.9%), and six experts plus
+  PPM through plain bittree cost 36,825 bytes — PPM's own marginal
+  contribution is small and genuinely net-positive (36,825 < 36,943,
+  consistent with S2-A100's own accepted mechanism), but it is dwarfed by
+  the cost of losing `encode_sse`'s SSE calibration on the six real
+  experts themselves, unrelated to PPM. S2-A100's own "pre-SSE margin"
+  prediction was never comparable to a real coding path in the first
+  place: its `baseline_bits` side was `Self::ideal_cost_bits`, a direct
+  256-way division with no bittree decomposition and no quantization at
+  all — a theoretical accounting mode this format's decoder never
+  actually drives for a 256-symbol literal (`FORMAT_VERSION` 2 coded
+  literals that way and was retired at ADR-0050, specifically because
+  bittree+SSE beat it). Every version 3 and later literal byte is coded
+  through bittree's binary decomposition, calibrated by SSE; skipping SSE
+  is the only real coding path this project can build without a new
+  primitive, and the isolation above shows that path's own quantization
+  and lost-calibration cost swamps a sparse additive expert's gain on
+  precisely the structured data (`markov_h8_2_trap`, `json_records`,
+  `interleaved_audio16`, `sqlite_like_records`, `x86_dense_code`,
+  `access_log`) this whole lead line (S1-P1 through S1-P5) exists to
+  help; only genuinely iid data (`entropy_ladder`, where SSE has little
+  to calibrate and losing it costs little) and one sealed-only outlier
+  (`gradient_image`) improved. Every candidate artifact this slice added
+  (`Literal::encode_ppm`/`decode_ppm`, `Ppm::try_new`/
+  `PpmExpertState::try_new`, `codec::PPM_EXPERT_MIN_VERSION` and its
+  `EncodeSink`/`VecSink`/`StreamingSink` dispatch, the `FORMAT_VERSION`
+  bump and every doc/spec/fixture that restated it, the diagnostic
+  scratch binary and scratch method) reverted in full, per the
+  `compression-experiment` skill's rejected-candidate rule;
+  `PpmExpertState`/`Literal::mix_ppm`/`update_ppm_expert`/
+  `ideal_cost_bits_ppm_expert_pair` (S2-A100, still accepted and unwired)
+  are unaffected. `research/progress.jsonl` it160. Remaining S1-P3 scope:
+  none named — see the updated S1-P3 lead entry above.
