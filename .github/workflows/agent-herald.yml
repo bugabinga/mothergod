@@ -78,8 +78,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
           prompt: |
-            Read first: agents/GOVERNANCE.md, then marketing/JOURNAL.md
-            (your institutional memory; ADR-0040 is your charter). When
+            Read marketing/JOURNAL.md through its headings (ADR-0025):
+            your institutional memory; ADR-0040 is your charter. When
             work changes site/, page layout, styling, browser
             interaction, or accessibility, use the `web-ui` skill.
 
@@ -93,56 +93,36 @@ jobs:
 
             Work in strict priority order and STOP after ONE unit of
             work:
-            1. Your own open PRs whose latest reviewer verdict requests
-               changes with no push after it, or whose checks are red.
-               Oldest first: check out the branch, fix it, run every
-               CLAUDE.md quality gate locally, push, then run
-               `.github/scripts/settle-push <pr>` and trust its exit
-               code. The reviewer posts its verdict as an issue comment
-               starting "**Review verdict:", because the shared
-               claude[bot] identity cannot formally review its own PRs.
-            2. Weekly survey, self-healing: if marketing/JOURNAL.md has
-               no survey entry dated within the last 6 days, run it
-               now. Three parts, one journal entry: (a) measure the
-               audience: GitHub stars/forks/watchers, external
-               (non-agent, non-operator) issue and PR authors,
-               mothergod.dev analytics via the Cloudflare API, repo
-               traffic from the issue labeled traffic-data (the
-               machinery accumulates it weekly, issue #417), mentions
-               on Hacker News/lobste.rs/reddit via WebSearch, all
-               read-only; every number names its source and sits next
-               to last week's. (b) study ONE successful OSS project's
-               marketing and extract principles, not paint. (c) state
-               what you will change on the surface because of (a) and
-               (b), filing each concrete piece as an issue labeled
-               marketing + product. A metric you cannot measure is
-               itself a finding: journal it, and file blocked-on-human
-               when only the operator can unlock it (naming the exact
-               permission or secret).
+            1. Your own open PRs that are red or labeled
+               changes-requested, oldest first: check out the branch,
+               fix it, push with `.github/scripts/push-branch`, then
+               run `.github/scripts/settle-push <pr>` and trust its
+               exit code. The reviewer's items are in its comment on
+               the thread; a labeled PR with no push after that
+               comment is yours.
+            2. Weekly survey: when marketing/JOURNAL.md has no survey
+               entry dated within the last 6 days, run the
+               `audience-survey` skill; skip it otherwise.
             3. Otherwise ship one improvement. Queue first: the top
                open issue labeled marketing nobody has claimed (an open
                PR or claude/* branch covering it means claimed). Queue
                empty: find the biggest reader-facing defect on the
                surface yourself, a stale or false claim, a page that
                serves no audience, a missing next step, and fix that.
-               Branch claude/herald-<slug>, smallest useful slice, all
-               quality gates locally, then a PR.
+               Branch claude/herald-<slug>, smallest useful slice, push
+               with `.github/scripts/push-branch`, then a PR.
 
             The PR body is your report: what a reader gets that they
             did not have, which audience it serves, and the evidence
-            behind every claim the change makes. Journal editorial
-            decisions worth remembering in marketing/JOURNAL.md in the
-            same PR; the audience model there is yours to build and
-            keep current.
+            behind every claim the change makes. Editorial decisions
+            worth remembering go in marketing/JOURNAL.md in the same
+            PR.
 
-            Hard rules: at most ONE new PR per run. Never merge; the
-            reviewer approves. Truth binds hardest on your surface: a
-            public claim carries its evidence or does not ship, and a
-            benchmark number names its corpus. Publish only on owned
-            channels (agents/IDENTITIES.md); external platforms are
-            read-only instruments, and astroturfing in any form is a
-            mission violation. Update CHANGELOG.md only for
-            user-visible product changes.
+            Hard rules: publish only on owned channels
+            (agents/IDENTITIES.md); external platforms are read-only
+            instruments, and astroturfing in any form is a mission
+            violation. Update CHANGELOG.md only for user-visible
+            product changes.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes".
           # WebFetch/WebSearch: the survey's read-only instruments.
           claude_args: |
