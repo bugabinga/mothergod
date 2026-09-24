@@ -1679,11 +1679,8 @@ mod tests {
     }
 }
 
-// Not under Miri: interpretation costs 300-5000x per case on this crate
-// (measured, issue #456), the storm multiplies that by its case count,
-// and `mod tests`' own examples already walk the same round-trip shape
-// for UB observation (`coder.rs`'s `mod proptests` header comment records
-// the same reasoning for the entropy coder this one parallels).
+// Not under Miri: same rationale as `coder.rs`'s `mod proptests` header
+// comment (interpretation cost, issue #456).
 #[cfg(test)]
 #[cfg(not(miri))]
 mod proptests {

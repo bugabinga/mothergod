@@ -2828,10 +2828,8 @@ mod tests {
 // #452 scope item 1). The examples stay as named anchors for the specific
 // edge cases they document; this property is the sweep across the same
 // structural classes.
-// Not under Miri: interpretation costs 300-5000x per case on this
-// crate (measured, issue #456), the storm multiplies that by its case
-// count, and the deterministic example tests already walk the same
-// paths for UB observation.
+// Not under Miri: same rationale as `coder.rs`'s `mod proptests` header
+// comment (interpretation cost, issue #456).
 #[cfg(test)]
 #[cfg(not(miri))]
 mod proptests {
