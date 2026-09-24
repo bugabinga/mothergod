@@ -131,15 +131,24 @@ runs:
             print(f"auth||{status}|")
             sys.exit()
 
+        import time
+        if status == 404 and model:
+            # A rung the subscription does not serve (adopted ahead of its
+            # launch, or since retired) is a 404, and without this every
+            # wake on that ladder fails until someone edits models.json.
+            # Seven days blocks it past the weekly model review, and the
+            # ladder falls through to the next rung on the next wake.
+            print(f"ledger|{model}|{int(time.time()) + 7 * 86400}|not served")
+            sys.exit()
+
         if (rejected or status == 429) and model:
             # Latest advertised reset among the rejections, so a run never
             # retries before the window that actually blocked it. A missing
             # resetsAt falls back to one hour: short, because a wrong-long
             # guess idles an agent for days and a wrong-short one costs one
             # 429.
-            import time
             resets = [r.get("resetsAt") for r in rejected if isinstance(r.get("resetsAt"), int)]
-            print(f"ledger|{model}|{max(resets) if resets else int(time.time()) + 3600}|")
+            print(f"ledger|{model}|{max(resets) if resets else int(time.time()) + 3600}|rate-limited")
             sys.exit()
 
         # Fallback only: a limit with no model to attribute it to.
@@ -174,7 +183,7 @@ runs:
           exit 0
           ;;
         ledger)
-          model="$a"; resets="$b"
+          model="$a"; resets="$b"; why="$c"
           gh label create model-limits --repo "$GITHUB_REPOSITORY" \
             --color FBCA04 --description "Per-model rate-limit ledger (ADR-0018)" 2>/dev/null || true
           n="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-limits --state open --json number --jq '.[0].number // empty')"
@@ -195,7 +204,8 @@ runs:
             for k, v in sorted(limits.items())
         )
         print("\n".join([
-            "Models currently rate-limited. The guard reads this before every agent",
+            "Models the guard must not pick right now: rate-limited, or not served",
+            "to this subscription (a 404). The guard reads this before every agent",
             "run and picks the first rung of that agent's ladder"
             " (`agents/models.json`) that is not listed here. Entries expire on their",
             "own timestamp; nothing needs closing.",
@@ -217,15 +227,15 @@ runs:
         )"
           if [ -n "$n" ]; then
             gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --body "$body"
-            echo "Ledgered $model until $resets (issue #$n). Other agents unaffected."
+            echo "Ledgered $model ($why) until $resets (issue #$n). Other agents unaffected."
           else
             gh issue create --repo "$GITHUB_REPOSITORY" \
               --title "🔒 Model availability ledger" --label model-limits --body "$body"
-            echo "Ledgered $model until $resets (new issue). Other agents unaffected."
+            echo "Ledgered $model ($why) until $resets (new issue). Other agents unaffected."
           fi
           if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$OPERATOR_TELEGRAM_CHAT_ID" ]; then
             until_h="$(date -u -d "@$resets" +%Y-%m-%dT%H:%MZ)"
-            printf '🔒 mothergod: %s rate-limited until %s. Agents on other models keep running; any agent whose ladder still has a rung falls back automatically.\n' "$model" "$until_h" \
+            printf '🔒 mothergod: %s %s until %s. Agents on other models keep running; any agent whose ladder still has a rung falls back automatically.\n' "$model" "$why" "$until_h" \
               | .github/scripts/tg-send && echo "Telegram alert sent." || echo "Telegram alert failed (non-fatal)."
           fi
           exit 0

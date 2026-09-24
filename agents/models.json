@@ -34,7 +34,7 @@
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-09-19",
+  "reviewed": "2026-09-24",
   "roles": {
     "bdfl": {
       "$comment": "Thrift drops the model and keeps the thinking: this seat is 47.3% of the fleet's seven-day projected cost, the largest of any seat. Retries the cheaper model at the normal rung's own effort after #362 moved model and effort together and credited the model. A bet with a written falsification, both tells and the full reasoning in SOURCES.md, 2026-09-19.",
@@ -52,12 +52,13 @@
       }
     },
     "curator": {
-      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first.",
+      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first. Canary for claude-opus-5-5 (operator, Telegram, 2026-09-24): same tier as claude-opus-5 at 20% less per token, unverifiable from a session because the nested CLI holds no login, so the cheapest Opus seat tries it first with its old rung beneath. Falsification: the first curator wake after merge either shows claude-opus-5-5 in the retrospect's model column, or fails with a 404 that agent-pause ledgers for seven days so the next wake falls through to claude-opus-5. A green canary promotes the herald, the researcher and the BDFL's third rung. Effort is pinned to high because Opus 5.5's own default is medium, one level below Opus 5's, and an empty value here would silently take that cut (SOURCES.md adoption log, 2026-09-24).",
       "ladder": [
+        "claude-opus-5-5",
         "claude-opus-5",
         "claude-sonnet-5"
       ],
-      "effort": "",
+      "effort": "high",
       "thrift": {
         "ladder": [
           "claude-sonnet-5"
