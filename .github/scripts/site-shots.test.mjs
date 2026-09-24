@@ -155,6 +155,37 @@ exec(open(${JSON.stringify(stub)}).read())
   ]);
 });
 
+test("a hanging browser is a failed shot, not a lost run", () => {
+  // Round two of the #732 review: a hang escaped as TimeoutExpired past the
+  // per-shot handling and the manifest was never written.
+  const hanging = join(mkdtempSync(join(tmpdir(), "site-shots-hang-")), "browser");
+  writeFileSync(
+    hanging,
+    `#!/usr/bin/env python3
+import sys, time
+if sys.argv[-1].endswith("/index.html"):
+    time.sleep(30)
+exec(open(${JSON.stringify(stub)}).read())
+`,
+    { mode: 0o755 },
+  );
+  const { dir, git, base } = repo();
+  writeFileSync(join(dir, "site/index.html"), "<p>new index</p>");
+  writeFileSync(join(dir, "site/agents.html"), "<p>new agents</p>");
+  git("commit", "-q", "-am", "two pages");
+  const head = git("rev-parse", "HEAD");
+  const out = join(dir, "shots");
+  const r = run(dir, out, ["--base", base, "--branch", `claude/x=${head}`], {
+    SITE_SHOTS_BROWSER: hanging,
+    SITE_SHOTS_TIMEOUT: "1",
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /index\.html at 375x812: browser timed out after 1s/);
+  const rows = manifest(out);
+  assert.equal(rows.filter((row) => row.page === "site/agents.html" && row.after).length, 2);
+  assert.equal(rows.filter((row) => row.page === "site/index.html" && !row.after).length, 2);
+});
+
 test("a missing browser fails loudly rather than skipping", () => {
   const { dir, git, base } = repo();
   writeFileSync(join(dir, "site/index.html"), "<p>new</p>");
@@ -164,5 +195,11 @@ test("a missing browser fails loudly rather than skipping", () => {
     SITE_SHOTS_BROWSER: "/nonexistent/browser",
   });
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /browser/);
+  // A CaptureError line per shot, never a traceback.
+  assert.match(r.stderr, /cannot run browser \/nonexistent\/browser/);
+  assert.ok(!r.stderr.includes("Traceback"), r.stderr);
+  assert.deepEqual(manifest(join(dir, "shots")).map((row) => [row.before, row.after]), [
+    [null, null],
+    [null, null],
+  ]);
 });

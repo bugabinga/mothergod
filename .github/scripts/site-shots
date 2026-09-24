@@ -65,6 +65,9 @@ VIEWPORTS = ((375, 812), (1440, 900))
 # push-branch's record of what this checkout pushed, per branch.
 OWN_PUSHES = "push-branch-refs.json"
 SITE = "site"
+# Seconds one capture may take before it counts as a failed shot. The
+# environment override exists for the hang test; nothing in production sets it.
+TIMEOUT = float(os.environ.get("SITE_SHOTS_TIMEOUT", "60"))
 
 
 def main() -> int:
@@ -96,16 +99,20 @@ def main() -> int:
     # captured for other pages or branches (PR #732 review).
     rows = []
     failures = 0
-    for branch, sha in branches.items():
-        try:
-            failures += capture_branch(branch, sha, base, out_dir, rows)
-        except CaptureError as err:
-            failures += 1
-            print(f"site-shots: {branch}: {err}", file=sys.stderr)
-
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
-        json.dump({"shots": rows}, fh, indent=1)
+    try:
+        for branch, sha in branches.items():
+            try:
+                failures += capture_branch(branch, sha, base, out_dir, rows)
+            except CaptureError as err:
+                failures += 1
+                print(f"site-shots: {branch}: {err}", file=sys.stderr)
+    finally:
+        # Whatever escapes above, the rows already captured are on disk and
+        # tg-photo reads only this file: the manifest is written on every
+        # exit, so a crash costs the shots after it, not the ones before.
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as fh:
+            json.dump({"shots": rows}, fh, indent=1)
     print(f"site-shots: {len(rows)} shot(s) in {out_dir}")
     return 1 if failures else 0
 
@@ -186,18 +193,25 @@ def shoot(browser: str, root: str, page: str, width: int, height: int, out: str)
     server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    where = f"{page} at {width}x{height}"
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/{page[len(SITE) + 1:]}"
         proc = subprocess.run(
             [browser, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
              f"--window-size={width},{height}", f"--screenshot={out}",
              "--virtual-time-budget=2000", url],
-            capture_output=True, text=True, timeout=60)
+            capture_output=True, text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        # A hang is a failed shot like any other, so the per-shot handling
+        # in capture_branch applies to it (PR #732 review, round two).
+        raise CaptureError(f"{where}: browser timed out after {TIMEOUT:g}s") from None
+    except (subprocess.SubprocessError, OSError) as err:
+        raise CaptureError(f"{where}: cannot run browser {browser}: {err}") from None
     finally:
         server.shutdown()
         server.server_close()
     if proc.returncode != 0 or not os.path.exists(out):
-        raise CaptureError(f"{page} at {width}x{height}: browser exit {proc.returncode}: "
+        raise CaptureError(f"{where}: browser exit {proc.returncode}: "
                            f"{proc.stderr.strip()[-300:]}")
 
 
