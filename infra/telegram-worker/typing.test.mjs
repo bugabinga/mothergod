@@ -179,7 +179,7 @@ test("a second run's reset cannot resurrect a settled indicator", async () => {
 // The draft (#733): typing with content, on the same loop, under the
 // same invariant. It exists exactly while an answer is owed.
 
-test("a draft while an answer is owed goes out on the next tick and is refreshed every 20s", async () => {
+test("a draft while an answer is owed goes out on the next tick and is refreshed every 10s", async () => {
   const bot = object();
   at(1000);
   await bot.call("/start");
@@ -199,9 +199,9 @@ test("a draft while an answer is owed goes out on the next tick and is refreshed
     ["sendChatAction", "sendMessageDraft", "sendChatAction"],
     "inside the preview window the same draft is not re-sent",
   );
-  at(22_500);
+  at(12_500);
   await bot.tick();
-  assert.equal(bot.methods.filter((m) => m === "sendMessageDraft").length, 2, "past 20s the preview is refreshed");
+  assert.equal(bot.methods.filter((m) => m === "sendMessageDraft").length, 2, "past 10s the preview is refreshed");
 });
 
 test("a changed draft goes out on the next tick, not on the next refresh", async () => {

@@ -31,10 +31,12 @@ const TYPING_TICK_MS = 4000;
 // it comes, arrives on a quiet screen instead of a lying one.
 const TYPING_CAP_MS = 20 * 60 * 1000;
 // sendMessageDraft's preview lives 30s; re-sending the same draft_id
-// inside that window keeps it on screen. The refresh sits well inside
-// the window and five times sparser than the typing tick, because a
-// draft that flickers is worse than "typing...".
-const DRAFT_REFRESH_MS = 20 * 1000;
+// inside that window keeps it on screen. 20s cut it too close (operator
+// report, 2026-09-24: the preview blanked between refreshes, then
+// reappeared on the next changed draft): a cold alarm tick or Telegram's
+// own delivery lag eats into a 10s margin. 10s margin is three ticks of
+// slack instead of one.
+const DRAFT_REFRESH_MS = 10 * 1000;
 // One chat and one run answering at a time (agent-bdfl.yml's
 // concurrency lane), so one draft: Telegram animates edits to the same
 // id and the real reply removes it.
