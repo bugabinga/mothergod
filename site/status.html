@@ -290,12 +290,11 @@
       // closed, the release milestone included (status-data.py's `_phase`), so
       // the denial retires itself on the day it stops being true.
       //
-      // It says so without the words "pre-alpha" and "no release" on purpose.
-      // tests/claims.rs's release_state_claims_agree_with_the_changelog
-      // watches those two phrases across this file and fails, post-release,
-      // wherever they are still written; a phase-conditional copy would trip
-      // it while rendering nothing. So the conditional copy stays out of the
-      // guard's vocabulary, and the guard goes on watching this file for the
+      // The copy below deliberately avoids the release-denial vocabulary
+      // that tests/claims.rs's release_state_claims_agree_with_the_changelog
+      // scans this file for (see its doc comment for the exact words): a
+      // phase-conditional copy would trip that guard while rendering
+      // nothing. This file stays in the guard's surface list for the
       // hand-typed copies it exists to catch.
       const verdict = document.getElementById('verdict-card');
       verdict.removeAttribute('data-loading');
