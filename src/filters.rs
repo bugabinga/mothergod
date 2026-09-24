@@ -429,6 +429,15 @@ pub mod bcj {
     /// instructions and need the same constant, not a second copy of `5`.
     pub(crate) const INSTRUCTION_LEN: usize = 5;
 
+    /// Whether `byte` opens a BCJ-eligible instruction (`call rel32` /
+    /// `jmp rel32`). The one source of truth [`rewrite_in_place`],
+    /// [`Undo::apply`] and `select::pick`'s density heuristic all gate on,
+    /// so widening the targeted opcode set is one edit, not three kept in
+    /// sync by hand.
+    pub(crate) const fn is_opcode(byte: u8) -> bool {
+        byte == 0xE8 || byte == 0xE9
+    }
+
     /// Walks `data`, rewriting each `0xE8`/`0xE9` opcode's operand through
     /// `rewrite_operand`.
     ///
@@ -463,7 +472,7 @@ pub mod bcj {
         let n = out.len();
         let mut i = 0usize;
         while i + INSTRUCTION_LEN <= n {
-            if out[i] == 0xE8 || out[i] == 0xE9 {
+            if is_opcode(out[i]) {
                 let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
                 // x86 rel32 addressing itself wraps at 2^32; truncating
                 // the position to u32 before adding matches that hardware
@@ -590,7 +599,7 @@ pub mod bcj {
         /// instruction's operand has arrived.
         pub(crate) fn apply(&mut self, filtered_byte: u8) -> Resolved {
             if self.pending.is_empty() {
-                if filtered_byte == 0xE8 || filtered_byte == 0xE9 {
+                if is_opcode(filtered_byte) {
                     self.pending.push(filtered_byte);
                     return Resolved::NONE;
                 }
@@ -1408,7 +1417,7 @@ pub mod select {
         let bcj_window = &data[..data.len().min(BCJ_SCAN_LEN)];
         let bcj_hits = bcj_window
             .iter()
-            .filter(|&&b| b == 0xE8 || b == 0xE9)
+            .filter(|&&b| super::bcj::is_opcode(b))
             .count();
         if bcj_hits * BCJ_DENSITY_DIVISOR > bcj_window.len() {
             candidates.push(Candidate::Bcj);
