@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Stream what a run is doing into the operator's Telegram chat (PreToolUse hook).
+
+`.claude/settings.json` wires this on every tool, `async`, so it never
+holds a tool call: the harness fires it as the call begins and moves on.
+
+Why: a chat wake answers the operator 20 to 75 minutes after their
+message, and until the reply lands the phone shows "typing..." and
+nothing else (operator, Telegram, 2026-09-24: "so i get faster
+feedback"). The model's words are not readable mid-turn from outside
+the harness, but its tool calls are, and a Bash call carries the human
+sentence its author wrote for exactly this reader (#733).
+
+What it posts: the seat, how long it has been running, and the last
+LINES tool calls as one-line verbs, newest last, to the webhook worker's
+`/typing/draft`. The worker shows the text with Telegram's
+`sendMessageDraft`, an ephemeral preview the real reply replaces, and
+only while an operator message is unanswered, so a scheduled wake posts
+here and nobody sees it; that gate lives in the worker so this script
+has nothing to know about who is waiting.
+
+PreToolUse, not PostToolUse, because the operator wants to know what
+the run is doing, not what it just finished: a ten-minute test run
+reads "running the worker tests" while it runs.
+
+Contract: reads the hook JSON on stdin; exit 0 always, because a
+decoration must never fail a tool call. Does nothing outside GitHub
+Actions (GITHUB_ACTIONS != "true") or when TELEGRAM_WEBHOOK_SECRET is
+unset, which is every seat but the one whose workflow holds the secret
+(agent-bdfl.yml). State is one file per session in the temp directory:
+the first call's time and the recent lines, replaced atomically so a
+parallel hook never reads half a file and forgets when the run started.
+The text goes through secret_scrub on the way out, tg-send's rule.
+
+Liveness: a chat wake whose reply arrives with the chat having shown
+"typing..." alone means this stopped reaching the worker.
+
+The worker's host is overridable so tg-draft.test.mjs can stand in for
+it; nothing in production sets MOTHERGOD_WORKER_BASE.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import time
+import urllib.request
+from urllib.parse import urlsplit
+
+from secret_scrub import scrub
+
+DRAFT = os.environ.get("MOTHERGOD_WORKER_BASE", "https://bot.mothergod.dev") + "/typing/draft"
+# Cloudflare's edge answers 403 to urllib's default User-Agent (tg-send).
+UA = "mothergod-tg-draft"
+LINES = 4  # recent calls shown: a phone screen, not a log
+WIDTH = 90  # chars per line, so four lines stay four lines on a phone
+DOT = "·"
+# Tools whose one interesting argument is the file they touch.
+FILE_TOOLS = {"Edit": "edit", "MultiEdit": "edit", "NotebookEdit": "edit", "Write": "write", "Read": "read"}
+
+
+def main() -> int:
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return 0
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if not secret:
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(call, dict) or not isinstance(call.get("tool_name"), str):
+        return 0
+    line = describe(call["tool_name"], call.get("tool_input"), call.get("cwd"))
+    now = time.time()
+    session = call.get("session_id")
+    path = state_path(session if isinstance(session, str) and session else "unknown")
+    state = load_state(path, now)
+    state["lines"] = (state["lines"] + [line])[-LINES:]
+    save_state(path, state)
+    text, _ = scrub(render(state, now))
+    post(text, secret)
+    return 0
+
+
+def describe(tool: str, tool_input, cwd) -> str:
+    """One line of what the call does, in the words closest to a human's."""
+    args = tool_input if isinstance(tool_input, dict) else {}
+    if tool == "Bash":
+        line = args.get("description") or "shell"
+    elif tool in FILE_TOOLS:
+        line = f"{FILE_TOOLS[tool]} {relative(args.get('file_path'), cwd)}"
+    elif tool == "WebFetch":
+        line = f"fetch {urlsplit(str(args.get('url', ''))).netloc or 'a page'}"
+    elif tool == "WebSearch":
+        line = f"search {args.get('query', '')}"
+    elif tool in ("Agent", "Task"):
+        line = f"agent: {args.get('description', '')}"
+    elif tool == "Skill":
+        line = f"skill {args.get('skill', '')}"
+    else:
+        line = tool.lower()
+    line = " ".join(str(line).split())
+    return line if len(line) <= WIDTH else line[: WIDTH - 1] + "…"
+
+
+def relative(path, cwd) -> str:
+    """The path as the reader knows it: relative to the checkout when inside it."""
+    if not isinstance(path, str) or not path:
+        return "a file"
+    if isinstance(cwd, str) and cwd:
+        root = cwd.rstrip("/") + "/"
+        if path.startswith(root):
+            return path[len(root):]
+    return path
+
+
+def render(state: dict, now: float) -> str:
+    """Seat and age on the first line, then the recent calls, newest last."""
+    seat = os.environ.get("GITHUB_WORKFLOW", "agent").removeprefix("agent-")
+    minutes = int((now - state["start"]) // 60)
+    head = f"{seat}, {minutes} min" if minutes else f"{seat}, starting"
+    return "\n".join([head, *(f"{DOT} {line}" for line in state["lines"])])
+
+
+def state_path(session_id: str) -> str:
+    """One file per session, in the temp directory, filename-safe."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+    return os.path.join(tempfile.gettempdir(), f"tg-draft-{safe}.json")
+
+
+def load_state(path: str, now: float) -> dict:
+    """The session's state, started now if this is the first call."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            state = json.load(fh)
+        if (
+            isinstance(state, dict)
+            and isinstance(state.get("start"), (int, float))
+            and isinstance(state.get("lines"), list)
+        ):
+            return state
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"start": now, "lines": []}
+
+
+def save_state(path: str, state: dict) -> None:
+    """Replace, never rewrite in place: parallel hooks read this file."""
+    tmp = f"{path}.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh)
+    os.replace(tmp, path)
+
+
+def post(text: str, secret: str) -> None:
+    """Hand the draft to the worker. Best effort: it is decoration."""
+    request = urllib.request.Request(
+        DRAFT,
+        data=json.dumps({"text": text}).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "x-mothergod-secret": secret,
+            "User-Agent": UA,
+        },
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(request, timeout=5).close()
+    except OSError as error:  # HTTPError included; it subclasses OSError.
+        print(f"tg-draft: not delivered: {str(error).replace(secret, '<redacted>')}",
+              file=sys.stderr)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

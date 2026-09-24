@@ -3,8 +3,9 @@
 // commands read or mutate existing GitHub state and answer immediately.
 // Everything else follows the original path: authenticate Telegram,
 // store the operator's update in KV (twice: the inbox to work through,
-// the chat log to remember), show the "typing..." indicator until an
-// answer goes out, then dispatch the BDFL. No model runs in this worker.
+// the chat log to remember), show the "typing..." indicator, and under
+// it a draft of what the run is doing, until an answer goes out, then
+// dispatch the BDFL. No model runs in this worker.
 
 // The chat log: one KV key holding the last KEEP turns of operator
 // conversation, the only memory that outlives a run. Both sides are
@@ -29,6 +30,16 @@ const TYPING_TICK_MS = 4000;
 // a bot type forever. Past this, the indicator gives up; the reply, when
 // it comes, arrives on a quiet screen instead of a lying one.
 const TYPING_CAP_MS = 20 * 60 * 1000;
+// sendMessageDraft's preview lives 30s; re-sending the same draft_id
+// inside that window keeps it on screen. The refresh sits well inside
+// the window and five times sparser than the typing tick, because a
+// draft that flickers is worse than "typing...".
+const DRAFT_REFRESH_MS = 20 * 1000;
+// One chat and one run answering at a time (agent-bdfl.yml's
+// concurrency lane), so one draft: Telegram animates edits to the same
+// id and the real reply removes it.
+const DRAFT_ID = 1;
+const DRAFT_LIMIT = 4096; // Telegram's cap on draft text
 
 /**
  * The "typing..." indicator, as a self-refreshing alarm loop.
@@ -47,7 +58,7 @@ const TYPING_CAP_MS = 20 * 60 * 1000;
  * messages must keep typing between replies one and three, which a
  * boolean cannot express (PR #155 review).
  *
- * Three verbs:
+ * Four verbs:
  * - /start, a message landed: append its arrival time.
  * - /stop, an answer went out (`.github/scripts/tg-send`): drop the
  *   oldest, because a drain answers in arrival order.
@@ -55,6 +66,13 @@ const TYPING_CAP_MS = 20 * 60 * 1000;
  *   every arrival older than that run's start. Those were its messages
  *   to answer, and whether it answered them, died, or was skipped by the
  *   pause guard, nobody is working on them now.
+ * - /draft, the run says what it is doing (`.github/scripts/tg-draft`,
+ *   a hook on every tool call): typing with content (#733). The text
+ *   is shown as a Telegram message draft, an ephemeral preview the real
+ *   reply replaces, by the same alarm loop that types, so it exists
+ *   exactly while an answer is owed and a burst of parallel hooks
+ *   collapses to the last text. A draft is proof the run is alive, so
+ *   it moves the deadline the way an arrival does.
  *
  * The `since` cutoff is the whole reason /reset is not a blunt zero. A
  * message that lands mid-run belongs to the NEXT run, which the
@@ -105,6 +123,28 @@ export class Typing {
     }
 
     const arrivals = (await this.state.storage.get("arrivals")) ?? [];
+    if (url.pathname === "/draft") {
+      let text;
+      try {
+        ({ text } = await request.json());
+      } catch {
+        return new Response(null, { status: 400 });
+      }
+      if (typeof text !== "string" || !text.trim() || text.length > DRAFT_LIMIT) {
+        return new Response(null, { status: 400 });
+      }
+      // Nobody waiting, nobody to show it to: a scheduled wake's drafts
+      // stop here, so the hook has nothing to know about who is owed.
+      // draftAt null means "changed, not yet sent".
+      if (arrivals.length) {
+        await this.state.storage.put({
+          draft: text,
+          draftAt: null,
+          deadline: Date.now() + TYPING_CAP_MS,
+        });
+      }
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === "/start") {
       arrivals.push(Date.now());
       await this.state.storage.put({
@@ -124,6 +164,11 @@ export class Typing {
       : arrivals.filter((at) => at >= cutoff);
     if (left.length) {
       await this.state.storage.put("arrivals", left);
+      // A reset is a run ending, and its last draft says what a dead
+      // run was doing. The queued run posts its own.
+      if (url.pathname === "/reset") {
+        await this.state.storage.delete(["draft", "draftAt"]);
+      }
     } else {
       await this.state.storage.deleteAlarm();
       await this.state.storage.deleteAll();
@@ -139,34 +184,48 @@ export class Typing {
       await this.state.storage.deleteAll();
       return;
     }
-    await fetch(
-      `https://api.telegram.org/bot${this.env.BOT_TOKEN}/sendChatAction`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: this.env.OPERATOR_CHAT_ID,
-          action: "typing",
-        }),
-      },
-    ).catch(() => {});
+    await this.telegram("sendChatAction", { action: "typing" });
+    // The draft goes out when it changed (draftAt null) or when its
+    // preview is about to expire. This loop is its only sender.
+    const draft = await this.state.storage.get("draft");
+    const draftAt = await this.state.storage.get("draftAt");
+    if (draft && (draftAt == null || Date.now() - draftAt >= DRAFT_REFRESH_MS)) {
+      await this.telegram("sendMessageDraft", { draft_id: DRAFT_ID, text: draft });
+      // Other requests interleave with the outbound call above. A draft
+      // that landed meanwhile keeps its zero stamp and goes out on the
+      // next tick instead of waiting a whole refresh.
+      if ((await this.state.storage.get("draft")) === draft) {
+        await this.state.storage.put("draftAt", Date.now());
+      }
+    }
     await this.state.storage.setAlarm(Date.now() + TYPING_TICK_MS);
+  }
+
+  // Never throws: decoration must not kill the loop that carries it.
+  async telegram(method, body) {
+    await fetch(`https://api.telegram.org/bot${this.env.BOT_TOKEN}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: this.env.OPERATOR_CHAT_ID, ...body }),
+    }).catch(() => {});
   }
 }
 
 // Never throws: a failed indicator loses decoration, never data, so it
-// must not abort the webhook that carries the message. It does report,
-// because the caller that ends the indicator is also our only probe
-// that the object is reachable at all.
-async function typing(env, verb) {
+// must not abort the webhook that carries the message. It answers with
+// the object's status, 502 when the object is unreachable, because the
+// caller that ends the indicator is also our only probe that the object
+// answers at all.
+async function typing(env, verb, body) {
   try {
-    await env.TYPING.get(env.TYPING.idFromName("operator")).fetch(
+    const response = await env.TYPING.get(env.TYPING.idFromName("operator")).fetch(
       `https://typing.invalid${verb}`,
+      body === undefined ? undefined : { method: "POST", body },
     );
-    return true;
+    return response.status;
   } catch (error) {
     console.error("typing", verb, error);
-    return false;
+    return 502;
   }
 }
 
@@ -851,6 +910,11 @@ export async function tick(env, cron, at) {
   }
 }
 
+// The typing object's verbs a run may call from outside; `/start` is
+// the webhook's alone, because only a message that landed may start
+// the indicator.
+const TYPING_VERBS = new Set(["/typing/stop", "/typing/reset", "/typing/draft"]);
+
 export default {
   async scheduled(event, env) {
     await tick(env, event.cron, new Date(event.scheduledTime).toISOString());
@@ -863,17 +927,22 @@ export default {
     // `/typing/stop`: one answer went out (tg-send). `/typing/reset`: a
     // run ended and owes nothing (agent-bdfl.yml's last step), which is
     // also the health probe that the object is reachable at all.
-    // Authenticated with WEBHOOK_SECRET under a header of its own,
-    // because the secret's role is "may talk to this worker" and both
-    // callers are ours. Telegram's header name is Telegram's; ours says
-    // who we are.
+    // `/typing/draft`: the run says what it is doing (tg-draft), body
+    // `{"text": ...}`. Authenticated with WEBHOOK_SECRET under a header
+    // of its own, because the secret's role is "may talk to this
+    // worker" and every caller is ours. Telegram's header name is
+    // Telegram's; ours says who we are.
     const { pathname, search } = new URL(request.url);
-    if (pathname === "/typing/stop" || pathname === "/typing/reset") {
+    if (TYPING_VERBS.has(pathname)) {
       if (request.headers.get("x-mothergod-secret") !== env.WEBHOOK_SECRET) {
         return new Response(null, { status: 401 });
       }
-      const ok = await typing(env, pathname.replace("/typing", "") + search);
-      return new Response(null, { status: ok ? 204 : 502 });
+      const status = await typing(
+        env,
+        pathname.replace("/typing", "") + search,
+        pathname === "/typing/draft" ? await request.text() : undefined,
+      );
+      return new Response(null, { status });
     }
     // Telegram echoes the secret_token from setWebhook in this header;
     // a request without it is not Telegram.
