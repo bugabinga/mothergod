@@ -1,6 +1,6 @@
 # ADR-0044: The curator stewards the issue tracker
 
-Status: accepted · Date: 2026-09-03 · Extends ADR-0003, ADR-0005 · Prompted by operator directive (Telegram, 2026-09-03)
+Status: accepted · Date: 2026-09-03 · Extends ADR-0003, ADR-0005 · Prompted by operator directive (Telegram, 2026-09-03) · Amended by ADR-0051 (the bootstrap item retired)
 
 ## Context
 

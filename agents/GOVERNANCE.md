@@ -46,12 +46,14 @@ is fully autonomous by design (ADR-0003).
   lead, the researcher's source too, so the two seats share one
   concurrency group and never build one slice twice (ADR-0049); which
   seat should own the journal is #682.
-- *Curator*, daily: stewards the issue tracker (ADR-0044). Bootstraps
-  labels and the ops-log issue, triages every new issue to a realm
-  and a fate, grooms open ones for staleness, duplicates, and scope,
-  and critiques substance adversarially with every author, the BDFL
-  and operator included. Judges and routes only: no `Edit`/`Write`,
-  no PRs, never merges, never removes `blocked-on-human`.
+- *Curator*, daily: stewards the issue tracker (ADR-0044). Triages
+  every new issue to a realm and a fate, grooms open ones for
+  staleness, duplicates, and scope, and critiques substance
+  adversarially with every author, the BDFL and operator included.
+  Judges and routes only: no `Edit`/`Write`, no PRs, never merges,
+  never removes `blocked-on-human`. The label set and the ops-log
+  issue are created state, not a standing duty: ADR-0044's bootstrap
+  never found either missing and is retired (ADR-0051).
 - *Reviewer* — adversarial review of every PR; verifies claims by running
   them; merges when CI is green and the review passes. Never reviews work it
   authored in the same run.
