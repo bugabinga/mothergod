@@ -26,15 +26,20 @@
 //! any `Method::Lz` frame naming a version below `LZ_MIN_VERSION`
 //! before calling [`decode`] at all, rather than relying on this parser's
 //! own adversarial-input defenses to fail safely by coincidence.
+//! `FORMAT_VERSION` 2 named this same outer layout but coded its literal
+//! sub-stream through a direct 256-way range division instead of the
+//! SSE-calibrated coding below; no release ever wrote it, so it was
+//! retired outright rather than kept forever
+//! (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`), and
+//! `LZ_MIN_VERSION` moved from 2 to 3 with it.
 //!
-//! The outer layout above is unchanged since `FORMAT_VERSION` 2, but the
-//! range-coded stream's literal sub-stream is not: a version-3 frame codes
-//! each literal byte as 8 SSE-calibrated binary decisions
+//! The outer layout above is unchanged across every version this build
+//! decodes (`LZ_MIN_VERSION` and up). Every one of those versions' literal
+//! sub-stream codes each byte as 8 SSE-calibrated binary decisions
 //! ([`crate::literal::Literal::encode_sse`]/`decode_sse`,
 //! `docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
-//! S1-P1) where a version-2 frame codes it as one direct 256-way range
-//! division ([`crate::literal::Literal::encode`]/`decode`). A version-4
-//! frame whose filter selector names [`Candidate::Transpose`] goes one step
+//! S1-P1). A version-4 frame whose filter selector names
+//! [`Candidate::Transpose`] goes one step
 //! further still: each literal byte blends a column-keyed seventh expert
 //! into the mix before the same SSE-calibrated coding
 //! ([`crate::literal::Literal::encode_column`]/`decode_column`,
@@ -73,15 +78,14 @@ use crate::model::Model;
 
 /// Lowest `FORMAT_VERSION` whose `Method::Lz` payload this build can
 /// decode: see the module docs' "Payload layout" section for the layout
-/// change that moved this from 1 to 2.
-pub(crate) const LZ_MIN_VERSION: u8 = 2;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes its literal
+/// change that moved this from 1 to 2, and for version 2's own retirement
+/// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`) that moved
+/// it from 2 to 3. Every version this constant admits codes its literal
 /// sub-stream through [`crate::literal::Literal::encode_sse`]/`decode_sse`
-/// rather than the older direct 256-way [`crate::literal::Literal::encode`]/
-/// `decode`: see the module docs' "Payload layout" section and [`decode`]'s
-/// own docs for the version dispatch this feeds.
-const LITERAL_SSE_MIN_VERSION: u8 = 3;
+/// (or, at version 4 on a `Candidate::Transpose` frame,
+/// [`crate::literal::Literal::encode_column`]/`decode_column`); no version
+/// this build decodes still needs a separate literal-coding floor.
+pub(crate) const LZ_MIN_VERSION: u8 = 3;
 
 /// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
 /// [`Candidate::Transpose`] frame's literal sub-stream through
@@ -892,7 +896,6 @@ fn decode_tokens<S: DecodeSink>(
 /// selects the column-keyed literal expert (`COLUMN_EXPERT_MIN_VERSION`).
 struct VecSink<'a> {
     output: &'a mut Vec<u8>,
-    version: u8,
     declared_len: usize,
     column: Option<(NonZeroUsize, &'a mut ColumnExpertState)>,
 }
@@ -920,10 +923,7 @@ impl DecodeSink for VecSink<'_> {
                 );
                 models.literal.decode_column(ac, context, bank, state)
             }
-            None if self.version >= LITERAL_SSE_MIN_VERSION => {
-                models.literal.decode_sse(ac, context)
-            }
-            None => models.literal.decode(ac, context),
+            None => models.literal.decode_sse(ac, context),
         };
         self.output.push(byte);
         Ok(byte)
@@ -986,17 +986,16 @@ impl DecodeSink for VecSink<'_> {
 /// panic-discipline).
 ///
 /// `version` is the frame's declared `FORMAT_VERSION` byte
-/// (`crate::decompress` already has it in scope at its one call site):
-/// versions below 3 decode the literal sub-stream through
-/// [`crate::literal::Literal::decode`] (the old direct 256-way division),
-/// version 3 and above through [`crate::literal::Literal::decode_sse`], and
-/// — only for a [`Candidate::Transpose`] frame, version
-/// `COLUMN_EXPERT_MIN_VERSION` (4) and above — through
-/// [`crate::literal::Literal::decode_column`] instead, blending a
-/// column-keyed seventh expert into the mix (see the module docs' "Payload
-/// layout" section). Every other symbol decodes identically regardless of
-/// `version` or candidate, since only the literal sub-stream's internal
-/// shape changed.
+/// (`crate::decompress` already has it in scope at its one call site,
+/// guaranteed at least `LZ_MIN_VERSION` (3) before this function is ever
+/// called): every version decodes the literal sub-stream through
+/// [`crate::literal::Literal::decode_sse`], except — only for a
+/// [`Candidate::Transpose`] frame, version `COLUMN_EXPERT_MIN_VERSION` (4)
+/// and above — through [`crate::literal::Literal::decode_column`] instead,
+/// blending a column-keyed seventh expert into the mix (see the module
+/// docs' "Payload layout" section). Every other symbol decodes identically
+/// regardless of `version` or candidate, since only the literal
+/// sub-stream's internal shape changed.
 ///
 /// # Panics
 ///
@@ -1042,7 +1041,6 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
 
     let mut sink = VecSink {
         output: &mut output,
-        version,
         declared_len,
         column: column_state
             .as_mut()
@@ -1097,18 +1095,13 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     let candidate =
         Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
     match candidate {
-        Candidate::Identity => decode_undoable_streaming(
-            filtered_payload,
-            version,
-            max_len,
-            writer,
-            &mut StreamUndo::Identity,
-        ),
+        Candidate::Identity => {
+            decode_undoable_streaming(filtered_payload, max_len, writer, &mut StreamUndo::Identity)
+        }
         Candidate::Delta(stride) => {
             let undo = filters::delta::Undo::try_new(stride).map_err(|_| Error::OutOfMemory)?;
             decode_undoable_streaming(
                 filtered_payload,
-                version,
                 max_len,
                 writer,
                 &mut StreamUndo::Delta(undo),
@@ -1118,7 +1111,6 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             let undo = filters::bcj::Undo::try_new().map_err(|_| Error::OutOfMemory)?;
             decode_undoable_streaming(
                 filtered_payload,
-                version,
                 max_len,
                 writer,
                 &mut StreamUndo::Bcj(undo),
@@ -1188,7 +1180,6 @@ struct StreamingSink<'a, W: std::io::Write> {
     window: &'a mut lz::Window,
     undo: &'a mut StreamUndo,
     writer: &'a mut W,
-    version: u8,
 }
 
 impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
@@ -1204,11 +1195,7 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
         ac: &mut Decoder,
         context: Context,
     ) -> Result<u8, crate::WriteError> {
-        let byte = if self.version >= LITERAL_SSE_MIN_VERSION {
-            models.literal.decode_sse(ac, context)
-        } else {
-            models.literal.decode(ac, context)
-        };
+        let byte = models.literal.decode_sse(ac, context);
         self.window.push(byte);
         self.undo.apply(byte, self.writer)?;
         Ok(byte)
@@ -1238,7 +1225,6 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
 /// [`read_header`]'s expected input.
 fn decode_undoable_streaming<W: std::io::Write>(
     payload: &[u8],
-    version: u8,
     max_len: u32,
     writer: &mut W,
     undo: &mut StreamUndo,
@@ -1256,7 +1242,6 @@ fn decode_undoable_streaming<W: std::io::Write>(
         window: &mut window,
         undo: &mut *undo,
         writer: &mut *writer,
-        version,
     };
     decode_tokens(
         token_count,
@@ -1649,7 +1634,7 @@ mod tests {
         let encoded = encode(&data);
         assert_eq!(encoded[0], 3, "fixture must select Transpose");
         assert_ne!(
-            decode(&encoded, LITERAL_SSE_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
+            decode(&encoded, LZ_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
             Ok(data.as_slice()),
             "decoding a COLUMN_EXPERT_MIN_VERSION frame as version 3 must not \
              silently reproduce the original data"

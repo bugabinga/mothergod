@@ -23,21 +23,22 @@
 //! driving [`crate::coder::Encoder`].
 //!
 //! **SSE-calibrated coding (`JOURNAL` S1-P1, S2-A58, S2-A59, `FORMAT_VERSION`
-//! 3).** [`Literal::encode_sse`]/[`Literal::decode_sse`] code the same mixed
-//! `cum` table [`Literal::encode`]/[`Literal::decode`] do, but through
-//! [`crate::bittree::encode_symbol_sse`]/[`crate::bittree::decode_symbol_sse`]
-//! instead of one direct 256-way range division: 8 chained binary decisions,
-//! each refined by [`Literal`]'s own [`Sse`] table
-//! (`crate::bittree::SSE_CONTEXTS` contexts, keyed by tree position only,
-//! `crate::bittree::sse_context`) before it reaches the coder. This
+//! 3).** [`Literal::encode_sse`]/[`Literal::decode_sse`] code the six-expert
+//! mixer's blended `cum` table through
+//! [`crate::bittree::encode_symbol_sse`]/[`crate::bittree::decode_symbol_sse`]:
+//! 8 chained binary decisions, each refined by [`Literal`]'s own [`Sse`]
+//! table (`crate::bittree::SSE_CONTEXTS` contexts, keyed by tree position
+//! only, `crate::bittree::sse_context`) before it reaches the coder. This
 //! calibrates the six-expert mixer's own blended probability at each
 //! binary-tree node, a compound estimate — unlike `JOURNAL` S2-R1's
 //! rejected attempt, which SSE-calibrated an already order-0-adaptive lone
 //! frequency counter (the flag model's `is_copy` bit) and found nothing to
-//! correct. The old [`Literal::encode`]/[`Literal::decode`] pair stays,
-//! unchanged, for decoding `FORMAT_VERSION` 2 frames
-//! (`tests/golden/v2-lz-repeated-text.mgdc` pins that forever); `codec.rs`
-//! picks between the two paths by the frame's declared version.
+//! correct. Every `FORMAT_VERSION` this build decodes (`codec::LZ_MIN_VERSION`
+//! (3) and up) codes through this path; the older direct 256-way range
+//! division that coded `FORMAT_VERSION` 2's literal sub-stream was deleted
+//! with that version
+//! (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`, no release
+//! having ever written it).
 //!
 //! **Decode-path determinism (`JOURNAL` S2-D3, resolved by ADR-0024).**
 //! The exponentiated-gradient weight update runs on both the encode and
@@ -207,7 +208,7 @@ fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) 
     (weight * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT)
 }
 
-/// Per-byte modeling context [`Literal::encode`]/[`Literal::decode`]
+/// Per-byte modeling context [`Literal::encode_sse`]/[`Literal::decode_sse`]
 /// read to select which banks blend at this position: the previous two
 /// bytes (`0` before the start of output, matching the archive's
 /// `fd[pos-1]`/`fd[pos-2]` boundary convention), the output position,
@@ -661,23 +662,11 @@ impl Literal {
         }
     }
 
-    /// Codes `byte` through `encoder` under `context`, then updates
-    /// every expert bank and the mixing weights.
-    pub fn encode(&mut self, encoder: &mut Encoder, context: Context, byte: u8) {
-        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
-        let symbol = usize::from(byte);
-        encoder.encode(cum[symbol], cum[symbol + 1], cum[ALPHABET]);
-        self.update(&bank_indices, weight_index, symbol, exp);
-    }
-
-    /// Codes `byte` through `encoder` under `context`, same as
-    /// [`Self::encode`], except the mixed `cum` table is coded as 8 chained
-    /// binary decisions through [`bittree::encode_symbol_sse`], each
-    /// calibrated by this model's own [`Sse`] table, instead of one direct
-    /// 256-way range division (`research/JOURNAL.md` S1-P1, `FORMAT_VERSION`
-    /// 3). The underlying six-expert mixer still adapts exactly as
-    /// [`Self::encode`] leaves it: `update` runs unconditionally after the
-    /// symbol is coded, regardless of which coding path chose it.
+    /// Codes `byte` through `encoder` under `context`, the mixed `cum`
+    /// table coded as 8 chained binary decisions through
+    /// [`bittree::encode_symbol_sse`], each calibrated by this model's own
+    /// [`Sse`] table (`research/JOURNAL.md` S1-P1, `FORMAT_VERSION` 3),
+    /// then updates every expert bank and the mixing weights.
     pub fn encode_sse(&mut self, encoder: &mut Encoder, context: Context, byte: u8) {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         bittree::encode_symbol_sse(encoder, &cum, byte, &mut self.sse);
@@ -685,8 +674,8 @@ impl Literal {
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_sse`], then updates the model the same way
-    /// [`Self::decode`] did.
+    /// of [`Self::encode_sse`], then updates every expert bank and the
+    /// mixing weights.
     ///
     /// Never panics on adversarial `decoder` state: [`bittree::decode_symbol_sse`]
     /// is total over any coded bit pattern (its own `Decoder::decode_bit`
@@ -702,8 +691,9 @@ impl Literal {
 
     /// Bits it would cost to code `byte` under `context`'s current mixed
     /// distribution — `-log2((cum[symbol+1] - cum[symbol]) /
-    /// cum[ALPHABET])` — then updates the model the same way
-    /// [`Self::encode`] does. No [`Encoder`] involved: this is
+    /// cum[ALPHABET])` — then updates every expert bank and the mixing
+    /// weights, exactly as [`Self::encode_sse`] does. No [`Encoder`]
+    /// involved: this is
     /// [`crate::model::Model::ideal_cost_bits`]'s counterpart for the
     /// six-expert mixer, the remaining scope `JOURNAL` S2-A30 flagged for
     /// ROADMAP M2's ideal-cost accounting mode.
@@ -887,36 +877,6 @@ impl Literal {
             crate::DEFAULT_RESCALE_INCREMENT,
             crate::DEFAULT_RESCALE_LIMIT,
         );
-    }
-
-    /// Decodes one byte from `decoder` under `context`, then updates the
-    /// model the same way [`Self::encode`] did, keeping both sides in
-    /// lockstep.
-    ///
-    /// Never panics on adversarial `decoder` state: [`Decoder::target`]
-    /// is mathematically bounded to `[0, total)`, and the mixed
-    /// cumulative-frequency table is built so every symbol contributes
-    /// at least `1`, so `cum[ALPHABET]` always exceeds any in-range
-    /// target and the scan below always finds a symbol before running
-    /// past the table.
-    #[must_use]
-    pub fn decode(&mut self, decoder: &mut Decoder, context: Context) -> u8 {
-        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
-        let total = cum[ALPHABET];
-        let target = decoder.target(total);
-        let mut symbol = 0usize;
-        while cum[symbol + 1] <= target {
-            symbol += 1;
-        }
-        decoder.decode(cum[symbol], cum[symbol + 1], total);
-        self.update(&bank_indices, weight_index, symbol, exp);
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "symbol is a scan index bounded by ALPHABET (256), always fits u8"
-        )]
-        {
-            symbol as u8
-        }
     }
 
     /// Codes `byte` through `encoder` under `context`, blending
@@ -1110,28 +1070,6 @@ impl Literal {
 mod tests {
     use super::*;
 
-    fn roundtrip_bytes(bytes: &[u8]) {
-        let mut model = Literal::new();
-        let mut context = Context::default();
-        let mut enc = Encoder::new();
-        for &b in bytes {
-            model.encode(&mut enc, context, b);
-            context = context.after_literal(b);
-        }
-        let encoded = enc.finish();
-
-        let mut model = Literal::new();
-        let mut context = Context::default();
-        let mut dec = Decoder::new(&encoded);
-        let mut got = Vec::with_capacity(bytes.len());
-        for _ in bytes {
-            let b = model.decode(&mut dec, context);
-            context = context.after_literal(b);
-            got.push(b);
-        }
-        assert_eq!(got, bytes);
-    }
-
     fn roundtrip_bytes_sse(bytes: &[u8]) {
         let mut model = Literal::new();
         let mut context = Context::default();
@@ -1155,44 +1093,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_stream_round_trips() {
-        roundtrip_bytes(&[]);
-    }
-
-    #[test]
-    fn single_byte_round_trips() {
-        roundtrip_bytes(b"x");
-    }
-
-    #[test]
-    fn skewed_repeat_round_trips() {
-        roundtrip_bytes(&b"aaaaaaaaaaaaaaaaaaaaaaaaaab".repeat(20));
-    }
-
-    #[test]
-    fn full_alphabet_cycles_round_trip() {
-        let bytes: Vec<u8> = (0..2000).map(|i| u8::try_from(i % 256).unwrap()).collect();
-        roundtrip_bytes(&bytes);
-    }
-
-    #[test]
-    fn ascii_text_round_trips() {
-        let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
-        roundtrip_bytes(&text);
-    }
-
-    #[test]
-    fn pseudo_random_bytes_round_trip() {
-        // 5000 bytes crosses every bank's rescale threshold repeatedly,
-        // including the fast expert's low 6144 ceiling.
-        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
-            .take(5000)
-            .map(|state| u8::try_from(state % 256).unwrap())
-            .collect();
-        roundtrip_bytes(&bytes);
-    }
-
-    #[test]
     fn copy_tokens_interleave_with_literals_round_trip() {
         // The shape Method-wiring will actually drive this with: literal
         // runs broken up by simulated LZ copy tokens, each shifting
@@ -1205,7 +1105,7 @@ mod tests {
         let copy_runs: &[&[u8]] = &[b"repeat repeat", b"o", b""];
         for (lits, copy) in literal_runs.iter().zip(copy_runs.iter()) {
             for &b in *lits {
-                model.encode(&mut enc, context, b);
+                model.encode_sse(&mut enc, context, b);
                 context = context.after_literal(b);
             }
             context = context.after_copy(copy);
@@ -1219,7 +1119,7 @@ mod tests {
         let mut got = Vec::with_capacity(total_literals);
         for (lits, copy) in literal_runs.iter().zip(copy_runs.iter()) {
             for _ in *lits {
-                let b = model.decode(&mut dec, context);
+                let b = model.decode_sse(&mut dec, context);
                 context = context.after_literal(b);
                 got.push(b);
             }
@@ -1398,104 +1298,6 @@ mod tests {
             .abs()
                 < 1e-9
         );
-    }
-
-    #[test]
-    fn ideal_cost_updates_state_same_as_encode() {
-        // ideal_cost_bits must leave the model in the same state encode
-        // would have: fork two identical models, drive one through each
-        // path over the same bytes, then confirm they agree from here by
-        // coding one more byte on top of each and comparing cost.
-        let bytes = b"hello world hello again";
-        let mut via_encode = Literal::new();
-        let mut context = Context::default();
-        let mut enc = Encoder::new();
-        for &b in bytes {
-            via_encode.encode(&mut enc, context, b);
-            context = context.after_literal(b);
-        }
-        let mut via_ideal_cost = Literal::new();
-        let mut ideal_context = Context::default();
-        for &b in bytes {
-            let _ = via_ideal_cost.ideal_cost_bits(ideal_context, b);
-            ideal_context = ideal_context.after_literal(b);
-        }
-        assert_eq!(context, ideal_context);
-        assert!(
-            (via_encode.ideal_cost_bits(context, b'!')
-                - via_ideal_cost.ideal_cost_bits(context, b'!'))
-            .abs()
-                < 1e-9
-        );
-    }
-
-    #[test]
-    fn ideal_cost_sum_tracks_real_encoded_length() {
-        // Named corpus (CLAUDE.md hard rule 4): the founding session's
-        // archived codec, real structured Rust source, the same fixture
-        // vendored_exp_keeps_bits_per_byte_within_one_percent_of_f64_exp
-        // above uses. Summed ideal cost is an estimate, not the real
-        // coder's bit-exact output (integer cumulative-frequency division
-        // rounds; the coder also pays a handful of flush bits at the very
-        // end), so this checks closeness, not equality — the same
-        // tolerance shape as that test and model.rs's counterpart.
-        let corpus: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
-
-        let mut ideal_cost_model = Literal::new();
-        let mut context = Context::default();
-        let ideal_bits: f64 = corpus
-            .iter()
-            .map(|&b| {
-                let cost = ideal_cost_model.ideal_cost_bits(context, b);
-                context = context.after_literal(b);
-                cost
-            })
-            .sum();
-
-        let mut real_model = Literal::new();
-        let mut context = Context::default();
-        let mut enc = Encoder::new();
-        for &b in corpus {
-            real_model.encode(&mut enc, context, b);
-            context = context.after_literal(b);
-        }
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "encoded length is far below f64's exact integer range (2^53)"
-        )]
-        let real_bits = (enc.finish().len() * 8) as f64;
-
-        let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
-        assert!(
-            relative_diff <= 0.01,
-            "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
-             {relative_diff:.4} relative difference exceeds the 1% budget"
-        );
-    }
-
-    #[test]
-    fn decoding_truncated_stream_does_not_panic() {
-        let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
-        let mut model = Literal::new();
-        let mut context = Context::default();
-        let mut enc = Encoder::new();
-        for &b in &bytes {
-            model.encode(&mut enc, context, b);
-            context = context.after_literal(b);
-        }
-        let encoded = enc.finish();
-        let truncated = &encoded[..encoded.len() / 2];
-
-        let mut model = Literal::new();
-        let mut context = Context::default();
-        let mut dec = Decoder::new(truncated);
-        for _ in &bytes {
-            let b = model.decode(&mut dec, context);
-            context = context.after_literal(b);
-        }
-        // No panic is the assertion: decoded bytes past the real data are
-        // whatever implicit-zero bits produce, never treated as ground
-        // truth here.
     }
 
     /// `f64::exp`, the pre-ADR-0024 reference this test diffs `exp`
