@@ -101,6 +101,18 @@ test("one media group per page: before beside after, narrow then wide, caption f
   assert.ok(seen[0].body.includes("png:index-375x812-before.png"));
 });
 
+test("a pair rendered without its deploy-generated data says so in the caption", async () => {
+  seen.length = 0;
+  const missing = ["status-data.json", "trust-data.json"];
+  const r = await send(
+    "tok-ok",
+    shots([{ ...row("375x812"), missing_data: missing }, { ...row("1440x900"), missing_data: missing }]),
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const media = JSON.parse(seen[0].body.match(/name="media"\r\n\r\n(.*?)\r\n/s)[1]);
+  assert.match(media[0].caption, /1440x900 \(rendered without status-data.json, trust-data.json\)$/);
+});
+
 test("a single still goes as one photo, captioned by branch when there is no PR", async () => {
   seen.length = 0;
   const only = { ...row("375x812", null), before: null };

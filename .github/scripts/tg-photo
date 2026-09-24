@@ -103,7 +103,13 @@ def caption_for(items: list, repo: str) -> str:
     viewports = ", ".join(dict.fromkeys(row["viewport"] for row in items))
     head = (f'<a href="https://github.com/{repo}/pull/{first["pr"]}">#{first["pr"]}</a>'
             if first.get("pr") else f"<code>{html.escape(first['branch'])}</code>")
-    return f"{head} {html.escape(first['page'])}: before and after at {html.escape(viewports)}"
+    text = f"{head} {html.escape(first['page'])}: before and after at {html.escape(viewports)}"
+    missing = first.get("missing_data") or []
+    if missing:
+        # A page that fetches deploy-generated data rendered without it on
+        # both sides; the reader must know the pair is partial (PR #732).
+        text += f" (rendered without {html.escape(', '.join(missing))})"
+    return text
 
 
 def send(token: str, chat: str, photos: list, caption: str) -> list:

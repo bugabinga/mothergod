@@ -28,6 +28,17 @@ Which pages: a changed `.html` under site/ is captured; a change to any
 other file under site/ (an asset every page may reference) captures every
 page. Viewports are the two `web-ui` names, 375x812 and 1440x900.
 
+Deploy-generated data: status.html and agents.html render from JSON files
+that deploy-site.yml generates and never commits (status-data.json,
+agent-metrics.json, trust-data.json), so a worktree alone renders "could
+not load" on both sides, a pair that says nothing (PR #732 review). Every
+`fetch('/<name>.json')` the pages make is discovered from their markup and
+the file is fetched from the deployed site into both trees before serving,
+which is what the operator sees today at sub-second cost; regenerating it
+here would cost the four minutes deploy-site pays. A file the deployed
+site cannot provide is recorded on the row as `missing_data` and named in
+tg-photo's caption, so a meaningless pair is never a silent one.
+
 Output: PNGs in <out-dir> plus `manifest.json`, one row per (branch, page,
 viewport) with `before` and `after` file names, either null when the page
 does not exist on that side. `tg-photo` reads that manifest; nothing here
@@ -42,21 +53,26 @@ else the first of google-chrome-stable, chromium, chromium-browser on PATH,
 all of which ubuntu-latest carries (verified 2026-09-21, #658).
 
 Usage: site-shots <out-dir> [--base <ref>] [--branch <name>=<sha>]...
+                  [--data-from <url>]
 
 `--branch` names a branch and its head explicitly, for a caller that did not
 push through push-branch; without it, every branch in the push record is
-processed. `--base` defaults to origin/main.
+processed. `--base` defaults to origin/main. `--data-from` is where the
+deploy-generated files come from, https://mothergod.dev unless a test
+points it at a local directory (`file:///...`).
 """
 
 import http.server
 import json
 import os
+import re
 import shutil
 import socketserver
 import subprocess
 import sys
 import tempfile
 import threading
+import urllib.request
 
 BROWSERS = ("google-chrome-stable", "chromium", "chromium-browser")
 # The two viewports .claude/skills/web-ui names; narrow first, so a media
@@ -65,6 +81,13 @@ VIEWPORTS = ((375, 812), (1440, 900))
 # push-branch's record of what this checkout pushed, per branch.
 OWN_PUSHES = "push-branch-refs.json"
 SITE = "site"
+# The deployed site, where deploy-generated data files are fetched from.
+DATA_FROM = "https://mothergod.dev"
+# Cloudflare's edge answers 403 to urllib's default User-Agent (tg-send
+# learned this on the worker); our tooling says who it is.
+UA = "mothergod-site-shots"
+# A page's own reference to a deploy-generated file: fetch('/x.json').
+DATA_REF = re.compile(r"""fetch\(\s*['"]/([\w.-]+\.json)['"]""")
 # Seconds one capture may take before it counts as a failed shot. The
 # environment override exists for the hang test; nothing in production sets it.
 TIMEOUT = float(os.environ.get("SITE_SHOTS_TIMEOUT", "60"))
@@ -77,10 +100,13 @@ def main() -> int:
         return 2
     out_dir, args = os.path.abspath(args[0]), args[1:]
     base = "origin/main"
+    data_from = DATA_FROM
     branches = {}
     while args:
         if args[0] == "--base" and len(args) > 1:
             base, args = args[1], args[2:]
+        elif args[0] == "--data-from" and len(args) > 1:
+            data_from, args = args[1].rstrip("/"), args[2:]
         elif args[0] == "--branch" and len(args) > 1 and "=" in args[1]:
             name, sha = args[1].split("=", 1)
             branches[name] = sha
@@ -102,7 +128,7 @@ def main() -> int:
     try:
         for branch, sha in branches.items():
             try:
-                failures += capture_branch(branch, sha, base, out_dir, rows)
+                failures += capture_branch(branch, sha, base, out_dir, rows, data_from)
             except CaptureError as err:
                 failures += 1
                 print(f"site-shots: {branch}: {err}", file=sys.stderr)
@@ -121,7 +147,8 @@ class CaptureError(Exception):
     """A capture that should have happened and could not."""
 
 
-def capture_branch(branch: str, sha: str, base: str, out_dir: str, rows: list) -> int:
+def capture_branch(branch: str, sha: str, base: str, out_dir: str, rows: list,
+                   data_from: str) -> int:
     """Append this branch's rows to `rows`; return how many shots failed."""
     ensure_object(branch, sha)
     merge_base = git("merge-base", base, sha).strip()
@@ -143,11 +170,13 @@ def capture_branch(branch: str, sha: str, base: str, out_dir: str, rows: list) -
         trees = {"before": worktree(tmp, "before", merge_base),
                  "after": worktree(tmp, "after", sha)}
         try:
+            missing = place_data(trees.values(), data_from)
             for page in pages:
                 for width, height in VIEWPORTS:
                     row = {"branch": branch, "sha": sha, "base": merge_base, "pr": pr,
                            "page": page, "viewport": f"{width}x{height}",
-                           "before": None, "after": None}
+                           "before": None, "after": None,
+                           "missing_data": sorted(missing)}
                     for phase, tree in trees.items():
                         if not os.path.exists(os.path.join(tree, page)):
                             continue
@@ -213,6 +242,36 @@ def shoot(browser: str, root: str, page: str, width: int, height: int, out: str)
     if proc.returncode != 0 or not os.path.exists(out):
         raise CaptureError(f"{where}: browser exit {proc.returncode}: "
                            f"{proc.stderr.strip()[-300:]}")
+
+
+def place_data(trees, data_from: str) -> set:
+    """Fetch every deploy-generated file the pages reference into each tree.
+
+    Returns the names the source could not provide; each is one stderr line
+    here and a caption note downstream, never a stop: the static parts of
+    the page are still evidence.
+    """
+    names = set()
+    for tree in trees:
+        site = os.path.join(tree, SITE)
+        for entry in os.listdir(site) if os.path.isdir(site) else []:
+            if entry.endswith(".html"):
+                with open(os.path.join(site, entry), encoding="utf-8", errors="replace") as fh:
+                    names.update(DATA_REF.findall(fh.read()))
+    missing = set()
+    for name in sorted(names):
+        try:
+            request = urllib.request.Request(f"{data_from}/{name}", headers={"User-Agent": UA})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                data = response.read()
+        except (OSError, ValueError) as err:
+            missing.add(name)
+            print(f"site-shots: {name}: not available from {data_from}: {err}", file=sys.stderr)
+            continue
+        for tree in trees:
+            with open(os.path.join(tree, SITE, name), "wb") as fh:
+                fh.write(data)
+    return missing
 
 
 def worktree(tmp: str, name: str, ref: str) -> str:

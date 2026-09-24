@@ -14,19 +14,35 @@ import { test } from "node:test";
 const script = new URL("site-shots", import.meta.url).pathname;
 
 // The stub: `--screenshot=<out>` and the URL are the two arguments that
-// matter; the served body stands in for pixels.
+// matter; the served body stands in for pixels. It also follows every
+// fetch('/x.json') the page makes, the way a browser running the page's
+// script would, and appends what it got or the status it hit, so a page
+// rendered without its deploy-generated data is visible here.
 const stub = join(mkdtempSync(join(tmpdir(), "site-shots-stub-")), "browser");
 writeFileSync(
   stub,
   `#!/usr/bin/env python3
-import sys, urllib.request
+import re, sys, urllib.error, urllib.request
 out = next(a for a in sys.argv if a.startswith("--screenshot=")).split("=", 1)[1]
 size = next(a for a in sys.argv if a.startswith("--window-size=")).split("=", 1)[1]
-body = urllib.request.urlopen(sys.argv[-1], timeout=10).read().decode()
+url = sys.argv[-1]
+body = urllib.request.urlopen(url, timeout=10).read().decode()
+root = url.rsplit("/", 1)[0]
+for name in re.findall(r"fetch\\('/([\\w.-]+\\.json)'\\)", body):
+    try:
+        body += " " + name + "=" + urllib.request.urlopen(root + "/" + name, timeout=10).read().decode()
+    except urllib.error.HTTPError as err:
+        body += " " + name + "=HTTP " + str(err.code)
 open(out, "w").write(size + " " + body)
 `,
   { mode: 0o755 },
 );
+
+// Data files the deployed site would serve, as a file:// source; a name it
+// lacks is a 404 there too.
+const data = mkdtempSync(join(tmpdir(), "site-shots-data-"));
+writeFileSync(join(data, "status-data.json"), "{\"experiments\":51}");
+const dataFrom = `file://${data}`;
 
 function repo() {
   const dir = mkdtempSync(join(tmpdir(), "site-shots-repo-"));
@@ -45,7 +61,7 @@ function repo() {
 }
 
 function run(dir, out, args, env = {}) {
-  return spawnSync("python3", [script, out, ...args], {
+  return spawnSync("python3", [script, out, "--data-from", dataFrom, ...args], {
     cwd: dir,
     env: { PATH: process.env.PATH, SITE_SHOTS_BROWSER: stub, ...env },
     encoding: "utf8",
@@ -153,6 +169,50 @@ exec(open(${JSON.stringify(stub)}).read())
     [null, null],
     [null, null],
   ]);
+});
+
+test("a page that fetches deploy-generated data renders with it on both sides", () => {
+  // status.html and agents.html fetch JSON that deploy-site generates and
+  // never commits; a worktree alone renders "could not load" twice (#732,
+  // round four). The data comes from the deployed site into both trees.
+  const { dir, git } = repo();
+  writeFileSync(join(dir, "site/status.html"), "<script>fetch('/status-data.json')</script>old");
+  git("add", "-A");
+  git("commit", "-q", "-m", "status page");
+  const mid = git("rev-parse", "HEAD");
+  writeFileSync(join(dir, "site/status.html"), "<script>fetch('/status-data.json')</script>new");
+  git("commit", "-q", "-am", "change status");
+  const head = git("rev-parse", "HEAD");
+  const out = join(dir, "shots");
+  const r = run(dir, out, ["--base", mid, "--branch", `claude/x=${head}`]);
+  assert.equal(r.status, 0, r.stderr);
+  const rows = manifest(out);
+  const page = "<script>fetch('/status-data.json')</script>";
+  assert.equal(
+    readFileSync(join(out, rows[0].before), "utf8"),
+    `375,812 ${page}old status-data.json={"experiments":51}`,
+  );
+  assert.equal(
+    readFileSync(join(out, rows[0].after), "utf8"),
+    `375,812 ${page}new status-data.json={"experiments":51}`,
+  );
+  assert.deepEqual(rows[0].missing_data, []);
+  // Placed, never committed: the branch's tree is untouched.
+  assert.ok(!git("ls-tree", "-r", "--name-only", head).includes("status-data.json"));
+});
+
+test("data the deployed site cannot provide is recorded on the row, not hidden", () => {
+  const { dir, git, base } = repo();
+  writeFileSync(join(dir, "site/agents.html"), "<script>fetch('/agent-metrics.json')</script>agents");
+  git("commit", "-q", "-am", "agents fetches metrics");
+  const head = git("rev-parse", "HEAD");
+  const out = join(dir, "shots");
+  const r = run(dir, out, ["--base", base, "--branch", `claude/x=${head}`]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /agent-metrics.json: not available from file:/);
+  const rows = manifest(out);
+  assert.deepEqual(rows[0].missing_data, ["agent-metrics.json"]);
+  assert.match(readFileSync(join(out, rows[0].after), "utf8"), /agent-metrics.json=HTTP 404/);
 });
 
 test("a hanging browser is a failed shot, not a lost run", () => {
