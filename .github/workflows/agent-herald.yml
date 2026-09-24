@@ -186,8 +186,9 @@ jobs:
         run: |
           # tg-photo runs whatever site-shots' exit was: a failed shot is an
           # error line plus the manifest of every shot that succeeded, and
-          # those still go. The exit is kept so the step reads red in the log.
-          shots=0
-          .github/scripts/site-shots "${RUNNER_TEMP}/site-shots" || shots=$?
-          .github/scripts/tg-photo "${RUNNER_TEMP}/site-shots"
-          exit "$shots"
+          # those still go. Either script's failure keeps the step red in
+          # the log; a delivery failure after a clean capture is one too.
+          status=0
+          .github/scripts/site-shots "${RUNNER_TEMP}/site-shots" || status=$?
+          .github/scripts/tg-photo "${RUNNER_TEMP}/site-shots" || status=$?
+          exit "$status"
