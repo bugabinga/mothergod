@@ -91,6 +91,20 @@ test("edits name the file relative to the checkout; fetches name the host", asyn
   assert.equal(posts.at(-1).body.text, "bdfl, starting\n· edit src/lib.rs\n· fetch core.telegram.org\n· skill adr");
 });
 
+test("a tool with no dedicated words is spaced out, not squashed", async () => {
+  await hook({ session_id: "s-eight", tool_name: "ListAgents", tool_input: {} });
+  await hook({ session_id: "s-eight", tool_name: "ScheduleWakeup", tool_input: {} });
+  await hook({
+    session_id: "s-eight",
+    tool_name: "mcp__github_file_ops__commit_files",
+    tool_input: {},
+  });
+  assert.equal(
+    posts.at(-1).body.text,
+    "bdfl, starting\n· list agents\n· schedule wakeup\n· commit files",
+  );
+});
+
 test("a credential in a description is redacted before it leaves the runner", async () => {
   await hook(bash("s-four", "push with ghp_abcdefghijklmnopqrstuvwxyz0123456789"));
   const text = posts.at(-1).body.text;

@@ -41,6 +41,7 @@ it; nothing in production sets MOTHERGOD_WORKER_BASE.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -99,9 +100,23 @@ def describe(tool: str, tool_input, cwd) -> str:
     elif tool == "Skill":
         line = f"skill {args.get('skill', '')}"
     else:
-        line = tool.lower()
+        line = humanize(tool)
     line = " ".join(str(line).split())
     return line if len(line) <= WIDTH else line[: WIDTH - 1] + "…"
+
+
+def humanize(tool: str) -> str:
+    """A tool this script has no words for, spaced out instead of squashed.
+
+    Every PascalCase name (`ListAgents`, `ScheduleWakeup`) reads as one
+    unbroken word once lowercased, and an MCP name (`mcp__server__tool`)
+    carries its plumbing on its face. Neither is a word closest to a
+    human's; split PascalCase on capitals and keep only the MCP name's
+    last segment, its server being implementation the operator did not
+    ask about.
+    """
+    name = tool.rsplit("__", 1)[-1] if tool.startswith("mcp__") else tool
+    return re.sub(r"(?<!^)(?=[A-Z])", " ", name).replace("_", " ").lower()
 
 
 def relative(path, cwd) -> str:
