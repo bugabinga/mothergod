@@ -71,6 +71,11 @@ prompts in `.github/workflows/` — both are ordinary versioned files. The
 BDFL evolves them directly; other agents propose changes by PR, which the
 reviewer treats as high-risk (see below).
 
+A roster change (a seat created, deleted or renamed) is one PR touching
+the seat's workflow, its persona in `agents/personas/`, its ladder in
+`agents/models.json` and this section together; an outward-facing
+identity registers in `agents/IDENTITIES.md` in the same PR.
+
 ## Decision rules
 
 The one-line rule (ADR-0011): is it `MISSION.md`? Operator. Anything else?
@@ -184,6 +189,9 @@ reviewed nothing. Two ways in, both observed on 2026-08-22:
   possible, now or on any future push; the PR lands by BDFL discretion
   once the required quality gates are green, the envelope authority
   (ADR-0008) acting as reviewer of last resort for its own machinery.
+  That discretion reads the PR's file list and names it in the merge:
+  #114 carried a second workflow and an ADR onto main unreviewed under
+  a one-workflow subject.
 - The PR branched before a reviewer-workflow change merged, so its
   copy went stale (PR #68's re-review, 32-second run). Every open PR
   is unreviewable from the moment such a change lands until its
