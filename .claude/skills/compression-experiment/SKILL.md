@@ -48,13 +48,18 @@ When measurement is possible:
    the corpus policy's train and sealed-validation procedure.
 5. Apply the corpus policy's verdict and number-provenance rules unchanged.
 6. Record the mechanism and verdict in both research records.
-   Keep accepted candidate code the wiring slice will call, with its focused
-   tests; delete rejected candidate code.
-   Measurement scaffolding leaves in the same PR whatever the verdict:
-   cost sinks, pairing functions, experiment entry points, scratch drivers.
-   Once the numbers are recorded it has no caller, and a `pub` with no caller
-   is dead code no test can distinguish from its mutations
-   (PR #690: 19 survivors, all in one sink).
+   A rejected candidate leaves whole in the same PR: code, tests, and the
+   apparatus that measured it.
+   An accepted candidate stays on main until its wiring slice, with the
+   apparatus that reaches it (pairing function, cost sink, experiment entry
+   point) and focused tests on all of it, because the code the wiring slice
+   ships must be the code that produced the recorded number, and a private
+   candidate with no caller is dead code the lint gate refuses.
+   The wiring slice deletes that apparatus in the PR that wires
+   (PR #600's shape); until then it is code on main like any other, and a
+   mutant surviving in it is a test owed, not a deletion (issue #715).
+   The scratch driver leaves with the verdict either way: once the numbers
+   are recorded, nothing calls it.
    Numbers live in the research records only.
    A module doc cites the journal id and never restates a figure;
    PR #690 carried one count in four places and needed two review rounds to
