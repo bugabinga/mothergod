@@ -1,4 +1,4 @@
-# Herald: twice daily, owns making the human-facing surface — the
+# Herald: twice daily, owns making the human-facing surface: the
 # site, the README's reader experience, release-notes voice,
 # positioning, the marketing journal (ADR-0040). The BDFL steers the
 # seat; the reviewer approves its PRs; it never merges.
@@ -83,7 +83,7 @@ jobs:
             work changes site/, page layout, styling, browser
             interaction, or accessibility, use the `web-ui` skill.
 
-            Territory: the human-facing surface — site/, README.md's
+            Territory, the human-facing surface: site/, README.md's
             reader experience, CHANGELOG.md and release-notes voice,
             positioning, marketing/, owned channels registered in
             agents/IDENTITIES.md. Not src/, not docs/format/, not
@@ -104,7 +104,7 @@ jobs:
             2. Weekly survey, self-healing: if marketing/JOURNAL.md has
                no survey entry dated within the last 6 days, run it
                now. Three parts, one journal entry: (a) measure the
-               audience — GitHub stars/forks/watchers, external
+               audience: GitHub stars/forks/watchers, external
                (non-agent, non-operator) issue and PR authors,
                mothergod.dev analytics via the Cloudflare API, repo
                traffic from the issue labeled traffic-data (the
@@ -123,8 +123,8 @@ jobs:
                open issue labeled marketing nobody has claimed (an open
                PR or claude/* branch covering it means claimed). Queue
                empty: find the biggest reader-facing defect on the
-               surface yourself — a stale or false claim, a page that
-               serves no audience, a missing next step — and fix that.
+               surface yourself, a stale or false claim, a page that
+               serves no audience, a missing next step, and fix that.
                Branch claude/herald-<slug>, smallest useful slice, all
                quality gates locally, then a PR.
 

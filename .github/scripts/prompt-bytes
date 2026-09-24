@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Print prompt bytes per seat against their pins; fail when a prompt and its pin disagree.
+
+Extensionless and executable because agents type it as a command mid-session,
+like retrospect and survey-due.
+
+#486's context audits judge each seat by one number, prompt bytes, and two
+seats derived it by hand four times in ten days (#543, #655, #688, the
+curator's re-measure on #486), the last two disagreeing by 18 bytes on the
+reviewer for a reason neither could name (#689). The reason: one counted
+UTF-8 bytes, the other code points, and that prompt carried nine em dashes at
+three bytes each. A measurement two readers cannot reproduce is not a
+measurement, so the definition lives here, once.
+
+Definition:
+
+    seat        every `.github/workflows/agent-*.yml` whose steps carry a
+                `with.prompt` key, named by the file stem after `agent-`
+                (`review`, not `reviewer`: the file is what is measured).
+                `agent-alarm.yml` and `agent-model-intel.yml` carry no prompt
+                and are not seats; they print nothing rather than a zero, so
+                two zeros never read as two shrunken seats. A workflow with
+                two prompt steps counts their sum.
+    bytes       UTF-8 bytes of the parsed `prompt:` scalar: the YAML block
+                indent gone, the `|` scalar's one trailing newline kept,
+                `${{ }}` expressions counted as the text they are. Bytes,
+                because that is what the four audits reported and what the
+                pins below record.
+    lines       newlines in the scalar.
+    em dashes   U+2014 count. CLAUDE.md's Voice forbids the character;
+                `deny-em-dash` guards posted text, and nothing guarded the
+                prompts until this did. Any em dash is a finding.
+
+The pin is the liveness signal, and the answer to the curator's question on
+#689: who reads the number, and at what delta does it act. Nobody reads a
+total in a footer; check 5 of #486's checklist fired once, on the director's
+1,968-byte regrowth over eight days, and was caught because somebody
+remembered to re-measure. So every seat's bytes are pinned in PINNED below,
+and `prompt-bytes.test.mjs` runs this against the repository: a PR that
+changes a prompt goes red in `ci`'s worker job until the pin moves in the
+same diff, which puts the growth on the reviewer's screen as one line with
+the PR body owing its reason. The pin is exact, not a ceiling and not a
+ratchet: a ceiling leaves headroom, and headroom is where 1,968 bytes hid; a
+ratchet that fails only on growth lets a shrink leave silent room to regrow
+into. The pins are the audit program's rating in one place (#486 item 3),
+and `git log -p` on this file is every seat's size history.
+
+The parse is PyYAML, apt's python3-yaml on the ubuntu-24.04 image, the same
+one `check-bdfl-wake-predicate.py` uses.
+
+Usage: prompt-bytes
+
+Prints the table, the footer, then one line per finding. Exits 1 on any
+finding, 0 otherwise.
+"""
+
+import glob
+import os
+import sys
+
+import yaml
+
+WORKFLOWS = ".github/workflows"
+EM_DASH = "—"
+
+# Pinned UTF-8 bytes of each seat's prompt. Change a prompt, move its pin in
+# the same PR, and let the PR body say why the seat grew or how it shrank.
+PINNED = {
+    "bdfl": 16341,
+    "curator": 3749,
+    "deslop": 1730,
+    "heartbeat": 3913,
+    "herald": 3220,
+    "research": 636,
+    "review": 5102,
+}
+
+
+def prompts(doc):
+    """Every `with.prompt` scalar in a parsed workflow, in step order."""
+    found = []
+    for job in (doc.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            inputs = step.get("with") or {}
+            if isinstance(inputs.get("prompt"), str):
+                found.append(inputs["prompt"])
+    return found
+
+
+def measure(text):
+    """The three numbers the definition above fixes, for one prompt text."""
+    return {
+        "bytes": len(text.encode("utf-8")),
+        "lines": text.count("\n"),
+        "em_dashes": text.count(EM_DASH),
+    }
+
+
+def seats(root):
+    """Seat name to measurement, for every agent-*.yml under `root` carrying a prompt."""
+    found = {}
+    for path in sorted(glob.glob(os.path.join(root, WORKFLOWS, "agent-*.yml"))):
+        with open(path, encoding="utf-8") as f:
+            texts = prompts(yaml.safe_load(f))
+        if not texts:
+            continue
+        name = os.path.basename(path)[len("agent-") : -len(".yml")]
+        found[name] = measure("".join(texts))
+    return found
+
+
+def findings(seen, pinned):
+    """One line per disagreement, each naming the next step."""
+    out = []
+    for name in sorted(set(seen) | set(pinned)):
+        if name not in pinned:
+            out.append(
+                f"{name}: {seen[name]['bytes']:,} bytes, no pin. "
+                f"Add PINNED[{name!r}] = {seen[name]['bytes']} in .github/scripts/prompt-bytes."
+            )
+            continue
+        if name not in seen:
+            out.append(f"{name}: pinned {pinned[name]:,} bytes, no agent-{name}.yml carries a prompt. Drop its pin.")
+            continue
+        got, pin = seen[name]["bytes"], pinned[name]
+        if got > pin:
+            out.append(
+                f"{name}: {got:,} bytes, pinned {pin:,}, grew {got - pin:,}. "
+                f"Move the pin to {got} in this PR and say why in its body, or cut {got - pin:,} bytes."
+            )
+        elif got < pin:
+            out.append(
+                f"{name}: {got:,} bytes, pinned {pin:,}, shrank {pin - got:,}. "
+                f"Move the pin to {got} so the room does not hide a regrowth."
+            )
+        if seen[name]["em_dashes"]:
+            out.append(
+                f"{name}: {seen[name]['em_dashes']} em dash(es). CLAUDE.md Voice: none, ever. "
+                "Comma, colon, semicolon, period."
+            )
+    return out
+
+
+def render(seen, pinned, out=sys.stdout):
+    """Print the table, the footer, the findings. Returns the finding count."""
+    width = max([len("seat"), *(len(n) for n in seen)])
+    print(f"{'seat':<{width}}   bytes  pinned  lines  em", file=out)
+    for name, m in sorted(seen.items(), key=lambda kv: -kv[1]["bytes"]):
+        pin = f"{pinned[name]:,}" if name in pinned else "-"
+        print(
+            f"{name:<{width}}  {m['bytes']:>6,}  {pin:>6}  {m['lines']:>5}  {m['em_dashes']:>2}",
+            file=out,
+        )
+    found = findings(seen, pinned)
+    total = sum(m["bytes"] for m in seen.values())
+    print(
+        f"\nprompt-bytes: seats {len(seen)} | total {total:,} bytes | pins {len(pinned)} | findings {len(found)}",
+        file=out,
+    )
+    for line in found:
+        print(f"    {line}", file=out)
+    return len(found)
+
+
+def main():
+    return 1 if render(seats(os.getcwd()), PINNED) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
