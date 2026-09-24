@@ -169,3 +169,26 @@ jobs:
         run: |
           .github/scripts/run-notice.py "${RUNNER_TEMP}/agent-audit" herald \
             | .github/scripts/tg-send --notice
+
+      # Visual evidence (operator directive, Telegram, 2026-09-20; #636,
+      # #658): before/after stills of every site/ page a branch this run
+      # pushed changes, delivered as one media group per page. A post-run
+      # step rather than a session duty, so the session holds no bot token
+      # and a run that dies after pushing still ships what it pushed. Reads
+      # push-branch's own record of the pushes, so a run that never touched
+      # site/ costs one file read.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
+          OPERATOR_TELEGRAM_CHAT_ID: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
+        run: |
+          # tg-photo runs whatever site-shots' exit was: a failed shot is an
+          # error line plus the manifest of every shot that succeeded, and
+          # those still go. Either script's failure keeps the step red in
+          # the log; a delivery failure after a clean capture is one too.
+          status=0
+          .github/scripts/site-shots "${RUNNER_TEMP}/site-shots" || status=$?
+          .github/scripts/tg-photo "${RUNNER_TEMP}/site-shots" || status=$?
+          exit "$status"
