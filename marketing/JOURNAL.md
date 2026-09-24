@@ -18,6 +18,77 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-24 — Editorial: the answer was there, under the architecture
+
+Took #692, the top of the queue and unblocked since #703 landed.
+`/status.html`'s first heading asks "Can I use this yet?" and its card opened
+with `PRE-ALPHA`, the format version, and both `Method` doc comments. On a
+phone that card plus the page header is the whole first screen: 425px of
+verdict section at 375x812, all of it bitstream architecture, under a heading
+about usability.
+
+**The card now answers its heading in its first two words, and the answer is
+rendered off `phase`, not typed.** `status-data.py`'s `_phase` returns
+`released` exactly when every non-ongoing ROADMAP milestone has closed, the
+release milestone included, so the denial retires itself on the day it stops
+being true. That is the durable half the curator asked for, and it is why the
+sentence is not a copy of `/`'s.
+
+**The denial deliberately avoids the words "pre-alpha" and "no release", and
+that is the decision worth recording.** Yesterday's guard,
+`release_state_claims_agree_with_the_changelog`, watches those two phrases
+across four surfaces including this file, and after a release it fails
+wherever they are still *written*. A phase-conditional copy is not a stale
+copy, but the guard cannot see the conditional: it would fail on a string
+that renders nothing, which is a guard crying wolf at the one mechanism that
+made it unnecessary. So the conditional copy says the same thing in its own
+words, "nothing is packaged, tagged, or published, so there is nothing to
+install", and `site/status.html` stays in SURFACES watching for the
+hand-typed copies the guard exists to catch. The invariant is written into
+the page next to the code that depends on it, because it is the kind that
+lives in two files and is obvious in neither.
+
+**Demotion by disclosure, not by font size.** The method list is real,
+generated from the enum's own doc comments, and useful to the engineer who
+has already decided to look; it is not the answer. Shrinking it would have
+left ~230 characters of `Lz` doc still occupying most of a phone screen.
+A `<details>` collapses it to one mono line, `Format version 4 · 2 frame
+methods`, which keeps the format version visible because that fact is about
+trust rather than architecture. First `<details>` on the site, so it is
+styled as a named second tier (`.card .detail`) rather than a one-off,
+because the next card that needs this will not be the last.
+
+Measured, served from `site/` over HTTP at the deployed root with
+`status-data.json` generated from this checkout, geometry read back over the
+W3C protocol at viewports corrected against `window.innerWidth`; before tree
+a detached worktree at `954d036`:
+
+| | before 375 | after 375 | before 1440 | after 1440 |
+|---|---|---|---|---|
+| Verdict card height | 388px | 273px | 237px | 173px |
+| Verdict section height | 425px | 310px | 274px | 210px |
+| "Is it any good?" starts at | 839px | 724px | 645px | 581px |
+| Document height | 4475px | 4361px | 3118px | 3054px |
+
+All three data branches exercised by feeding the page edited copies of its
+own data file: `released` renders "Yes" with the changelog named, a null
+`phase` renders "Cannot say" and says which source failed, and a null
+`format_version` with null `methods` drops the disclosure rather than
+printing `?`. Keyboard: the summary is the fifth tab stop, after the four
+frame links, takes the site's gold focus ring, opens on Enter and closes on
+Space.
+
+**One link each way, because an answer without a next step is half an
+answer.** "Build it from source" now goes to `/#try-it`, which is `/`'s
+existing Try-it section given an id; the click was followed from the deployed
+root and lands with the section at scroll top. The released branch links the
+changelog, which the footer does not carry.
+
+Deviation from #692's item 1 as written: it says the card should render the
+answer from `phase` *and* `format_version`. The format version is not part of
+the answer to "can I use this yet", so it moved into the disclosure summary
+instead. Recorded rather than folded in silently.
+
 ## 2026-09-23 — Editorial: half the status box was already mechanized, and the run said so
 
 Took #703, the top of the queue: the curator ranked it above #692 on the

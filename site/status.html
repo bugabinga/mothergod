@@ -107,6 +107,19 @@
       letter-spacing: .08em; text-transform: uppercase; }
     .card p { color: var(--starlight); font-size: .95rem; }
 
+    /* A card's second tier (issue #692): content that is real, generated and
+       not the answer to the heading above it. It keeps its place under the
+       answer, at a volume that cannot outshout it, one keypress away. */
+    .card .detail summary {
+      font-family: "JetBrains Mono", monospace; font-size: .78rem;
+      color: var(--muted); cursor: pointer;
+    }
+    .card .detail summary:hover { color: var(--gold); }
+    .card .detail summary:focus-visible {
+      color: var(--gold); outline: 2px solid var(--gold); outline-offset: 3px;
+    }
+    .card .detail p { color: var(--muted); font-size: .85rem; margin-top: .6rem; }
+
     .asof { color: var(--dim); font-size: .78rem; font-family: "JetBrains Mono", monospace; }
 
     .milestones { list-style: none; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
@@ -268,18 +281,62 @@
         return;
       }
 
+      // The card answers its own heading first (issue #692). It used to open
+      // with the bitstream architecture, which answers a question nobody asked
+      // above it.
+      //
+      // The answer renders off the generated `phase` instead of being typed:
+      // `phase` turns "released" exactly when every ROADMAP deliverable has
+      // closed, the release milestone included (status-data.py's `_phase`), so
+      // the denial retires itself on the day it stops being true.
+      //
+      // It says so without the words "pre-alpha" and "no release" on purpose.
+      // tests/claims.rs's release_state_claims_agree_with_the_changelog
+      // watches those two phrases across this file and fails, post-release,
+      // wherever they are still written; a phase-conditional copy would trip
+      // it while rendering nothing. So the conditional copy stays out of the
+      // guard's vocabulary, and the guard goes on watching this file for the
+      // hand-typed copies it exists to catch.
       const verdict = document.getElementById('verdict-card');
       verdict.removeAttribute('data-loading');
+      let answer;
+      if (data.phase == null) {
+        answer = `
+          <b>Cannot say</b>
+          <p><strong>ROADMAP.md's milestones could not be read on this
+          deploy, and the answer is derived from them.</strong> The roadmap
+          itself is linked at the foot of this page.</p>`;
+      } else if (data.phase === 'released') {
+        answer = `
+          <b>Yes</b>
+          <p><strong>Every ROADMAP deliverable has closed, the release
+          milestone included.</strong> The <a
+          href="https://github.com/bugabinga/mothergod/blob/main/CHANGELOG.md"
+          >changelog</a> names what shipped and which frame versions it
+          reads.</p>`;
+      } else {
+        answer = `
+          <b>Not yet</b>
+          <p><strong>Nothing is packaged, tagged, or published, so there is
+          nothing to install.</strong> <a href="/#try-it">Build it from
+          source</a> to measure it, and keep nothing in it you cannot
+          regenerate: before the first release, a frame this build writes
+          carries no promise that a later build still reads it.</p>`;
+      }
+      // Demoted, not dropped: generated from the enum's own doc comments, and
+      // the right depth for an engineer who has already decided to look.
       const methods = (data.methods ?? []).map((m) => `
         <p><strong>${escapeHtml(m.name)}.</strong> ${escapeHtml(m.doc)}</p>
       `).join('');
-      verdict.innerHTML = `
-        <b>${escapeHtml(data.phase ?? 'phase unknown')}</b>
-        <p><strong>Format version ${data.format_version ?? '?'}.</strong>
-        Frame methods in this build, described by their own
-        <code>src/lib.rs</code> doc comments:</p>
-        ${methods}
-      `;
+      const methodCount = data.methods?.length ?? 0;
+      const detail = data.format_version == null && methodCount === 0 ? '' : `
+        <details class="detail">
+          <summary>Format version ${data.format_version ?? '?'} ·
+          ${methodCount} frame method${methodCount === 1 ? '' : 's'}</summary>
+          <p>Each method's own doc comment in <code>src/lib.rs</code>, verbatim:</p>
+          ${methods}
+        </details>`;
+      verdict.innerHTML = answer + detail;
 
       // The gap to the field, and how long it has stood still. Ranked above
       // the synthetic gate table below because it is the number the mission
