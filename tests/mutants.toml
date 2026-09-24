@@ -19,7 +19,7 @@
 # self-healing; an entry that over-matches hides a real mutant silently.
 # So entries scope to function + operator only where every current match
 # is proven, and pin file:line:col where the same function also contains
-# catchable mutants of that operator (decode's `value` line, coder.rs:289,
+# catchable mutants of that operator (decode's `value` line, coder.rs:303,
 # is catchable garbage, not a hang, and stays live).
 #
 # After editing src/coder.rs's constants or renormalization, re-verify:
@@ -68,13 +68,13 @@ exclude_re = [
   # without bound. Encoder::encode's only `&` and `<<` sites are its two
   # shift lines, so function scope is exact there; Decoder<'a>::decode
   # also carries catchable `&` and `<<` mutants on its `value` line
-  # (coder.rs:289), so its two shift lines are pinned instead. 8 mutants.
+  # (coder.rs:303), so its two shift lines are pinned instead. 8 mutants.
   "replace & with \\| in Encoder::encode$",
   "replace << with >> in Encoder::encode$",
-  "^src/coder\\.rs:286:34: replace << with >>",
-  "^src/coder\\.rs:286:40: replace & with \\|",
-  "^src/coder\\.rs:287:37: replace << with >>",
-  "^src/coder\\.rs:287:48: replace & with \\|",
+  "^src/coder\\.rs:300:34: replace << with >>",
+  "^src/coder\\.rs:300:40: replace & with \\|",
+  "^src/coder\\.rs:301:37: replace << with >>",
+  "^src/coder\\.rs:301:48: replace & with \\|",
 
   # Non-terminating, constant geometry: HALF doubled past TOP makes
   # `high < HALF` a tautology; MASK = TOP + 1 or TOP pins the interval
