@@ -170,13 +170,16 @@ def capture_branch(branch: str, sha: str, base: str, out_dir: str, rows: list,
         trees = {"before": worktree(tmp, "before", merge_base),
                  "after": worktree(tmp, "after", sha)}
         try:
-            missing = place_data(trees.values(), data_from)
+            refs, missing = place_data(trees.values(), data_from)
             for page in pages:
                 for width, height in VIEWPORTS:
                     row = {"branch": branch, "sha": sha, "base": merge_base, "pr": pr,
                            "page": page, "viewport": f"{width}x{height}",
                            "before": None, "after": None,
-                           "missing_data": sorted(missing)}
+                           # Only what this page itself fetches and did not
+                           # get; a plain page's pair is complete (PR #732,
+                           # round five).
+                           "missing_data": sorted(refs.get(page, set()).intersection(missing))}
                     for phase, tree in trees.items():
                         if not os.path.exists(os.path.join(tree, page)):
                             continue
@@ -244,20 +247,27 @@ def shoot(browser: str, root: str, page: str, width: int, height: int, out: str)
                            f"{proc.stderr.strip()[-300:]}")
 
 
-def place_data(trees, data_from: str) -> set:
+def place_data(trees, data_from: str) -> tuple:
     """Fetch every deploy-generated file the pages reference into each tree.
 
-    Returns the names the source could not provide; each is one stderr line
-    here and a caption note downstream, never a stop: the static parts of
-    the page are still evidence.
+    Returns (refs, missing): the names each page references, keyed by its
+    site-relative path, and the names the source could not provide. Each
+    missing name is one stderr line here and a caption note downstream on
+    the pages that reference it, never a stop: the static parts of the page
+    are still evidence.
     """
-    names = set()
+    refs = {}
     for tree in trees:
         site = os.path.join(tree, SITE)
-        for entry in os.listdir(site) if os.path.isdir(site) else []:
-            if entry.endswith(".html"):
-                with open(os.path.join(site, entry), encoding="utf-8", errors="replace") as fh:
-                    names.update(DATA_REF.findall(fh.read()))
+        for root, _, files in os.walk(site):
+            for entry in files:
+                if not entry.endswith(".html"):
+                    continue
+                path = os.path.join(root, entry)
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    page = os.path.relpath(path, tree)
+                    refs.setdefault(page, set()).update(DATA_REF.findall(fh.read()))
+    names = set().union(*refs.values()) if refs else set()
     missing = set()
     for name in sorted(names):
         try:
@@ -271,7 +281,7 @@ def place_data(trees, data_from: str) -> set:
         for tree in trees:
             with open(os.path.join(tree, SITE, name), "wb") as fh:
                 fh.write(data)
-    return missing
+    return refs, missing
 
 
 def worktree(tmp: str, name: str, ref: str) -> str:

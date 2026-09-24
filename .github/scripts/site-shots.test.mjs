@@ -201,18 +201,39 @@ test("a page that fetches deploy-generated data renders with it on both sides", 
   assert.ok(!git("ls-tree", "-r", "--name-only", head).includes("status-data.json"));
 });
 
-test("data the deployed site cannot provide is recorded on the row, not hidden", () => {
+test("data the deployed site cannot provide is recorded on the pages that fetch it, not others", () => {
+  // Round five (#732): the missing set was branch-wide, so a plain page in
+  // the same branch was captioned as rendered without another page's data.
   const { dir, git, base } = repo();
   writeFileSync(join(dir, "site/agents.html"), "<script>fetch('/agent-metrics.json')</script>agents");
-  git("commit", "-q", "-am", "agents fetches metrics");
+  writeFileSync(join(dir, "site/index.html"), "<p>plain</p>");
+  git("commit", "-q", "-am", "agents fetches metrics, index is plain");
   const head = git("rev-parse", "HEAD");
   const out = join(dir, "shots");
   const r = run(dir, out, ["--base", base, "--branch", `claude/x=${head}`]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /agent-metrics.json: not available from file:/);
   const rows = manifest(out);
-  assert.deepEqual(rows[0].missing_data, ["agent-metrics.json"]);
-  assert.match(readFileSync(join(out, rows[0].after), "utf8"), /agent-metrics.json=HTTP 404/);
+  const agents = rows.find((row) => row.page === "site/agents.html");
+  const index = rows.find((row) => row.page === "site/index.html");
+  assert.deepEqual(agents.missing_data, ["agent-metrics.json"]);
+  assert.match(readFileSync(join(out, agents.after), "utf8"), /agent-metrics.json=HTTP 404/);
+  assert.deepEqual(index.missing_data, []);
+});
+
+test("a page in a subdirectory gets its data too", () => {
+  const { dir, git, base } = repo();
+  mkdirSync(join(dir, "site/docs"));
+  writeFileSync(join(dir, "site/docs/deep.html"), "<script>fetch('/status-data.json')</script>deep");
+  git("add", "-A");
+  git("commit", "-q", "-m", "nested page");
+  const head = git("rev-parse", "HEAD");
+  const out = join(dir, "shots");
+  const r = run(dir, out, ["--base", base, "--branch", `claude/x=${head}`]);
+  assert.equal(r.status, 0, r.stderr);
+  const row = manifest(out).find((r) => r.page === "site/docs/deep.html");
+  assert.deepEqual(row.missing_data, []);
+  assert.match(readFileSync(join(out, row.after), "utf8"), /status-data.json=\{"experiments":51\}/);
 });
 
 test("a hanging browser is a failed shot, not a lost run", () => {
