@@ -117,6 +117,19 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-24: Anthropic's model list as the `claude-api` skill carries it
+  (cached 2026-06-24) and the operator's Telegram note "claude dropped new
+  model": `claude-opus-5-5` adopted as a canary on the curator's ladder
+  only, `claude-opus-5` kept beneath it. Same tier and context, $4/$20 per
+  MTok against $5/$25, two traps written into `agents/models.json`: effort
+  defaults to medium (Opus 5 defaults to high), so the seat pins high; and
+  reachability on this subscription is not checkable from inside a run,
+  so `agent-pause` now ledgers a 404 for seven days and the ladder falls
+  through. Promotion of the other Opus seats waits for one green curator
+  run. Not adopted: a nested `claude -p` probe, which holds no login in a
+  session. Gap noted: `agent-model-intel` reads a third-party index that
+  lags launches, and the operator noticed the drop before the factory did.
+
 - 2026-09-19: our own published telemetry (`site/agent-metrics.json`,
   generated 2026-09-19T03:44Z over 166 runs), applied to the BDFL thrift
   rung: `claude-opus-5`/high to `claude-sonnet-5`/xhigh in
