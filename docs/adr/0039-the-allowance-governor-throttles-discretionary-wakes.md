@@ -111,7 +111,10 @@ them. The second gear does not ask.
 
 **The deslopper stays ungoverned**, twice a day being a rounding error against
 an allowance measured in percent per hour. It carries no `source` input and so
-declares nothing.
+declares nothing. (No longer true: since 2026-09-24 it wakes six times a day at
+about $3 a run, carries `source: cron`, and is governed like the rest; the
+current list of governed seats is the `CLOCK` table in
+`infra/telegram-worker/worker.js`.)
 
 **So does the maintainer wake chained off a landed verdict** (#186), which on a
 busy day outnumbers that seat's clock ticks. The argument for leaving it is that

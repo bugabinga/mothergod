@@ -784,13 +784,20 @@ export const CLOCK = {
     // input and is never skipped.
     { workflow: "agent-heartbeat.yml", inputs: { source: "cron" } },
   ],
+  "37 */4 * * *": [
+    // agent-deslop, six times a day, off the other seats' minutes. Raised
+    // from twice daily on 2026-09-24 (operator, Telegram: "deslopper does
+    // not run often enough"): every one of its 14 runs that week shipped a
+    // deslop PR, so slop was arriving faster than two wakes cleared it. At
+    // $3 a run this is no longer the rounding error ADR-0039 left
+    // ungoverned, so `source: cron` marks the wake discretionary and the
+    // governor may shed it in a tight week. The fifth and last cron
+    // expression the Workers Free plan allows.
+    { workflow: "agent-deslop.yml", inputs: { source: "cron" } },
+  ],
   "37 */12 * * *": [
-    // agent-deslop, twice daily, off the other seats' minutes.
-    { workflow: "agent-deslop.yml" },
-    // agent-curator shares the tick (ADR-0044): the Workers Free plan
-    // caps the account at 5 cron expressions, so a new seat joins an
-    // existing list rather than adding a line. `source: cron` marks
-    // the wake discretionary (ADR-0039).
+    // agent-curator, twice daily (ADR-0044). `source: cron` marks the
+    // wake discretionary (ADR-0039).
     { workflow: "agent-curator.yml", inputs: { source: "cron" } },
   ],
   "49 6,18 * * *": [
