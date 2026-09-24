@@ -22,15 +22,17 @@ const stub = join(mkdtempSync(join(tmpdir(), "site-shots-stub-")), "browser");
 writeFileSync(
   stub,
   `#!/usr/bin/env python3
-import re, sys, urllib.error, urllib.request
+import re, sys, urllib.error, urllib.parse, urllib.request
 out = next(a for a in sys.argv if a.startswith("--screenshot=")).split("=", 1)[1]
 size = next(a for a in sys.argv if a.startswith("--window-size=")).split("=", 1)[1]
 url = sys.argv[-1]
 body = urllib.request.urlopen(url, timeout=10).read().decode()
-root = url.rsplit("/", 1)[0]
+# A root-relative fetch resolves against the origin, wherever the page sits.
+parts = urllib.parse.urlsplit(url)
+origin = parts.scheme + "://" + parts.netloc
 for name in re.findall(r"fetch\\('/([\\w.-]+\\.json)'\\)", body):
     try:
-        body += " " + name + "=" + urllib.request.urlopen(root + "/" + name, timeout=10).read().decode()
+        body += " " + name + "=" + urllib.request.urlopen(origin + "/" + name, timeout=10).read().decode()
     except urllib.error.HTTPError as err:
         body += " " + name + "=HTTP " + str(err.code)
 open(out, "w").write(size + " " + body)
