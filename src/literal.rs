@@ -1758,4 +1758,85 @@ mod tests {
             context = context.after_literal(b);
         }
     }
+
+    /// #697: pins the `2f64.powf(-bits)` transform directly, independent
+    /// of any caller, so a return-value or sign mutation in the function
+    /// body is visible without going through [`ppm_probability`].
+    #[test]
+    fn probability_from_price_bits_inverts_the_log2_bits_transform() {
+        assert!((probability_from_price_bits(0.0) - 1.0).abs() < 1e-12);
+        assert!((probability_from_price_bits(1.0) - 0.5).abs() < 1e-12);
+        assert!((probability_from_price_bits(2.0) - 0.25).abs() < 1e-12);
+    }
+
+    /// #697: an unobserved symbol must report exactly `0.0` (the escape
+    /// branch), and an observed one must report a value strictly between
+    /// `0.0` and `1.0` that matches [`probability_from_price_bits`]'s own
+    /// conversion of [`Ppm::price_symbol`] — the two branches together
+    /// rule out every constant-return mutant.
+    #[test]
+    fn ppm_probability_is_zero_unobserved_and_matches_the_price_conversion_once_observed() {
+        let mut table = Ppm::new(ALPHABET);
+        assert!((ppm_probability(&table, 0) - 0.0).abs() < 1e-12);
+
+        table.observe(0);
+        let bits = table
+            .price_symbol(0)
+            .expect("just observed, no longer an escape");
+        let expected = probability_from_price_bits(bits);
+        let got = ppm_probability(&table, 0);
+        assert!(got > 0.0 && got < 1.0, "got={got}");
+        assert!((got - expected).abs() < 1e-12);
+    }
+
+    /// #697: a concrete `(weight, weight_sum, probability)` triple whose
+    /// expected fixed-point result distinguishes `/` from `%`/`*` in the
+    /// normalization step and `*` from `+`/`/` in either multiplication,
+    /// so every arithmetic-operator mutant in the function produces a
+    /// different `u64`.
+    #[test]
+    fn fixed_point_contribution_from_probability_matches_the_normalized_product() {
+        assert_eq!(
+            fixed_point_contribution_from_probability(2.0, 4.0, 0.5),
+            1_073_741_824
+        );
+    }
+
+    /// #697: `mix_ppm`'s own accumulation step, isolated from
+    /// [`Literal::six_expert_mixed`] and [`fixed_point_contribution_from_probability`]
+    /// (each already proven correct on their own): recomputes symbol 0's
+    /// `mixed` total from those same building blocks with the intended
+    /// `+=`/`>>`/`+1` operators and checks `mix_ppm`'s own first cumulative
+    /// entry against it, so a swap of any of those three operators inside
+    /// `mix_ppm` itself is visible even though the sub-computations it
+    /// calls are unchanged.
+    #[test]
+    fn mix_ppm_first_entry_matches_the_six_expert_mix_plus_ppm_contribution() {
+        let model = Literal::new();
+        let mut ppm_state = PpmExpertState::new();
+        let context = Context::default();
+        let (bank_indices, weight_index) = banks(context);
+        let ppm_bank = PpmExpertState::bank_of(context);
+
+        // Give the PPM table's own estimate for symbol 0 real weight, so
+        // its contribution is not the degenerate zero every fresh table
+        // starts every symbol at.
+        for _ in 0..8 {
+            ppm_state.tables[ppm_bank].observe(0);
+        }
+
+        let w7 = ppm_state.weight[weight_index];
+        let (weights6, weight_sum) = model.weights6_and_sum(weight_index, w7);
+        let scale6 = model.scale6(&bank_indices, &weights6, weight_sum);
+        let mut expected_mixed = model.six_expert_mixed(&bank_indices, &scale6, 0);
+        expected_mixed += fixed_point_contribution_from_probability(
+            w7,
+            weight_sum,
+            ppm_probability(&ppm_state.tables[ppm_bank], 0),
+        );
+        let expected_first_entry = (expected_mixed >> 16) + 1;
+
+        let cum = model.mix_ppm(&bank_indices, weight_index, ppm_bank, &ppm_state);
+        assert_eq!(cum[1], expected_first_entry);
+    }
 }
