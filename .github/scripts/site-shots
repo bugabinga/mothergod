@@ -91,11 +91,14 @@ def main() -> int:
         print("site-shots: this checkout pushed no branch; nothing to capture")
         return 0
 
+    # Rows accumulate here, outside any branch's failure: a shot that
+    # fails costs that shot and an error line, never the rows already
+    # captured for other pages or branches (PR #732 review).
     rows = []
     failures = 0
     for branch, sha in branches.items():
         try:
-            rows.extend(capture_branch(branch, sha, base, out_dir))
+            failures += capture_branch(branch, sha, base, out_dir, rows)
         except CaptureError as err:
             failures += 1
             print(f"site-shots: {branch}: {err}", file=sys.stderr)
@@ -111,7 +114,8 @@ class CaptureError(Exception):
     """A capture that should have happened and could not."""
 
 
-def capture_branch(branch: str, sha: str, base: str, out_dir: str) -> list:
+def capture_branch(branch: str, sha: str, base: str, out_dir: str, rows: list) -> int:
+    """Append this branch's rows to `rows`; return how many shots failed."""
     ensure_object(branch, sha)
     merge_base = git("merge-base", base, sha).strip()
     if not merge_base:
@@ -119,7 +123,7 @@ def capture_branch(branch: str, sha: str, base: str, out_dir: str) -> list:
     changed = git("diff", "--name-only", merge_base, sha, "--", SITE).split()
     if not changed:
         print(f"site-shots: {branch}: no change under {SITE}/")
-        return []
+        return 0
     pages = affected_pages(changed, merge_base, sha)
     browser = find_browser()
     if not browser:
@@ -127,7 +131,7 @@ def capture_branch(branch: str, sha: str, base: str, out_dir: str) -> list:
 
     pr = pr_number(branch)
     os.makedirs(out_dir, exist_ok=True)
-    rows = []
+    failed = 0
     with tempfile.TemporaryDirectory(prefix="site-shots-") as tmp:
         trees = {"before": worktree(tmp, "before", merge_base),
                  "after": worktree(tmp, "after", sha)}
@@ -141,8 +145,13 @@ def capture_branch(branch: str, sha: str, base: str, out_dir: str) -> list:
                         if not os.path.exists(os.path.join(tree, page)):
                             continue
                         name = f"{slug(branch)}-{slug(page)}-{width}x{height}-{phase}.png"
-                        shoot(browser, os.path.join(tree, SITE), page, width, height,
-                              os.path.join(out_dir, name))
+                        try:
+                            shoot(browser, os.path.join(tree, SITE), page, width, height,
+                                  os.path.join(out_dir, name))
+                        except CaptureError as err:
+                            failed += 1
+                            print(f"site-shots: {branch}: {phase} {err}", file=sys.stderr)
+                            continue
                         row[phase] = name
                     rows.append(row)
         finally:
@@ -150,8 +159,9 @@ def capture_branch(branch: str, sha: str, base: str, out_dir: str) -> list:
                 subprocess.run(["git", "worktree", "remove", "--force", tree],
                                capture_output=True)
     print(f"site-shots: {branch}: {len(pages)} page(s) x {len(VIEWPORTS)} viewports, "
-          f"before {merge_base[:7]} after {sha[:7]}")
-    return rows
+          f"before {merge_base[:7]} after {sha[:7]}"
+          + (f", {failed} shot(s) failed" if failed else ""))
+    return failed
 
 
 def affected_pages(changed: list, before: str, after: str) -> list:

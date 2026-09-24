@@ -20,8 +20,11 @@ const server = createServer((req, res) => {
   const chunks = [];
   req.on("data", (chunk) => chunks.push(chunk));
   req.on("end", () => {
-    seen.push({ method, body: Buffer.concat(chunks).toString("latin1") });
-    if (token === "tok-denied") {
+    const body = Buffer.concat(chunks).toString("latin1");
+    seen.push({ method, body });
+    // One page Telegram refuses, keyed on the caption, so a test can fail a
+    // single group inside an otherwise good run.
+    if (token === "tok-denied" || body.includes("site/broken.html")) {
       res.writeHead(400, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: false, description: `Bad Request: no chat for /bot${token}` }));
       return;
@@ -114,6 +117,16 @@ test("an empty manifest sends nothing and exits 0", async () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout, "tg-photo: nothing to send\n");
   assert.equal(seen.length, 0);
+});
+
+test("a refused group does not stop the others, and what went is still printed", async () => {
+  seen.length = 0;
+  const broken = { ...row("375x812"), page: "site/broken.html" };
+  const r = await send("tok-ok", shots([broken, row("375x812"), row("1440x900")]));
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, "message_ids=700,701,702,703\n");
+  assert.match(r.stderr, /site\/broken.html on claude\/herald-x: HTTP 400/);
+  assert.equal(seen.length, 2);
 });
 
 test("a Telegram error is a non-zero exit with the description, token scrubbed", async () => {

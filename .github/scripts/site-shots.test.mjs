@@ -119,6 +119,42 @@ test("no record and no --branch is a one-line no-op", () => {
   assert.match(r.stdout, /pushed no branch/);
 });
 
+test("one page's failure keeps every other page's rows and still exits non-zero", () => {
+  // The review's reproduction (#732): two changed pages, a browser that
+  // fails on one. The other page's rows must survive in the manifest, and
+  // the exit must still say something went wrong.
+  const flaky = join(mkdtempSync(join(tmpdir(), "site-shots-flaky-")), "browser");
+  writeFileSync(
+    flaky,
+    `#!/usr/bin/env python3
+import sys
+if sys.argv[-1].endswith("/index.html"):
+    sys.exit(3)
+exec(open(${JSON.stringify(stub)}).read())
+`,
+    { mode: 0o755 },
+  );
+  const { dir, git, base } = repo();
+  writeFileSync(join(dir, "site/index.html"), "<p>new index</p>");
+  writeFileSync(join(dir, "site/agents.html"), "<p>new agents</p>");
+  git("commit", "-q", "-am", "two pages");
+  const head = git("rev-parse", "HEAD");
+  const out = join(dir, "shots");
+  const r = run(dir, out, ["--base", base, "--branch", `claude/x=${head}`], { SITE_SHOTS_BROWSER: flaky });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /index\.html/);
+  assert.match(r.stdout, /4 shot\(s\) failed/);
+  const rows = manifest(out);
+  const agents = rows.filter((row) => row.page === "site/agents.html");
+  assert.equal(agents.length, 2);
+  assert.equal(readFileSync(join(out, agents[0].after), "utf8"), "375,812 <p>new agents</p>");
+  // index.html's rows exist with nothing captured, which tg-photo skips.
+  assert.deepEqual(rows.filter((row) => row.page === "site/index.html").map((row) => [row.before, row.after]), [
+    [null, null],
+    [null, null],
+  ]);
+});
+
 test("a missing browser fails loudly rather than skipping", () => {
   const { dir, git, base } = repo();
   writeFileSync(join(dir, "site/index.html"), "<p>new</p>");

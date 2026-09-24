@@ -60,27 +60,32 @@ def main() -> int:
         return 0
 
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    # A group that fails costs that group and an error line naming it; the
+    # rest still go, and what went is still printed (PR #732 review).
     sent = []
+    failed = 0
     for (branch, page), items in groups.items():
         photos = [os.path.join(shots_dir, row[phase])
                   for row in items for phase in ("before", "after") if row[phase]]
         caption = caption_for(items, repo)
         try:
-            sent.append(send(token, chat, photos[:GROUP_MAX], caption))
+            sent.extend(send(token, chat, photos[:GROUP_MAX], caption))
         except urllib.error.HTTPError as error:
             detail = error.read().decode(errors="replace")
             try:
                 detail = json.loads(detail).get("description", detail)
             except json.JSONDecodeError:
                 pass
-            print(f"tg-photo: HTTP {error.code}: {detail.replace(token, '<redacted>')}",
-                  file=sys.stderr)
-            return 1
+            failed += 1
+            print(f"tg-photo: {page} on {branch}: HTTP {error.code}: "
+                  f"{detail.replace(token, '<redacted>')}", file=sys.stderr)
         except OSError as error:
-            print(f"tg-photo: {str(error).replace(token, '<redacted>')}", file=sys.stderr)
-            return 1
-    print(f"message_ids={','.join(str(i) for group in sent for i in group)}")
-    return 0
+            failed += 1
+            print(f"tg-photo: {page} on {branch}: {str(error).replace(token, '<redacted>')}",
+                  file=sys.stderr)
+    if sent:
+        print(f"message_ids={','.join(str(i) for i in sent)}")
+    return 1 if failed else 0
 
 
 def grouped(rows: list) -> dict:
