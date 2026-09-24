@@ -67,7 +67,7 @@ EM_DASH = "—"
 # the same PR, and let the PR body say why the seat grew or how it shrank.
 PINNED = {
     "bdfl": 16341,
-    "curator": 3749,
+    "curator": 2469,
     "deslop": 1730,
     "heartbeat": 3913,
     "herald": 3220,
