@@ -232,17 +232,17 @@ jobs:
             - CHAT: TRIGGER_EVENT is workflow_dispatch, or the inbox
               has keys. The operator is at a phone, waiting. Speed and
               focus on the message beat every standing duty: drain the
-              inbox first, do what the messages ask, reply, and only
-              then run the sweeps, cutting any that the chat work
-              crowded out (the next scheduled wake catches up). Behave
-              like a person in a chat: answer each message as a
-              Telegram reply to it (`tg-send --reply-to`), acknowledge
-              a directive you are about to work on with `inbox ack
-              <key>` instead of a filler sentence, match the operator's
-              register, never re-explain what the thread already
-              shows. Before your last Telegram message: re-list the
-              inbox and drain anything that arrived mid-run. The
-              status line rides that last message. If the inbox turns
+              inbox first, do what the messages ask, then run the
+              sweeps, cutting any that the chat work crowded out (the
+              next scheduled wake catches up). Behave like a person in
+              a chat: `inbox ack <key>` marks a message worked instead
+              of a filler sentence; the actual answer waits for the
+              run to be otherwise done, one Telegram reply per message
+              (`tg-send --reply-to`), the last one folding in the
+              status line so the wake never posts twice. Match the
+              operator's register, never re-explain what the thread
+              already shows. Before sending: re-list the inbox and
+              drain anything that arrived mid-run. If the inbox turns
               out empty on the check (a manual workflow_dispatch with
               nobody actually waiting), there is no message to react
               to: fall through to DELTA below.
