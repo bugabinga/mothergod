@@ -54,11 +54,14 @@ tuned for it.
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
 format (`FORMAT_VERSION` 4) carries `Stored` and `Lz` (optimal-parse LZ over
 an adaptive, context-mixing range coder; `research/JOURNAL.md` S2-D2/S2-D3).
-That format is frozen ([`docs/format/SPEC.md`](docs/format/SPEC.md),
-ADR-0041): no future version may drop decode support for a version 2 or later
-frame, so a frame written today stays readable. Everything around it still
-moves: the library API, the CLI, and the ratio above. Do not use this for
-data you care about yet.
+That format is specified ([`docs/format/SPEC.md`](docs/format/SPEC.md)) and
+versioned, not frozen: until 1.0 a version can be retired, and a frame from
+a build before the first release has no promise at all. A version a release
+has written is retired only after a later release that still reads it and
+writes its successor, named in the changelog, so you can re-compress first
+(ADR-0050). From 1.0 on, no version is ever retired. Everything around it
+still moves: the library API, the CLI, and the ratio above. Do not use this
+for data you care about yet.
 
 ## Try it
 

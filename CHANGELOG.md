@@ -21,9 +21,11 @@ All notable changes to this project are documented here. Format follows
 - Codec: a filter bank (delta, transpose, x86 BCJ) feeding an optimal-parse
   LZ with in-DP repeat offsets and a six-expert, SSE-calibrated
   context-mixing adaptive range coder. Zero runtime dependencies.
-- Bitstream format frozen at `FORMAT_VERSION` 4
-  ([`docs/format/SPEC.md`](docs/format/SPEC.md), ADR-0041): every version
-  from 2 onward decodes forever, whatever the format grows into next.
+- Bitstream format at `FORMAT_VERSION` 4, specified in
+  [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
+  release has written is retired only after a later release that still
+  reads it and writes its successor, named here, so you can re-compress
+  first; from 1.0 on, no version is ever retired (ADR-0050).
 - Ratio, on the held-out finals ([`bench/corpus.toml`](bench/corpus.toml),
   pinned by URL and SHA-256): beats both `zstd -19` and `xz -9e` in
   aggregate on Canterbury (1.374 bits/byte vs 1.470 and 1.403); trails both

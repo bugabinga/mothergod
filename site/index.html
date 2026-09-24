@@ -216,11 +216,14 @@
             tag.</strong> The container format (version 4) carries <code
           >Stored</code> and
           <code>Lz</code>: optimal-parse LZ over an adaptive, context-mixing
-          range coder. That format is frozen, and the project's rules forbid
-          ever dropping decode support for a version 2 or later frame, so a
-          frame written today stays readable (<a
+          range coder. That format is specified (<a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/format/SPEC.md"
-          >format spec</a>). Everything around it still moves: the API, the CLI,
+          >format spec</a>) and versioned, not frozen: until 1.0 a version can
+          be retired, and a frame from a build before the first release has no
+          promise at all. A version a release has written is retired only after
+          a later release that still reads it and writes its successor, named in
+          the changelog, so you can re-compress first. From 1.0 on, no version
+          is ever retired. Everything around it still moves: the API, the CLI,
           and the ratio below. Do not use this for data you care about yet.
         </p>
       </div>
