@@ -40,6 +40,15 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-unpushed-work"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/tg-draft",
+            "async": true
+          }
+        ]
       }
     ],
     "Stop": [

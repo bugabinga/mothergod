@@ -64,6 +64,9 @@ function harness(github = () => json({})) {
                 values.set(key, value);
               }
             },
+            async delete(keys) {
+              for (const key of [].concat(keys)) values.delete(key);
+            },
             async deleteAll() {
               values.clear();
             },
@@ -732,4 +735,22 @@ test("Clock ticks (ADR-0035)", async (t) => {
     await tick(setup, cron);
     assert.equal(clocklog(setup).length, 1);
   });
+});
+
+test("/typing/draft carries a run's draft to the typing object on the worker secret", async () => {
+  const setup = harness();
+  const post = (secret, body) =>
+    worker.fetch(
+      new Request("https://bot.mothergod.dev/typing/draft", {
+        method: "POST",
+        headers: { "x-mothergod-secret": secret },
+        body,
+      }),
+      setup.env,
+    );
+  assert.equal((await post("wrong", JSON.stringify({ text: "x" }))).status, 401);
+  assert.equal((await post("webhook-secret", "not json")).status, 400);
+  // Nobody is owed an answer here, so the object drops it quietly: 204 all the same.
+  assert.equal((await post("webhook-secret", JSON.stringify({ text: "bdfl, 3 min" }))).status, 204);
+  assert.deepEqual(setup.typing, ["https://typing.invalid/draft", "https://typing.invalid/draft"]);
 });
