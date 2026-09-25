@@ -20,8 +20,9 @@ n = rounds.render(prs, out=buf, limit=limit)
 print(json.dumps({"n": n, "line": buf.getvalue().rstrip("\\n")}))
 `;
 
-const post = (role, prose = "Verdict.") =>
-  ({ body: `${prose}\n\n---\n_${role} · [Claude Code](https://claude.ai/code)_` });
+const post = (role, prose = "Verdict.") => ({
+  body: `${prose}\n\n---\n_${role} · [Claude Code](https://claude.ai/code)_`,
+});
 const pr = (number, ...comments) => ({ number, mergedAt: "2026-09-25T08:00:00Z", comments });
 
 const fixtures = [
@@ -53,7 +54,10 @@ const fixtures = [
     prs: [
       pr(
         703,
-        { body: "The reviewer wrote:\n\n> _reviewer · [Claude Code](https://claude.ai/code)_\n\nand I disagree.\n\n---\n_bdfl · [Claude Code](https://claude.ai/code)_" },
+        {
+          body:
+            "The reviewer wrote:\n\n> _reviewer · [Claude Code](https://claude.ai/code)_\n\nand I disagree.\n\n---\n_bdfl · [Claude Code](https://claude.ai/code)_",
+        },
         post("reviewer"),
       ),
     ],
