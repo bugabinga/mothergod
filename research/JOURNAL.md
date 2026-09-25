@@ -4035,7 +4035,23 @@ record.
   capability patch, no codec/bitstream change. `research/progress.jsonl`
   it123. Full record: this entry, S1-P7 lead entry updated above.
 - S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
-  entries) — only after SSE.
+  entries), only after SSE. First slice, S2-R20: LZMA's own "matched
+  literal" byte (the byte at the current rep0 distance back from the
+  position being coded), generalized as a ninth additive expert through
+  this project's proven recipe (S1-P5's column expert, S1-P3's PPM
+  expert), deliberately not the from-scratch GLN gating architecture
+  this lead's own name still names (declined near S2-A99 under a single
+  session's time budget). Train net **-0.007642 b/B** (7 of 11 improved,
+  `sqlite_like_records` **-0.046757** the single largest train move any
+  S1-P2/S1-P3/S1-P8 additive-expert slice has measured); sealed split:
+  `access_log` -0.003024 improved, `gradient_image` +0.003002 regressed.
+  **Rejected**: corpus policy's accept rule fails outright on the sealed
+  regression alone. Full numbers and mechanism: S2-R20's own entry.
+  Remaining S1-P8 scope: LZMA's own matched-literal signal, tried via this
+  project's proven additive-expert recipe, does not clear the accept bar
+  on this corpus; what is left is either a genuinely different "more
+  experts" signal or the from-scratch GLN gating architecture this
+  lead's own name still names and this slice deliberately avoided.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
   `finals_report`: a new `silesia_report` binary (`bench`'s `corpus-fetch`
   feature) fetches each of Silesia's 12 individually pinned
@@ -6161,3 +6177,100 @@ record.
   `ideal_cost_bits_ppm_expert_pair` (S2-A100, still accepted and unwired)
   are unaffected. `research/progress.jsonl` it160. Remaining S1-P3 scope:
   none named — see the updated S1-P3 lead entry above.
+- S2-R20 | REJECTED | First slice of ROADMAP M3's eighth standing lead
+  (S1-P8, GLN-style predictors / more experts, gated "only after SSE"):
+  deliberately not a from-scratch GLN gating architecture (this lead's
+  own prior scoping note, near S2-A99, declined that under a single
+  session's time budget, "real risk of the half-understood failure this
+  lead's own selection criteria warn against"); instead, the one untried
+  signal this project's own additive-expert recipe (S1-P5's column
+  expert, S1-P3's PPM expert) had not yet tried: LZMA's own "matched
+  literal" byte (LZMA SDK/xz format docs, Igor Pavlov), the byte at the
+  current rep0 distance back from the position being coded, generalized
+  here as a plain additive context expert instead of LZMA's own bit-tree
+  special coding mode. Hypothesis: blending a Laplace-smoothed frequency
+  bank keyed by this matched byte into `Literal`'s mix as a ninth,
+  genuinely additive term (never substituted into any of the six real
+  experts' own banks, the same "own bank space, own adaptive weight"
+  shape S2-A69/S2-A100 both used) reduces ideal-cost bits/byte on
+  record-structured, LZ-repeat-heavy data (`sqlite_like_records`,
+  `json_records`, `access_log`, `x86_dense_code`, S1-P2/S1-P3's own named
+  targets) by capturing systematic small differences between a record's
+  field and the corresponding field the most recent repeat pointed at,
+  without regressing the sealed set. New `lz::match_byte_at(data,
+  position, distance)`: the byte `distance` positions back from
+  `position`, `0` only when not enough history exists yet (`position ==
+  0`, since `RepCache::initial`'s smallest distance is `1`). New
+  `literal::MatchByteExpertState` (`MATCH_BYTE_EXPERT_BANKS` = 256, one
+  bank per possible matched-byte value, `MatchByteExpertState::bank_of`
+  trivial): same plain freq/total/weight shape as `ColumnExpertState`,
+  unlike `PpmExpertState`'s zero-floor `Ppm` table, since the matched
+  byte is always defined past position 0 (no "silent" case to model).
+  `Literal::mix_matchbyte`/`update_matchbyte_expert`/
+  `ideal_cost_bits_matchbyte_expert_pair` reuse the exact shared helpers
+  `mix7`/`mix_ppm` already factored out (`weights6_and_sum`, `scale6`,
+  `six_expert_mixed`, `adapt_seventh_weight`), the same paired
+  before-wiring methodology S2-A69/S2-A100 both used (baseline via
+  `Self::ideal_cost_bits` exactly, candidate via the ninth-expert blend).
+  Unlike every prior additive expert, this one's own bank cannot be
+  derived from `Context` alone (it needs the data buffer and the current
+  rep-cache state, both outside `Context`), so `codec::
+  MatchByteExpertCostSink` tracks its own `RepCache` across `walk_tokens`:
+  `offset` folds a fresh `Token::Match`'s distance in via
+  `RepCache::push_front`, `slot` folds a `Token::Rep`'s reused slot in via
+  `RepCache::promote`, the identical update rule `replay`/`decode`'s own
+  rep-cache bookkeeping use, never a second, independently-derived copy.
+  12 new unit tests (3 for `match_byte_at`'s own boundary/correctness in
+  `lz.rs`; 4 for the expert pair's own baseline-matches-plain/bank-
+  isolation/finite-positive/mix-accumulation claims in `literal.rs`,
+  mirroring `S2-A100`'s own PPM-expert suite; 7 for `MatchByteExpertCostSink`'s
+  own per-`TokenSink`-method cost pass-through and rep-cache bookkeeping in
+  `codec.rs`, including one that recomputes the expected bank from
+  `offset`-set state and compares emitted cost against the same pairing
+  method called directly, since this type's own fields are private the
+  same way `PpmExpertState`'s are). Measured on `bench::baseline`'s 11
+  train-tier cases (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) and
+  both sealed-only kinds at `sealed_seed(CASE_SEED)`, matching S2-A100's
+  own convention, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_matchbyte_expert_experiment.rs`, deleted after
+  this measurement). | Train net **-0.007642 b/B** (7 of 11 improved:
+  `entropy_ladder_h1` -0.000772, `h2` -0.001023, `markov_h8_2_trap`
+  -0.006532, `json_records` -0.016810, `base64_wrapped` -0.005311,
+  `interleaved_audio16` -0.014384, `sqlite_like_records` **-0.046757**,
+  the single largest train move any S1-P2/S1-P3/S1-P8 additive-expert
+  slice has measured on this project's own named sqlite/json/jsonl
+  residue target; 4 regressed, all roughly one to two orders of magnitude
+  smaller: `entropy_ladder_h4` +0.000128, `h6` +0.002246, `h8` +0.001373,
+  `x86_dense_code` +0.003781). Sealed: `access_log` **-0.003024**
+  (improved), `gradient_image` **+0.003002** (regressed). **Rejected**:
+  corpus policy's accept rule needs train improvement AND no validation
+  regression; `gradient_image`'s real, if small, regression fails that
+  rule outright regardless of the strongest train net any additive-expert
+  slice in this lead line has measured, the same "either side alone is
+  sufficient to reject" reading S2-R7/S2-R18 both applied. Mechanism, not
+  confirmed by a dedicated test here (same evidentiary limit S2-A76's own
+  entry accepted for its converse finding): `gradient_image` is a smooth
+  sine-plus-gaussian-noise surface (`bench::gradient_image`'s own module
+  doc), not a record-repeated format, so whatever short matches/reps its
+  optimal parse does find are largely incidental byte coincidences on a
+  noisy continuous signal rather than the genuine structural repeats this
+  expert's hypothesis targets; keying a bank on an incidental match's
+  "predicted" byte blends real signal (where a rep-cache distance really
+  is meaningful) with near-noise (where it is not) into one 256-way table,
+  costing a small but real, not-fully-suppressed mixing tax, the same
+  "the mixer downweights, but not fully" shape S2-A69/S2-R15 both
+  documented for their own additive experts' own worst cases. Candidate
+  code (`lz::match_byte_at`, its three unit tests, `literal::
+  MatchByteExpertState`/`MATCH_BYTE_EXPERT_BANKS`, `Literal::
+  mix_matchbyte`/`update_matchbyte_expert`/
+  `ideal_cost_bits_matchbyte_expert_pair`, their four unit tests, `codec::
+  MatchByteExpertCostSink`/`ideal_cost_bits_matchbyte_expert_experiment`,
+  their seven unit tests, the scratch binary) reverted in full, per the
+  `compression-experiment` skill's "delete rejected candidate code"; this
+  slice never touched `PpmExpertState`/`ColumnExpertState`/`Ppm` or
+  anything else already on `main`. `research/progress.jsonl` it161.
+  Remaining S1-P8 scope: LZMA's own matched-literal signal, tried via this
+  project's proven additive-expert recipe, does not clear the accept bar
+  on this corpus; what is left is either a genuinely different "more
+  experts" signal or the from-scratch GLN gating architecture this
+  lead's own name still names and this slice deliberately avoided.
