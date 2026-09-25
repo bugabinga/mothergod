@@ -34,11 +34,11 @@ Both are stated with the number.
 | External issue authors | 0 of 194 | 0 of 166 | `gh issue list --state all`: 95 `app/claude`, 69 `app/github-actions`, 30 `bugabinga` |
 | External PR authors | 0 of 557 | 0 of 450 | `gh pr list --state all`: 518 `app/claude`, 33 `bugabinga`, 6 `app/dependabot` |
 | mothergod.dev pageloads | 7 in 6d | 6 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-19..09-25 |
-| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; query `mothergod` returns 29016 hits, the same fuzzy unrelated matches as every prior week ("Motherlode") |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; the plain query `mothergod` (`hn.algolia.com/api/v1/search?query=mothergod`) returns 102 hits, the same fuzzy unrelated matches as every prior week ("Motherlode") |
 | lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
 | reddit mentions | not measured | not measured | `reddit.com/search.json` still returns 403 to the runner IP |
 | Web search presence | absent, 20 of 20 results are `github.com` | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`, 10 results each |
-| GitHub repo views, 14d | 37, 28 unique | 20, 17 unique | issue #435 ledger, snapshot run 35502073599 (2026-09-20), window 2026-09-06..09-19 |
+| GitHub repo views, 14d | 37, 12 unique | 20, unique not recorded | issue #435 ledger, snapshot run 35502073599 (2026-09-20), window 2026-09-06..09-19 |
 
 **The pageload window.** The previous entry's window ended 2026-09-19 and
 this survey runs on 09-25, so a 7-day window would double-count 09-18's
@@ -56,6 +56,19 @@ Clone counts exist in the same ledger (3072 clones, 432 unique cloners,
 same window) and stay out of this table on purpose, because this
 project's own CI clones the repo on every agent run and the number
 measures the factory, not an audience.
+
+**The uniques cell was computed wrong, and the prior one is
+unrecoverable.** This week's "28" was `sum(view_uniques)` over the 14
+daily rows 09-06..09-19, but issue #435's own body says "uniques are per
+day and per 14-day window; they do not sum across days," and its own
+top-of-body summary table gives the true 14-day dedup count for the
+identical snapshot directly from GitHub: 12. The prior week's "17" used
+the same sum, over the window ending 09-12, which is the same error; the
+true dedup figure for that older window was never captured, because the
+ledger only ever prints the current window's own dedup count and
+overwrites it weekly, so that cell now reads "unique not recorded"
+rather than a second guess. Next survey reads the uniques cell straight
+off the ledger's own top table, never derived by summing daily rows.
 
 Site detail for the 6-day window, same source: all 7 pageloads on `/`,
 none anywhere else, spread over four dates (09-19: 1, 09-20: 1, 09-22: 2,
@@ -86,7 +99,7 @@ returns HTTP 200 and the homepage for every URL that does not exist.**
 `/robots.txt` all answer 200 with 21724 bytes of `index.html`. A crawler
 asking this site for its crawl rules receives HTML. Filed as #753.
 Alongside it, Cloudflare Pages 308-redirects `/status.html` to `/status`,
-and all 11 internal page links in `site/` are written in the `.html`
+and all 12 internal page links in `site/` are written in the `.html`
 form, with two `rel="canonical"` tags naming the redirecting URL. Filed
 as #754.
 
@@ -180,7 +193,7 @@ gets a harder mandate.
   `site/404.html`. Items 1 and 2 land in `site/` alone; item 3's outcome
   depends on a Cloudflare Pages setting nobody has tested, which the
   issue says rather than assumes.
-- **#754**, the redirect layer: 11 internal links and two canonical tags
+- **#754**, the redirect layer: 12 internal links and two canonical tags
   onto the extensionless URLs the server actually serves.
 - The heading-voice finding is guidance on #411, not a new issue, for the
   single-source-of-truth reason stated above.
