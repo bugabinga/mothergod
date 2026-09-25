@@ -6701,9 +6701,9 @@ record.
   every prior slice left the mixer to learn around (a just-found,
   never-yet-confirmed candidate) should eliminate that regression
   outright rather than merely shrink it. Reused S2-R23's own
-  `src/match_model.rs` verbatim (the underlying hash-table engine and its
-  9 unit tests are not this slice's own hypothesis and needed no change);
-  changed only `literal.rs`'s gating: `MATCH_LEN_BUCKETS` dropped from 6
+  `src/match_model.rs` verbatim (the underlying hash-table engine is not
+  this slice's own hypothesis and needed no change); changed only
+  `literal.rs`'s gating: `MATCH_LEN_BUCKETS` dropped from 6
   to 5 by merging `match_len_bucket`'s `None` and `Some((_, 0))` cases into
   one shared bucket `0` (previously separate, buckets 0 and 1), and both
   `Literal::mix_matchmodel`/`Literal::update_matchmodel_expert` now compute
@@ -6735,8 +6735,9 @@ record.
   -0.000004; `h6` -0.000000, both negligible). Train net delta_bpb (mean
   over 11 cases): **+0.000102** (regressed). Sealed: `access_log`
   -0.000581 (improved); `gradient_image` **+0.000000151** (nominally
-  regressed, but four orders of magnitude below S2-R23's own +0.000245 and
-  within this measurement's own floating-point noise floor — reproduced
+  regressed, but roughly three orders of magnitude below S2-R23's own
+  +0.000245 and within this measurement's own floating-point noise floor —
+  reproduced
   identically on a second run). **Rejected**: corpus policy's accept rule
   needs train improvement AND no validation regression; this slice's train
   net is itself a regression, failing the rule on the opposite side of the
@@ -6774,17 +6775,12 @@ record.
   scale carries a small, real dilution the unconditioned S2-R23 version
   did not pay in quite the same way (there, an occasional correct fresh
   guess gave the shared weight upward pressure that partially offset the
-  same dilution). 22 new unit tests (9 in `match_model.rs`, unchanged from
-  S2-R23, verbatim reused; 6 in `literal.rs` — S2-R23's own 5 plus one new
-  `mix_matchmodel_contributes_nothing_for_a_fresh_unconfirmed_guess`,
-  directly pinning this slice's own hard-suppression claim rather than
-  inferring it from the train/sealed numbers alone; 7 in `codec.rs`,
-  unchanged from S2-R23). Candidate code (`src/match_model.rs` in full and
-  its 9 unit tests; `literal::MATCH_LEN_BUCKETS`/`match_len_bucket`/
+  same dilution). Candidate code (`src/match_model.rs` in full;
+  `literal::MATCH_LEN_BUCKETS`/`match_len_bucket`/
   `MatchModelExpertState`/`Literal::mix_matchmodel`/
-  `update_matchmodel_expert`/`ideal_cost_bits_matchmodel_expert_pair` and
-  their 6 unit tests; `codec::MatchModelCostSink`/
-  `ideal_cost_bits_matchmodel_expert_experiment` and their 7 unit tests;
+  `update_matchmodel_expert`/`ideal_cost_bits_matchmodel_expert_pair`;
+  `codec::MatchModelCostSink`/
+  `ideal_cost_bits_matchmodel_expert_experiment`;
   `lib.rs`'s `pub mod match_model;`; the scratch binary) reverted in full,
   per the `compression-experiment` skill's delete-rejected-candidate-code
   rule and S2-R23/PR #752's own corrected precedent (a rejected candidate
