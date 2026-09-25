@@ -30,7 +30,13 @@ name: agent-review
 
 on:
   pull_request:
-    types: [opened, ready_for_review, reopened, synchronize, converted_to_draft]
+    # `edited` (title, body or base changed): a verdict whose one [must]
+    # sits in the PR body is answered by a body edit, which no push
+    # follows. Without it, seats forced the re-review with a close and
+    # reopen, three times on 2026-09-25: the third into a dirty PR,
+    # which fires no event at all, and one scoped onto the wrong PR
+    # (#771). A title or base change costs one review; both are rare.
+    types: [opened, ready_for_review, reopened, synchronize, converted_to_draft, edited]
 
 permissions: {}
 

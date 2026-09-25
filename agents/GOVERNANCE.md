@@ -284,7 +284,7 @@ verdict label yet post no items (PR #516, a mid-run 401), so a dead
 review counts as this signature whatever the labels say, and the
 label it left is cleaned up by the fresh round it triggers. Nothing
 retries it on its own, because
-`agent-review.yml` triggers on pushes and open/reopen only.
+`agent-review.yml` triggers on pushes, open/reopen and title/body edits only.
 `stalled-prs --rescue` closes and reopens it, which fires `reopened`
 and starts a fresh review of the same head; it holds for the grace
 after the death, so a review that died into an outage is not refired

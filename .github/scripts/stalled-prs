@@ -32,7 +32,7 @@ Signatures, most specific first, at most one reported per PR:
                          items (first hit PR #516, a mid-run 401), so only
                          a completed round may speak through labels.
                          Nothing retries it: agent-review triggers on
-                         pushes and open/reopen only (first hit PR #377).
+                         pushes, open/reopen and title/body edits only (first hit PR #377).
     verdict-missing      the `review` check SUCCEEDED and left no verdict
                          label. The reviewer finished without deciding,
                          which no other signature can distinguish from a
