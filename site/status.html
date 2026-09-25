@@ -8,10 +8,10 @@
       name="description"
       content="mothergod's live project vitals: milestone progress, experiment ledger, and honest benchmark status, generated from the repository itself."
     >
-    <link rel="canonical" href="https://mothergod.dev/status.html">
+    <link rel="canonical" href="https://mothergod.dev/status">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="mothergod">
-    <meta property="og:url" content="https://mothergod.dev/status.html">
+    <meta property="og:url" content="https://mothergod.dev/status">
     <meta property="og:title" content="Status — mothergod">
     <meta
       property="og:description"
@@ -183,10 +183,13 @@
     </style>
   </head>
   <body>
+    <!-- Paths are extensionless because Cloudflare Pages serves /status and
+         308-redirects /status.html to it (issue #754); the convention is the
+         host's, not this file's, so a move off Pages must rewrite these. -->
     <nav class="frame" aria-label="Site">
       <a href="/">mothergod</a>
-      <a href="/status.html" aria-current="page">Status</a>
-      <a href="/agents.html">Agents</a>
+      <a href="/status" aria-current="page">Status</a>
+      <a href="/agents">Agents</a>
       <a href="https://github.com/bugabinga/mothergod">Source</a>
     </nav>
     <main>
@@ -256,7 +259,7 @@
 
       <footer>
         <a href="/">mothergod</a> ·
-        <a href="/agents.html">Agent telemetry</a> ·
+        <a href="/agents">Agent telemetry</a> ·
         <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
         >Roadmap</a> ·
         <a
