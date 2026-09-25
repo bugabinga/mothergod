@@ -598,10 +598,36 @@ fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
     sink.bits
 }
 
+/// Accumulates the two totals a paired-experiment [`TokenSink`]
+/// ([`PpmExpertCostSink`], [`SseMatchbyteCostSink`]) prices side by side:
+/// `baseline` for the shipped model, `candidate` for the same event under
+/// the experimental change. One shared [`add`](Self::add) means a symbol
+/// can't be added to just one half of the pair by accident.
+#[derive(Default)]
+struct PairedCost {
+    baseline: f64,
+    candidate: f64,
+}
+
+impl PairedCost {
+    /// Adds `bits` to both totals, for a [`TokenSink`] event whose cost is
+    /// identical under the baseline and the candidate.
+    fn add_same(&mut self, bits: f64) {
+        self.add(bits, bits);
+    }
+
+    /// Adds `baseline`/`candidate` to their own totals, for a
+    /// [`TokenSink`] event (`literal`) where the two differ.
+    fn add(&mut self, baseline: f64, candidate: f64) {
+        self.baseline += baseline;
+        self.candidate += candidate;
+    }
+}
+
 /// `research/JOURNAL.md` S1-P3's paired measurement, [`walk_tokens`]'s use
 /// in [`ideal_cost_bits_ppm_expert_experiment`]: sums the same
 /// flag/length/offset/slot costs [`CostSink`] does, so any delta between
-/// `baseline_bits` and `with_ppm_bits` is attributable to the literal
+/// `cost.baseline` and `cost.candidate` is attributable to the literal
 /// model alone, and prices every literal byte twice through
 /// [`Literal::ideal_cost_bits_ppm_expert_pair`] — the shipped six-expert
 /// mix, and the same mix with `ppm_state`'s own [`crate::ppm::Ppm`]-backed
@@ -609,15 +635,13 @@ fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
 /// any of the six real experts' own banks.
 struct PpmExpertCostSink<'a> {
     ppm_state: &'a mut PpmExpertState,
-    baseline_bits: f64,
-    with_ppm_bits: f64,
+    cost: PairedCost,
 }
 
 impl TokenSink for PpmExpertCostSink<'_> {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
-        let bits = models.flag[flag_table].ideal_cost_bits(kind);
-        self.baseline_bits += bits;
-        self.with_ppm_bits += bits;
+        self.cost
+            .add_same(models.flag[flag_table].ideal_cost_bits(kind));
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -625,26 +649,21 @@ impl TokenSink for PpmExpertCostSink<'_> {
             models
                 .literal
                 .ideal_cost_bits_ppm_expert_pair(context, byte, self.ppm_state);
-        self.baseline_bits += baseline;
-        self.with_ppm_bits += with_ppm;
+        self.cost.add(baseline, with_ppm);
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
-        let bits = ideal_cost_bucketed(&mut models.length, value);
-        self.baseline_bits += bits;
-        self.with_ppm_bits += bits;
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.length, value));
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
-        let bits = ideal_cost_bucketed(&mut models.offset, value);
-        self.baseline_bits += bits;
-        self.with_ppm_bits += bits;
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.offset, value));
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
-        let bits = models.slot.ideal_cost_bits(symbol);
-        self.baseline_bits += bits;
-        self.with_ppm_bits += bits;
+        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
     }
 }
 
@@ -664,18 +683,17 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     let mut ppm_state = PpmExpertState::new();
     let mut sink = PpmExpertCostSink {
         ppm_state: &mut ppm_state,
-        baseline_bits: 0.0,
-        with_ppm_bits: 0.0,
+        cost: PairedCost::default(),
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.baseline_bits, sink.with_ppm_bits)
+    (sink.cost.baseline, sink.cost.candidate)
 }
 
 /// `research/JOURNAL.md` S1-P3/S1-P8's paired measurement for the
 /// matched-byte SSE-context axis (`bittree::sse_context_matchbyte`),
 /// [`walk_tokens`]'s use in [`ideal_cost_bits_sse_matchbyte_experiment`]:
 /// sums the same flag/length/offset/slot costs [`CostSink`] does (so any
-/// delta between `baseline_bits` and `with_matchbyte_bits` is attributable
+/// delta between `cost.baseline` and `cost.candidate` is attributable
 /// to the literal model's SSE stage alone) and prices every literal byte
 /// twice through
 /// [`crate::literal::Literal::ideal_cost_bits_sse_matchbyte_pair`]: the
@@ -694,15 +712,13 @@ struct SseMatchbyteCostSink<'a> {
     pos: usize,
     reps: RepCache,
     candidate_sse: Sse,
-    baseline_bits: f64,
-    with_matchbyte_bits: f64,
+    cost: PairedCost,
 }
 
 impl TokenSink for SseMatchbyteCostSink<'_> {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
-        let bits = models.flag[flag_table].ideal_cost_bits(kind);
-        self.baseline_bits += bits;
-        self.with_matchbyte_bits += bits;
+        self.cost
+            .add_same(models.flag[flag_table].ideal_cost_bits(kind));
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -714,30 +730,25 @@ impl TokenSink for SseMatchbyteCostSink<'_> {
             match_byte,
             &mut self.candidate_sse,
         );
-        self.baseline_bits += baseline;
-        self.with_matchbyte_bits += with_matchbyte;
+        self.cost.add(baseline, with_matchbyte);
         self.pos += 1;
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
-        let bits = ideal_cost_bucketed(&mut models.length, value);
-        self.baseline_bits += bits;
-        self.with_matchbyte_bits += bits;
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.length, value));
         self.pos += value as usize;
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
-        let bits = ideal_cost_bucketed(&mut models.offset, value);
-        self.baseline_bits += bits;
-        self.with_matchbyte_bits += bits;
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.offset, value));
         let distance = NonZeroU32::new(value).expect("token offsets are always >= 1");
         self.reps.push_front(distance);
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
-        let bits = models.slot.ideal_cost_bits(symbol);
-        self.baseline_bits += bits;
-        self.with_matchbyte_bits += bits;
+        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
         self.reps.promote(RepSlot::from_index(symbol));
     }
 }
@@ -761,11 +772,10 @@ pub fn ideal_cost_bits_sse_matchbyte_experiment(data: &[u8]) -> (f64, f64) {
         pos: 0,
         reps: RepCache::initial(),
         candidate_sse: Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE),
-        baseline_bits: 0.0,
-        with_matchbyte_bits: 0.0,
+        cost: PairedCost::default(),
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.baseline_bits, sink.with_matchbyte_bits)
+    (sink.cost.baseline, sink.cost.candidate)
 }
 
 /// Whether `body_len` beats `best_len` in `encode`'s shortest-wins
@@ -2153,13 +2163,12 @@ mod tests {
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
         let mut sink = PpmExpertCostSink {
             ppm_state: &mut ppm_state,
-            baseline_bits: 0.0,
-            with_ppm_bits: 0.0,
+            cost: PairedCost::default(),
         };
         sink.flag(&mut models, 0, FLAG_LITERAL);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -2170,13 +2179,12 @@ mod tests {
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
         let mut sink = PpmExpertCostSink {
             ppm_state: &mut ppm_state,
-            baseline_bits: 0.0,
-            with_ppm_bits: 0.0,
+            cost: PairedCost::default(),
         };
         sink.length(&mut models, 17);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -2187,13 +2195,12 @@ mod tests {
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
         let mut sink = PpmExpertCostSink {
             ppm_state: &mut ppm_state,
-            baseline_bits: 0.0,
-            with_ppm_bits: 0.0,
+            cost: PairedCost::default(),
         };
         sink.offset(&mut models, 123);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -2204,13 +2211,12 @@ mod tests {
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
         let mut sink = PpmExpertCostSink {
             ppm_state: &mut ppm_state,
-            baseline_bits: 0.0,
-            with_ppm_bits: 0.0,
+            cost: PairedCost::default(),
         };
         sink.slot(&mut models, 0);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_ppm_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -2224,8 +2230,7 @@ mod tests {
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
         let mut sink = PpmExpertCostSink {
             ppm_state: &mut ppm_state,
-            baseline_bits: 0.0,
-            with_ppm_bits: 0.0,
+            cost: PairedCost::default(),
         };
 
         let mut context = Context::default();
@@ -2248,8 +2253,8 @@ mod tests {
             "baseline_total={expected_baseline_total} with_ppm_total={expected_with_ppm_total}, \
              test cannot tell the pair's two halves apart"
         );
-        assert!((sink.baseline_bits - expected_baseline_total).abs() < 1e-6);
-        assert!((sink.with_ppm_bits - expected_with_ppm_total).abs() < 1e-6);
+        assert!((sink.cost.baseline - expected_baseline_total).abs() < 1e-6);
+        assert!((sink.cost.candidate - expected_with_ppm_total).abs() < 1e-6);
     }
 
     #[test]
@@ -2288,8 +2293,7 @@ mod tests {
                 pos: 0,
                 reps: RepCache::initial(),
                 candidate_sse: Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE),
-                baseline_bits: 0.0,
-                with_matchbyte_bits: 0.0,
+                cost: PairedCost::default(),
             },
         )
     }
@@ -2302,8 +2306,8 @@ mod tests {
         let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
         sink.flag(&mut models, 0, FLAG_LITERAL);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_matchbyte_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -2314,8 +2318,8 @@ mod tests {
         let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
         sink.length(&mut models, 17);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_matchbyte_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
         assert_eq!(
             sink.pos, 17,
             "length must advance pos by the copy's own length"
@@ -2330,8 +2334,8 @@ mod tests {
         let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
         sink.offset(&mut models, 42);
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_matchbyte_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
 
         let mut expected_reps = RepCache::initial();
         expected_reps.push_front(NonZeroU32::new(42).unwrap());
@@ -2350,8 +2354,8 @@ mod tests {
         sink.reps.push_front(NonZeroU32::new(99).unwrap()); // [99, 1, 4]
         sink.slot(&mut models, 2); // promote the cached distance 4 to the front
 
-        assert!((sink.baseline_bits - expected).abs() < 1e-9);
-        assert!((sink.with_matchbyte_bits - expected).abs() < 1e-9);
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
         assert_eq!(sink.reps.get(RepSlot::from_index(0)).get(), 4);
     }
 
@@ -2391,8 +2395,8 @@ mod tests {
             "baseline_total={expected_baseline_total} with_matchbyte_total={expected_with_matchbyte_total}, \
              test cannot tell the pair's two halves apart"
         );
-        assert!((sink.baseline_bits - expected_baseline_total).abs() < 1e-6);
-        assert!((sink.with_matchbyte_bits - expected_with_matchbyte_total).abs() < 1e-6);
+        assert!((sink.cost.baseline - expected_baseline_total).abs() < 1e-6);
+        assert!((sink.cost.candidate - expected_with_matchbyte_total).abs() < 1e-6);
     }
 
     #[test]
