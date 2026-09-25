@@ -31,6 +31,14 @@ Every read is read-only. External platforms are instruments here, never
 channels: querying them is the whole of the survey's contact with them
 (MISSION.md).
 
+Two readings the instruments punish (#755 spent four review rounds on
+them). Repo uniques are the ledger's own 14-day figure, never a sum of
+its daily rows, because uniques do not add. A mention search yields
+mentions you read, never a hit total: Algolia's `nbHits` for one query
+answered three different numbers in one afternoon. A number you cannot
+reproduce on a second fetch is not a number; it is a caveat, written as
+one.
+
 A metric you cannot measure is itself a finding: journal it with the
 mechanism of failure, and file `blocked-on-human` when only the operator
 can unlock it, naming the exact permission or secret.
