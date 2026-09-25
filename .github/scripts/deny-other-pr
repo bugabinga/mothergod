@@ -11,8 +11,12 @@ newest of three open PRs: it reviewed #770, passed it, and merged it
 on #768 with no verdict ever posted there (issue #771). Nothing checked
 that the actions landed where the environment pointed. This does.
 
-Denied, per shell segment (split on `;`, `&`, `|`): a write verb whose
-first positional number is not `PR_NUMBER`. The verbs are the ones a
+Denied, per shell segment (split on `;`, `&`, `|` and newline, because
+the Bash tool carries multi-line commands and the incident's shape is a
+comment on the right PR followed by a merge on the wrong one; PR #772's
+first review round reproduced exactly that through a bare newline): a
+write verb, every occurrence in the segment, whose first positional
+number is not `PR_NUMBER`. The verbs are the ones a
 verdict is made of: `merge-pr`, `gh-comment`, `push-branch`, `gh pr`
 and `gh issue` mutations (edit, merge, close, reopen, ready, review,
 comment, lock, unlock, delete, pin, unpin, transfer), and `gh api` on
@@ -43,6 +47,9 @@ import re
 import sys
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+# A newline separates statements exactly as `;` does (review round one).
+SEGMENT = re.compile(r"[;&|\r\n]+")
 
 # A number token: not glued to a path, a word, a flag value like `-770`,
 # or an issue reference like `#770` in prose.
@@ -100,18 +107,16 @@ def strip_prose(command: str) -> str:
 
 def other_target(command: str, pr: str) -> tuple[str, str] | None:
     """The (class, number) of the first write aimed off the PR, or None."""
-    for segment in re.split(r"[;&|]+", strip_prose(command)):
+    for segment in SEGMENT.split(strip_prose(command)):
         for name, verb in VERBS:
-            hit = verb.search(segment)
-            if not hit:
-                continue
-            number = re.search(NUMBER, segment[hit.end():])
-            if number and number.group(1) != pr:
-                return name, number.group(1)
+            for hit in verb.finditer(segment):
+                number = re.search(NUMBER, segment[hit.end():])
+                if number and number.group(1) != pr:
+                    return name, number.group(1)
         if GH_API.search(segment) and API_WRITE.search(segment):
-            target = API_TARGET.search(segment)
-            if target and target.group(1) != pr:
-                return "gh api write", target.group(1)
+            for target in API_TARGET.finditer(segment):
+                if target.group(1) != pr:
+                    return "gh api write", target.group(1)
     return None
 
 

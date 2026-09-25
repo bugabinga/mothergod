@@ -49,6 +49,13 @@ const denied = [
   ["merge-pr '770' --sha abc", "single quotes, same"],
   [".github/scripts/push-branch 770 --merge abc", "a merge push to another PR"],
   ["timeout 300 .github/scripts/merge-pr 770 2>&1", "wrapper and redirection"],
+  ["gh pr comment 768 --body \"ok\"\ngh pr merge 770 --squash --auto", "newline-separated, review round one"],
+  ["merge-pr 768\nmerge-pr 770", "same verb twice, right then wrong"],
+  [
+    "gh api -X POST repos/o/r/issues/768/comments -f body=q\ngh api -X POST repos/o/r/issues/770/comments -f body=q",
+    "two api writes, right then wrong",
+  ],
+  ["gh pr edit 768 --add-label agent-approved\r\n.github/scripts/merge-pr 770", "CRLF"],
 ];
 
 const allowed = [
@@ -79,6 +86,8 @@ const allowed = [
   ["git log --oneline -770", "a flag value is not a target"],
   ["grep -n 770 research/JOURNAL.md", "no write verb"],
   ["gh run view 36178330703 --log", "a run id is not a PR"],
+  ["gh pr edit 768 --title q\ngh pr view 770", "a read on the second line"],
+  ["merge-pr 768\necho done", "a second line with no verb"],
 ];
 
 for (const [command, why] of denied) {
