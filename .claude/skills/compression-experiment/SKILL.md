@@ -65,6 +65,9 @@ When measurement is possible:
    The scratch driver is deleted with the verdict either way: once the
    numbers are recorded, nothing calls it.
    Numbers live in the research records only.
+   An entry names no test and counts none: the tests are in the tree or
+   gone with the candidate, and PR #765 cited one that never existed, then
+   spent two rounds on counts.
    A module doc cites the journal id and never restates a figure;
    PR #690 carried one count in four places and needed two review rounds to
    correct them all.
