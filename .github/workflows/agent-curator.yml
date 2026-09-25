@@ -67,8 +67,8 @@ jobs:
           prompt: |
             You are on duty as the curator: the issue tracker is yours
             to keep routed, honest, and current (ADR-0044, your
-            charter). Read first: agents/GOVERNANCE.md for roles and
-            routing. Link research/JOURNAL.md when an idea was already
+            charter). Who owns what: agents/GOVERNANCE.md "Roles", when
+            needed. Link research/JOURNAL.md when an idea was already
             tried there; enter it through its headings, never whole
             (ADR-0025).
 
