@@ -7,7 +7,7 @@ session text leaves the machine". That was false. Issue comments, PR bodies and
 commit contents are unmasked on a public repo too, as CLAUDE.md hard rule 10
 says outright, and nothing scrubbed them.
 
-Two rules, and the order they are in matters.
+Three rules, and the order they are in matters.
 
 `URL_USERINFO` is the load-bearing one, because it is shaped, not prefixed.
 Issue #425 added prefix patterns to catch an app installation token echoed out
@@ -20,8 +20,15 @@ the regex matched the fixture and never that it matched the token the runner
 actually mints. Userinfo in an http(s) URL is a credential by construction, at
 any length, in any format, so this rule cannot go stale the same way.
 
+`AUTH_HEADER` is shaped the same way. The runner hands git its credential as
+an `AUTHORIZATION: basic <base64>` extraheader, and base64 of
+`x-access-token:<token>` encodes the prefix away, so no prefix rule can see
+the one form the runner actually writes to disk. A session that `cat`s its
+own git config prints exactly that (#738). A header value is a credential by
+construction, whatever the scheme.
+
 The prefix rules stay as defence in depth: they catch a bare token pasted
-outside a URL, which the userinfo rule by definition cannot see.
+outside a URL or header, which the shaped rules by definition cannot see.
 
 The remote URL itself, the source of both leaks, is cleaned at session
 start by the scrub-remote hook (#597); this scrubber stays as the exit-side
@@ -40,6 +47,15 @@ REDACTION = "***REDACTED***"
 # match inside the authority, so a path containing `@` and a bare email beside
 # an ordinary link are both left alone.
 URL_USERINFO = re.compile(r"(?i)\b(https?://)[^/\s@]+@")
+
+# An HTTP Authorization header: `basic` is what the runner writes to git config,
+# `bearer` and `token` are what the Cloudflare and GitHub APIs take on a curl
+# line. The value is redacted and the scheme kept, so a reader learns which
+# leak class fired. The length floor keeps prose ("authorization: token holders
+# decide") out of it; no real credential is that short.
+AUTH_HEADER = re.compile(
+    r"(?i)\b(authorization:\s*(?:basic|bearer|token)\s+)[A-Za-z0-9._~+/=-]{16,}"
+)
 
 TOKEN_PATTERNS = [
     # GitHub: ghp_ personal, gho_ OAuth, ghu_/ghs_ app, ghr_ refresh.
@@ -71,6 +87,8 @@ def scrub(text, values=()):
             text = text.replace(value, REDACTION)
             count += 1
     text, found = URL_USERINFO.subn(r"\1" + REDACTION + "@", text)
+    count += found
+    text, found = AUTH_HEADER.subn(r"\1" + REDACTION, text)
     count += found
     for pattern in TOKEN_PATTERNS:
         text, found = pattern.subn(REDACTION, text)

@@ -75,6 +75,39 @@ test("the live remote URL of this checkout carries no credential past scrub", ()
   }
 });
 
+// The runner hands git its credential base64-encoded (#738), so every prefix
+// rule sees an opaque blob: the header shape is the only handle.
+test("the Authorization header the runner writes to git config is redacted", () => {
+  const b64 = Buffer.from(`x-access-token:${longToken}`).toString("base64");
+  const { out, count } = scrub(
+    `http.https://github.com/.extraheader=AUTHORIZATION: basic ${b64}`,
+  );
+  assert.ok(!out.includes(b64), "the base64 credential survived");
+  assert.equal(count, 1);
+  assert.ok(out.includes("AUTHORIZATION: basic ***REDACTED***"), out);
+  for (const scheme of ["Bearer", "token"]) {
+    const { out } = scrub(`curl -H "Authorization: ${scheme} ${patToken}"`);
+    assert.ok(!out.includes(patToken), `${scheme} value survived`);
+    assert.ok(out.includes(`Authorization: ${scheme} ***REDACTED***`), out);
+  }
+});
+
+// Liveness, as for the remote URL: whatever header this runner actually put in
+// its git config, nothing credential-shaped survives the scrub.
+test("the live extraheader of this checkout carries no credential past scrub", () => {
+  const result = spawnSync(
+    "git",
+    ["config", "--get-all", "http.https://github.com/.extraheader"],
+    { encoding: "utf8" },
+  );
+  for (const header of result.stdout.split("\n").map((s) => s.trim()).filter(Boolean)) {
+    const { out } = scrub(header);
+    const value = out.match(/^authorization:\s*\S+\s+(\S+)/i);
+    assert.ok(value, `unrecognised header shape: ${out.slice(0, 24)}`);
+    assert.equal(value[1], "***REDACTED***", "a live credential survived in the extraheader");
+  }
+});
+
 test("bare prefixed tokens outside a URL are still caught", () => {
   for (const fake of [ghsToken, patToken, antToken, tgToken]) {
     const { out } = scrub(`saw ${fake} in the environment`);
@@ -100,6 +133,7 @@ test("ordinary prose and links are left alone", () => {
     "see https://github.com/bugabinga/mothergod/issues/425 for the history",
     "mail a@b.com or read https://mothergod.dev/status.html",
     "the path https://example.com/a/user@example is not userinfo",
+    "authorization: token holders decide, per ADR-0011",
     "`cargo x check` runs fmt, lint, test, doc",
   ].join("\n");
   const { out, count } = scrub(prose);
