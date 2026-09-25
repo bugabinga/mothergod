@@ -40,9 +40,12 @@ nothing; a human's local git config is theirs. In CI it reads
 `remote.origin.url` of the checkout (CLAUDE_PROJECT_DIR, else the working
 directory) and, if the URL carries userinfo (`https://<anything>@host`),
 rewrites it without; then it unsets every `http.https://github.com/.extraheader`
-value. Neither the URL nor a header value is ever printed, in any state.
-Always exits 0: a hook that fails a session start over git cosmetics is a
-worse defect than the leak it prevents.
+value at the file each one actually resolves from (`--show-origin`), since
+actions/checkout writes the header into a file pulled in by `includeIf`,
+not the repo's own `.git/config`, and a plain `--unset-all` only ever
+targets the latter. Neither the URL nor a header value is ever printed,
+in any state. Always exits 0: a hook that fails a session start over git
+cosmetics is a worse defect than the leak it prevents.
 
 Liveness: one line on stdout, which the harness adds to the model's
 context, and the same line appended to GITHUB_STEP_SUMMARY, the durable
@@ -97,11 +100,39 @@ def scrub_origin(repo):
     return "origin credential removed"
 
 
+def extraheader_files(repo):
+    """Distinct files the extraheader value actually resolves from.
+
+    actions/checkout persists the header in an external file pulled in via
+    an `includeIf` stanza (git-auth-helper.ts), not a write into the repo's
+    own `.git/config`. Plain `--unset-all` has no `--file` and always writes
+    to the repo's local config, so it silently no-ops against that layout.
+    `--show-origin` reports the file each matching line actually came from;
+    only the origin, never the value, is read here.
+    """
+    result = git(repo, "config", "--show-origin", "--get-all", EXTRAHEADER)
+    if result.returncode != 0:
+        return []
+    files = []
+    for line in result.stdout.splitlines():
+        origin, _, _value = line.partition("\t")
+        if origin.startswith("file:"):
+            path = origin[len("file:") :]
+            if path not in files:
+                files.append(path)
+    return files
+
+
 def scrub_extraheader(repo):
-    """Unset every persisted extraheader value; the clause for the line."""
-    if git(repo, "config", "--get-all", EXTRAHEADER).returncode != 0:
+    """Unset every persisted extraheader value at its real file; the clause for the line."""
+    files = extraheader_files(repo)
+    if not files:
         return "extraheader already clean"
-    if git(repo, "config", "--unset-all", EXTRAHEADER).returncode != 0:
+    ok = True
+    for path in files:
+        if git(repo, "config", "--file", path, "--unset-all", EXTRAHEADER).returncode != 0:
+            ok = False
+    if not ok:
         print("scrub-remote: could not unset the extraheader", file=sys.stderr)
         return None
     return "extraheader removed"

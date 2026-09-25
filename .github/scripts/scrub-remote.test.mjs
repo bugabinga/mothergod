@@ -24,7 +24,18 @@ function repo(url, withHeader = false) {
   const dir = mkdtempSync(join(tmpdir(), "scrub-remote-"));
   execFileSync("git", ["-C", dir, "init", "-q"]);
   if (url) execFileSync("git", ["-C", dir, "remote", "add", "origin", url]);
-  if (withHeader) execFileSync("git", ["-C", dir, "config", HEADER_KEY, header]);
+  if (withHeader) {
+    // actions/checkout persists the header in a file pulled in via an
+    // `includeIf` stanza (git-auth-helper.ts), not a write into the repo's
+    // own .git/config; a flat `git config` write here would validate a
+    // fixture the real credential store never matches (#759 review).
+    const credDir = mkdtempSync(join(tmpdir(), "scrub-remote-cred-"));
+    const credFile = join(credDir, "git-credentials.config");
+    writeFileSync(credFile, `[http "https://github.com/"]\n\textraheader = ${header}\n`);
+    const gitConfig = join(dir, ".git", "config");
+    const includeBlock = `[includeIf "gitdir:${dir}/.git"]\n\tpath = ${credFile}\n`;
+    writeFileSync(gitConfig, readFileSync(gitConfig, "utf8") + includeBlock);
+  }
   return dir;
 }
 
