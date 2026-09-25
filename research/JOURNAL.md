@@ -4123,7 +4123,14 @@ record.
   mechanism: S2-R23's own entry. Remaining S1-P8 scope: a third,
   structurally independent mechanism (S2-R20's mixing weight, S2-R22's SSE
   axis, now S2-R23's own hash-based match model) has now hit the same
-  `gradient_image` wall; what is left is either suppressing this expert's
+  `gradient_image` wall. Slice S2-R25 changed the mixing rule instead of
+  adding a fourth signal: PAQ7-style logit-domain mixing of the same six
+  experts, the transfer pair a GLN is built on. Train net **-0.085830
+  b/B** at its train-tuned rate, ten of eleven cases improved, the largest
+  train effect this lead has measured; rejected on `gradient_image`
+  **+0.000346**, a sealed margin that flips sign with the mixing learning
+  rate rather than holding the wall the three signal slices hit. Full
+  record in S2-R25's own entry. What is left is either suppressing this expert's
   contribution until a candidate has been confirmed at least once (never
   trusting a fresh, unconfirmed guess — untried, since S2-R23 deliberately
   measured one design), the from-scratch GLN gating architecture this
@@ -6674,3 +6681,130 @@ record.
   code" and PR #752/bc86904's own corrected precedent (a rejected
   candidate leaves whole, meaning departs). `research/progress.jsonl`
   it164. Remaining S1-P8 scope: see the updated S1-P8 lead entry above.
+- S2-R25 | REJECTED | S1-P8's own remaining scope after S2-R23, taken at
+  the lead's name rather than its recipe: every slice in this line so far
+  has added a *signal* (S2-R20's matched literal byte, S2-R22's the same
+  byte as a calibration axis, S2-R23's own hash match model) and left the
+  mixing *rule* alone. This slice adds no signal at all. It replaces the
+  rule: [`crate::literal::Literal::mix`] forms a weighted average of the
+  six experts' own probabilities, so the blend can never be more confident
+  than the most confident expert in it; PAQ7 and every lpaq/zpaq/cmix
+  descendant mix `stretch(p) = ln(p / (1 - p))` instead and squash the sum
+  back, where two experts that agree compound rather than average
+  (Mahoney 2005 onward). That transfer pair is also what a GLN is built
+  on, so this is the smallest testable piece of the from-scratch gating
+  architecture this lead's own name still names and which S2-A99 and
+  S2-R20 each declined on a session's time budget: the mixing rule alone,
+  no gating, no new expert, no new signal. Hypothesis: mixing the same six
+  experts in the logit domain, per binary decision, under the same SSE
+  stage, reduces ideal-cost bits/byte across `bench::baseline`'s train
+  tier without regressing the sealed set. Apparatus: new `src/logistic.rs`
+  (`stretch`/`squash` plus a vendored `ln`, IEEE-754 basic operations
+  only, since `clippy.toml` forbids the libm transcendental family
+  crate-wide and `src/sse.rs`'s own module doc records S2-A40 declining to
+  vendor a second pair for exactly that reason; `squash` reuses S2-A16's
+  existing `exp`); `literal::LogisticMix`, reading `Literal`'s own six
+  expert banks, mixing their per-node stretches under one weight vector
+  per `WEIGHT_CONTEXTS` key (the same key `banks` selects the linear
+  weights by) and moving each weight along the coding loss' own gradient,
+  `error * stretch(p_expert)`; `codec::LogisticMixCostSink` and
+  `ideal_cost_bits_logistic_mix_experiment`. Three guards on the
+  comparison, because a paired measurement is only worth its symmetry:
+  `bittree::walk_steps`'s halving loop was factored into a
+  `walk_nodes` the candidate walks too, so the candidate cannot
+  silently price a different tree than the shipped coder; the candidate
+  carries its own `Sse` over the same `bittree::SSE_CONTEXTS` (255)
+  contexts, so both halves are calibrated and neither is judged pre-SSE
+  (S2-L1); and a test asserted the pair's baseline half equals
+  `codec::ideal_cost_bits`'s own whole-file number, not merely something
+  like it. Measured on `bench::baseline`'s 11 train cases (`CASE_LEN`
+  50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only kinds at
+  `sealed_seed(CASE_SEED)`, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_logistic_mix_experiment.rs`, deleted after this
+  measurement), matching S2-A100/S2-R20/S2-R23's own convention. | The
+  mixing learning rate is this candidate's one free constant, tuned
+  against train and nothing else (`research/corpus/POLICY.md` sanctions
+  exactly that, and the scratch binary printed the sealed kinds only under
+  an explicit flag so a sweep could not see them). Train net by rate, as a
+  sum over the 11 cases: **+0.046523** at 0.0005, **-0.016549** at 0.001,
+  **-0.057062** at 0.002, **-0.081468** at 0.004, **-0.085830** at 0.006,
+  **-0.085296** at 0.008, **-0.057433** at 0.016. A clean unimodal curve;
+  the train optimum, and therefore this candidate, is **0.006**. There,
+  train net **-0.085830 b/B** (sum; mean -0.007803), ten of eleven cases
+  improved: `interleaved_audio16` **-0.048989** (the largest single train
+  move any S1-P2/S1-P3/S1-P8 slice has measured), `x86_dense_code`
+  -0.016003, `json_records` -0.007394, `markov_h8_2_trap` -0.005784,
+  `sqlite_like_records` -0.004518, `base64_wrapped` -0.004389,
+  `entropy_ladder_h8` -0.001239, `h4` -0.000807, `h2` -0.000688, `h1`
+  -0.000084; one regressed, `entropy_ladder_h6` **+0.004066**, the same
+  ladder point S2-A60's own SSE wiring regressed inside its accepted
+  trade. Sealed: `access_log` **-0.000878** improved, `gradient_image`
+  **+0.000346** regressed. **Rejected**: corpus policy's accept rule needs
+  train improvement AND no validation regression, and S2-R4's own reading
+  ("the accept rule draws no tolerance line for the sealed set the way
+  `TOLERANCE_BITS` does for the CI gate") has since decided S2-R7, S2-R18,
+  S2-R20, S2-R22 and S2-R23 at this magnitude and smaller. | Disclosed in
+  full because it decides nothing and would look like a buried lead
+  otherwise: the rate this slice registered a priori in code before any
+  measurement, 0.002, was measured first, and its sealed check passed
+  outright (`access_log` -0.000070, `gradient_image` **-0.012761**, a
+  large improvement on the exact case that has sunk this lead line three
+  times). Both numbers are real and reproduce exactly on a re-run, the
+  accounting being deterministic. The verdict is not read off them,
+  because reaching back for a train-suboptimal rate once its sealed
+  numbers are known is selecting a hyperparameter on the validation set,
+  which is the one thing `research/corpus/POLICY.md` forbids outright.
+  Sealed may veto a candidate; it may never choose one. So the candidate
+  is the train-tuned one and the veto stands. No further sealed
+  measurement was taken: two points is what the procedure produced, and
+  sweeping the sealed set to map the sign flip would be the same violation
+  by a slower route. | Mechanism, train side: the cases that move most are
+  the ones where several experts genuinely agree and the linear blend
+  cannot express it. `interleaved_audio16` is the clearest, its alignment
+  expert and both rate-keyed order-1 experts all keying on the same
+  channel period; `x86_dense_code` and the record formats follow the same
+  shape. The `entropy_ladder_h6` regression is S1-L4's richness tax in its
+  usual place: on a near-memoryless source there is nothing for agreement
+  to compound, and the mixer's own adaptation is pure overhead. Mechanism,
+  the rate: the sealed sign flip between 0.002 and 0.006 says this
+  candidate's sealed margin is a knife edge in one hyperparameter, not the
+  flat wall S2-R20 through S2-R23 hit, where three structurally
+  independent mechanisms all regressed `gradient_image` at every setting
+  tried. A faster-adapting mixer sharpens its estimate on genuine
+  structure and overshoots on `gradient_image`'s smooth
+  sine-plus-gaussian-noise surface, where confident agreement between
+  experts is frequently agreement about noise. That is a different failure
+  from this lead's previous three and it is the first one a rate schedule
+  could plausibly address. | One confound, named rather than left for a
+  reviewer to find: the candidate also escapes the linear path's
+  fixed-point blend (`mix`'s `>>16` quantization and per-symbol Laplace
+  floor), reading each expert's probability at full `f64` precision, so
+  the measured delta is the mixing rule plus that. The rate curve rules
+  the confound out as the source of the win: at 0.0005 the weights barely
+  move from their uniform start, the candidate is then very nearly a
+  static full-precision blend, and it **loses** by +0.046523. The gain
+  appears only as the weights adapt, and it tracks how fast they do. |
+  Candidate code (`src/logistic.rs` in full, `lib.rs`'s `pub mod
+  logistic`, `literal::LOGISTIC_LEARNING_RATE`/`LogisticMix`/
+  `Literal::ideal_cost_bits_logistic_pair`, `literal::exp`'s widened
+  visibility, `codec::LogisticMixCostSink`/
+  `ideal_cost_bits_logistic_mix_experiment`/`_at`, every unit test added
+  with them, `bittree::walk_nodes` and its extraction, the scratch binary)
+  reverted in full, per the `compression-experiment` skill's
+  delete-rejected-candidate-code rule and PR #752/bc86904's corrected
+  precedent. `walk_nodes` goes with it, unlike S2-R22's `walk_sse_keyed`,
+  which stayed: that extraction kept a second caller and pre-existing
+  tests exercising it, this one would keep exactly one caller and no
+  reason to exist. The vendored `ln` matched libm to within `1e-12`
+  relative across `[1e-6, 1e6]`, which is the part of this slice worth
+  rebuilding if a logit-binned `Sse` is ever attempted (S2-A40's own
+  declined design). `research/progress.jsonl` it166. Remaining S1-P8
+  scope: logit-domain mixing is the largest train-side effect this lead
+  has produced and the first whose sealed failure is a hyperparameter
+  knife edge rather than a wall, so what is left here is a rate rule
+  rather than a rate constant (an annealed or count-derived step size,
+  the way `crate::model::Model`'s own increment/limit pair is fixed by
+  construction rather than tuned), or the full GLN gating architecture
+  this lead names, whose gate is exactly the per-context trust a single
+  global rate cannot express. A fourth new *signal* is not the next
+  thing to try.
