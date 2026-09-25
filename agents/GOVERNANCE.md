@@ -355,8 +355,12 @@ it is why the script exists and what it protects.
   main and misses the PR branch entirely (observed on #78).
 - The admin PAT (actor `bugabinga`): operator-attributed, and
   operator-attributed events wake the BDFL (issue #50). Reserved for
-  what the app cannot do: workflow-file pushes (issue #24) and cron-line
-  changes. `push-branch` selects it from the paths. Never push these
+  what the app cannot do: workflow-file pushes (issue #24), cron-line
+  changes, and, past the hour mark, the push the app token can no
+  longer make: on a 401 `push-branch` retries once on the PAT and says
+  so (issue #734), 401 only, because a 403 is a permission answer and
+  is never routed around. `push-branch` selects it from the paths and
+  from that one answer. Never push these
   with git: the runner injects its own credential as a multi-valued
   `http.extraheader`, it wins, and the recipe this file carried for
   clearing it appended an empty header instead of replacing the real
@@ -382,7 +386,8 @@ compiles that order, and its docstring holds the incidents that made
 a sentence insufficient. For comments that must land late in
 a long run, fall back to the job-scoped workflow token, exposed to
 agent sessions as `GH_WORKFLOW_TOKEN`:
-`GH_TOKEN="$GH_WORKFLOW_TOKEN" gh api ...`. That identity is
+`GH_TOKEN="$GH_WORKFLOW_TOKEN" gh api ...`; `settle-push` makes that
+retry itself for its reads (issue #734). That identity is
 `github-actions[bot]`, blessed for issue comments, issue creation and
 PR comments, never for pushes (first bullet above) and never for
 merges. The reviewer is exempt from all of this; its `gh` rides
