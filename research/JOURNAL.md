@@ -6603,20 +6603,20 @@ record.
   hypothesis under test, a hash-table implementation bug. Fixed by
   comparing the actual `CONTEXT_LEN` context bytes before trusting a stored
   position (`predict`'s own doc), rejecting a collision structurally
-  instead of waiting for the mixer to learn around it; a dedicated unit
-  test (`rejects_a_forged_table_entry_whose_context_does_not_match`) forges
-  a mismatched table entry and confirms it is refused. Only the
+  instead of waiting for the mixer to learn around it; the collision fix
+  is evidenced only by the aggregate before/after numbers above, not a
+  dedicated test isolating the context-byte comparison. Only the
   collision-verified version is this entry's recorded measurement; the
   naive numbers above are cited as mechanism evidence for why the check was
-  necessary, not as a second accept/reject basis. 8 new unit tests in
+  necessary, not as a second accept/reject basis. 9 new unit tests in
   `match_model.rs` (causality — a context never predicts from a position
   not yet reached; a fresh model backfills a copy-token-sized gap from one
   `predict` call alone; match length grows on consecutive hits and resets
-  on a miss; the forged-collision rejection above), 6 in `literal.rs`
+  on a miss), 5 in `literal.rs`
   (paired baseline matches plain `ideal_cost_bits` exactly; the "silent"
   case contributes zero mass to every symbol, not just the predicted one;
   a found candidate adds a spike at exactly its own symbol; length-bucket
-  separation; finite-positive costs), 6 in `codec.rs` (each `TokenSink`
+  separation; finite-positive costs), 7 in `codec.rs` (each `TokenSink`
   method's cost pass-through, the paired-cost end-to-end check). Measured
   on `bench::baseline`'s 11 train-tier cases (`CASE_LEN` 50,000,
   `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only kinds at
