@@ -2719,12 +2719,14 @@ record.
   `ideal_cost_bits_sse_matchbyte` and their unit tests,
   `Literal::ideal_cost_bits_sse_matchbyte_pair` and its unit tests,
   `codec::SseMatchbyteCostSink`/`ideal_cost_bits_sse_matchbyte_experiment`
-  and their unit tests, the scratch binary) kept whole per the
-  `compression-experiment` skill (measurement apparatus stays on `main`
-  even on a reject), plus `walk_sse`'s own behavior-preserving extraction
-  into `walk_sse_keyed`, which is infrastructure, not candidate-specific
-  (bit-for-bit identical to its pre-slice body, every existing SSE test
-  still exercises it unchanged). Every named branch S2-R6 through S2-R22
+  and their unit tests, the scratch binary) was deleted in the PR that
+  closes issue #756, per the `compression-experiment` skill's actual rule
+  (a rejected candidate leaves whole, meaning departs; #752 misread
+  "leaves" as "stays" and shipped it instead), except `walk_sse`'s own
+  behavior-preserving extraction into `walk_sse_keyed`, which is
+  infrastructure, not candidate-specific (bit-for-bit identical to its
+  pre-slice body, every existing SSE test still exercises it unchanged),
+  and stays. Every named branch S2-R6 through S2-R22
   has now failed at real-SSE-coding granularity; S1-P3 reaches the same
   "unclear, no further named branch" state S1-P2 reached.
   `research/progress.jsonl` it163.
@@ -6512,12 +6514,14 @@ record.
   tests, `lz::match_byte_at` and its three unit tests,
   `Literal::ideal_cost_bits_sse_matchbyte_pair` and its three unit tests,
   `codec::SseMatchbyteCostSink`/`ideal_cost_bits_sse_matchbyte_experiment`
-  and their eight unit tests, the scratch binary) kept whole per the
-  `compression-experiment` skill (measurement apparatus stays on `main`
-  even on a reject), plus `walk_sse`'s own behavior-preserving extraction
-  into `walk_sse_keyed`, which is infrastructure, not candidate-specific:
-  bit-for-bit identical to `walk_sse`'s pre-slice body, every pre-existing
-  SSE test still exercises it unchanged.
+  and their eight unit tests, the scratch binary) was deleted in the PR
+  that closes issue #756, per the `compression-experiment` skill's actual
+  rule (a rejected candidate leaves whole, meaning departs; #752 misread
+  "leaves" as "stays" and shipped it instead), except `walk_sse`'s own
+  behavior-preserving extraction into `walk_sse_keyed`, which is
+  infrastructure, not candidate-specific: bit-for-bit identical to
+  `walk_sse`'s pre-slice body, every pre-existing SSE test still exercises
+  it unchanged, and stays.
   `research/progress.jsonl` it163. Remaining S1-P3 scope: every named
   branch from S2-R6 through this entry has now failed at real-SSE-coding
   granularity (substitution, additive-mixing, and now calibration-context

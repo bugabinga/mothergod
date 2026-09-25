@@ -69,14 +69,12 @@
 use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::Error;
-use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
 use crate::literal::{ColumnExpertState, Context, Literal, PpmExpertState};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
-use crate::sse::Sse;
 
 /// Lowest `FORMAT_VERSION` whose `Method::Lz` payload this build can
 /// decode: see the module docs' "Payload layout" section for the layout
@@ -599,10 +597,10 @@ fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
 }
 
 /// Accumulates the two totals a paired-experiment [`TokenSink`]
-/// ([`PpmExpertCostSink`], [`SseMatchbyteCostSink`]) prices side by side:
-/// `baseline` for the shipped model, `candidate` for the same event under
-/// the experimental change. One shared [`add`](Self::add) means a symbol
-/// can't be added to just one half of the pair by accident.
+/// ([`PpmExpertCostSink`]) prices side by side: `baseline` for the shipped
+/// model, `candidate` for the same event under the experimental change. One
+/// shared [`add`](Self::add) means a symbol can't be added to just one half
+/// of the pair by accident.
 #[derive(Default)]
 struct PairedCost {
     baseline: f64,
@@ -683,95 +681,6 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     let mut ppm_state = PpmExpertState::new();
     let mut sink = PpmExpertCostSink {
         ppm_state: &mut ppm_state,
-        cost: PairedCost::default(),
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.cost.baseline, sink.cost.candidate)
-}
-
-/// `research/JOURNAL.md` S1-P3/S1-P8's paired measurement for the
-/// matched-byte SSE-context axis (`bittree::sse_context_matchbyte`),
-/// [`walk_tokens`]'s use in [`ideal_cost_bits_sse_matchbyte_experiment`]:
-/// sums the same flag/length/offset/slot costs [`CostSink`] does (so any
-/// delta between `cost.baseline` and `cost.candidate` is attributable
-/// to the literal model's SSE stage alone) and prices every literal byte
-/// twice through
-/// [`crate::literal::Literal::ideal_cost_bits_sse_matchbyte_pair`]: the
-/// shipped tree-position-only SSE table, and a candidate table additionally
-/// keyed on `lz::match_byte_at`'s own report for this position. Tracks its
-/// own [`RepCache`] and byte position across [`walk_tokens`], the same
-/// shape `research/JOURNAL.md` S2-R20's `MatchByteExpertCostSink` used for
-/// the identical matched-byte signal tried as a mixer expert instead of an
-/// SSE context: `offset` folds a fresh [`Token::Match`]'s distance in via
-/// [`RepCache::push_front`], `slot` folds a [`Token::Rep`]'s reused slot in
-/// via [`RepCache::promote`], `length` (called for both token kinds, always
-/// with that copy's own length) is where `pos` advances across a copy since
-/// no other [`TokenSink`] method sees it; `literal` advances `pos` by one.
-struct SseMatchbyteCostSink<'a> {
-    data: &'a [u8],
-    pos: usize,
-    reps: RepCache,
-    candidate_sse: Sse,
-    cost: PairedCost,
-}
-
-impl TokenSink for SseMatchbyteCostSink<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
-        self.cost
-            .add_same(models.flag[flag_table].ideal_cost_bits(kind));
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        let rep0 = self.reps.get(RepSlot::from_index(0));
-        let match_byte = lz::match_byte_at(self.data, self.pos, rep0);
-        let (baseline, with_matchbyte) = models.literal.ideal_cost_bits_sse_matchbyte_pair(
-            context,
-            byte,
-            match_byte,
-            &mut self.candidate_sse,
-        );
-        self.cost.add(baseline, with_matchbyte);
-        self.pos += 1;
-    }
-
-    fn length(&mut self, models: &mut Models, value: u32) {
-        self.cost
-            .add_same(ideal_cost_bucketed(&mut models.length, value));
-        self.pos += value as usize;
-    }
-
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        self.cost
-            .add_same(ideal_cost_bucketed(&mut models.offset, value));
-        let distance = NonZeroU32::new(value).expect("token offsets are always >= 1");
-        self.reps.push_front(distance);
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
-        self.reps.promote(RepSlot::from_index(symbol));
-    }
-}
-
-/// `research/JOURNAL.md` S1-P3/S1-P8's before-wiring measurement: does
-/// widening the literal mixer's single SSE table with a matched-byte axis
-/// (`bittree::sse_context_matchbyte`, LZMA's own matched-literal signal,
-/// generalized as a calibration context instead of S2-R20's rejected
-/// ninth-mixer-expert shape) help, priced through
-/// [`crate::literal::Literal::ideal_cost_bits_sse_matchbyte_pair`]. Not
-/// reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
-/// wiring, measurement only.
-///
-/// Returns `(baseline_bits, with_matchbyte_bits)`.
-#[must_use]
-pub fn ideal_cost_bits_sse_matchbyte_experiment(data: &[u8]) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut sink = SseMatchbyteCostSink {
-        data,
-        pos: 0,
-        reps: RepCache::initial(),
-        candidate_sse: Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE),
         cost: PairedCost::default(),
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
@@ -2255,148 +2164,6 @@ mod tests {
         );
         assert!((sink.cost.baseline - expected_baseline_total).abs() < 1e-6);
         assert!((sink.cost.candidate - expected_with_ppm_total).abs() < 1e-6);
-    }
-
-    #[test]
-    fn ideal_cost_bits_sse_matchbyte_experiment_is_zero_on_empty_input() {
-        let (baseline, with_matchbyte) = ideal_cost_bits_sse_matchbyte_experiment(b"");
-        assert!(baseline.abs() < 1e-9);
-        assert!(with_matchbyte.abs() < 1e-9);
-    }
-
-    #[test]
-    fn ideal_cost_bits_sse_matchbyte_experiment_stays_finite_and_positive() {
-        // research/JOURNAL.md S1-P3/S1-P8: no accuracy claim here, just that
-        // the paired walk runs to completion and both totals land somewhere
-        // sane — the actual accept/reject verdict is a train/sealed
-        // measurement recorded in the journal, not a unit test assertion.
-        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
-        let (baseline, with_matchbyte) = ideal_cost_bits_sse_matchbyte_experiment(data);
-        assert!(
-            baseline.is_finite() && baseline > 0.0,
-            "baseline={baseline}"
-        );
-        assert!(
-            with_matchbyte.is_finite() && with_matchbyte > 0.0,
-            "with_matchbyte={with_matchbyte}"
-        );
-    }
-
-    /// A fresh [`SseMatchbyteCostSink`] over `data` and a fresh [`Models`],
-    /// for asserting each [`TokenSink`] method against a value computed
-    /// independently from the same starting state.
-    fn fresh_sse_matchbyte_sink(data: &[u8]) -> (Models, SseMatchbyteCostSink<'_>) {
-        (
-            Models::new(),
-            SseMatchbyteCostSink {
-                data,
-                pos: 0,
-                reps: RepCache::initial(),
-                candidate_sse: Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE),
-                cost: PairedCost::default(),
-            },
-        )
-    }
-
-    #[test]
-    fn sse_matchbyte_cost_sink_flag_adds_the_model_cost_to_both_totals() {
-        let mut expected_models = Models::new();
-        let expected = expected_models.flag[0].ideal_cost_bits(FLAG_LITERAL);
-
-        let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
-        sink.flag(&mut models, 0, FLAG_LITERAL);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-    }
-
-    #[test]
-    fn sse_matchbyte_cost_sink_length_adds_the_bucketed_cost_to_both_totals() {
-        let mut expected_models = Models::new();
-        let expected = ideal_cost_bucketed(&mut expected_models.length, 17);
-
-        let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
-        sink.length(&mut models, 17);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-        assert_eq!(
-            sink.pos, 17,
-            "length must advance pos by the copy's own length"
-        );
-    }
-
-    #[test]
-    fn sse_matchbyte_cost_sink_offset_adds_the_bucketed_cost_and_pushes_the_distance() {
-        let mut expected_models = Models::new();
-        let expected = ideal_cost_bucketed(&mut expected_models.offset, 42);
-
-        let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
-        sink.offset(&mut models, 42);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-
-        let mut expected_reps = RepCache::initial();
-        expected_reps.push_front(NonZeroU32::new(42).unwrap());
-        assert_eq!(
-            sink.reps.get(RepSlot::from_index(0)).get(),
-            expected_reps.get(RepSlot::from_index(0)).get()
-        );
-    }
-
-    #[test]
-    fn sse_matchbyte_cost_sink_slot_adds_the_model_cost_and_promotes_the_slot() {
-        let mut expected_models = Models::new();
-        let expected = expected_models.slot.ideal_cost_bits(0);
-
-        let (mut models, mut sink) = fresh_sse_matchbyte_sink(b"");
-        sink.reps.push_front(NonZeroU32::new(99).unwrap()); // [99, 1, 4]
-        sink.slot(&mut models, 2); // promote the cached distance 4 to the front
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-        assert_eq!(sink.reps.get(RepSlot::from_index(0)).get(), 4);
-    }
-
-    #[test]
-    fn sse_matchbyte_cost_sink_literal_adds_the_baseline_and_with_matchbyte_pair_separately() {
-        // Enough repeats that the widened SSE context's own adaptation
-        // pulls away from the shipped table's baseline, so a sink that
-        // swaps or drops one half of the pair is distinguishable from a
-        // correct one.
-        let bytes = b"abcabcabcabcabcabcabcabcabca";
-
-        let mut expected_models = Models::new();
-        let mut expected_candidate_sse = Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE);
-        let (mut models, mut sink) = fresh_sse_matchbyte_sink(bytes);
-
-        let mut context = Context::default();
-        let mut expected_baseline_total = 0.0;
-        let mut expected_with_matchbyte_total = 0.0;
-        let reps = RepCache::initial();
-        for (pos, &byte) in bytes.iter().enumerate() {
-            let match_byte = lz::match_byte_at(bytes, pos, reps.get(RepSlot::from_index(0)));
-            let (baseline, with_matchbyte) =
-                expected_models.literal.ideal_cost_bits_sse_matchbyte_pair(
-                    context,
-                    byte,
-                    match_byte,
-                    &mut expected_candidate_sse,
-                );
-            expected_baseline_total += baseline;
-            expected_with_matchbyte_total += with_matchbyte;
-            sink.literal(&mut models, context, byte);
-            context = context.after_literal(byte);
-        }
-
-        assert!(
-            (expected_baseline_total - expected_with_matchbyte_total).abs() > 1e-6,
-            "baseline_total={expected_baseline_total} with_matchbyte_total={expected_with_matchbyte_total}, \
-             test cannot tell the pair's two halves apart"
-        );
-        assert!((sink.cost.baseline - expected_baseline_total).abs() < 1e-6);
-        assert!((sink.cost.candidate - expected_with_matchbyte_total).abs() < 1e-6);
     }
 
     #[test]
