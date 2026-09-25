@@ -4120,23 +4120,41 @@ record.
   than S2-R20's own deciding regression, 47x smaller than S2-R22's) but
   real and reproducible. **Rejected**: corpus policy's binary
   no-validation-regression rule draws no size exception. Full numbers and
-  mechanism: S2-R23's own entry. Remaining S1-P8 scope: a third,
-  structurally independent mechanism (S2-R20's mixing weight, S2-R22's SSE
-  axis, now S2-R23's own hash-based match model) has now hit the same
-  `gradient_image` wall. Slice S2-R25 changed the mixing rule instead of
+  mechanism: S2-R23's own entry. Third slice, S2-R24: S2-R23's own
+  remaining-scope note's first untried option, hard-suppress a fresh,
+  unconfirmed guess (`match_len_bucket` `0`) at the mixing site itself
+  instead of letting a learned weight decide it, so it contributes exactly
+  as much as no candidate at all: nothing. Sealed `gradient_image` regression
+  essentially eliminated (**+0.000000151 b/B**, noise-floor, vs S2-R23's
+  +0.000245), confirming the hypothesis that unconfirmed guesses were the
+  regression's source. But train net flips to **+0.000102 b/B** (regressed,
+  7 of 11 worse): the suppressed bucket carried real signal too;
+  `json_records`'s improvement collapsed from S2-R23's -0.022140 to
+  -0.003526, and `x86_dense_code` — a large regression under every prior
+  mechanism (S2-R20 +0.003781, S2-R22 +0.007659, S2-R23 +0.006163) — stayed
+  large at **+0.004056**, this slice's own largest train regression;
+  `sqlite_like_records`, this lead line's own named residue target, moved
+  only to +0.000006 (near-neutral, still not a win). **Rejected**:
+  corpus policy's accept rule fails on the train side this time, the
+  mirror image of S2-R20/S2-R22/S2-R23's sealed-side failures. Full
+  numbers and mechanism: S2-R24's own entry. Remaining S1-P8 scope: four
+  structurally independent mechanisms (S2-R20's mixing weight, S2-R22's SSE
+  axis, S2-R23's length-gated weight, S2-R24's hard length-threshold
+  suppression) have each traded off between `gradient_image`'s tax and
+  real train-side signal without clearing both bars at once, the same
+  "unclear, no further named branch" state S1-P2/S1-P3 both reached.
+  Slice S2-R25 changed the mixing rule instead of
   adding a fourth signal: PAQ7-style logit-domain mixing of the same six
   experts, the transfer pair a GLN is built on. Train net **-0.085830
   b/B** at its train-tuned rate, ten of eleven cases improved, the largest
   train effect this lead has measured; rejected on `gradient_image`
   **+0.000346**, a sealed margin that flips sign with the mixing learning
   rate rather than holding the wall the three signal slices hit. Full
-  record in S2-R25's own entry. What is left is either suppressing this expert's
-  contribution until a candidate has been confirmed at least once (never
-  trusting a fresh, unconfirmed guess — untried, since S2-R23 deliberately
-  measured one design), the from-scratch GLN gating architecture this
-  lead's own name still names (declined near S2-A99 and again here, under
-  a single session's time budget), or accepting this lead's ceiling absent
-  one.
+  record in S2-R25's own entry. What is left is the from-scratch GLN
+  gating architecture this lead's own name still names (declined near
+  S2-A99, again after S2-R23, and a third time after S2-R24, under a
+  single session's time budget every time), or accepting this lead's
+  ceiling absent one.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
   `finals_report`: a new `silesia_report` binary (`bench`'s `corpus-fetch`
   feature) fetches each of Silesia's 12 individually pinned
@@ -6681,6 +6699,106 @@ record.
   code" and PR #752/bc86904's own corrected precedent (a rejected
   candidate leaves whole, meaning departs). `research/progress.jsonl`
   it164. Remaining S1-P8 scope: see the updated S1-P8 lead entry above.
+- S2-R24 | REJECTED | S1-P8's own remaining scope after S2-R23: the first
+  untried option its own closing note named — hard-suppress a fresh,
+  unconfirmed match-model guess (`match_len_bucket` `0`, confirmed length
+  `0`) at the mixing site itself, so it contributes exactly as much as no
+  candidate at all (nothing), instead of letting a learned weight decide
+  its trust the way S2-R23's own version did. Hypothesis: since S2-R20,
+  S2-R22, and S2-R23 each diagnosed the identical failure — a real
+  record-repeat signal on train data, undone by a small but real
+  `gradient_image` regression the mixer's own learned weight never fully
+  suppressed — an unconditional, weight-independent gate on the one bucket
+  every prior slice left the mixer to learn around (a just-found,
+  never-yet-confirmed candidate) should eliminate that regression
+  outright rather than merely shrink it. Reused S2-R23's own
+  `src/match_model.rs` verbatim (the underlying hash-table engine is not
+  this slice's own hypothesis and needed no change); changed only
+  `literal.rs`'s gating: `MATCH_LEN_BUCKETS` dropped from 6
+  to 5 by merging `match_len_bucket`'s `None` and `Some((_, 0))` cases into
+  one shared bucket `0` (previously separate, buckets 0 and 1), and both
+  `Literal::mix_matchmodel`/`Literal::update_matchmodel_expert` now compute
+  an effective predicted-symbol that is forced to `None` whenever
+  `match_len_bucket` is `0`, regardless of what byte the engine actually
+  guessed — so no spike is ever added and no weight ever adapts toward a
+  fresh guess's correctness. Critically, `state.engine.observe(predicted,
+  byte)` still receives the *real*, ungated `predicted` value: the
+  underlying `MatchModel`'s own `ptr`/`len` bookkeeping continues
+  regardless of the mixer's gate, so a fresh guess that happens to be
+  right can still grow into a confirmed candidate (`match_len_bucket` ≥ 1)
+  by the *next* position, the same causal continuity S2-R23's engine
+  already required — only the mixing signal, not the engine's own state
+  machine, is gated. Measured on `bench::baseline`'s 11 train-tier cases
+  (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only
+  kinds at `sealed_seed(CASE_SEED)`, matching S2-R20/S2-R23's own
+  convention, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_matchmodel_gated_experiment.rs`, deleted after
+  this measurement). | Train: 7 of 11 regressed (`x86_dense_code`
+  **+0.004056**, a large regression under every prior mechanism (S2-R20
+  +0.003781, S2-R22 +0.007659, S2-R23 +0.006163) and by far the largest
+  single move in this measurement, though smaller than S2-R22's and
+  S2-R23's own regressions there; `markov_h8_2_trap` +0.000844;
+  `entropy_ladder_h1` +0.000243, `h2` +0.000204, `h4` +0.000099;
+  `interleaved_audio16` +0.000001; `sqlite_like_records`, this lead line's
+  own named residue target, +0.000006, near-neutral, an improvement over
+  S2-R23's own +0.002278 regression there but still not a win); 4 improved
+  (`json_records` -0.003526, down from S2-R23's -0.022140 — most of that
+  slice's own largest win came from fresh guesses this slice now silences;
+  `base64_wrapped` -0.000796, down from -0.010033; `entropy_ladder_h8`
+  -0.000004; `h6` -0.000000, both negligible). Train net delta_bpb (mean
+  over 11 cases): **+0.000102** (regressed). Sealed: `access_log`
+  -0.000581 (improved); `gradient_image` **+0.000000151** (nominally
+  regressed, but roughly three orders of magnitude below S2-R23's own
+  +0.000245 and within this measurement's own floating-point noise floor —
+  reproduced
+  identically on a second run). **Rejected**: corpus policy's accept rule
+  needs train improvement AND no validation regression; this slice's train
+  net is itself a regression, failing the rule on the opposite side of the
+  ledger from S2-R20/S2-R22/S2-R23 (each of which improved train and
+  regressed sealed). Mechanism: the hypothesis's `gradient_image` half is
+  confirmed directly — hard-suppressing bucket `0` removes essentially all
+  of the incidental-coincidence tax that smooth, noisy surface was paying
+  every prior slice under three different mechanisms (S2-R20's
+  unconditional weight, S2-R22's SSE axis, S2-R23's own length-gated but
+  still weight-mediated bucket). But bucket `0` was never pure noise on
+  every case: on record-repeat data (`json_records`, and to a lesser
+  extent `base64_wrapped`), a meaningful share of a genuine repeat's very
+  first predicted byte arrives as an unconfirmed guess before the model
+  has had a chance to confirm it, and S2-R23's learned weight captured
+  real value there a hard, unconditional gate discards regardless of
+  whether that particular guess would have been correct.
+  `x86_dense_code`'s persistently large regression across every mechanism
+  (worse under both S2-R22 and S2-R23 than here) says the same bucket's
+  fresh guesses carry real, previously-uncredited signal specific to dense
+  executable code's own repeat structure, not just noise this project's
+  other structured cases happened to tolerate. The small,
+  new entropy-ladder cost (`h1`/`h2`/`h4`, absent from every prior slice's
+  own per-case breakdown) is the same "the mixer downweights, but not
+  fully" structural tax S2-A69/S2-R15 documented for other additive
+  experts' own worst cases, now visible on iid data specifically: bucket
+  `0`'s own mixing weight still enters `weights6_and_sum`'s normalization
+  denominator (this expert's contract from S1-P5/S1-P3 onward has the
+  seventh weight dilute the six real experts' scale regardless of whether
+  it ever adds a spike, the same shape `mix_matchmodel_contributes_nothing_when_no_match_is_found`
+  already established and tests unchanged), and that weight starts at
+  `1.0` and only decays toward `0` as `update_matchmodel_expert` adapts it
+  against a fixed `estimate7` of `0.0` — on genuinely structureless data,
+  where bucket `0` is nearly the only bucket ever populated, that decay
+  never fully completes within a 50,000-byte slice, so the six-expert
+  scale carries a small, real dilution the unconditioned S2-R23 version
+  did not pay in quite the same way (there, an occasional correct fresh
+  guess gave the shared weight upward pressure that partially offset the
+  same dilution). Candidate code (`src/match_model.rs` in full;
+  `literal::MATCH_LEN_BUCKETS`/`match_len_bucket`/
+  `MatchModelExpertState`/`Literal::mix_matchmodel`/
+  `update_matchmodel_expert`/`ideal_cost_bits_matchmodel_expert_pair`;
+  `codec::MatchModelCostSink`/
+  `ideal_cost_bits_matchmodel_expert_experiment`;
+  `lib.rs`'s `pub mod match_model;`; the scratch binary) reverted in full,
+  per the `compression-experiment` skill's delete-rejected-candidate-code
+  rule and S2-R23/PR #752's own corrected precedent (a rejected candidate
+  leaves whole, meaning departs). `research/progress.jsonl` it165.
+  Remaining S1-P8 scope: see the updated S1-P8 lead entry above.
 - S2-R25 | REJECTED | S1-P8's own remaining scope after S2-R23, taken at
   the lead's name rather than its recipe: every slice in this line so far
   has added a *signal* (S2-R20's matched literal byte, S2-R22's the same
