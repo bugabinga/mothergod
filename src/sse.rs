@@ -368,9 +368,11 @@ mod tests {
         // 0.5, same as converges_toward_the_true_observed_rate above) that
         // Sse calibrates toward a skewed context's true rate, fed through
         // coder::Encoder::encode_bit/Decoder::decode_bit instead of just
-        // compared against refine()'s return value. Not yet wired into
-        // codec.rs (see this module's "Remaining scope" docs), but proves
-        // the two pieces compose correctly before that wiring decision.
+        // compared against refine()'s return value. Exercises the
+        // primitive directly against the coder, independent of
+        // crate::literal::Literal::encode_sse/decode_sse, this module doc's
+        // "Wired" ADR-0038 path that later composed the same two pieces
+        // into the real bitstream.
         let outcomes: Vec<bool> = crate::test_support::Xorshift32::new(0x5EED_5EED)
             .take(2000)
             .map(|state| state % 10 != 0) // true 90% of the time
