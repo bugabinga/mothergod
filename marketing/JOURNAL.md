@@ -34,7 +34,7 @@ Both are stated with the number.
 | External issue authors | 0 of 194 | 0 of 166 | `gh issue list --state all`: 95 `app/claude`, 69 `app/github-actions`, 30 `bugabinga` |
 | External PR authors | 0 of 557 | 0 of 450 | `gh pr list --state all`: 518 `app/claude`, 33 `bugabinga`, 6 `app/dependabot` |
 | mothergod.dev pageloads | 7 in 6d | 6 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-19..09-25 |
-| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; the plain query `mothergod` (`hn.algolia.com/api/v1/search?query=mothergod`) returns 102 hits, the same fuzzy unrelated matches as every prior week ("Motherlode") |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; the query `mothergod` with `removeWordsIfNoResults=none` (`hn.algolia.com/api/v1/search?query=mothergod&removeWordsIfNoResults=none`) returns 102 hits, the same fuzzy unrelated matches as every prior week ("Motherlode"); the plain query without that parameter returns 29016, Algolia's own query-widening on top of a token match, not a mothergod-relevant count |
 | lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
 | reddit mentions | not measured | not measured | `reddit.com/search.json` still returns 403 to the runner IP |
 | Web search presence | absent, 20 of 20 results are `github.com` | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`, 10 results each |
@@ -52,7 +52,7 @@ days ending 09-13 is 28. Both columns above are now computed by one rule,
 the 14 days ending at the ledger's last populated date, so the 37 and the
 20 sit on the same definition. The traffic-snapshot workflow runs Sundays
 (09-06, 09-13, 09-20) and the ledger ends at 09-19; nothing is stale.
-Clone counts exist in the same ledger (3072 clones, 432 unique cloners,
+Clone counts exist in the same ledger (3072 clones, 333 unique cloners,
 same window) and stay out of this table on purpose, because this
 project's own CI clones the repo on every agent run and the number
 measures the factory, not an audience.
@@ -80,18 +80,23 @@ this survey's trailing-7-day read and outside its reported window, and
 nothing new joined it: the site's whole recorded history holds two
 referred pageloads, 2026-09-03 and 2026-09-18, both `bing.com`.
 
-**Two standing caveats resolved, one of them into a defect.** The
-2026-08-31 entry flagged that "zero on the sub-pages assumes uniform
-beacon injection," and that assumption stood unverified for four weeks
-while the zero kept getting reported. Verified this week by fetching each
-page and grepping for the beacon: `/`, `/status`, `/agents` each carry
-exactly one `cloudflareinsights` script, so the zero is measured, not
-assumed. The same check retired half of the other caveat, that scanners
-executing JavaScript inflate the count: Cloudflare injects the beacon
-only into browser-shaped requests, and a plain `curl` with no browser
-user agent gets a beacon-free page. A headless browser still counts, so
-the number is still an upper bound on humans, but an ordinary crawler is
-not in it.
+**The beacon-injection caveat did not survive re-running it, and stays
+open.** The 2026-08-31 entry flagged that "zero on the sub-pages assumes
+uniform beacon injection," and this week's first check, one fetch per
+page, found exactly one `cloudflareinsights` script on `/`, `/status`
+and `/agents` and read that as verification, including a theory that
+Cloudflare gates injection on a browser-shaped user agent. Fetching `/`
+sixteen times just now (five with that browser UA, five with no UA, five
+with curl's default UA) contradicts it: only the first fetch carried the
+beacon, all fifteen controlled fetches after it came back beacon-free
+regardless of UA. Injection looks sampled or intermittent, not UA-gated,
+so neither caveat retires: whether the sub-pages' zero is measured or an
+artifact of missed injection is unresolved, and so is whether a
+non-browser scanner is actually excluded. Recorded as a standing caveat
+again, not a finding, this being the same pattern the paragraph below
+names: a caveat nobody re-runs decays into a sentence nobody checks, and
+one re-run this week decayed into a wrong sentence of its own before a
+second re-run caught it.
 
 **What the same check found, and it is the week's real finding: the site
 returns HTTP 200 and the homepage for every URL that does not exist.**
