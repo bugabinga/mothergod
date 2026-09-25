@@ -137,15 +137,13 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
     }
 }
 
-/// Shared skeleton behind [`encode_symbol`], [`decode_symbol`], and
-/// [`ideal_cost_bits`]: walks the same `LEVELS`-level binary-tree
-/// decomposition of `cum`. `code_bit` receives each level's midpoint and
-/// raw `upper_half_probability` and returns the bit that level resolved
-/// to — already known from a caller's own `symbol` for [`encode_symbol`]
-/// and [`ideal_cost_bits`], decoded from [`Decoder::decode_bit`] for
-/// [`decode_symbol`] — so the three callers differ only in what they do
-/// with that bit and probability, never in the walk itself. Mirrors
-/// [`walk_sse`] for this module's non-SSE trio.
+/// Shared halving loop behind [`walk`] and [`walk_sse`]: the `LEVELS`-level
+/// binary-tree decomposition of `[0, ALPHABET)`, computing each level's
+/// `depth`, `prefix` (`lo / width`, [`sse_context`]'s own argument), midpoint,
+/// and raw `upper_half_probability` before handing them to `step`, which
+/// returns the bit that level resolved to. [`walk`] ignores `depth`/`prefix`;
+/// [`walk_sse`] uses them to key its `Sse` context — the only difference
+/// between the two, so this is the one place that difference lives.
 ///
 /// Returns the final `lo`, which after `LEVELS` halvings of `[0, ALPHABET)`
 /// is exactly the coded symbol.
@@ -154,13 +152,15 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
 ///
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
-fn walk(cum: &[u64], mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
+fn walk_steps(cum: &[u64], mut step: impl FnMut(u32, usize, usize, f64) -> bool) -> u8 {
     check_table_shape(cum);
     let mut lo = 0usize;
     let mut hi = ALPHABET;
-    for _ in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let bit = code_bit(mid, upper_half_probability(cum, lo, hi));
+    for depth in 0..LEVELS {
+        let width = hi - lo;
+        let mid = lo + width / 2;
+        let prefix = lo / width;
+        let bit = step(depth, prefix, mid, upper_half_probability(cum, lo, hi));
         if bit {
             lo = mid;
         } else {
@@ -175,6 +175,23 @@ fn walk(cum: &[u64], mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
     {
         lo as u8
     }
+}
+
+/// Shared skeleton behind [`encode_symbol`], [`decode_symbol`], and
+/// [`ideal_cost_bits`]: walks [`walk_steps`], keying on nothing beyond each
+/// level's midpoint and raw probability. `code_bit` receives those two and
+/// returns the bit that level resolved to — already known from a caller's
+/// own `symbol` for [`encode_symbol`] and [`ideal_cost_bits`], decoded from
+/// [`Decoder::decode_bit`] for [`decode_symbol`] — so the three callers
+/// differ only in what they do with that bit and probability, never in the
+/// walk itself. Mirrors [`walk_sse`] for this module's non-SSE trio.
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+fn walk(cum: &[u64], mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
+    walk_steps(cum, |_depth, _prefix, mid, p| code_bit(mid, p))
 }
 
 /// Codes `symbol` through `encoder` as `LEVELS` chained binary
@@ -218,51 +235,30 @@ pub fn decode_symbol(decoder: &mut Decoder, cum: &[u64]) -> u8 {
 }
 
 /// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
-/// [`ideal_cost_bits_sse`]: walks the same `LEVELS`-level binary-tree
-/// decomposition of `cum`, computing each level's SSE context and refined
-/// probability and updating `sse` on the raw one, identically for all three
-/// callers. `code_bit` receives the level's midpoint and refined
-/// probability and returns the bit that level resolved to — already known
-/// from a caller's own `symbol` for [`encode_symbol_sse`] and
-/// [`ideal_cost_bits_sse`], decoded from [`Decoder::decode_bit`] for
+/// [`ideal_cost_bits_sse`]: walks [`walk_steps`], computing each level's SSE
+/// context and refined probability and updating `sse` on the raw one,
+/// identically for all three callers. `code_bit` receives the level's
+/// midpoint and refined probability and returns the bit that level resolved
+/// to — already known from a caller's own `symbol` for [`encode_symbol_sse`]
+/// and [`ideal_cost_bits_sse`], decoded from [`Decoder::decode_bit`] for
 /// [`decode_symbol_sse`] — so the three callers differ only in what they do
 /// with that bit and probability, never in the SSE walk itself. Matches
 /// [`crate::codec::walk_tokens`]'s reasoning: keeping the walk in one place
 /// is what stops the encode, decode, and cost-pricing paths from silently
 /// drifting apart.
 ///
-/// Returns the final `lo`, which after `LEVELS` halvings of `[0, ALPHABET)`
-/// is exactly the coded symbol.
-///
 /// # Panics
 ///
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
 fn walk_sse(cum: &[u64], sse: &mut Sse, mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
-    check_table_shape(cum);
-    let mut lo = 0usize;
-    let mut hi = ALPHABET;
-    for depth in 0..LEVELS {
-        let mid = lo + (hi - lo) / 2;
-        let context = sse_context(depth, lo / (hi - lo));
-        let raw_p = upper_half_probability(cum, lo, hi);
+    walk_steps(cum, |depth, prefix, mid, raw_p| {
+        let context = sse_context(depth, prefix);
         let refined_p = sse.refine(context, raw_p);
         let bit = code_bit(mid, refined_p);
         sse.update(context, raw_p, bit);
-        if bit {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "lo is bounded to [0, ALPHABET) after LEVELS halvings of a 256-wide range, \
-                  always fits u8"
-    )]
-    {
-        lo as u8
-    }
+        bit
+    })
 }
 
 /// Codes `symbol` through `encoder` as `LEVELS` chained binary decisions
