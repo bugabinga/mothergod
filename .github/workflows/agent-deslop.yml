@@ -77,28 +77,20 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
           prompt: |
-            Read first, in this order:
-            .claude/skills/deslop/SKILL.md (your operating manual, with
-            the taxonomy in its references/ directory), then
-            agents/GOVERNANCE.md.
+            Read first: .claude/skills/deslop/SKILL.md, your operating
+            manual.
 
-            Your territory is src/ and nothing else. Not docs, not
-            .github, not agents/, not research/. A slop finding outside
-            src/ is somebody else's; do not open a PR for it.
+            Your territory is src/ and nothing else; a slop finding
+            elsewhere is somebody else's, no PR for it.
 
             Work in strict priority order and STOP after ONE unit of
             work:
-            1. Your own open PRs whose latest reviewer verdict requests
-               changes with no push after it, or whose checks are red.
-               Oldest first: check out the branch, fix it, run every
-               CLAUDE.md quality gate locally, push, then run
-               `.github/scripts/settle-push <pr>`: it proves the push's
-               runs are running and re-attributes them if GitHub held
-               them at the approval gate (issue #57). Trust its exit
-               code, not the push's. The reviewer posts its
-               verdict as an issue comment starting "**Review verdict:",
-               because the shared claude[bot] identity cannot formally
-               review its own PRs.
+            1. Your own open PRs labeled changes-requested with no push
+               after the verdict, or whose checks are red. Oldest first:
+               check out the branch, fix it, `cargo x check`, push with
+               `.github/scripts/push-branch`, then run
+               `.github/scripts/settle-push <pr>` and trust its exit
+               code, not the push's.
             2. Otherwise hunt. Pick one scope per the Scope section of
                the skill, state it in one sentence, and execute the
                skill's procedure on a new branch claude/deslop-<slug>.
@@ -108,13 +100,8 @@ jobs:
             taxonomy rule it violated; how behaviour preservation was
             proved, naming the commands you ran; any second scope you
             found and deliberately left. No severity ratings, no status
-            headers.
-
-            Hard rules: at most ONE new PR per run. Never merge
-            anything, including your own PR: the reviewer is the
-            approver. Never change observable behaviour. Never edit a
-            test to make it pass. Update CHANGELOG.md only if the
-            change is user-visible, which most desloppings are not.
+            headers. CHANGELOG.md only for a user-visible change, which
+            most desloppings are not.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes".
           claude_args: |
             --append-system-prompt-file agents/personas/deslopper.md
