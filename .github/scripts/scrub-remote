@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strip the credential claude-code-action embeds in the git remote (SessionStart hook).
+"""Strip the credentials the harness leaves in the checkout's git config (SessionStart hook).
 
 `.claude/settings.json` wires this as a SessionStart hook; the harness runs
 it once, after the action has configured git and before the model's first
@@ -18,6 +18,16 @@ the repository is public, so `git fetch` needs none. secret_scrub.py
 filters the token's echoes at every exit; this hook removes the source
 (issue #597).
 
+The runner's own checkout leaves a second one: actions/checkout persists
+its token as `http.https://github.com/.extraheader`, a base64 basic header
+that `git config --list` prints whole. The reviewer's run 36094012470 did
+exactly that into its transcript while verifying #749's scrub rule (the
+token was hour-scoped and dead before anyone read it, which is luck, not
+a control). Nothing consumes it either, for the same reasons as above, so
+this hook removes it too. `persist-credentials: false` on every checkout
+would do the same per workflow, one line that drifts the day a workflow
+is added and that nothing lints (#556); this runs for every session.
+
 Upstream offers no switch. The action's credential-helper path keeps the
 URL clean but is keyed to `allowed_non_write_users`, which also widens who
 may trigger a run and scrubs the environment out of every subprocess, so
@@ -26,18 +36,19 @@ the one in-repo point that runs after the action writes the URL and
 before any tool can print it.
 
 Contract: outside GitHub Actions (GITHUB_ACTIONS != "true") this does
-nothing; a human's local remote is theirs. In CI it reads
+nothing; a human's local git config is theirs. In CI it reads
 `remote.origin.url` of the checkout (CLAUDE_PROJECT_DIR, else the working
 directory) and, if the URL carries userinfo (`https://<anything>@host`),
-rewrites it without. The URL itself is never printed, in either state.
+rewrites it without; then it unsets every `http.https://github.com/.extraheader`
+value. Neither the URL nor a header value is ever printed, in any state.
 Always exits 0: a hook that fails a session start over git cosmetics is a
 worse defect than the leak it prevents.
 
 Liveness: one line on stdout, which the harness adds to the model's
 context, and the same line appended to GITHUB_STEP_SUMMARY, the durable
-trace. `credential removed` means the hook earns its keep. `already
-clean` means the action stopped embedding the token and this file is
-dead weight to delete.
+trace, one clause per credential. `removed` means the hook earns its
+keep. `already clean` on both clauses means the harness stopped leaving
+credentials behind and this file is dead weight to delete.
 """
 
 import os
@@ -67,28 +78,50 @@ def report(line):
             fh.write(line + "\n")
 
 
+# The key actions/checkout writes its persisted token under (git-auth-helper.ts).
+EXTRAHEADER = "http.https://github.com/.extraheader"
+
+
+def scrub_origin(repo):
+    """Rewrite a credentialed origin without its userinfo; the clause for the line."""
+    got = git(repo, "config", "--get", "remote.origin.url")
+    if got.returncode != 0:
+        return None  # No origin: nothing to leak, nothing to say.
+    match = CREDENTIALED.match(got.stdout.strip())
+    if not match:
+        return "origin already clean"
+    clean = match["scheme"] + match["rest"]
+    if git(repo, "remote", "set-url", "origin", clean).returncode != 0:
+        print("scrub-remote: could not rewrite origin", file=sys.stderr)
+        return None
+    return "origin credential removed"
+
+
+def scrub_extraheader(repo):
+    """Unset every persisted extraheader value; the clause for the line."""
+    if git(repo, "config", "--get-all", EXTRAHEADER).returncode != 0:
+        return "extraheader already clean"
+    if git(repo, "config", "--unset-all", EXTRAHEADER).returncode != 0:
+        print("scrub-remote: could not unset the extraheader", file=sys.stderr)
+        return None
+    return "extraheader removed"
+
+
 def main() -> int:
-    """Rewrite a credentialed origin without its userinfo; always exit 0."""
+    """Strip both credentials; always exit 0."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return 0
     repo = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     try:
-        got = git(repo, "config", "--get", "remote.origin.url")
-        if got.returncode != 0:
-            # No origin, or no repository: nothing to leak.
-            return 0
-        match = CREDENTIALED.match(got.stdout.strip())
-        if not match:
-            report("scrub-remote: origin already clean")
-            return 0
-        clean = match["scheme"] + match["rest"]
-        if git(repo, "remote", "set-url", "origin", clean).returncode != 0:
-            print("scrub-remote: could not rewrite origin", file=sys.stderr)
-            return 0
+        if git(repo, "rev-parse", "--git-dir").returncode != 0:
+            return 0  # No repository: nothing to leak.
+        clauses = [scrub_origin(repo), scrub_extraheader(repo)]
     except OSError as error:
         print(f"scrub-remote: {error.__class__.__name__}, left as is", file=sys.stderr)
         return 0
-    report("scrub-remote: origin credential removed")
+    said = [c for c in clauses if c]
+    if said:
+        report("scrub-remote: " + ", ".join(said))
     return 0
 
 
