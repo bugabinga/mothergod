@@ -4130,8 +4130,11 @@ record.
   regression's source. But train net flips to **+0.000102 b/B** (regressed,
   7 of 11 worse): the suppressed bucket carried real signal too;
   `json_records`'s improvement collapsed from S2-R23's -0.022140 to
-  -0.003526, and `x86_dense_code` (this lead line's own named residue
-  target) moved from a small regression to **+0.004056**. **Rejected**:
+  -0.003526, and `x86_dense_code` — a large regression under every prior
+  mechanism (S2-R20 +0.003781, S2-R22 +0.007659, S2-R23 +0.006163) — stayed
+  large at **+0.004056**, this slice's own largest train regression;
+  `sqlite_like_records`, this lead line's own named residue target, moved
+  only to +0.000006 (near-neutral, still not a win). **Rejected**:
   corpus policy's accept rule fails on the train side this time, the
   mirror image of S2-R20/S2-R22/S2-R23's sealed-side failures. Full
   numbers and mechanism: S2-R24's own entry. Remaining S1-P8 scope: four
@@ -6731,11 +6734,13 @@ record.
   convention, via an uncommitted scratch binary
   (`bench/src/bin/scratch_matchmodel_gated_experiment.rs`, deleted after
   this measurement). | Train: 7 of 11 regressed (`x86_dense_code`
-  **+0.004056**, this lead line's own named residue target, moving the
-  wrong direction and by far the largest single move in this
-  measurement; `markov_h8_2_trap` +0.000844; `entropy_ladder_h1` +0.000243,
-  `h2` +0.000204, `h4` +0.000099; `interleaved_audio16` +0.000001;
-  `sqlite_like_records` +0.000006, near-neutral, an improvement over
+  **+0.004056**, a large regression under every prior mechanism (S2-R20
+  +0.003781, S2-R22 +0.007659, S2-R23 +0.006163) and by far the largest
+  single move in this measurement, though smaller than S2-R22's and
+  S2-R23's own regressions there; `markov_h8_2_trap` +0.000844;
+  `entropy_ladder_h1` +0.000243, `h2` +0.000204, `h4` +0.000099;
+  `interleaved_audio16` +0.000001; `sqlite_like_records`, this lead line's
+  own named residue target, +0.000006, near-neutral, an improvement over
   S2-R23's own +0.002278 regression there but still not a win); 4 improved
   (`json_records` -0.003526, down from S2-R23's -0.022140 — most of that
   slice's own largest win came from fresh guesses this slice now silences;
@@ -6762,11 +6767,11 @@ record.
   has had a chance to confirm it, and S2-R23's learned weight captured
   real value there a hard, unconditional gate discards regardless of
   whether that particular guess would have been correct.
-  `x86_dense_code`'s reversal (a near-neutral case under every prior
-  mechanism, now this slice's single largest regression) says the same
-  bucket's fresh guesses were carrying real, previously-uncredited signal
-  specific to dense executable code's own repeat structure, not just noise
-  this project's other structured cases happened to tolerate. The small,
+  `x86_dense_code`'s persistently large regression across every mechanism
+  (worse under both S2-R22 and S2-R23 than here) says the same bucket's
+  fresh guesses carry real, previously-uncredited signal specific to dense
+  executable code's own repeat structure, not just noise this project's
+  other structured cases happened to tolerate. The small,
   new entropy-ladder cost (`h1`/`h2`/`h4`, absent from every prior slice's
   own per-case breakdown) is the same "the mixer downweights, but not
   fully" structural tax S2-A69/S2-R15 documented for other additive
