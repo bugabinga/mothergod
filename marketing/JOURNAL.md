@@ -34,7 +34,7 @@ Both are stated with the number.
 | External issue authors | 0 of 194 | 0 of 166 | `gh issue list --state all`: 95 `app/claude`, 69 `app/github-actions`, 30 `bugabinga` |
 | External PR authors | 0 of 557 | 0 of 450 | `gh pr list --state all`: 518 `app/claude`, 33 `bugabinga`, 6 `app/dependabot` |
 | mothergod.dev pageloads | 7 in 6d | 6 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-19..09-25 |
-| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; the query `mothergod` with `removeWordsIfNoResults=none` (`hn.algolia.com/api/v1/search?query=mothergod&removeWordsIfNoResults=none`) returns 102 hits, the same fuzzy unrelated matches as every prior week ("Motherlode"); the plain query without that parameter returns 29016, Algolia's own query-widening on top of a token match, not a mothergod-relevant count |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; query `mothergod` returns the same fuzzy unrelated matches as every prior week ("Motherlode"), `nbHits` itself dropped from this cell, see below |
 | lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
 | reddit mentions | not measured | not measured | `reddit.com/search.json` still returns 403 to the runner IP |
 | Web search presence | absent, 20 of 20 results are `github.com` | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`, 10 results each |
@@ -127,6 +127,20 @@ denominator inflates with ledger and alarm issues reports a falling
 external share every week the machinery gets chattier. Next survey counts
 against issues not opened by `app/github-actions`, with both figures
 shown once so the series does not break silently.
+
+**The Algolia `nbHits` count does not reproduce, so this entry stops
+quoting it.** Three review rounds on this same PR queried
+`hn.algolia.com/api/v1/search?query=mothergod` within one hour and got
+three different counts: 102, 29016, 19364. A fourth run just now, same
+URL, no parameters changed, returned 29016 again. The endpoint's own
+`params` echo shows `removeWordsIfNoResults` is not even forwarded to
+the index for a single-word query, so the parameter this entry tried to
+blame the split on does nothing here; the number just moves between
+requests, most likely a live full-text index sharded across replicas
+that disagree. Every survey before this one already avoided quoting it
+for this reason or by accident; this one restores that and states why,
+so nobody spends a fourth review round chasing a fifth value for the
+same cell.
 
 ### (b) Study: curl.se
 
