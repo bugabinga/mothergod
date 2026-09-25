@@ -4109,11 +4109,27 @@ record.
   `access_log` -0.003024 improved, `gradient_image` +0.003002 regressed.
   **Rejected**: corpus policy's accept rule fails outright on the sealed
   regression alone. Full numbers and mechanism: S2-R20's own entry.
-  Remaining S1-P8 scope: LZMA's own matched-literal signal, tried via this
-  project's proven additive-expert recipe, does not clear the accept bar
-  on this corpus; what is left is either a genuinely different "more
-  experts" signal or the from-scratch GLN gating architecture this
-  lead's own name still names and this slice deliberately avoided.
+  Second slice, S2-R23: a genuinely different signal per S2-R20's own
+  remaining-scope note — a from-scratch hash-based match model (its own
+  hash table over the reconstructed byte stream, independent of
+  [`crate::lz`]'s parse), weight-keyed by match length so a long confirmed
+  match earns trust a short/incidental one never does. Train net
+  **-0.001661 b/B** (mean; `json_records` -0.022140 and `base64_wrapped`
+  -0.010033 carried the improvement); sealed split: `access_log` -0.004661
+  improved, `gradient_image` **+0.000245** regressed — tiny (12x smaller
+  than S2-R20's own deciding regression, 47x smaller than S2-R22's) but
+  real and reproducible. **Rejected**: corpus policy's binary
+  no-validation-regression rule draws no size exception. Full numbers and
+  mechanism: S2-R23's own entry. Remaining S1-P8 scope: a third,
+  structurally independent mechanism (S2-R20's mixing weight, S2-R22's SSE
+  axis, now S2-R23's own hash-based match model) has now hit the same
+  `gradient_image` wall; what is left is either suppressing this expert's
+  contribution until a candidate has been confirmed at least once (never
+  trusting a fresh, unconfirmed guess — untried, since S2-R23 deliberately
+  measured one design), the from-scratch GLN gating architecture this
+  lead's own name still names (declined near S2-A99 and again here, under
+  a single session's time budget), or accepting this lead's ceiling absent
+  one.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
   `finals_report`: a new `silesia_report` binary (`bench`'s `corpus-fetch`
   feature) fetches each of Silesia's 12 individually pinned
@@ -6530,3 +6546,131 @@ record.
   remains, if anything, is a signal this lead has not yet tried at all
   (not another angle on the matched byte specifically, per this slice's
   own closing finding) or accepting this lead's ceiling absent one.
+- S2-R23 | REJECTED | S1-P8's own remaining scope after S2-R20: "either a
+  genuinely different 'more experts' signal or the from-scratch GLN gating
+  architecture." A genuinely different signal, not another angle on LZMA's
+  matched-literal byte S2-R20 and S1-P3's S2-R22 both already tried and
+  rejected on the identical failure (real signal on record-repeat data,
+  regression on `gradient_image`) under two different mechanisms (an
+  additive mixer weight, an SSE calibration axis) — this slice deliberately
+  never reads `lz::RepCache`, a `Token::Match`/`Token::Rep`, or any LZ parse
+  decision. Instead, the kind lpaq/zpaq/cmix call a "match model": a
+  from-scratch hash table over the reconstructed byte stream (causal, only
+  ever consulting `data[..position]`), independent of `crate::lz`'s own
+  parse, blended into `Literal`'s mix through this project's proven
+  additive-expert recipe (own bank space, own adaptive weight, S1-P5's
+  column expert and S1-P3's PPM expert). Hypothesis: since both S2-R20 and
+  S2-R22 diagnosed the identical failure mode — an *unconditional*
+  correlation signal blending real repeat-structure with `gradient_image`'s
+  "largely incidental byte coincidences" — gating this expert's own mixing
+  weight on the confirmed length of its own match (long confirmed match:
+  high trust; short or freshly-guessed: none) should let it win on
+  record-repeat data without paying `gradient_image`'s tax, since an
+  incidental 4-byte hash hit should mostly land in the low-confidence
+  "fresh, unconfirmed" bucket and get down-weighted independently of
+  genuine long matches elsewhere. New `src/match_model.rs`: `MatchModel`
+  (a `Vec<u32>` hash table over the last `CONTEXT_LEN` (4) bytes, FNV-1a,
+  `TABLE_BITS` (16) slots; `ptr`/`len` tracking an active candidate's own
+  position and confirmed run length; `indexed_up_to` folding not-yet-seen
+  `data` positions into the table lazily, so `predict` alone — not an
+  interleaved `observe` call — backfills whatever an LZ copy token's own
+  bytes would otherwise skip, since this model's history is the whole
+  reconstructed stream, not just the literal sub-stream, the same
+  convention `crate::literal::Context`'s `prev1`/`prev2` already use).
+  `predict(data, position)` returns `Option<(u8, u32)>` (predicted byte,
+  confirmed length), `None` when no candidate context has ever recurred —
+  silent exactly where it has nothing to say, the same "never a false
+  floor" shape `PpmExpertState`'s zero-frequency case already established.
+  New `literal::MatchModelExpertState` (the engine plus one weight per
+  (`WEIGHT_CONTEXTS`, `match_len_bucket`) pair, `MATCH_LEN_BUCKETS` = 6:
+  no candidate, fresh/unconfirmed, then four widening length bands) and
+  `Literal::mix_matchmodel`/`update_matchmodel_expert`/
+  `ideal_cost_bits_matchmodel_expert_pair`, the same paired
+  before-wiring methodology S2-A69/S2-A100/S2-R20 all used — unlike every
+  other expert in this lead line, this one's own prediction cannot be
+  derived from `Context` alone (it needs the raw byte buffer and current
+  position), so `codec::MatchModelCostSink` owns `data` directly and calls
+  `MatchModelExpertState::predict` from its own `literal` method, the same
+  shape S2-R20's `MatchByteExpertCostSink` needed for the LZ-derived
+  signal. A first, uncollision-verified version of `MatchModel::predict`
+  trusted any hash-table hit outright and measured a severe train-side
+  regression driven almost entirely by `entropy_ladder_h8` (**+0.105221
+  b/B**) and `interleaved_audio16` (+0.068347): `TABLE_SIZE` (65,536 slots)
+  is far smaller than the number of distinct 4-byte contexts a 50,000-byte
+  case can produce, so most hash hits on low-structure data are collisions,
+  not genuine repeats, and every one was coded as a confident "fresh"
+  guess until the mixer's own weight learned otherwise — not the
+  hypothesis under test, a hash-table implementation bug. Fixed by
+  comparing the actual `CONTEXT_LEN` context bytes before trusting a stored
+  position (`predict`'s own doc), rejecting a collision structurally
+  instead of waiting for the mixer to learn around it; the collision fix
+  is evidenced only by the aggregate before/after numbers above, not a
+  dedicated test isolating the context-byte comparison. Only the
+  collision-verified version is this entry's recorded measurement; the
+  naive numbers above are cited as mechanism evidence for why the check was
+  necessary, not as a second accept/reject basis. 9 new unit tests in
+  `match_model.rs` (causality — a context never predicts from a position
+  not yet reached; a fresh model backfills a copy-token-sized gap from one
+  `predict` call alone; match length grows on consecutive hits and resets
+  on a miss), 5 in `literal.rs`
+  (paired baseline matches plain `ideal_cost_bits` exactly; the "silent"
+  case contributes zero mass to every symbol, not just the predicted one;
+  a found candidate adds a spike at exactly its own symbol; length-bucket
+  separation; finite-positive costs), 7 in `codec.rs` (each `TokenSink`
+  method's cost pass-through, the paired-cost end-to-end check). Measured
+  on `bench::baseline`'s 11 train-tier cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only kinds at
+  `sealed_seed(CASE_SEED)`, matching S2-A100/S2-R20/S2-R22's own
+  convention, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_matchmodel_expert_experiment.rs`, deleted after
+  this measurement). | Train net **-0.001661 b/B** (mean over 11 cases;
+  3 improved — `json_records` **-0.022140**, `base64_wrapped` -0.010033,
+  `entropy_ladder_h1` -0.000446 — 8 regressed, all one to three orders of
+  magnitude smaller: `x86_dense_code` +0.006163, `markov_h8_2_trap`
+  +0.004687, `sqlite_like_records` +0.002278 — S1-P2/S1-P3/S1-P8's own
+  named residue target, moving the wrong direction, unlike S2-R20's own
+  big win there (-0.046757) — `entropy_ladder_h4` +0.000456, `h2`
+  +0.000384, `h6` +0.000211, `interleaved_audio16` +0.000167, `h8`
+  +0.000005). Sealed: `access_log` **-0.004661** (improved), `gradient_image`
+  **+0.000245** (regressed) — reproduced identically on a second run
+  (deterministic ideal-cost accounting, no run-to-run noise), roughly
+  12x smaller than S2-R20's own deciding regression there (+0.003002) and
+  47x smaller than S2-R22's (+0.011629). **Rejected**: corpus policy's
+  accept rule needs train improvement AND no validation regression;
+  `gradient_image`'s regression, however small, fails that rule outright
+  under the same binary reading S2-R4's own entry established ("the
+  corpus policy's accept rule draws no tolerance line for the sealed set
+  the way `TOLERANCE_BITS` does for the CI gate") and S2-R7/S2-R18/S2-R20/
+  S2-R22 all applied since. Mechanism: length-gating plus collision
+  verification together validate the hypothesis *directionally* —
+  `entropy_ladder_h8`'s tax collapsed from the naive version's +0.105221 to
+  +0.000005, `interleaved_audio16`'s from +0.068347 to +0.000167, and the
+  sealed regression shrank an order of magnitude below both prior
+  matched-literal attempts — but do not clear a zero-tolerance bar.
+  `gradient_image`'s residual regression is real even with every hash
+  collision structurally ruled out: its smooth sine-plus-gaussian-noise
+  surface (`bench::gradient_image`'s own module doc) still contains
+  genuine, byte-exact 4-byte coincidences often enough that some fraction
+  extend a byte or two by chance before failing, landing in a
+  low-but-nonzero-confidence bucket and costing a small, not-fully-
+  suppressed mixing tax — a third, structurally independent mechanism
+  (after S2-R20's mixing weight and S2-R22's SSE axis) confirming the same
+  reading both of those entries reached: on this data, the matched-byte
+  signal's own noise, not the mechanism chosen to exploit it, is what
+  `gradient_image` cannot afford, and gating on confirmed length narrows
+  that cost without erasing it. `sqlite_like_records` failing to improve,
+  unlike S2-R20's large win there, suggests this expert's own gating also
+  suppresses some genuine record-repeat signal LZMA's own rep0-derived
+  byte captures more directly; `json_records`/`base64_wrapped` improving
+  substantially is evidence the underlying hash-match signal is real on at
+  least some record-repeat classes. Candidate code (`src/match_model.rs`
+  in full, its 9 unit tests; `literal::MATCH_LEN_BUCKETS`/
+  `match_len_bucket`/`MatchModelExpertState`/`Literal::mix_matchmodel`/
+  `update_matchmodel_expert`/`ideal_cost_bits_matchmodel_expert_pair` and
+  their 5 unit tests; `codec::MatchModelCostSink`/
+  `ideal_cost_bits_matchmodel_expert_experiment` and their 7 unit tests;
+  `lib.rs`'s `pub mod match_model;`; the scratch binary) reverted in full,
+  per the `compression-experiment` skill's "delete rejected candidate
+  code" and PR #752/bc86904's own corrected precedent (a rejected
+  candidate leaves whole, meaning departs). `research/progress.jsonl`
+  it164. Remaining S1-P8 scope: see the updated S1-P8 lead entry above.
