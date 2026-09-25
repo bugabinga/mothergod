@@ -174,7 +174,10 @@ ride in your prompt from `agents/personas/`.
   a doc: a document records what was true when someone wrote it, a run
   log records what happened, and when they disagree the run wins. A
   stale sentence read confidently is how this project has produced its
-  wrong statements. Having checked, fix the sentence.
+  wrong statements. Having checked, fix the sentence. A name you cite
+  (a test, a journal id, an issue) is pasted from a grep hit, never
+  typed from memory: #764 and #765 each lost a review round to one
+  invented reference.
 
 ## Where things live
 
