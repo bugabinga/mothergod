@@ -49,8 +49,6 @@ pub mod literal;
 #[doc(hidden)]
 pub mod lz;
 #[doc(hidden)]
-pub mod match_model;
-#[doc(hidden)]
 pub mod model;
 #[doc(hidden)]
 pub mod ppm;
