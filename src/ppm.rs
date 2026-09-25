@@ -146,24 +146,20 @@
 //! single tree-position-only key cannot express. **Rejected**, on the same
 //! train-side failure S2-R18 hit (`interleaved_audio16` +0.026322 b/B,
 //! train net +0.002608 b/B, both matching S2-R18's own numbers to within
-//! measurement noise). Mechanism: [`Ppm::distinct`]'s rescale step never
-//! lets a nonzero frequency decay back to zero, so a bank's "warm" flag is
-//! monotonic — with only 16 banks, every one warms up within the first few
-//! dozen bytes of any real file and stays warm for the rest of it, so
-//! `cold` prices a vanishing prefix and `warm` carries essentially the
-//! whole stream, structurally almost the single table S2-R18 already
-//! rejected. The per-*symbol* "PPM active/silent" distinction S2-R18's own
-//! postmortem named is not the same signal as "this bank has ever observed
-//! anything," and the per-symbol version is unavailable to gate an SSE
-//! context on before the symbol is decoded, since knowing it requires
-//! already knowing the answer. Every candidate artifact reverted in full;
-//! full record `JOURNAL` S2-R21. Remaining S1-P3 scope: a decoder-visible
-//! activity signal is necessarily bank-level and near-permanent under this
-//! architecture, not the per-symbol one that actually varies; closing this
-//! lead needs either a bank scheme with enough contexts that "warm" stays
-//! meaningfully rare (untried, and in tension with S2-R16/S2-R17's own
-//! finding that a coarse key is what let the additive shape work at all)
-//! or a coding mechanism this lead has not yet named.
+//! measurement noise): [`Ppm::distinct`] has no decrement or reset path
+//! anywhere in the crate, so it is monotonically non-decreasing and a
+//! bank's "warm" flag never goes cold — with only 16 banks, every one
+//! warms up within the first few dozen bytes of any real file and stays
+//! warm for the rest of it, so `cold` prices a vanishing prefix and `warm`
+//! carries essentially the whole stream, structurally almost the single
+//! table S2-R18 already rejected. Full mechanism and record: `JOURNAL`
+//! S2-R21. Remaining S1-P3 scope: a decoder-visible activity signal is
+//! necessarily bank-level and near-permanent under this architecture, not
+//! the per-symbol one that actually varies; closing this lead needs either
+//! a bank scheme with enough contexts that "warm" stays meaningfully rare
+//! (untried, and in tension with S2-R16/S2-R17's own finding that a coarse
+//! key is what let the additive shape work at all) or a coding mechanism
+//! this lead has not yet named.
 
 use crate::coder::{Decoder, Encoder};
 
