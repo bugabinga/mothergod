@@ -75,7 +75,7 @@ const MATCH_STATES: usize = 3;
 /// additive attempt at this same signal) or a bank-count variant on the
 /// existing PPM expert's SSE key (S2-R18/S2-R21, both a tree-position-only
 /// key). `crate::sse::Sse::new`'s `contexts` argument for a table keyed on
-/// this scheme, [`MATCH_STATES`] times wider than [`SSE_CONTEXTS`].
+/// this scheme, `MATCH_STATES` times wider than [`SSE_CONTEXTS`].
 pub const SSE_CONTEXTS_MATCHBYTE: usize = SSE_CONTEXTS * MATCH_STATES;
 
 /// Which of [`MATCH_STATES`] states this walk step's `prefix` (the `depth`
@@ -118,7 +118,7 @@ fn match_state(depth: u32, prefix: usize, match_byte: Option<u8>) -> usize {
     }
 }
 
-/// [`sse_context`], widened with [`match_state`] as a second, independent
+/// [`sse_context`], widened with `match_state` as a second, independent
 /// axis: `sse_context(depth, prefix) * MATCH_STATES + match_state(depth,
 /// prefix, match_byte)`, landing in `0..SSE_CONTEXTS_MATCHBYTE`. See
 /// [`SSE_CONTEXTS_MATCHBYTE`]'s own docs for why this axis exists instead
@@ -494,9 +494,9 @@ pub fn ideal_cost_bits_sse(cum: &[u64], symbol: u8, sse: &mut Sse) -> f64 {
 /// measurement): sums the ideal (`-log2`) cost of each `sse`-refined binary
 /// decision under the matched-byte-aware context instead of plain
 /// [`sse_context`], updating `sse` on the raw probability exactly as
-/// [`walk_sse_matchbyte`] does. `sse` must be sized
+/// `walk_sse_matchbyte` does. `sse` must be sized
 /// [`SSE_CONTEXTS_MATCHBYTE`]. `match_byte` is the byte
-/// [`crate::lz::match_byte_at`] reports for the position this `symbol` is
+/// `crate::lz::match_byte_at` reports for the position this `symbol` is
 /// being priced at, or `None` before any history exists.
 /// [`crate::literal::Literal::ideal_cost_bits_sse_matchbyte_pair`]'s
 /// counterpart for this decomposition.
