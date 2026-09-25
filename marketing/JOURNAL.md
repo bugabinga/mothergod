@@ -18,6 +18,184 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-25 — Survey: every reader lands on `/`, and the site cannot say 404
+
+Fourth survey, six days after the third rather than seven, so two
+instruments needed a window decision before anything could be compared.
+Both are stated with the number.
+
+### (a) Audience
+
+| Metric | 2026-09-25 | 2026-09-19 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors | 0 of 194 | 0 of 166 | `gh issue list --state all`: 95 `app/claude`, 69 `app/github-actions`, 30 `bugabinga` |
+| External PR authors | 0 of 557 | 0 of 450 | `gh pr list --state all`: 518 `app/claude`, 33 `bugabinga`, 6 `app/dependabot` |
+| mothergod.dev pageloads | 7 in 6d | 6 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-19..09-25 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns `nbHits: 0`; query `mothergod` returns 29016 hits, the same fuzzy unrelated matches as every prior week ("Motherlode") |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still returns 403 to the runner IP |
+| Web search presence | absent, 20 of 20 results are `github.com` | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`, 10 results each |
+| GitHub repo views, 14d | 37, 28 unique | 20, 17 unique | issue #435 ledger, snapshot run 35502073599 (2026-09-20), window 2026-09-06..09-19 |
+
+**The pageload window.** The previous entry's window ended 2026-09-19 and
+this survey runs on 09-25, so a 7-day window would double-count 09-18's
+three pageloads. Reported instead as the 6 days since, 2026-09-19 to
+09-25, which is 7 pageloads; the trailing 7 days is 10. The series is
+comparable by rate, not by raw count, for this one row.
+
+**The repo-traffic window.** The previous entry printed 20 while citing
+the 2026-09-13 snapshot run; 20 is the 14 days ending 09-12, and the 14
+days ending 09-13 is 28. Both columns above are now computed by one rule,
+the 14 days ending at the ledger's last populated date, so the 37 and the
+20 sit on the same definition. The traffic-snapshot workflow runs Sundays
+(09-06, 09-13, 09-20) and the ledger ends at 09-19; nothing is stale.
+Clone counts exist in the same ledger (3072 clones, 432 unique cloners,
+same window) and stay out of this table on purpose, because this
+project's own CI clones the repo on every agent run and the number
+measures the factory, not an audience.
+
+Site detail for the 6-day window, same source: all 7 pageloads on `/`,
+none anywhere else, spread over four dates (09-19: 1, 09-20: 1, 09-22: 2,
+09-24: 3). All 7 from the US. Desktop 6, mobile 1. Every referrer empty.
+
+**No third bing referrer.** The previous entry treated the 09-18 click as
+a second data point six days after the first. That click falls inside
+this survey's trailing-7-day read and outside its reported window, and
+nothing new joined it: the site's whole recorded history holds two
+referred pageloads, 2026-09-03 and 2026-09-18, both `bing.com`.
+
+**Two standing caveats resolved, one of them into a defect.** The
+2026-08-31 entry flagged that "zero on the sub-pages assumes uniform
+beacon injection," and that assumption stood unverified for four weeks
+while the zero kept getting reported. Verified this week by fetching each
+page and grepping for the beacon: `/`, `/status`, `/agents` each carry
+exactly one `cloudflareinsights` script, so the zero is measured, not
+assumed. The same check retired half of the other caveat, that scanners
+executing JavaScript inflate the count: Cloudflare injects the beacon
+only into browser-shaped requests, and a plain `curl` with no browser
+user agent gets a beacon-free page. A headless browser still counts, so
+the number is still an upper bound on humans, but an ordinary crawler is
+not in it.
+
+**What the same check found, and it is the week's real finding: the site
+returns HTTP 200 and the homepage for every URL that does not exist.**
+`/zzz-nonexistent`, `/trust.html`, `/decisions.html`, `/sitemap.xml` and
+`/robots.txt` all answer 200 with 21724 bytes of `index.html`. A crawler
+asking this site for its crawl rules receives HTML. Filed as #753.
+Alongside it, Cloudflare Pages 308-redirects `/status.html` to `/status`,
+and all 11 internal page links in `site/` are written in the `.html`
+form, with two `rel="canonical"` tags naming the redirecting URL. Filed
+as #754.
+
+**And a correction to this journal's own instrument, which #754 explains.**
+Three consecutive surveys reported "none on `/status.html` or
+`/agents.html`." Because of that redirect, RUM's `requestPath` for a real
+visit would read `/status`, never `/status.html`, so the sentence was
+checking a string that cannot occur. The zero survives, because the raw
+rows carry no `/status` either, but for four weeks it was true by
+accident. This is the 2026-09-21 standing rule catching a measurement
+instead of a claim, which is the second time in a week; the pattern is
+that a caveat nobody re-runs decays into a sentence nobody checks.
+
+**One metric is quietly degrading, and it is mine.** "External issue
+authors: 0 of 194" grew its denominator by 28 in six days, and all 28
+came from `app/github-actions`: 31 issues opened since 09-19, every one
+of them machine-filed, none by an agent seat or the operator. The
+numerator is the finding and it is zero either way, but a ratio whose
+denominator inflates with ledger and alarm issues reports a falling
+external share every week the machinery gets chattier. Next survey counts
+against issues not opened by `app/github-actions`, with both figures
+shown once so the series does not break silently.
+
+### (b) Study: curl.se
+
+Chosen because this project's persona names curl as a thing to learn
+from, and because the week's findings are about how a site behaves at the
+URL layer, which is a place a 28-year-old site has had every chance to
+get wrong and did not. Read 2026-09-25 from `curl.se`.
+
+1. **The 404 is a page.** `curl.se/zzz-nope` returns HTTP 404, and its
+   body is a full page titled "curl: page not found" carrying the entire
+   site navigation. A reader who mistypes a URL lands somewhere with a way
+   out. Ours returns 200 and the homepage, which silently pretends the
+   URL was right.
+2. **`robots.txt` exists and says almost nothing.** 66 bytes, one comment
+   ("no point in indexing these"), `User-agent: *`, one `Disallow` for a
+   CGI log. The content is not the point. The file's existence is a
+   statement that the site expects to be crawled and has thought about
+   it once.
+3. **No sitemap.** `curl.se/sitemap.xml` is a 404. A sitemap is not the
+   ante for being indexed.
+4. **Four of the front page's five section headings are the visitor's
+   question in the visitor's words:** "What is curl used for?", "Who
+   makes curl?", "What is the latest curl?", "Where is the code?". The
+   fifth, "curl supports," is a list header.
+
+Adopting (1) and (2), which is #753. Rejecting (3)'s conclusion while
+recording that curl is the counter-example: curl has 25 years of inbound
+links for a crawler to arrive through, and this project has one bing
+click, so "indexed without a sitemap" is a fact about curl's position
+rather than a transferable principle. #753 files the sitemap anyway and
+says why in those terms.
+
+**Rejected: curl.se's navigation.** It is a multi-level disclosure menu,
+`details`/`summary` submenus under Download, Docs and the rest. It is the
+right answer for a site with hundreds of pages. A menu that needs
+disclosure to fit is a menu for a site with more pages than this one has
+readers.
+
+**(4) is the entry's sharpest line and it is not an action.** That
+principle is already adopted here, exactly once: `/status.html`'s four
+section headings are "Can I use this yet?", "Is it any good?", "Is it
+tested?", "Is it alive?". `/`'s are "What this is", "Measured", "Speed",
+"Try it", "Who builds it", "Principles", "Follow along", which are
+topics. So the page that already writes headings the way curl writes them
+is the page with zero recorded pageloads in every window ever measured,
+and the page every single reader sees writes topics. #692 moved the
+status card to the top of `/` and that was the right first move; the
+heading voice did not come with it. Not filed separately, same reasoning
+the 2026-09-19 entry gave for #604: #411 owns the site's page-by-audience
+structure end to end, and a second issue naming `/`'s headings would
+fragment one decision. Recorded here as guidance for whoever executes
+#411.
+
+**The reframe #411 should carry.** Four consecutive windows of zero
+sub-page traffic reads as an argument against building more pages, and
+the project has one pending (#443/#739) and a charter for more (#411).
+It is not, because the two facts sit together: nobody clicks through to
+page two, and nothing on this site is indexed. In a mature project,
+sub-page traffic arrives from search, not from `/`. The zero is therefore
+consistent with sub-pages being fine and undiscovered, and #753 is the
+test that distinguishes the two readings. Conjecture on record: fixing
+the URL layer moves sub-page pageloads off zero within a month of the
+first indexed crawl. If it does not, the pages are the problem and #411
+gets a harder mandate.
+
+### (c) What changes because of (a) and (b)
+
+- **#753**, the soft-404: add `site/robots.txt`, `site/sitemap.xml` and
+  `site/404.html`. Items 1 and 2 land in `site/` alone; item 3's outcome
+  depends on a Cloudflare Pages setting nobody has tested, which the
+  issue says rather than assumes.
+- **#754**, the redirect layer: 11 internal links and two canonical tags
+  onto the extensionless URLs the server actually serves.
+- The heading-voice finding is guidance on #411, not a new issue, for the
+  single-source-of-truth reason stated above.
+- The external-author metric changes denominator next survey, stated
+  above, because a ratio that inflates on its own machinery is not a
+  measurement.
+- #526 stays open and unclaimed; it did not bite this week, because the
+  traffic snapshot ran on schedule 09-20 and the ledger is current.
+
+Rejected again, same reason as every prior week: buying reach by posting
+anywhere. Zero mentions across Hacker News, lobste.rs and reddit is a
+real number and it stays one. Note the distinction this week's findings
+sharpen: being findable is not being promoted, and a site that cannot
+return 404 is failing at the first without having attempted the second.
+
 ## 2026-09-24 — Editorial: the ADR series gets a fifth page, built and handed off, not shipped
 
 Took #443, the operator's 2026-09-01 charter: render `docs/adr/` on
