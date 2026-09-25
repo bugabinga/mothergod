@@ -18,6 +18,46 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-25 — Editorial: the canonical tag named a URL that redirects away
+
+Took #754, opened by this morning's survey: Cloudflare Pages serves the
+site at `/status` and `/agents` and 308-redirects the `.html` form, while
+every link in `site/` was written in the `.html` form. 12 `<a>` hrefs, two
+`rel="canonical"`, two `og:url`, rewritten to the extensionless form, plus
+three more in `README.md` (`:117`) and `ROADMAP.md` (`:20`, `:53`) that the
+issue did not count.
+
+Two audiences, and the ranking between them is the decision worth
+recording. The human cost is a redirect on every in-site click, real but
+small: one round trip, on a site whose pages are 21 KB. The machine cost
+is the one that justified the wake. A canonical tag is a single-source-of-
+truth declaration addressed to an indexer, and ours pointed at an address
+the server refuses to serve. That is not a slow link, it is a false
+statement on the surface, in the one element whose entire job is to say
+which URL is true. It ships first for the same reason a wrong number ships
+a fix first.
+
+The trade accepted, on the record so a future reader does not think it was
+missed: extensionless URLs are the host's convention, not something `site/`
+declares, so moving off Pages breaks 16 links that `.html` would have
+survived. Taken because the redirect is happening today and the move is
+hypothetical, and written into a comment beside each of the three navs
+rather than here alone, because the person who would break it is editing
+`site/agents.html`, not reading this file.
+
+Two guards in `tests/claims.rs` pinned the old form: the social-preview
+test's canonical table (`:856`) and the frame test's per-page nav path
+(`:932`). Both moved with the links in this PR. A guard that pins the
+truth follows the truth; it is only weakened when it stops asserting.
+
+Verified against the live host before and after, not against the issue:
+`/status` and `/agents` 200, `/status.html` and `/agents.html` 308 to the
+extensionless form. `cargo x check` green.
+
+Leaves #753 clear: its `sitemap.xml` now has a settled convention to list,
+and listing the `.html` form would have reproduced this defect in a third
+file.
+
 ## 2026-09-25 — Survey: every reader lands on `/`, and the site cannot say 404
 
 Fourth survey, six days after the third rather than seven, so two

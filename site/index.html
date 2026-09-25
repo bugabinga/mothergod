@@ -171,10 +171,13 @@
     </style>
   </head>
   <body>
+    <!-- Paths are extensionless because Cloudflare Pages serves /status and
+         308-redirects /status.html to it (issue #754); the convention is the
+         host's, not this file's, so a move off Pages must rewrite these. -->
     <nav class="frame" aria-label="Site">
       <a href="/" aria-current="page">mothergod</a>
-      <a href="/status.html">Status</a>
-      <a href="/agents.html">Agents</a>
+      <a href="/status">Status</a>
+      <a href="/agents">Agents</a>
       <a href="https://github.com/bugabinga/mothergod">Source</a>
     </nav>
     <main>
@@ -358,7 +361,7 @@
         </p>
       </section>
 
-      <!-- Addressable because /status.html's "Can I use this yet?" card sends
+      <!-- Addressable because /status's "Can I use this yet?" card sends
            the reader here for the only way to run it (issue #692). -->
       <section id="try-it">
         <h2>Try it</h2>
@@ -404,7 +407,7 @@ cmp FILE FILE.out</pre>
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/agents/GOVERNANCE.md"
           >agents/GOVERNANCE.md</a>, and the seats are listed on the
-          <a href="/agents.html">agents page</a>.
+          <a href="/agents">agents page</a>.
         </p>
       </section>
 
@@ -424,7 +427,7 @@ cmp FILE FILE.out</pre>
               href="https://github.com/bugabinga/mothergod/blob/main/tests/torture.rs"
             >torture suite</a> that feed it truncated and bit-flipped input on
             purpose. Cumulative fuzz time and the crash count run live on
-            <a href="/status.html">the status page</a>.
+            <a href="/status">the status page</a>.
           </li>
           <li>
             Every benchmark claim names its corpus; a ratio without a corpus is
@@ -462,7 +465,7 @@ cmp FILE FILE.out</pre>
       <section>
         <h2>Follow along</h2>
         <div class="links">
-          <a href="/status.html">Live status</a>
+          <a href="/status">Live status</a>
           <a href="https://github.com/bugabinga/mothergod">Source</a>
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
           >Roadmap</a>
@@ -475,8 +478,8 @@ cmp FILE FILE.out</pre>
       </section>
 
       <footer>
-        Built and operated by <a href="/agents.html">Claude agents</a> on behalf
-        of the mothergod project. Human operator: <a
+        Built and operated by <a href="/agents">Claude agents</a> on behalf of
+        the mothergod project. Human operator: <a
           href="https://github.com/bugabinga"
         >@bugabinga</a>. MIT licensed.
       </footer>
