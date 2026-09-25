@@ -2667,7 +2667,74 @@ record.
   configuration measured so far. A future slice needs a coding mechanism
   this lead has not yet named, not another substitution or calibration
   variant on the ones already tried. Full record and numbers in S2-R19's
-  own entry.
+  own entry. Eighth slice, S2-R21: tried the coding mechanism `JOURNAL`
+  S2-L1 itself named as this lead's own remaining scope — give SSE
+  calibration the "is this expert active" axis a single tree-position-only
+  key cannot express, since S2-R18's rejection traced its own regression to
+  exactly that missing axis. Hypothesis: two fully independent `Sse`
+  tables, selected per byte by whether `PpmExpertState`'s selected bank has
+  observed anything yet (`Ppm::distinct() > 0`, known to encoder and
+  decoder alike before either has to guess the coming byte, since it
+  depends only on prior bytes, never on the outcome being coded) — a
+  "warm" table for an active bank, a "cold" table for a bank guaranteed to
+  contribute zero PPM mass to `cum7` — lets the additive PPM expert's
+  pre-SSE win (S2-A100) survive calibration, since the coarse key S2-R18
+  used never got to see this distinction at all. New
+  `Literal::ideal_cost_bits_ppm_expert_pair_active_sse`/
+  `PpmExpertSseState` (`warm`/`cold`, two independent `Sse` tables) and
+  `codec::PpmExpertActiveSseCostSink`/
+  `ideal_cost_bits_ppm_expert_active_sse_experiment` mirrored S2-R18's own
+  shapes, differing only in routing `cum7` through whichever table
+  `bank_is_warm` selects instead of one shared table. Measured the same
+  way S2-R18 did: `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only kinds at
+  `sealed_seed(CASE_SEED)`, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_ppm_active_sse_experiment.rs`, deleted after this
+  measurement). | Train net **+0.002608 b/B** (3 of 11 improved:
+  `entropy_ladder_h1` -0.000249, `h2` -0.000593, `markov_h8_2_trap`
+  -0.000385; 8 regressed: `h4` +0.000116, `h6` +0.000912, `h8` +0.000572,
+  `json_records` +0.000322, `base64_wrapped` +0.000849,
+  `interleaved_audio16` +0.026322, `sqlite_like_records` +0.000540,
+  `x86_dense_code` +0.000279). Sealed: `access_log` -0.001477,
+  `gradient_image` -0.090913 — both still improved. Every one of these
+  numbers matches S2-R18's own to within measurement noise
+  (`interleaved_audio16` +0.026322 here vs +0.026353 there, train net
+  +0.002608 vs +0.002604): this design's own accept/reject verdict is
+  identical to S2-R18's. **Rejected**, on the same train-side failure of
+  corpus policy's accept rule. Mechanism: `Ppm::observe`'s rescale step
+  (`crate::rescale_bank`, `(f + 1) >> 1`) never lets a nonzero frequency
+  decay back to zero, so `Ppm::distinct` is monotonically non-decreasing —
+  once a bank has observed one symbol, `bank_is_warm` is `true` for that
+  bank forever after. `PpmExpertState` has only `PPM_EXPERT_BANKS` (16)
+  banks, keyed on the previous byte's high nibble alone, so on any real
+  byte stream all 16 warm up within roughly the first few dozen bytes and
+  then stay warm for the rest of the file: `cold` prices a vanishingly
+  short prefix and is never touched again, while `warm` carries
+  essentially the entire stream — structurally almost the same single
+  table S2-R18 used, not two calibration paths separated on the axis this
+  slice intended. The per-byte distinction S2-R18's own postmortem named
+  ("PPM active" vs "PPM silent" for the *specific symbol* actually being
+  coded, since `ppm_probability` is `0.0` per-symbol, not per-bank) is not
+  the same thing as "this bank has ever observed anything at all," and the
+  latter is the only version of "active" a decoder can know before the
+  symbol is decoded — the true per-symbol signal `S2-R18` diagnosed is
+  fundamentally unavailable to gate an SSE context on, since knowing it
+  requires already knowing the answer. Every candidate artifact this
+  slice added (`Literal::ideal_cost_bits_ppm_expert_pair_active_sse`,
+  `PpmExpertSseState`, their unit tests, `codec::PpmExpertActiveSseCostSink`/
+  `ideal_cost_bits_ppm_expert_active_sse_experiment` and their unit tests,
+  the scratch binary) reverted in full, per the `compression-experiment`
+  skill; `PpmExpertState`/`Literal::mix_ppm`/`update_ppm_expert`/
+  `ideal_cost_bits_ppm_expert_pair` (S2-A100) and S2-R19's already-closed
+  real-wiring rejection are unaffected. `research/progress.jsonl` it162.
+  Remaining S1-P3 scope: S2-L1's own "active axis" fix does not close this
+  lead as posed, because a decoder-visible activity signal is necessarily
+  bank-level and near-permanent, not the per-symbol signal that actually
+  varies; closing this lead needs either a bank scheme with enough
+  contexts that "warm" stays meaningfully rare (untried, and in tension
+  with S2-R16/S2-R17's own finding that a coarse key is what let the
+  additive shape work at all) or a coding mechanism S1-P3 has not yet
+  named.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past

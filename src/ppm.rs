@@ -126,11 +126,44 @@
 //! added was reverted in full, per the `compression-experiment` skill;
 //! [`crate::literal::PpmExpertState`]/`Literal::mix_ppm`/
 //! `Literal::ideal_cost_bits_ppm_expert_pair` (S2-A100) are unaffected.
-//! Full record: `JOURNAL` S2-R18. Remaining
-//! S1-P3 scope: the real wiring slice alone (a `Method`/`FORMAT_VERSION`
-//! bump, an ADR, decode support for every earlier version, and a
-//! real-bitstream measurement) — the SSE-interaction question is now
-//! closed, negative.
+//! Full record: `JOURNAL` S2-R18.
+//!
+//! Seventh slice, `JOURNAL` S2-R19: built the real wiring slice S2-R18 left
+//! as remaining scope (`Literal::encode_ppm`/`decode_ppm`, `FORMAT_VERSION`
+//! 5) and found the prediction wrong by two orders of magnitude:
+//! real-bitstream train net **+0.140771 b/B**, driven by the loss of
+//! `encode_sse`'s own SSE calibration on the six real experts themselves
+//! (S2-A100's "baseline" side never modeled this, since it used a direct
+//! 256-way division no real coding path this format's decoder ever
+//! drives). **Rejected**, every candidate artifact reverted; full record
+//! `JOURNAL` S2-R19.
+//!
+//! Eighth slice, `JOURNAL` S2-R21: tried the coding mechanism `JOURNAL`
+//! S2-L1 itself named as this lead's remaining scope — two independent
+//! `Sse` tables (`PpmExpertSseState`'s `warm`/`cold`), selected per byte by
+//! whether the coded byte's PPM bank has observed anything yet
+//! (`Ppm::distinct() > 0`), giving SSE the "is this expert active" axis a
+//! single tree-position-only key cannot express. **Rejected**, on the same
+//! train-side failure S2-R18 hit (`interleaved_audio16` +0.026322 b/B,
+//! train net +0.002608 b/B, both matching S2-R18's own numbers to within
+//! measurement noise). Mechanism: [`Ppm::distinct`]'s rescale step never
+//! lets a nonzero frequency decay back to zero, so a bank's "warm" flag is
+//! monotonic — with only 16 banks, every one warms up within the first few
+//! dozen bytes of any real file and stays warm for the rest of it, so
+//! `cold` prices a vanishing prefix and `warm` carries essentially the
+//! whole stream, structurally almost the single table S2-R18 already
+//! rejected. The per-*symbol* "PPM active/silent" distinction S2-R18's own
+//! postmortem named is not the same signal as "this bank has ever observed
+//! anything," and the per-symbol version is unavailable to gate an SSE
+//! context on before the symbol is decoded, since knowing it requires
+//! already knowing the answer. Every candidate artifact reverted in full;
+//! full record `JOURNAL` S2-R21. Remaining S1-P3 scope: a decoder-visible
+//! activity signal is necessarily bank-level and near-permanent under this
+//! architecture, not the per-symbol one that actually varies; closing this
+//! lead needs either a bank scheme with enough contexts that "warm" stays
+//! meaningfully rare (untried, and in tension with S2-R16/S2-R17's own
+//! finding that a coarse key is what let the additive shape work at all)
+//! or a coding mechanism this lead has not yet named.
 
 use crate::coder::{Decoder, Encoder};
 
