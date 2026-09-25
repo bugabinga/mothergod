@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+r"""Deny a review session's write aimed at any PR but the one it reviews (PreToolUse hook).
+
+agent-review.yml hands the reviewer its PR as `PR_NUMBER` in the step
+environment, because a `${{ }}` in the prompt would cap the whole prompt
+at 21,000 characters (issue #154). The prompt says "PR to review:
+#$PR_NUMBER, in your environment", and the model resolves it. Run
+36178330703 was scoped to PR #768 and resolved to #770 instead, the
+newest of three open PRs: it reviewed #770, passed it, and merged it
+27 seconds after #770's own reviewer had failed it, then ended green
+on #768 with no verdict ever posted there (issue #771). Nothing checked
+that the actions landed where the environment pointed. This does.
+
+Denied, per shell segment (split on `;`, `&`, `|`): a write verb whose
+first positional number is not `PR_NUMBER`. The verbs are the ones a
+verdict is made of: `merge-pr`, `gh-comment`, `push-branch`, `gh pr`
+and `gh issue` mutations (edit, merge, close, reopen, ready, review,
+comment, lock, unlock, delete, pin, unpin, transfer), and `gh api` on
+`/issues/<n>` or `/pulls/<n>` with a write marker (`-X`/`--method` with
+a mutating verb, or a field flag, which makes gh POST). Reads stay
+allowed whatever number they name: `gh pr view|diff|checks|list|
+checkout`, `gh issue view`, a bare `gh api` GET, and a number inside
+quoted prose, so `--body "supersedes #770"` never trips it. Only a
+quoted span that is nothing but digits counts as a target, because
+`merge-pr "770"` runs exactly like `merge-pr 770`.
+
+Contract: reads the PreToolUse JSON on stdin. Armed only when
+`PR_NUMBER` is a number in the environment, which is agent-review.yml's
+Claude step and nothing else; every other seat, a malformed JSON, a
+null tool_input (the #324 shape) and any tool but Bash are allowed
+through. Exit 2 denies; stderr names both numbers and the next step,
+so a wrong resolution costs one turn instead of a merge.
+
+Liveness: every deny appends a fixed-vocabulary line to
+GITHUB_STEP_SUMMARY, and the test file pins agent-review.yml's
+`PR_NUMBER` env line, so renaming the variable breaks the test rather
+than silently disarming the guard.
+"""
+
+import json
+import os
+import re
+import sys
+
+QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+# A number token: not glued to a path, a word, a flag value like `-770`,
+# or an issue reference like `#770` in prose.
+NUMBER = r"(?<![\w/.#=-])(\d+)(?![\w.-])"
+
+# (class name for the summary line, verb pattern). The target is the
+# first number token after the verb in the same segment.
+VERBS = (
+    ("merge-pr", re.compile(r"(?:^|[\s/])merge-pr\b")),
+    ("gh-comment", re.compile(r"(?:^|[\s/])gh-comment\b")),
+    ("push-branch", re.compile(r"(?:^|[\s/])push-branch\b")),
+    (
+        "gh pr write",
+        re.compile(
+            r"\bgh\s+pr\s+(?:edit|merge|close|reopen|ready|review|comment|"
+            r"lock|unlock)\b"
+        ),
+    ),
+    (
+        "gh issue write",
+        re.compile(
+            r"\bgh\s+issue\s+(?:edit|close|reopen|comment|lock|unlock|delete|"
+            r"pin|unpin|transfer)\b"
+        ),
+    ),
+)
+
+GH_API = re.compile(r"\bgh\s+api\b")
+API_WRITE = re.compile(
+    r"(?:-X|--method)[\s=]+(?:POST|PATCH|PUT|DELETE)\b"
+    r"|(?:^|\s)(?:-[fF]|--field|--raw-field|--input)\b"
+)
+API_TARGET = re.compile(r"/(?:issues|pulls)/(\d+)(?:/|\b)")
+
+MESSAGE = (
+    "This run reviews #{pr}; the command targets #{other}. A verdict, "
+    "label, comment or merge on any other PR from here is a review that "
+    "never reached #{pr} and a green check that lies: the run for #768 "
+    "merged #770 that way (#771). #{other} has its own review run. "
+    "Resolve the number again with `echo $PR_NUMBER` and act on that PR "
+    "only."
+)
+
+
+def strip_prose(command: str) -> str:
+    """A quoted span that is only digits is a target and unwraps; any other
+    quoted span is an argument, never a target, and collapses to `q`."""
+
+    def rewrite(match: re.Match[str]) -> str:
+        content = match.group(0)[1:-1]
+        return content if content.isdigit() else "q"
+
+    return QUOTED.sub(rewrite, command)
+
+
+def other_target(command: str, pr: str) -> tuple[str, str] | None:
+    """The (class, number) of the first write aimed off the PR, or None."""
+    for segment in re.split(r"[;&|]+", strip_prose(command)):
+        for name, verb in VERBS:
+            hit = verb.search(segment)
+            if not hit:
+                continue
+            number = re.search(NUMBER, segment[hit.end():])
+            if number and number.group(1) != pr:
+                return name, number.group(1)
+        if GH_API.search(segment) and API_WRITE.search(segment):
+            target = API_TARGET.search(segment)
+            if target and target.group(1) != pr:
+                return "gh api write", target.group(1)
+    return None
+
+
+def main() -> int:
+    """Allow (0) or deny (2) the tool call described on stdin."""
+    pr = os.environ.get("PR_NUMBER", "")
+    if not pr.isdigit():
+        return 0
+    try:
+        call = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    if call.get("tool_name") != "Bash":
+        return 0
+    tool_input = call.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return 0
+    found = other_target(command, pr)
+    if found is None:
+        return 0
+    name, other = found
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"deny-other-pr: denied {name} on #{other}\n")
+    print(MESSAGE.format(pr=pr, other=other), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
