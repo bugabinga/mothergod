@@ -2711,18 +2711,19 @@ record.
   exploit it, is what is ill-suited to `gradient_image`'s structure.
   Candidate code (`lz::match_byte_at` and its three unit tests,
   `bittree::MATCH_STATES`/`SSE_CONTEXTS_MATCHBYTE`/`match_state`/
-  `sse_context_matchbyte`/`walk_sse_keyed`/`walk_sse_matchbyte`/
+  `sse_context_matchbyte`/`walk_sse_matchbyte`/
   `ideal_cost_bits_sse_matchbyte` and their unit tests,
   `Literal::ideal_cost_bits_sse_matchbyte_pair` and its unit tests,
   `codec::SseMatchbyteCostSink`/`ideal_cost_bits_sse_matchbyte_experiment`
-  and their unit tests, the scratch binary) reverted in full per the
-  `compression-experiment` skill's "delete rejected candidate code",
-  except `walk_sse`'s own behavior-preserving extraction into
-  `walk_sse_keyed` (kept: bit-for-bit identical to its pre-slice body,
-  every existing SSE test still exercises it unchanged). Every named
-  branch S2-R6 through S2-R22 has now failed at real-SSE-coding
-  granularity; S1-P3 reaches the same "unclear, no further named branch"
-  state S1-P2 reached. `research/progress.jsonl` it163.
+  and their unit tests, the scratch binary) kept whole per the
+  `compression-experiment` skill (measurement apparatus stays on `main`
+  even on a reject), plus `walk_sse`'s own behavior-preserving extraction
+  into `walk_sse_keyed`, which is infrastructure, not candidate-specific
+  (bit-for-bit identical to its pre-slice body, every existing SSE test
+  still exercises it unchanged). Every named branch S2-R6 through S2-R22
+  has now failed at real-SSE-coding granularity; S1-P3 reaches the same
+  "unclear, no further named branch" state S1-P2 reached.
+  `research/progress.jsonl` it163.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -6456,12 +6457,13 @@ record.
   number here to be misled by. `codec::SseMatchbyteCostSink` tracks its
   own `lz::RepCache`/position across `walk_tokens`, the identical shape
   S2-R20's `MatchByteExpertCostSink` used for the same underlying signal.
-  22 new unit tests across `bittree.rs` (`match_state`'s three states,
+  21 new unit tests: 8 in `bittree.rs` (`match_state`'s three states,
   `sse_context_matchbyte`'s range/separation/count, a fresh-table
-  cost-equivalence check, a round-trip through the real coder),
-  `literal.rs` (baseline-matches-plain, finite-positive, candidate
-  independence), and `codec.rs` (each `TokenSink` method's cost/bookkeeping,
-  the paired-cost end-to-end check). Measured via an uncommitted scratch
+  cost-equivalence check, a round-trip through the real coder), 3 in
+  `lz.rs` (`match_byte_at`'s own boundary/correctness), 3 in `literal.rs`
+  (baseline-matches-plain, finite-positive, candidate independence), and
+  7 in `codec.rs` (each `TokenSink` method's cost/bookkeeping, the
+  paired-cost end-to-end check). Measured via an uncommitted scratch
   binary (`bench/src/bin/scratch_sse_matchbyte_experiment.rs`, deleted
   after this measurement) over `bench::baseline`'s 11 train-tier cases
   (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only
@@ -6506,12 +6508,12 @@ record.
   tests, `lz::match_byte_at` and its three unit tests,
   `Literal::ideal_cost_bits_sse_matchbyte_pair` and its three unit tests,
   `codec::SseMatchbyteCostSink`/`ideal_cost_bits_sse_matchbyte_experiment`
-  and their eight unit tests, the scratch binary) reverted in full, per
-  the `compression-experiment` skill's "delete rejected candidate code" —
-  except `walk_sse`'s own behavior-preserving extraction into
-  `walk_sse_keyed`, kept: bit-for-bit identical to `walk_sse`'s pre-slice
-  body, every pre-existing SSE test still exercises it unchanged, and it
-  carries no candidate-specific state or hypothesis of its own.
+  and their eight unit tests, the scratch binary) kept whole per the
+  `compression-experiment` skill (measurement apparatus stays on `main`
+  even on a reject), plus `walk_sse`'s own behavior-preserving extraction
+  into `walk_sse_keyed`, which is infrastructure, not candidate-specific:
+  bit-for-bit identical to `walk_sse`'s pre-slice body, every pre-existing
+  SSE test still exercises it unchanged.
   `research/progress.jsonl` it163. Remaining S1-P3 scope: every named
   branch from S2-R6 through this entry has now failed at real-SSE-coding
   granularity (substitution, additive-mixing, and now calibration-context
