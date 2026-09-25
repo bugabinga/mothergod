@@ -735,6 +735,44 @@ impl Literal {
         bits
     }
 
+    /// `research/JOURNAL.md` S1-P3/S1-P8's before-wiring measurement for
+    /// the SSE-context axis (`bittree::sse_context_matchbyte`) rather than a
+    /// ninth mixer expert (S2-R20's own additive attempt at the identical
+    /// signal, rejected on a sealed regression): prices `byte` twice from
+    /// the same pre-update six-expert mix — once through the shipped
+    /// [`Self::sse`] table exactly as [`Self::ideal_cost_bits_sse`] does,
+    /// once through `candidate_sse` (a caller-owned, independently adapting
+    /// table sized [`bittree::SSE_CONTEXTS_MATCHBYTE`]) keyed on
+    /// `match_byte` in addition to tree position. Both sides walk the exact
+    /// same `cum` this model's real [`Self::encode_sse`] would build, so
+    /// unlike a new additive expert this never risks the `research/
+    /// JOURNAL.md` S2-L1 pre-SSE blind spot: there is no separate "before
+    /// SSE" measurement here, both numbers already are the real SSE-layer
+    /// cost, just under two different context schemes for the one existing
+    /// calibration stage. `self.sse` and `candidate_sse` are otherwise
+    /// disjoint state, never read or written by the other's call.
+    ///
+    /// Returns `(baseline_bits, with_matchbyte_bits)`.
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits_sse_matchbyte_pair(
+        &mut self,
+        context: Context,
+        byte: u8,
+        match_byte: Option<u8>,
+        candidate_sse: &mut Sse,
+    ) -> (f64, f64) {
+        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
+        let baseline_bits = bittree::ideal_cost_bits_sse(&cum, byte, &mut self.sse);
+        let with_matchbyte_bits =
+            bittree::ideal_cost_bits_sse_matchbyte(&cum, byte, candidate_sse, match_byte);
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        (baseline_bits, with_matchbyte_bits)
+    }
+
     /// `weights6`, the extra expert's own weight, and their sum: the
     /// shared three-number prelude [`Self::mix7`]/[`Self::mix_ppm`] and
     /// their [`Self::update_column_expert`]/[`Self::update_ppm_expert`]
@@ -1598,6 +1636,84 @@ mod tests {
             assert!(
                 with_ppm.is_finite() && with_ppm > 0.0,
                 "with_ppm={with_ppm}"
+            );
+            context = context.after_literal(b);
+        }
+    }
+
+    /// `Self::ideal_cost_bits_sse_matchbyte_pair`'s own docs: the baseline
+    /// side must be bit-identical to plain `Self::ideal_cost_bits_sse`,
+    /// same claim `ppm_expert_pair_baseline_matches_plain_ideal_cost_bits`
+    /// makes for the PPM pairing.
+    #[test]
+    fn sse_matchbyte_pair_baseline_matches_plain_ideal_cost_bits_sse() {
+        let mut paired = Literal::new();
+        let mut plain = Literal::new();
+        let mut candidate_sse = Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE);
+        let mut context = Context::default();
+        for &b in b"the quick brown fox jumps over the lazy dog" {
+            let (baseline, _) = paired.ideal_cost_bits_sse_matchbyte_pair(
+                context,
+                b,
+                Some(b'q'),
+                &mut candidate_sse,
+            );
+            let expected = plain.ideal_cost_bits_sse(context, b);
+            assert!(
+                (baseline - expected).abs() < 1e-9,
+                "byte {b:?}: paired baseline {baseline} vs plain {expected}"
+            );
+            context = context.after_literal(b);
+        }
+    }
+
+    #[test]
+    fn sse_matchbyte_pair_costs_stay_finite_and_positive() {
+        let mut model = Literal::new();
+        let mut candidate_sse = Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE);
+        let mut context = Context::default();
+        for (i, &b) in b"0123456789abcdefghijklmnopqrstuvwxyz".iter().enumerate() {
+            let match_byte = if i == 0 { None } else { Some(b'0') };
+            let (baseline, with_matchbyte) = model.ideal_cost_bits_sse_matchbyte_pair(
+                context,
+                b,
+                match_byte,
+                &mut candidate_sse,
+            );
+            assert!(
+                baseline.is_finite() && baseline > 0.0,
+                "baseline={baseline}"
+            );
+            assert!(
+                with_matchbyte.is_finite() && with_matchbyte > 0.0,
+                "with_matchbyte={with_matchbyte}"
+            );
+            context = context.after_literal(b);
+        }
+    }
+
+    #[test]
+    fn sse_matchbyte_pair_leaves_the_shipped_sse_table_untouched_by_the_candidate() {
+        // The candidate table is caller-owned and independent: running the
+        // pair must adapt self.sse exactly as ideal_cost_bits_sse alone
+        // would (already checked above), and must never read or write
+        // through the candidate for anything other computing/adapting its
+        // own separate contexts. Proven here by running the pair twice with
+        // two *different* match_byte values and confirming the baseline
+        // side is unaffected by which one was passed.
+        let mut model_a = Literal::new();
+        let mut model_b = Literal::new();
+        let mut sse_a = Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE);
+        let mut sse_b = Sse::new(bittree::SSE_CONTEXTS_MATCHBYTE);
+        let mut context = Context::default();
+        for &b in b"mississippi" {
+            let (baseline_a, _) =
+                model_a.ideal_cost_bits_sse_matchbyte_pair(context, b, Some(0x00), &mut sse_a);
+            let (baseline_b, _) =
+                model_b.ideal_cost_bits_sse_matchbyte_pair(context, b, Some(0xFF), &mut sse_b);
+            assert!(
+                (baseline_a - baseline_b).abs() < 1e-9,
+                "byte {b:?}: baseline must not depend on match_byte, got {baseline_a} vs {baseline_b}"
             );
             context = context.after_literal(b);
         }
