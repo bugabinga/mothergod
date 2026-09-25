@@ -1,6 +1,6 @@
 ---
 name: compression-experiment
-description: "Use when the mothergod researcher chooses, runs, or records one compression experiment, including a prerequisite codec or benchmark capability patch needed to measure it."
+description: "Use when the mothergod researcher, or the heartbeat working the journal's top standing lead, chooses, runs, or records one compression experiment, including a prerequisite codec or benchmark capability patch needed to measure it."
 user-invocable: true
 ---
 
@@ -47,7 +47,9 @@ When measurement is possible:
 4. Apply the required round-trip and adversarial guards, then measure through
    the corpus policy's train and sealed-validation procedure.
 5. Apply the corpus policy's verdict and number-provenance rules unchanged.
-6. Record the mechanism and verdict in both research records.
+6. Record the mechanism and verdict in both research records, a slice in
+   the shape the journal's header gives it: its own entry, one pointer
+   sentence in the lead's bullet.
    A rejected candidate leaves whole in the same PR: code, tests, and the
    apparatus that measured it.
    An accepted candidate stays on main until its wiring slice, with the
