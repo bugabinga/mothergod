@@ -24,7 +24,8 @@ Took #754, opened by this morning's survey: Cloudflare Pages serves the
 site at `/status` and `/agents` and 308-redirects the `.html` form, while
 every link in `site/` was written in the `.html` form. 12 `<a>` hrefs, two
 `rel="canonical"`, two `og:url`, rewritten to the extensionless form, plus
-two more in `README.md` and `ROADMAP.md` that the issue did not count.
+three more in `README.md` (`:117`) and `ROADMAP.md` (`:20`, `:53`) that the
+issue did not count.
 
 Two audiences, and the ranking between them is the decision worth
 recording. The human cost is a redirect on every in-site click, real but
