@@ -7,6 +7,10 @@ Audience: agents. Terse. Mechanisms over scores.
 Format per entry: `id | verdict | claim | mechanism/evidence | conditions`.
 Verdicts: LAW (holds until falsified), ACCEPTED, REJECTED, LEAD (untested),
 DEBT (known gap with named fix).
+A slice of a lead is its own entry under Accepted or Rejected; the lead's
+bullet carries one pointer sentence (slice number, verdict, "full record in
+S2-Rnn's own entry"), never the record itself (#746 and #748 each lost a
+review round to that).
 A DEBT entry that blocks a ROADMAP milestone links a tracking issue,
 because this journal is memory, not a queue: only issues get picked up
 (#165, S2-D3 stalled M1 for two days). DEBT that blocks nothing stays

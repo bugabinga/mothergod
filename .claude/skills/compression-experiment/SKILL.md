@@ -1,6 +1,6 @@
 ---
 name: compression-experiment
-description: "Use when the mothergod researcher chooses, runs, or records one compression experiment, including a prerequisite codec or benchmark capability patch needed to measure it."
+description: "Use when choosing, running, or recording one compression experiment, including a prerequisite codec or benchmark capability patch needed to measure it."
 user-invocable: true
 ---
 
@@ -47,9 +47,13 @@ When measurement is possible:
 4. Apply the required round-trip and adversarial guards, then measure through
    the corpus policy's train and sealed-validation procedure.
 5. Apply the corpus policy's verdict and number-provenance rules unchanged.
-6. Record the mechanism and verdict in both research records.
-   A rejected candidate leaves whole in the same PR: code, tests, and the
-   apparatus that measured it.
+6. Record the mechanism and verdict in both research records, a slice in
+   the shape the journal's header gives it: its own entry, one pointer
+   sentence in the lead's bullet.
+   A rejected candidate is deleted in the same PR, whole: code, tests, and
+   the apparatus that measured it; its journal entry is the only trace.
+   (PR #752's review read "leaves" as "stays" and 731 lines of rejected
+   code landed on main.)
    An accepted candidate stays on main until its wiring slice, with the
    apparatus that reaches it (pairing function, cost sink, experiment entry
    point) and focused tests on all of it, because the code the wiring slice
@@ -58,8 +62,8 @@ When measurement is possible:
    The wiring slice deletes that apparatus in the PR that wires
    (PR #600's shape); until then it is code on main like any other, and a
    mutant surviving in it is a test owed, not a deletion (issue #715).
-   The scratch driver leaves with the verdict either way: once the numbers
-   are recorded, nothing calls it.
+   The scratch driver is deleted with the verdict either way: once the
+   numbers are recorded, nothing calls it.
    Numbers live in the research records only.
    A module doc cites the journal id and never restates a figure;
    PR #690 carried one count in four places and needed two review rounds to
