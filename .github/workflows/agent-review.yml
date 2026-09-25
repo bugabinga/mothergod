@@ -36,7 +36,14 @@ on:
     # reopen, three times on 2026-09-25: the third into a dirty PR,
     # which fires no event at all, and one scoped onto the wrong PR
     # (#771). A title or base change costs one review; both are rare.
-    types: [opened, ready_for_review, reopened, synchronize, converted_to_draft, edited]
+    types: [
+      opened,
+      ready_for_review,
+      reopened,
+      synchronize,
+      converted_to_draft,
+      edited,
+    ]
 
 permissions: {}
 
