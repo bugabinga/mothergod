@@ -40,9 +40,23 @@ HEAD_TIMEOUT = 30  # seconds for the PR's head to catch up with the push
 POLL = 5
 
 
+# The two calls whose point is the actor the session token carries: a
+# close/reopen on the workflow token re-attributes to github-actions[bot],
+# whose runs hold at the approval gate, the state this script exists to clear.
+ATTRIBUTED = (("pr", "close"), ("pr", "reopen"))
+
+
 def gh(*args):
-    """Run gh with the session's own credential; no token logic lives here."""
+    """Run gh on the session's credential. Past the hour mark it answers 401
+    (issue #81); a read then retries once on GH_WORKFLOW_TOKEN, the job-scoped
+    token gh-comment already rides, because settling needs reads and nothing
+    else (issue #734). The two attributed writes never fall back."""
     proc = subprocess.run(("gh",) + args, capture_output=True, text=True)
+    fallback = os.environ.get("GH_WORKFLOW_TOKEN", "")
+    dead = proc.returncode != 0 and ("401" in proc.stderr or "Bad credentials" in proc.stderr)
+    if dead and fallback and tuple(args[:2]) not in ATTRIBUTED:
+        env = dict(os.environ, GH_TOKEN=fallback)
+        proc = subprocess.run(("gh",) + args, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         hint = ("The app token expires about an hour into a session (issue #81);"
                 if "401" in proc.stderr or "Bad credentials" in proc.stderr else

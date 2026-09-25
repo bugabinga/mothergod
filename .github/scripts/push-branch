@@ -28,6 +28,13 @@ decision is the one agents kept making by hand and kept getting wrong, and it
 fails on the remote rather than here, one turn later, in a 403 that reads like
 a permissions bug.
 
+Past the hour mark the app token answers 401 (issue #81). A push in flight
+then retries once on the admin PAT when the environment holds one, says so on
+stderr, and lands operator-attributed (issue #734). 401 only: a 403 is a
+permission answer, not a dead token, and is never routed around (merge-pr's
+rule). Without a PAT the failure names the expiry and the one write that still
+works, so the next context can post what the push held instead of retrying.
+
 Commit identity follows the credential, which follows the paths: app token
 commits as `claude[bot]`, admin PAT commits as the operator. Nothing to
 configure, and `git commit` never runs, so the runner's missing git ident
@@ -109,14 +116,50 @@ def gh(args, token=None, stdin=None):
     )
 
 
-def api(method, path, token, body=None, allow_missing=False):
+class Credential:
+    """The token a push rides and the identity its commit will carry. One
+    object threads through every call, so the hour-mark fallback moves the
+    whole push onto the PAT, not one request of it."""
+
+    def __init__(self, token, identity):
+        self.token, self.identity = token, identity
+
+    def escalate(self):
+        """Move an expired app token onto the admin PAT, once (issue #734)."""
+        admin = os.environ.get("GH_ADMIN_TOKEN", "")
+        if self.identity != "app token" or not admin:
+            return False
+        note("the app token answered 401, the hour-mark expiry (issue #81); "
+             "retrying on the admin PAT, so this commit is operator-attributed")
+        self.token, self.identity = admin, "admin PAT"
+        return True
+
+
+def expired(proc):
+    return "401" in proc.stderr or "Bad credentials" in proc.stderr
+
+
+def api(method, path, cred, body=None, allow_missing=False):
     args = ["api", "-X", method, f"repos/{REPO}/{path}"]
     if body is not None:
         args += ["--input", "-"]
-    proc = gh(args, token, json.dumps(body) if body is not None else None)
+    payload = json.dumps(body) if body is not None else None
+    proc = gh(args, cred.token, payload)
+    if proc.returncode != 0 and expired(proc) and cred.escalate():
+        proc = gh(args, cred.token, payload)
     if proc.returncode != 0:
         if allow_missing and "404" in proc.stderr:
             return None
+        if expired(proc):
+            hint = (
+                "The app token expires about an hour into a session (issue #81); "
+                "nothing was pushed. `gh-comment` still writes on the workflow "
+                "token: post what this push held there, and stop."
+                if cred.identity == "app token"
+                else "The PAT does not expire mid-run: it is revoked or mistyped, "
+                "which is blocked-on-human."
+            )
+            die(f"{method} {path}: the {cred.identity} answered 401 with no fallback left.", hint)
         die(f"{method} {path} failed: {proc.stderr.strip()}")
     return json.loads(proc.stdout) if proc.stdout.strip() else {}
 
@@ -269,20 +312,22 @@ def main() -> int:
                 "which is not in the environment. The app token cannot write "
                 "workflow files (issue #24).",
             )
-        identity = "admin PAT"
+        cred = Credential(token, "admin PAT")
     else:
-        token = os.environ.get("GH_TOKEN") or gh(["auth", "token"]).stdout.strip()
-        identity = "app token"
+        cred = Credential(
+            os.environ.get("GH_TOKEN") or gh(["auth", "token"]).stdout.strip(),
+            "app token",
+        )
 
-    branch = api("GET", f"pulls/{target}", token)["head"]["ref"] if target.isdigit() else target
+    branch = api("GET", f"pulls/{target}", cred)["head"]["ref"] if target.isdigit() else target
 
-    ref = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
+    ref = api("GET", f"git/ref/heads/{branch}", cred, allow_missing=True)
     if ref:
         base_sha, action = ref["object"]["sha"], "update"
     elif target.isdigit():
         die(f"PR {target} names branch {branch}, which does not exist")
     else:
-        base_sha, action = api("GET", "git/ref/heads/main", token)["object"]["sha"], "create"
+        base_sha, action = api("GET", "git/ref/heads/main", cred)["object"]["sha"], "create"
 
     if merge_sha:
         # The parent check replaces guard_not_stale: HEAD's diff is only the
@@ -300,7 +345,7 @@ def main() -> int:
     else:
         guard_not_stale(branch, base_sha, paths + deletions)
 
-    base_tree = api("GET", f"git/commits/{base_sha}", token)["tree"]["sha"]
+    base_tree = api("GET", f"git/commits/{base_sha}", cred)["tree"]["sha"]
     tree = []
     for p in paths:
         if merge_sha:
@@ -320,7 +365,7 @@ def main() -> int:
         blob = api(
             "POST",
             "git/blobs",
-            token,
+            cred,
             {"content": base64.b64encode(data).decode(), "encoding": "base64"},
         )
         tree.append({"path": p, "mode": mode, "type": "blob", "sha": blob["sha"]})
@@ -332,7 +377,7 @@ def main() -> int:
     # commit then reuses the base tree, because the tree API rejects an
     # empty entry list.
     tree_sha = (
-        api("POST", "git/trees", token, {"base_tree": base_tree, "tree": tree})["sha"]
+        api("POST", "git/trees", cred, {"base_tree": base_tree, "tree": tree})["sha"]
         if tree
         else base_tree
     )
@@ -340,15 +385,15 @@ def main() -> int:
     commit = api(
         "POST",
         "git/commits",
-        token,
+        cred,
         {"message": message, "tree": tree_sha, "parents": parents},
     )
     sha = commit["sha"]
 
     if action == "create":
-        api("POST", "git/refs", token, {"ref": f"refs/heads/{branch}", "sha": sha})
+        api("POST", "git/refs", cred, {"ref": f"refs/heads/{branch}", "sha": sha})
     else:
-        api("PATCH", f"git/refs/heads/{branch}", token, {"sha": sha})
+        api("PATCH", f"git/refs/heads/{branch}", cred, {"sha": sha})
 
     # The failure this replaces is a branch that silently does not move, so the
     # write's own answer is not evidence: read the ref back (issue #133). Refs
@@ -359,7 +404,7 @@ def main() -> int:
     for delay in (0, 1, 2):
         if delay:
             time.sleep(delay)
-        landed = api("GET", f"git/ref/heads/{branch}", token, allow_missing=True)
+        landed = api("GET", f"git/ref/heads/{branch}", cred, allow_missing=True)
         if landed and landed["object"]["sha"] == sha:
             break
     # A lagging replica answers with whatever the ref held before this write:
@@ -385,7 +430,7 @@ def main() -> int:
     record_push(branch, sha)
 
     note(
-        f"{action} {branch} {sha[:7]} on the {identity}, "
+        f"{action} {branch} {sha[:7]} on the {cred.identity}, "
         f"{len(paths)} file{'s' if len(paths) != 1 else ''}, base {base_sha[:7]}"
     )
     print(sha)
