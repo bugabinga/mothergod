@@ -16,7 +16,15 @@ the Bash tool carries multi-line commands and the incident's shape is a
 comment on the right PR followed by a merge on the wrong one; PR #772's
 first review round reproduced exactly that through a bare newline): a
 write verb, every occurrence in the segment, whose first positional
-number is not `PR_NUMBER`. The verbs are the ones a
+number is not `PR_NUMBER`, or whose target is a shell variable other
+than `$PR_NUMBER` itself (`n=770; merge-pr $n`, `gh pr merge $TARGET`
+resolve to no literal digit at all here and read as clean by a matcher
+that only distrusts digits; PR #772's second review round reproduced
+both). A target the hook cannot read as literal fails closed as denied,
+not open as allowed; a write verb with no number and no variable in
+sight at all (a bare `push-branch <branch>` before a PR exists, a
+`gh-comment --new`) still has nothing to verify against and is
+unaffected. The verbs are the ones a
 verdict is made of: `merge-pr`, `gh-comment`, `push-branch`, `gh pr`
 and `gh issue` mutations (edit, merge, close, reopen, ready, review,
 comment, lock, unlock, delete, pin, unpin, transfer), and `gh api` on
@@ -55,6 +63,10 @@ SEGMENT = re.compile(r"[;&|\r\n]+")
 # or an issue reference like `#770` in prose.
 NUMBER = r"(?<![\w/.#=-])(\d+)(?![\w.-])"
 
+# A shell variable or brace expansion: `$n`, `$TARGET`, `${PR_NUMBER}`.
+# Never matches inside quotes; strip_prose runs first.
+VARIABLE = re.compile(r"\$\{?(\w+)\}?")
+
 # (class name for the summary line, verb pattern). The target is the
 # first number token after the verb in the same segment.
 VERBS = (
@@ -82,7 +94,7 @@ API_WRITE = re.compile(
     r"(?:-X|--method)[\s=]+(?:POST|PATCH|PUT|DELETE)\b"
     r"|(?:^|\s)(?:-[fF]|--field|--raw-field|--input)\b"
 )
-API_TARGET = re.compile(r"/(?:issues|pulls)/(\d+)(?:/|\b)")
+API_TARGET = re.compile(r"/(?:issues|pulls)/([^\s/\"']+)")
 
 MESSAGE = (
     "This run reviews #{pr}; the command targets #{other}. A verdict, "
@@ -91,6 +103,15 @@ MESSAGE = (
     "merged #770 that way (#771). #{other} has its own review run. "
     "Resolve the number again with `echo $PR_NUMBER` and act on that PR "
     "only."
+)
+
+UNRESOLVED_MESSAGE = (
+    "This run reviews #{pr}; the {verb} target here is a shell variable "
+    "or substitution, not a literal number, so this hook cannot verify "
+    "it is #{pr}. That is exactly how the run for #768 merged #770 "
+    "(#771): the number lived in a variable, not on the line. Resolve "
+    "the number with `echo $PR_NUMBER` and write it literally, or use "
+    "`$PR_NUMBER` verbatim, before this write."
 )
 
 
@@ -106,17 +127,32 @@ def strip_prose(command: str) -> str:
 
 
 def other_target(command: str, pr: str) -> tuple[str, str] | None:
-    """The (class, number) of the first write aimed off the PR, or None."""
+    """The (class, number) of the first write aimed off the PR, or None.
+
+    `number` is `"unresolved"` when a write verb's target is a shell
+    variable other than `$PR_NUMBER` rather than a digit: the hook
+    cannot verify that, so it denies rather than reading the absence of
+    a literal digit as safe (review round two, PR #772)."""
     for segment in SEGMENT.split(strip_prose(command)):
         for name, verb in VERBS:
             for hit in verb.finditer(segment):
-                number = re.search(NUMBER, segment[hit.end():])
-                if number and number.group(1) != pr:
-                    return name, number.group(1)
+                rest = segment[hit.end():]
+                number = re.search(NUMBER, rest)
+                if number is not None:
+                    if number.group(1) != pr:
+                        return name, number.group(1)
+                    continue
+                variable = VARIABLE.search(rest)
+                if variable is not None and variable.group(1) != "PR_NUMBER":
+                    return name, "unresolved"
         if GH_API.search(segment) and API_WRITE.search(segment):
             for target in API_TARGET.finditer(segment):
-                if target.group(1) != pr:
-                    return "gh api write", target.group(1)
+                value = target.group(1)
+                if value.isdigit():
+                    if value != pr:
+                        return "gh api write", value
+                elif value not in ("$PR_NUMBER", "${PR_NUMBER}"):
+                    return "gh api write", "unresolved"
     return None
 
 
@@ -142,10 +178,14 @@ def main() -> int:
         return 0
     name, other = found
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    target = "an unresolved target" if other == "unresolved" else f"#{other}"
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-other-pr: denied {name} on #{other}\n")
-    print(MESSAGE.format(pr=pr, other=other), file=sys.stderr)
+            fh.write(f"deny-other-pr: denied {name} on {target}\n")
+    if other == "unresolved":
+        print(UNRESOLVED_MESSAGE.format(pr=pr, verb=name), file=sys.stderr)
+    else:
+        print(MESSAGE.format(pr=pr, other=other), file=sys.stderr)
     return 2
 
 

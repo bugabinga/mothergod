@@ -58,6 +58,18 @@ const denied = [
   ["gh pr edit 768 --add-label agent-approved\r\n.github/scripts/merge-pr 770", "CRLF"],
 ];
 
+// The write verb's target resolves through a shell variable rather than
+// a literal digit: unverifiable, so denied even though no `#770` ever
+// appears on the line (review round two, the two live reproductions).
+const deniedUnresolved = [
+  ["n=770; .github/scripts/merge-pr $n", "the observed bypass: a variable assigned earlier"],
+  ["export TARGET=770; gh pr merge $TARGET --squash --auto", "the observed bypass: an exported variable"],
+  ["NUM=$(gh pr list -q .[0].number); merge-pr $NUM", "a variable resolved by command substitution"],
+  ["gh api -X POST repos/o/r/issues/$n/comments -f body=q", "a variable in the api path"],
+  ["gh-comment $n --close", "gh-comment's own number as a variable"],
+  [".github/scripts/push-branch $n --merge abc", "push-branch's pr-or-branch slot as a variable"],
+];
+
 const allowed = [
   [".github/scripts/merge-pr 768 --sha 3c115a9", "the PR under review"],
   ["merge-pr 768", "same, bare"],
@@ -88,6 +100,9 @@ const allowed = [
   ["gh run view 36178330703 --log", "a run id is not a PR"],
   ["gh pr edit 768 --title q\ngh pr view 770", "a read on the second line"],
   ["merge-pr 768\necho done", "a second line with no verb"],
+  ["merge-pr $PR_NUMBER", "the variable that always resolves to the reviewed PR"],
+  ["gh pr merge $PR_NUMBER --squash --auto", "same, in a gh pr write"],
+  ["gh api -X POST repos/o/r/issues/$PR_NUMBER/comments -f body=q", "same, in an api path"],
 ];
 
 for (const [command, why] of denied) {
@@ -95,6 +110,14 @@ for (const [command, why] of denied) {
     const r = run(bash(command));
     assert.equal(r.status, 2);
     assert.match(r.stderr, /This run reviews #768; the command targets #77[01]\./);
+  });
+}
+
+for (const [command, why] of deniedUnresolved) {
+  test(`denies (unresolved): ${command} (${why})`, () => {
+    const r = run(bash(command));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /target here is a shell variable or substitution/);
   });
 }
 
@@ -128,6 +151,16 @@ test("a deny writes its class and target to GITHUB_STEP_SUMMARY", () => {
   const env = { ...reviewEnv, GITHUB_STEP_SUMMARY: summary };
   assert.equal(run(bash("gh pr edit 770 --add-label agent-approved"), env).status, 2);
   assert.match(readFileSync(summary, "utf8"), /^deny-other-pr: denied gh pr write on #770$/m);
+});
+
+test("an unresolved deny writes that to GITHUB_STEP_SUMMARY too", () => {
+  const summary = join(mkdtempSync(join(tmpdir(), "deny-")), "summary.md");
+  const env = { ...reviewEnv, GITHUB_STEP_SUMMARY: summary };
+  assert.equal(run(bash("n=770; merge-pr $n"), env).status, 2);
+  assert.match(
+    readFileSync(summary, "utf8"),
+    /^deny-other-pr: denied merge-pr on an unresolved target$/m,
+  );
 });
 
 test("agent-review.yml still arms the guard by setting PR_NUMBER", () => {
