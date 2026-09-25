@@ -57,6 +57,12 @@ audit now records each denial's typed reason (audit-extract.py), and
 every distinct one prints under the session, so the wall is read where
 the session is judged. Older artifacts carry no reasons and print none.
 
+ROUNDS is the sixth, and it costs one `gh pr list`. Issue #663 argued for
+two fixes to the reviewer's one-must-per-round habit with no number either
+side could reproduce; the curator's hand count of reviewer posts per merged
+PR was the first. `rounds.py` prints that histogram for the window on one
+footer line, tail PRs named, so the next argument starts from the number.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -103,6 +109,7 @@ from allowance import WEEK, project, valid_fraction, valid_reset, window_reading
 from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
 from attribution import report as attribution_report
 from opener import trim
+from rounds import report as rounds_report
 
 # Only these produce a judgeable session. Everything else in the repository is
 # graded by exit code.
@@ -505,6 +512,8 @@ def main():
 
     comments, bypassed = attribution_report(repo, anchor)
 
+    print()
+    rounds_report(repo, anchor)
     budget(samples, anchor)
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
