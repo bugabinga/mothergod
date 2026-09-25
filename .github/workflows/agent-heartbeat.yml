@@ -149,7 +149,7 @@ jobs:
                   lacks an issue link, filing that issue is the first
                   step (#165),
                c. the top unblocked ROADMAP item, or the journal's top
-                  standing lead,
+                  standing lead, worked through `compression-experiment`,
                d. the oldest enhancement issue that is not
                   blocked-on-human.
                Claim check first, because agents run concurrently
