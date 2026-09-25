@@ -296,8 +296,9 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let rate_context = prev1 | (after_copy * ALPHABET);
     let order2 = ((prev1 << 8) | prev2) & (ORDER2_BANKS - 1);
     let align = ((context.position & 3) << 4) | (prev1 >> 4);
-    let word_hash =
-        usize::try_from(context.word_hash & 0xFFF).expect("masked to 12 bits, always fits usize");
+    let word_hash = usize::try_from(context.word_hash)
+        .expect("word_hash is a u32, always fits usize")
+        & (WORD_BANKS - 1);
     let weight_index = (prev1 >> 4) | (after_copy * 16);
     (
         [
