@@ -101,15 +101,13 @@ jobs:
             This session chooses, runs, and records one compression
             experiment, or the codec or benchmark capability patch needed to
             measure it; use `compression-experiment` for that work.
-            Workflow-only schedule or attribution-footer changes do not.
 
             Hard rules: one experiment, one PR on branch
-            claude/research-<slug>, never merge, stop when recorded. If the
-            work dies for an environmental reason, post the exact blocker on
-            the ops-log issue with `.github/scripts/gh-comment <issue>`,
-            never `gh issue comment` directly (issue #510), and without a
-            verdict. Never fabricate numbers; every number you write was
-            produced by a command in this session.
+            claude/research-<slug>, stop when recorded. If the work dies for
+            an environmental reason, post the exact blocker on the ops-log
+            issue with `.github/scripts/gh-comment <issue>`. Never fabricate
+            numbers; every number you write was produced by a command in
+            this session.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes".
           claude_args: |
             --append-system-prompt-file agents/personas/researcher.md
