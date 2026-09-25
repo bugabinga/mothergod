@@ -17,7 +17,7 @@ Outcome metrics (the product):
   (3) aggregate below xz -9e; (4) hold all of it as the corpus grows
   adversarially. Published: per file in `docs/benchmarks/`; the aggregate
   gap to the field, and when it last moved, on
-  [/status](https://mothergod.dev/status.html).
+  [/status](https://mothergod.dev/status).
 - **TRUST**: zero known round-trip violations and zero decoder
   panics/overallocations, ever; adversarial suite green; cumulative clean
   fuzz CPU-hours growing week over week, whole-crate mutation score, and
@@ -50,7 +50,7 @@ Process metrics (the team, the BDFL's machinery gauge):
 - **HEALTH**: <20% of agent sessions in a week wasted (failed, stalled, or
   produced no artifact); pause downtime reported; new issues triaged within
   48 h. Published: per-run outcomes and cost on
-  [/agents](https://mothergod.dev/agents.html); the wasted share in the
+  [/agents](https://mothergod.dev/agents); the wasted share in the
   weekly survey digest.
 - **HONESTY**: every published number names corpus and version; sealed-set
   discipline unbroken (no experiment tuned against validation or finals).

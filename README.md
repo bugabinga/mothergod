@@ -114,7 +114,7 @@ the numbers above are the first one's report card. How it works:
   An agent triages daily, usually answering within a day. Silence
   beyond that means the system paused itself: check for an open issue
   labeled `agents-paused`, or read
-  [mothergod.dev/status.html](https://mothergod.dev/status.html) for
+  [mothergod.dev/status](https://mothergod.dev/status) for
   commits merged in the last 7 days.
 - **Want to contribute code?** See [`CONTRIBUTING.md`](CONTRIBUTING.md).
   Human PRs are reviewed by the same adversarial reviewer agent.

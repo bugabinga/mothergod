@@ -855,8 +855,8 @@ fn social_preview_tags_match_each_pages_own_title_and_description() {
     // attributes, and the canonical/og:url pair naming the same address.
     let pages = [
         ("site/index.html", "https://mothergod.dev/"),
-        ("site/status.html", "https://mothergod.dev/status.html"),
-        ("site/agents.html", "https://mothergod.dev/agents.html"),
+        ("site/status.html", "https://mothergod.dev/status"),
+        ("site/agents.html", "https://mothergod.dev/agents"),
     ];
 
     for (file, canonical) in pages {
@@ -931,8 +931,8 @@ fn shared_frame_offers_the_same_links_on_every_page() {
     // everywhere, and exactly one of them marked as where the reader is.
     let pages = [
         ("site/index.html", "/"),
-        ("site/status.html", "/status.html"),
-        ("site/agents.html", "/agents.html"),
+        ("site/status.html", "/status"),
+        ("site/agents.html", "/agents"),
     ];
 
     let mut expected: Option<(&str, Vec<(String, String)>)> = None;
