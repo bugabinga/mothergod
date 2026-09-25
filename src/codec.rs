@@ -537,7 +537,7 @@ fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Toke
         },
     );
 
-    let mut out = Vec::with_capacity(8 + data.len() / 2);
+    let mut out = Vec::with_capacity(TOKEN_HEADER_LEN + data.len() / 2);
     out.extend_from_slice(&declared_len.to_le_bytes());
     out.extend_from_slice(&token_count.to_le_bytes());
     out.extend(ac.finish());
@@ -714,15 +714,34 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Reads the 4-byte little-endian `u32` at `payload[start..start + 4]`.
+/// Byte width of one little-endian `u32` header field: [`read_u32_le`]'s
+/// own unit, and the stride from one [`read_header`] field to the next.
+const U32_LEN: usize = 4;
+
+/// Byte length of [`encode_tokens_with`]'s header (declared output length
+/// then token count, each a [`U32_LEN`]-byte `u32`): this module's own
+/// "Payload layout" doc names it as the two 4-byte fields at relative
+/// offsets 0 and 4, right before the range-coded stream. [`read_header`]
+/// inverts it exactly, so a caller sizing a buffer around that header
+/// (encode's own capacity hint, a test computing coded-bits-past-header)
+/// reads this constant instead of re-deriving `2 * U32_LEN`.
+const TOKEN_HEADER_LEN: usize = 2 * U32_LEN;
+
+/// Reads the [`U32_LEN`]-byte little-endian `u32` at `payload[start..start +
+/// U32_LEN]`.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Truncated`] if `payload` is shorter than `start + 4`.
+/// Returns [`Error::Truncated`] if `payload` is shorter than `start +
+/// U32_LEN`.
 fn read_u32_le(payload: &[u8], start: usize) -> Result<u32, Error> {
-    let field = payload.get(start..start + 4).ok_or(Error::Truncated)?;
+    let field = payload
+        .get(start..start + U32_LEN)
+        .ok_or(Error::Truncated)?;
     Ok(u32::from_le_bytes(
-        field.try_into().expect("checked to be exactly 4 bytes"),
+        field
+            .try_into()
+            .expect("checked to be exactly U32_LEN bytes"),
     ))
 }
 
@@ -731,12 +750,16 @@ fn read_u32_le(payload: &[u8], start: usize) -> Result<u32, Error> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Truncated`] if `payload` is shorter than the 8-byte
-/// header.
+/// Returns [`Error::Truncated`] if `payload` is shorter than the
+/// [`TOKEN_HEADER_LEN`]-byte header.
 fn read_header(payload: &[u8]) -> Result<(usize, u32, &[u8]), Error> {
     let declared_len = read_u32_le(payload, 0)?;
-    let token_count = read_u32_le(payload, 4)?;
-    Ok((declared_len as usize, token_count, &payload[8..]))
+    let token_count = read_u32_le(payload, U32_LEN)?;
+    Ok((
+        declared_len as usize,
+        token_count,
+        &payload[TOKEN_HEADER_LEN..],
+    ))
 }
 
 /// Rejects a declared output length past `max_len`, before any allocation
@@ -1953,7 +1976,7 @@ mod tests {
             clippy::cast_precision_loss,
             reason = "encoded length is far below f64's exact integer range (2^53)"
         )]
-        let real_bits = ((real.len() - 8) * 8) as f64;
+        let real_bits = ((real.len() - TOKEN_HEADER_LEN) * 8) as f64;
 
         let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
         assert!(
