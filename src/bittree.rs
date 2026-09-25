@@ -61,6 +61,79 @@ const LEVELS: u32 = 8;
 /// argument for a table keyed on this scheme.
 pub const SSE_CONTEXTS: usize = (1 << LEVELS) - 1;
 
+/// Number of states [`match_state`] can return: no match byte available
+/// (position `0`, before any history exists), the walk so far still
+/// agreeing with the match byte's own bits, or already diverged from it.
+const MATCH_STATES: usize = 3;
+
+/// Number of distinct `(sse_context, match_state)` pairs
+/// [`sse_context_matchbyte`] can be called with: `research/JOURNAL.md`
+/// S1-P3/S1-P8's own remaining-scope note after every additive-expert and
+/// SSE-calibration variant tried so far ("a coding mechanism ... not yet
+/// named"), answered here by giving the existing SSE stage a second,
+/// independent axis instead of adding a ninth mixer expert (S2-R20's own
+/// additive attempt at this same signal) or a bank-count variant on the
+/// existing PPM expert's SSE key (S2-R18/S2-R21, both a tree-position-only
+/// key). `crate::sse::Sse::new`'s `contexts` argument for a table keyed on
+/// this scheme, [`MATCH_STATES`] times wider than [`SSE_CONTEXTS`].
+pub const SSE_CONTEXTS_MATCHBYTE: usize = SSE_CONTEXTS * MATCH_STATES;
+
+/// Which of [`MATCH_STATES`] states this walk step's `prefix` (the `depth`
+/// bits of the symbol already decided) stands in relative to `match_byte`
+/// (`crate::lz::match_byte_at`'s own `Option<u8>` shape carried straight
+/// through, never a magic byte value standing in for "no match byte"): `0`
+/// when `match_byte` is `None`, `1` when `match_byte`'s own top `depth`
+/// bits equal `prefix` (the walk so far predicts the same byte LZMA's
+/// matched-literal mode would condition on), `2` once they disagree. Pure
+/// function of already-decided bits and a byte both encoder and decoder
+/// know before this symbol is coded (`match_byte` comes from already-coded
+/// history, never from the outcome being decided), so this is safe to key
+/// an SSE context on without leaking future information.
+///
+/// Not itself a full bijection over every `u8` value of `match_byte`: many
+/// different bytes collapse onto the same state, by design (the SSE table
+/// calibrates "does the predicted byte agree so far", not which specific
+/// byte was predicted — a finer key would need `MATCH_STATES` × 256
+/// contexts for a signal `research/JOURNAL.md` S2-R20 already measured as
+/// too sparse to help via a 256-bank additive expert at this project's
+/// train slice sizes, S1-L4's data/richness trade-off).
+///
+/// # Panics
+///
+/// Panics under the same condition as [`sse_context`] (`depth >= LEVELS`
+/// or `prefix >= 1 << depth`): both are the identical caller-code
+/// invariant, `sse_context_matchbyte` validates by calling `sse_context`
+/// itself before deriving the match state.
+fn match_state(depth: u32, prefix: usize, match_byte: Option<u8>) -> usize {
+    match match_byte {
+        None => 0,
+        Some(byte) => {
+            // depth < LEVELS is already established by sse_context_matchbyte's
+            // own sse_context(depth, prefix) call before this runs, so
+            // LEVELS - depth is in 1..=LEVELS: never a zero-width or
+            // out-of-range shift.
+            let top_bits = usize::from(byte) >> (LEVELS - depth);
+            if top_bits == prefix { 1 } else { 2 }
+        }
+    }
+}
+
+/// [`sse_context`], widened with [`match_state`] as a second, independent
+/// axis: `sse_context(depth, prefix) * MATCH_STATES + match_state(depth,
+/// prefix, match_byte)`, landing in `0..SSE_CONTEXTS_MATCHBYTE`. See
+/// [`SSE_CONTEXTS_MATCHBYTE`]'s own docs for why this axis exists instead
+/// of a ninth mixer expert or a finer PPM-expert-only SSE key.
+///
+/// # Panics
+///
+/// Panics under the same condition as [`sse_context`]: `depth >= LEVELS`
+/// or `prefix >= 1 << depth`.
+#[must_use]
+pub fn sse_context_matchbyte(depth: u32, prefix: usize, match_byte: Option<u8>) -> usize {
+    let base = sse_context(depth, prefix);
+    base * MATCH_STATES + match_state(depth, prefix, match_byte)
+}
+
 /// Maps one step of [`encode_symbol`]/[`decode_symbol`]'s walk — the
 /// decision at tree depth `depth` (`0..LEVELS`, `0` is the first,
 /// coarsest split) having already decided `prefix` (the `depth` bits
@@ -234,31 +307,76 @@ pub fn decode_symbol(decoder: &mut Decoder, cum: &[u64]) -> u8 {
     walk(cum, |_mid, p| decoder.decode_bit(p))
 }
 
-/// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
-/// [`ideal_cost_bits_sse`]: walks [`walk_steps`], computing each level's SSE
-/// context and refined probability and updating `sse` on the raw one,
-/// identically for all three callers. `code_bit` receives the level's
-/// midpoint and refined probability and returns the bit that level resolved
-/// to — already known from a caller's own `symbol` for [`encode_symbol_sse`]
-/// and [`ideal_cost_bits_sse`], decoded from [`Decoder::decode_bit`] for
-/// [`decode_symbol_sse`] — so the three callers differ only in what they do
-/// with that bit and probability, never in the SSE walk itself. Matches
-/// [`crate::codec::walk_tokens`]'s reasoning: keeping the walk in one place
-/// is what stops the encode, decode, and cost-pricing paths from silently
-/// drifting apart.
+/// Shared skeleton behind [`walk_sse`] and [`walk_sse_matchbyte`]: walks
+/// [`walk_steps`], computing each level's SSE context via caller-supplied
+/// `context_of` (the one place [`walk_sse`]'s plain [`sse_context`] and
+/// [`walk_sse_matchbyte`]'s [`sse_context_matchbyte`] differ), refining and
+/// updating `sse` on the raw probability identically either way. Extracted
+/// from what was `walk_sse`'s own body (`research/JOURNAL.md`'s
+/// [`SSE_CONTEXTS_MATCHBYTE`] slice): behavior-preserving for every existing
+/// caller, since `walk_sse` below still keys on exactly [`sse_context`].
 ///
 /// # Panics
 ///
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
-fn walk_sse(cum: &[u64], sse: &mut Sse, mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
+fn walk_sse_keyed(
+    cum: &[u64],
+    sse: &mut Sse,
+    mut context_of: impl FnMut(u32, usize) -> usize,
+    mut code_bit: impl FnMut(usize, f64) -> bool,
+) -> u8 {
     walk_steps(cum, |depth, prefix, mid, raw_p| {
-        let context = sse_context(depth, prefix);
+        let context = context_of(depth, prefix);
         let refined_p = sse.refine(context, raw_p);
         let bit = code_bit(mid, refined_p);
         sse.update(context, raw_p, bit);
         bit
     })
+}
+
+/// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
+/// [`ideal_cost_bits_sse`]: [`walk_sse_keyed`] keyed on plain [`sse_context`].
+/// `code_bit` receives the level's midpoint and refined probability and
+/// returns the bit that level resolved to — already known from a caller's
+/// own `symbol` for [`encode_symbol_sse`] and [`ideal_cost_bits_sse`],
+/// decoded from [`Decoder::decode_bit`] for [`decode_symbol_sse`] — so the
+/// three callers differ only in what they do with that bit and probability,
+/// never in the SSE walk itself. Matches [`crate::codec::walk_tokens`]'s
+/// reasoning: keeping the walk in one place is what stops the encode,
+/// decode, and cost-pricing paths from silently drifting apart.
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+fn walk_sse(cum: &[u64], sse: &mut Sse, code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
+    walk_sse_keyed(cum, sse, sse_context, code_bit)
+}
+
+/// [`walk_sse`]'s counterpart keyed on [`sse_context_matchbyte`] instead of
+/// plain [`sse_context`]: the walk behind [`ideal_cost_bits_sse_matchbyte`],
+/// this lead's own not-yet-wired measurement (`research/JOURNAL.md`
+/// S1-P3/S1-P8). `sse` must be sized [`SSE_CONTEXTS_MATCHBYTE`], not
+/// [`SSE_CONTEXTS`] — a caller-code invariant [`crate::sse::Sse::refine`]'s
+/// own bounds check enforces.
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+fn walk_sse_matchbyte(
+    cum: &[u64],
+    sse: &mut Sse,
+    match_byte: Option<u8>,
+    code_bit: impl FnMut(usize, f64) -> bool,
+) -> u8 {
+    walk_sse_keyed(
+        cum,
+        sse,
+        |depth, prefix| sse_context_matchbyte(depth, prefix, match_byte),
+        code_bit,
+    )
 }
 
 /// Codes `symbol` through `encoder` as `LEVELS` chained binary decisions
@@ -360,6 +478,49 @@ pub fn ideal_cost_bits_sse(cum: &[u64], symbol: u8, sse: &mut Sse) -> f64 {
     let symbol_index = usize::from(symbol);
     let mut bits = 0.0f64;
     walk_sse(cum, sse, |mid, refined_p| {
+        let bit = symbol_index >= mid;
+        bits -= if bit {
+            refined_p.log2()
+        } else {
+            (1.0 - refined_p).log2()
+        };
+        bit
+    });
+    bits
+}
+
+/// [`ideal_cost_bits_sse`]'s counterpart for [`sse_context_matchbyte`]'s
+/// wider context (`research/JOURNAL.md` S1-P3/S1-P8's own not-yet-wired
+/// measurement): sums the ideal (`-log2`) cost of each `sse`-refined binary
+/// decision under the matched-byte-aware context instead of plain
+/// [`sse_context`], updating `sse` on the raw probability exactly as
+/// [`walk_sse_matchbyte`] does. `sse` must be sized
+/// [`SSE_CONTEXTS_MATCHBYTE`]. `match_byte` is the byte
+/// [`crate::lz::match_byte_at`] reports for the position this `symbol` is
+/// being priced at, or `None` before any history exists.
+/// [`crate::literal::Literal::ideal_cost_bits_sse_matchbyte_pair`]'s
+/// counterpart for this decomposition.
+///
+/// # Panics
+///
+/// Panics if `cum` is not shaped like a 257-entry cumulative table over
+/// `ALPHABET` symbols; see `check_table_shape`.
+#[must_use]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends \
+              on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't \
+              apply off the coding path) — ideal_cost_bits_sse takes the same exemption"
+)]
+pub fn ideal_cost_bits_sse_matchbyte(
+    cum: &[u64],
+    symbol: u8,
+    sse: &mut Sse,
+    match_byte: Option<u8>,
+) -> f64 {
+    let symbol_index = usize::from(symbol);
+    let mut bits = 0.0f64;
+    walk_sse_matchbyte(cum, sse, match_byte, |mid, refined_p| {
         let bit = symbol_index >= mid;
         bits -= if bit {
             refined_p.log2()
@@ -742,6 +903,149 @@ mod tests {
             let encoded = enc.finish();
             let mut dec = Decoder::new(&encoded);
             assert_eq!(decode_symbol(&mut dec, &cum), symbol);
+        }
+    }
+
+    #[test]
+    fn match_state_is_zero_exactly_when_match_byte_is_none() {
+        for depth in 0..LEVELS {
+            for prefix in 0..(1usize << depth) {
+                assert_eq!(match_state(depth, prefix, None), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn match_state_is_one_when_the_match_byte_agrees_so_far() {
+        // A byte whose top `depth` bits are exactly `prefix` (remaining
+        // bits zeroed) must read as "still matching" at that node.
+        for depth in 0..LEVELS {
+            for prefix in 0..(1usize << depth) {
+                let byte = u8::try_from(prefix << (LEVELS - depth)).unwrap();
+                assert_eq!(
+                    match_state(depth, prefix, Some(byte)),
+                    1,
+                    "depth={depth}, prefix={prefix}, byte={byte}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn match_state_is_two_when_the_match_byte_has_diverged() {
+        // Flipping the top decided bit of an otherwise-agreeing byte must
+        // read as "diverged" at every depth past the first (depth 0 has no
+        // decided bits yet, so nothing can diverge there).
+        for depth in 1..LEVELS {
+            for prefix in 0..(1usize << depth) {
+                let agreeing = prefix << (LEVELS - depth);
+                let diverged = agreeing ^ (1 << (LEVELS - 1));
+                let byte = u8::try_from(diverged).unwrap();
+                assert_eq!(
+                    match_state(depth, prefix, Some(byte)),
+                    2,
+                    "depth={depth}, prefix={prefix}, byte={byte}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sse_context_matchbyte_stays_in_range() {
+        for depth in 0..LEVELS {
+            for prefix in 0..(1usize << depth) {
+                for match_byte in [None, Some(0u8), Some(0x42), Some(u8::MAX)] {
+                    let context = sse_context_matchbyte(depth, prefix, match_byte);
+                    assert!(
+                        context < SSE_CONTEXTS_MATCHBYTE,
+                        "depth={depth}, prefix={prefix}, match_byte={match_byte:?}: \
+                         context {context} must be < {SSE_CONTEXTS_MATCHBYTE}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sse_context_matchbyte_separates_the_three_states_at_one_node() {
+        let depth = 3;
+        let prefix = 5usize;
+        let agreeing = u8::try_from(prefix << (LEVELS - depth)).unwrap();
+        let diverged = agreeing ^ (1 << (LEVELS - 1));
+        let none_ctx = sse_context_matchbyte(depth, prefix, None);
+        let matching_ctx = sse_context_matchbyte(depth, prefix, Some(agreeing));
+        let diverged_ctx = sse_context_matchbyte(depth, prefix, Some(diverged));
+        assert_ne!(none_ctx, matching_ctx);
+        assert_ne!(none_ctx, diverged_ctx);
+        assert_ne!(matching_ctx, diverged_ctx);
+        let base = sse_context(depth, prefix) * MATCH_STATES;
+        assert_eq!(none_ctx, base);
+        assert_eq!(matching_ctx, base + 1);
+        assert_eq!(diverged_ctx, base + 2);
+    }
+
+    #[test]
+    fn sse_context_matchbyte_count_is_765() {
+        assert_eq!(SSE_CONTEXTS_MATCHBYTE, 765);
+    }
+
+    #[test]
+    fn ideal_cost_bits_sse_matchbyte_matches_plain_sse_on_a_fresh_table() {
+        // A fresh Sse table starts at the identity mapping in every
+        // context (crate::sse's own docs), so the very first call through
+        // either walk must return the same cost regardless of match_byte
+        // or which of the two (differently sized) tables is used — they
+        // only diverge once adaptation has happened.
+        let cum = skewed_table();
+        for symbol in 0..=u8::MAX {
+            let mut sse = Sse::new(SSE_CONTEXTS);
+            let plain = ideal_cost_bits_sse(&cum, symbol, &mut sse);
+            for match_byte in [None, Some(0u8), Some(0x99)] {
+                let mut sse_mb = Sse::new(SSE_CONTEXTS_MATCHBYTE);
+                let matchbyte =
+                    ideal_cost_bits_sse_matchbyte(&cum, symbol, &mut sse_mb, match_byte);
+                assert!(
+                    (plain - matchbyte).abs() < 1e-9,
+                    "symbol {symbol}, match_byte {match_byte:?}: plain {plain} bits vs \
+                     matchbyte {matchbyte} bits on a fresh table"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ideal_cost_bits_sse_matchbyte_round_trips_through_a_real_coder() {
+        // Same shape as real_sse_coded_length_tracks_sse_ideal_cost_within_a_few_percent:
+        // encode_symbol_sse/decode_symbol_sse have no matchbyte-keyed
+        // counterpart yet (this slice is deliberately ideal-cost-only,
+        // `research/JOURNAL.md`'s "measure before wiring" shape), so this
+        // instead proves the matchbyte-keyed Sse table itself still
+        // composes correctly with the real coder via the plain
+        // encode_bit/decode_bit primitives sse::Sse's own suite already
+        // proves, driven by sse_context_matchbyte's own refine/update
+        // calls at a fixed node.
+        let outcomes: Vec<bool> = crate::test_support::Xorshift32::new(0x5EED_5EED)
+            .take(2000)
+            .map(|state| state % 10 != 0)
+            .collect();
+        let context = sse_context_matchbyte(2, 1, Some(0x80));
+
+        let mut sse = Sse::new(SSE_CONTEXTS_MATCHBYTE);
+        let mut enc = Encoder::new();
+        for &outcome in &outcomes {
+            let p = sse.refine(context, 0.5);
+            enc.encode_bit(outcome, p);
+            sse.update(context, 0.5, outcome);
+        }
+        let encoded = enc.finish();
+
+        let mut sse = Sse::new(SSE_CONTEXTS_MATCHBYTE);
+        let mut dec = Decoder::new(&encoded);
+        for &outcome in &outcomes {
+            let p = sse.refine(context, 0.5);
+            let bit = dec.decode_bit(p);
+            assert_eq!(bit, outcome, "round-trip mismatch");
+            sse.update(context, 0.5, bit);
         }
     }
 }

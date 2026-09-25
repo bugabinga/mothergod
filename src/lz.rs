@@ -231,6 +231,30 @@ impl RepCache {
     }
 }
 
+/// The byte `distance` positions back from `position` in `data` — LZMA's
+/// own "matched literal" coding mode conditions on exactly this value (LZMA
+/// SDK / xz format docs, Igor Pavlov), generalized here for
+/// `crate::bittree::sse_context_matchbyte` instead of LZMA's own dedicated
+/// bit-tree mode (`research/JOURNAL.md` S1-P3/S1-P8's own remaining-scope
+/// note: "a coding mechanism ... not yet named", after S2-R20 already tried
+/// this same signal as a ninth additive mixer expert and found it net-
+/// regressed the sealed set).
+///
+/// `None` when `position` is too small for `distance` to reach real
+/// history — only `position == 0`, since every [`Distance`] is at least 1
+/// ([`RepCache::initial`]'s own smallest seed distance). The caller decides
+/// what "no match byte" means to its own SSE context
+/// (`sse_context_matchbyte`'s own `match_state`), not this function.
+#[must_use]
+pub(crate) fn match_byte_at(data: &[u8], position: usize, distance: Distance) -> Option<u8> {
+    let distance = distance.get() as usize;
+    if position < distance {
+        None
+    } else {
+        Some(data[position - distance])
+    }
+}
+
 /// Fixed-capacity ring buffer over the last [`WINDOW`] decoded bytes.
 /// [`crate::codec`]'s streaming decode path uses it in place of a
 /// fully-resident `Vec<u8>` (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP
@@ -2630,6 +2654,37 @@ mod tests {
         // MIN_REP_LEN. The other two cached slots (1, 4) miss immediately
         // (4 exceeds i, 1 hits 'b' vs 'A').
         assert_eq!(best_active_rep_len(data, 3, reps, &mut carry), None);
+    }
+
+    #[test]
+    fn match_byte_at_is_none_when_position_is_too_small_for_the_distance() {
+        let data = b"abcdef";
+        assert_eq!(match_byte_at(data, 0, NonZeroU32::new(1).unwrap()), None);
+        assert_eq!(match_byte_at(data, 2, NonZeroU32::new(3).unwrap()), None);
+    }
+
+    #[test]
+    fn match_byte_at_reads_the_byte_distance_positions_back() {
+        let data = b"abcdef";
+        assert_eq!(
+            match_byte_at(data, 3, NonZeroU32::new(1).unwrap()),
+            Some(b'c')
+        );
+        assert_eq!(
+            match_byte_at(data, 3, NonZeroU32::new(3).unwrap()),
+            Some(b'a')
+        );
+    }
+
+    #[test]
+    fn match_byte_at_is_defined_at_the_exact_boundary() {
+        // position == distance is the smallest position that still reaches
+        // real history (index 0), not yet the None case.
+        let data = b"abcdef";
+        assert_eq!(
+            match_byte_at(data, 2, NonZeroU32::new(2).unwrap()),
+            Some(b'a')
+        );
     }
 
     /// Finds an [`DETECTOR_ANCHOR_LEN`]-byte value whose own window

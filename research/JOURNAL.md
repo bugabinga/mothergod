@@ -2681,7 +2681,48 @@ record.
   rare (untried, and in tension with S2-R16/S2-R17's own finding that a
   coarse key is what let the additive shape work at all) or a coding
   mechanism S1-P3 has not yet named. Full record and numbers in S2-R21's
-  own entry.
+  own entry. Ninth slice, S2-R22: tried exactly that — a coding mechanism
+  rather than another PPM-expert calibration variant, widening the
+  literal mixer's one SSE table with a second, independent axis
+  (`bittree::sse_context_matchbyte`) instead of adding a ninth mixer
+  expert (S1-P8's S2-R20 already tried the identical LZMA matched-byte
+  signal that way and it also failed on the sealed set). **Rejected**,
+  same shape as every slice since S2-R16: a real, if small, sealed
+  regression (`gradient_image` +0.011629 b/B) fails corpus policy's
+  accept rule outright regardless of a net-improving train mean.
+  `sqlite_like_records`/`json_records` (this lead's own named targets)
+  both improved (-0.021786/-0.002850), confirming the underlying
+  agreement-with-the-matched-byte signal is real on record-repeat data,
+  same as S2-R20's own finding — but every other case measured
+  regressed, mildly on the entropy ladder's higher points and
+  `markov_h8_2_trap`, more on `interleaved_audio16`/`x86_dense_code`.
+  Mechanism: tripling the SSE context count (255 to 765,
+  `MATCH_STATES` = 3) triples how many bins must individually warm up
+  before calibration earns its keep, an `S1-L4` richness/data tax paid
+  again at a finer grain than S2-A60's own `entropy_ladder_h6` regression
+  already showed for the plain SSE wiring; `gradient_image` pays it
+  worst because its short matches/reps are largely incidental byte
+  coincidences on a smooth noisy surface rather than genuine structural
+  repeats (S2-R20's own diagnosis for the identical signal), so the
+  "does the prefix agree" axis reports near-noise there specifically.
+  The same sealed case sinks this signal under both a mixing mechanism
+  (S2-R20) and a calibration mechanism (this slice), evidence the
+  matched-byte signal itself, not the specific mechanism chosen to
+  exploit it, is what is ill-suited to `gradient_image`'s structure.
+  Candidate code (`lz::match_byte_at` and its three unit tests,
+  `bittree::MATCH_STATES`/`SSE_CONTEXTS_MATCHBYTE`/`match_state`/
+  `sse_context_matchbyte`/`walk_sse_keyed`/`walk_sse_matchbyte`/
+  `ideal_cost_bits_sse_matchbyte` and their unit tests,
+  `Literal::ideal_cost_bits_sse_matchbyte_pair` and its unit tests,
+  `codec::SseMatchbyteCostSink`/`ideal_cost_bits_sse_matchbyte_experiment`
+  and their unit tests, the scratch binary) reverted in full per the
+  `compression-experiment` skill's "delete rejected candidate code",
+  except `walk_sse`'s own behavior-preserving extraction into
+  `walk_sse_keyed` (kept: bit-for-bit identical to its pre-slice body,
+  every existing SSE test still exercises it unchanged). Every named
+  branch S2-R6 through S2-R22 has now failed at real-SSE-coding
+  granularity; S1-P3 reaches the same "unclear, no further named branch"
+  state S1-P2 reached. `research/progress.jsonl` it163.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past
@@ -6369,3 +6410,113 @@ record.
   with S2-R16/S2-R17's own finding that a coarse key is what let the
   additive shape work at all) or a coding mechanism S1-P3 has not yet
   named.
+- S2-R22 | REJECTED | S1-P3's own remaining scope after S2-R21: "a coding
+  mechanism S1-P3 has not yet named," answered by widening the literal
+  mixer's one SSE table with a second, independent context axis instead
+  of another PPM-expert calibration variant — the same LZMA "matched
+  literal" signal S1-P8's S2-R20 already tried as a ninth additive mixer
+  expert (rejected there on an identical sealed failure), tried here as a
+  calibration axis instead of a mixing one. Hypothesis: keying
+  [`crate::sse::Sse`] by whether the current literal's bit-tree prefix
+  (the bits of this byte already decided) agrees so far with the
+  corresponding prefix of `lz::match_byte_at`'s own report (the byte at
+  the most recent match/rep distance back from this position, LZMA
+  SDK/xz format docs, Igor Pavlov's own matched-literal coding mode,
+  generalized here for this crate's bit-tree instead of LZMA's own
+  dedicated coding mode) reduces ideal-cost bits/byte on record-repeat
+  data (`sqlite_like_records`/`json_records`, S1-P2/S1-P3/S1-P8's own
+  named residue targets) without regressing the sealed set. New
+  `bittree::MATCH_STATES` (3: no match byte yet, prefix agrees so far,
+  prefix has diverged) and `bittree::sse_context_matchbyte(depth, prefix,
+  match_byte: Option<u8>)`, `sse_context(depth, prefix) * MATCH_STATES +
+  match_state(...)`, landing in a new `SSE_CONTEXTS_MATCHBYTE` (765) space
+  three times [`bittree::SSE_CONTEXTS`]'s own 255. `match_state` is a pure
+  function of already-decided bits and a byte both encoder and decoder
+  know before the symbol is coded, so no future information leaks into
+  the context. `walk_sse` (the shared skeleton behind
+  `encode_symbol_sse`/`decode_symbol_sse`/`ideal_cost_bits_sse`) was
+  factored into a new `walk_sse_keyed(cum, sse, context_of, code_bit)`
+  taking the context function as a parameter, behavior-preserving for
+  every existing caller (`walk_sse` now just calls it with plain
+  `sse_context`; every pre-existing SSE round-trip/cost test still
+  passes unchanged); `walk_sse_matchbyte`/`ideal_cost_bits_sse_matchbyte`
+  reuse the same skeleton keyed on `sse_context_matchbyte` instead. New
+  `Literal::ideal_cost_bits_sse_matchbyte_pair(context, byte, match_byte,
+  candidate_sse: &mut Sse)` prices `byte` twice from the same pre-update
+  six-expert `cum` — once through the shipped `self.sse` exactly as
+  `Self::ideal_cost_bits_sse` does, once through a caller-owned
+  `candidate_sse` sized `SSE_CONTEXTS_MATCHBYTE` — then calls `self.update`
+  once, the same shared-trajectory shape S2-A69/S2-A100/S2-R20 all used.
+  Unlike every additive-expert slice in this lead line, both sides of this
+  pair already run through the real SSE decomposition from the start
+  (`bittree::ideal_cost_bits_sse`/`ideal_cost_bits_sse_matchbyte`, the
+  identical walk `encode_sse`/`decode_sse` drive), so this slice cannot
+  hit `JOURNAL` S2-L1's pre-SSE blind spot the way a new mixer expert's
+  own "before wiring" measurement can: there is no separate pre-SSE
+  number here to be misled by. `codec::SseMatchbyteCostSink` tracks its
+  own `lz::RepCache`/position across `walk_tokens`, the identical shape
+  S2-R20's `MatchByteExpertCostSink` used for the same underlying signal.
+  22 new unit tests across `bittree.rs` (`match_state`'s three states,
+  `sse_context_matchbyte`'s range/separation/count, a fresh-table
+  cost-equivalence check, a round-trip through the real coder),
+  `literal.rs` (baseline-matches-plain, finite-positive, candidate
+  independence), and `codec.rs` (each `TokenSink` method's cost/bookkeeping,
+  the paired-cost end-to-end check). Measured via an uncommitted scratch
+  binary (`bench/src/bin/scratch_sse_matchbyte_experiment.rs`, deleted
+  after this measurement) over `bench::baseline`'s 11 train-tier cases
+  (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) and both sealed-only
+  kinds at `sealed_seed(CASE_SEED)`, matching S2-A100/S2-R20's own
+  convention. | Train net **-0.001863 b/B** (sum; 3 of 11 improved:
+  `sqlite_like_records` **-0.021786** (S1-P3's own named target, the
+  largest single move), `json_records` -0.002850, `entropy_ladder_h1`
+  -0.000421; 8 regressed: `entropy_ladder_h2` +0.000125, `h4` +0.000292,
+  `h6` +0.000394, `h8` +0.000646, `base64_wrapped` +0.000287,
+  `markov_h8_2_trap` +0.004958, `x86_dense_code` +0.007659,
+  `interleaved_audio16` +0.008832). Sealed: `access_log` **-0.000551**
+  (improved), `gradient_image` **+0.011629** (regressed, larger than
+  S2-R20's own deciding regression there of +0.003002). **Rejected**:
+  corpus policy's accept rule needs train improvement AND no validation
+  regression; `gradient_image`'s real, if small, sealed regression fails
+  that rule outright regardless of the improving net train mean, the same
+  "either side alone is sufficient to reject" reading S2-R7/S2-R18/S2-R20
+  all applied. Mechanism: `sqlite_like_records`/`json_records` improving
+  confirms the underlying agreement-with-the-matched-byte signal is real
+  on record-repeat data, matching S2-R20's own finding for the identical
+  byte under a mixing mechanism instead of a calibration one. But tripling
+  the SSE context count (255 to 765) triples how many bins must
+  individually warm up before calibration earns its keep — an `S1-L4`
+  richness/data tax paid again at a finer grain than S2-A60's own
+  `entropy_ladder_h6` regression already showed for the plain SSE wiring,
+  which is why every entropy-ladder point past `h1` and `markov_h8_2_trap`
+  regressed here too. `gradient_image` pays the tax worst because its
+  short matches/reps are largely incidental byte coincidences on a smooth
+  noisy surface rather than genuine structural repeats (S2-R20's own
+  reading for the same signal): keying either a mixing weight or, here, a
+  calibration context on an incidental match's "predicted" byte blends
+  real signal with near-noise, and this project's own held-out validation
+  case is exactly where that noise shows up. That the identical sealed
+  case sinks this signal under two structurally different mechanisms
+  (S2-R20's additive mixer weight, this slice's calibration context) is
+  evidence the matched-byte signal itself, not the specific mechanism
+  chosen to exploit it, is what is ill-suited to `gradient_image`'s
+  structure — a caution for any future S1-P3/S1-P8 slice that reaches for
+  this same byte again. Candidate code (`bittree::MATCH_STATES`/
+  `SSE_CONTEXTS_MATCHBYTE`/`match_state`/`sse_context_matchbyte`/
+  `walk_sse_matchbyte`/`ideal_cost_bits_sse_matchbyte` and their unit
+  tests, `lz::match_byte_at` and its three unit tests,
+  `Literal::ideal_cost_bits_sse_matchbyte_pair` and its three unit tests,
+  `codec::SseMatchbyteCostSink`/`ideal_cost_bits_sse_matchbyte_experiment`
+  and their eight unit tests, the scratch binary) reverted in full, per
+  the `compression-experiment` skill's "delete rejected candidate code" —
+  except `walk_sse`'s own behavior-preserving extraction into
+  `walk_sse_keyed`, kept: bit-for-bit identical to `walk_sse`'s pre-slice
+  body, every pre-existing SSE test still exercises it unchanged, and it
+  carries no candidate-specific state or hypothesis of its own.
+  `research/progress.jsonl` it163. Remaining S1-P3 scope: every named
+  branch from S2-R6 through this entry has now failed at real-SSE-coding
+  granularity (substitution, additive-mixing, and now calibration-context
+  mechanisms alike, on both a coarse and a widened key); S1-P3 reaches the
+  same "unclear, no further named branch" state S1-P2 reached. What
+  remains, if anything, is a signal this lead has not yet tried at all
+  (not another angle on the matched byte specifically, per this slice's
+  own closing finding) or accepting this lead's ceiling absent one.

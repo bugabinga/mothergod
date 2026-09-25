@@ -127,10 +127,12 @@ and `research/progress.jsonl`, never a checkbox.
 Work the journal's standing leads. Resolved: SSE (S1-P1), per-column
 modeling (S1-P5). Exhausted under every mechanism tried so far, pending a
 genuinely new one, not a variant (JOURNAL S2-L1): btultra2-class parse
-(S1-P2), PPM escape (S1-P3). Open: large windows (S1-P4, the active
-front), more experts (S1-P8, gated "only after SSE," now unblocked).
-Target: beat zstd -19 per-file on all of Silesia/Canterbury with real
-bitstreams; then xz -9e.
+(S1-P2), PPM escape (S1-P3), large windows (S1-P4 — every pricing/gating
+signal since S2-R11 has failed, JOURNAL S2-R14's own remaining-scope note;
+what is left is a deliberate large-file mode, M5 territory, not a parse
+heuristic). Open: more experts (S1-P8, gated "only after SSE," now
+unblocked, one slice in). Target: beat zstd -19 per-file on all of
+Silesia/Canterbury with real bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
 
