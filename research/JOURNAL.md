@@ -6664,11 +6664,11 @@ record.
   byte captures more directly; `json_records`/`base64_wrapped` improving
   substantially is evidence the underlying hash-match signal is real on at
   least some record-repeat classes. Candidate code (`src/match_model.rs`
-  in full, its 8 unit tests; `literal::MATCH_LEN_BUCKETS`/
+  in full, its 9 unit tests; `literal::MATCH_LEN_BUCKETS`/
   `match_len_bucket`/`MatchModelExpertState`/`Literal::mix_matchmodel`/
   `update_matchmodel_expert`/`ideal_cost_bits_matchmodel_expert_pair` and
-  their 6 unit tests; `codec::MatchModelCostSink`/
-  `ideal_cost_bits_matchmodel_expert_experiment` and their 6 unit tests;
+  their 5 unit tests; `codec::MatchModelCostSink`/
+  `ideal_cost_bits_matchmodel_expert_experiment` and their 7 unit tests;
   `lib.rs`'s `pub mod match_model;`; the scratch binary) reverted in full,
   per the `compression-experiment` skill's "delete rejected candidate
   code" and PR #752/bc86904's own corrected precedent (a rejected
