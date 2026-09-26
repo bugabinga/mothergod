@@ -8,3 +8,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # x/ and fuzz/ each declare their own [workspace] table (cargo-x and
+  # cargo-fuzz both require a standalone workspace), so they are not part
+  # of the root's and dependabot does not discover them via directory: /.
+  - package-ecosystem: cargo
+    directory: /x
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
