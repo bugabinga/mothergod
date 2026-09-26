@@ -81,6 +81,24 @@ test("commenting and closing keep their shapes", () => {
   assert.deepEqual(run(["489", "--close"]).called.argv.slice(0, 2), ["issue", "close"]);
 });
 
+// Issue #772's own close: `gh issue close` has no --delete-branch, and the
+// session that wanted one hand-rolled `gh pr close` instead, losing the
+// footer. This is the path that should have existed.
+test("--close --delete-branch closes through gh pr, not gh issue", () => {
+  const { status, called } = run(["772", "--close", "--delete-branch"]);
+  assert.equal(status, 0);
+  assert.deepEqual(called.argv.slice(0, 2), ["pr", "close"]);
+  assert.ok(called.argv.includes("--delete-branch"));
+  assert.match(called.argv[called.argv.indexOf("--comment") + 1], /^hello\n\n---\n_bdfl ·/);
+});
+
+test("--delete-branch without --close is refused rather than silently dropped", () => {
+  const { status, stderr, called } = run(["772", "--delete-branch"]);
+  assert.equal(status, 1);
+  assert.equal(called, null);
+  assert.match(stderr, /--delete-branch needs --close/);
+});
+
 test("--new refuses a number or a close, which would mean two verbs at once", () => {
   const { status, stderr, called } = run(["--new", "t", "489", "--close"]);
   assert.equal(status, 1);
