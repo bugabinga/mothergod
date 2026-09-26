@@ -1,7 +1,9 @@
 # GitHub forgets repo traffic after 14 days; this job is the memory
 # (issue #417). Deliberately NOT an agent: reading two fixed endpoints
 # and merging by date is arithmetic, a script does it for free, and a
-# fixed-schema merge has no injection surface.
+# fixed-schema merge has no injection surface. So no agent-guard either:
+# the pause stops agents acting during an outage, and a Sunday this job
+# skips is a week of data GitHub has already forgotten (issue #526).
 #
 # Credential split, and why it is load-bearing:
 # - The READ runs on the admin PAT, the only credential the traffic
@@ -55,13 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - id: guard
-        uses: ./.github/actions/agent-guard
-        with:
-          token: ${{ github.token }}
-
-      - if: steps.guard.outputs.paused != 'true'
-        shell: bash
+      - shell: bash
         env:
           # Read-only use; hard rule 10 keeps it in the variable and out
           # of every echo.
