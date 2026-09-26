@@ -56,6 +56,11 @@ const denied = [
     "two api writes, right then wrong",
   ],
   ["gh pr edit 768 --add-label agent-approved\r\n.github/scripts/merge-pr 770", "CRLF"],
+  ["(merge-pr 770)", "review round four: a subshell"],
+  ["true; (.github/scripts/merge-pr 770)", "a subshell after a segment"],
+  ["out=`merge-pr 770`", "a backtick capture"],
+  ["sha=$(gh pr merge 770 --squash --auto)", "a command substitution"],
+  ["{ gh-comment 770 --close; }", "a brace group"],
 ];
 
 // The write verb's target resolves through a shell variable rather than
@@ -70,6 +75,14 @@ const deniedUnresolved = [
   [".github/scripts/push-branch $n --merge abc", "push-branch's pr-or-branch slot as a variable"],
   ["merge-pr \"$n\"", "a double-quoted variable runs like a bare one"],
   ["gh pr merge \"${TARGET}\" --squash --auto", "braced and quoted, same"],
+  ["echo 770 | xargs .github/scripts/merge-pr", "review round four: an xargs feed"],
+  [
+    "gh pr list --json number -q .[0].number | xargs -I{} .github/scripts/merge-pr {}",
+    "the incident's own resolver, fed through xargs",
+  ],
+  ["gh pr list --json number -q .[0].number | xargs gh pr merge --squash --auto", "fed into a gh pr write"],
+  ["echo 770 | xargs gh pr edit --add-label agent-approved", "fed into a label flip"],
+  ["echo $PR_NUMBER | xargs merge-pr", "even the trusted variable is off the line once piped"],
 ];
 
 // The command rebinds the one name the hook trusts (review round three,
@@ -131,6 +144,13 @@ const allowed = [
     "PR_NUMBER=768 node --test .github/scripts/deny-other-pr.test.mjs",
     "rebinding it ahead of a read rebinds nothing that writes",
   ],
+  ["(merge-pr 768)", "a subshell on the right PR"],
+  ["cat /tmp/verdict.md | gh-comment 768", "a body piped in; the target is on the line"],
+  [
+    "printf 'msg' | .github/scripts/push-branch claude/foo README.md",
+    "a commit message piped in; the branch is on the line",
+  ],
+  ["merge-pr 768 || echo failed", "an or-list is not a pipe"],
 ];
 
 for (const [command, why] of denied) {
@@ -145,7 +165,7 @@ for (const [command, why] of deniedUnresolved) {
   test(`denies (unresolved): ${command} (${why})`, () => {
     const r = run(bash(command));
     assert.equal(r.status, 2);
-    assert.match(r.stderr, /target here is a shell variable or substitution/);
+    assert.match(r.stderr, /target here is a shell variable, a substitution or an xargs feed/);
   });
 }
 
