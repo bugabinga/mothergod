@@ -47,6 +47,8 @@ pub mod filters;
 #[doc(hidden)]
 pub mod literal;
 #[doc(hidden)]
+pub mod logistic;
+#[doc(hidden)]
 pub mod lz;
 #[doc(hidden)]
 pub mod model;

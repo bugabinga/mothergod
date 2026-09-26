@@ -4157,7 +4157,12 @@ record.
   gating architecture this lead's own name still names (declined near
   S2-A99, again after S2-R23, and a third time after S2-R24, under a
   single session's time budget every time), or accepting this lead's
-  ceiling absent one.
+  ceiling absent one. Sixth slice, S2-A101: that rate schedule, a
+  per-weight-key step size decaying from S2-R25's 0.006 toward its 0.002
+  as the key's weight vector takes steps. Train net **-0.090784 b/B** at
+  its train-tuned decay, more than either constant rate reached; both
+  sealed kinds improved (`gradient_image` **-0.009122**). **Accepted**,
+  unwired; full record in S2-A101's own entry.
 - S2-A52 | ACCEPTED | Silesia counterpart to S2-A45's Canterbury-facing
   `finals_report`: a new `silesia_report` binary (`bench`'s `corpus-fetch`
   feature) fetches each of Silesia's 12 individually pinned
@@ -6929,3 +6934,97 @@ record.
   this lead names, whose gate is exactly the per-context trust a single
   global rate cannot express. A fourth new *signal* is not the next
   thing to try.
+- S2-A101 | ACCEPTED | S1-P8's own remaining scope after S2-R25: "a rate
+  rule rather than a rate constant (an annealed or count-derived step
+  size ...)". S2-R25's logit-domain mixer is rebuilt unchanged except for
+  its one free constant, which becomes a schedule: each `WEIGHT_CONTEXTS`
+  key's weight vector steps at `rate(n) = 0.002 + (0.006 - 0.002) / (1 +
+  n * decay)`, `n` the gradient steps that vector has already taken (one
+  per bit-tree node coded under the key). 0.006 is S2-R25's train
+  optimum, 0.002 its sweep point whose sealed check passed; `decay` is
+  the one new free constant. Hypothesis: a count-derived step that starts
+  at 0.006 and anneals toward 0.002 keeps more of 0.006's train benefit
+  than a constant 0.002 does while passing the zero-tolerance sealed
+  gate, on the mixed literal-byte class across `bench::baseline`'s train
+  cases, decided most by `interleaved_audio16`, `x86_dense_code` and the
+  record formats per S2-R25's mechanism reading. Apparatus, rebuilt from
+  S2-R25's description (its code never reached a commit): new `src/logistic.rs`
+  (`ln`, `stretch`, `squash`; `ln` from IEEE-754 basic operations and
+  the bit pattern only, matching `f64::ln` to within `1e-12` relative
+  across `[1e-6, 1e6]`, `squash` reusing `literal::exp`, widened to
+  `pub(crate)`); `literal::LogisticMix` (weights, a per-key
+  `update_count`, its own `Sse` over `bittree::SSE_CONTEXTS`),
+  `literal::logistic_rate`, `LOGISTIC_INITIAL_RATE`/`LOGISTIC_FLOOR_RATE`/
+  `LOGISTIC_RATE_DECAY`/`LOGISTIC_PROBABILITY_FLOOR`/
+  `LOGISTIC_INITIAL_WEIGHT`, `Literal::ideal_cost_bits_logistic_pair`;
+  `codec::LogisticMixCostSink`,
+  `ideal_cost_bits_logistic_mix_experiment`/`_at`; `bittree::walk_nodes`,
+  the halving loop `walk_steps` now wraps, so the candidate walks the
+  shipped coder's own tree. S2-R25's three guards stand: shared tree
+  walk, both halves SSE-calibrated, and a test asserting the pair's
+  baseline half equals `codec::ideal_cost_bits`'s whole-file number bit
+  for bit. | Reproduction first, because `decay = 0` collapses the
+  schedule to S2-R25's constant 0.006. The first rebuild missed by a hair
+  (train sum -0.085846 against S2-R25's -0.085830, five of eleven cases
+  off in the sixth decimal). The missing detail, absent from S2-R25's
+  entry: every probability the mixer stretches or codes is clamped to
+  `[1/4096, 1 - 1/4096]`, both each expert's node probability before
+  `stretch` and the squashed mix before the `Sse` and the gradient
+  (`Sse`'s own output bound). With that clamp the rebuild reproduces
+  S2-R25 exactly: all eleven per-case train deltas and the -0.085830 sum
+  at 0.006, the -0.057062 train sum at 0.002, and the sealed pair at
+  0.006 (`access_log` -0.000878, `gradient_image` +0.000346), a
+  published result re-run, not a new look at the sealed set. Measured on
+  `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) and both sealed-only kinds at
+  `sealed_seed(CASE_SEED)`, via an uncommitted scratch binary
+  (`bench/src/bin/scratch_logistic_rate_schedule.rs`, deleted after this
+  measurement) that printed sealed kinds only under an explicit
+  `--sealed <decay>` flag. Train net by `decay`, as a sum over the 11
+  cases: -0.085830 at 0, -0.087515 at 1e-5, -0.088665 at 3e-5, -0.089793
+  at 1e-4, -0.090055 at 1.5e-4, -0.090307 at 2e-4, -0.090473 at 2.5e-4,
+  -0.090659 at 3e-4, -0.090756 at 3.5e-4, **-0.090784 at 4e-4**,
+  -0.090752 at 4.5e-4, -0.090709 at 5e-4, -0.090569 at 6e-4, -0.090357 at
+  7e-4, -0.089561 at 1e-3, -0.084143 at 3e-3, -0.075073 at 1e-2,
+  -0.067308 at 3e-2, -0.061770 at 1e-1, -0.057874 at 1. Unimodal; the
+  coarse grid (0, 1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1,
+  1) peaked at 3e-4, and a finer train-only pass between 1.5e-4 and 7e-4 put the optimum, and
+  therefore this candidate, at **4e-4** (registered default before
+  measuring: 1e-4). There, train net **-0.090784 b/B** (sum; mean
+  -0.008253), ten of eleven improved: `interleaved_audio16` **-0.051695**,
+  `x86_dense_code` -0.014993, `markov_h8_2_trap` -0.006857,
+  `sqlite_like_records` -0.006406, `json_records` -0.006192,
+  `base64_wrapped` -0.004095, `entropy_ladder_h8` -0.002214, `h4`
+  -0.001300, `h2` -0.000555, `h1` -0.000338; one regressed,
+  `entropy_ladder_h6` **+0.003861** (S2-R25: +0.004066). Sealed, measured
+  at 4e-4, the only value besides the `decay = 0` reproduction above
+  (re-run once on the final code, identical): `access_log` **-0.001030** improved, `gradient_image`
+  **-0.009122** improved. **Accepted**: train improves and neither sealed
+  kind regresses, the corpus policy's rule applied as S2-R4 reads it. |
+  Mechanism: the schedule does not interpolate between S2-R25's two
+  constants, it beats both on train (-0.090784 against -0.085830 at 0.006
+  and -0.057062 at 0.002), so early large steps and late small steps are
+  each doing work a single rate cannot. Early steps move the weights off
+  their uniform start fast; late steps shrink the gradient noise a
+  constant rate keeps paying forever. `gradient_image`'s sign flip, from
+  +0.000346 at a constant 0.006 to -0.009122, is consistent with S2-R25's
+  reading that the fast rate overshoots on a smooth noisy surface: here
+  the steady state runs near the floor. Not confirmed by a dedicated
+  test. The cost is visible where the data keeps shifting:
+  `x86_dense_code`, `json_records` and `base64_wrapped` each keep less of
+  their gain than under a constant 0.006, the cases that want sustained
+  fast adaptation, which a count-only schedule cannot give back once it
+  has decayed. `entropy_ladder_h6` stays S1-L4's richness tax, slightly
+  smaller. | Scope, named so the wiring slice does not inherit a false
+  claim: every number here is SSE-calibrated ideal cost, not a real
+  bitstream (S2-L1); the candidate replaces only the
+  `encode_sse`/`decode_sse` literal path, not `encode_column`'s
+  seven-expert mix that `Candidate::Transpose` frames code through; its
+  per-byte cost (six prefix sums, 48 `ln` calls) is unmeasured. The
+  apparatus stays on main until the wiring slice, per the
+  `compression-experiment` skill. `research/progress.jsonl` it167.
+  Remaining S1-P8 scope: the wiring slice (real-bitstream measurement,
+  `FORMAT_VERSION` bump, ADR, golden fixture, decode-path determinism of
+  `ln`/`exp`, speed), then a schedule keyed on something other than a
+  step count for the cases that want sustained adaptation, or the GLN
+  gating this lead names.
