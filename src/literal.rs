@@ -58,12 +58,12 @@
 //! [`Literal::encode_logistic`]/[`Literal::decode_logistic`] replace the
 //! SSE-calibrated path above with a second mixer, [`LogisticMix`]: the six
 //! real experts' own probability estimates are [`crate::logistic::stretch`]ed
-//! into the logit domain, blended under a weight vector [`logistic_rate`]'s
+//! into the logit domain, blended under a weight vector `logistic_rate`'s
 //! annealed schedule adapts, [`crate::logistic::squash`]ed back, then
 //! calibrated through `LogisticMix`'s own [`Sse`] table, independent of
-//! [`Literal::sse`] — the same separation [`Literal::encode_column`] already
+//! `Literal`'s own — the same separation [`Literal::encode_column`] already
 //! keeps for its seventh expert. The six real experts still adapt exactly as
-//! [`Literal::encode_sse`] leaves them ([`Literal::update`] still runs,
+//! [`Literal::encode_sse`] leaves them (`Literal::update` still runs,
 //! unperturbed): only the literal path's own coding and calibration change.
 //! `LogisticMix` reuses `stretch`/`squash` rather than `exp`/`ln` directly;
 //! both are built from IEEE-754 basic operations only, the same
