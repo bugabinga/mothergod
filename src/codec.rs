@@ -1791,6 +1791,30 @@ mod tests {
     }
 
     #[test]
+    fn logistic_path_is_gated_on_version_alone() {
+        // Same shape as column_expert_path_is_gated_on_both_version_and_
+        // candidate, for the other version-gated literal path: a non-
+        // Transpose frame the real encoder built through encode_logistic
+        // (LOGISTIC_MIN_VERSION and up) must decode through the plain SSE
+        // path (Literal::decode_sse) when declared at a version below
+        // LOGISTIC_MIN_VERSION, never decode_logistic. Encoding a payload
+        // the logistic path actually produced and then decoding it at
+        // COLUMN_EXPERT_MIN_VERSION (4, still below LOGISTIC_MIN_VERSION)
+        // must NOT reproduce the original data, proving the `version >=
+        // LOGISTIC_MIN_VERSION` check is live dispatch, not dead code a
+        // future refactor could drop unnoticed.
+        let data = columnar_drift_data();
+        let encoded = encode(&data);
+        assert_eq!(encoded[0], 1, "fixture must select Delta, not Transpose");
+        assert_ne!(
+            decode(&encoded, COLUMN_EXPERT_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(data.as_slice()),
+            "decoding a LOGISTIC_MIN_VERSION frame as version 4 must not \
+             silently reproduce the original data"
+        );
+    }
+
+    #[test]
     fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
         // A run of identical 5-byte instructions in the *filtered* stream
         // gives lz::parse_optimal real match/rep tokens to find, exercising

@@ -51,6 +51,24 @@ established for the seventh, column-keyed expert. `decay` is no longer a
 parameter: `LOGISTIC_RATE_DECAY` is now the one fixed constant every
 byte codes under, S2-A101's own train-optimum.
 
+Real-bitstream measurement (S2-A102) matches S2-A101's own ideal-cost
+reading in sign and rough magnitude on every case tried but one:
+`entropy_ladder_h6`, which S2-R25/S2-A101's ideal-cost pairing flagged a
+small regression under a constant/annealed rate respectively
+(+0.004066/+0.003861 bits/byte at that pre-real-bitstream layer), instead
+improves under the real encoder (-0.000960 bits/byte). The ideal-cost
+pairing prices a byte from the same pre-update banks the shipped
+`encode_sse` path would see, holding the encoder's other choices fixed;
+the real `encode`/`decode` path does not: switching the literal model
+changes the real per-token cost `codec::encode`'s candidate/window
+selection and LZ parse optimize against, so they select a different
+parse for this case than the SSE-priced encoder did. The gap is not
+evidence against S2-A101's own reading, which never claimed to predict
+interactions outside the mixer itself: it is the same
+SSE-calibration-shaped gap ADR-0046's own wiring slice (S2-A79) already
+saw once on this same case, an ideal-cost pairing measures the model in
+isolation, a wiring slice measures it inside the whole encoder.
+
 **2. `FORMAT_VERSION` bumps to 5, gated on version alone (not
 candidate).** `codec::Models` gains a `logistic: LogisticMix` field,
 constructed alongside `literal` (`Models::new`/`try_new`, the latter
@@ -106,11 +124,11 @@ and version-4 fixture stays committed, decode-only, forever
 Real-bitstream measurement (`mothergod::compress`, this run's sandbox,
 `bench/baseline.json`'s 11 train-tier cases plus both sealed-only kinds):
 see `research/JOURNAL.md`'s closing S1-P8 entry for the full per-case
-numbers. Net effect matches S2-A101's own ideal-cost reading in sign and
-rough magnitude on every case tried; the literal-heavy cases (`interleaved_audio16`,
-`x86_dense_code`, the record-format kinds) improve, `entropy_ladder_h6`
-regresses by the same small margin S2-A101 already named as this
-schedule's own richness tax.
+numbers. No train or sealed case regresses. The literal-heavy cases
+(`interleaved_audio16`, `x86_dense_code`, the record-format kinds)
+improve, matching S2-A101's own ideal-cost reading; `entropy_ladder_h6`
+improves too (-0.000960), reversing that same reading's small-regression
+call. Decision §1 gives the mechanism for the reversal.
 
 ## Rejected alternatives
 
