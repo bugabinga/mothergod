@@ -1,5 +1,6 @@
 //! Adaptive range coder: [`Encoder`] and [`Decoder`], the arithmetic-coding
-//! primitive the entropy models (`JOURNAL` S2-D2) will drive.
+//! primitive [`crate::model::Model`] and [`crate::literal::Literal`] drive
+//! (`JOURNAL` S2-D2).
 //!
 //! Ported from the archive's `Enc`/`Dec`
 //! (`research/imports/session-1/mothergod.rs`), not the code, per ADR-0006:
@@ -8,8 +9,8 @@
 //! `pending`), same byte-oriented bit packer. This slice is the coder
 //! alone, driven directly by caller-supplied cumulative-frequency ranges;
 //! [`crate::model::Model`] is the order-0 adaptive frequency table that
-//! supplies those ranges from real data. The six-expert `Lit` literal mixer
-//! is a separate, larger slice still to come.
+//! supplies those ranges from real data, and [`crate::literal::Literal`]
+//! is the six-expert mixer that supplies them for literal bytes.
 //! [`Decoder`] already treats a stream shorter than the coder expects as
 //! implicit trailing zero bits rather than panicking (hard rule 2,
 //! `CLAUDE.md`): the archive's own decoder relied on the same behavior.
@@ -372,10 +373,10 @@ mod tests {
 
     /// Minimal order-0 adaptive frequency table: just enough to drive
     /// [`Encoder`]/[`Decoder`] round-trip tests without depending on the
-    /// real entropy models this coder exists to support (still to come,
-    /// `JOURNAL` S2-D2). Mirrors the shape the archive's own `Model` uses
-    /// (`research/imports/session-1/mothergod.rs`): a frequency per
-    /// symbol, updated after every code.
+    /// real entropy models this coder supports ([`crate::model::Model`],
+    /// [`crate::literal::Literal`], `JOURNAL` S2-D2). Mirrors the shape the
+    /// archive's own `Model` uses (`research/imports/session-1/mothergod.rs`):
+    /// a frequency per symbol, updated after every code.
     struct FreqTable {
         freq: Vec<u32>,
         total: u32,
