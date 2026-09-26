@@ -976,15 +976,14 @@ fn shared_frame_offers_the_same_links_on_every_page() {
 #[test]
 fn sitemap_lists_exactly_the_pages_with_a_canonical_tag() {
     // #753: a sitemap that names a page the site does not serve, or omits
-    // one it does, teaches a crawler the wrong map. The canonical/og:url
-    // pair asserted per page in `social_preview_tags_match_each_pages_own_title_and_description`
-    // is the single source of truth for "what pages exist at what URLs";
-    // this test reads the same three addresses rather than retyping them.
-    let canonical_urls = [
-        "https://mothergod.dev/",
-        "https://mothergod.dev/status",
-        "https://mothergod.dev/agents",
-    ];
+    // one it does, teaches a crawler the wrong map. Read each page's own
+    // canonical tag rather than a hardcoded literal, so this stays tied to
+    // the pages' actual source instead of a copy of it.
+    let pages = ["site/index.html", "site/status.html", "site/agents.html"];
+    let canonical_urls: Vec<String> = pages
+        .iter()
+        .map(|file| canonical_href(&read(file)).to_owned())
+        .collect();
 
     let sitemap = read("site/sitemap.xml");
     let listed: Vec<&str> = sitemap
@@ -999,7 +998,11 @@ fn sitemap_lists_exactly_the_pages_with_a_canonical_tag() {
         .collect();
 
     assert_eq!(
-        listed, canonical_urls,
+        listed,
+        canonical_urls
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         "site/sitemap.xml lists {listed:?}, the site's canonical URLs are {canonical_urls:?}"
     );
 }
@@ -1009,10 +1012,19 @@ fn robots_txt_points_at_the_committed_sitemap() {
     // A robots.txt with a Sitemap: line naming a URL that 404s is worse
     // than no line at all, per the same reasoning #753 filed against the
     // canonical-tag defect: a crawler-facing pointer should name a URL
-    // the site actually serves.
+    // the site actually serves. Exact match, not substring: a `.bak`
+    // suffix or any other corruption of the URL must fail this. Also
+    // reads the sitemap file itself, so a renamed or deleted
+    // site/sitemap.xml fails here too.
     let robots = read("site/robots.txt");
-    assert!(
-        robots.contains("Sitemap: https://mothergod.dev/sitemap.xml"),
-        "site/robots.txt does not point at the committed sitemap.xml: {robots:?}"
+    let line = robots
+        .lines()
+        .find(|line| line.starts_with("Sitemap:"))
+        .unwrap_or_else(|| panic!("site/robots.txt has no Sitemap: line: {robots:?}"));
+    let url = line.trim_start_matches("Sitemap:").trim();
+    assert_eq!(
+        url, "https://mothergod.dev/sitemap.xml",
+        "site/robots.txt's Sitemap: line names {url:?}, not the committed sitemap.xml"
     );
+    read("site/sitemap.xml");
 }
