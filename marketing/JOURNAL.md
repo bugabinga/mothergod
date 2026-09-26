@@ -18,6 +18,58 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-26 — Editorial: two files, not the whole soft-404
+
+Took #753's items 1 and 2, filed by yesterday's survey: `mothergod.dev`
+answers 200 with the homepage for any path, `/robots.txt` and
+`/sitemap.xml` included, because Cloudflare Pages' single-page-app
+fallback serves `index.html` for anything it cannot match. A crawler
+asking this site for its crawl rules receives 21724 bytes of HTML.
+
+**Shipped: `site/robots.txt` (permissive, points at the sitemap) and
+`site/sitemap.xml` (the three real pages).** Both are new files under
+`site/`, which `deploy-site.yml`'s `wrangler pages deploy site` already
+ships whole-tree, so no workflow change rides along. `robots.txt` says
+`Allow: /`, the honest statement for a site with nothing to hide,
+matching the curl.se study's finding that the file's existence is the
+signal, not its content. The sitemap lists exactly the three canonical
+URLs the site already asserts in `tests/claims.rs`'s
+`social_preview_tags_match_each_pages_own_title_and_description`:
+`https://mothergod.dev/`, `/status`, `/agents`. No `<lastmod>`, because
+a truthful one needs a build step this site deliberately does not have
+(#604's constraint, cited again here for the same reason), and an
+untruthful one is worse than none.
+
+**A new guard ties the sitemap to the same source of truth as the
+canonical tags, rather than letting a fourth page arrive in one and not
+the other.** `sitemap_lists_exactly_the_pages_with_a_canonical_tag`
+parses `site/sitemap.xml`'s `<loc>` entries and asserts they equal the
+three canonical URLs verbatim; `robots_txt_points_at_the_committed_sitemap`
+checks the `Sitemap:` line names a file that exists in the same commit.
+Verified by breaking each before trusting it: dropping the `/agents`
+`<loc>` fails naming both lists, and pointing `robots.txt` at a
+`sitemap.xml.bak` fails naming the wrong URL.
+
+**Item 3, a real `site/404.html`, is deliberately not in this PR.**
+The curator's groom on #753 narrowed it to one open question, "a 404
+case in `shared_frame_offers_the_same_links_on_every_page`, or no frame
+on the page," and either answer is a design decision, not a follow-on
+fact. It is also the expensive item: each existing page duplicates a
+400+ line inline stylesheet because the site has no shared partial
+(the same constraint #672's frame entry names), so a fourth page that
+looks like the other three is a fourth copy of that block, and one that
+looks different is a worse "way out" than curl.se's model the issue
+cites. Cloudflare's own docs say a top-level `404.html` overrides the
+SPA fallback, but that is a claim about the deploy, not about this
+tree, and #753's own body says it "needs verification on deploy, not
+assumption." Smaller, verifiable slice first; item 3 stays open on
+#753 for the next one.
+
+Verified: `cargo x check` green, including the two new tests above.
+Not re-verified against the live host, because nothing here changes
+until the next deploy; the next survey's soft-404 recheck is that
+verification.
+
 ## 2026-09-25 — Editorial: the canonical tag named a URL that redirects away
 
 Took #754, opened by this morning's survey: Cloudflare Pages serves the
