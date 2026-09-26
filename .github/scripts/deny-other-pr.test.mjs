@@ -68,6 +68,27 @@ const deniedUnresolved = [
   ["gh api -X POST repos/o/r/issues/$n/comments -f body=q", "a variable in the api path"],
   ["gh-comment $n --close", "gh-comment's own number as a variable"],
   [".github/scripts/push-branch $n --merge abc", "push-branch's pr-or-branch slot as a variable"],
+  ["merge-pr \"$n\"", "a double-quoted variable runs like a bare one"],
+  ["gh pr merge \"${TARGET}\" --squash --auto", "braced and quoted, same"],
+];
+
+// The command rebinds the one name the hook trusts (review round three,
+// the three live reproductions, plus the accident shape: resolving the
+// number again into PR_NUMBER itself). Every form names it bare.
+const deniedRebound = [
+  ["PR_NUMBER=770 .github/scripts/merge-pr $PR_NUMBER", "the observed bypass: an inline prefix"],
+  ["export PR_NUMBER=770; .github/scripts/merge-pr $PR_NUMBER", "the observed bypass: exported a segment earlier"],
+  [
+    "PR_NUMBER=770 gh api -X POST repos/o/r/issues/$PR_NUMBER/comments -f body=q",
+    "the observed bypass: ahead of an api write",
+  ],
+  [
+    "PR_NUMBER=$(gh pr list --json number -q .[0].number); merge-pr $PR_NUMBER",
+    "the accident: resolving the number again into the trusted name",
+  ],
+  ["export \"PR_NUMBER=770\"; merge-pr $PR_NUMBER", "a quoted assignment rebinds exactly like a bare one"],
+  ["read PR_NUMBER < /tmp/n\nmerge-pr $PR_NUMBER", "read rebinds too"],
+  ["merge-pr $PR_NUMBER # PR_NUMBER comes from the workflow", "bare in a comment: the hook cannot tell, so one turn"],
 ];
 
 const allowed = [
@@ -103,6 +124,13 @@ const allowed = [
   ["merge-pr $PR_NUMBER", "the variable that always resolves to the reviewed PR"],
   ["gh pr merge $PR_NUMBER --squash --auto", "same, in a gh pr write"],
   ["gh api -X POST repos/o/r/issues/$PR_NUMBER/comments -f body=q", "same, in an api path"],
+  ["merge-pr \"$PR_NUMBER\"", "the trusted variable, quoted"],
+  ["gh pr merge \"${PR_NUMBER}\" --squash --auto", "same, braced"],
+  ["grep -n PR_NUMBER .github/workflows/agent-review.yml", "naming PR_NUMBER bare beside no write verb"],
+  [
+    "PR_NUMBER=768 node --test .github/scripts/deny-other-pr.test.mjs",
+    "rebinding it ahead of a read rebinds nothing that writes",
+  ],
 ];
 
 for (const [command, why] of denied) {
@@ -118,6 +146,14 @@ for (const [command, why] of deniedUnresolved) {
     const r = run(bash(command));
     assert.equal(r.status, 2);
     assert.match(r.stderr, /target here is a shell variable or substitution/);
+  });
+}
+
+for (const [command, why] of deniedRebound) {
+  test(`denies (rebound): ${command} (${why})`, () => {
+    const r = run(bash(command));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /names PR_NUMBER without `\$`/);
   });
 }
 
@@ -160,6 +196,16 @@ test("an unresolved deny writes that to GITHUB_STEP_SUMMARY too", () => {
   assert.match(
     readFileSync(summary, "utf8"),
     /^deny-other-pr: denied merge-pr on an unresolved target$/m,
+  );
+});
+
+test("a rebound deny writes that to GITHUB_STEP_SUMMARY too", () => {
+  const summary = join(mkdtempSync(join(tmpdir(), "deny-")), "summary.md");
+  const env = { ...reviewEnv, GITHUB_STEP_SUMMARY: summary };
+  assert.equal(run(bash("PR_NUMBER=770 merge-pr $PR_NUMBER"), env).status, 2);
+  assert.match(
+    readFileSync(summary, "utf8"),
+    /^deny-other-pr: denied merge-pr on a rebound PR_NUMBER$/m,
   );
 });
 

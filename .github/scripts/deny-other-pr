@@ -3,45 +3,56 @@ r"""Deny a review session's write aimed at any PR but the one it reviews (PreToo
 
 agent-review.yml hands the reviewer its PR as `PR_NUMBER` in the step
 environment, because a `${{ }}` in the prompt would cap the whole prompt
-at 21,000 characters (issue #154). The prompt says "PR to review:
-#$PR_NUMBER, in your environment", and the model resolves it. Run
+at 21,000 characters (issue #154), and the model resolves it. Run
 36178330703 was scoped to PR #768 and resolved to #770 instead, the
-newest of three open PRs: it reviewed #770, passed it, and merged it
-27 seconds after #770's own reviewer had failed it, then ended green
-on #768 with no verdict ever posted there (issue #771). Nothing checked
+newest of three open PRs: it reviewed #770, passed it, merged it 27
+seconds after #770's own reviewer had failed it, then ended green on
+#768 with no verdict ever posted there (issue #771). Nothing checked
 that the actions landed where the environment pointed. This does.
 
-Denied, per shell segment (split on `;`, `&`, `|` and newline, because
-the Bash tool carries multi-line commands and the incident's shape is a
-comment on the right PR followed by a merge on the wrong one; PR #772's
-first review round reproduced exactly that through a bare newline): a
-write verb, every occurrence in the segment, whose first positional
-number is not `PR_NUMBER`, or whose target is a shell variable other
-than `$PR_NUMBER` itself (`n=770; merge-pr $n`, `gh pr merge $TARGET`
-resolve to no literal digit at all here and read as clean by a matcher
-that only distrusts digits; PR #772's second review round reproduced
-both). A target the hook cannot read as literal fails closed as denied,
-not open as allowed; a write verb with no number and no variable in
-sight at all (a bare `push-branch <branch>` before a PR exists, a
-`gh-comment --new`) still has nothing to verify against and is
-unaffected. The verbs are the ones a
-verdict is made of: `merge-pr`, `gh-comment`, `push-branch`, `gh pr`
-and `gh issue` mutations (edit, merge, close, reopen, ready, review,
-comment, lock, unlock, delete, pin, unpin, transfer), and `gh api` on
-`/issues/<n>` or `/pulls/<n>` with a write marker (`-X`/`--method` with
-a mutating verb, or a field flag, which makes gh POST). Reads stay
-allowed whatever number they name: `gh pr view|diff|checks|list|
-checkout`, `gh issue view`, a bare `gh api` GET, and a number inside
-quoted prose, so `--body "supersedes #770"` never trips it. Only a
-quoted span that is nothing but digits counts as a target, because
-`merge-pr "770"` runs exactly like `merge-pr 770`.
+Threat model: a wrong resolution, not an evader. A model that means to
+write elsewhere holds the token and the shell, and no matcher on the
+Bash boundary stops it; this hook makes the mistake cost one turn and a
+message instead of a merge. It is judged against the ordinary shapes a
+wrong number reaches a write verb through, and PR #772's three review
+rounds each found one (a bare newline, a variable, a rebound
+`PR_NUMBER`), so the rules below are shaped to close a class each
+rather than a case. `eval`, indirection through a second variable, and
+the like are out of scope by decision (BDFL, PR #772).
 
-Contract: reads the PreToolUse JSON on stdin. Armed only when
-`PR_NUMBER` is a number in the environment, which is agent-review.yml's
-Claude step and nothing else; every other seat, a malformed JSON, a
-null tool_input (the #324 shape) and any tool but Bash are allowed
-through. Exit 2 denies; stderr names both numbers and the next step,
-so a wrong resolution costs one turn instead of a merge.
+Armed only when `PR_NUMBER` is a number in the environment, which is
+agent-review.yml's Claude step and nothing else. Denied, per shell
+segment (split on `;`, `&`, `|` and newline, because the Bash tool
+carries multi-line commands):
+- a write verb, every occurrence, whose first positional number is not
+  `PR_NUMBER`;
+- a write verb whose target is a shell variable other than
+  `$PR_NUMBER`, quoted or bare (`merge-pr $n`, `gh pr merge "$TARGET"`):
+  the hook cannot read it, so it denies rather than reading the absence
+  of a literal digit as safe;
+- a command that carries a write verb and names `PR_NUMBER` without
+  `$`, in any position or quoting: every way a shell rebinds a variable
+  names it bare (`PR_NUMBER=770 merge-pr $PR_NUMBER`,
+  `export "PR_NUMBER=770"`, `read PR_NUMBER`), so one token pattern
+  covers every form, and the hook trusts `$PR_NUMBER` only because the
+  workflow set it.
+The write verbs are the ones a verdict is made of: `merge-pr`,
+`gh-comment`, `push-branch`, the mutating `gh pr` and `gh issue`
+subcommands, and `gh api` on `/issues/<n>` or `/pulls/<n>` with a write
+marker (`-X`/`--method` with a mutating method, or a field flag, which
+makes gh POST). Reads stay allowed whatever number they name (`gh pr
+view|diff|checks|list|checkout`, `gh issue view`, a bare `gh api` GET),
+as does a number inside quoted prose (`--body "supersedes #770"`); only
+a quoted span that is nothing but digits or one variable counts as a
+target, because `merge-pr "770"` and `merge-pr "$n"` run exactly like
+their bare forms. A write verb with no number and no variable in sight
+(`push-branch <branch>` before a PR exists, `gh-comment --new`) has
+nothing to verify against and passes.
+
+Contract: reads the PreToolUse JSON on stdin. Every other seat, a
+malformed JSON, a null tool_input (the #324 shape) and any tool but Bash
+are allowed through. Exit 2 denies; stderr names both numbers and the
+next step, so a wrong resolution costs one turn instead of a merge.
 
 Liveness: every deny appends a fixed-vocabulary line to
 GITHUB_STEP_SUMMARY, and the test file pins agent-review.yml's
@@ -56,7 +67,7 @@ import sys
 
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 
-# A newline separates statements exactly as `;` does (review round one).
+# A newline separates statements exactly as `;` does.
 SEGMENT = re.compile(r"[;&|\r\n]+")
 
 # A number token: not glued to a path, a word, a flag value like `-770`,
@@ -64,8 +75,12 @@ SEGMENT = re.compile(r"[;&|\r\n]+")
 NUMBER = r"(?<![\w/.#=-])(\d+)(?![\w.-])"
 
 # A shell variable or brace expansion: `$n`, `$TARGET`, `${PR_NUMBER}`.
-# Never matches inside quotes; strip_prose runs first.
 VARIABLE = re.compile(r"\$\{?(\w+)\}?")
+
+# `PR_NUMBER` named bare: not `$PR_NUMBER`, not `${PR_NUMBER}`, not part
+# of a longer word. Matched on the raw command, quotes included, because
+# `export "PR_NUMBER=770"` rebinds exactly like the unquoted form.
+REBIND = re.compile(r"(?<![${\w])PR_NUMBER\b")
 
 # (class name for the summary line, verb pattern). The target is the
 # first number token after the verb in the same segment.
@@ -96,6 +111,10 @@ API_WRITE = re.compile(
 )
 API_TARGET = re.compile(r"/(?:issues|pulls)/([^\s/\"']+)")
 
+# `other` in a denial is a literal number, or one of these two.
+UNRESOLVED = "unresolved"
+REBOUND = "rebound"
+
 MESSAGE = (
     "This run reviews #{pr}; the command targets #{other}. A verdict, "
     "label, comment or merge on any other PR from here is a review that "
@@ -114,26 +133,64 @@ UNRESOLVED_MESSAGE = (
     "`$PR_NUMBER` verbatim, before this write."
 )
 
+REBOUND_MESSAGE = (
+    "This run reviews #{pr}, and this hook trusts `$PR_NUMBER` only "
+    "because the workflow set it. This command names PR_NUMBER without "
+    "`$` next to a {verb}: that is how a shell rebinds it "
+    "(`PR_NUMBER=770 ...`, `export PR_NUMBER=...`), and the hook cannot "
+    "see the value it would take. Use `$PR_NUMBER` verbatim, or read it "
+    "with `echo $PR_NUMBER` and write the number literally. Prose that "
+    "names PR_NUMBER goes in a file first: `gh-comment {pr} < body.md`."
+)
+
+SUMMARY_TARGET = {
+    UNRESOLVED: "an unresolved target",
+    REBOUND: "a rebound PR_NUMBER",
+}
+
 
 def strip_prose(command: str) -> str:
-    """A quoted span that is only digits is a target and unwraps; any other
-    quoted span is an argument, never a target, and collapses to `q`."""
+    """A quoted span that is only digits, or one double-quoted variable,
+    is a target and unwraps; any other quoted span is an argument, never
+    a target, and collapses to `q`."""
 
     def rewrite(match: re.Match[str]) -> str:
-        content = match.group(0)[1:-1]
-        return content if content.isdigit() else "q"
+        span = match.group(0)
+        content = span[1:-1]
+        if content.isdigit():
+            return content
+        if span[0] == '"' and VARIABLE.fullmatch(content):
+            return content
+        return "q"
 
     return QUOTED.sub(rewrite, command)
+
+
+def first_write(stripped: str) -> str | None:
+    """The class name of the first write verb in the command, or None."""
+    for name, verb in VERBS:
+        if verb.search(stripped):
+            return name
+    if GH_API.search(stripped) and API_WRITE.search(stripped):
+        return "gh api write"
+    return None
 
 
 def other_target(command: str, pr: str) -> tuple[str, str] | None:
     """The (class, number) of the first write aimed off the PR, or None.
 
-    `number` is `"unresolved"` when a write verb's target is a shell
-    variable other than `$PR_NUMBER` rather than a digit: the hook
-    cannot verify that, so it denies rather than reading the absence of
-    a literal digit as safe (review round two, PR #772)."""
-    for segment in SEGMENT.split(strip_prose(command)):
+    `number` is UNRESOLVED when a write verb's target is a shell
+    variable other than `$PR_NUMBER`, and REBOUND when the command
+    names `PR_NUMBER` bare beside a write verb: in both the hook cannot
+    verify the target, so it denies rather than reading what it cannot
+    see as safe."""
+    stripped = strip_prose(command)
+    name = first_write(stripped)
+    if name is None:
+        return None
+    if REBIND.search(command):
+        return name, REBOUND
+    for segment in SEGMENT.split(stripped):
         for name, verb in VERBS:
             for hit in verb.finditer(segment):
                 rest = segment[hit.end():]
@@ -144,7 +201,7 @@ def other_target(command: str, pr: str) -> tuple[str, str] | None:
                     continue
                 variable = VARIABLE.search(rest)
                 if variable is not None and variable.group(1) != "PR_NUMBER":
-                    return name, "unresolved"
+                    return name, UNRESOLVED
         if GH_API.search(segment) and API_WRITE.search(segment):
             for target in API_TARGET.finditer(segment):
                 value = target.group(1)
@@ -152,7 +209,7 @@ def other_target(command: str, pr: str) -> tuple[str, str] | None:
                     if value != pr:
                         return "gh api write", value
                 elif value not in ("$PR_NUMBER", "${PR_NUMBER}"):
-                    return "gh api write", "unresolved"
+                    return "gh api write", UNRESOLVED
     return None
 
 
@@ -178,11 +235,13 @@ def main() -> int:
         return 0
     name, other = found
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    target = "an unresolved target" if other == "unresolved" else f"#{other}"
     if summary:
+        target = SUMMARY_TARGET.get(other, f"#{other}")
         with open(summary, "a", encoding="utf-8") as fh:
             fh.write(f"deny-other-pr: denied {name} on {target}\n")
-    if other == "unresolved":
+    if other == REBOUND:
+        print(REBOUND_MESSAGE.format(pr=pr, verb=name), file=sys.stderr)
+    elif other == UNRESOLVED:
         print(UNRESOLVED_MESSAGE.format(pr=pr, verb=name), file=sys.stderr)
     else:
         print(MESSAGE.format(pr=pr, other=other), file=sys.stderr)
