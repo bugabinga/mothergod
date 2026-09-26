@@ -206,6 +206,15 @@ impl Ppm {
         self.distinct
     }
 
+    /// The full coding space this table currently divides its distribution
+    /// over: `total` slots for symbols already seen plus `distinct` slots
+    /// for the escape event ([`Self::price_symbol`]/[`Self::price_escape`]'s
+    /// shared denominator, and [`Self::encode`]/[`Self::decode`]'s shared
+    /// coder width).
+    fn space(&self) -> u32 {
+        self.total + self.distinct
+    }
+
     /// `true` if `symbol` has never been observed in this table: coding it
     /// now must go through [`Self::encode_escape`]/be reported as
     /// [`None`] by [`Self::decode`], never [`Self::encode`].
@@ -250,7 +259,7 @@ impl Ppm {
         if self.freq[symbol] == 0 {
             return None;
         }
-        let denom = f64::from(self.total + self.distinct);
+        let denom = f64::from(self.space());
         Some(-(f64::from(self.freq[symbol]) / denom).log2())
     }
 
@@ -270,7 +279,7 @@ impl Ppm {
         if self.total == 0 {
             return 0.0;
         }
-        let denom = f64::from(self.total + self.distinct);
+        let denom = f64::from(self.space());
         -(f64::from(self.distinct) / denom).log2()
     }
 
@@ -291,12 +300,7 @@ impl Ppm {
             self.freq[symbol] > 0,
             "Ppm::encode called on a never-observed symbol; use encode_escape"
         );
-        crate::encode_symbol(
-            encoder,
-            &self.freq,
-            symbol,
-            u64::from(self.total + self.distinct),
-        );
+        crate::encode_symbol(encoder, &self.freq, symbol, u64::from(self.space()));
         self.observe(symbol);
     }
 
@@ -347,7 +351,7 @@ impl Ppm {
             self.distinct > 0,
             "Ppm::decode called on an empty table; nothing was ever coded into it"
         );
-        let denom = u64::from(self.total + self.distinct);
+        let denom = u64::from(self.space());
         let target = decoder.target(denom);
         if target >= u64::from(self.total) {
             let total = u64::from(self.total);
