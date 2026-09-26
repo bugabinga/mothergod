@@ -16,8 +16,8 @@ Bash boundary stops it; this hook makes the mistake cost one turn and a
 message instead of a merge. It is judged against the ordinary shapes a
 wrong number reaches a write verb through, and PR #772's three review
 rounds each found one (a bare newline, a variable, a rebound
-`PR_NUMBER`), so the rules below are shaped to close a class each
-rather than a case. `eval`, indirection through a second variable, and
+`PR_NUMBER`, a subshell and an xargs feed), so the rules below are
+shaped to close a class each rather than a case. `eval`, indirection through a second variable, and
 the like are out of scope by decision (BDFL, PR #772).
 
 Armed only when `PR_NUMBER` is a number in the environment, which is
@@ -27,9 +27,12 @@ carries multi-line commands):
 - a write verb, every occurrence, whose first positional number is not
   `PR_NUMBER`;
 - a write verb whose target is a shell variable other than
-  `$PR_NUMBER`, quoted or bare (`merge-pr $n`, `gh pr merge "$TARGET"`):
-  the hook cannot read it, so it denies rather than reading the absence
-  of a literal digit as safe;
+  `$PR_NUMBER`, quoted or bare (`merge-pr $n`, `gh pr merge "$TARGET"`),
+  or arrives through an xargs feed (`echo 770 | xargs merge-pr`,
+  `... | xargs -I{} merge-pr {}`): the hook cannot read it, so it denies
+  rather than reading the absence of a literal digit as safe. A body
+  piped into `gh-comment 768` or `push-branch <branch>` carries its
+  target on the line and passes;
 - a command that carries a write verb and names `PR_NUMBER` without
   `$`, in any position or quoting: every way a shell rebinds a variable
   names it bare (`PR_NUMBER=770 merge-pr $PR_NUMBER`,
@@ -83,11 +86,13 @@ VARIABLE = re.compile(r"\$\{?(\w+)\}?")
 REBIND = re.compile(r"(?<![${\w])PR_NUMBER\b")
 
 # (class name for the summary line, verb pattern). The target is the
-# first number token after the verb in the same segment.
+# first number token after the verb in the same segment. A script verb
+# is recognized wherever a shell word starts, `(merge-pr 770)`, a
+# backtick capture, `$(...)`, not only after whitespace or a slash.
 VERBS = (
-    ("merge-pr", re.compile(r"(?:^|[\s/])merge-pr\b")),
-    ("gh-comment", re.compile(r"(?:^|[\s/])gh-comment\b")),
-    ("push-branch", re.compile(r"(?:^|[\s/])push-branch\b")),
+    ("merge-pr", re.compile(r"(?<![\w.-])merge-pr\b")),
+    ("gh-comment", re.compile(r"(?<![\w.-])gh-comment\b")),
+    ("push-branch", re.compile(r"(?<![\w.-])push-branch\b")),
     (
         "gh pr write",
         re.compile(
@@ -111,6 +116,11 @@ API_WRITE = re.compile(
 )
 API_TARGET = re.compile(r"/(?:issues|pulls)/([^\s/\"']+)")
 
+# The verb's arguments arrive from a pipe: `echo 770 | xargs merge-pr`,
+# `... | xargs -I{} merge-pr {}`. Nothing on the line to verify.
+FEED = re.compile(r"\bxargs\b")
+PLACEHOLDER = "{}"
+
 # `other` in a denial is a literal number, or one of these two.
 UNRESOLVED = "unresolved"
 REBOUND = "rebound"
@@ -125,10 +135,10 @@ MESSAGE = (
 )
 
 UNRESOLVED_MESSAGE = (
-    "This run reviews #{pr}; the {verb} target here is a shell variable "
-    "or substitution, not a literal number, so this hook cannot verify "
-    "it is #{pr}. That is exactly how the run for #768 merged #770 "
-    "(#771): the number lived in a variable, not on the line. Resolve "
+    "This run reviews #{pr}; the {verb} target here is a shell variable, "
+    "a substitution or an xargs feed, not a literal number on the line, "
+    "so this hook cannot verify it is #{pr}. That is exactly how the run "
+    "for #768 merged #770 (#771): the number lived off the line. Resolve "
     "the number with `echo $PR_NUMBER` and write it literally, or use "
     "`$PR_NUMBER` verbatim, before this write."
 )
@@ -201,6 +211,10 @@ def other_target(command: str, pr: str) -> tuple[str, str] | None:
                     continue
                 variable = VARIABLE.search(rest)
                 if variable is not None and variable.group(1) != "PR_NUMBER":
+                    return name, UNRESOLVED
+                if variable is None and (
+                    FEED.search(segment[: hit.start()]) or PLACEHOLDER in rest
+                ):
                     return name, UNRESOLVED
         if GH_API.search(segment) and API_WRITE.search(segment):
             for target in API_TARGET.finditer(segment):
