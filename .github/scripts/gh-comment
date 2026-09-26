@@ -62,7 +62,16 @@ variables before either resolving the real bug: the check belongs where
 the number is already a concrete string, not where it is still shell
 syntax an adversarial-shaped matcher can never fully parse.
 
-Usage: gh-comment <issue-or-pr-number> [--close] < body
+A PR close that also wants the branch gone used to have no path through
+this script at all (`gh issue close`, the verb `--close` shells out to,
+has no `--delete-branch`; only `gh pr close` does), so the one session
+that wanted both took the branch-delete and typed the footer by hand
+to fake the rest -- exactly the bypass attribution.py's `claude[bot]`
+tell exists to catch (PR #772's own close, caught the next run). `gh pr
+close` takes the same `--comment` this script already assembles, so
+`--delete-branch` swaps the verb rather than adding a second code path.
+
+Usage: gh-comment <issue-or-pr-number> [--close [--delete-branch]] < body
        gh-comment --new "<title>" [--label NAME]... < body
 Prints the comment's or the new issue's URL on stdout.
 """
@@ -87,6 +96,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="gh-comment", description=__doc__.splitlines()[0])
     parser.add_argument("number", nargs="?", help="the issue or PR to comment on or close")
     parser.add_argument("--close", action="store_true", help="close it, body as the closing comment")
+    parser.add_argument("--delete-branch", action="store_true",
+                        help="with --close on a PR, delete its branch too")
     parser.add_argument("--new", metavar="TITLE", help="open a new issue with this title")
     parser.add_argument("--label", action="append", default=[], metavar="NAME",
                         help="label for --new, repeatable")
@@ -97,14 +108,16 @@ def main() -> int:
     if args.new is not None:
         if not args.new.strip():
             die("--new needs a title; an issue nobody can scan is nobody's work")
-        if args.number or args.close:
+        if args.number or args.close or args.delete_branch:
             die("--new opens an issue; it takes no number and cannot --close one")
     else:
         if not args.number or not args.number.isdigit():
-            die("usage: gh-comment <issue-or-pr-number> [--close] < body",
+            die("usage: gh-comment <issue-or-pr-number> [--close [--delete-branch]] < body",
                 "       gh-comment --new \"<title>\" [--label NAME]... < body")
         if args.label:
             die("--label applies to --new only; label an existing issue with `gh issue edit`")
+        if args.delete_branch and not args.close:
+            die("--delete-branch needs --close; there is no branch to drop on a comment")
         scope = os.environ.get("PR_NUMBER")
         if scope and args.number != scope:
             die(f"target #{args.number} does not match PR_NUMBER={scope} from "
@@ -153,6 +166,12 @@ def main() -> int:
         for label in args.label:
             call += ["--label", label]
         target = f"a new issue titled {args.new!r}"
+    elif args.delete_branch:
+        # `gh issue close` (the plain --close path) has no --delete-branch;
+        # only `gh pr close` does, so this is the one case that changes verb
+        # rather than just flags.
+        call = ["pr", "close", args.number, "--delete-branch", "--comment", full_body]
+        target = f"#{args.number}"
     else:
         call = ["issue", "close" if args.close else "comment", args.number]
         call += ["--comment" if args.close else "--body", full_body]
