@@ -623,7 +623,7 @@ fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
 }
 
 /// Accumulates the two totals a paired-experiment [`TokenSink`]
-/// ([`PpmExpertCostSink`], [`LogisticMixCostSink`]) prices side by side: `baseline` for the shipped
+/// ([`PairedTokenSink`]) prices side by side: `baseline` for the shipped
 /// model, `candidate` for the same event under the experimental change. One
 /// shared [`add`](Self::add) means a symbol can't be added to just one half
 /// of the pair by accident.
@@ -648,32 +648,31 @@ impl PairedCost {
     }
 }
 
-/// `research/JOURNAL.md` S1-P3's paired measurement, [`walk_tokens`]'s use
-/// in [`ideal_cost_bits_ppm_expert_experiment`]: sums the same
-/// flag/length/offset/slot costs [`CostSink`] does, so any delta between
-/// `cost.baseline` and `cost.candidate` is attributable to the literal
-/// model alone, and prices every literal byte twice through
-/// [`Literal::ideal_cost_bits_ppm_expert_pair`] — the shipped six-expert
-/// mix, and the same mix with `ppm_state`'s own [`crate::ppm::Ppm`]-backed
-/// bank blended in as a genuinely additive expert, never substituted into
-/// any of the six real experts' own banks.
-struct PpmExpertCostSink<'a> {
-    ppm_state: &'a mut PpmExpertState,
+/// `TokenSink` shared by every paired baseline/candidate experiment
+/// ([`ideal_cost_bits_ppm_expert_experiment`],
+/// [`ideal_cost_bits_logistic_mix_experiment_at`]): flag/length/offset/slot
+/// price identically to [`CostSink`] and add the same bits to both
+/// [`PairedCost`] halves, since only the literal model differs between an
+/// experiment's baseline and candidate. `pair_literal` supplies that one
+/// difference: the experiment-specific `(baseline_bits, candidate_bits)`
+/// pairing function.
+struct PairedTokenSink<F> {
     cost: PairedCost,
+    pair_literal: F,
 }
 
-impl TokenSink for PpmExpertCostSink<'_> {
+impl<F> TokenSink for PairedTokenSink<F>
+where
+    F: FnMut(&mut Models, Context, u8) -> (f64, f64),
+{
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
         self.cost
             .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        let (baseline, with_ppm) =
-            models
-                .literal
-                .ideal_cost_bits_ppm_expert_pair(context, byte, self.ppm_state);
-        self.cost.add(baseline, with_ppm);
+        let (baseline, candidate) = (self.pair_literal)(models, context, byte);
+        self.cost.add(baseline, candidate);
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
@@ -705,55 +704,16 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     let tokens = lz::parse_optimal(data);
     let mut models = Models::new();
     let mut ppm_state = PpmExpertState::new();
-    let mut sink = PpmExpertCostSink {
-        ppm_state: &mut ppm_state,
+    let mut sink = PairedTokenSink {
         cost: PairedCost::default(),
+        pair_literal: |models: &mut Models, context: Context, byte: u8| {
+            models
+                .literal
+                .ideal_cost_bits_ppm_expert_pair(context, byte, &mut ppm_state)
+        },
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
     (sink.cost.baseline, sink.cost.candidate)
-}
-
-/// `research/JOURNAL.md` S2-A101's paired measurement, [`walk_tokens`]'s use
-/// in [`ideal_cost_bits_logistic_mix_experiment_at`]: sums the same
-/// flag/length/offset/slot costs [`CostSink`] does, so any delta between
-/// `cost.baseline` and `cost.candidate` is attributable to the literal
-/// model alone, and prices every literal byte twice through
-/// [`Literal::ideal_cost_bits_logistic_pair`]: the shipped SSE-calibrated
-/// linear mix, and `logistic`'s logit-domain mix of the same six banks
-/// under `decay`'s rate schedule.
-struct LogisticMixCostSink<'a> {
-    logistic: &'a mut LogisticMix,
-    decay: f64,
-    cost: PairedCost,
-}
-
-impl TokenSink for LogisticMixCostSink<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.cost
-            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        let (baseline, candidate) =
-            models
-                .literal
-                .ideal_cost_bits_logistic_pair(context, byte, self.logistic, self.decay);
-        self.cost.add(baseline, candidate);
-    }
-
-    fn length(&mut self, models: &mut Models, value: u32) {
-        self.cost
-            .add_same(ideal_cost_bucketed(&mut models.length, value));
-    }
-
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        self.cost
-            .add_same(ideal_cost_bucketed(&mut models.offset, value));
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
-    }
 }
 
 /// [`ideal_cost_bits_logistic_mix_experiment_at`] at the registered
@@ -779,10 +739,13 @@ pub fn ideal_cost_bits_logistic_mix_experiment_at(data: &[u8], decay: f64) -> (f
     let tokens = lz::parse_optimal(data);
     let mut models = Models::new();
     let mut logistic = LogisticMix::new();
-    let mut sink = LogisticMixCostSink {
-        logistic: &mut logistic,
-        decay,
+    let mut sink = PairedTokenSink {
         cost: PairedCost::default(),
+        pair_literal: |models: &mut Models, context: Context, byte: u8| {
+            models
+                .literal
+                .ideal_cost_bits_logistic_pair(context, byte, &mut logistic, decay)
+        },
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
     (sink.cost.baseline, sink.cost.candidate)
@@ -2156,79 +2119,39 @@ mod tests {
         );
     }
 
-    /// A fresh [`PpmExpertCostSink`] over a fresh [`Models`]/[`PpmExpertState`]
-    /// pair, for asserting each [`TokenSink`] method against a value computed
+    /// A fresh [`Models`]/[`PpmExpertState`] pair, for asserting
+    /// [`PairedTokenSink`]'s ppm-paired literal against a value computed
     /// independently from the same starting state.
     fn fresh_ppm_expert_sink() -> (Models, PpmExpertState) {
         (Models::new(), PpmExpertState::new())
     }
 
     #[test]
-    fn ppm_expert_cost_sink_flag_adds_the_model_cost_to_both_totals() {
-        let (mut expected_models, _) = fresh_ppm_expert_sink();
-        let expected = expected_models.flag[0].ideal_cost_bits(FlagKind::Literal.index());
+    fn paired_token_sink_non_literal_events_add_the_same_cost_to_both_totals() {
+        let mut expected_models = Models::new();
+        let expected = expected_models.flag[1].ideal_cost_bits(FlagKind::Match.index())
+            + ideal_cost_bucketed(&mut expected_models.length, 17)
+            + ideal_cost_bucketed(&mut expected_models.offset, 123)
+            + expected_models.slot.ideal_cost_bits(2);
 
-        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
-        let mut sink = PpmExpertCostSink {
-            ppm_state: &mut ppm_state,
+        let mut models = Models::new();
+        let mut sink = PairedTokenSink {
             cost: PairedCost::default(),
+            pair_literal: |_: &mut Models, _: Context, _: u8| {
+                unreachable!("this test never calls TokenSink::literal")
+            },
         };
-        sink.flag(&mut models, 0, FlagKind::Literal);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-    }
-
-    #[test]
-    fn ppm_expert_cost_sink_length_adds_the_bucketed_cost_to_both_totals() {
-        let (mut expected_models, _) = fresh_ppm_expert_sink();
-        let expected = ideal_cost_bucketed(&mut expected_models.length, 17);
-
-        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
-        let mut sink = PpmExpertCostSink {
-            ppm_state: &mut ppm_state,
-            cost: PairedCost::default(),
-        };
+        sink.flag(&mut models, 1, FlagKind::Match);
         sink.length(&mut models, 17);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-    }
-
-    #[test]
-    fn ppm_expert_cost_sink_offset_adds_the_bucketed_cost_to_both_totals() {
-        let (mut expected_models, _) = fresh_ppm_expert_sink();
-        let expected = ideal_cost_bucketed(&mut expected_models.offset, 123);
-
-        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
-        let mut sink = PpmExpertCostSink {
-            ppm_state: &mut ppm_state,
-            cost: PairedCost::default(),
-        };
         sink.offset(&mut models, 123);
+        sink.slot(&mut models, 2);
 
         assert!((sink.cost.baseline - expected).abs() < 1e-9);
         assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
-    fn ppm_expert_cost_sink_slot_adds_the_model_cost_to_both_totals() {
-        let (mut expected_models, _) = fresh_ppm_expert_sink();
-        let expected = expected_models.slot.ideal_cost_bits(0);
-
-        let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
-        let mut sink = PpmExpertCostSink {
-            ppm_state: &mut ppm_state,
-            cost: PairedCost::default(),
-        };
-        sink.slot(&mut models, 0);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
-    }
-
-    #[test]
-    fn ppm_expert_cost_sink_literal_adds_the_baseline_and_with_ppm_pair_separately() {
+    fn paired_token_sink_ppm_expert_literal_adds_the_baseline_and_with_ppm_pair_separately() {
         // Enough repeats for the additive PPM bank's own history to pull
         // away from the six-expert mix's baseline, so a sink that swaps or
         // drops one half of the pair is distinguishable from a correct one.
@@ -2236,9 +2159,13 @@ mod tests {
 
         let (mut expected_models, mut expected_ppm_state) = fresh_ppm_expert_sink();
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
-        let mut sink = PpmExpertCostSink {
-            ppm_state: &mut ppm_state,
+        let mut sink = PairedTokenSink {
             cost: PairedCost::default(),
+            pair_literal: |models: &mut Models, context: Context, byte: u8| {
+                models
+                    .literal
+                    .ideal_cost_bits_ppm_expert_pair(context, byte, &mut ppm_state)
+            },
         };
 
         let mut context = Context::default();
@@ -2307,16 +2234,19 @@ mod tests {
     }
 
     #[test]
-    fn logistic_mix_cost_sink_literal_adds_the_baseline_and_candidate_separately() {
+    fn paired_token_sink_logistic_mix_literal_adds_the_baseline_and_candidate_separately() {
         let bytes = b"aaaaaaaaaaaaaaaaaab";
         let mut expected_models = Models::new();
         let mut expected_logistic = LogisticMix::new();
         let mut models = Models::new();
         let mut logistic = LogisticMix::new();
-        let mut sink = LogisticMixCostSink {
-            logistic: &mut logistic,
-            decay: 4e-4,
+        let mut sink = PairedTokenSink {
             cost: PairedCost::default(),
+            pair_literal: |models: &mut Models, context: Context, byte: u8| {
+                models
+                    .literal
+                    .ideal_cost_bits_logistic_pair(context, byte, &mut logistic, 4e-4)
+            },
         };
         let mut context = Context::default();
         let mut expected_baseline_total = 0.0;
@@ -2345,30 +2275,6 @@ mod tests {
             sink.cost.candidate.to_bits(),
             expected_candidate_total.to_bits()
         );
-    }
-
-    #[test]
-    fn logistic_mix_cost_sink_non_literal_events_add_the_same_cost_to_both_totals() {
-        let mut expected_models = Models::new();
-        let expected = expected_models.flag[1].ideal_cost_bits(FlagKind::Match.index())
-            + ideal_cost_bucketed(&mut expected_models.length, 17)
-            + ideal_cost_bucketed(&mut expected_models.offset, 123)
-            + expected_models.slot.ideal_cost_bits(2);
-
-        let mut models = Models::new();
-        let mut logistic = LogisticMix::new();
-        let mut sink = LogisticMixCostSink {
-            logistic: &mut logistic,
-            decay: 4e-4,
-            cost: PairedCost::default(),
-        };
-        sink.flag(&mut models, 1, FlagKind::Match);
-        sink.length(&mut models, 17);
-        sink.offset(&mut models, 123);
-        sink.slot(&mut models, 2);
-
-        assert!((sink.cost.baseline - expected).abs() < 1e-9);
-        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
