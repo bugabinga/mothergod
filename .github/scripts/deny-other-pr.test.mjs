@@ -83,6 +83,13 @@ const deniedUnresolved = [
   ["gh pr list --json number -q .[0].number | xargs gh pr merge --squash --auto", "fed into a gh pr write"],
   ["echo 770 | xargs gh pr edit --add-label agent-approved", "fed into a label flip"],
   ["echo $PR_NUMBER | xargs merge-pr", "even the trusted variable is off the line once piped"],
+  ["merge-pr $(cat /tmp/pr-number)", "review round five: a bare substitution"],
+  [".github/scripts/merge-pr $(resolve-target)", "a substitution with no digit inside"],
+  ["gh-comment $(cat /tmp/n) --close", "gh-comment's number substituted"],
+  [".github/scripts/push-branch $(cat /tmp/n) --merge abc", "push-branch's slot substituted"],
+  ["gh pr edit $(cat /tmp/n) --add-label agent-approved", "a label flip on a substituted number"],
+  ["gh pr merge $(gh pr list --json number -q .[0].number) --squash --auto", "the incident's resolver, inline"],
+  ["merge-pr `cat /tmp/n`", "a backtick substitution"],
 ];
 
 // The command rebinds the one name the hook trusts (review round three,
@@ -151,6 +158,11 @@ const allowed = [
     "a commit message piped in; the branch is on the line",
   ],
   ["merge-pr 768 || echo failed", "an or-list is not a pipe"],
+  [
+    "gh-comment --new \"$(cat /tmp/title)\" --label agent-system < body",
+    "a quoted substitution is prose, and --new has no PR",
+  ],
+  ["merge-pr $PR_NUMBER --sha $(git rev-parse HEAD)", "a substitution beside the trusted target"],
 ];
 
 for (const [command, why] of denied) {

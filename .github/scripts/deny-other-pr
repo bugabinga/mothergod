@@ -16,8 +16,9 @@ Bash boundary stops it; this hook makes the mistake cost one turn and a
 message instead of a merge. It is judged against the ordinary shapes a
 wrong number reaches a write verb through, and PR #772's three review
 rounds each found one (a bare newline, a variable, a rebound
-`PR_NUMBER`, a subshell and an xargs feed), so the rules below are
-shaped to close a class each rather than a case. `eval`, indirection through a second variable, and
+`PR_NUMBER`, a subshell, an xargs feed, a bare substitution), so the
+rules below clear a target positively and deny the rest, rather than
+naming the shapes that deny. `eval`, indirection through a second variable, and
 the like are out of scope by decision (BDFL, PR #772).
 
 Armed only when `PR_NUMBER` is a number in the environment, which is
@@ -26,10 +27,11 @@ segment (split on `;`, `&`, `|` and newline, because the Bash tool
 carries multi-line commands):
 - a write verb, every occurrence, whose first positional number is not
   `PR_NUMBER`;
-- a write verb whose target is a shell variable other than
-  `$PR_NUMBER`, quoted or bare (`merge-pr $n`, `gh pr merge "$TARGET"`),
-  or arrives through an xargs feed (`echo 770 | xargs merge-pr`,
-  `... | xargs -I{} merge-pr {}`): the hook cannot read it, so it denies
+- a write verb with anything the shell resolves at run time beside it
+  and neither a literal number nor `$PR_NUMBER`: a variable (`merge-pr
+  $n`, `gh pr merge "$TARGET"`), a substitution (`merge-pr $(cat n)`, a
+  backtick), an xargs feed (`echo 770 | xargs merge-pr`, `... | xargs
+  -I{} merge-pr {}`). The hook cannot read the target, so it denies
   rather than reading the absence of a literal digit as safe. A body
   piped into `gh-comment 768` or `push-branch <branch>` carries its
   target on the line and passes;
@@ -74,11 +76,20 @@ QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 SEGMENT = re.compile(r"[;&|\r\n]+")
 
 # A number token: not glued to a path, a word, a flag value like `-770`,
-# or an issue reference like `#770` in prose.
-NUMBER = r"(?<![\w/.#=-])(\d+)(?![\w.-])"
+# an issue reference like `#770` in prose, or an index like jq's `.[0]`.
+NUMBER = r"(?<![\w/.#=\[-])(\d+)(?![\w.\]-])"
 
 # A shell variable or brace expansion: `$n`, `$TARGET`, `${PR_NUMBER}`.
 VARIABLE = re.compile(r"\$\{?(\w+)\}?")
+
+# The one target the hook can clear without a digit: the workflow's own.
+TRUSTED = re.compile(r"\$\{?PR_NUMBER\}?(?!\w)")
+
+# Anything the shell resolves at run time beside a write verb: a
+# variable, `$(...)`, a backtick. Without a literal digit or `$PR_NUMBER`
+# next to the verb, the target is whatever this expands to, and the hook
+# cannot read it (review round five: `merge-pr $(cat /tmp/n)`).
+OPAQUE = re.compile(r"[$`]")
 
 # `PR_NUMBER` named bare: not `$PR_NUMBER`, not `${PR_NUMBER}`, not part
 # of a longer word. Matched on the raw command, quotes included, because
@@ -189,11 +200,13 @@ def first_write(stripped: str) -> str | None:
 def other_target(command: str, pr: str) -> tuple[str, str] | None:
     """The (class, number) of the first write aimed off the PR, or None.
 
-    `number` is UNRESOLVED when a write verb's target is a shell
-    variable other than `$PR_NUMBER`, and REBOUND when the command
-    names `PR_NUMBER` bare beside a write verb: in both the hook cannot
-    verify the target, so it denies rather than reading what it cannot
-    see as safe."""
+    A write verb clears on a literal number equal to `pr` or on
+    `$PR_NUMBER` beside it, and on nothing else: `number` is UNRESOLVED
+    when anything the shell resolves at run time sits beside the verb
+    instead (a variable, a substitution, an xargs feed), and REBOUND
+    when the command names `PR_NUMBER` bare beside a write verb. In
+    both the hook denies rather than reading what it cannot see as
+    safe, the posture the `gh api` arm had from the start."""
     stripped = strip_prose(command)
     name = first_write(stripped)
     if name is None:
@@ -209,11 +222,12 @@ def other_target(command: str, pr: str) -> tuple[str, str] | None:
                     if number.group(1) != pr:
                         return name, number.group(1)
                     continue
-                variable = VARIABLE.search(rest)
-                if variable is not None and variable.group(1) != "PR_NUMBER":
-                    return name, UNRESOLVED
-                if variable is None and (
-                    FEED.search(segment[: hit.start()]) or PLACEHOLDER in rest
+                if TRUSTED.search(rest):
+                    continue
+                if (
+                    OPAQUE.search(rest)
+                    or PLACEHOLDER in rest
+                    or FEED.search(segment[: hit.start()])
                 ):
                     return name, UNRESOLVED
         if GH_API.search(segment) and API_WRITE.search(segment):
