@@ -1,7 +1,7 @@
 # Model intelligence watch. Deliberately NOT an agent: no Claude step, no
-# tokens, no context window (ADR-0019). The `agent-` prefix is inaccurate
-# and kept anyway: renaming splits the run history and touches four call
-# sites to buy nothing (ADR-0023).
+# tokens, no context window (ADR-0019), and so no agent-guard (#526). The
+# `agent-` prefix is inaccurate and kept anyway: renaming splits the run
+# history and touches four call sites to buy nothing (ADR-0023).
 #
 # Two collectors, one assembly, one channel (ADR-0023). Capability comes
 # from Artificial Analysis: what the market thinks a model can do. Run
@@ -57,13 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - id: guard
-        uses: ./.github/actions/agent-guard
-        with:
-          token: ${{ github.token }}
-
       - id: fetch
-        if: steps.guard.outputs.paused != 'true'
         shell: bash
         env:
           AA_TOKEN: ${{ secrets.ARTIFICIALANALYSIS_API_TOKEN }}
@@ -92,7 +86,6 @@ jobs:
       # design: it reads our own audit artifacts, so it still reports when
       # Artificial Analysis is down or unconfigured.
       - id: telemetry
-        if: steps.guard.outputs.paused != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,7 +95,6 @@ jobs:
           python3 .github/scripts/run-telemetry.py "$RUNNER_TEMP/out/telemetry.md" 7
 
       - id: report
-        if: steps.guard.outputs.paused != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,7 +166,7 @@ jobs:
 
       # Independent of the fetch: the telemetry half produces a report even
       # when Artificial Analysis does not.
-      - if: always() && steps.guard.outputs.paused != 'true'
+      - if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:

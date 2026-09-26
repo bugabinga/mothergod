@@ -4,6 +4,15 @@ description: >-
   not run this cycle, all reported through the single `paused` output
   because all four mean the same thing to a workflow step: do not run.
 
+  Agent workflows only, meaning a job that runs a Claude session. A
+  script-only workflow (traffic-snapshot, docs-watch, agent-model-intel,
+  whose prefix is a name and not a claim, ADR-0023) spends no tokens
+  and takes no action a broken agent could corrupt, so every reason
+  below is moot for it and one, the pause, costs it data: GitHub forgets
+  repo traffic after 14 days, and a paused Sunday deletes a week of the
+  only series there is (issue #526). Do not add this step to a workflow
+  by copying a neighbour; add it because the job carries a model.
+
   1. Global pause (ADR-0004): an open issue labeled `agents-paused` whose
      body may contain `RESUME-AT: <ISO-8601 UTC>`. While such an issue is
      open and RESUME-AT is in the future (or absent), every agent skips.
