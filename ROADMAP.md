@@ -171,8 +171,13 @@ invariant fuzzing cannot, journal rules apply.
 A program, not a milestone, on the same terms as M3: it is the Scorecard's
 SPEED line, worked continuously.
 
-Bit-decomposed fast models, tANS fast path (level -1 mode), explicit SIMD
-blend, measured multi-core scaling (S1-P6).
+S1-P6 is exhausted at every small-slice avenue that respects the crate's
+own constraints: bit-decomposed coding shipped without reaching the SPEED
+floor, tANS-as-fast-path loses on bits/byte (S2-A88/S2-A90), and explicit
+SIMD is blocked crate-wide by `forbid(unsafe_code)` (ADR-0017, re-checked
+S2-A103). Reopening it needs a genuinely new idea, not a variant. The one
+open thread: S1-A6's block-parallel encode/decode is correct but its
+scaling is unmeasured beyond CI's 1-core container.
 
 ## M6 — Release 0.1
 

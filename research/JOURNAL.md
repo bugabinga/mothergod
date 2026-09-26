@@ -3679,6 +3679,26 @@ record.
   buffer automatic candidate, LZ-preserving literal-stage swap) lose on
   bits/byte. Reopening this lead needs a genuinely new idea, not a next
   slice of what is already here.
+- S2-A103 | REJECTED | Re-checked S2-A80/it129's explicit-SIMD blocker
+  against an external claim (operator-forwarded article, "State of SIMD
+  in Rust 2026") that Rust 1.87 stabilized calling platform intrinsics
+  without wrapping each one in `unsafe`. Verified the condition it129
+  named has not changed: the stabilization moves where `unsafe` sits
+  (once per `#[target_feature]` dispatch boundary, not once per
+  intrinsic) but does not remove it there, since the compiler still
+  cannot prove a runtime-detected feature is present at the call site
+  without one; `src/lib.rs:4`/`src/bin/mothergod.rs:1` still carry
+  `#![forbid(unsafe_code)]` (checked against the tree, not memory), which
+  forbids that one call site same as it forbade the old per-intrinsic
+  ones. `std::simd` (the only route with zero `unsafe` anywhere) is
+  still nightly-only per the same article; `rust-toolchain.toml` still
+  pins `channel = "stable"` (checked).
+  | Mechanism: policy conflict, unchanged (kind `wild`, no candidate,
+  nothing to measure).
+  | Closes the re-check. Explicit SIMD stays closed until ADR-0017
+  itself is revisited; a future re-check should look for stable
+  portable SIMD or a crate-wide unsafe-boundary carve-out, not another
+  intrinsics-ergonomics stabilization. `research/progress.jsonl` it169.
 - S1-P7 | RESOLVED 2026-09-01, closed by it124/ADR-0041 | Production
   hardening: streaming mode, frozen format spec v1. The fuzzing half landed: targets S2-A25, scheduled CI
   S2-A53, remaining fuzz scope named in S2-A53. First slice toward the
