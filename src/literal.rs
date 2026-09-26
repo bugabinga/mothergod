@@ -534,6 +534,26 @@ fn logistic_rate(steps: u64, decay: f64) -> f64 {
     LOGISTIC_FLOOR_RATE + (LOGISTIC_INITIAL_RATE - LOGISTIC_FLOOR_RATE) / steps.mul_add(decay, 1.0)
 }
 
+/// One gradient step of [`LogisticMix`]'s weight vector for a single
+/// bit-tree node: the node's error, target bit minus the pre-refine mix
+/// `p`, nudges each expert's weight by `rate` scaled by that expert's own
+/// stretched input. Split out of [`Literal::logistic_cost_bits`] so this
+/// arithmetic is checkable against the walk's chained state (#783's
+/// mutants outlived the walk-level tests; issue's shape is
+/// `test-craft`'s survivor-triage).
+fn logistic_gradient_step(
+    weights: &mut [f64; EXPERTS],
+    stretched: &[f64; EXPERTS],
+    rate: f64,
+    bit: bool,
+    p: f64,
+) {
+    let error = f64::from(u8::from(bit)) - p;
+    for (weight, &s) in weights.iter_mut().zip(stretched) {
+        *weight += rate * error * s;
+    }
+}
+
 /// Logit-domain mixer over [`Literal`]'s own six expert banks
 /// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
 /// probability of the upper half is [`stretch`]ed, the stretches are
@@ -1230,10 +1250,7 @@ impl Literal {
             };
             sse.update(context, p, bit);
             let rate = logistic_rate(*steps, decay);
-            let error = f64::from(u8::from(bit)) - p;
-            for (weight, &s) in weights.iter_mut().zip(&stretched) {
-                *weight += rate * error * s;
-            }
+            logistic_gradient_step(weights, &stretched, rate, bit, p);
             *steps += 1;
             bit
         });
@@ -1914,6 +1931,42 @@ mod tests {
             previous = rate;
         }
         assert!((logistic_rate(u64::MAX, 1.0) - LOGISTIC_FLOOR_RATE).abs() < 1e-15);
+    }
+
+    /// `#783`: pins the gradient step's arithmetic against hand-computed
+    /// values (`error = bit - p`, `weight += rate * error * stretched`),
+    /// independent of the bit-tree walk, so a mutated `-`, `+=`, or `*`
+    /// in [`logistic_gradient_step`] lands on a wrong number instead of
+    /// surviving under the walk's chained, hard-to-hand-check state.
+    #[test]
+    fn logistic_gradient_step_matches_hand_computed_error_and_delta() {
+        let stretched = [1.0, -1.0, 2.0, 0.0, 0.5, -0.25];
+
+        // bit = true: error = 1.0 - p = 0.7, delta = rate * error * s.
+        let mut weights = [0.0; EXPERTS];
+        logistic_gradient_step(&mut weights, &stretched, 0.1, true, 0.3);
+        let expected = [0.07, -0.07, 0.14, 0.0, 0.035, -0.0175];
+        for (got, want) in weights.iter().zip(&expected) {
+            assert!((got - want).abs() < 1e-12, "{weights:?}");
+        }
+
+        // bit = false: error = 0.0 - p = -0.4, delta = rate * error * s,
+        // the opposite sign from the bit = true case above.
+        let mut weights = [0.0; EXPERTS];
+        logistic_gradient_step(&mut weights, &stretched, 0.2, false, 0.4);
+        let expected = [-0.08, 0.08, -0.16, 0.0, -0.04, 0.02];
+        for (got, want) in weights.iter().zip(&expected) {
+            assert!((got - want).abs() < 1e-12, "{weights:?}");
+        }
+
+        // Nonzero starting weights: `+=` accumulates onto them rather
+        // than replacing or subtracting.
+        let mut weights = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        logistic_gradient_step(&mut weights, &[1.0; EXPERTS], 0.05, true, 0.25);
+        let expected = [1.0375, 2.0375, 3.0375, 4.0375, 5.0375, 6.0375];
+        for (got, want) in weights.iter().zip(&expected) {
+            assert!((got - want).abs() < 1e-12, "{weights:?}");
+        }
     }
 
     #[test]
