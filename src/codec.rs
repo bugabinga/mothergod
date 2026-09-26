@@ -158,12 +158,38 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// here.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
-/// Flag symbols coded before every token, selecting which of the three
-/// kinds follows. Matches the archive's `flag.enc(ac, {0,1,2})`.
-const FLAG_LITERAL: usize = 0;
-const FLAG_MATCH: usize = 1;
-const FLAG_REP: usize = 2;
-/// Alphabet size of the flag [`Model`]s: exactly the three symbols above.
+/// Which of the three kinds a token codes as: the flag symbol coded
+/// before every token. Matches the archive's `flag.enc(ac, {0,1,2})`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FlagKind {
+    Literal,
+    Match,
+    Rep,
+}
+
+impl FlagKind {
+    /// The [`Model`] symbol this kind codes as, `flag.enc`'s `{0,1,2}`.
+    const fn index(self) -> usize {
+        match self {
+            Self::Literal => 0,
+            Self::Match => 1,
+            Self::Rep => 2,
+        }
+    }
+
+    /// Inverse of [`Self::index`]. `models.flag`'s alphabet is
+    /// [`FLAG_ALPHABET`] (3), so [`Model::decode`] never returns anything
+    /// past `Rep`.
+    const fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::Literal,
+            1 => Self::Match,
+            _ => Self::Rep,
+        }
+    }
+}
+
+/// Alphabet size of the flag [`Model`]s: exactly [`FlagKind`]'s three symbols.
 const FLAG_ALPHABET: usize = 3;
 
 /// The five adaptive tables `Method::Lz` drives, bundled so encode and
@@ -293,7 +319,7 @@ fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Result<Vec<u8>, Error> {
 /// actually emits; routing both through [`walk_tokens`] makes that a single
 /// piece of code instead of two loops kept in sync by hand.
 trait TokenSink {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize);
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind);
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8);
     fn length(&mut self, models: &mut Models, value: u32);
     fn offset(&mut self, models: &mut Models, value: u32);
@@ -312,13 +338,13 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
         let flag_table = usize::from(context.after_copy);
         match *token {
             Token::Literal(byte) => {
-                sink.flag(models, flag_table, FLAG_LITERAL);
+                sink.flag(models, flag_table, FlagKind::Literal);
                 sink.literal(models, context, byte);
                 context = context.after_literal(byte);
                 pos += 1;
             }
             Token::Match { len, distance } => {
-                sink.flag(models, flag_table, FLAG_MATCH);
+                sink.flag(models, flag_table, FlagKind::Match);
                 sink.length(models, len);
                 sink.offset(models, distance.get());
                 let end = pos + len as usize;
@@ -326,7 +352,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
                 pos = end;
             }
             Token::Rep { len, slot } => {
-                sink.flag(models, flag_table, FLAG_REP);
+                sink.flag(models, flag_table, FlagKind::Rep);
                 sink.slot(models, slot.index());
                 sink.length(models, len);
                 let end = pos + len as usize;
@@ -361,8 +387,8 @@ struct EncodeSink<'a> {
 }
 
 impl TokenSink for EncodeSink<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
-        models.flag[flag_table].encode(self.ac, kind);
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
+        models.flag[flag_table].encode(self.ac, kind.index());
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -407,8 +433,8 @@ struct CostSink {
 }
 
 impl TokenSink for CostSink {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
-        self.bits += models.flag[flag_table].ideal_cost_bits(kind);
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
+        self.bits += models.flag[flag_table].ideal_cost_bits(kind.index());
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -637,9 +663,9 @@ struct PpmExpertCostSink<'a> {
 }
 
 impl TokenSink for PpmExpertCostSink<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: usize) {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
         self.cost
-            .add_same(models.flag[flag_table].ideal_cost_bits(kind));
+            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -897,13 +923,13 @@ fn decode_tokens<S: DecodeSink>(
     let mut context = Context::default();
     for _ in 0..token_count {
         let flag_table = usize::from(context.after_copy);
-        match models.flag[flag_table].decode(ac) {
-            FLAG_LITERAL => {
+        match FlagKind::from_index(models.flag[flag_table].decode(ac)) {
+            FlagKind::Literal => {
                 ensure_room(sink.len(), 1, declared_len)?;
                 let byte = sink.literal(models, ac, context)?;
                 context = context.after_literal(byte);
             }
-            FLAG_MATCH => {
+            FlagKind::Match => {
                 let len = decode_bucketed(&mut models.length, ac);
                 let distance = decode_bucketed(&mut models.offset, ac);
                 // decode_bucketed always ORs in `1 << bits`, which is >= 1
@@ -915,9 +941,7 @@ fn decode_tokens<S: DecodeSink>(
                 context = sink.copy(len, distance, context)?;
                 reps.push_front(distance);
             }
-            _ => {
-                // models.flag's alphabet is FLAG_ALPHABET (3), so this arm
-                // is FLAG_REP (2), never a fourth flag value.
+            FlagKind::Rep => {
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
                 let slot = RepSlot::from_index(models.slot.decode(ac));
@@ -1844,7 +1868,7 @@ mod tests {
         let mut models = Models::new();
         let mut ac = Encoder::new();
         let context = Context::default();
-        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        models.flag[0].encode(&mut ac, FlagKind::Match.index());
         encode_bucketed(&mut models.length, &mut ac, 4);
         encode_bucketed(&mut models.offset, &mut ac, 1);
         let _ = context;
@@ -1888,7 +1912,7 @@ mod tests {
         let over_window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32") + 1;
         let mut models = Models::new();
         let mut ac = Encoder::new();
-        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        models.flag[0].encode(&mut ac, FlagKind::Match.index());
         encode_bucketed(&mut models.length, &mut ac, 4);
         encode_bucketed(&mut models.offset, &mut ac, over_window);
         let ac_bytes = ac.finish();
@@ -2067,14 +2091,14 @@ mod tests {
     #[test]
     fn ppm_expert_cost_sink_flag_adds_the_model_cost_to_both_totals() {
         let (mut expected_models, _) = fresh_ppm_expert_sink();
-        let expected = expected_models.flag[0].ideal_cost_bits(FLAG_LITERAL);
+        let expected = expected_models.flag[0].ideal_cost_bits(FlagKind::Literal.index());
 
         let (mut models, mut ppm_state) = fresh_ppm_expert_sink();
         let mut sink = PpmExpertCostSink {
             ppm_state: &mut ppm_state,
             cost: PairedCost::default(),
         };
-        sink.flag(&mut models, 0, FLAG_LITERAL);
+        sink.flag(&mut models, 0, FlagKind::Literal);
 
         assert!((sink.cost.baseline - expected).abs() < 1e-9);
         assert!((sink.cost.candidate - expected).abs() < 1e-9);
@@ -2284,7 +2308,7 @@ mod tests {
         // rather than trusting decode's coverage to also prove it.
         let mut models = Models::new();
         let mut ac = Encoder::new();
-        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        models.flag[0].encode(&mut ac, FlagKind::Match.index());
         encode_bucketed(&mut models.length, &mut ac, 4);
         encode_bucketed(&mut models.offset, &mut ac, 1);
         let ac_bytes = ac.finish();
@@ -2304,7 +2328,7 @@ mod tests {
         let over_window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32") + 1;
         let mut models = Models::new();
         let mut ac = Encoder::new();
-        models.flag[0].encode(&mut ac, FLAG_MATCH);
+        models.flag[0].encode(&mut ac, FlagKind::Match.index());
         encode_bucketed(&mut models.length, &mut ac, 4);
         encode_bucketed(&mut models.offset, &mut ac, over_window);
         let ac_bytes = ac.finish();
