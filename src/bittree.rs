@@ -154,13 +154,27 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
 /// `ALPHABET` symbols; see `check_table_shape`.
 fn walk_steps(cum: &[u64], mut step: impl FnMut(u32, usize, usize, f64) -> bool) -> u8 {
     check_table_shape(cum);
+    walk_nodes(|depth, prefix, lo, mid, hi| {
+        step(depth, prefix, mid, upper_half_probability(cum, lo, hi))
+    })
+}
+
+/// The pure tree traversal under [`walk_steps`], with no cumulative table:
+/// hands `node` each level's `depth`, `prefix`, and the `[lo, mid, hi)`
+/// split it decides, and follows the bit `node` returns. Factored out so a
+/// caller pricing the same decisions from its own probabilities
+/// ([`crate::literal::LogisticMix`], `research/JOURNAL.md` S2-A101) walks
+/// the identical tree the shipped coder does, never a copy of it.
+///
+/// Returns the final `lo`, the symbol the `LEVELS` decisions resolved to.
+pub(crate) fn walk_nodes(mut node: impl FnMut(u32, usize, usize, usize, usize) -> bool) -> u8 {
     let mut lo = 0usize;
     let mut hi = ALPHABET;
     for depth in 0..LEVELS {
         let width = hi - lo;
         let mid = lo + width / 2;
         let prefix = lo / width;
-        let bit = step(depth, prefix, mid, upper_half_probability(cum, lo, hi));
+        let bit = node(depth, prefix, lo, mid, hi);
         if bit {
             lo = mid;
         } else {
@@ -747,6 +761,34 @@ mod tests {
             "sse-calibrated {sse_bytes} bytes should beat uncalibrated {plain_bytes} bytes \
              once Sse has adapted to the skew a uniform cum table can't see"
         );
+    }
+
+    /// `walk_nodes` is `walk_steps`'s own traversal, not a copy: for every
+    /// symbol, both visit the same `(depth, prefix, mid)` sequence, the
+    /// `[lo, hi)` `walk_nodes` reports yields exactly the probability
+    /// `walk_steps` handed out, and both land on the symbol.
+    #[test]
+    fn walk_nodes_visits_the_same_nodes_walk_steps_prices() {
+        let cum = skewed_table();
+        for symbol in 0..=u8::MAX {
+            let target = usize::from(symbol);
+            let mut via_steps = Vec::new();
+            let landed_steps = walk_steps(&cum, |depth, prefix, mid, p| {
+                via_steps.push((depth, prefix, mid, p.to_bits()));
+                target >= mid
+            });
+            let mut via_nodes = Vec::new();
+            let landed_nodes = walk_nodes(|depth, prefix, lo, mid, hi| {
+                assert_eq!(mid, lo + (hi - lo) / 2);
+                let p = upper_half_probability(&cum, lo, hi);
+                via_nodes.push((depth, prefix, mid, p.to_bits()));
+                target >= mid
+            });
+            assert_eq!(via_steps, via_nodes, "symbol {symbol}");
+            assert_eq!(via_nodes.len(), LEVELS as usize);
+            assert_eq!(landed_steps, symbol);
+            assert_eq!(landed_nodes, symbol);
+        }
     }
 
     #[test]

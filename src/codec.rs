@@ -72,7 +72,7 @@ use crate::Error;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
-use crate::literal::{ColumnExpertState, Context, Literal, PpmExpertState};
+use crate::literal::{ColumnExpertState, Context, Literal, LogisticMix, PpmExpertState};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
 
@@ -623,7 +623,7 @@ fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
 }
 
 /// Accumulates the two totals a paired-experiment [`TokenSink`]
-/// ([`PpmExpertCostSink`]) prices side by side: `baseline` for the shipped
+/// ([`PpmExpertCostSink`], [`LogisticMixCostSink`]) prices side by side: `baseline` for the shipped
 /// model, `candidate` for the same event under the experimental change. One
 /// shared [`add`](Self::add) means a symbol can't be added to just one half
 /// of the pair by accident.
@@ -707,6 +707,81 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     let mut ppm_state = PpmExpertState::new();
     let mut sink = PpmExpertCostSink {
         ppm_state: &mut ppm_state,
+        cost: PairedCost::default(),
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.cost.baseline, sink.cost.candidate)
+}
+
+/// `research/JOURNAL.md` S2-A101's paired measurement, [`walk_tokens`]'s use
+/// in [`ideal_cost_bits_logistic_mix_experiment_at`]: sums the same
+/// flag/length/offset/slot costs [`CostSink`] does, so any delta between
+/// `cost.baseline` and `cost.candidate` is attributable to the literal
+/// model alone, and prices every literal byte twice through
+/// [`Literal::ideal_cost_bits_logistic_pair`]: the shipped SSE-calibrated
+/// linear mix, and `logistic`'s logit-domain mix of the same six banks
+/// under `decay`'s rate schedule.
+struct LogisticMixCostSink<'a> {
+    logistic: &'a mut LogisticMix,
+    decay: f64,
+    cost: PairedCost,
+}
+
+impl TokenSink for LogisticMixCostSink<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
+        self.cost
+            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        let (baseline, candidate) =
+            models
+                .literal
+                .ideal_cost_bits_logistic_pair(context, byte, self.logistic, self.decay);
+        self.cost.add(baseline, candidate);
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.length, value));
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.offset, value));
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
+    }
+}
+
+/// [`ideal_cost_bits_logistic_mix_experiment_at`] at the registered
+/// default [`crate::literal::LOGISTIC_RATE_DECAY`].
+///
+/// Returns `(baseline_bits, candidate_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_logistic_mix_experiment(data: &[u8]) -> (f64, f64) {
+    ideal_cost_bits_logistic_mix_experiment_at(data, crate::literal::LOGISTIC_RATE_DECAY)
+}
+
+/// `research/JOURNAL.md` S2-A101's before-wiring measurement: the whole
+/// codec's ideal cost of `data` with the literal model priced both as
+/// shipped and through [`LogisticMix`] under rate-schedule `decay`, over
+/// one shared token stream and one shared set of banks. Not reachable
+/// from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION` wiring,
+/// measurement only.
+///
+/// Returns `(baseline_bits, candidate_bits)`; `baseline_bits` equals
+/// [`ideal_cost_bits`]`(data)` exactly.
+#[must_use]
+pub fn ideal_cost_bits_logistic_mix_experiment_at(data: &[u8], decay: f64) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut logistic = LogisticMix::new();
+    let mut sink = LogisticMixCostSink {
+        logistic: &mut logistic,
+        decay,
         cost: PairedCost::default(),
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
@@ -2188,6 +2263,112 @@ mod tests {
         );
         assert!((sink.cost.baseline - expected_baseline_total).abs() < 1e-6);
         assert!((sink.cost.candidate - expected_with_ppm_total).abs() < 1e-6);
+    }
+
+    /// `research/JOURNAL.md` S2-A101's guard on the comparison: the pair's
+    /// baseline half is [`ideal_cost_bits`]'s own whole-file number, bit for
+    /// bit, at any `decay`, so the measured delta is the literal mixer's
+    /// alone.
+    #[test]
+    fn logistic_mix_experiment_baseline_is_exactly_ideal_cost_bits() {
+        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
+        let expected = ideal_cost_bits(data);
+        for decay in [0.0, crate::literal::LOGISTIC_RATE_DECAY, 1.0] {
+            let (baseline, candidate) = ideal_cost_bits_logistic_mix_experiment_at(data, decay);
+            assert_eq!(baseline.to_bits(), expected.to_bits(), "decay={decay}");
+            assert!(
+                candidate.is_finite() && candidate > 0.0,
+                "decay={decay}: candidate={candidate}"
+            );
+            assert!(
+                (candidate - baseline).abs() > 1e-6,
+                "decay={decay}: the candidate half must differ from the baseline"
+            );
+        }
+    }
+
+    #[test]
+    fn logistic_mix_experiment_is_zero_on_empty_input() {
+        let (baseline, candidate) = ideal_cost_bits_logistic_mix_experiment(b"");
+        assert!(baseline.abs() < 1e-9);
+        assert!(candidate.abs() < 1e-9);
+    }
+
+    #[test]
+    fn logistic_mix_experiment_defaults_to_the_registered_decay() {
+        let data = b"abcabcabd abcabcabe abcabcabf".repeat(8);
+        let via_default = ideal_cost_bits_logistic_mix_experiment(&data);
+        let via_at =
+            ideal_cost_bits_logistic_mix_experiment_at(&data, crate::literal::LOGISTIC_RATE_DECAY);
+        assert_eq!(via_default.0.to_bits(), via_at.0.to_bits());
+        assert_eq!(via_default.1.to_bits(), via_at.1.to_bits());
+        let via_other = ideal_cost_bits_logistic_mix_experiment_at(&data, 0.0);
+        assert_ne!(via_default.1.to_bits(), via_other.1.to_bits());
+    }
+
+    #[test]
+    fn logistic_mix_cost_sink_literal_adds_the_baseline_and_candidate_separately() {
+        let bytes = b"aaaaaaaaaaaaaaaaaab";
+        let mut expected_models = Models::new();
+        let mut expected_logistic = LogisticMix::new();
+        let mut models = Models::new();
+        let mut logistic = LogisticMix::new();
+        let mut sink = LogisticMixCostSink {
+            logistic: &mut logistic,
+            decay: 4e-4,
+            cost: PairedCost::default(),
+        };
+        let mut context = Context::default();
+        let mut expected_baseline_total = 0.0;
+        let mut expected_candidate_total = 0.0;
+        for &byte in bytes {
+            let (baseline, candidate) = expected_models.literal.ideal_cost_bits_logistic_pair(
+                context,
+                byte,
+                &mut expected_logistic,
+                4e-4,
+            );
+            expected_baseline_total += baseline;
+            expected_candidate_total += candidate;
+            sink.literal(&mut models, context, byte);
+            context = context.after_literal(byte);
+        }
+        assert!(
+            (expected_baseline_total - expected_candidate_total).abs() > 1e-6,
+            "test cannot tell the pair's two halves apart"
+        );
+        assert_eq!(
+            sink.cost.baseline.to_bits(),
+            expected_baseline_total.to_bits()
+        );
+        assert_eq!(
+            sink.cost.candidate.to_bits(),
+            expected_candidate_total.to_bits()
+        );
+    }
+
+    #[test]
+    fn logistic_mix_cost_sink_non_literal_events_add_the_same_cost_to_both_totals() {
+        let mut expected_models = Models::new();
+        let expected = expected_models.flag[1].ideal_cost_bits(FlagKind::Match.index())
+            + ideal_cost_bucketed(&mut expected_models.length, 17)
+            + ideal_cost_bucketed(&mut expected_models.offset, 123)
+            + expected_models.slot.ideal_cost_bits(2);
+
+        let mut models = Models::new();
+        let mut logistic = LogisticMix::new();
+        let mut sink = LogisticMixCostSink {
+            logistic: &mut logistic,
+            decay: 4e-4,
+            cost: PairedCost::default(),
+        };
+        sink.flag(&mut models, 1, FlagKind::Match);
+        sink.length(&mut models, 17);
+        sink.offset(&mut models, 123);
+        sink.slot(&mut models, 2);
+
+        assert!((sink.cost.baseline - expected).abs() < 1e-9);
+        assert!((sink.cost.candidate - expected).abs() < 1e-9);
     }
 
     #[test]
