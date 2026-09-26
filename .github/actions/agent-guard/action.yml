@@ -5,7 +5,8 @@ description: >-
   because all four mean the same thing to a workflow step: do not run.
 
   Agent workflows only, meaning a job that runs a Claude session. A
-  script-only workflow (traffic-snapshot, docs-watch) spends no tokens
+  script-only workflow (traffic-snapshot, docs-watch, agent-model-intel,
+  whose prefix is a name and not a claim, ADR-0023) spends no tokens
   and takes no action a broken agent could corrupt, so every reason
   below is moot for it and one, the pause, costs it data: GitHub forgets
   repo traffic after 14 days, and a paused Sunday deletes a week of the
