@@ -4150,7 +4150,10 @@ record.
   train effect this lead has measured; rejected on `gradient_image`
   **+0.000346**, a sealed margin that flips sign with the mixing learning
   rate rather than holding the wall the three signal slices hit. Full
-  record in S2-R25's own entry. What is left is the from-scratch GLN
+  record in S2-R25's own entry. What is left is a rate schedule in place
+  of S2-R25's fixed learning-rate constant (an annealed or count-derived
+  step, since that slice's sealed failure is a hyperparameter knife edge
+  rather than the wall the three signal slices hit), the from-scratch GLN
   gating architecture this lead's own name still names (declined near
   S2-A99, again after S2-R23, and a third time after S2-R24, under a
   single session's time budget every time), or accepting this lead's
@@ -6850,7 +6853,7 @@ record.
   the train optimum, and therefore this candidate, is **0.006**. There,
   train net **-0.085830 b/B** (sum; mean -0.007803), ten of eleven cases
   improved: `interleaved_audio16` **-0.048989** (the largest single train
-  move any S1-P2/S1-P3/S1-P8 slice has measured), `x86_dense_code`
+  move any S1-P8 slice has measured), `x86_dense_code`
   -0.016003, `json_records` -0.007394, `markov_h8_2_trap` -0.005784,
   `sqlite_like_records` -0.004518, `base64_wrapped` -0.004389,
   `entropy_ladder_h8` -0.001239, `h4` -0.000807, `h2` -0.000688, `h1`
