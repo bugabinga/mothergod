@@ -34,22 +34,29 @@
 //! `LZ_MIN_VERSION` moved from 2 to 3 with it.
 //!
 //! The outer layout above is unchanged across every version this build
-//! decodes (`LZ_MIN_VERSION` and up). Every one of those versions' literal
-//! sub-stream codes each byte as 8 SSE-calibrated binary decisions
+//! decodes (`LZ_MIN_VERSION` and up). Versions 3 and 4 code each literal
+//! byte as 8 SSE-calibrated binary decisions
 //! ([`crate::literal::Literal::encode_sse`]/`decode_sse`,
 //! `docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
-//! S1-P1). A version-4 frame whose filter selector names
-//! [`Candidate::Transpose`] goes one step
-//! further still: each literal byte blends a column-keyed seventh expert
-//! into the mix before the same SSE-calibrated coding
+//! S1-P1), except a version-4 frame whose filter selector names
+//! [`Candidate::Transpose`], which goes one step further still: each
+//! literal byte blends a column-keyed seventh expert into the mix before
+//! the same SSE-calibrated coding
 //! ([`crate::literal::Literal::encode_column`]/`decode_column`,
 //! `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
-//! `research/JOURNAL.md` S1-P5); every other candidate at version 4 codes
-//! its literals exactly as version 3 does. [`decode`] takes the frame's
-//! declared `version` and its already-parsed `candidate` and picks the
-//! matching literal path; every other symbol (flag/length/offset/slot) is
-//! unaffected and coded identically at every version `LZ_MIN_VERSION` or
-//! above, regardless of candidate.
+//! `research/JOURNAL.md` S1-P5). Version `LOGISTIC_MIN_VERSION` (5) and
+//! above codes every other candidate's literals through a second mixer
+//! instead, blending the same six experts in the logit domain under its
+//! own annealed-rate weights and its own SSE table
+//! ([`crate::literal::Literal::encode_logistic`]/`decode_logistic`,
+//! `docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`,
+//! `research/JOURNAL.md` S1-P8); a version-5 `Candidate::Transpose` frame
+//! still codes through `encode_column`/`decode_column` exactly as version 4
+//! does — the logit-domain mix does not yet reach the seventh expert.
+//! [`decode`] takes the frame's declared `version` and its already-parsed
+//! `candidate` and picks the matching literal path; every other symbol
+//! (flag/length/offset/slot) is unaffected and coded identically at every
+//! version `LZ_MIN_VERSION` or above, regardless of candidate.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -82,9 +89,11 @@ use crate::model::Model;
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`) that moved
 /// it from 2 to 3. Every version this constant admits codes its literal
 /// sub-stream through [`crate::literal::Literal::encode_sse`]/`decode_sse`
-/// (or, at version 4 on a `Candidate::Transpose` frame,
-/// [`crate::literal::Literal::encode_column`]/`decode_column`); no version
-/// this build decodes still needs a separate literal-coding floor.
+/// below `LOGISTIC_MIN_VERSION`, `encode_logistic`/`decode_logistic` at
+/// `LOGISTIC_MIN_VERSION` and above (or, at version 4 on a
+/// `Candidate::Transpose` frame, [`crate::literal::Literal::encode_column`]/
+/// `decode_column` regardless of the logistic gate); no version this build
+/// decodes still needs a separate literal-coding floor.
 pub(crate) const LZ_MIN_VERSION: u8 = 3;
 
 /// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
@@ -96,6 +105,21 @@ pub(crate) const LZ_MIN_VERSION: u8 = 3;
 /// other candidate's literal sub-stream, and every candidate at a lower
 /// version, is unaffected — see the module docs' "Payload layout" section.
 const COLUMN_EXPERT_MIN_VERSION: u8 = 4;
+
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a literal
+/// sub-stream through [`crate::literal::Literal::encode_logistic`]/
+/// `decode_logistic` (a logit-domain mix over the six real experts,
+/// `research/JOURNAL.md` S1-P8, S2-A101,
+/// `docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`)
+/// instead of [`crate::literal::Literal::encode_sse`]/`decode_sse`. Applies
+/// to every candidate except [`Candidate::Transpose`] at
+/// `COLUMN_EXPERT_MIN_VERSION` and above, which keeps coding through
+/// [`crate::literal::Literal::encode_column`]/`decode_column` regardless of
+/// this constant — the logit-domain mix does not yet reach the seventh,
+/// column-keyed expert (a separate lead, not this one's scope). Every
+/// candidate at a lower version is unaffected — see the module docs'
+/// "Payload layout" section.
+const LOGISTIC_MIN_VERSION: u8 = 5;
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -155,7 +179,12 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// itself is a `research/JOURNAL.md` S1-P6 speed-tier target
 /// (`Literal::mix` rebuilds all 256 cumulative entries from scratch every
 /// byte instead of an incremental structure), not something to chase down
-/// here.
+/// here. ADR-0052's `decode_logistic` is now the worst-case literal path at
+/// `LOGISTIC_MIN_VERSION` and above (a bounded constant more per node than
+/// `decode_sse`'s own bound above: six `stretch` calls and a dot product
+/// against `expert_prefix_sums` instead of one `mix` lookup, still linear
+/// in `declared_len`, no new loop or allocation); not separately
+/// remeasured, the same provisional-ceiling argument covers it.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Which of the three kinds a token codes as: the flag symbol coded
@@ -196,6 +225,12 @@ const FLAG_ALPHABET: usize = 3;
 /// decode construct and thread them identically.
 struct Models {
     literal: Literal,
+    /// The logit-domain mixer [`crate::literal::Literal::encode_logistic`]/
+    /// `decode_logistic` code every non-`Candidate::Transpose` literal
+    /// through at `LOGISTIC_MIN_VERSION` and above: its own weights, step
+    /// counts and `Sse` table, one per frame/trial, the same lifetime as
+    /// `literal`'s six real banks.
+    logistic: LogisticMix,
     /// One flag table per "was the previous token a copy" state (the
     /// archive's `flag[2]`): a literal run and a post-copy position have
     /// different flag distributions worth modeling separately. Indexed by
@@ -210,6 +245,7 @@ impl Models {
     fn new() -> Self {
         Self {
             literal: Literal::new(),
+            logistic: LogisticMix::new(),
             flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
             length: Model::new(lz::LENGTH_BUCKETS),
             offset: Model::new(lz::OFFSET_BUCKETS),
@@ -217,7 +253,7 @@ impl Models {
         }
     }
 
-    /// Fallible counterpart to [`Self::new`]: the same five fresh tables,
+    /// Fallible counterpart to [`Self::new`]: the same six fresh tables,
     /// but returns `Err` instead of aborting if the allocator cannot
     /// satisfy one of them. [`decode`] and [`decode_undoable_streaming`]
     /// use this (hard rule 2, `rust-craft` skill's allocation-discipline,
@@ -227,6 +263,7 @@ impl Models {
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             literal: Literal::try_new()?,
+            logistic: LogisticMix::try_new()?,
             flag: [
                 Model::try_new(FLAG_ALPHABET)?,
                 Model::try_new(FLAG_ALPHABET)?,
@@ -379,8 +416,8 @@ struct ColumnCoding<'a> {
 /// [`encode_tokens`]. `column` is `Some` exactly when the candidate under
 /// trial is [`Candidate::Transpose`] (`encode`'s caller), selecting
 /// [`crate::literal::Literal::encode_column`] over
-/// [`crate::literal::Literal::encode_sse`] for every literal in this trial
-/// (`research/JOURNAL.md` S1-P5, `COLUMN_EXPERT_MIN_VERSION`).
+/// [`crate::literal::Literal::encode_logistic`] for every literal in this
+/// trial (`research/JOURNAL.md` S1-P5, `COLUMN_EXPERT_MIN_VERSION`).
 struct EncodeSink<'a> {
     ac: &'a mut Encoder,
     column: Option<ColumnCoding<'a>>,
@@ -393,8 +430,8 @@ impl TokenSink for EncodeSink<'_> {
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
         // Compression always targets the newest format version
-        // (`FORMAT_VERSION`), so encoding always takes the SSE-calibrated
-        // path (with or without the column expert); `decode` is the one
+        // (`FORMAT_VERSION`), so encoding always takes the logit-domain
+        // mixer (with or without the column expert); `decode` is the one
         // that must still read older frames.
         match &mut self.column {
             Some(col) => {
@@ -408,7 +445,11 @@ impl TokenSink for EncodeSink<'_> {
                     .literal
                     .encode_column(self.ac, context, byte, bank, col.state);
             }
-            None => models.literal.encode_sse(self.ac, context, byte),
+            None => {
+                models
+                    .literal
+                    .encode_logistic(self.ac, context, byte, &mut models.logistic);
+            }
         }
     }
 
@@ -438,11 +479,15 @@ impl TokenSink for CostSink {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        // Matches EncodeSink::literal's encode_sse path (this trait's own
-        // docs: CostSink and EncodeSink must price and code the same
-        // thing), so ideal_cost_bits stays a true estimate of what
+        // Matches EncodeSink::literal's None branch (encode_logistic; every
+        // CostSink caller here parses `data` with no filter selection, so
+        // Candidate::Transpose's encode_column never arises) — this trait's
+        // own docs: CostSink and EncodeSink must price and code the same
+        // thing, so ideal_cost_bits stays a true estimate of what
         // encode_tokens's real Encoder pays.
-        self.bits += models.literal.ideal_cost_bits_sse(context, byte);
+        self.bits += models
+            .literal
+            .ideal_cost_bits_logistic(context, byte, &mut models.logistic);
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
@@ -649,8 +694,7 @@ impl PairedCost {
 }
 
 /// `TokenSink` shared by every paired baseline/candidate experiment
-/// ([`ideal_cost_bits_ppm_expert_experiment`],
-/// [`ideal_cost_bits_logistic_mix_experiment_at`]): flag/length/offset/slot
+/// ([`ideal_cost_bits_ppm_expert_experiment`]): flag/length/offset/slot
 /// price identically to [`CostSink`] and add the same bits to both
 /// [`PairedCost`] halves, since only the literal model differs between an
 /// experiment's baseline and candidate. `pair_literal` supplies that one
@@ -710,41 +754,6 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
             models
                 .literal
                 .ideal_cost_bits_ppm_expert_pair(context, byte, &mut ppm_state)
-        },
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.cost.baseline, sink.cost.candidate)
-}
-
-/// [`ideal_cost_bits_logistic_mix_experiment_at`] at the registered
-/// default [`crate::literal::LOGISTIC_RATE_DECAY`].
-///
-/// Returns `(baseline_bits, candidate_bits)`.
-#[must_use]
-pub fn ideal_cost_bits_logistic_mix_experiment(data: &[u8]) -> (f64, f64) {
-    ideal_cost_bits_logistic_mix_experiment_at(data, crate::literal::LOGISTIC_RATE_DECAY)
-}
-
-/// `research/JOURNAL.md` S2-A101's before-wiring measurement: the whole
-/// codec's ideal cost of `data` with the literal model priced both as
-/// shipped and through [`LogisticMix`] under rate-schedule `decay`, over
-/// one shared token stream and one shared set of banks. Not reachable
-/// from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION` wiring,
-/// measurement only.
-///
-/// Returns `(baseline_bits, candidate_bits)`; `baseline_bits` equals
-/// [`ideal_cost_bits`]`(data)` exactly.
-#[must_use]
-pub fn ideal_cost_bits_logistic_mix_experiment_at(data: &[u8], decay: f64) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut logistic = LogisticMix::new();
-    let mut sink = PairedTokenSink {
-        cost: PairedCost::default(),
-        pair_literal: |models: &mut Models, context: Context, byte: u8| {
-            models
-                .literal
-                .ideal_cost_bits_logistic_pair(context, byte, &mut logistic, decay)
         },
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
@@ -1001,10 +1010,14 @@ fn decode_tokens<S: DecodeSink>(
 /// per-candidate trial to share it across): `Some` exactly when this
 /// frame's candidate is [`Candidate::Transpose`] and its declared version
 /// selects the column-keyed literal expert (`COLUMN_EXPERT_MIN_VERSION`).
+/// `logistic` is `true` exactly when `column` is `None` and the declared
+/// version selects the logit-domain mixer (`LOGISTIC_MIN_VERSION`) over
+/// plain SSE-calibrated coding.
 struct VecSink<'a> {
     output: &'a mut Vec<u8>,
     declared_len: usize,
     column: Option<(NonZeroUsize, &'a mut ColumnExpertState)>,
+    logistic: bool,
 }
 
 impl DecodeSink for VecSink<'_> {
@@ -1029,6 +1042,11 @@ impl DecodeSink for VecSink<'_> {
                     MAX_COLUMN_BANKS,
                 );
                 models.literal.decode_column(ac, context, bank, state)
+            }
+            None if self.logistic => {
+                models
+                    .literal
+                    .decode_logistic(ac, context, &mut models.logistic)
             }
             None => models.literal.decode_sse(ac, context),
         };
@@ -1095,12 +1113,14 @@ impl DecodeSink for VecSink<'_> {
 /// `version` is the frame's declared `FORMAT_VERSION` byte
 /// (`crate::decompress` already has it in scope at its one call site,
 /// guaranteed at least `LZ_MIN_VERSION` (3) before this function is ever
-/// called): every version decodes the literal sub-stream through
-/// [`crate::literal::Literal::decode_sse`], except — only for a
+/// called): versions 3 and below `LOGISTIC_MIN_VERSION` decode the literal
+/// sub-stream through [`crate::literal::Literal::decode_sse`]; versions
+/// `LOGISTIC_MIN_VERSION` (5) and above decode it through
+/// [`crate::literal::Literal::decode_logistic`] instead, except — only for a
 /// [`Candidate::Transpose`] frame, version `COLUMN_EXPERT_MIN_VERSION` (4)
-/// and above — through [`crate::literal::Literal::decode_column`] instead,
-/// blending a column-keyed seventh expert into the mix (see the module
-/// docs' "Payload layout" section). Every other symbol decodes identically
+/// and above — through [`crate::literal::Literal::decode_column`], blending
+/// a column-keyed seventh expert into the mix (see the module docs'
+/// "Payload layout" section). Every other symbol decodes identically
 /// regardless of `version` or candidate, since only the literal
 /// sub-stream's internal shape changed.
 ///
@@ -1152,6 +1172,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
         column: column_state
             .as_mut()
             .map(|(columns, state)| (*columns, state)),
+        logistic: version >= LOGISTIC_MIN_VERSION,
     };
     decode_tokens(
         token_count,
@@ -1202,13 +1223,18 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     let candidate =
         Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
     match candidate {
-        Candidate::Identity => {
-            decode_undoable_streaming(filtered_payload, max_len, writer, &mut StreamUndo::Identity)
-        }
+        Candidate::Identity => decode_undoable_streaming(
+            filtered_payload,
+            version,
+            max_len,
+            writer,
+            &mut StreamUndo::Identity,
+        ),
         Candidate::Delta(stride) => {
             let undo = filters::delta::Undo::try_new(stride).map_err(|_| Error::OutOfMemory)?;
             decode_undoable_streaming(
                 filtered_payload,
+                version,
                 max_len,
                 writer,
                 &mut StreamUndo::Delta(undo),
@@ -1218,6 +1244,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             let undo = filters::bcj::Undo::try_new().map_err(|_| Error::OutOfMemory)?;
             decode_undoable_streaming(
                 filtered_payload,
+                version,
                 max_len,
                 writer,
                 &mut StreamUndo::Bcj(undo),
@@ -1282,11 +1309,15 @@ impl StreamUndo {
 /// `undo` and written to `writer` immediately. Never carries column-expert
 /// state: [`decode_to_writer`] never builds this sink for
 /// [`Candidate::Transpose`], which falls back to [`decode`]'s whole-buffer
-/// path instead (see that function's docs).
+/// path instead (see that function's docs). `logistic` mirrors
+/// [`VecSink`]'s own version gate: `true` exactly when the frame's declared
+/// version selects [`crate::literal::Literal::decode_logistic`]
+/// (`LOGISTIC_MIN_VERSION`) over `decode_sse`.
 struct StreamingSink<'a, W: std::io::Write> {
     window: &'a mut lz::Window,
     undo: &'a mut StreamUndo,
     writer: &'a mut W,
+    logistic: bool,
 }
 
 impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
@@ -1302,7 +1333,13 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
         ac: &mut Decoder,
         context: Context,
     ) -> Result<u8, crate::WriteError> {
-        let byte = models.literal.decode_sse(ac, context);
+        let byte = if self.logistic {
+            models
+                .literal
+                .decode_logistic(ac, context, &mut models.logistic)
+        } else {
+            models.literal.decode_sse(ac, context)
+        };
         self.window.push(byte);
         self.undo.apply(byte, self.writer)?;
         Ok(byte)
@@ -1329,9 +1366,13 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
 /// only the byte handed to `writer` differs per candidate, never what goes
 /// into `window` or `context`. `payload` here has already had its 2-byte
 /// filter selector stripped by [`decode_to_writer`], matching
-/// [`read_header`]'s expected input.
+/// [`read_header`]'s expected input. `version` is the frame's declared
+/// `FORMAT_VERSION` byte, [`decode_to_writer`]'s own parameter passed
+/// through unchanged, gating the literal sub-stream exactly as [`decode`]'s
+/// own `version` does (`LOGISTIC_MIN_VERSION`).
 fn decode_undoable_streaming<W: std::io::Write>(
     payload: &[u8],
+    version: u8,
     max_len: u32,
     writer: &mut W,
     undo: &mut StreamUndo,
@@ -1349,6 +1390,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
         window: &mut window,
         undo: &mut *undo,
         writer: &mut *writer,
+        logistic: version >= LOGISTIC_MIN_VERSION,
     };
     decode_tokens(
         token_count,
@@ -2190,91 +2232,6 @@ mod tests {
         );
         assert!((sink.cost.baseline - expected_baseline_total).abs() < 1e-6);
         assert!((sink.cost.candidate - expected_with_ppm_total).abs() < 1e-6);
-    }
-
-    /// `research/JOURNAL.md` S2-A101's guard on the comparison: the pair's
-    /// baseline half is [`ideal_cost_bits`]'s own whole-file number, bit for
-    /// bit, at any `decay`, so the measured delta is the literal mixer's
-    /// alone.
-    #[test]
-    fn logistic_mix_experiment_baseline_is_exactly_ideal_cost_bits() {
-        let data: &[u8] = include_bytes!("../research/imports/session-1/mothergod.rs");
-        let expected = ideal_cost_bits(data);
-        for decay in [0.0, crate::literal::LOGISTIC_RATE_DECAY, 1.0] {
-            let (baseline, candidate) = ideal_cost_bits_logistic_mix_experiment_at(data, decay);
-            assert_eq!(baseline.to_bits(), expected.to_bits(), "decay={decay}");
-            assert!(
-                candidate.is_finite() && candidate > 0.0,
-                "decay={decay}: candidate={candidate}"
-            );
-            assert!(
-                (candidate - baseline).abs() > 1e-6,
-                "decay={decay}: the candidate half must differ from the baseline"
-            );
-        }
-    }
-
-    #[test]
-    fn logistic_mix_experiment_is_zero_on_empty_input() {
-        let (baseline, candidate) = ideal_cost_bits_logistic_mix_experiment(b"");
-        assert!(baseline.abs() < 1e-9);
-        assert!(candidate.abs() < 1e-9);
-    }
-
-    #[test]
-    fn logistic_mix_experiment_defaults_to_the_registered_decay() {
-        let data = b"abcabcabd abcabcabe abcabcabf".repeat(8);
-        let via_default = ideal_cost_bits_logistic_mix_experiment(&data);
-        let via_at =
-            ideal_cost_bits_logistic_mix_experiment_at(&data, crate::literal::LOGISTIC_RATE_DECAY);
-        assert_eq!(via_default.0.to_bits(), via_at.0.to_bits());
-        assert_eq!(via_default.1.to_bits(), via_at.1.to_bits());
-        let via_other = ideal_cost_bits_logistic_mix_experiment_at(&data, 0.0);
-        assert_ne!(via_default.1.to_bits(), via_other.1.to_bits());
-    }
-
-    #[test]
-    fn paired_token_sink_logistic_mix_literal_adds_the_baseline_and_candidate_separately() {
-        let bytes = b"aaaaaaaaaaaaaaaaaab";
-        let mut expected_models = Models::new();
-        let mut expected_logistic = LogisticMix::new();
-        let mut models = Models::new();
-        let mut logistic = LogisticMix::new();
-        let mut sink = PairedTokenSink {
-            cost: PairedCost::default(),
-            pair_literal: |models: &mut Models, context: Context, byte: u8| {
-                models
-                    .literal
-                    .ideal_cost_bits_logistic_pair(context, byte, &mut logistic, 4e-4)
-            },
-        };
-        let mut context = Context::default();
-        let mut expected_baseline_total = 0.0;
-        let mut expected_candidate_total = 0.0;
-        for &byte in bytes {
-            let (baseline, candidate) = expected_models.literal.ideal_cost_bits_logistic_pair(
-                context,
-                byte,
-                &mut expected_logistic,
-                4e-4,
-            );
-            expected_baseline_total += baseline;
-            expected_candidate_total += candidate;
-            sink.literal(&mut models, context, byte);
-            context = context.after_literal(byte);
-        }
-        assert!(
-            (expected_baseline_total - expected_candidate_total).abs() > 1e-6,
-            "test cannot tell the pair's two halves apart"
-        );
-        assert_eq!(
-            sink.cost.baseline.to_bits(),
-            expected_baseline_total.to_bits()
-        );
-        assert_eq!(
-            sink.cost.candidate.to_bits(),
-            expected_candidate_total.to_bits()
-        );
     }
 
     #[test]

@@ -52,6 +52,23 @@
 //! integer-only mixer is no longer a prerequisite here; ADR-0024
 //! demotes it to an M5 speed lead, since its speed claim is unmeasured
 //! in this codebase.
+//!
+//! **Logit-domain mixing (`JOURNAL` S1-P8, S2-A101, `FORMAT_VERSION`
+//! `codec::LOGISTIC_MIN_VERSION` (5), ADR-0052).**
+//! [`Literal::encode_logistic`]/[`Literal::decode_logistic`] replace the
+//! SSE-calibrated path above with a second mixer, [`LogisticMix`]: the six
+//! real experts' own probability estimates are [`crate::logistic::stretch`]ed
+//! into the logit domain, blended under a weight vector [`logistic_rate`]'s
+//! annealed schedule adapts, [`crate::logistic::squash`]ed back, then
+//! calibrated through `LogisticMix`'s own [`Sse`] table, independent of
+//! [`Literal::sse`] — the same separation [`Literal::encode_column`] already
+//! keeps for its seventh expert. The six real experts still adapt exactly as
+//! [`Literal::encode_sse`] leaves them ([`Literal::update`] still runs,
+//! unperturbed): only the literal path's own coding and calibration change.
+//! `LogisticMix` reuses `stretch`/`squash` rather than `exp`/`ln` directly;
+//! both are built from IEEE-754 basic operations only, the same
+//! ADR-0024 determinism this module's `exp` already provides
+//! (`crate::logistic`'s own module docs).
 
 use std::num::NonZeroUsize;
 
@@ -496,10 +513,10 @@ const LOGISTIC_INITIAL_RATE: f64 = 0.006;
 /// S2-R25's 0.002 sweep point (S2-A101 names why).
 const LOGISTIC_FLOOR_RATE: f64 = 0.002;
 
-/// The rate schedule's `decay` for
-/// [`crate::codec::ideal_cost_bits_logistic_mix_experiment`]: the train-only
-/// sweep optimum (`research/JOURNAL.md` S2-A101).
-pub const LOGISTIC_RATE_DECAY: f64 = 4e-4;
+/// [`LogisticMix`]'s rate schedule's `decay`, fixed at the train-only sweep
+/// optimum [`Literal::encode_logistic`]/`decode_logistic` code every byte
+/// under (`research/JOURNAL.md` S2-A101).
+const LOGISTIC_RATE_DECAY: f64 = 4e-4;
 
 /// Every probability [`LogisticMix`] stretches or codes is clamped to
 /// `[LOGISTIC_PROBABILITY_FLOOR, 1 - LOGISTIC_PROBABILITY_FLOOR]`: an
@@ -561,8 +578,8 @@ fn logistic_gradient_step(
 /// key `banks` selects [`Literal`]'s linear weights by), and the sum is
 /// [`squash`]ed back, then refined through this mixer's own [`Sse`] over
 /// the same [`bittree::SSE_CONTEXTS`] contexts the shipped coder uses.
-/// Measurement only: reads [`Literal`]'s banks, never writes them, and no
-/// coding path reaches it.
+/// Reads [`Literal`]'s banks, never writes them: [`Literal::encode_logistic`]/
+/// `decode_logistic` are the real coding path (`codec::LOGISTIC_MIN_VERSION`).
 #[derive(Debug, Clone)]
 pub struct LogisticMix {
     /// One weight vector per [`WEIGHT_CONTEXTS`] key.
@@ -587,11 +604,19 @@ impl LogisticMix {
         }
     }
 
-    // No `try_new`: unlike `ColumnExpertState`, `LogisticMix` is never
-    // constructed on a decode path (its own docs), so hard rule 2's
-    // bounded-allocation obligation doesn't reach it, matching
-    // `PpmExpertState`'s own no-`try_new` precedent, the other
-    // measurement-only expert state in this file.
+    /// Fallible counterpart to [`Self::new`], the same shape
+    /// [`ColumnExpertState::try_new`] gives the seventh expert:
+    /// [`crate::codec::decode`]'s real decode path constructs a
+    /// `LogisticMix` per frame now that [`Literal::decode_logistic`] reaches
+    /// it, and the allocation can still fail, so hard rule 2 requires
+    /// `Error::OutOfMemory` there instead of an abort.
+    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
+            update_count: crate::try_filled_vec(WEIGHT_CONTEXTS, 0)?,
+            sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
+        })
+    }
 }
 
 impl Default for LogisticMix {
@@ -846,6 +871,39 @@ impl Literal {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let bits = bittree::ideal_cost_bits_sse(&cum, byte, &mut self.sse);
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        bits
+    }
+
+    /// [`Self::ideal_cost_bits_sse`]'s counterpart for [`Self::encode_logistic`]:
+    /// sums the ideal cost of `byte`'s `LEVELS` `logistic`-refined binary
+    /// decisions through [`Self::logistic_code_bit`], so a caller pricing a
+    /// whole stream this way reflects what `Self::encode_logistic` actually
+    /// pays (`crate::codec`'s `CostSink`/`EncodeSink` invariant,
+    /// [`Self::ideal_cost_bits_sse`]'s own docs). Updates the six real
+    /// experts' banks the same way [`Self::ideal_cost_bits_sse`] does, and
+    /// takes the same gradient steps on `logistic` [`Self::encode_logistic`]
+    /// would.
+    #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
+    pub fn ideal_cost_bits_logistic(
+        &mut self,
+        context: Context,
+        byte: u8,
+        logistic: &mut LogisticMix,
+    ) -> f64 {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+        let mut bits = 0.0f64;
+        let landed = self.logistic_code_bit(&bank_indices, weight_index, logistic, |mid, p| {
+            let bit = symbol >= mid;
+            bits -= if bit { p.log2() } else { (1.0 - p).log2() };
+            bit
+        });
+        debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
+        self.update(&bank_indices, weight_index, symbol, exp);
         bits
     }
 
@@ -1200,34 +1258,36 @@ impl Literal {
         prefix
     }
 
-    /// Ideal cost of `byte` under `logistic`, from this model's current
-    /// (pre-update) banks, then one gradient step per node on `logistic`'s
-    /// `weight_index` vector at [`logistic_rate`]. Walks
-    /// [`bittree::walk_nodes`], the shipped coder's own tree traversal.
+    /// Shared skeleton behind [`Self::encode_logistic`] and
+    /// [`Self::decode_logistic`], the [`LogisticMix`] counterpart of
+    /// [`bittree::walk_sse`]: walks [`bittree::walk_nodes`], the shipped
+    /// coder's own tree traversal, blending this model's six expert banks
+    /// in the logit domain under `logistic`'s `weight_index` vector,
+    /// refining through `logistic`'s own [`Sse`] table, and taking one
+    /// gradient step per node at [`logistic_rate`]`(steps,
+    /// LOGISTIC_RATE_DECAY)`. `code_bit` receives each node's midpoint and
+    /// refined probability and returns the bit that node resolved to —
+    /// already known from a caller's own `symbol` for
+    /// [`Self::encode_logistic`], decoded from [`Decoder::decode_bit`] for
+    /// [`Self::decode_logistic`] — so the two callers differ only in what
+    /// they do with that bit and probability, never in the walk itself.
     ///
     /// Every expert's upper-half probability lies strictly inside `(0, 1)`
     /// before [`clamp_logistic_probability`] even runs: every bank
     /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
     /// every node's range holds at least one symbol on each side.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
-    fn logistic_cost_bits(
+    fn logistic_code_bit(
         &self,
         bank_indices: &[usize; EXPERTS],
         weight_index: usize,
-        byte: u8,
         logistic: &mut LogisticMix,
-        decay: f64,
-    ) -> f64 {
+        mut code_bit: impl FnMut(usize, f64) -> bool,
+    ) -> u8 {
         let prefix = self.expert_prefix_sums(bank_indices);
-        let symbol = usize::from(byte);
         let weights = &mut logistic.weights[weight_index];
         let steps = &mut logistic.update_count[weight_index];
         let sse = &mut logistic.sse;
-        let mut bits = 0.0f64;
-        let landed = bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
+        bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
             let mut stretched = [0f64; EXPERTS];
             let mut dot = 0.0f64;
             for (expert, sums) in prefix.iter().enumerate() {
@@ -1240,45 +1300,66 @@ impl Literal {
                 dot += weights[expert] * stretched[expert];
             }
             let p = clamp_logistic_probability(squash(dot));
-            let context = bittree::sse_context(depth, node_prefix);
-            let refined = sse.refine(context, p);
-            let bit = symbol >= mid;
-            bits -= if bit {
-                refined.log2()
-            } else {
-                (1.0 - refined).log2()
-            };
-            sse.update(context, p, bit);
-            let rate = logistic_rate(*steps, decay);
+            let node_context = bittree::sse_context(depth, node_prefix);
+            let refined = sse.refine(node_context, p);
+            let bit = code_bit(mid, refined);
+            sse.update(node_context, p, bit);
+            let rate = logistic_rate(*steps, LOGISTIC_RATE_DECAY);
             logistic_gradient_step(weights, &stretched, rate, bit, p);
             *steps += 1;
             bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
-        bits
+        })
     }
 
-    /// `research/JOURNAL.md` S2-A101's paired measurement, the shape of
-    /// [`Self::ideal_cost_bits_ppm_expert_pair`]: prices `byte` from the
-    /// same pre-update banks twice, under `logistic` with `decay`'s rate
-    /// schedule (candidate) and through [`Self::ideal_cost_bits_sse`]
-    /// verbatim (baseline, which then updates the banks and linear weights
-    /// once, on their one real trajectory).
-    ///
-    /// Returns `(baseline_bits, candidate_bits)`.
-    #[must_use]
-    pub fn ideal_cost_bits_logistic_pair(
+    /// Codes `byte` through `encoder` under `context`, blending this
+    /// model's six expert banks through `logistic`'s logit-domain mix
+    /// instead of [`Self::mix`]'s linear blend
+    /// (`research/JOURNAL.md` S1-P8, S2-A101, `codec::LOGISTIC_MIN_VERSION`),
+    /// then updates every expert bank exactly as [`Self::encode_sse`]
+    /// does. The six real experts' own linear weights adapt unperturbed
+    /// ([`Self::update`] still runs on the same six-way `mixed` estimate it
+    /// always has) — the same layering [`Self::encode_column`] already
+    /// uses for its seventh expert, not a new coupling.
+    pub fn encode_logistic(
         &mut self,
+        encoder: &mut Encoder,
         context: Context,
         byte: u8,
         logistic: &mut LogisticMix,
-        decay: f64,
-    ) -> (f64, f64) {
+    ) {
         let (bank_indices, weight_index) = banks(context);
-        let candidate_bits =
-            self.logistic_cost_bits(&bank_indices, weight_index, byte, logistic, decay);
-        let baseline_bits = self.ideal_cost_bits_sse(context, byte);
-        (baseline_bits, candidate_bits)
+        let symbol = usize::from(byte);
+        let landed = self.logistic_code_bit(&bank_indices, weight_index, logistic, |mid, p| {
+            let bit = symbol >= mid;
+            encoder.encode_bit(bit, p);
+            bit
+        });
+        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
+        self.update(&bank_indices, weight_index, symbol, exp);
+    }
+
+    /// Decodes one byte from `decoder` under `context`, the exact inverse
+    /// of [`Self::encode_logistic`]; see that method's docs for the coding
+    /// and update shape.
+    ///
+    /// Never panics on adversarial `decoder` state, the same argument
+    /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
+    /// over any coded bit pattern, and every probability
+    /// [`Self::logistic_code_bit`] derives is this model's and `logistic`'s
+    /// own invariant, never derived from `decoder`'s bytes.
+    #[must_use]
+    pub fn decode_logistic(
+        &mut self,
+        decoder: &mut Decoder,
+        context: Context,
+        logistic: &mut LogisticMix,
+    ) -> u8 {
+        let (bank_indices, weight_index) = banks(context);
+        let byte = self.logistic_code_bit(&bank_indices, weight_index, logistic, |_mid, p| {
+            decoder.decode_bit(p)
+        });
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        byte
     }
 }
 
@@ -1978,45 +2059,127 @@ mod tests {
         assert!((clamp_logistic_probability(0.3) - 0.3).abs() < 1e-18);
     }
 
-    /// Guard on the pair's symmetry: its baseline half is
-    /// [`Literal::ideal_cost_bits_sse`] bit for bit, and the candidate half
-    /// leaves the banks, linear weights, and shipped `Sse` exactly where a
-    /// plain [`Literal::ideal_cost_bits_sse`] pass leaves them.
-    #[test]
-    fn logistic_pair_baseline_is_ideal_cost_bits_sse_and_leaves_the_model_untouched() {
-        let mut paired = Literal::new();
-        let mut plain = Literal::new();
+    fn roundtrip_bytes_logistic(bytes: &[u8]) {
+        let mut model = Literal::new();
         let mut logistic = LogisticMix::new();
         let mut context = Context::default();
-        for &b in b"the quick brown fox jumps over the lazy dog, the quick brown fox" {
-            let (baseline, _) =
-                paired.ideal_cost_bits_logistic_pair(context, b, &mut logistic, 4e-4);
-            let expected = plain.ideal_cost_bits_sse(context, b);
-            assert_eq!(baseline.to_bits(), expected.to_bits(), "byte {b:?}");
+        let mut enc = Encoder::new();
+        for &b in bytes {
+            model.encode_logistic(&mut enc, context, b, &mut logistic);
             context = context.after_literal(b);
         }
-        assert_eq!(paired.freq, plain.freq);
-        assert_eq!(paired.total, plain.total);
-        assert_eq!(paired.weights, plain.weights);
-        assert_eq!(format!("{:?}", paired.sse), format!("{:?}", plain.sse));
+        let encoded = enc.finish();
+
+        let mut model = Literal::new();
+        let mut logistic = LogisticMix::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(&encoded);
+        let mut got = Vec::with_capacity(bytes.len());
+        for _ in bytes {
+            let b = model.decode_logistic(&mut dec, context, &mut logistic);
+            context = context.after_literal(b);
+            got.push(b);
+        }
+        assert_eq!(got, bytes);
     }
 
     #[test]
-    fn logistic_pair_steps_only_its_own_weight_key_once_per_node() {
+    fn empty_stream_round_trips_through_logistic() {
+        roundtrip_bytes_logistic(&[]);
+    }
+
+    #[test]
+    fn single_byte_round_trips_through_logistic() {
+        roundtrip_bytes_logistic(b"x");
+    }
+
+    #[test]
+    fn ascii_text_round_trips_through_logistic() {
+        let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
+        roundtrip_bytes_logistic(&text);
+    }
+
+    #[test]
+    fn pseudo_random_bytes_round_trip_through_logistic() {
+        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+        roundtrip_bytes_logistic(&bytes);
+    }
+
+    #[test]
+    fn decoding_truncated_stream_does_not_panic_through_logistic() {
+        let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
         let mut model = Literal::new();
         let mut logistic = LogisticMix::new();
-        // Give the banks a skew first, so the stretches (and therefore the
-        // gradient step) are nonzero.
-        let mut warm = LogisticMix::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in &bytes {
+            model.encode_logistic(&mut enc, context, b, &mut logistic);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+        let truncated = &encoded[..encoded.len() / 2];
+
+        let mut model = Literal::new();
+        let mut logistic = LogisticMix::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(truncated);
+        for _ in &bytes {
+            let b = model.decode_logistic(&mut dec, context, &mut logistic);
+            context = context.after_literal(b);
+        }
+        // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
+    }
+
+    /// [`Literal::encode_logistic`] must leave the six real experts' banks
+    /// and linear weights exactly where [`Literal::encode_sse`] would, per
+    /// the layering [`Literal::encode_logistic`]'s own docs claim: the
+    /// logit-domain mix reads the banks but never perturbs them or
+    /// `self.weights`, the same guarantee
+    /// `encode_column_updates_the_six_real_experts_same_as_encode_sse`
+    /// checks for the seventh expert.
+    #[test]
+    fn encode_logistic_updates_the_six_real_experts_same_as_encode_sse() {
+        let bytes = b"hello world hello again";
+        let mut via_logistic = Literal::new();
+        let mut logistic = LogisticMix::new();
+        let mut context_logistic = Context::default();
+        let mut enc_logistic = Encoder::new();
+        for &b in bytes {
+            via_logistic.encode_logistic(&mut enc_logistic, context_logistic, b, &mut logistic);
+            context_logistic = context_logistic.after_literal(b);
+        }
+
+        let mut via_sse = Literal::new();
+        let mut context_sse = Context::default();
+        let mut enc_sse = Encoder::new();
+        for &b in bytes {
+            via_sse.encode_sse(&mut enc_sse, context_sse, b);
+            context_sse = context_sse.after_literal(b);
+        }
+
+        assert_eq!(via_logistic.freq, via_sse.freq);
+        assert_eq!(via_logistic.total, via_sse.total);
+        assert_eq!(via_logistic.weights, via_sse.weights);
+    }
+
+    #[test]
+    fn encode_logistic_steps_only_its_own_weight_key_once_per_node() {
+        let mut model = Literal::new();
+        let mut logistic = LogisticMix::new();
         let context = Context {
             prev1: 0x25,
             ..Context::default()
         };
+        // Give the banks a skew first, so the stretches (and therefore the
+        // gradient step) are nonzero.
         for _ in 0..4 {
-            let _ = model.ideal_cost_bits_logistic_pair(context, b'x', &mut warm, 0.0);
+            model.encode_logistic(&mut Encoder::new(), context, b'x', &mut LogisticMix::new());
         }
         let (_, weight_index) = banks(context);
-        let _ = model.ideal_cost_bits_logistic_pair(context, b'x', &mut logistic, 0.0);
+        model.encode_logistic(&mut Encoder::new(), context, b'x', &mut logistic);
         for key in 0..WEIGHT_CONTEXTS {
             if key == weight_index {
                 assert_eq!(logistic.update_count[key], 8);
@@ -2032,55 +2195,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    /// The schedule is actually applied: a larger `decay` shrinks every
-    /// step after the first, so the same stream moves the weights less.
-    #[test]
-    fn logistic_pair_moves_weights_less_under_a_faster_decay() {
-        let movement = |decay: f64| -> f64 {
-            let mut model = Literal::new();
-            let mut logistic = LogisticMix::new();
-            let context = Context::default();
-            for _ in 0..50 {
-                let _ = model.ideal_cost_bits_logistic_pair(context, b'a', &mut logistic, decay);
-            }
-            let (_, weight_index) = banks(context);
-            logistic.weights[weight_index]
-                .iter()
-                .map(|w| (w - LOGISTIC_INITIAL_WEIGHT).abs())
-                .sum()
-        };
-        let (slow, fast) = (movement(0.0), movement(1.0));
-        assert!(slow > 0.0);
-        assert!(
-            fast < slow,
-            "decay 1.0 moved {fast}, decay 0.0 moved {slow}"
-        );
-    }
-
-    #[test]
-    fn logistic_pair_candidate_cost_is_finite_positive_and_learns_a_repeat() {
-        let mut model = Literal::new();
-        let mut logistic = LogisticMix::new();
-        let context = Context::default().after_literal(b'a');
-        let mut previous = f64::INFINITY;
-        for _ in 0..3 {
-            let (_, candidate) =
-                model.ideal_cost_bits_logistic_pair(context, b'a', &mut logistic, 4e-4);
-            assert!(candidate.is_finite() && candidate > 0.0, "{candidate}");
-            assert!(candidate < previous, "{candidate} >= {previous}");
-            previous = candidate;
-        }
-        // A fresh model's experts are uniform: every node's stretch is 0,
-        // the mix squashes to 0.5, and the identity Sse prices 8 bits.
-        let (baseline, candidate) = Literal::new().ideal_cost_bits_logistic_pair(
-            Context::default(),
-            b'q',
-            &mut LogisticMix::new(),
-            4e-4,
-        );
-        assert!((candidate - 8.0).abs() < 1e-9, "{candidate}");
-        assert!(baseline.is_finite());
     }
 }
