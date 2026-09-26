@@ -218,8 +218,11 @@
           <strong>Pre-alpha: no release, no packaged binary, no version
             tag.</strong> The container format (version 5) carries <code
           >Stored</code> and
-          <code>Lz</code>: optimal-parse LZ over an adaptive, context-mixing
-          range coder. That format is specified (<a
+          <code>Lz</code>. <code>Lz</code> finds repeated stretches of the
+          input, works out the cheapest way to describe each one rather than
+          taking the first match, then encodes what is left with an arithmetic
+          coder whose byte predictions blend several models and keep adjusting
+          as they read. That format is specified (<a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/format/SPEC.md"
           >format spec</a>) and versioned, not frozen: until 1.0 a version can
           be retired, and a frame from a build before the first release has no
@@ -234,12 +237,15 @@
       <section>
         <h2>What this is</h2>
         <p>
-          A <strong>context-mixing LZ hybrid</strong>: a filter bank feeds an
-          optimal-parse LZ with in-DP repeat offsets, which feeds an adaptive
-          arithmetic coder with gradient-mixed experts. Ratio came first, so
-          judge it on bits per byte; the speed section below says what that
-          order cost. Every design decision traces to a recorded experiment in
-          the <a
+          Compression runs in three stages. First, reversible transforms
+          rearrange bytes to expose patterns a plain byte-by-byte view hides.
+          Second, an LZ stage finds repeated stretches of the input and works
+          out the cheapest way to describe them, including cheap references back
+          to a handful of recently used distances. Third, an arithmetic coder
+          encodes what remains, blending predictions from several models and
+          adjusting that blend as it reads. Ratio came first, so judge it on
+          bits per byte; the speed section below says what that order cost.
+          Every design decision traces to a recorded experiment in the <a
             href="https://github.com/bugabinga/mothergod/blob/main/research/JOURNAL.md"
           >research journal</a>, rejections included.
         </p>
