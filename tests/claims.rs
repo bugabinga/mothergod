@@ -972,3 +972,47 @@ fn shared_frame_offers_the_same_links_on_every_page() {
         }
     }
 }
+
+#[test]
+fn sitemap_lists_exactly_the_pages_with_a_canonical_tag() {
+    // #753: a sitemap that names a page the site does not serve, or omits
+    // one it does, teaches a crawler the wrong map. The canonical/og:url
+    // pair asserted per page in `social_preview_tags_match_each_pages_own_title_and_description`
+    // is the single source of truth for "what pages exist at what URLs";
+    // this test reads the same three addresses rather than retyping them.
+    let canonical_urls = [
+        "https://mothergod.dev/",
+        "https://mothergod.dev/status",
+        "https://mothergod.dev/agents",
+    ];
+
+    let sitemap = read("site/sitemap.xml");
+    let listed: Vec<&str> = sitemap
+        .match_indices("<loc>")
+        .map(|(index, marker)| {
+            let after = &sitemap[index + marker.len()..];
+            let end = after
+                .find("</loc>")
+                .unwrap_or_else(|| panic!("unterminated <loc> in site/sitemap.xml"));
+            &after[..end]
+        })
+        .collect();
+
+    assert_eq!(
+        listed, canonical_urls,
+        "site/sitemap.xml lists {listed:?}, the site's canonical URLs are {canonical_urls:?}"
+    );
+}
+
+#[test]
+fn robots_txt_points_at_the_committed_sitemap() {
+    // A robots.txt with a Sitemap: line naming a URL that 404s is worse
+    // than no line at all, per the same reasoning #753 filed against the
+    // canonical-tag defect: a crawler-facing pointer should name a URL
+    // the site actually serves.
+    let robots = read("site/robots.txt");
+    assert!(
+        robots.contains("Sitemap: https://mothergod.dev/sitemap.xml"),
+        "site/robots.txt does not point at the committed sitemap.xml: {robots:?}"
+    );
+}
