@@ -4096,7 +4096,8 @@ record.
   on the fallback path, since `Bcj` no longer is. | No bpb measurement:
   capability patch, no codec/bitstream change. `research/progress.jsonl`
   it123. Full record: this entry, S1-P7 lead entry updated above.
-- S1-P8 | LEAD | GLN-style predictors / more experts (2026 AIT Challenge
+- S1-P8 | RESOLVED 2026-09-26, closed by S2-A102 (`FORMAT_VERSION` 5,
+  ADR-0052) | GLN-style predictors / more experts (2026 AIT Challenge
   entries), only after SSE. First slice, S2-R20: LZMA's own "matched
   literal" byte (the byte at the current rep0 distance back from the
   position being coded), generalized as a ninth additive expert through
@@ -7023,8 +7024,60 @@ record.
   per-byte cost (six prefix sums, 48 `ln` calls) is unmeasured. The
   apparatus stays on main until the wiring slice, per the
   `compression-experiment` skill. `research/progress.jsonl` it167.
-  Remaining S1-P8 scope: the wiring slice (real-bitstream measurement,
-  `FORMAT_VERSION` bump, ADR, golden fixture, decode-path determinism of
-  `ln`/`exp`, speed), then a schedule keyed on something other than a
-  step count for the cases that want sustained adaptation, or the GLN
-  gating this lead names.
+  Remaining S1-P8 scope, at the time: the wiring slice (real-bitstream
+  measurement, `FORMAT_VERSION` bump, ADR, golden fixture, decode-path
+  determinism of `ln`/`exp`, speed), then a schedule keyed on something
+  other than a step count for the cases that want sustained adaptation,
+  or the GLN gating this lead names. Sixth slice, S2-A102: the wiring
+  itself, closing this lead — `decode`-path determinism was already
+  satisfied (`ln`/`exp`/`stretch`/`squash` are IEEE-754-only, no new work
+  needed), so this slice was real-bitstream measurement, `FORMAT_VERSION`
+  bump, ADR, and golden fixture only. Speed is unmeasured (tracked,
+  ROADMAP's SPEED line is a program, not a gate). Real bitstreams
+  improved on every train and sealed case tried, none regressed (numbers
+  in S2-A102's own entry). A schedule keyed on something other than a
+  step count, and the from-scratch GLN gating architecture, are both
+  still open: a future lead, not this one's remaining scope, since S1-P8
+  itself is now resolved.
+- S2-A102 | ACCEPTED | S1-P8's real-wiring slice, closing the lead
+  (`FORMAT_VERSION` 5, ADR-0052): `Literal::encode_logistic`/`decode_logistic`
+  code every candidate except `Candidate::Transpose`'s literal sub-stream
+  through `LogisticMix` instead of the six-expert `encode_sse`/`decode_sse`,
+  reusing `Literal::update` verbatim rather than a new coupled update (the
+  six real experts adapt exactly as `encode_sse` leaves them, unperturbed
+  by the logit-domain mix — the same layering ADR-0046's column expert
+  already established, not a new design). `codec::decode`/`decode_to_writer`
+  read the declared version alongside (for `Candidate::Transpose`) the
+  already-parsed filter selector to pick the path; every other candidate
+  at version 5 is otherwise unaffected. | Measured, real bitstreams
+  (`mothergod::compress`, this run's sandbox): `bench/baseline.json`'s 11
+  fixed train-tier cases, none regress (`baseline_gate check` passes):
+  `base64_wrapped` 0.588800 -> 0.584640 (-0.004160), `entropy_ladder_h1`
+  1.262240 -> 1.261920 (-0.000320), `entropy_ladder_h2` 2.428640 ->
+  2.428160 (-0.000480), `entropy_ladder_h4` 4.476800 -> 4.475520
+  (-0.001280), `entropy_ladder_h6` 6.179200 -> 6.178240 (-0.000960),
+  `entropy_ladder_h8` 8.000960 -> 8.000960 (unchanged),
+  `interleaved_audio16` 5.839680 -> 5.788000 (**-0.051680**, the largest
+  single move), `json_records` 0.604640 -> 0.598560 (-0.006080),
+  `markov_h8_2_trap` 2.428800 -> 2.428160 (-0.000640), `sqlite_like_records`
+  3.443040 -> 3.432800 (-0.010240), `x86_dense_code` 2.716000 -> 2.708160
+  (-0.007840). Sealed-only kinds (`sealed_seed(CASE_SEED)`, same length):
+  `access_log` 0.906880 -> 0.905920 (-0.000960), `gradient_image` 5.923360
+  -> 5.914240 (-0.009120), both improve. Corpus policy's accept rule (train
+  improvement, no validation regression) passes on every case tried. |
+  Mechanism: matches S2-A101's own ideal-cost reading in sign and rough
+  magnitude on every case; `interleaved_audio16`'s alignment/order-1
+  agreement and the record-format kinds (`sqlite_like_records`,
+  `json_records`, `x86_dense_code`) carry the improvement, same reading
+  S2-R25/S2-A101 gave. `entropy_ladder_h6` — S2-R25/S2-A101's ideal-cost
+  pairing flagged it a small regression under a constant/annealed rate
+  respectively (+0.004066/+0.003861 at that pre-real-bitstream layer) —
+  instead improves slightly here (-0.000960): the real encoder's own
+  candidate/window selection and LZ parse interact with the literal
+  model's cost differently than the ideal-cost pairing did, an
+  SSE-calibration-shaped gap ADR-0046's own wiring slice (S2-A79) already
+  saw once on the same case. Full argument in ADR-0052's Decision section,
+  not duplicated here. New golden fixture `tests/golden/v5-lz-repeated-text`
+  (same plaintext as `v3-lz-repeated-text`, re-encoded — the real encoder
+  selects `Candidate::Delta(45)`, still non-`Transpose`); that pair stays
+  committed, decode-only, forever. `research/progress.jsonl` it168.

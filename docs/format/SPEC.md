@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 4)
+# mothergod bitstream format (FORMAT_VERSION 5)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -14,7 +14,7 @@ version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 4)
+4       1     format version (currently 5)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -28,11 +28,11 @@ ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
 rather than parsed under the current layout; version 2 named this same
 outer layout but coded its literal sub-stream through a direct 256-way
 range division, and was retired outright under ADR-0050, no release ever
-having written it. Versions 3 and 4 `Lz` frames share the same outer
+having written it. Versions 3, 4, and 5 `Lz` frames share the same outer
 payload layout below; only the literal sub-stream's internal shape
-differs between them (see "Lz" below, ADR-0038, ADR-0046) — a decoder
-dispatches on the declared version (and, for version 4, the frame's own
-filter selector) rather than rejecting either of them.
+differs between them (see "Lz" below, ADR-0038, ADR-0046, ADR-0052) — a
+decoder dispatches on the declared version (and, at version 4 and above,
+the frame's own filter selector) rather than rejecting any of them.
 
 ## Methods
 
@@ -59,10 +59,10 @@ offset  size  field
 10      ...   range-coded stream, of the FILTERED bytes
 ```
 
-**Literal sub-stream shape is version- (and, at version 4, candidate-)
-gated (ADR-0038, ADR-0046).** At format version 3 (`codec::LZ_MIN_VERSION`)
-and above, each literal byte is 8 chained binary decisions over the
-six-expert mixer's cumulative table
+**Literal sub-stream shape is version- (and, at version 4 and above,
+candidate-) gated (ADR-0038, ADR-0046, ADR-0052).** At format version 3
+(`codec::LZ_MIN_VERSION`) and above, each literal byte is 8 chained binary
+decisions over the six-expert mixer's cumulative table
 (`bittree::encode_symbol`/`decode_symbol`'s chain-rule decomposition),
 each calibrated by a secondary symbol estimation (SSE) stage keyed on
 tree position (`bittree::sse_context`, 255 contexts) before it drives the
@@ -73,12 +73,21 @@ further still: a column-keyed seventh expert (`column::column_of`/
 `column_bank`, keyed on the byte's position among the transposed stream's
 columns) is blended into the six-expert mix before the same
 SSE-calibrated binary-tree coding (`literal::Literal::encode_column`/
-`decode_column`); every other candidate at version 4 codes its literals
-exactly as version 3 does. Every other symbol in the stream
-(flag/length/offset/slot) is coded identically regardless of version or
-candidate; a decoder dispatches only the literal sub-stream, on the
-frame's declared version and (at version 4) its own already-parsed filter
-selector.
+`decode_column`). At format version 5 and above
+(`codec::LOGISTIC_MIN_VERSION`), every *other* candidate (every candidate
+except `Candidate::Transpose`) codes its literals through a second mixer
+instead of the plain six-expert one: each of the same six experts'
+per-node probability is mapped to the logit domain, blended under its own
+annealed-rate weight vector, mapped back, and calibrated through its own
+SSE table, independent of the plain mixer's
+(`literal::Literal::encode_logistic`/`decode_logistic`); a version-5
+`Candidate::Transpose` frame still codes through `encode_column`/
+`decode_column` exactly as version 4 does. Every candidate at a version
+below its own gate codes its literals exactly as the next lower version
+does. Every other symbol in the stream (flag/length/offset/slot) is coded
+identically regardless of version or candidate; a decoder dispatches only
+the literal sub-stream, on the frame's declared version and (at version 4
+and above) its own already-parsed filter selector.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for

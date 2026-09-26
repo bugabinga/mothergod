@@ -71,10 +71,14 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// outright, below), to 3 when the literal sub-stream switched to
 /// SSE-calibrated binary-tree coding
 /// (`docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
-/// S1-P1), and to 4 when a `Candidate::Transpose` frame's literal
-/// sub-stream gained a column-keyed seventh expert
+/// S1-P1), to 4 when a `Candidate::Transpose` frame's literal sub-stream
+/// gained a column-keyed seventh expert
 /// (`docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
-/// `research/JOURNAL.md` S1-P5): all four are bitstream format changes
+/// `research/JOURNAL.md` S1-P5), and to 5 when every other candidate's
+/// literal sub-stream switched from SSE-calibrated coding to a logit-domain
+/// mixer over the same six experts
+/// (`docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`,
+/// `research/JOURNAL.md` S1-P8): all five are bitstream format changes
 /// (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
 /// separate version-0 decode path is needed. A version-1 or version-2 frame
@@ -88,13 +92,15 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`). A
 /// version-4 frame whose filter selector names `Candidate::Transpose` codes
 /// its literals through [`literal::Literal::decode_column`] instead of
-/// `decode_sse`, every other candidate unchanged. [`codec::decode`] takes
-/// the frame's declared version (and, for the version-4 case, its
+/// `decode_sse`, every other candidate unchanged; a version-5 frame codes
+/// every candidate except that same `Candidate::Transpose` case through
+/// [`literal::Literal::decode_logistic`] instead. [`codec::decode`] takes
+/// the frame's declared version (and, for `Candidate::Transpose`, its
 /// already-parsed candidate) and picks between them, so hard rule 5's
 /// "decode support for every version the spec still covers" is satisfied by
-/// dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc` and
-/// `tests/golden/v4-*.mgdc` pin that forever).
-pub const FORMAT_VERSION: u8 = 4;
+/// dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
+/// `tests/golden/v4-*.mgdc`, and `tests/golden/v5-*.mgdc` pin that forever).
+pub const FORMAT_VERSION: u8 = 5;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
