@@ -52,6 +52,16 @@ needed one: GOVERNANCE "Stalled auto-merge", sixth signature). PRs open
 through `gh-pr`, on the session's token. Review bodies (`gh pr review`) are
 posted from nowhere: a verdict is a label and a comment (agent-review.yml).
 
+The target must match PR_NUMBER when the caller's environment carries one
+(a review session, agent-review.yml's Claude step). Issue #771 was a
+review scoped to #768 that commented on and merged #770 instead, a wrong
+resolution reaching this script's argument. PR #772 tried to catch that
+class at the Bash boundary with a regex over the unexpanded command text
+and lost six review rounds to newlines, subshells, pipes and indirected
+variables before either resolving the real bug: the check belongs where
+the number is already a concrete string, not where it is still shell
+syntax an adversarial-shaped matcher can never fully parse.
+
 Usage: gh-comment <issue-or-pr-number> [--close] < body
        gh-comment --new "<title>" [--label NAME]... < body
 Prints the comment's or the new issue's URL on stdout.
@@ -95,6 +105,11 @@ def main() -> int:
                 "       gh-comment --new \"<title>\" [--label NAME]... < body")
         if args.label:
             die("--label applies to --new only; label an existing issue with `gh issue edit`")
+        scope = os.environ.get("PR_NUMBER")
+        if scope and args.number != scope:
+            die(f"target #{args.number} does not match PR_NUMBER={scope} from "
+                "the environment; a review session writes only to the PR it "
+                "was scoped to (issue #771)")
 
     role = os.environ.get("ROLE", "")
     if not role:

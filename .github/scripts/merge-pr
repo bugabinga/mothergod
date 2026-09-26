@@ -36,6 +36,15 @@ moves:
   the caller's decision and this call fails loud instead of shipping
   unreviewed content. Default pin is the head read here; pass --sha for
   the head the verdict actually covered.
+- The target must match PR_NUMBER when the caller's environment carries
+  one (a review session, agent-review.yml's Claude step). Issue #771 was
+  a review scoped to #768 that merged #770 instead, a wrong resolution
+  reaching this script's argument. PR #772 tried to catch that class at
+  the Bash boundary with a regex over the unexpanded command text and
+  lost six review rounds to newlines, subshells, pipes and indirected
+  variables before either resolving the real bug: the check belongs
+  where the number is already a concrete string, not where it is still
+  shell syntax an adversarial-shaped matcher can never fully parse.
 
 What this does NOT do, deliberately: decide. Reading the thread for a
 request-changes verdict, the workflow carve-out, and the file-list read
@@ -178,6 +187,11 @@ def main():
     pr = args[0]
     if not REPO:
         die("GITHUB_REPOSITORY is not set; run this from an agent session")
+    scope = os.environ.get("PR_NUMBER")
+    if scope and pr != scope:
+        die(f"target #{pr} does not match PR_NUMBER={scope} from the "
+            "environment; a review session merges only the PR it was "
+            "scoped to (issue #771)")
 
     proc, _ = gh_api((f"repos/{REPO}/pulls/{pr}",))
     if proc.returncode != 0:

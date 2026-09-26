@@ -149,3 +149,25 @@ test("a typed footer is stripped before the role footer goes on", () => {
 test("a PR number is a comment target like any issue: gh takes it (#589, #683)", () => {
   assert.deepEqual(run(["683"]).called.argv.slice(0, 3), ["issue", "comment", "683"]);
 });
+
+// Issue #771: a review scoped to #768 commented on and merged #770 instead.
+// A review session's environment carries PR_NUMBER; nothing outside that
+// scope may reach gh, no matter how the wrong number was resolved.
+test("PR_NUMBER in the environment refuses a write to any other number", () => {
+  const { status, called, stderr } = run(["770"], { env: { PR_NUMBER: "768" } });
+  assert.equal(status, 1);
+  assert.equal(called, null);
+  assert.match(stderr, /does not match PR_NUMBER=768/);
+});
+
+test("PR_NUMBER matching the target is unaffected", () => {
+  const { status, called } = run(["768"], { env: { PR_NUMBER: "768" } });
+  assert.equal(status, 0);
+  assert.deepEqual(called.argv.slice(0, 3), ["issue", "comment", "768"]);
+});
+
+test("no PR_NUMBER in the environment (every non-review seat) is unaffected", () => {
+  const { status, called } = run(["770"]);
+  assert.equal(status, 0);
+  assert.deepEqual(called.argv.slice(0, 3), ["issue", "comment", "770"]);
+});
