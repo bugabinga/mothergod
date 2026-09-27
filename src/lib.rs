@@ -448,13 +448,25 @@ fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
     frame
 }
 
-/// Whether an [`Method::Lz`] body of `body_len` bytes beats a
-/// [`Method::Stored`] frame of `input_len` bytes. Strict: a tie keeps
-/// `Stored`. This is `compress`'s own convention, not something
-/// `docs/format/SPEC.md` requires — the spec only bounds the frame from
-/// above (`header + len(x)`), which either method satisfies on a tie.
-fn lz_beats_stored(body_len: usize, input_len: usize) -> bool {
-    body_len < input_len
+/// Whether a `candidate_len`-byte encoding beats an `incumbent_len`-byte
+/// incumbent in a shortest-wins search. Strict: a tie keeps the
+/// incumbent, so search order is a stable tie-break, not an accident of
+/// iteration. Shared by [`compress`]'s [`Method::Lz`]-vs-[`Method::Stored`]
+/// choice and [`codec::encode`]'s filter-candidate search (where it keeps
+/// [`filters::select::pick`]'s candidate order a stable tie-break) —
+/// both are this same convention, not something `docs/format/SPEC.md`
+/// requires (the spec only bounds the frame from above, which either
+/// choice satisfies on a tie).
+///
+/// #390's mutation sweep found `<` survive as both `<=` and `==` at this
+/// function's two call sites, before they were merged here: neither
+/// `compress`'s nor `encode`'s own round-trip and selection tests ever
+/// observe which candidate was chosen on a tie, since every candidate
+/// they compare is already a valid, lossless encoding. The unit test
+/// below is the only place that pins "strictly smaller, not tied or
+/// larger" directly.
+pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usize) -> bool {
+    candidate_len < incumbent_len
 }
 
 /// Compresses `input` into a self-describing frame.
@@ -468,7 +480,7 @@ fn lz_beats_stored(body_len: usize, input_len: usize) -> bool {
 pub fn compress(input: &[u8]) -> Vec<u8> {
     if u32::try_from(input.len()).is_ok() {
         let body = codec::encode(input);
-        if lz_beats_stored(body.len(), input.len()) {
+        if candidate_beats_incumbent(body.len(), input.len()) {
             return build_frame(Method::Lz, &body);
         }
     }
@@ -834,22 +846,18 @@ mod tests {
     }
 
     #[test]
-    fn lz_beats_stored_keeps_the_strictly_smaller_body_only() {
-        // #390's mutation sweep found `<` -> `<=` surviving the full suite:
-        // `compress`'s own round-trip tests never observe which method was
-        // chosen on a tie, since both frame a losslessly. Unit testing the
-        // extracted comparison directly is the only way to pin the
-        // Stored-floor invariant ("Lz wins outright, never on a tie")
-        // without constructing an input whose encoded Lz body happens to
-        // land exactly at input.len().
-        assert!(lz_beats_stored(3, 5), "a strictly smaller body must win");
+    fn candidate_beats_incumbent_keeps_the_strictly_smaller_candidate_only() {
         assert!(
-            !lz_beats_stored(5, 5),
-            "a tied body must fall back to Stored"
+            candidate_beats_incumbent(3, 5),
+            "a strictly smaller candidate must win"
         );
         assert!(
-            !lz_beats_stored(6, 5),
-            "a larger body must fall back to Stored"
+            !candidate_beats_incumbent(5, 5),
+            "a tied candidate must not displace the incumbent"
+        );
+        assert!(
+            !candidate_beats_incumbent(6, 5),
+            "a larger candidate must not win"
         );
     }
 
