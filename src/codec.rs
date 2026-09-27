@@ -338,13 +338,9 @@ fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
 fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Result<Vec<u8>, Error> {
     match candidate {
         Candidate::Identity => Ok(data),
-        Candidate::Delta(stride) => {
-            filters::delta::try_decode(&data, stride).map_err(|_| Error::OutOfMemory)
-        }
-        Candidate::Bcj => filters::bcj::try_decode(&data).map_err(|_| Error::OutOfMemory),
-        Candidate::Transpose(columns) => {
-            filters::transpose::try_decode(&data, columns).map_err(|_| Error::OutOfMemory)
-        }
+        Candidate::Delta(stride) => Ok(filters::delta::try_decode(&data, stride)?),
+        Candidate::Bcj => Ok(filters::bcj::try_decode(&data)?),
+        Candidate::Transpose(columns) => Ok(filters::transpose::try_decode(&data, columns)?),
     }
 }
 
@@ -1132,17 +1128,16 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     ensure_within_max_len(declared_len, max_len)?;
 
     let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
+    let mut models = Models::try_new()?;
     let mut reps = RepCache::initial();
     // Some exactly when this frame's candidate is Candidate::Transpose and
     // its declared version codes the column-expert path (COLUMN_EXPERT_MIN_VERSION):
     // mirrors encode_tokens's ColumnCoding, but `state` is owned here
     // (there is no per-candidate trial to share it across).
     let mut column_state: Option<(NonZeroUsize, ColumnExpertState)> = match candidate {
-        Candidate::Transpose(columns) if version >= COLUMN_EXPERT_MIN_VERSION => Some((
-            columns,
-            ColumnExpertState::try_new(MAX_COLUMN_BANKS).map_err(|_| Error::OutOfMemory)?,
-        )),
+        Candidate::Transpose(columns) if version >= COLUMN_EXPERT_MIN_VERSION => {
+            Some((columns, ColumnExpertState::try_new(MAX_COLUMN_BANKS)?))
+        }
         _ => None,
     };
     // Reserved fallibly and exactly up front, not left to grow through
@@ -1153,9 +1148,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     // `push`'s infallible growth path (hard rule 2, torture-swept by
     // `tests/torture.rs`, #453).
     let mut output: Vec<u8> = Vec::new();
-    output
-        .try_reserve_exact(declared_len)
-        .map_err(|_| Error::OutOfMemory)?;
+    output.try_reserve_exact(declared_len)?;
 
     let mut sink = VecSink {
         output: &mut output,
@@ -1222,7 +1215,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             &mut StreamUndo::Identity,
         ),
         Candidate::Delta(stride) => {
-            let undo = filters::delta::Undo::try_new(stride).map_err(|_| Error::OutOfMemory)?;
+            let undo = filters::delta::Undo::try_new(stride).map_err(Error::from)?;
             decode_undoable_streaming(
                 filtered_payload,
                 version,
@@ -1232,7 +1225,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             )
         }
         Candidate::Bcj => {
-            let undo = filters::bcj::Undo::try_new().map_err(|_| Error::OutOfMemory)?;
+            let undo = filters::bcj::Undo::try_new().map_err(Error::from)?;
             decode_undoable_streaming(
                 filtered_payload,
                 version,
@@ -1373,9 +1366,9 @@ fn decode_undoable_streaming<W: std::io::Write>(
     ensure_within_max_len(declared_len, max_len)?;
 
     let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new().map_err(|_| Error::OutOfMemory)?;
+    let mut models = Models::try_new().map_err(Error::from)?;
     let mut reps = RepCache::initial();
-    let mut window = lz::Window::try_new().map_err(|_| Error::OutOfMemory)?;
+    let mut window = lz::Window::try_new().map_err(Error::from)?;
 
     let mut sink = StreamingSink {
         window: &mut window,

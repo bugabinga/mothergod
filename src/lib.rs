@@ -195,6 +195,16 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl From<std::collections::TryReserveError> for Error {
+    /// Every `try_reserve`/`try_new` allocation this crate's decode path
+    /// makes fails the same way: [`Error::OutOfMemory`], never a panic
+    /// (hard rule 2). One impl instead of a `.map_err(|_| Error::OutOfMemory)`
+    /// at each of the decoder's fallible-allocation call sites.
+    fn from(_: std::collections::TryReserveError) -> Self {
+        Self::OutOfMemory
+    }
+}
+
 /// Error from [`decompress_to_writer`]: either the frame failed to decode
 /// ([`Error`], same variants and meaning as [`decompress`]'s) or `writer`
 /// itself failed.
@@ -659,7 +669,7 @@ pub fn decompress_to_writer<W: std::io::Write>(
         method,
         payload,
     } = bounded_header(input, max_len)?;
-    let mut writer = TryBufWriter::try_new(writer).map_err(|_| Error::OutOfMemory)?;
+    let mut writer = TryBufWriter::try_new(writer).map_err(Error::from)?;
     match method {
         Method::Stored => {
             check_stored_bound(payload, stored_bound)?;
