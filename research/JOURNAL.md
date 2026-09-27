@@ -7101,3 +7101,88 @@ record.
   (same plaintext as `v3-lz-repeated-text`, re-encoded — the real encoder
   selects `Candidate::Delta(45)`, still non-`Transpose`); that pair stays
   committed, decode-only, forever. `research/progress.jsonl` it168.
+- S2-R26 | REJECTED | S2-A102's own remaining-scope note: "a schedule keyed
+  on something other than a step count for the cases that want sustained
+  adaptation" (`x86_dense_code`, `json_records`, `base64_wrapped`,
+  S2-A101's own reading of what a count-only schedule cannot give back
+  once decayed). Hypothesis: an exponential moving average of each
+  `WEIGHT_CONTEXTS` key's squared gradient error, in place of
+  `logistic_rate`'s step count, tracks genuine distribution drift
+  (variable-step-size LMS: Kwong & Johnston, "A variable step size LMS
+  algorithm", IEEE Trans. Signal Processing, 1992 — step size keyed on
+  recent error rather than a clock), keeping more of `LOGISTIC_INITIAL_RATE`
+  on a shifting byte stream than S2-A102's schedule gives back, without
+  regressing the sealed set. | Apparatus, additive, alongside the shipped
+  `LogisticMix`/`logistic_rate`, never called by them: `literal::
+  ErrorRateLogisticMix` (same weight vectors and `Sse` as `LogisticMix`,
+  `update_count` replaced by a per-key `recent_sq_error`, initialized at
+  `ERROR_RATE_MAX_VARIANCE = 0.25`, a Bernoulli variable's maximum variance
+  — a principled normalizer in place of a swept constant, and this
+  schedule's own step-0 rate, matching `logistic_rate(0, _)`),
+  `logistic_rate_error` (same two endpoints as `logistic_rate`, fraction of
+  `ERROR_RATE_MAX_VARIANCE` in place of a step-derived fraction),
+  `error_rate_ema_update` (`recent = decay·recent + (1−decay)·error²`, one
+  call per bit-tree node, mirroring `logistic_gradient_step`'s shape),
+  `Literal::logistic_code_bit_error_rate`/`ideal_cost_bits_logistic_error_rate_at`/
+  `ideal_cost_bits_logistic_error_rate` (the last two mirroring
+  `ideal_cost_bits_logistic`, `_at` taking `decay` explicit for the sweep);
+  5 new unit tests pinning the fresh-mixer state, the rate formula's two
+  endpoints and monotonicity, the EMA blend against a hand-computed value,
+  that a walk touches only its own weight key, and that the two entry
+  points agree at the registered constant. Scratch binary
+  `bench/src/bin/scratch_logistic_error_rate.rs` (deleted with this
+  verdict): for `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` sealed
+  at `sealed_seed(CASE_SEED)`, same length, extracted each case's real
+  optimal-parse literal stream once (`lz::parse_optimal`,
+  `Context::after_literal`/`after_copy` in coding order, S2-A88's own
+  method) and priced it twice from independent fresh state: the champion,
+  S2-A102's shipped `ideal_cost_bits_logistic`; the candidate,
+  `ideal_cost_bits_logistic_error_rate_at` swept over `decay` ∈ {0, 0.5,
+  0.8, 0.9, 0.95, 0.98, 0.99, 0.995, 0.999} (1 itself freezes
+  `recent_sq_error` at `ERROR_RATE_MAX_VARIANCE` forever, collapsing the
+  schedule to a constant near-top rate). | Train mean delta (candidate
+  minus champion, 11 cases) stayed positive — worse — at every decay
+  tried: +0.000731 b/B at 0, +0.000963 at 0.5, +0.000670 at 0.8, +0.000472
+  at 0.9, +0.000334 at 0.95, +0.000247 at 0.98, +0.000214 at 0.99,
+  +0.000172 at 0.995, **+0.000038** (its least-bad point) at 0.999.
+  `gradient_image` (sealed) regressed at every decay too, worse than any
+  train movement: +0.004013 at 0, peaking **+0.010405** at 0.5, still
+  +0.008410 at 0.999; `access_log` (sealed) stayed near flat throughout
+  (+0.000010 to +0.000199). The three cases the remaining-scope note
+  named as wanting sustained adaptation never recovered gain over the
+  champion at any decay: `x86_dense_code` +0.000644 to +0.000868,
+  `json_records` +0.000007 to +0.000331, `base64_wrapped` −0.000044 to
+  +0.000436 across the grid, all near zero or worse throughout, not the
+  clear win the hypothesis named. **Rejected**: corpus policy needs train
+  improvement and no sealed regression; this candidate manages neither at
+  any point on the swept grid. | Mechanism: a per-bit-tree-node squared
+  prediction error reflects two different things at once — genuine
+  distribution drift (what this schedule was built to react to) and a
+  context's own intrinsic residual uncertainty (stable, not something to
+  react to). `interleaved_audio16` and `gradient_image` are exactly
+  S2-R25's own named overshoot cases (a fast rate overreacting on a smooth
+  noisy surface); here the conflation keeps their rate near the top
+  indefinitely, because a converged, well-calibrated context on genuinely
+  noisy data still carries nontrivial residual error forever, so
+  `recent_sq_error` never falls the way a step count deterministically
+  does. The cases the note actually targeted show the opposite failure:
+  their error signal decays to the floor about as fast as the champion's
+  step count already does, so the schedule recovers nothing there either.
+  As `decay` → 1 the EMA update freezes at its initial value and the
+  schedule converges toward a constant near-`LOGISTIC_INITIAL_RATE` rate —
+  the same regime S2-A101/S2-R25 already measured and rejected relative to
+  the champion — which is why the train net's approach toward zero at high
+  decay retraces a known-inferior limit rather than finding new ground.
+  | A per-node error signal cannot serve this schedule until it can tell
+  a context's stable residual uncertainty apart from real drift (e.g. an
+  EMA of surprise *relative to that context's own recent baseline*, or a
+  per-context floor learned instead of one shared `ERROR_RATE_MAX_VARIANCE`
+  normalizer); re-running the identical mechanism unchanged is closed.
+  Candidate code (`literal::ErrorRateLogisticMix`,
+  `ERROR_RATE_MAX_VARIANCE`/`ERROR_RATE_EMA_DECAY`, `logistic_rate_error`,
+  `error_rate_ema_update`, `Literal::logistic_code_bit_error_rate`/
+  `ideal_cost_bits_logistic_error_rate`/`_at`, their five unit tests, the
+  scratch binary) reverted in full per the `compression-experiment`
+  skill's delete-rejected-candidate-code rule. `research/progress.jsonl`
+  it170.
