@@ -7186,3 +7186,94 @@ record.
   scratch binary) reverted in full per the `compression-experiment`
   skill's delete-rejected-candidate-code rule. `research/progress.jsonl`
   it170.
+- S2-A104 | ACCEPTED | S2-A102's own remaining-scope note, S2-R26's own
+  diagnosis turned into a fix: that entry's own mechanism paragraph named
+  the flaw precisely — "a per-node squared prediction error reflects two
+  different things at once — genuine distribution drift... and a
+  context's own intrinsic residual uncertainty (stable, not something to
+  react to)" — and read both against one shared `ERROR_RATE_MAX_VARIANCE`
+  constant, so a converged-but-noisy context (`interleaved_audio16`,
+  `gradient_image`) could never tell "this is my normal noise" from "this
+  is new." Hypothesis: read the fast error EMA against that same key's own
+  *learned* baseline (a second, slower EMA of the identical signal)
+  instead of a shared constant, so `recent ≈ baseline` (a context back at
+  its own steady state) decays to the floor while `recent` pulling away
+  from `baseline` (genuine drift, not mere noise) still pushes the rate
+  back up. | Apparatus, additive, alongside the shipped `LogisticMix`,
+  never called by it: `literal::SurpriseLogisticMix` (same weight vectors
+  and `Sse` as `LogisticMix`; `update_count` replaced by two `f64` EMAs
+  per key, `recent_sq_error` and `baseline_sq_error`, both starting at
+  `0.0`, read by `surprise_rate` as "not yet established" — maximum
+  surprise, matching `logistic_rate`'s own `steps = 0` rate), `surprise_rate`
+  (`LOGISTIC_FLOOR_RATE` at `recent <= baseline`, `LOGISTIC_INITIAL_RATE`
+  at `recent >= 2 * baseline`, linear between, `baseline <=
+  SURPRISE_BASELINE_EPSILON` treated as the cold-start case), `surprise_ema_update`
+  (`decay * previous + (1 - decay) * error²`, one call per bit-tree node
+  per EMA, `baseline_sq_error`'s own decay fixed at `SURPRISE_BASELINE_DECAY`
+  = 0.9995, deliberately not swept: this timescale stands for "this key's
+  settled residual," a design choice, not a free parameter), `Literal::
+  ideal_cost_bits_logistic_surprise`/`_at` (the latter taking `recent_decay`
+  explicit for the sweep, mirroring `ideal_cost_bits_logistic`); five unit
+  tests (fresh-mixer state, `surprise_rate`'s two endpoints plus
+  monotonicity between them, the EMA blend against a hand-computed value,
+  that a walk touches only its own weight key, that the two entry points
+  agree at the registered constant). Scratch binary
+  `bench/src/bin/scratch_logistic_surprise.rs` (deleted with this
+  verdict, same convention as S2-R26's): for `bench::baseline`'s 11 train
+  cases (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) plus
+  `access_log`/`gradient_image` sealed at `sealed_seed(CASE_SEED)`, same
+  length, extracted each case's real optimal-parse literal stream once
+  (`lz::parse_optimal`, S2-A88's own method, identical to S2-R26's) and
+  priced it twice from independent fresh state: the champion, S2-A102's
+  shipped `ideal_cost_bits_logistic`; the candidate,
+  `ideal_cost_bits_logistic_surprise_at` swept over `recent_decay` at the
+  same nine points S2-R26 used (0, 0.5, 0.8, 0.9, 0.95, 0.98, 0.99, 0.995,
+  0.999), `baseline_sq_error`'s own decay held fixed. | Train mean delta
+  (candidate minus champion) was positive (worse) at `recent_decay` 0
+  (+0.000509), 0.5 (+0.000664), and 0.8 (+0.000048, both sealed cases
+  still improved even here), then turned and stayed negative from 0.9
+  through 0.999: 0.9 −0.000138, 0.95 −0.000228, **0.98 −0.000256** (this
+  entry's chosen point), 0.99 −0.000238, 0.995 −0.000228, 0.999 −0.000042.
+  At the chosen point (`recent_decay` = 0.98): every train case stayed
+  within ±0.00055 b/B of the champion (`markov_h8_2_trap` +0.000543 and
+  `json_records` +0.000488 the largest regressions, both two orders of
+  magnitude under `TOLERANCE_BITS`), `interleaved_audio16` −0.001595 and
+  `sqlite_like_records` −0.001208 carrying most of the train improvement.
+  Sealed split, the deciding evidence: **both kinds improved at every
+  `recent_decay` from 0 through 0.999**, `access_log` from −0.000144 (a
+  regression at 0, actually) down to −0.000106 by 0.995, `gradient_image`
+  from −0.001008 at 0 down to **−0.003457** at the chosen 0.98 and as low
+  as −0.004302 at 0.999 — the first slice in this lead's entire S2-R20
+  through S2-R26 history where `gradient_image` improves rather than
+  being the regression that sinks the candidate. Corpus policy's accept
+  rule (train improvement, no validation regression) passes cleanly at
+  every `recent_decay` from 0.9 through 0.999; 0.98 is this entry's own
+  pick as the best-supported point (strongest train mean among the
+  qualifying range, both sealed kinds improving well inside it, not the
+  single best point on either axis alone). | Mechanism: S2-R26's own
+  diagnosis was correct as stated, and separating the two signals it
+  named fixes exactly what it predicted. `interleaved_audio16` and
+  `gradient_image` are smooth, structurally noisy sources whose per-node
+  prediction error never converges near zero even once the mixer has
+  fully adapted — a converged context there still carries real residual
+  uncertainty forever, which is what made S2-R26's single shared
+  threshold read every one of their nodes as "still surprised," keeping
+  the fast rate on indefinitely. Once each key tracks its own settled
+  error level (`baseline_sq_error`) instead of a threshold shared across
+  every context in the model, that same steady residual reads as
+  `recent ≈ baseline`, ratio near 1, and the schedule decays normally —
+  the fix is legible in the very case this diagnosis named. The training
+  side did not fully recover the three cases S2-A101's own remaining-scope
+  note first flagged (`x86_dense_code`, `json_records`, `base64_wrapped`
+  each stayed within ±0.0009 b/B of the champion at every `recent_decay`,
+  neither the clear win nor the clear loss S2-R20 through S2-R25 traded
+  off against each other), so this slice's real win is the sealed
+  side's reversal, not that three-case target. `research/progress.jsonl`
+  it171. Remaining scope: unwired. A wiring slice would need its own
+  `FORMAT_VERSION` bump under CLAUDE.md hard rule 5 — `logistic_rate`'s
+  schedule is deterministic model state both `encode_logistic` and
+  `decode_logistic` must replay identically from coded history alone, so
+  swapping it changes model semantics visible in the bitstream even
+  though no frame byte encodes the schedule directly — plus an ADR and a
+  golden fixture, matching S2-A102's own precedent; `SURPRISE_BASELINE_DECAY`
+  itself (fixed here, not swept) is a candidate for its own future slice.
