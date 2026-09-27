@@ -125,14 +125,19 @@ beating the field is finished. Progress reads off the Scorecard's RATIO ladder
 and `research/progress.jsonl`, never a checkbox.
 
 Work the journal's standing leads. Resolved: SSE (S1-P1), per-column
-modeling (S1-P5). Exhausted under every mechanism tried so far, pending a
-genuinely new one, not a variant (JOURNAL S2-L1): btultra2-class parse
-(S1-P2), PPM escape (S1-P3), large windows (S1-P4 — every pricing/gating
-signal since S2-R11 has failed, JOURNAL S2-R14's own remaining-scope note;
-what is left is a deliberate large-file mode, M5 territory, not a parse
-heuristic). Open: more experts (S1-P8, gated "only after SSE," now
-unblocked, one slice in). Target: beat zstd -19 per-file on all of
-Silesia/Canterbury with real bitstreams; then xz -9e.
+modeling (S1-P5), more experts via a logit-domain mixer (S1-P8, JOURNAL
+S2-A102, ADR-0052, `FORMAT_VERSION` 5). Exhausted under every mechanism
+tried so far, pending a genuinely new one, not a variant (JOURNAL S2-L1):
+btultra2-class parse (S1-P2), PPM escape (S1-P3), large windows (S1-P4 —
+every pricing/gating signal since S2-R11 has failed, JOURNAL S2-R14's own
+remaining-scope note; what is left is a deliberate large-file mode, M5
+territory, not a parse heuristic). No standing lead is open: the next
+candidate is a literature idea or a cheap wild swing per the
+`compression-experiment` skill, unless S2-A102's own remaining-scope note
+(a rate schedule keyed on something other than a step count, or a
+from-scratch GLN gating architecture) is promoted to one. Target: beat
+zstd -19 per-file on all of Silesia/Canterbury with real bitstreams; then
+xz -9e.
 
 ## M4 — Production hardening ✅
 
