@@ -41,3 +41,7 @@ All notable changes to this project are documented here. Format follows
   half of the metric alongside the existing `src/` line counts. `cargo x
   doc` keeps the published count honest against what rustdoc actually
   built (`docs/api-surface.txt`).
+- `site/404.html`: mothergod.dev's soft-404 (#753 item 3) is a real page
+  now, carrying the same site nav as every other page so a broken or
+  mistyped link still offers a way to the three real pages instead of a
+  silent copy of the homepage.
