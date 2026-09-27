@@ -34,13 +34,14 @@
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-09-24",
+  "reviewed": "2026-09-27",
   "roles": {
     "bdfl": {
-      "$comment": "Thrift drops the model and keeps the thinking: this seat is 47.3% of the fleet's seven-day projected cost, the largest of any seat. Retries the cheaper model at the normal rung's own effort after #362 moved model and effort together and credited the model. A bet with a written falsification, both tells and the full reasoning in SOURCES.md, 2026-09-19.",
+      "$comment": "Thrift drops the model and keeps the thinking: this seat is 47.3% of the fleet's seven-day projected cost, the largest of any seat. Retries the cheaper model at the normal rung's own effort after #362 moved model and effort together and credited the model. A bet with a written falsification, both tells and the full reasoning in SOURCES.md, 2026-09-19. Third rung promoted to try claude-opus-5-5 first, claude-opus-5 kept beneath it as the proven floor: the curator's canary (2026-09-24) came back green, SOURCES.md, 2026-09-27.",
       "ladder": [
         "claude-fable-5-1",
         "claude-fable-5",
+        "claude-opus-5-5",
         "claude-opus-5"
       ],
       "effort": "xhigh",
@@ -52,7 +53,7 @@
       }
     },
     "curator": {
-      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first. Canary for claude-opus-5-5 (operator, Telegram, 2026-09-24): same tier as claude-opus-5 at 20% less per token, unverifiable from a session because the nested CLI holds no login, so the cheapest Opus seat tries it first with its old rung beneath. Falsification: the first curator wake after merge either shows claude-opus-5-5 in the retrospect's model column, or fails with a 404 that agent-pause ledgers for seven days so the next wake falls through to claude-opus-5. A green canary promotes the herald, the researcher and the BDFL's third rung. Effort is pinned to high because Opus 5.5's own default is medium, one level below Opus 5's, and an empty value here would silently take that cut (SOURCES.md adoption log, 2026-09-24).",
+      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first. Canary for claude-opus-5-5 (operator, Telegram, 2026-09-24), promoted 2026-09-27: run-telemetry.py's 2026-09-27 window shows 2 of 14 curator runs on claude-opus-5-5, no 404 in the model-availability ledger (#110) since the canary landed. Green, per its own falsification rule; promotes the herald, the researcher and the BDFL's third rung, all done this same run (SOURCES.md, 2026-09-27). Effort is pinned to high because Opus 5.5's own default is medium, one level below Opus 5's, and an empty value here would silently take that cut (SOURCES.md adoption log, 2026-09-24).",
       "ladder": [
         "claude-opus-5-5",
         "claude-opus-5",
@@ -73,8 +74,9 @@
       "effort": ""
     },
     "herald": {
-      "$comment": "Opus floor, no sonnet rung: writing quality for humans is this seat's entire output, and a weaker writer defeats the seat (ADR-0040). Thrift trades that deliberately when the alternative is a dead factory.",
+      "$comment": "Opus floor, no sonnet rung: writing quality for humans is this seat's entire output, and a weaker writer defeats the seat (ADR-0040). Thrift trades that deliberately when the alternative is a dead factory. claude-opus-5-5 promoted above claude-opus-5, same tier at 20% less per token: the curator's canary came back green (SOURCES.md, 2026-09-27).",
       "ladder": [
+        "claude-opus-5-5",
         "claude-opus-5"
       ],
       "effort": "",
@@ -92,8 +94,9 @@
       "effort": ""
     },
     "researcher": {
-      "$comment": "Opus first: each research session is the fleet's judgment-densest, so the raise costs one sonnet-to-opus delta per session (operator directive, Telegram, 2026-09-01). Cadence moved off a fixed weekly wake to research-due's claim check (issue #541, operator request, Telegram, 2026-09-21), roughly twice weekly now, so this raise now costs about twice what it did when priced.",
+      "$comment": "Opus first: each research session is the fleet's judgment-densest, so the raise costs one sonnet-to-opus delta per session (operator directive, Telegram, 2026-09-01). Cadence moved off a fixed weekly wake to research-due's claim check (issue #541, operator request, Telegram, 2026-09-21), roughly twice weekly now, so this raise now costs about twice what it did when priced. claude-opus-5-5 promoted above claude-opus-5, same tier at 20% less per token: the curator's canary came back green (SOURCES.md, 2026-09-27).",
       "ladder": [
+        "claude-opus-5-5",
         "claude-opus-5",
         "claude-sonnet-5"
       ],
