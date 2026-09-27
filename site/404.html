@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>mothergod — page not found</title>
+    <meta name="robots" content="noindex">
+    <link rel="icon" href="/logo.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Albert+Sans:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+    >
+    <style>
+    :root {
+      --void: #0b0618;
+      --nebula: #1c1136;
+      --line: #382a5e;
+      --starlight: #f2ecff;
+      --muted: #a396c9;
+      --gold: #ffd76a;
+      --gold-deep: #e0a12f;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      background:
+        radial-gradient(120% 90% at 50% 0%, #241548 0%, var(--void) 62%) fixed,
+        var(--void);
+      color: var(--starlight);
+      font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+      padding: 1.6rem 1.25rem 5rem;
+      min-height: 100vh;
+    }
+    main {
+      max-width: 720px; margin: 3rem auto 0; display: flex;
+      flex-direction: column; gap: 1.2rem; align-items: center; text-align: center;
+    }
+
+    /* Same frame as every other page (issue #604 item 4), minus the
+       current-page mark: a 404 is none of the site's destinations, so none
+       of these links carries aria-current. tests/claims.rs checks the
+       destination list against this file too, expecting zero marked. */
+    .frame {
+      max-width: 720px; margin: 0 auto; display: flex; flex-wrap: wrap;
+      justify-content: center; gap: .2rem 1.4rem;
+      font-family: "JetBrains Mono", monospace; font-size: .8rem;
+    }
+    .frame a {
+      color: var(--muted); text-decoration: none;
+      padding-bottom: .15rem; border-bottom: 1px solid transparent;
+    }
+    .frame a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+    .frame a:focus-visible {
+      color: var(--gold); outline: 2px solid var(--gold); outline-offset: 3px;
+    }
+
+    h1 {
+      font-family: "Unbounded", "Albert Sans", sans-serif;
+      font-weight: 600; font-size: clamp(1.6rem, 5vw, 2.2rem);
+      letter-spacing: .02em;
+    }
+    p { color: var(--muted); max-width: 46ch; }
+    a { color: var(--gold); }
+    a:hover, a:focus-visible { color: var(--gold-deep); }
+    </style>
+  </head>
+  <body>
+    <nav class="frame" aria-label="Site">
+      <a href="/">mothergod</a>
+      <a href="/status">Status</a>
+      <a href="/agents">Agents</a>
+      <a href="https://github.com/bugabinga/mothergod">Source</a>
+    </nav>
+    <main>
+      <h1>Nothing lives at this address.</h1>
+      <p>
+        Three pages do: the <a href="/">overview</a>,
+        <a href="/status">live status</a>, and <a href="/agents"
+        >who builds it</a>, all linked above.
+      </p>
+    </main>
+  </body>
+</html>

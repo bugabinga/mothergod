@@ -922,17 +922,21 @@ fn frame_links(nav: &str) -> Vec<(String, String, bool)> {
 
 #[test]
 fn shared_frame_offers_the_same_links_on_every_page() {
-    // The frame (issue #604 item 4) is three inline copies of one nav,
+    // The frame (issue #604 item 4) is four inline copies of one nav,
     // because the site has no build step to share a stylesheet or a partial.
     // A copy is a synchronization debt: a page gains a destination and the
     // other two silently keep the old map, which on a three-page site means
     // a reader who can reach a page from one place and not from another.
     // This is that debt, paid by a test: same destinations in the same order
     // everywhere, and exactly one of them marked as where the reader is.
+    // 404.html (issue #753 item 3) carries the same frame but marks none of
+    // them current, because a not-found page is none of the site's real
+    // destinations.
     let pages = [
-        ("site/index.html", "/"),
-        ("site/status.html", "/status"),
-        ("site/agents.html", "/agents"),
+        ("site/index.html", Some("/")),
+        ("site/status.html", Some("/status")),
+        ("site/agents.html", Some("/agents")),
+        ("site/404.html", None),
     ];
 
     let mut expected: Option<(&str, Vec<(String, String)>)> = None;
@@ -947,17 +951,20 @@ fn shared_frame_offers_the_same_links_on_every_page() {
 
         let current: Vec<&(String, String, bool)> =
             links.iter().filter(|(_, _, current)| *current).collect();
+        let expected_current_count = usize::from(own_path.is_some());
         assert_eq!(
             current.len(),
-            1,
-            "{file}'s frame nav marks {} links aria-current=\"page\"; exactly one is where the reader is",
+            expected_current_count,
+            "{file}'s frame nav marks {} links aria-current=\"page\"; expected {expected_current_count}",
             current.len()
         );
-        assert_eq!(
-            current[0].0, own_path,
-            "{file}'s frame nav marks {:?} as the current page, but the page is served at {own_path}",
-            current[0].0
-        );
+        if let Some(own_path) = own_path {
+            assert_eq!(
+                current[0].0, own_path,
+                "{file}'s frame nav marks {:?} as the current page, but the page is served at {own_path}",
+                current[0].0
+            );
+        }
 
         let destinations: Vec<(String, String)> = links
             .into_iter()

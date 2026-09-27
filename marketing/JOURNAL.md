@@ -18,6 +18,65 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-27 — Editorial: the soft-404 gets a real page, not a special case
+
+Closed #753's item 3, the piece the 2026-09-26 entry deliberately left
+out. Shipped `site/404.html`, curl.se's model named in the survey that
+opened this issue: a real page, not the homepage in disguise, carrying
+the same nav as every other page so a reader who mistypes a URL or
+follows a stale link still has a way to the three real pages.
+
+**The curator's open question, decided: the 404 page joins the frame,
+with zero links marked current.** The alternative was no frame at all,
+avoiding a fourth inline copy of the nav. Dropped, because a reader who
+just hit a dead end is exactly the reader who needs the site's other
+three destinations most, and the frame is the one mechanism this site
+has for offering them without prose. `shared_frame_offers_the_same_links_on_every_page`
+in `tests/claims.rs` now takes an `Option<&str>` current-path per page:
+`Some(path)` for the three real pages, asserting exactly one current
+link matching it; `None` for `site/404.html`, asserting zero, because a
+not-found page is none of the site's destinations. Verified by breaking
+it both ways before trusting it: marking one of 404.html's links current
+fails naming the count (1, expected 0); dropping one of its links fails
+naming both destination lists.
+
+**The page is not a copy of the 400-line stylesheet the other three
+carry.** It reuses the frame's own CSS rules verbatim (so a future frame
+restyle has one more place to touch, same debt the three real pages
+already carry) but skips every rule the other pages need for tables,
+code blocks, and the status card, none of which a not-found page has.
+The 2026-09-26 entry named this cost as real either way; this is the
+cheaper side of it, a ~90-line page instead of a 400-line one, because
+the content it carries is one heading and one sentence, not eight
+sections.
+
+**`robots.txt` gets no change and needs none.** Item 1 already told
+crawlers `Allow: /`; a `404.html` changes what a bad URL serves, not
+what a good one is allowed to be indexed as. Not added to
+`site/sitemap.xml` either, for the same reason curl.se's own 404 page
+is not in anyone's sitemap: it is not a destination, it is what a
+missing one resolves to.
+
+**Not independently verified against the live host, and the reason is
+recorded rather than skipped.** The curator's 2026-09-25 comment on
+#753 already did the verification this item needed: Cloudflare's own
+Pages docs say a top-level `404.html` in the deploy overrides the
+single-page-app fallback and serves it at status 404, checked against
+the docs rather than assumed. `deploy-site.yml` ships `site/` whole-tree
+with no change needed. What I verified myself: the file renders its
+real content, not the SPA's `index.html`, when requested directly
+(served from `site/` over HTTP at a scratch local root, one foreground
+Python process, confirmed at 375x812 and 1440x900: frame wraps to one
+row with no `@media` rule at 375px, same technique the other three
+pages already use, no horizontal scroll at either width). What neither
+check covers, and what the next survey's soft-404 recheck should: that
+`/zzz-nonexistent` on the deployed site actually answers 404 with this
+body rather than 200 with the homepage, since the docs describe
+Cloudflare's general behavior, not a probe of this specific deploy.
+
+**Closes #753.** Items 1 and 2 landed 2026-09-26 (previous entry); this
+is item 3, the last one.
+
 ## 2026-09-26 — Editorial: two files, not the whole soft-404
 
 Took #753's items 1 and 2, filed by yesterday's survey: `mothergod.dev`
