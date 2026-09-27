@@ -131,11 +131,17 @@ tried so far, pending a genuinely new one, not a variant (JOURNAL S2-L1):
 btultra2-class parse (S1-P2), PPM escape (S1-P3), large windows (S1-P4 —
 every pricing/gating signal since S2-R11 has failed, JOURNAL S2-R14's own
 remaining-scope note; what is left is a deliberate large-file mode, M5
-territory, not a parse heuristic). No standing lead is open: the next
-candidate is a literature idea or a cheap wild swing per the
-`compression-experiment` skill, unless S2-A102's own remaining-scope note
-(a rate schedule keyed on something other than a step count, or a
-from-scratch GLN gating architecture) is promoted to one. Target: beat
+territory, not a parse heuristic). S2-A102's own remaining-scope note had
+two threads: a rate schedule keyed on something other than a step count,
+and a from-scratch GLN gating architecture. The first is now closed too:
+tried as an error-EMA schedule and REJECTED (JOURNAL S2-R26), which
+conflated a context's stable residual uncertainty with genuine drift.
+No standing lead is open: the next candidate is a literature idea or a
+cheap wild swing per the `compression-experiment` skill, unless one of
+two untried threads is promoted: S2-R26's own remaining-scope note (an
+error signal that separates a context's stable residual uncertainty from
+real drift, not the identical per-node EMA it closed) or S2-A102's other
+original thread, the from-scratch GLN gating architecture. Target: beat
 zstd -19 per-file on all of Silesia/Canterbury with real bitstreams; then
 xz -9e.
 
