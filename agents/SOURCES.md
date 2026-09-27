@@ -117,6 +117,18 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-09-27: weekly deep survey, model ladders duty. The 2026-09-24
+  `claude-opus-5-5` curator canary came back green: `run-telemetry.py`'s
+  7-day window shows 2 of 14 curator runs on it, and the model-availability
+  ledger (#110) carries no 404 for it since the canary landed. Per the
+  canary's own written falsification rule, promoted `claude-opus-5-5`
+  above `claude-opus-5` on the herald and researcher ladders and above the
+  BDFL's `claude-opus-5` third rung, `claude-opus-5` kept beneath each as
+  the proven floor. Also this run: RATIO's held-out-final snapshot
+  (`docs/benchmarks/canterbury.md`/`silesia.md`) was 26 days and two
+  accepted codec changes stale (PR #800); regenerated against the current
+  codec, no adoption decision, a measurement refresh.
+
 - 2026-09-24: Anthropic's model list as the `claude-api` skill carries it
   (cached 2026-06-24) and the operator's Telegram note "claude dropped new
   model": `claude-opus-5-5` adopted as a canary on the curator's ladder
