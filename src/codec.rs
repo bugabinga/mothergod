@@ -275,6 +275,14 @@ impl Models {
     }
 }
 
+/// Converts a [`lz::bucket`] alphabet index to the residual bit count
+/// [`Encoder::encode_bits`]/[`Decoder::decode_bits`] take: `b` is at most
+/// `OFFSET_BUCKETS - 1` (20), the largest bucket alphabet in use, so it
+/// always fits `u32`.
+fn bucket_bits(b: usize) -> u32 {
+    u32::try_from(b).expect("bucket index is small, always fits u32")
+}
+
 /// Codes `value` (a match/rep length, or a match distance) as a
 /// [`lz::bucket`] symbol through `model`, then the residual low bits of
 /// `value` within that bucket as raw, unmodeled bits. Matches the
@@ -283,10 +291,7 @@ impl Models {
 fn encode_bucketed(model: &mut Model, ac: &mut Encoder, value: u32) {
     let b = lz::bucket(value);
     model.encode(ac, b);
-    // b is a Model alphabet index, at most OFFSET_BUCKETS - 1 (20): always
-    // fits u32.
-    let bits = u32::try_from(b).expect("bucket index is small, always fits u32");
-    ac.encode_bits(value, bits);
+    ac.encode_bits(value, bucket_bits(b));
 }
 
 /// Inverse of [`encode_bucketed`]: decodes a bucket symbol, then the
@@ -297,7 +302,7 @@ fn encode_bucketed(model: &mut Model, ac: &mut Encoder, value: u32) {
 /// argument as [`encode_bucketed`].
 fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
     let b = model.decode(ac);
-    let bits = u32::try_from(b).expect("bucket index is small, always fits u32");
+    let bits = bucket_bits(b);
     (1u32 << bits) | ac.decode_bits(bits)
 }
 
@@ -308,10 +313,7 @@ fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
 fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
     let b = lz::bucket(value);
     let cost = model.ideal_cost_bits(b);
-    // b is a Model alphabet index, at most OFFSET_BUCKETS - 1 (20): always
-    // fits u32, same bound encode_bucketed relies on.
-    let bits = u32::try_from(b).expect("bucket index is small, always fits u32");
-    cost + f64::from(bits)
+    cost + f64::from(bucket_bits(b))
 }
 
 /// Applies `candidate`'s filter to `data`, or returns a copy of it
