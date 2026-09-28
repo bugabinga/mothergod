@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 5)
+# mothergod bitstream format (FORMAT_VERSION 6)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -14,7 +14,7 @@ version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 5)
+4       1     format version (currently 6)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -28,11 +28,12 @@ ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
 rather than parsed under the current layout; version 2 named this same
 outer layout but coded its literal sub-stream through a direct 256-way
 range division, and was retired outright under ADR-0050, no release ever
-having written it. Versions 3, 4, and 5 `Lz` frames share the same outer
+having written it. Versions 3 through 6 `Lz` frames share the same outer
 payload layout below; only the literal sub-stream's internal shape
-differs between them (see "Lz" below, ADR-0038, ADR-0046, ADR-0052) — a
-decoder dispatches on the declared version (and, at version 4 and above,
-the frame's own filter selector) rather than rejecting any of them.
+differs between them (see "Lz" below, ADR-0038, ADR-0046, ADR-0052,
+ADR-0054) — a decoder dispatches on the declared version (and, at version
+4 and above, the frame's own filter selector) rather than rejecting any
+of them.
 
 ## Methods
 
@@ -82,12 +83,21 @@ annealed-rate weight vector, mapped back, and calibrated through its own
 SSE table, independent of the plain mixer's
 (`literal::Literal::encode_logistic`/`decode_logistic`); a version-5
 `Candidate::Transpose` frame still codes through `encode_column`/
-`decode_column` exactly as version 4 does. Every candidate at a version
-below its own gate codes its literals exactly as the next lower version
-does. Every other symbol in the stream (flag/length/offset/slot) is coded
-identically regardless of version or candidate; a decoder dispatches only
-the literal sub-stream, on the frame's declared version and (at version 4
-and above) its own already-parsed filter selector.
+`decode_column` exactly as version 4 does. At format version 6 and above
+(`codec::SURPRISE_MIN_VERSION`), the same *other* candidates code their
+literals through the identical logit-domain mix again, but under a
+different per-key rate schedule: a learned baseline (a fast EMA of each
+key's own squared prediction error read against a slower EMA of the
+identical signal) instead of version 5's annealed step count
+(`literal::Literal::encode_logistic_surprise`/`decode_logistic_surprise`);
+a version-6 `Candidate::Transpose` frame still codes through
+`encode_column`/`decode_column` exactly as versions 4 and 5 do. Every
+candidate at a version below its own gate codes its literals exactly as
+the next lower version does. Every other symbol in the stream
+(flag/length/offset/slot) is coded identically regardless of version or
+candidate; a decoder dispatches only the literal sub-stream, on the
+frame's declared version and (at version 4 and above) its own
+already-parsed filter selector.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for

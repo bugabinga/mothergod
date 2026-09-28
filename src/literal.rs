@@ -69,6 +69,18 @@
 //! both are built from IEEE-754 basic operations only, the same
 //! ADR-0024 determinism this module's `exp` already provides
 //! (`crate::logistic`'s own module docs).
+//!
+//! **Learned-baseline rate schedule (`JOURNAL` S2-A104/S2-A105,
+//! `FORMAT_VERSION` `codec::SURPRISE_MIN_VERSION` (6), ADR-0054).**
+//! [`Literal::encode_logistic_surprise`]/[`Literal::decode_logistic_surprise`]
+//! replace [`Literal::encode_logistic`]/`decode_logistic` for every
+//! candidate except `Candidate::Transpose`: the same six-expert
+//! logit-domain walk, but [`SurpriseLogisticMix`]'s per-key step size reads
+//! a fast EMA of that key's own squared prediction error against a slower
+//! EMA of the identical signal (its own learned baseline) instead of
+//! [`LogisticMix`]'s step-count-derived schedule, so a converged-but-noisy
+//! context's stable residual reads as "no surprise" while genuine drift
+//! still raises the rate.
 
 use std::num::NonZeroUsize;
 
@@ -623,7 +635,7 @@ fn surprise_error_tracking_step(
 
 /// One bit-tree node's ideal-cost contribution: `-log2(p)` if the node
 /// resolved to `bit`, `-log2(1 - p)` otherwise.
-/// [`Literal::ideal_cost_bits_logistic_surprise_at`]'s own per-node
+/// [`Literal::ideal_cost_bits_logistic_surprise`]'s own per-node
 /// accumulation, split out on [`logistic_gradient_step`]'s own grounds
 /// (#783): checkable against directly-chosen `bit`/`p` pairs, independent
 /// of the walk's chained state (`test-craft`'s survivor-triage, #810).
@@ -693,16 +705,17 @@ impl Default for LogisticMix {
 /// `baseline_sq_error` uses, fixed rather than swept. This is the
 /// "learned floor" `research/JOURNAL.md` S2-R26's own remaining-scope note
 /// names, standing for a key's typical residual error once converged; only
-/// the fast side ([`Literal::ideal_cost_bits_logistic_surprise_at`]'s own
-/// `recent_decay` parameter) is this experiment's swept variable.
+/// the fast side ([`SURPRISE_RECENT_DECAY`]) was swept, in S2-A104's own
+/// scratch binary.
 const SURPRISE_BASELINE_DECAY: f64 = 0.9995;
 
-/// [`Literal::ideal_cost_bits_logistic_surprise`]'s registered `recent_decay`,
-/// the constant its own [`Literal::ideal_cost_bits_logistic_surprise_at`]
-/// counterpart matches at this value (mirrors [`LOGISTIC_RATE_DECAY`]'s
-/// role for the champion, chosen arbitrarily here since this experiment's
-/// own scratch binary sweeps this parameter independently).
-const SURPRISE_RECENT_DECAY: f64 = 0.9;
+/// [`SurpriseLogisticMix`]'s per-key step size reads `recent_sq_error`
+/// against `baseline_sq_error` at this decay: `research/JOURNAL.md`
+/// S2-A104's own accept point (mirrors [`LOGISTIC_RATE_DECAY`]'s role for
+/// the champion), the best-supported point of the nine-value sweep that
+/// entry's own scratch binary ran (train mean best at 0.98, both sealed
+/// cases improving well inside the qualifying range).
+const SURPRISE_RECENT_DECAY: f64 = 0.98;
 
 /// Below this, [`surprise_rate`] treats a key's `baseline_sq_error` as
 /// "not yet established" rather than dividing by a near-zero number.
@@ -736,16 +749,17 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
     decay.mul_add(previous, (1.0 - decay) * error_sq)
 }
 
-/// A second candidate rate schedule for [`LogisticMix`]'s per-key step
-/// size, testing `research/JOURNAL.md` S2-R26's own remaining-scope note:
-/// separate a context's stable residual uncertainty from genuine drift by
-/// comparing a fast EMA of squared prediction error (`recent_sq_error`)
-/// against a slow EMA of the identical signal (`baseline_sq_error`, that
-/// key's own learned floor), through `surprise_rate`, rather than reading
-/// magnitude against one shared constant the way that entry's own
-/// rejected mechanism did. Additive: built and measured through
-/// [`Literal::ideal_cost_bits_logistic_surprise`]/`_at` alongside the
-/// shipped [`LogisticMix`], never called by it.
+/// A second rate schedule for a logit-domain literal mixer's per-key step
+/// size, replacing [`LogisticMix`]'s step-count-derived
+/// [`logistic_rate`] (`research/JOURNAL.md` S2-A104, S2-R26's own
+/// remaining-scope note fixed): separates a context's stable residual
+/// uncertainty from genuine drift by comparing a fast EMA of squared
+/// prediction error (`recent_sq_error`) against a slow EMA of the
+/// identical signal (`baseline_sq_error`, that key's own learned floor),
+/// through `surprise_rate`, rather than reading magnitude against one
+/// shared constant the way S2-R26's own rejected mechanism did. The real
+/// coding path (`codec::SURPRISE_MIN_VERSION`):
+/// [`Literal::encode_logistic_surprise`]/`decode_logistic_surprise`.
 #[derive(Debug, Clone)]
 pub struct SurpriseLogisticMix {
     /// One weight vector per [`WEIGHT_CONTEXTS`] key, same shape and
@@ -774,6 +788,22 @@ impl SurpriseLogisticMix {
             baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             sse: Sse::new(bittree::SSE_CONTEXTS),
         }
+    }
+
+    /// Fallible counterpart to [`Self::new`], the same shape
+    /// [`LogisticMix::try_new`] gives its own mixer:
+    /// [`crate::codec::decode`]'s real decode path constructs a
+    /// `SurpriseLogisticMix` per frame now that
+    /// [`Literal::decode_logistic_surprise`] reaches it, and the
+    /// allocation can still fail, so hard rule 2 requires
+    /// `Error::OutOfMemory` there instead of an abort.
+    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
+            recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
+            baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
+            sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
+        })
     }
 }
 
@@ -1065,53 +1095,34 @@ impl Literal {
         bits
     }
 
-    /// [`Self::ideal_cost_bits_logistic`]'s counterpart under
-    /// [`SurpriseLogisticMix`]'s rate schedule instead of [`LogisticMix`]'s:
-    /// `research/JOURNAL.md` S2-R26's own remaining-scope note, measured
-    /// the same way that entry's own rejected mechanism was, through
-    /// [`Self::ideal_cost_bits_logistic_surprise_at`] at the registered
-    /// [`SURPRISE_RECENT_DECAY`].
+    /// [`Self::ideal_cost_bits_sse`]'s counterpart for
+    /// [`Self::encode_logistic_surprise`]: sums the ideal cost of `byte`'s
+    /// `LEVELS` `mixer`-refined binary decisions through
+    /// [`Self::surprise_code_bit`] at the registered [`SURPRISE_RECENT_DECAY`],
+    /// so a caller pricing a whole stream this way reflects what
+    /// `Self::encode_logistic_surprise` actually pays (`crate::codec`'s
+    /// `CostSink`/`EncodeSink` invariant, [`Self::ideal_cost_bits_sse`]'s
+    /// own docs). Updates the six real experts' banks and takes the same
+    /// gradient step `mixer` would, same as [`Self::ideal_cost_bits_logistic`].
     #[must_use]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+    )]
     pub fn ideal_cost_bits_logistic_surprise(
         &mut self,
         context: Context,
         byte: u8,
         mixer: &mut SurpriseLogisticMix,
     ) -> f64 {
-        self.ideal_cost_bits_logistic_surprise_at(context, byte, mixer, SURPRISE_RECENT_DECAY)
-    }
-
-    /// [`Self::ideal_cost_bits_logistic_surprise`] with `recent_decay`
-    /// explicit, the sweep entry point this experiment's scratch binary
-    /// calls: everything else matches [`Self::ideal_cost_bits_logistic`]'s
-    /// own docs, substituting [`Self::surprise_code_bit`] for
-    /// [`Self::logistic_code_bit`].
-    #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
-    pub fn ideal_cost_bits_logistic_surprise_at(
-        &mut self,
-        context: Context,
-        byte: u8,
-        mixer: &mut SurpriseLogisticMix,
-        recent_decay: f64,
-    ) -> f64 {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
         let mut bits = 0.0f64;
-        let landed = self.surprise_code_bit(
-            &bank_indices,
-            weight_index,
-            mixer,
-            recent_decay,
-            |mid, p| {
-                let bit = symbol >= mid;
-                bits += ideal_cost_bit(bit, p);
-                bit
-            },
-        );
+        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+            let bit = symbol >= mid;
+            bits += ideal_cost_bit(bit, p);
+            bit
+        });
         debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
         self.update(&bank_indices, weight_index, symbol, exp);
         bits
@@ -1516,13 +1527,13 @@ impl Literal {
     /// read from [`surprise_rate`] over `mixer`'s own per-key
     /// `recent_sq_error`/`baseline_sq_error` instead of
     /// [`logistic_rate`]'s step count, then both EMAs advanced from this
-    /// node's own prediction error at `recent_decay`/[`SURPRISE_BASELINE_DECAY`].
+    /// node's own prediction error at [`SURPRISE_RECENT_DECAY`]/
+    /// [`SURPRISE_BASELINE_DECAY`].
     fn surprise_code_bit(
         &self,
         bank_indices: &[usize; EXPERTS],
         weight_index: usize,
         mixer: &mut SurpriseLogisticMix,
-        recent_decay: f64,
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let prefix = self.expert_prefix_sums(bank_indices);
@@ -1539,9 +1550,61 @@ impl Literal {
             sse.update(node_context, p, bit);
             let rate = surprise_rate(*recent, *baseline);
             logistic_gradient_step(weights, &stretched, rate, bit, p);
-            surprise_error_tracking_step(recent, baseline, recent_decay, bit, p);
+            surprise_error_tracking_step(recent, baseline, SURPRISE_RECENT_DECAY, bit, p);
             bit
         })
+    }
+
+    /// Codes `byte` through `encoder` under `context`, blending this
+    /// model's six expert banks through `mixer`'s logit-domain mix under
+    /// [`SurpriseLogisticMix`]'s learned-baseline rate schedule instead of
+    /// [`Self::encode_logistic`]'s step-count-derived one
+    /// (`research/JOURNAL.md` S2-A104, `codec::SURPRISE_MIN_VERSION`), then
+    /// updates every expert bank exactly as [`Self::encode_sse`] does. The
+    /// six real experts' own linear weights adapt unperturbed
+    /// ([`Self::update`] still runs on the same six-way `mixed` estimate it
+    /// always has), the same layering [`Self::encode_logistic`] already
+    /// uses.
+    pub fn encode_logistic_surprise(
+        &mut self,
+        encoder: &mut Encoder,
+        context: Context,
+        byte: u8,
+        mixer: &mut SurpriseLogisticMix,
+    ) {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+            let bit = symbol >= mid;
+            encoder.encode_bit(bit, p);
+            bit
+        });
+        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
+        self.update(&bank_indices, weight_index, symbol, exp);
+    }
+
+    /// Decodes one byte from `decoder` under `context`, the exact inverse
+    /// of [`Self::encode_logistic_surprise`]; see that method's docs for the
+    /// coding and update shape.
+    ///
+    /// Never panics on adversarial `decoder` state, the same argument
+    /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
+    /// over any coded bit pattern, and every probability
+    /// [`Self::surprise_code_bit`] derives is this model's and `mixer`'s
+    /// own invariant, never derived from `decoder`'s bytes.
+    #[must_use]
+    pub fn decode_logistic_surprise(
+        &mut self,
+        decoder: &mut Decoder,
+        context: Context,
+        mixer: &mut SurpriseLogisticMix,
+    ) -> u8 {
+        let (bank_indices, weight_index) = banks(context);
+        let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
+            decoder.decode_bit(p)
+        });
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        byte
     }
 
     /// Codes `byte` through `encoder` under `context`, blending this
@@ -2595,43 +2658,155 @@ mod tests {
         }
     }
 
+    fn roundtrip_bytes_logistic_surprise(bytes: &[u8]) {
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMix::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in bytes {
+            model.encode_logistic_surprise(&mut enc, context, b, &mut mixer);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMix::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(&encoded);
+        let mut got = Vec::with_capacity(bytes.len());
+        for _ in bytes {
+            let b = model.decode_logistic_surprise(&mut dec, context, &mut mixer);
+            context = context.after_literal(b);
+            got.push(b);
+        }
+        assert_eq!(got, bytes);
+    }
+
     #[test]
-    fn ideal_cost_bits_logistic_surprise_and_at_agree_at_the_registered_constant() {
+    fn empty_stream_round_trips_through_logistic_surprise() {
+        roundtrip_bytes_logistic_surprise(&[]);
+    }
+
+    #[test]
+    fn single_byte_round_trips_through_logistic_surprise() {
+        roundtrip_bytes_logistic_surprise(b"x");
+    }
+
+    #[test]
+    fn ascii_text_round_trips_through_logistic_surprise() {
+        let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
+        roundtrip_bytes_logistic_surprise(&text);
+    }
+
+    #[test]
+    fn pseudo_random_bytes_round_trip_through_logistic_surprise() {
+        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+        roundtrip_bytes_logistic_surprise(&bytes);
+    }
+
+    #[test]
+    fn decoding_truncated_stream_does_not_panic_through_logistic_surprise() {
+        let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMix::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in &bytes {
+            model.encode_logistic_surprise(&mut enc, context, b, &mut mixer);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+        let truncated = &encoded[..encoded.len() / 2];
+
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMix::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(truncated);
+        for _ in &bytes {
+            let b = model.decode_logistic_surprise(&mut dec, context, &mut mixer);
+            context = context.after_literal(b);
+        }
+        // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
+    }
+
+    /// [`Literal::encode_logistic_surprise`] must leave the six real
+    /// experts' banks and linear weights exactly where [`Literal::encode_sse`]
+    /// would, per the layering [`Literal::encode_logistic_surprise`]'s own
+    /// docs claim, the same guarantee
+    /// `encode_logistic_updates_the_six_real_experts_same_as_encode_sse`
+    /// checks for [`LogisticMix`]'s own path.
+    #[test]
+    fn encode_logistic_surprise_updates_the_six_real_experts_same_as_encode_sse() {
         let bytes = b"hello world hello again";
-
-        let mut via_default = Literal::new();
-        let mut mixer_default = SurpriseLogisticMix::new();
-        let mut context = Context::default();
-        let mut bits_default = 0.0;
+        let mut via_surprise = Literal::new();
+        let mut mixer = SurpriseLogisticMix::new();
+        let mut context_surprise = Context::default();
+        let mut enc_surprise = Encoder::new();
         for &b in bytes {
-            let cost =
-                via_default.ideal_cost_bits_logistic_surprise(context, b, &mut mixer_default);
-            // Every node's clamped probability keeps its own cost inside
-            // (0, -log2(LOGISTIC_PROBABILITY_FLOOR)) = (0, 12), and a byte
-            // walks bittree::LEVELS = 8 of them, so the byte's total stays
-            // inside (0, 96): catches a mutated accumulation (`+=` to
-            // `-=`, which drives the sum negative, or to `*=`, which
-            // collapses it to zero from the `0.0` starting accumulator)
-            // as well as a mutated per-node cost.
-            assert!(cost > 0.0 && cost < 96.0, "cost={cost}");
-            bits_default += cost;
-            context = context.after_literal(b);
+            via_surprise.encode_logistic_surprise(&mut enc_surprise, context_surprise, b, &mut mixer);
+            context_surprise = context_surprise.after_literal(b);
         }
 
-        let mut via_at = Literal::new();
-        let mut mixer_at = SurpriseLogisticMix::new();
-        let mut context = Context::default();
-        let mut bits_at = 0.0;
+        let mut via_sse = Literal::new();
+        let mut context_sse = Context::default();
+        let mut enc_sse = Encoder::new();
         for &b in bytes {
-            bits_at += via_at.ideal_cost_bits_logistic_surprise_at(
+            via_sse.encode_sse(&mut enc_sse, context_sse, b);
+            context_sse = context_sse.after_literal(b);
+        }
+
+        assert_eq!(via_surprise.freq, via_sse.freq);
+        assert_eq!(via_surprise.total, via_sse.total);
+        assert_eq!(via_surprise.weights, via_sse.weights);
+    }
+
+    #[test]
+    fn encode_logistic_surprise_steps_only_its_own_weight_key_once_per_node() {
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMix::new();
+        let context = Context {
+            prev1: 0x25,
+            ..Context::default()
+        };
+        // Give the banks a skew first, so the stretches (and therefore the
+        // gradient step) are nonzero.
+        for _ in 0..4 {
+            model.encode_logistic_surprise(
+                &mut Encoder::new(),
                 context,
-                b,
-                &mut mixer_at,
-                SURPRISE_RECENT_DECAY,
+                b'x',
+                &mut SurpriseLogisticMix::new(),
             );
-            context = context.after_literal(b);
         }
-
-        assert!((bits_default - bits_at).abs() < 1e-9);
+        let (_, weight_index) = banks(context);
+        model.encode_logistic_surprise(&mut Encoder::new(), context, b'x', &mut mixer);
+        for key in 0..WEIGHT_CONTEXTS {
+            if key == weight_index {
+                assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
+                assert_ne!(mixer.baseline_sq_error[key].to_bits(), 0.0f64.to_bits());
+                assert_ne!(
+                    mixer.weights[key].map(f64::to_bits),
+                    [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
+                );
+            } else {
+                assert_eq!(
+                    mixer.recent_sq_error[key].to_bits(),
+                    0.0f64.to_bits(),
+                    "key {key}"
+                );
+                assert_eq!(
+                    mixer.baseline_sq_error[key].to_bits(),
+                    0.0f64.to_bits(),
+                    "key {key}"
+                );
+                assert_eq!(
+                    mixer.weights[key].map(f64::to_bits),
+                    [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
+                );
+            }
+        }
     }
 }
