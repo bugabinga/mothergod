@@ -484,9 +484,12 @@ impl TokenSink for EncodeSink<'_> {
                     .encode_column(self.ac, context, byte, bank, col.state);
             }
             None => {
-                models
-                    .literal
-                    .encode_logistic_surprise(self.ac, context, byte, &mut models.surprise);
+                models.literal.encode_logistic_surprise(
+                    self.ac,
+                    context,
+                    byte,
+                    &mut models.surprise,
+                );
             }
         }
     }
@@ -523,9 +526,10 @@ impl TokenSink for CostSink {
         // trait's own docs: CostSink and EncodeSink must price and code the
         // same thing, so ideal_cost_bits stays a true estimate of what
         // encode_tokens's real Encoder pays.
-        self.bits += models
-            .literal
-            .ideal_cost_bits_logistic_surprise(context, byte, &mut models.surprise);
+        self.bits +=
+            models
+                .literal
+                .ideal_cost_bits_logistic_surprise(context, byte, &mut models.surprise);
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {

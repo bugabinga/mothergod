@@ -751,7 +751,7 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 
 /// A second rate schedule for a logit-domain literal mixer's per-key step
 /// size, replacing [`LogisticMix`]'s step-count-derived
-/// [`logistic_rate`] (`research/JOURNAL.md` S2-A104, S2-R26's own
+/// `logistic_rate` (`research/JOURNAL.md` S2-A104, S2-R26's own
 /// remaining-scope note fixed): separates a context's stable residual
 /// uncertainty from genuine drift by comparing a fast EMA of squared
 /// prediction error (`recent_sq_error`) against a slow EMA of the
@@ -2746,7 +2746,12 @@ mod tests {
         let mut context_surprise = Context::default();
         let mut enc_surprise = Encoder::new();
         for &b in bytes {
-            via_surprise.encode_logistic_surprise(&mut enc_surprise, context_surprise, b, &mut mixer);
+            via_surprise.encode_logistic_surprise(
+                &mut enc_surprise,
+                context_surprise,
+                b,
+                &mut mixer,
+            );
             context_surprise = context_surprise.after_literal(b);
         }
 

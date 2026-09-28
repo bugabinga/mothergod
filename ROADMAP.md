@@ -133,17 +133,17 @@ every pricing/gating signal since S2-R11 has failed, JOURNAL S2-R14's own
 remaining-scope note; what is left is a deliberate large-file mode, M5
 territory, not a parse heuristic). S2-A102's own remaining-scope note had
 two threads: a rate schedule keyed on something other than a step count,
-and a from-scratch GLN gating architecture. The first is now closed too:
-tried as an error-EMA schedule and REJECTED (JOURNAL S2-R26), which
-conflated a context's stable residual uncertainty with genuine drift.
-No standing lead is open: the next candidate is a literature idea or a
-cheap wild swing per the `compression-experiment` skill, unless one of
-two untried threads is promoted: S2-R26's own remaining-scope note (an
-error signal that separates a context's stable residual uncertainty from
-real drift, not the identical per-node EMA it closed) or S2-A102's other
-original thread, the from-scratch GLN gating architecture. Target: beat
-zstd -19 per-file on all of Silesia/Canterbury with real bitstreams; then
-xz -9e.
+and a from-scratch GLN gating architecture. The first tried an error-EMA
+schedule and REJECTED it (JOURNAL S2-R26), which conflated a context's
+stable residual uncertainty with genuine drift; the fix S2-R26's own
+diagnosis named was tried next and ACCEPTED (JOURNAL S2-A104: a learned
+baseline instead of one shared constant), then wired into a real
+bitstream (JOURNAL S2-A105, ADR-0054, `FORMAT_VERSION` 6), closing that
+thread. No standing lead is open: the next candidate is a literature idea
+or a cheap wild swing per the `compression-experiment` skill, unless the
+one remaining untried thread is promoted: S2-A102's other original
+thread, the from-scratch GLN gating architecture. Target: beat zstd -19
+per-file on all of Silesia/Canterbury with real bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
 

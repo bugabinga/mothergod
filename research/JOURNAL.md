@@ -7277,3 +7277,47 @@ record.
   though no frame byte encodes the schedule directly — plus an ADR and a
   golden fixture, matching S2-A102's own precedent; `SURPRISE_BASELINE_DECAY`
   itself (fixed here, not swept) is a candidate for its own future slice.
+- S2-A105 | ACCEPTED | S2-A104's real-wiring slice, closing that entry's
+  own remaining scope (`FORMAT_VERSION` 6, ADR-0054):
+  `Literal::encode_logistic_surprise`/`decode_logistic_surprise` code
+  every candidate except `Candidate::Transpose`'s literal sub-stream
+  through `SurpriseLogisticMix` instead of `LogisticMix`, reusing
+  `Literal::update` verbatim exactly as `encode_logistic` does (the six
+  real experts adapt unperturbed, unchanged layering). `codec::Models`
+  gained a `surprise: SurpriseLogisticMix` field alongside `logistic`
+  (kept for decoding version-5 frames); `VecSink`/`StreamingSink` replaced
+  their own two-state `logistic: bool` with a three-state `LiteralPath`
+  enum derived once from the declared version
+  (`LOGISTIC_MIN_VERSION`/`SURPRISE_MIN_VERSION`), so a version between
+  the two thresholds cannot dispatch to "both" or "neither" mixer.
+  `SURPRISE_RECENT_DECAY` corrected from its pre-wiring placeholder (0.9)
+  to S2-A104's own accepted point (0.98), the value every real call site
+  now shares. | Measured, real bitstreams (`mothergod::compress`, this
+  run's sandbox): `bench/baseline.json`'s 11 fixed train-tier cases, none
+  regress (`baseline_gate check` passes): `base64_wrapped` 0.588800 ->
+  0.584640 (-0.004160), `entropy_ladder_h1` 1.262240 -> 1.261920
+  (-0.000320), `entropy_ladder_h2` 2.428640 -> 2.428320 (-0.000320),
+  `entropy_ladder_h4` 4.476800 -> 4.475200 (-0.001600), `entropy_ladder_h6`
+  6.179200 -> 6.178240 (-0.000960), `entropy_ladder_h8` 8.000960 ->
+  8.000960 (unchanged), `interleaved_audio16` 5.839680 -> 5.786400
+  (**-0.053280**, the largest single move), `json_records` 0.604640 ->
+  0.599040 (-0.005600), `markov_h8_2_trap` 2.428800 -> 2.428160
+  (-0.000640), `sqlite_like_records` 3.443040 -> 3.432480 (-0.010560),
+  `x86_dense_code` 2.716000 -> 2.708000 (-0.008000); train mean
+  **-0.007767 b/B**. Sealed-only kinds (`sealed_seed(CASE_SEED)`, same
+  length): `access_log` 0.906880 -> 0.905760 (-0.001120), `gradient_image`
+  5.923360 -> 5.910720 (-0.012640), both improve. Corpus policy's accept
+  rule (train improvement, no validation regression) passes on every case
+  tried. | Mechanism: matches S2-A104's own ideal-cost reading in sign on
+  every case; the real encoder's improvement magnitude runs larger than
+  the ideal-cost pairing predicted on several cases (`gradient_image`
+  -0.012640 here vs -0.003457 ideal-cost, `interleaved_audio16` and the
+  record-format kinds likewise), the same real-bitstream-vs-ideal-cost gap
+  ADR-0052's own wiring slice (S2-A102) already documented once for this
+  exact lead (the real encoder's candidate/window selection and LZ parse
+  interact with the literal model's cost differently than an ideal-cost
+  pairing measures in isolation). New golden fixture
+  `tests/golden/v6-lz-repeated-text` (same plaintext as
+  `v5-lz-repeated-text`, re-encoded); every version-3 through version-5
+  fixture stays committed, decode-only, forever. `research/progress.jsonl`
+  it172.

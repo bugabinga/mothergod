@@ -216,7 +216,7 @@
         <b>Status</b>
         <p>
           <strong>Pre-alpha: no release, no packaged binary, no version
-            tag.</strong> The container format (version 5) carries <code
+            tag.</strong> The container format (version 6) carries <code
           >Stored</code> and
           <code>Lz</code>. <code>Lz</code> finds repeated stretches of the
           input, works out the cheapest way to describe each one rather than
@@ -257,7 +257,7 @@
           Aggregate bits per byte on the two named corpora, lower is better.
           Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
           both are pinned by URL and SHA-256, fetched at measurement time and
-          never committed. Measured 2026-09-27 against <code>gzip 1.12</code>,
+          never committed. Measured 2026-09-28 against <code>gzip 1.12</code>,
           <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
           flags in the header row.
         </p>
@@ -339,27 +339,27 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.128</td>
-              <td>3.040</td>
+              <td>0.126</td>
+              <td>2.921</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.061</td>
-              <td>1.331</td>
+              <td>0.058</td>
+              <td>1.222</td>
             </tr>
           </tbody>
         </table>
         <p>
-          Silesia's 212 MB took about an hour to compress and under two minutes
-          to read back. Encoding carries the optimal parse, so it runs roughly
-          twenty times slower than decoding.
+          Silesia's 212 MB took about an hour to compress and about three
+          minutes to read back. Encoding carries the optimal parse, so it runs
+          roughly twenty times slower than decoding.
         </p>
         <p>
           One caveat the reports state themselves: these are single-run figures
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.3 to 26.7 MB/s</span>. Speed is measured on every
+          <span class="rate">0.2 to 24.9 MB/s</span>. Speed is measured on every
           benchmark run and becomes a target of its own at the speed-tiers
           milestone on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
