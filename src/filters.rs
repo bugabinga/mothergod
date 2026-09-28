@@ -849,15 +849,27 @@ pub mod base64_unwrap {
     /// input costs a bounded scan, not a wasted full decode attempt.
     const SCAN_LIMIT: usize = 4096;
 
-    fn decode_char(b: u8) -> Option<u8> {
-        match b {
-            b'A'..=b'Z' => Some(b - b'A'),
-            b'a'..=b'z' => Some(b - b'a' + 26),
-            b'0'..=b'9' => Some(b - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
+    /// [`ALPHABET`]'s inverse, indexed by byte value: `DECODE_TABLE[b]` is
+    /// `Some(v)` iff `ALPHABET[v] == b`. Built from `ALPHABET` itself so the
+    /// two directions cannot drift apart.
+    const DECODE_TABLE: [Option<u8>; 256] = {
+        let mut table = [None; 256];
+        let mut v = 0;
+        while v < ALPHABET.len() {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "v < ALPHABET.len() == 64, always fits u8"
+            )]
+            {
+                table[ALPHABET[v] as usize] = Some(v as u8);
+            }
+            v += 1;
         }
+        table
+    };
+
+    fn decode_char(b: u8) -> Option<u8> {
+        DECODE_TABLE[b as usize]
     }
 
     fn is_base64_byte(b: u8) -> bool {
@@ -1063,6 +1075,19 @@ pub mod base64_unwrap {
             assert!(is_base64_byte(b'A'));
             assert!(is_base64_byte(b'='));
             assert!(!is_base64_byte(b'!'));
+        }
+
+        #[test]
+        fn decode_char_inverts_alphabet_and_rejects_everything_else() {
+            for (value, &symbol) in ALPHABET.iter().enumerate() {
+                let value = u8::try_from(value).unwrap();
+                assert_eq!(decode_char(symbol), Some(value), "symbol {symbol:?}");
+            }
+            for b in 0..=u8::MAX {
+                if !ALPHABET.contains(&b) {
+                    assert_eq!(decode_char(b), None, "byte {b:?}");
+                }
+            }
         }
 
         #[test]
