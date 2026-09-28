@@ -7425,3 +7425,107 @@ record.
   `Literal::surprise_code_bit`/`ideal_cost_bits_logistic_surprise`
   (S2-A104, shipped at `FORMAT_VERSION` 6 by S2-A105) are unaffected.
   `research/progress.jsonl` it173.
+- S2-A106 | ACCEPTED, unwired | New literature idea, not tied to any
+  existing standing lead (ROADMAP M3: no standing lead is open): logit-
+  domain SSE bins. `crate::sse::Sse`'s own module doc records a deliberate
+  deviation from the classic APM (Mahoney 2005): linear-domain bin
+  spacing instead of log-domain, because at the time (S2-A40) this crate
+  had no deterministic transcendental pair to build `stretch`/`squash`
+  from. `crate::logistic` (S2-A101) built exactly that pair for the
+  logit-domain mixer and it already ships on the real coding path
+  (`FORMAT_VERSION` 5+); this candidate asks whether removing that now-
+  stale blocker is also a real bpb win, not just a closed precondition.
+  Hypothesis: spacing `SurpriseLogisticMix`'s own SSE calibration bins
+  across `stretch`-space instead of linear probability space,
+  concentrating resolution near 0/1 where calibration error costs most,
+  improves bpb on structured/record-like data (confident, well-calibrated
+  node probabilities near the extremes) at some cost on near-memoryless
+  data (the entropy ladder, where node probabilities cluster near 0.5 and
+  stretch-domain bins are coarser there than linear ones). Mechanically
+  distinct from every closed direction on this table: not a second stage
+  (S2-R27, closed) and not a crossed/widened context axis (S2-R22,
+  closed) — it changes how one existing table's bins are spaced, not
+  what context selects them or how many stages there are. | Apparatus:
+  `crate::sse::LogitSse`, a structural mirror of `Sse` (same 33 bins, same
+  interpolate-then-nudge update rule, same learning rate and clamp) whose
+  own `position` maps `p` through `stretch` into a bounded `[-bound,
+  bound]` range (`bound = stretch(MAX_PROBABILITY)`) before locating the
+  two neighboring bins, instead of `Sse::position`'s linear `p * (BINS -
+  1)`; `fill_identity_logit` matches by filling each bin with `squash` of
+  its own evenly-spaced stretch-domain point rather than
+  `fill_identity`'s evenly-spaced probability point, so a fresh table
+  stays (approximately) identity under the new spacing.
+  `literal::SurpriseLogisticMixLogitSse` mirrors `SurpriseLogisticMix`
+  field-for-field except its own calibration table is a `LogitSse`;
+  `Literal::logit_sse_code_bit`/`ideal_cost_bits_logistic_surprise_logit_sse`
+  mirror `surprise_code_bit`/`ideal_cost_bits_logistic_surprise` exactly,
+  changing only which table's `refine`/`update` the walk calls. 13 new
+  `LogitSse` unit tests (mirroring `Sse`'s own suite, plus one proving the
+  bin-concentration property directly: the same 0.02 probability step
+  crosses more bin-space near 1.0 than near 0.5); 3 new `Literal`/mixer
+  tests mirroring `SurpriseLogisticMix`'s own. Measured via a scratch
+  binary (`bench/src/bin/scratch_logit_sse.rs`, deleted with this
+  verdict), same methodology as S2-A104/S2-R27: for each of
+  `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` sealed at
+  `sealed_seed(CASE_SEED)`, same length, extracted the real optimal-parse
+  literal-byte stream (`lz::parse_optimal`, `Context::after_literal` in
+  coding order — a pure literal-byte replay never re-enters
+  `after_copy`) and priced it twice from independent fresh state: the
+  champion, `Literal::ideal_cost_bits_logistic_surprise`
+  (`SurpriseLogisticMix`, S2-A104/S2-A105's shipped mixer); the
+  candidate, `ideal_cost_bits_logistic_surprise_logit_sse`. Corrected after
+  review (PR #823): the original measurement normalized each case's bit delta
+  by its own literal-byte count instead of `CASE_LEN` (the corpus-byte
+  denominator every other `progress.jsonl` entry and
+  `bench::baseline::bits_per_byte` use), inflating every case whose optimal
+  parse is mostly matches; re-run with the same literal-only replay, correct
+  denominator. | Train mean delta (candidate minus champion) **-0.000166 b/B**
+  (sum **-0.001824**), 5 of 11 improved: `markov_h8_2_trap` **-0.014293**,
+  `x86_dense_code` **-0.013571** (this slice's two largest single moves),
+  `json_records` -0.001134, `entropy_ladder_h6` -0.000970, `base64_wrapped`
+  -0.000907; 6 regressed: `entropy_ladder_h8` **+0.019700** (the largest single
+  regression), `interleaved_audio16` +0.005761, `sqlite_like_records`
+  +0.002517, `entropy_ladder_h4` +0.000692, `entropy_ladder_h2` +0.000325,
+  `entropy_ladder_h1` +0.000057. Sealed: both improved, `access_log` -0.001004,
+  `gradient_image` **-0.040248** — the largest single sealed move any
+  ideal-cost pairing in this lead's own history has measured (S2-A104's own
+  -0.003457, S2-R27's own -0.013939). **Accepted**: corpus policy's accept rule
+  (train improvement, no validation regression) passes, though by a thin train
+  mean against an `entropy_ladder_h8` regression nearly two orders of magnitude
+  larger; both sealed kinds improve rather than merely holding. | Mechanism:
+  `stretch`'s derivative `1 / (p * (1 - p))` is minimal (4) at `p = 0.5` and
+  grows without bound
+  toward either extreme, so `LogitSse`'s evenly-spaced stretch-domain
+  bins are *coarser* in probability terms near 0.5 and *finer* near 0/1
+  than `Sse`'s own linear spacing — the intended trade.
+  `entropy_ladder_h8` (a uniform byte histogram, no cross-byte structure)
+  keeps nearly all its bit-tree node probabilities clustered near 0.5 (an
+  iid source gives the mixer no reason to commit toward either extreme at
+  any node), so this candidate spends its finer resolution where this
+  dataset has no mass and its coarser resolution exactly where all of it
+  sits: S1-L4's richness tax, paid here by a bin-spacing change rather
+  than an added context axis or expert. The structured/record cases and
+  both sealed kinds have many confident, correctly-skewed node
+  probabilities (repeated substructure the six experts already predict
+  well), where finer resolution near the extremes calibrates real signal
+  instead of noise — `x86_dense_code` and `markov_h8_2_trap`'s large
+  wins, and `gradient_image`'s (this lead line's own repeat decider since
+  S2-R20) largest ideal-cost win to date, are consistent with that
+  reading. | Scope, named so a wiring slice does not inherit a false
+  claim: every number above is SSE-calibrated ideal cost against
+  `SurpriseLogisticMix`'s own shipped mixer, not a real bitstream (S2-L1's
+  own warning that a pre-wiring ideal-cost read can diverge from a real
+  bitstream's magnitude, though not usually its sign, per S2-A102/
+  S2-A105's own real-vs-ideal gap). `stretch_bound` recomputes
+  `stretch(MAX_PROBABILITY)` on every `position` call rather than caching
+  it; unmeasured cost, a wiring slice's own concern. Accepted, unwired:
+  apparatus (`crate::sse::LogitSse`, `literal::SurpriseLogisticMixLogitSse`,
+  `Literal::logit_sse_code_bit`/`ideal_cost_bits_logistic_surprise_logit_sse`,
+  their unit tests) stays on main per the `compression-experiment` skill;
+  the scratch binary is deleted with this verdict. A wiring slice needs
+  its own `FORMAT_VERSION` bump (hard rule 5): `LogitSse`'s own
+  adaptation is deterministic state both `encode`/`decode` must replay
+  identically from coded history, the same reasoning S2-A104's own entry
+  gives for why a rate-schedule change is a format change even though no
+  frame byte encodes it directly. `research/progress.jsonl` it174.

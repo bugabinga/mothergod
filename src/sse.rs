@@ -54,6 +54,8 @@
 //! both sealed kinds improved). `research/JOURNAL.md` S2-A60 has the full
 //! numbers and mechanism read.
 
+use crate::logistic::{squash, stretch};
+
 /// Number of probability bins per context: 33 evenly spaced points across
 /// `[0.0, 1.0]` (32 intervals), the classic PAQ/APM bin count (Mahoney
 /// 2005) — one bin per point, `1.0 / 32.0` apart, so bin `i` starts life
@@ -218,6 +220,148 @@ impl Sse {
     /// [`Self::refine`].
     pub fn update(&mut self, context: usize, p: f64, outcome: bool) {
         assert!(context < self.contexts, "Sse context out of range");
+        let base = context * BINS;
+        let (lower_index, fraction) = Self::position(p);
+        let target = if outcome { 1.0 } else { 0.0 };
+        let lower = base + lower_index;
+        let upper = lower + 1;
+        self.table[lower] += LEARNING_RATE * (1.0 - fraction) * (target - self.table[lower]);
+        self.table[upper] += LEARNING_RATE * fraction * (target - self.table[upper]);
+    }
+}
+
+/// Logit-domain counterpart to [`Sse`]'s bin spacing, a research candidate
+/// (`research/JOURNAL.md` S2-A106): [`Sse`]'s own module doc records a
+/// deliberate deviation from the classic APM (Mahoney 2005) because this
+/// crate had no deterministic transcendental pair to spend on it at the
+/// time (S2-A40). [`crate::logistic`] (S2-A101) built
+/// exactly that pair for [`crate::literal::LogisticMix`]'s own mixing step
+/// and it already ships on the real coding path (`FORMAT_VERSION` 5+), so
+/// the blocker no longer holds. This type is the untried side of that
+/// deviation: bins live at evenly spaced points in [`stretch`]-space
+/// instead of linear probability space, concentrating resolution near 0
+/// and 1 the way [`Sse`]'s own doc says a production APM wants. Everything
+/// else (the two-neighbor interpolate-then-nudge mechanism, learning
+/// rate, clamp) is identical to [`Sse`]; only `position` (bin lookup) and
+/// the identity fill differ.
+#[derive(Debug, Clone)]
+pub struct LogitSse {
+    contexts: usize,
+    /// `contexts * BINS` calibrated probabilities, context-major, same
+    /// layout as `Sse`'s own table.
+    table: Vec<f64>,
+}
+
+/// [`stretch`]'s value at [`MAX_PROBABILITY`], the positive half of the
+/// bounded logit-domain range [`LogitSse`]'s bin lookup spaces its bins
+/// across (`stretch` is odd, so [`MIN_PROBABILITY`]'s value is its
+/// negation). Recomputed rather than a `const`: [`stretch`] calls
+/// [`crate::logistic::ln`], not itself `const fn`.
+fn stretch_bound() -> f64 {
+    stretch(MAX_PROBABILITY)
+}
+
+/// [`fill_identity`]'s counterpart for [`LogitSse`]: bin `i` starts at
+/// [`squash`] of the identity mapping's evenly-spaced *stretch*-domain
+/// point, rather than [`fill_identity`]'s own evenly-spaced probability
+/// point, so a fresh table is still (approximately) a no-op under
+/// [`LogitSse`]'s own bin spacing.
+fn fill_identity_logit(table: &mut [f64], contexts: usize) {
+    let bound = stretch_bound();
+    for context in 0..contexts {
+        for bin in 0..BINS {
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "bin < BINS (33) and BINS - 1 (32): both exact in f64"
+            )]
+            let s = -bound + bin as f64 / (BINS - 1) as f64 * (2.0 * bound);
+            table[context * BINS + bin] = squash(s);
+        }
+    }
+}
+
+impl LogitSse {
+    /// A fresh table over `contexts` independent contexts, every bin
+    /// initialized to the logit-domain identity mapping (see the struct
+    /// docs).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `contexts` is zero, the same caller-bug bound
+    /// [`Sse::new`] enforces.
+    #[must_use]
+    pub fn new(contexts: usize) -> Self {
+        assert!(contexts > 0, "LogitSse must have at least one context");
+        let mut table = vec![0.0; contexts * BINS];
+        fill_identity_logit(&mut table, contexts);
+        Self { contexts, table }
+    }
+
+    /// The number of independent contexts this table calibrates.
+    #[must_use]
+    pub fn contexts(&self) -> usize {
+        self.contexts
+    }
+
+    /// `Sse::position`'s counterpart: the two adjacent bin indices `p`'s
+    /// [`stretch`] falls between in the bounded `[-`[`stretch_bound`]`,
+    /// `[`stretch_bound`]`]` range, and how far past the lower one it
+    /// sits. `p` is clamped to [`MIN_PROBABILITY`]/[`MAX_PROBABILITY`]
+    /// first (same range [`Sse::refine`]'s own output is clamped to)
+    /// so `stretch` never sees an input outside the domain its own bound
+    /// was computed from.
+    fn position(p: f64) -> (usize, f64) {
+        let bound = stretch_bound();
+        let s = stretch(p.clamp(MIN_PROBABILITY, MAX_PROBABILITY)).clamp(-bound, bound);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "BINS is 33: exact in f64 well inside its 53-bit mantissa"
+        )]
+        let scaled = (s + bound) / (2.0 * bound) * (BINS - 1) as f64;
+        let lower = scaled.floor();
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scaled is clamp(-bound, bound) rescaled into [0.0, 32.0]: always fits usize"
+        )]
+        let lower_index = (lower as usize).min(BINS - 2);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "lower_index < BINS - 1 (32): exact in f64"
+        )]
+        let fraction = scaled - lower_index as f64;
+        (lower_index, fraction)
+    }
+
+    /// [`Sse::refine`]'s counterpart: linear interpolation between the two
+    /// bins `p`'s stretch falls between, clamped the same way.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `context >= self.contexts()`, the same bound
+    /// [`Sse::refine`] enforces.
+    #[must_use]
+    pub fn refine(&self, context: usize, p: f64) -> f64 {
+        assert!(context < self.contexts, "LogitSse context out of range");
+        let base = context * BINS;
+        let (lower_index, fraction) = Self::position(p);
+        let value = self.table[base + lower_index].mul_add(
+            1.0 - fraction,
+            self.table[base + lower_index + 1] * fraction,
+        );
+        value.clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+    }
+
+    /// [`Sse::update`]'s counterpart: nudges `context`'s two bins nearest
+    /// `p`'s stretch toward the observed `outcome`, weighted by
+    /// `position`'s own fraction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `context >= self.contexts()`, the same bound
+    /// [`Sse::update`] enforces.
+    pub fn update(&mut self, context: usize, p: f64, outcome: bool) {
+        assert!(context < self.contexts, "LogitSse context out of range");
         let base = context * BINS;
         let (lower_index, fraction) = Self::position(p);
         let target = if outcome { 1.0 } else { 0.0 };
@@ -409,5 +553,156 @@ mod tests {
             assert_eq!(bit, outcome, "round-trip mismatch");
             sse.update(0, 0.5, bit);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one context")]
+    fn logit_sse_zero_contexts_panics() {
+        let _ = LogitSse::new(0);
+    }
+
+    #[test]
+    fn logit_sse_fresh_table_is_near_identity() {
+        let sse = LogitSse::new(1);
+        for tenth in 1..10 {
+            // Excludes the extremes (0.0, 1.0): stretch-domain bins bunch
+            // tightly there, so a fresh table's interpolation error is
+            // largest at exactly the points Sse's own test also has
+            // loosest tolerance for real signal, not a bug in this
+            // candidate's identity fill.
+            let p = f64::from(tenth) / 10.0;
+            let refined = sse.refine(0, p);
+            assert!(
+                (refined - p).abs() < 0.02,
+                "p={p}, refined={refined}, expected near-identity on a fresh table"
+            );
+        }
+    }
+
+    #[test]
+    fn logit_sse_output_is_always_clamped_away_from_extremes() {
+        let mut sse = LogitSse::new(1);
+        for _ in 0..10_000 {
+            sse.update(0, 1.0, true);
+        }
+        let refined = sse.refine(0, 1.0);
+        assert!(
+            (MIN_PROBABILITY..1.0).contains(&refined),
+            "refined={refined} must stay inside (0.0, 1.0) even after 10_000 updates \
+             all pushing toward 1.0"
+        );
+
+        let mut sse = LogitSse::new(1);
+        for _ in 0..10_000 {
+            sse.update(0, 0.0, false);
+        }
+        let refined = sse.refine(0, 0.0);
+        assert!(
+            refined > 0.0 && refined <= MAX_PROBABILITY,
+            "refined={refined} must stay inside (0.0, 1.0) even after 10_000 updates \
+             all pushing toward 0.0"
+        );
+    }
+
+    #[test]
+    fn logit_sse_converges_toward_the_true_observed_rate() {
+        let mut sse = LogitSse::new(1);
+        let rng = crate::test_support::Xorshift32::new(0xA5A5_5A5A);
+        for state in rng.take(20_000) {
+            let outcome = state % 10 != 0; // true 90% of the time
+            sse.update(0, 0.5, outcome);
+        }
+        let refined = sse.refine(0, 0.5);
+        assert!(
+            (refined - 0.9).abs() < 0.03,
+            "refined={refined}, expected convergence near the true rate 0.9"
+        );
+    }
+
+    #[test]
+    fn logit_sse_contexts_adapt_independently() {
+        let mut sse = LogitSse::new(2);
+        for _ in 0..5000 {
+            sse.update(0, 0.5, true);
+            sse.update(1, 0.5, false);
+        }
+        let refined0 = sse.refine(0, 0.5);
+        let refined1 = sse.refine(1, 0.5);
+        assert!(
+            refined0 > 0.8,
+            "context 0 saw only true outcomes, refined={refined0}"
+        );
+        assert!(
+            refined1 < 0.2,
+            "context 1 saw only false outcomes, refined={refined1}"
+        );
+    }
+
+    #[test]
+    fn logit_sse_refine_is_monotonic_in_input_probability_on_a_fresh_table() {
+        let sse = LogitSse::new(1);
+        let mut previous = sse.refine(0, 0.0);
+        for hundredth in 1..=100 {
+            let p = f64::from(hundredth) / 100.0;
+            let refined = sse.refine(0, p);
+            assert!(
+                refined >= previous,
+                "refine must be non-decreasing in p on an untrained table: \
+                 p={p}, refined={refined}, previous={previous}"
+            );
+            previous = refined;
+        }
+    }
+
+    #[test]
+    fn logit_sse_out_of_range_probability_is_clamped_not_a_panic() {
+        let sse = LogitSse::new(1);
+        let low = sse.refine(0, -1.0);
+        let high = sse.refine(0, 2.0);
+        assert!((low - MIN_PROBABILITY).abs() < 1e-6);
+        assert!((high - MAX_PROBABILITY).abs() < 1e-6);
+    }
+
+    #[test]
+    #[should_panic(expected = "context out of range")]
+    fn logit_sse_refine_out_of_range_context_panics() {
+        let sse = LogitSse::new(2);
+        let _ = sse.refine(2, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "context out of range")]
+    fn logit_sse_update_out_of_range_context_panics() {
+        let mut sse = LogitSse::new(2);
+        sse.update(2, 0.5, true);
+    }
+
+    #[test]
+    fn logit_sse_contexts_reports_the_constructed_count() {
+        assert_eq!(LogitSse::new(5).contexts(), 5);
+    }
+
+    #[test]
+    fn logit_sse_bins_concentrate_resolution_near_the_extremes() {
+        // The mechanism this candidate exists to test: two probabilities
+        // close together near 0.5 should fall in the same or adjacent
+        // bins (coarse there), while two probabilities equally far apart
+        // near 1.0 should land in more widely separated bins (fine
+        // there) than Sse's own linear spacing would give them.
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "bin indices here stay under BINS (33): exact in f64"
+        )]
+        fn gap(lo: (usize, f64), hi: (usize, f64)) -> f64 {
+            (hi.0 as f64 + hi.1) - (lo.0 as f64 + lo.1)
+        }
+        let mid_gap = gap(LogitSse::position(0.50), LogitSse::position(0.52));
+        let ext_gap = gap(LogitSse::position(0.96), LogitSse::position(0.98));
+
+        assert!(
+            ext_gap > mid_gap,
+            "the same 0.02 probability step should cross more bin-space near 1.0 \
+             (gap={ext_gap}) than near 0.5 (gap={mid_gap})"
+        );
     }
 }

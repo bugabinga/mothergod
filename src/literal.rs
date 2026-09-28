@@ -799,6 +799,44 @@ impl Default for SurpriseLogisticMix {
     }
 }
 
+/// Research candidate (`research/JOURNAL.md` S2-A106): identical to
+/// [`SurpriseLogisticMix`] in every field and update rule except its own
+/// calibration table, [`crate::sse::LogitSse`] instead of [`Sse`] — the
+/// mixing weights, error EMAs and rate schedule are untouched, isolating
+/// the bin-spacing change this candidate measures.
+#[derive(Debug, Clone)]
+pub struct SurpriseLogisticMixLogitSse {
+    /// Same shape as [`SurpriseLogisticMix::weights`].
+    weights: Vec<[f64; EXPERTS]>,
+    /// Same shape as [`SurpriseLogisticMix::recent_sq_error`].
+    recent_sq_error: Vec<f64>,
+    /// Same shape as [`SurpriseLogisticMix::baseline_sq_error`].
+    baseline_sq_error: Vec<f64>,
+    /// This candidate's own calibration table, logit-domain bins instead
+    /// of [`SurpriseLogisticMix::sse`]'s linear ones.
+    sse: crate::sse::LogitSse,
+}
+
+impl SurpriseLogisticMixLogitSse {
+    /// A fresh mixer, the same starting point [`SurpriseLogisticMix::new`]
+    /// gives its own fields.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
+            recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
+            baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
+            sse: crate::sse::LogitSse::new(bittree::SSE_CONTEXTS),
+        }
+    }
+}
+
+impl Default for SurpriseLogisticMixLogitSse {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Six-expert context-mixing model over literal bytes. See the module
 /// docs for the port source and the open `f64` determinism question.
 #[derive(Debug, Clone)]
@@ -1068,6 +1106,30 @@ impl Literal {
         let symbol = usize::from(byte);
         let mut bits = 0.0f64;
         let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+            let bit = symbol >= mid;
+            bits += bittree::ideal_cost_bit(bit, p);
+            bit
+        });
+        debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
+        self.update(&bank_indices, weight_index, symbol, exp);
+        bits
+    }
+
+    /// [`Self::ideal_cost_bits_logistic_surprise`]'s counterpart for the
+    /// [`SurpriseLogisticMixLogitSse`] research candidate
+    /// (`research/JOURNAL.md` S2-A106): identical pricing, through
+    /// [`Self::logit_sse_code_bit`] instead of [`Self::surprise_code_bit`].
+    #[must_use]
+    pub fn ideal_cost_bits_logistic_surprise_logit_sse(
+        &mut self,
+        context: Context,
+        byte: u8,
+        mixer: &mut SurpriseLogisticMixLogitSse,
+    ) -> f64 {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+        let mut bits = 0.0f64;
+        let landed = self.logit_sse_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
             bits += bittree::ideal_cost_bit(bit, p);
             bit
@@ -1483,6 +1545,37 @@ impl Literal {
         bank_indices: &[usize; EXPERTS],
         weight_index: usize,
         mixer: &mut SurpriseLogisticMix,
+        mut code_bit: impl FnMut(usize, f64) -> bool,
+    ) -> u8 {
+        let prefix = self.expert_prefix_sums(bank_indices);
+        let weights = &mut mixer.weights[weight_index];
+        let recent = &mut mixer.recent_sq_error[weight_index];
+        let baseline = &mut mixer.baseline_sq_error[weight_index];
+        let sse = &mut mixer.sse;
+        bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
+            let (stretched, dot) = logistic_mix_node(&prefix, weights, lo, mid, hi);
+            let p = clamp_logistic_probability(squash(dot));
+            let node_context = bittree::sse_context(depth, node_prefix);
+            let refined = sse.refine(node_context, p);
+            let bit = code_bit(mid, refined);
+            sse.update(node_context, p, bit);
+            let rate = surprise_rate(*recent, *baseline);
+            logistic_gradient_step(weights, &stretched, rate, bit, p);
+            surprise_error_tracking_step(recent, baseline, SURPRISE_RECENT_DECAY, bit, p);
+            bit
+        })
+    }
+
+    /// [`Self::surprise_code_bit`]'s counterpart under
+    /// [`SurpriseLogisticMixLogitSse`]: identical walk, rate schedule and
+    /// gradient step, refined through [`crate::sse::LogitSse`] instead of
+    /// [`Sse`] — the only line that differs from [`Self::surprise_code_bit`]
+    /// is which calibration table's `refine`/`update` this walk calls.
+    fn logit_sse_code_bit(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        weight_index: usize,
+        mixer: &mut SurpriseLogisticMixLogitSse,
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let prefix = self.expert_prefix_sums(bank_indices);
@@ -2590,6 +2683,102 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn surprise_logistic_mix_logit_sse_new_starts_at_uniform_weights_and_zero_error_state() {
+        let mix = SurpriseLogisticMixLogitSse::new();
+        assert_eq!(
+            mix.weights,
+            vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
+        );
+        assert_eq!(mix.recent_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
+        assert_eq!(mix.baseline_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
+        assert_eq!(mix.sse.contexts(), bittree::SSE_CONTEXTS);
+    }
+
+    #[test]
+    fn ideal_cost_bits_logistic_surprise_logit_sse_steps_only_its_own_weight_key_once_per_node() {
+        let mut model = Literal::new();
+        let context = Context {
+            prev1: 0x25,
+            ..Context::default()
+        };
+        for _ in 0..4 {
+            let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(
+                context,
+                b'x',
+                &mut SurpriseLogisticMixLogitSse::new(),
+            );
+        }
+        let (_, weight_index) = banks(context);
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(context, b'x', &mut mixer);
+        for key in 0..WEIGHT_CONTEXTS {
+            if key == weight_index {
+                assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
+                assert_ne!(mixer.baseline_sq_error[key].to_bits(), 0.0f64.to_bits());
+                assert_ne!(
+                    mixer.weights[key].map(f64::to_bits),
+                    [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
+                );
+            } else {
+                assert_eq!(
+                    mixer.recent_sq_error[key].to_bits(),
+                    0.0f64.to_bits(),
+                    "key {key}"
+                );
+                assert_eq!(
+                    mixer.baseline_sq_error[key].to_bits(),
+                    0.0f64.to_bits(),
+                    "key {key}"
+                );
+                assert_eq!(
+                    mixer.weights[key].map(f64::to_bits),
+                    [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
+                );
+            }
+        }
+    }
+
+    /// Both candidates start from an identical mixer state and see the
+    /// same byte stream; only their calibration table's bin spacing
+    /// differs (linear vs. logit-domain), so a fresh comparison must
+    /// start near-identical and is free to diverge as [`Sse`]/
+    /// [`crate::sse::LogitSse`] each adapt away from their own identity
+    /// mapping.
+    #[test]
+    fn ideal_cost_bits_logistic_surprise_logit_sse_diverges_from_the_champion_as_both_adapt() {
+        let mut champion_model = Literal::new();
+        let mut candidate_model = Literal::new();
+        let mut champion_mixer = SurpriseLogisticMix::new();
+        let mut candidate_mixer = SurpriseLogisticMixLogitSse::new();
+        let context = Context::default();
+        let mut champion_bits = 0.0;
+        let mut candidate_bits = 0.0;
+        for (i, &byte) in b"the quick brown fox jumps over the lazy dog repeatedly"
+            .iter()
+            .enumerate()
+        {
+            champion_bits += champion_model.ideal_cost_bits_logistic_surprise(
+                context,
+                byte,
+                &mut champion_mixer,
+            );
+            candidate_bits += candidate_model.ideal_cost_bits_logistic_surprise_logit_sse(
+                context,
+                byte,
+                &mut candidate_mixer,
+            );
+            if i == 0 {
+                assert!(
+                    (champion_bits - candidate_bits).abs() < 0.05,
+                    "first byte should price near-identically from two fresh identity tables"
+                );
+            }
+        }
+        assert!(champion_bits.is_finite());
+        assert!(candidate_bits.is_finite());
     }
 
     fn roundtrip_bytes_logistic_surprise(bytes: &[u8]) {
