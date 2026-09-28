@@ -74,12 +74,16 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// S1-P1), to 4 when a `Candidate::Transpose` frame's literal sub-stream
 /// gained a column-keyed seventh expert
 /// (`docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
-/// `research/JOURNAL.md` S1-P5), and to 5 when every other candidate's
+/// `research/JOURNAL.md` S1-P5), to 5 when every other candidate's
 /// literal sub-stream switched from SSE-calibrated coding to a logit-domain
 /// mixer over the same six experts
 /// (`docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`,
-/// `research/JOURNAL.md` S1-P8): all five are bitstream format changes
-/// (CLAUDE.md hard rule 5). A version-0 frame only ever contains
+/// `research/JOURNAL.md` S1-P8), and to 6 when that same set of candidates
+/// switched to a second rate schedule over the identical logit-domain mix,
+/// a learned baseline instead of an annealed step count
+/// (`docs/adr/0054-wire-the-surprise-rate-schedule-into-the-literal-model.md`,
+/// `research/JOURNAL.md` S2-A104/S2-A105): all six are bitstream format
+/// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
 /// separate version-0 decode path is needed. A version-1 or version-2 frame
 /// is rejected as `UnsupportedVersion` before [`codec::decode`] is ever
@@ -94,13 +98,15 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// its literals through [`literal::Literal::decode_column`] instead of
 /// `decode_sse`, every other candidate unchanged; a version-5 frame codes
 /// every candidate except that same `Candidate::Transpose` case through
-/// [`literal::Literal::decode_logistic`] instead. [`codec::decode`] takes
-/// the frame's declared version (and, for `Candidate::Transpose`, its
-/// already-parsed candidate) and picks between them, so hard rule 5's
-/// "decode support for every version the spec still covers" is satisfied by
-/// dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
-/// `tests/golden/v4-*.mgdc`, and `tests/golden/v5-*.mgdc` pin that forever).
-pub const FORMAT_VERSION: u8 = 5;
+/// [`literal::Literal::decode_logistic`] instead; a version-6 frame codes
+/// that same set of candidates through [`literal::Literal::decode_logistic_surprise`]
+/// instead. [`codec::decode`] takes the frame's declared version (and, for
+/// `Candidate::Transpose`, its already-parsed candidate) and picks between
+/// them, so hard rule 5's "decode support for every version the spec still
+/// covers" is satisfied by dispatch, not by dropping an old path
+/// (`tests/golden/v3-*.mgdc`, `tests/golden/v4-*.mgdc`,
+/// `tests/golden/v5-*.mgdc`, and `tests/golden/v6-*.mgdc` pin that forever).
+pub const FORMAT_VERSION: u8 = 6;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

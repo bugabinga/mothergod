@@ -20,7 +20,7 @@ below. Every design decision traces to a recorded experiment in
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-09-27 against
+measurement time and never committed. Measured 2026-09-28 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
@@ -39,20 +39,20 @@ each report: [`docs/benchmarks/`](docs/benchmarks/).
 measure it one thread per file, several files at once, on one CI machine
 (AMD EPYC 7763, 4 logical cores), more threads than cores, so the rate is a
 lower bound on what an isolated single-file run would show. On that run,
-mothergod encoded Canterbury at 0.128 MB/s and
-decoded it at 3.040 MB/s; it encoded Silesia at 0.061 MB/s and decoded it at
-1.331 MB/s. Silesia's 212 MB took about an hour to compress and under two
+mothergod encoded Canterbury at 0.126 MB/s and
+decoded it at 2.921 MB/s; it encoded Silesia at 0.058 MB/s and decoded it at
+1.222 MB/s. Silesia's 212 MB took about an hour to compress and about three
 minutes to read back; encoding carries the optimal parse, so it runs roughly
 twenty times slower than decoding. One caveat the reports state themselves:
 these are single-run figures from one machine, not a cross-machine claim. One
 more worth adding: an aggregate is total bytes over total time rather than a
-typical file, with per-file decode rates running from 0.3 to 26.7 MB/s. Speed is
+typical file, with per-file decode rates running from 0.2 to 24.9 MB/s. Speed is
 measured every benchmark run and becomes a target of its own at
 [`ROADMAP.md`](ROADMAP.md)'s speed-tiers milestone; nothing before then is
 tuned for it.
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 5) carries `Stored` and `Lz` (optimal-parse LZ over
+format (`FORMAT_VERSION` 6) carries `Stored` and `Lz` (optimal-parse LZ over
 an adaptive, context-mixing range coder; `research/JOURNAL.md` S2-D2/S2-D3).
 That format is specified ([`docs/format/SPEC.md`](docs/format/SPEC.md)) and
 versioned, not frozen: until 1.0 a version can be retired, and a frame from
