@@ -1,4 +1,5 @@
-//! Guard: `README.md` and `site/index.html` restate `FORMAT_VERSION`, the
+//! Guard: `README.md`, `site/index.html` and `CHANGELOG.md` restate
+//! `FORMAT_VERSION`, the
 //! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
 //! encode/decode MB/s, the measurement date, the reference compressor
@@ -81,6 +82,30 @@ fn markdown_numbers(row: &str) -> Vec<f64> {
     row.split('|')
         .filter_map(|cell| cell.trim().trim_matches('*').trim().parse::<f64>().ok())
         .collect()
+}
+
+/// Decimal numbers anywhere in free-flowing prose, in encounter order:
+/// `"(1.374 bits/byte vs 1.470 and 1.403)"` -> `[1.374, 1.470, 1.403]`.
+/// Unlike `markdown_numbers`, there is no cell delimiter to split on, so
+/// this scans character by character instead.
+fn prose_numbers(text: &str) -> Vec<f64> {
+    let mut values = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() {
+            let start = index;
+            while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
+                index += 1;
+            }
+            if let Ok(value) = text[start..index].parse::<f64>() {
+                values.push(value);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    values
 }
 
 fn line_containing<'a>(text: &'a str, needle: &str) -> &'a str {
@@ -298,6 +323,47 @@ fn aggregate_ratios_match_their_generated_reports() {
             assert_eq!(
                 site_claim, rounded,
                 "site/index.html's {corpus} {column} bits/byte is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
+            );
+        }
+    }
+}
+
+/// `CHANGELOG.md`'s "Ratio" bullet names only three of the four columns the
+/// other surfaces carry, in this order: `[mothergod, zstd -19, xz -9e]`. It
+/// never names gzip, so it maps onto `aggregate_from_report`'s four-wide
+/// array by skipping index 1.
+fn aggregate_from_changelog(corpus: &str) -> [f64; 3] {
+    let changelog = read("CHANGELOG.md");
+    let marker = format!("{corpus} (");
+    let start = changelog
+        .find(&marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found in CHANGELOG.md"))
+        + marker.len();
+    let end = changelog[start..]
+        .find(')')
+        .unwrap_or_else(|| panic!("unterminated {corpus} parenthetical in CHANGELOG.md"))
+        + start;
+    let numbers = prose_numbers(&changelog[start..end]);
+    [numbers[0], numbers[1], numbers[2]]
+}
+
+#[test]
+fn changelog_ratio_claim_matches_its_generated_reports() {
+    let corpora = [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")];
+    let columns = ["mothergod", "zstd -19", "xz -9e"];
+    let report_indices = [0, 2, 3];
+
+    for (corpus, report_file) in corpora {
+        let truth = aggregate_from_report(report_file);
+        let changelog = aggregate_from_changelog(corpus);
+
+        for (position, column) in columns.iter().enumerate() {
+            let rounded = format!("{:.3}", truth[report_indices[position]]);
+            let changelog_claim = format!("{:.3}", changelog[position]);
+
+            assert_eq!(
+                changelog_claim, rounded,
+                "CHANGELOG.md's {corpus} {column} bits/byte is {changelog_claim}, docs/benchmarks/{report_file} says {rounded}"
             );
         }
     }

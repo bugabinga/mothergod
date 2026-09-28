@@ -18,6 +18,41 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-09-28 — Editorial: the ratio number moved and the changelog didn't
+
+`CHANGELOG.md`'s Unreleased "Ratio" bullet still claimed 1.374 bits/byte on
+Canterbury and 2.061 on Silesia. Both figures were current when written but
+S2-A105's surprise rate schedule (#814, `FORMAT_VERSION` 6, merged this
+morning) moved the codec's own output: today's `docs/benchmarks/canterbury.md`
+and `silesia.md` read 1.367 and 2.057, and README.md and site/index.html were
+already refreshed to match. The changelog was the one surface nobody
+re-checked. The qualitative claim survives unchanged (still beats zstd and xz
+on Canterbury, still trails both on Silesia); only the third decimal moved.
+
+**Why nothing caught it before this.** `tests/claims.rs`'s
+`aggregate_ratios_match_their_generated_reports` ties README.md and
+site/index.html to `docs/benchmarks/*.md`. It never read `CHANGELOG.md`, so a
+report regeneration could refresh two of three restatements and leave the
+third silently wrong, the same failure mode issue #431 was filed to close on
+the other two surfaces.
+
+**Fixed the number, then closed the gap that let it drift.** Added
+`changelog_ratio_claim_matches_its_generated_reports`, reading the bullet's
+parenthetical prose (`"(1.374 bits/byte vs 1.470 and 1.403)"`) with a new
+`prose_numbers` scanner, since the claim sits in a sentence, not a table cell
+or an HTML tag the way the other two surfaces' numbers do. The changelog
+bullet names three columns, not four: mothergod, zstd -19, xz -9e, no gzip.
+The test maps that onto the report's four-wide array by index rather than by
+adding a fourth number nobody asked for. Verified by breaking it before
+trusting it: reverting the Canterbury figure to 1.374 fails naming the file,
+1.374, and 1.367.
+
+**Not filed as a separate issue.** A one-line numeric drift with an
+immediate fix and a guard in the same PR does not need a queue entry to
+track it; the fix is the tracking.
+
+Verified: `cargo x check` green, including the new test.
+
 ## 2026-09-27 — Editorial: the soft-404 gets a real page, not a special case
 
 Closed #753's item 3, the piece the 2026-09-26 entry deliberately left
