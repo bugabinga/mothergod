@@ -7321,3 +7321,107 @@ record.
   `v5-lz-repeated-text`, re-encoded); every version-3 through version-5
   fixture stays committed, decode-only, forever. `research/progress.jsonl`
   it172.
+- S2-R27 | REJECTED | New literature idea, not tied to any existing
+  standing lead (ROADMAP M3: "no standing lead is open... the next
+  candidate is a literature idea or a cheap wild swing"): classic
+  multi-stage APM chaining (Mahoney 2005, `crate::sse`'s own module docs
+  cite the same paper for the single stage already shipped). After
+  `SurpriseLogisticMix`'s own tree-position-keyed `Sse` refines a bit-tree
+  node's probability (S2-A104/S2-A105, the shipped champion), chain a
+  second, independently-adapting `Sse` stage on top, keyed by
+  `weight_index` (the same coarse previous-byte-high-nibble/`after_copy`
+  key `banks` already selects the six real experts' linear mixing weights
+  by), refining the first stage's already-refined output rather than the
+  raw mixed estimate. Hypothesis: a second stage on an independent,
+  non-crossed context corrects whatever systematic bias survives the
+  first stage's per-node calibration within one coarse previous-byte
+  class, a different shape from S2-R22's rejected attempt (that slice
+  crossed a second axis *into* the existing 255-context table; this one
+  chains a second, separately-adapting table *after* it, never crossing
+  contexts). | Apparatus, mirroring `SurpriseLogisticMix`'s own shape:
+  `literal::ChainedSurpriseLogisticMix` (same `weights`/`recent_sq_error`/
+  `baseline_sq_error`/`sse` fields, plus `sse2: Sse::new(WEIGHT_CONTEXTS)`),
+  `Literal::chained_code_bit` (mirrors `surprise_code_bit` exactly, adding
+  one extra `sse2.refine`/`code_bit`/`sse2.update` between `sse`'s own
+  refine and the coded bit), `Literal::ideal_cost_bits_logistic_chained`
+  (mirrors `ideal_cost_bits_logistic_surprise`); four unit tests (fresh-
+  mixer state including `sse2.contexts() == WEIGHT_CONTEXTS`, a walk
+  touches only its own weight key for weights/`recent_sq_error`/
+  `baseline_sq_error` exactly as the champion's own test does, `sse2`
+  itself starts at identity for every key before any update). One test
+  written against a wrong premise, caught before measurement: the working
+  assumption that a fresh mixer costs the very first byte identically to
+  the champion (both stages start at identity) is false for this design —
+  `sse2`'s context (`weight_index`) is constant across a whole byte's
+  `LEVELS` (8)-node walk, unlike `sse`'s tree-position context, a fresh
+  distinct context at each of the 8 nodes, so `sse2` is refined *and*
+  updated 8 times at the *same* context within one byte, moving away from
+  identity mid-byte; the corrected test checks the identity precondition
+  directly (`sse2.refine(key, 0.5) == 0.5` for every key on a brand-new
+  mixer) instead of a whole byte's cost. Scratch binary
+  `bench/src/bin/scratch_chained_sse.rs` (deleted with this verdict, same
+  convention as every prior scratch measurement): for `bench::baseline`'s
+  11 train cases (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) plus
+  `access_log`/`gradient_image` sealed at `sealed_seed(CASE_SEED)`, same
+  length, extracted each case's real optimal-parse literal stream once
+  (`lz::parse_optimal`, `Context::after_literal`/`after_copy` in coding
+  order, S2-A88's own method, identical to S2-A104/S2-R26's) and priced it
+  twice from independent fresh state: the champion,
+  `Literal::ideal_cost_bits_logistic_surprise` (S2-A104's shipped
+  `SurpriseLogisticMix`); the candidate,
+  `ideal_cost_bits_logistic_chained`. | Train mean delta (candidate minus
+  champion) **+0.000451 b/B**, a regression (6 of 11 improved:
+  `markov_h8_2_trap` -0.006815, `sqlite_like_records` -0.005208,
+  `x86_dense_code` -0.004016, `interleaved_audio16` -0.002893,
+  `json_records` -0.001405, `entropy_ladder_h8` -0.010350; 5 regressed,
+  every remaining entropy-ladder point, growing with entropy up to h6
+  then reversing at h8: `entropy_ladder_h1` +0.001627, `h2` +0.004781,
+  `h4` +0.012657, `h6` +0.016453 (this slice's own largest single
+  regression), `base64_wrapped` +0.000124, near-flat). Sealed split: both
+  improved, `access_log` -0.000206, `gradient_image` -0.013939 (a large
+  improvement, on the exact case this whole logit-domain-mixer thread has
+  repeatedly turned on since S2-R20). **Rejected**: corpus policy's
+  accept rule needs train improvement *and* no validation regression; a
+  positive train mean fails it outright regardless of the sealed side,
+  the same reading S2-R1/S2-R26 already applied to a positive-train,
+  improving-sealed split. | Mechanism: `sse2`'s context (`weight_index`)
+  carries no tree-depth information, so the same 33-bin pair calibrates
+  all `LEVELS` (8) tree positions' probabilities under one previous-byte
+  class, pooling priors `crate::bittree::sse_context`'s own doc already
+  names as needing to stay separate ("no coarser... folding two nodes
+  together loses the distinction the walk actually observed") — confirmed
+  directly in testing (`chained_second_stage_only_moves_its_own_weight_
+  index_context`): within a single byte, `sse2` is refined and updated 8
+  times at that one shared context, each update immediately visible to
+  the next level's refine call, before the next byte's own `weight_index`
+  lookup starts the same cycle over. For the entropy ladder (an iid
+  source at a fixed order-0 entropy, no cross-byte structure to exploit),
+  the eight tree-position priors are genuinely different numbers even
+  under a skewed marginal, so folding all eight into one shared, within-
+  byte-adapting curve is pure noise injection; `entropy_ladder_h8`
+  (uniform byte histogram) is the one ladder point where every level's
+  true probability already sits close to the others', so this conflation
+  costs least there and the second stage's extra adaptation happens to
+  help by chance, while `h6`, the ladder's most order-1-structured point
+  short of `h8`, pays this slice's largest tax. The sealed, non-ladder
+  cases (both genuinely structured, non-iid data) improve, consistent
+  with S1-L4's richness-tax law read the other way: a real cost on
+  structureless data can still be a real win on structured data, and the
+  entropy ladder is exactly the guard `research/corpus/POLICY.md` built to
+  catch that trade against wins on the corpus's other, structured cases.
+  Remaining scope, if pursued again: `sse2`'s context needs a real
+  tree-depth axis, not `weight_index` alone, but crossing `weight_index`
+  with depth (or tree position) reduces to widening one `Sse` table with
+  a second axis, S2-R22's own already-rejected shape (a different second
+  axis there, LZMA match-byte agreement, but the same crossed-context
+  mechanism); this direction has now failed under both its independent-
+  stage (this entry) and same-table-widened (S2-R22) presentations,
+  plausibly closed pending a genuinely different second-stage design, not
+  another axis choice on either presentation. Candidate code
+  (`literal::ChainedSurpriseLogisticMix`, `Literal::chained_code_bit`/
+  `ideal_cost_bits_logistic_chained`, their four unit tests, the scratch
+  binary) reverted in full per the `compression-experiment` skill's
+  delete-rejected-candidate-code rule; `SurpriseLogisticMix`/
+  `Literal::surprise_code_bit`/`ideal_cost_bits_logistic_surprise`
+  (S2-A104, shipped at `FORMAT_VERSION` 6 by S2-A105) are unaffected.
+  `research/progress.jsonl` it173.
