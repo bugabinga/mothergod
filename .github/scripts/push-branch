@@ -229,6 +229,21 @@ def merge_paths(merge_sha):
     return head2_sha, paths, deletions
 
 
+def guard_pr_scope(target):
+    """Refuse a push to a PR other than the one this session is scoped to.
+
+    merge-pr and gh-comment both gained this in 59e7530 (#782), closing #771
+    (a reviewer run scoped to one PR wrote to another); push-branch was named
+    in #771's original defect list and left out (#811)."""
+    if not target.isdigit():
+        return
+    scope = os.environ.get("PR_NUMBER")
+    if scope and target != scope:
+        die(f"target #{target} does not match PR_NUMBER={scope} from the "
+            "environment; a review session pushes only to the PR it was "
+            "scoped to (issue #771)")
+
+
 def guard_not_stale(branch, base_sha, paths):
     """Refuse a push that would silently revert someone else's commit.
 
@@ -263,6 +278,7 @@ def main() -> int:
     if not REPO:
         die("GITHUB_REPOSITORY is unset; this runs inside the repo's workflows")
     target, rest = argv[0], argv[1:]
+    guard_pr_scope(target)
     merge_sha = None
     if "--merge" in rest:
         if len(rest) != 2 or rest[0] != "--merge":
