@@ -782,6 +782,19 @@ pub(crate) mod test_support {
     pub(crate) fn nz(v: usize) -> std::num::NonZeroUsize {
         std::num::NonZeroUsize::new(v).unwrap()
     }
+
+    /// Extracts the [`Error`] from a [`WriteError`] produced by a
+    /// `decode_to_writer` call, for tests asserting exactly which decode
+    /// error occurred; `None` for a [`WriteError::Io`] (a `writer` failure,
+    /// never a decode error): `codec` and `lib`'s test suites each need
+    /// this same match and had each hand-rolled the identical helper to
+    /// get it.
+    pub(crate) fn as_codec_error(err: &super::WriteError) -> Option<&super::Error> {
+        match err {
+            super::WriteError::Decode(inner) => Some(inner),
+            super::WriteError::Io(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1118,17 +1131,6 @@ mod tests {
         assert_eq!(decodes_incrementally(&frame), Err(Error::BadMagic));
     }
 
-    /// Extracts the [`Error`] from a [`WriteError`] produced by
-    /// [`decompress_to_writer`], for tests asserting exactly which decode
-    /// error occurred; `None` for a [`WriteError::Io`] (a `writer` failure,
-    /// never a decode error).
-    fn as_codec_error(err: &WriteError) -> Option<&Error> {
-        match err {
-            WriteError::Decode(inner) => Some(inner),
-            WriteError::Io(_) => None,
-        }
-    }
-
     #[test]
     fn decompress_to_writer_matches_decompress_for_stored_and_lz_frames() {
         for input in [
@@ -1154,7 +1156,7 @@ mod tests {
         let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out)
             .expect_err("declared length past MAX_DECODED_LEN must be rejected");
         assert_eq!(
-            as_codec_error(&err),
+            test_support::as_codec_error(&err),
             Some(&Error::TooLarge {
                 len: over,
                 max: codec::MAX_DECODED_LEN
@@ -1171,7 +1173,7 @@ mod tests {
         let err = decompress_to_writer(&frame, 1, &mut out)
             .expect_err("a Stored payload over a caller's tighter bound must be rejected");
         assert_eq!(
-            as_codec_error(&err),
+            test_support::as_codec_error(&err),
             Some(&Error::TooLarge {
                 len: u32::try_from(input.len()).unwrap(),
                 max: 1
@@ -1190,7 +1192,7 @@ mod tests {
         let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out)
             .expect_err("a newer format version must be rejected");
         assert_eq!(
-            as_codec_error(&err),
+            test_support::as_codec_error(&err),
             Some(&Error::UnsupportedVersion(FORMAT_VERSION + 1))
         );
     }
@@ -1212,7 +1214,7 @@ mod tests {
         let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut writer)
             .expect_err("a writer that always fails must surface its error");
         assert!(
-            as_codec_error(&err).is_none(),
+            test_support::as_codec_error(&err).is_none(),
             "a writer failure is not a decode Error and must not downcast to one"
         );
         match err {

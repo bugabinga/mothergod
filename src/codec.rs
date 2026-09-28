@@ -1528,6 +1528,7 @@ fn copy_streamed<W: std::io::Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::as_codec_error;
 
     /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
     /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
@@ -1540,16 +1541,6 @@ mod tests {
         let mut out = Vec::new();
         decode_to_writer(payload, version, max_len, &mut out)?;
         Ok(out)
-    }
-
-    /// Extracts the [`Error`] from a [`crate::WriteError`] produced by
-    /// [`decode_to_writer`], for tests asserting exactly which decode error
-    /// occurred rather than just that some error did.
-    fn as_codec_error(err: &crate::WriteError) -> Option<&Error> {
-        match err {
-            crate::WriteError::Decode(inner) => Some(inner),
-            crate::WriteError::Io(_) => None,
-        }
     }
 
     fn roundtrip(data: &[u8]) {
