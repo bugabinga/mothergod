@@ -333,6 +333,22 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
     walk_sse(cum, sse, |_mid, refined_p| decoder.decode_bit(refined_p))
 }
 
+/// One bit-tree node's ideal-cost contribution: `-log2(p)` if the node
+/// resolved to `bit`, `-log2(1 - p)` otherwise. Shared by every ideal-cost
+/// accounting path in the crate ([`ideal_cost_bits`], [`ideal_cost_bits_sse`],
+/// and [`crate::literal::Literal`]'s logistic-mix pricing) so the formula
+/// carries one exemption from `clippy.toml`'s `disallowed-methods` instead
+/// of one per call site.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends \
+              on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't \
+              apply off the coding path)"
+)]
+pub(crate) fn ideal_cost_bit(bit: bool, p: f64) -> f64 {
+    -(if bit { p.log2() } else { (1.0 - p).log2() })
+}
+
 /// Sum of the ideal (`-log2`) cost of each of the `LEVELS` binary
 /// decisions [`encode_symbol`] would pay coding `symbol` under `cum`,
 /// without driving a coder — the chain-rule identity the module docs
@@ -346,19 +362,12 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
 #[must_use]
-#[allow(
-    clippy::disallowed_methods,
-    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends \
-              on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't \
-              apply off the coding path) — crate::literal::Literal::ideal_cost_bits takes the \
-              same exemption"
-)]
 pub fn ideal_cost_bits(cum: &[u64], symbol: u8) -> f64 {
     let symbol_index = usize::from(symbol);
     let mut bits = 0.0f64;
     walk(cum, |mid, p| {
         let bit = symbol_index >= mid;
-        bits -= if bit { p.log2() } else { (1.0 - p).log2() };
+        bits += ideal_cost_bit(bit, p);
         bit
     });
     bits
@@ -379,23 +388,12 @@ pub fn ideal_cost_bits(cum: &[u64], symbol: u8) -> f64 {
 /// Panics if `cum` is not shaped like a 257-entry cumulative table over
 /// `ALPHABET` symbols; see `check_table_shape`.
 #[must_use]
-#[allow(
-    clippy::disallowed_methods,
-    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends \
-              on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't \
-              apply off the coding path) — crate::literal::Literal::ideal_cost_bits_sse takes the \
-              same exemption"
-)]
 pub fn ideal_cost_bits_sse(cum: &[u64], symbol: u8, sse: &mut Sse) -> f64 {
     let symbol_index = usize::from(symbol);
     let mut bits = 0.0f64;
     walk_sse(cum, sse, |mid, refined_p| {
         let bit = symbol_index >= mid;
-        bits -= if bit {
-            refined_p.log2()
-        } else {
-            (1.0 - refined_p).log2()
-        };
+        bits += ideal_cost_bit(bit, refined_p);
         bit
     });
     bits
@@ -516,6 +514,21 @@ mod tests {
                 "symbol {symbol}: direct {direct} bits vs decomposed {decomposed} bits"
             );
         }
+    }
+
+    /// `#810`: pins [`ideal_cost_bit`]'s log2 cost formula against
+    /// directly-chosen `p` values, independent of the bit-tree walk that
+    /// otherwise makes `p` itself hard to hand-derive.
+    #[test]
+    fn ideal_cost_bit_matches_hand_computed_log2_cost() {
+        // -log2(0.5) = 1.0, both branches.
+        assert!((ideal_cost_bit(true, 0.5) - 1.0).abs() < 1e-12);
+        assert!((ideal_cost_bit(false, 0.5) - 1.0).abs() < 1e-12);
+        // -log2(0.25) = 2.0: bit = true reads p directly, bit = false
+        // reads 1 - p, so p = 0.75 exercises the same value through the
+        // subtraction instead.
+        assert!((ideal_cost_bit(true, 0.25) - 2.0).abs() < 1e-12);
+        assert!((ideal_cost_bit(false, 0.75) - 2.0).abs() < 1e-12);
     }
 
     #[test]
