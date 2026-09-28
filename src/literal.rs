@@ -2604,8 +2604,17 @@ mod tests {
         let mut context = Context::default();
         let mut bits_default = 0.0;
         for &b in bytes {
-            bits_default +=
+            let cost =
                 via_default.ideal_cost_bits_logistic_surprise(context, b, &mut mixer_default);
+            // Every node's clamped probability keeps its own cost inside
+            // (0, -log2(LOGISTIC_PROBABILITY_FLOOR)) = (0, 12), and a byte
+            // walks bittree::LEVELS = 8 of them, so the byte's total stays
+            // inside (0, 96): catches a mutated accumulation (`+=` to
+            // `-=`, which drives the sum negative, or to `*=`, which
+            // collapses it to zero from the `0.0` starting accumulator)
+            // as well as a mutated per-node cost.
+            assert!(cost > 0.0 && cost < 96.0, "cost={cost}");
+            bits_default += cost;
             context = context.after_literal(b);
         }
 
