@@ -633,20 +633,6 @@ fn surprise_error_tracking_step(
     *baseline = surprise_ema_update(*baseline, error_sq, SURPRISE_BASELINE_DECAY);
 }
 
-/// One bit-tree node's ideal-cost contribution: `-log2(p)` if the node
-/// resolved to `bit`, `-log2(1 - p)` otherwise.
-/// [`Literal::ideal_cost_bits_logistic_surprise`]'s own per-node
-/// accumulation, split out on [`logistic_gradient_step`]'s own grounds
-/// (#783): checkable against directly-chosen `bit`/`p` pairs, independent
-/// of the walk's chained state (`test-craft`'s survivor-triage, #810).
-#[allow(
-    clippy::disallowed_methods,
-    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-)]
-fn ideal_cost_bit(bit: bool, p: f64) -> f64 {
-    -(if bit { p.log2() } else { (1.0 - p).log2() })
-}
-
 /// Logit-domain mixer over [`Literal`]'s own six expert banks
 /// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
 /// probability of the upper half is [`stretch`]ed, the stretches are
@@ -1072,10 +1058,6 @@ impl Literal {
     /// takes the same gradient steps on `logistic` [`Self::encode_logistic`]
     /// would.
     #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
     pub fn ideal_cost_bits_logistic(
         &mut self,
         context: Context,
@@ -1087,7 +1069,7 @@ impl Literal {
         let mut bits = 0.0f64;
         let landed = self.logistic_code_bit(&bank_indices, weight_index, logistic, |mid, p| {
             let bit = symbol >= mid;
-            bits -= if bit { p.log2() } else { (1.0 - p).log2() };
+            bits += bittree::ideal_cost_bit(bit, p);
             bit
         });
         debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
@@ -1105,10 +1087,6 @@ impl Literal {
     /// own docs). Updates the six real experts' banks and takes the same
     /// gradient step `mixer` would, same as [`Self::ideal_cost_bits_logistic`].
     #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
     pub fn ideal_cost_bits_logistic_surprise(
         &mut self,
         context: Context,
@@ -1120,7 +1098,7 @@ impl Literal {
         let mut bits = 0.0f64;
         let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
-            bits += ideal_cost_bit(bit, p);
+            bits += bittree::ideal_cost_bit(bit, p);
             bit
         });
         debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
@@ -2595,21 +2573,6 @@ mod tests {
         let expected_baseline = surprise_ema_update(0.1, 0.09, SURPRISE_BASELINE_DECAY);
         assert!((recent - expected_recent).abs() < 1e-15);
         assert!((baseline - expected_baseline).abs() < 1e-15);
-    }
-
-    /// `#810`: pins [`ideal_cost_bit`]'s log2 cost formula against
-    /// directly-chosen `p` values, independent of the bit-tree walk that
-    /// otherwise makes `p` itself hard to hand-derive.
-    #[test]
-    fn ideal_cost_bit_matches_hand_computed_log2_cost() {
-        // -log2(0.5) = 1.0, both branches.
-        assert!((ideal_cost_bit(true, 0.5) - 1.0).abs() < 1e-12);
-        assert!((ideal_cost_bit(false, 0.5) - 1.0).abs() < 1e-12);
-        // -log2(0.25) = 2.0: bit = true reads p directly, bit = false
-        // reads 1 - p, so p = 0.75 exercises the same value through the
-        // subtraction instead.
-        assert!((ideal_cost_bit(true, 0.25) - 2.0).abs() < 1e-12);
-        assert!((ideal_cost_bit(false, 0.75) - 2.0).abs() < 1e-12);
     }
 
     #[test]
