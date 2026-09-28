@@ -78,3 +78,51 @@ test("a 403 is never routed around, admin PAT present or not", () => {
   assert.equal(r.identity, "app token");
   assert.doesNotMatch(r.stderr, /retrying/);
 });
+
+// guard_pr_scope (issue #811): merge-pr and gh-comment both gained this
+// refusal in 59e7530 (#782); push-branch was named in #771's original
+// defect list and left out.
+const scopeDriver = `
+import importlib.machinery, importlib.util, os, sys
+
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+try:
+    pb.guard_pr_scope(sys.argv[2])
+    died = False
+except SystemExit:
+    died = True
+print(died)
+`;
+
+function runScope(target, env = {}) {
+  const proc = spawnSync("python3", ["-c", scopeDriver, scriptsDir, target], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, GITHUB_REPOSITORY: "o/r", ...env },
+  });
+  return { died: proc.stdout.trim() === "True", stderr: proc.stderr };
+}
+
+test("PR_NUMBER in the environment refuses a push to any other PR number", () => {
+  const r = runScope("770", { PR_NUMBER: "768" });
+  assert.equal(r.died, true);
+  assert.match(r.stderr, /does not match PR_NUMBER=768/);
+});
+
+test("PR_NUMBER matching the target clears the guard", () => {
+  const r = runScope("768", { PR_NUMBER: "768" });
+  assert.equal(r.died, false);
+});
+
+test("no PR_NUMBER in the environment (every non-review seat) is unaffected", () => {
+  const r = runScope("770", {});
+  assert.equal(r.died, false);
+});
+
+test("a bare branch name is never scoped, PR_NUMBER or not", () => {
+  const r = runScope("claude/some-branch", { PR_NUMBER: "768" });
+  assert.equal(r.died, false);
+});
