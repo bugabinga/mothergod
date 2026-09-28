@@ -7474,22 +7474,28 @@ record.
   `after_copy`) and priced it twice from independent fresh state: the
   champion, `Literal::ideal_cost_bits_logistic_surprise`
   (`SurpriseLogisticMix`, S2-A104/S2-A105's shipped mixer); the
-  candidate, `ideal_cost_bits_logistic_surprise_logit_sse`. | Train mean
-  delta (candidate minus champion) **-0.013504 b/B** (sum **-0.148540**),
-  5 of 11 improved: `x86_dense_code` **-0.070712**, `markov_h8_2_trap`
-  **-0.071132** (this slice's two largest single moves), `json_records`
-  -0.022029, `base64_wrapped` -0.020192, `entropy_ladder_h6` -0.001081; 6
-  regressed: `entropy_ladder_h8` **+0.019712** (the largest single
-  regression), `interleaved_audio16` +0.006338, `sqlite_like_records`
-  +0.006298, `entropy_ladder_h2` +0.001897, `entropy_ladder_h4`
-  +0.001475, `entropy_ladder_h1` +0.000886. Sealed: both improved,
-  `access_log` -0.013990, `gradient_image` **-0.042370** — the largest
-  single sealed move any ideal-cost pairing in this lead's own history
-  has measured (S2-A104's own -0.003457, S2-R27's own -0.013939).
-  **Accepted**: corpus policy's accept rule (train improvement, no
-  validation regression) passes outright, both sealed kinds improving
-  rather than merely holding. | Mechanism: `stretch`'s derivative `1 /
-  (p * (1 - p))` is minimal (4) at `p = 0.5` and grows without bound
+  candidate, `ideal_cost_bits_logistic_surprise_logit_sse`. Corrected after
+  review (PR #823): the original measurement normalized each case's bit delta
+  by its own literal-byte count instead of `CASE_LEN` (the corpus-byte
+  denominator every other `progress.jsonl` entry and
+  `bench::baseline::bits_per_byte` use), inflating every case whose optimal
+  parse is mostly matches; re-run with the same literal-only replay, correct
+  denominator. | Train mean delta (candidate minus champion) **-0.000166 b/B**
+  (sum **-0.001824**), 5 of 11 improved: `markov_h8_2_trap` **-0.014293**,
+  `x86_dense_code` **-0.013571** (this slice's two largest single moves),
+  `json_records` -0.001134, `entropy_ladder_h6` -0.000970, `base64_wrapped`
+  -0.000907; 6 regressed: `entropy_ladder_h8` **+0.019700** (the largest single
+  regression), `interleaved_audio16` +0.005761, `sqlite_like_records`
+  +0.002517, `entropy_ladder_h4` +0.000692, `entropy_ladder_h2` +0.000325,
+  `entropy_ladder_h1` +0.000057. Sealed: both improved, `access_log` -0.001004,
+  `gradient_image` **-0.040248** — the largest single sealed move any
+  ideal-cost pairing in this lead's own history has measured (S2-A104's own
+  -0.003457, S2-R27's own -0.013939). **Accepted**: corpus policy's accept rule
+  (train improvement, no validation regression) passes, though by a thin train
+  mean against an `entropy_ladder_h8` regression nearly two orders of magnitude
+  larger; both sealed kinds improve rather than merely holding. | Mechanism:
+  `stretch`'s derivative `1 / (p * (1 - p))` is minimal (4) at `p = 0.5` and
+  grows without bound
   toward either extreme, so `LogitSse`'s evenly-spaced stretch-domain
   bins are *coarser* in probability terms near 0.5 and *finer* near 0/1
   than `Sse`'s own linear spacing — the intended trade.
