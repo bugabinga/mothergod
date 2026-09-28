@@ -1543,20 +1543,28 @@ mod tests {
         Ok(out)
     }
 
+    /// Asserts both [`decode`] and [`decode_streaming`] reproduce `expected`
+    /// from `encoded`, the pairing every roundtrip fixture in this module
+    /// needs since the two share no code path (`decode_to_writer` is a
+    /// separate loop, tested here rather than trusted to inherit `decode`'s
+    /// coverage). `context` names the fixture in the failure message.
+    fn assert_decode_matches(encoded: &[u8], expected: &[u8], context: &str) {
+        assert_eq!(
+            decode(encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(expected),
+            "decode mismatch: {context}"
+        );
+        assert_eq!(
+            decode_streaming(encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+                .expect("decode_to_writer must succeed whenever decode does, same payload"),
+            expected,
+            "streaming roundtrip mismatch: {context}"
+        );
+    }
+
     fn roundtrip(data: &[u8]) {
         let encoded = encode(data);
-        assert_eq!(
-            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(data),
-            "roundtrip mismatch"
-        );
-        assert_eq!(
-            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .as_deref()
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            data,
-            "streaming roundtrip mismatch"
-        );
+        assert_decode_matches(&encoded, data, "roundtrip");
     }
 
     #[test]
@@ -1584,16 +1592,7 @@ mod tests {
             data.len(),
             encoded.len()
         );
-        assert_eq!(
-            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(data.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            data,
-            "streaming roundtrip mismatch"
-        );
+        assert_decode_matches(&encoded, &data, "roundtrip");
     }
 
     #[test]
@@ -1682,16 +1681,7 @@ mod tests {
             "columnar drift data should select Delta, got kind byte {}",
             encoded[0]
         );
-        assert_eq!(
-            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(data.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            data,
-            "streaming roundtrip mismatch: decode_undoable_streaming's Delta path"
-        );
+        assert_decode_matches(&encoded, &data, "decode_undoable_streaming's Delta path");
     }
 
     #[test]
@@ -1709,16 +1699,7 @@ mod tests {
         let mut frame = Candidate::Delta(stride).to_header_bytes().to_vec();
         frame.extend(encode_tokens(&filtered, None));
 
-        assert_eq!(
-            decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(raw.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            raw,
-            "streaming roundtrip mismatch: Delta path with match/rep copies"
-        );
+        assert_decode_matches(&frame, &raw, "Delta path with match/rep copies");
     }
 
     /// Many `call rel32` instructions, 20 bytes apart (room for a full
@@ -1756,16 +1737,7 @@ mod tests {
             "call-dense data should select Bcj, got kind byte {}",
             encoded[0]
         );
-        assert_eq!(
-            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(data.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            data,
-            "streaming roundtrip mismatch: decode_undoable_streaming's Bcj path"
-        );
+        assert_decode_matches(&encoded, &data, "decode_undoable_streaming's Bcj path");
     }
 
     /// Fixed-width records whose columns each cycle through their own
@@ -1823,16 +1795,7 @@ mod tests {
             "tabular column data should select Transpose, got kind byte {}",
             encoded[0]
         );
-        assert_eq!(
-            decode(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(data.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            data,
-            "streaming roundtrip mismatch: Transpose's whole-buffer fallback path"
-        );
+        assert_decode_matches(&encoded, &data, "Transpose's whole-buffer fallback path");
     }
 
     #[test]
@@ -1916,16 +1879,7 @@ mod tests {
         let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
         frame.extend(encode_tokens(&filtered, None));
 
-        assert_eq!(
-            decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(raw.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            raw,
-            "streaming roundtrip mismatch: Bcj path with match/rep copies"
-        );
+        assert_decode_matches(&frame, &raw, "Bcj path with match/rep copies");
     }
 
     #[test]
@@ -1948,15 +1902,10 @@ mod tests {
         let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
         frame.extend(encode_tokens(&filtered, None));
 
-        assert_eq!(
-            decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-            Ok(raw.as_slice())
-        );
-        assert_eq!(
-            decode_streaming(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN)
-                .expect("decode_to_writer must succeed whenever decode does, same payload"),
-            raw,
-            "streaming roundtrip mismatch: StreamUndo::finish must flush a trailing buffered Bcj opcode"
+        assert_decode_matches(
+            &frame,
+            &raw,
+            "StreamUndo::finish must flush a trailing buffered Bcj opcode",
         );
     }
 
