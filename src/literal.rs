@@ -571,6 +571,70 @@ fn logistic_gradient_step(
     }
 }
 
+/// One bit-tree node's six-expert logit-domain mix: `prefix`'s per-expert
+/// prefix sums at `(lo, mid, hi)` give each expert's upper-half
+/// probability, [`stretch`]ed and weighted-summed against `weights`.
+/// Shared by [`Literal::logistic_code_bit`] and
+/// [`Literal::surprise_code_bit`], the one step both take before diverging
+/// into their own rate schedules. Split out on [`logistic_gradient_step`]'s
+/// own grounds (#783): checkable against directly-chosen prefix sums,
+/// independent of the walk's chained state (`test-craft`'s
+/// survivor-triage, #810).
+fn logistic_mix_node(
+    prefix: &[[u64; ALPHABET + 1]; EXPERTS],
+    weights: &[f64; EXPERTS],
+    lo: usize,
+    mid: usize,
+    hi: usize,
+) -> ([f64; EXPERTS], f64) {
+    let mut stretched = [0f64; EXPERTS];
+    let mut dot = 0.0f64;
+    for (expert, sums) in prefix.iter().enumerate() {
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "bank totals are bounded by the rescale limit, far below 2^53"
+        )]
+        let p = (sums[hi] - sums[mid]) as f64 / (sums[hi] - sums[lo]) as f64;
+        stretched[expert] = stretch(clamp_logistic_probability(p));
+        dot += weights[expert] * stretched[expert];
+    }
+    (stretched, dot)
+}
+
+/// [`Literal::surprise_code_bit`]'s per-node error-tracking step: squares
+/// the node's prediction error (target bit minus the pre-refine mix `p`)
+/// and advances `recent` at `recent_decay` and `baseline` at
+/// [`SURPRISE_BASELINE_DECAY`], both through [`surprise_ema_update`].
+/// Split out on [`logistic_gradient_step`]'s own grounds (#783): checkable
+/// against directly-chosen `bit`/`p` pairs, independent of the walk's
+/// chained state (`test-craft`'s survivor-triage, #810).
+fn surprise_error_tracking_step(
+    recent: &mut f64,
+    baseline: &mut f64,
+    recent_decay: f64,
+    bit: bool,
+    p: f64,
+) {
+    let error = f64::from(u8::from(bit)) - p;
+    let error_sq = error * error;
+    *recent = surprise_ema_update(*recent, error_sq, recent_decay);
+    *baseline = surprise_ema_update(*baseline, error_sq, SURPRISE_BASELINE_DECAY);
+}
+
+/// One bit-tree node's ideal-cost contribution: `-log2(p)` if the node
+/// resolved to `bit`, `-log2(1 - p)` otherwise.
+/// [`Literal::ideal_cost_bits_logistic_surprise_at`]'s own per-node
+/// accumulation, split out on [`logistic_gradient_step`]'s own grounds
+/// (#783): checkable against directly-chosen `bit`/`p` pairs, independent
+/// of the walk's chained state (`test-craft`'s survivor-triage, #810).
+#[allow(
+    clippy::disallowed_methods,
+    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
+)]
+fn ideal_cost_bit(bit: bool, p: f64) -> f64 {
+    -(if bit { p.log2() } else { (1.0 - p).log2() })
+}
+
 /// Logit-domain mixer over [`Literal`]'s own six expert banks
 /// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
 /// probability of the upper half is [`stretch`]ed, the stretches are
@@ -1044,7 +1108,7 @@ impl Literal {
             recent_decay,
             |mid, p| {
                 let bit = symbol >= mid;
-                bits -= if bit { p.log2() } else { (1.0 - p).log2() };
+                bits += ideal_cost_bit(bit, p);
                 bit
             },
         );
@@ -1434,17 +1498,7 @@ impl Literal {
         let steps = &mut logistic.update_count[weight_index];
         let sse = &mut logistic.sse;
         bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let mut stretched = [0f64; EXPERTS];
-            let mut dot = 0.0f64;
-            for (expert, sums) in prefix.iter().enumerate() {
-                #[allow(
-                    clippy::cast_precision_loss,
-                    reason = "bank totals are bounded by the rescale limit, far below 2^53"
-                )]
-                let p = (sums[hi] - sums[mid]) as f64 / (sums[hi] - sums[lo]) as f64;
-                stretched[expert] = stretch(clamp_logistic_probability(p));
-                dot += weights[expert] * stretched[expert];
-            }
+            let (stretched, dot) = logistic_mix_node(&prefix, weights, lo, mid, hi);
             let p = clamp_logistic_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
             let refined = sse.refine(node_context, p);
@@ -1477,17 +1531,7 @@ impl Literal {
         let baseline = &mut mixer.baseline_sq_error[weight_index];
         let sse = &mut mixer.sse;
         bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let mut stretched = [0f64; EXPERTS];
-            let mut dot = 0.0f64;
-            for (expert, sums) in prefix.iter().enumerate() {
-                #[allow(
-                    clippy::cast_precision_loss,
-                    reason = "bank totals are bounded by the rescale limit, far below 2^53"
-                )]
-                let p = (sums[hi] - sums[mid]) as f64 / (sums[hi] - sums[lo]) as f64;
-                stretched[expert] = stretch(clamp_logistic_probability(p));
-                dot += weights[expert] * stretched[expert];
-            }
+            let (stretched, dot) = logistic_mix_node(&prefix, weights, lo, mid, hi);
             let p = clamp_logistic_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
             let refined = sse.refine(node_context, p);
@@ -1495,10 +1539,7 @@ impl Literal {
             sse.update(node_context, p, bit);
             let rate = surprise_rate(*recent, *baseline);
             logistic_gradient_step(weights, &stretched, rate, bit, p);
-            let error = f64::from(u8::from(bit)) - p;
-            let error_sq = error * error;
-            *recent = surprise_ema_update(*recent, error_sq, recent_decay);
-            *baseline = surprise_ema_update(*baseline, error_sq, SURPRISE_BASELINE_DECAY);
+            surprise_error_tracking_step(recent, baseline, recent_decay, bit, p);
             bit
         })
     }
@@ -2242,6 +2283,41 @@ mod tests {
         }
     }
 
+    /// `#810`: pins [`logistic_mix_node`]'s per-expert probability and dot
+    /// product against directly-chosen prefix sums, independent of the
+    /// bit-tree walk, so a mutated `-`, `/`, or `+=` there lands on a wrong
+    /// number instead of surviving under the walk's chained state.
+    #[test]
+    fn logistic_mix_node_matches_hand_computed_stretch_and_dot() {
+        let (lo, mid, hi) = (0, 128, 256);
+        // Six distinct upper-half probabilities, one per expert, chosen so
+        // `sums[hi] - sums[mid]` and `sums[hi] - sums[lo]` are never equal
+        // (ruling out a `-`/`/` mixup that happens to agree at p = 0.5).
+        let p = [0.75, 0.25, 0.5, 0.875, 0.125, 0.625];
+        let mut prefix = [[0u64; ALPHABET + 1]; EXPERTS];
+        for (sums, &p) in prefix.iter_mut().zip(&p) {
+            sums[hi] = 256;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let mid_sum = (256.0 * (1.0 - p)) as u64;
+            sums[mid] = mid_sum;
+        }
+        let weights = [0.1, -0.2, 0.3, 0.05, 0.4, -0.15];
+
+        let expected_stretched: [f64; EXPERTS] =
+            std::array::from_fn(|i| stretch(clamp_logistic_probability(p[i])));
+        let expected_dot: f64 = weights
+            .iter()
+            .zip(&expected_stretched)
+            .map(|(w, s)| w * s)
+            .sum();
+
+        let (stretched, dot) = logistic_mix_node(&prefix, &weights, lo, mid, hi);
+        for (got, want) in stretched.iter().zip(&expected_stretched) {
+            assert!((got - want).abs() < 1e-12, "{stretched:?}");
+        }
+        assert!((dot - expected_dot).abs() < 1e-12, "{dot} {expected_dot}");
+    }
+
     #[test]
     fn clamp_logistic_probability_bounds_both_tails_and_passes_the_middle() {
         assert!((clamp_logistic_probability(0.0) - LOGISTIC_PROBABILITY_FLOOR).abs() < 1e-18);
@@ -2430,6 +2506,47 @@ mod tests {
         assert!((surprise_ema_update(0.1, 0.5, 0.0) - 0.5).abs() < 1e-15);
         // decay = 1.0 never moves.
         assert!((surprise_ema_update(0.3, 0.9, 1.0) - 0.3).abs() < 1e-15);
+    }
+
+    /// `#810`: pins [`surprise_error_tracking_step`]'s error and error²
+    /// arithmetic against directly-chosen `bit`/`p` pairs, independent of
+    /// the bit-tree walk, comparing against [`surprise_ema_update`] (a
+    /// trusted, already-tested function) fed the hand-computed error².
+    #[test]
+    fn surprise_error_tracking_step_matches_hand_computed_error_sq() {
+        // bit = true: error = 1.0 - 0.3 = 0.7, error_sq = 0.49.
+        let mut recent = 0.2;
+        let mut baseline = 0.1;
+        surprise_error_tracking_step(&mut recent, &mut baseline, 0.8, true, 0.3);
+        let expected_recent = surprise_ema_update(0.2, 0.49, 0.8);
+        let expected_baseline = surprise_ema_update(0.1, 0.49, SURPRISE_BASELINE_DECAY);
+        assert!((recent - expected_recent).abs() < 1e-15);
+        assert!((baseline - expected_baseline).abs() < 1e-15);
+
+        // bit = false: error = 0.0 - 0.3 = -0.3, error_sq = 0.09, the
+        // opposite sign from the bit = true case but the same square.
+        let mut recent = 0.2;
+        let mut baseline = 0.1;
+        surprise_error_tracking_step(&mut recent, &mut baseline, 0.8, false, 0.3);
+        let expected_recent = surprise_ema_update(0.2, 0.09, 0.8);
+        let expected_baseline = surprise_ema_update(0.1, 0.09, SURPRISE_BASELINE_DECAY);
+        assert!((recent - expected_recent).abs() < 1e-15);
+        assert!((baseline - expected_baseline).abs() < 1e-15);
+    }
+
+    /// `#810`: pins [`ideal_cost_bit`]'s log2 cost formula against
+    /// directly-chosen `p` values, independent of the bit-tree walk that
+    /// otherwise makes `p` itself hard to hand-derive.
+    #[test]
+    fn ideal_cost_bit_matches_hand_computed_log2_cost() {
+        // -log2(0.5) = 1.0, both branches.
+        assert!((ideal_cost_bit(true, 0.5) - 1.0).abs() < 1e-12);
+        assert!((ideal_cost_bit(false, 0.5) - 1.0).abs() < 1e-12);
+        // -log2(0.25) = 2.0: bit = true reads p directly, bit = false
+        // reads 1 - p, so p = 0.75 exercises the same value through the
+        // subtraction instead.
+        assert!((ideal_cost_bit(true, 0.25) - 2.0).abs() < 1e-12);
+        assert!((ideal_cost_bit(false, 0.75) - 2.0).abs() < 1e-12);
     }
 
     #[test]
