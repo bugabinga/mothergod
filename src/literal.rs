@@ -1048,35 +1048,6 @@ impl Literal {
         bits
     }
 
-    /// [`Self::ideal_cost_bits_sse`]'s counterpart for [`Self::encode_logistic`]:
-    /// sums the ideal cost of `byte`'s `LEVELS` `logistic`-refined binary
-    /// decisions through [`Self::logistic_code_bit`], so a caller pricing a
-    /// whole stream this way reflects what `Self::encode_logistic` actually
-    /// pays (`crate::codec`'s `CostSink`/`EncodeSink` invariant,
-    /// [`Self::ideal_cost_bits_sse`]'s own docs). Updates the six real
-    /// experts' banks the same way [`Self::ideal_cost_bits_sse`] does, and
-    /// takes the same gradient steps on `logistic` [`Self::encode_logistic`]
-    /// would.
-    #[must_use]
-    pub fn ideal_cost_bits_logistic(
-        &mut self,
-        context: Context,
-        byte: u8,
-        logistic: &mut LogisticMix,
-    ) -> f64 {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let mut bits = 0.0f64;
-        let landed = self.logistic_code_bit(&bank_indices, weight_index, logistic, |mid, p| {
-            let bit = symbol >= mid;
-            bits += bittree::ideal_cost_bit(bit, p);
-            bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
-        bits
-    }
-
     /// [`Self::ideal_cost_bits_sse`]'s counterpart for
     /// [`Self::encode_logistic_surprise`]: sums the ideal cost of `byte`'s
     /// `LEVELS` `mixer`-refined binary decisions through
@@ -1085,7 +1056,7 @@ impl Literal {
     /// `Self::encode_logistic_surprise` actually pays (`crate::codec`'s
     /// `CostSink`/`EncodeSink` invariant, [`Self::ideal_cost_bits_sse`]'s
     /// own docs). Updates the six real experts' banks and takes the same
-    /// gradient step `mixer` would, same as [`Self::ideal_cost_bits_logistic`].
+    /// gradient step `mixer` would, same as [`Self::ideal_cost_bits_sse`].
     #[must_use]
     pub fn ideal_cost_bits_logistic_surprise(
         &mut self,
