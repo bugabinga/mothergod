@@ -1,6 +1,6 @@
 ---
 name: audience-survey
-description: The mothergod herald's weekly USERS survey, one dated journal entry in three parts, measure the audience against ROADMAP.md's USERS proxies, study one successful open-source project's marketing, decide what changes on the surface. Use when marketing/JOURNAL.md has no survey entry dated within the last 6 days. A run that finds one skips this and ships one surface improvement instead.
+description: The mothergod herald's weekly USERS survey, one dated journal entry in three parts, measure the audience against ROADMAP.md's USERS proxies, study one successful open-source project's marketing, decide what changes on the surface. Use when `.github/scripts/herald-survey-due` answers `due`, which it reads from the newest Survey entry's date in marketing/JOURNAL.md against the weekly cadence. A run it answers `not-due` skips this and ships one surface improvement instead.
 user-invocable: true
 ---
 
@@ -8,12 +8,15 @@ user-invocable: true
 
 The weekly duty, about one herald wake in fourteen, which is why it lives
 here and not in every wake's context (ADR-0025). The trigger is
-self-healing: a survey the run never reached is retried by the next wake,
-so a missed week costs latency and nothing else.
+`.github/scripts/herald-survey-due`, self-healing: a survey the run never
+reached is retried by the next wake, so a missed week costs latency and
+nothing else.
 
 The survey is the run's one unit of work: one entry dated today in
 `marketing/JOURNAL.md`, headed `Survey`, three parts, shipped as the run's
-PR. The journal's header defines the entry kind. The previous survey is
+PR. The journal's header defines the entry kind, and the heading is what
+`herald-survey-due` reads: the date first, then `Survey`, or the detector
+goes blind and the next wake surveys again. The previous survey is
 the template: every number sits next to that entry's, and its Source
 column names each instrument exactly enough to re-run it.
 
