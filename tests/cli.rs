@@ -57,7 +57,7 @@ fn compress_then_decompress_roundtrips_empty_input() {
 
     let (decompressed, decompress_code) = run(bin().arg("decompress"), &compressed);
     assert_eq!(decompress_code, 0);
-    assert!(decompressed.is_empty());
+    assert_eq!(decompressed, [] as [u8; 0]);
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn unknown_command_fails_with_usage() {
 fn help_flag_succeeds() {
     let (stdout, code) = run(bin().arg("--help"), b"");
     assert_eq!(code, 0);
-    assert!(!stdout.is_empty());
+    assert_ne!(stdout, [] as [u8; 0]);
 }
 
 #[test]
