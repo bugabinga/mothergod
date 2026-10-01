@@ -47,10 +47,10 @@ When measurement is possible:
 4. Apply the required round-trip and adversarial guards, then measure through
    the corpus policy's train and sealed-validation procedure.
    An unwired literal candidate is priced by the bench crate's pairing
-   driver (spec: issue #828 until it lands, then its module path goes here),
-   never by a scratch binary of your own: S2-A104, S2-R27 and S2-A106 each
-   rewrote that driver by hand and the third divided by the wrong byte count
-   (PR #823). No driver yet means the capability route, above.
+   driver, `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb`
+   (issue #828), never by a scratch binary of your own: S2-A104, S2-R27
+   and S2-A106 each rewrote that driver by hand and the third divided by
+   the wrong byte count (PR #823).
 5. Apply the corpus policy's verdict and number-provenance rules unchanged.
 6. Record the mechanism and verdict in both research records, a slice in
    the shape the journal's header gives it: its own entry, one pointer

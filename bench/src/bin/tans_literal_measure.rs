@@ -12,10 +12,11 @@
 //! produces, instead of building the integration first and finding out
 //! after.
 //!
-//! For each buffer: run [`mothergod::lz::parse_optimal`] to get the real
-//! token stream, walk it exactly as [`mothergod::codec`]'s own
-//! `walk_tokens` does (`Context::after_literal`/`after_copy`, same order),
-//! and split the walk in two comparable costs over the literal bytes alone:
+//! For each buffer: [`mothergod_bench::literal_pairing::literal_replay`]
+//! runs [`mothergod::lz::parse_optimal`] to get the real token stream and
+//! walks it exactly as [`mothergod::codec`]'s own `walk_tokens` does
+//! (`Context::after_literal`/`after_copy`, same order), splitting the walk
+//! in two comparable costs over the literal bytes alone:
 //!
 //! - the champion's real per-literal cost, [`mothergod::literal::Literal`]'s
 //!   context-mixing model via `ideal_cost_bits_sse` (the ideal-cost
@@ -35,9 +36,8 @@
 //! tans_literal_measure`, run by hand like `tans_measure`, not wired into
 //! CI.
 
-use mothergod::literal::{Context, Literal};
-use mothergod::lz::{self, Token};
 use mothergod::tans;
+use mothergod_bench::literal_pairing::literal_replay;
 use mothergod_bench::{
     access_log, base64_wrapped, entropy_ladder, gradient_image, interleaved_audio16, json_records,
     markov_h8_2_trap, sealed_seed, sqlite_like_records, x86_dense_code,
@@ -122,38 +122,15 @@ fn byte_histogram(data: &[u8]) -> [u32; 256] {
     counts
 }
 
-/// Walks `data`'s real optimal parse in coding order, exactly as
-/// `mothergod::codec`'s private `walk_tokens` does
-/// (`Context::after_literal`/`after_copy`, flags/lengths/offsets skipped
-/// since this measurement only prices the literal sub-stream), and returns
-/// the literal bytes in coding order plus the champion's real per-literal
-/// ideal cost summed over them (`Literal::ideal_cost_bits_sse`, the
-/// `encode_sse` path every non-`Transpose` candidate codes literals
-/// through).
+/// [`literal_replay`] with this binary's champion pricer,
+/// `Literal::ideal_cost_bits_sse` (the ideal-cost counterpart to the
+/// `encode_sse` path `Method::Lz` actually codes literals through for
+/// every non-`Transpose` candidate): the literal bytes in coding order
+/// plus the champion's real per-literal ideal cost summed over them.
 fn literal_stream_and_champion_bits(data: &[u8]) -> (Vec<u8>, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut context = Context::default();
-    let mut pos = 0usize;
-    let mut model = Literal::new();
-    let mut literal_bytes = Vec::new();
-    let mut champion_bits = 0.0f64;
-
-    for token in &tokens {
-        match *token {
-            Token::Literal(byte) => {
-                champion_bits += model.ideal_cost_bits_sse(context, byte);
-                literal_bytes.push(byte);
-                context = context.after_literal(byte);
-                pos += 1;
-            }
-            Token::Match { len, .. } | Token::Rep { len, .. } => {
-                let end = pos + len as usize;
-                context = context.after_copy(&data[pos..end]);
-                pos = end;
-            }
-        }
-    }
-    (literal_bytes, champion_bits)
+    literal_replay(data, |model, context, byte| {
+        model.ideal_cost_bits_sse(context, byte)
+    })
 }
 
 /// An order-0 static tANS coder's total bit cost on `literal_bytes`,

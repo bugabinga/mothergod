@@ -59,6 +59,7 @@ pub mod baseline;
 pub mod corpus;
 pub mod finals;
 pub mod graph;
+pub mod literal_pairing;
 pub mod reference;
 
 use std::fmt::Write as _;
