@@ -99,7 +99,7 @@ use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
 use crate::ppm::Ppm;
-use crate::sse::Sse;
+use crate::sse::{Calibrate, Sse};
 
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
@@ -757,8 +757,22 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 /// shared constant the way S2-R26's own rejected mechanism did. The real
 /// coding path (`codec::SURPRISE_MIN_VERSION`):
 /// [`Literal::encode_logistic_surprise`]/`decode_logistic_surprise`.
+///
+/// Generic over its own calibration table `C` ([`Calibrate`]): the mixing
+/// weights, error EMAs and rate schedule never depend on which table
+/// calibrates them, only the walk's `refine`/`update` calls do.
+/// [`SurpriseLogisticMixLogitSse`] is this same type with
+/// [`crate::sse::LogitSse`] in `C`'s place (`research/JOURNAL.md` S2-A106):
+/// isolates the bin-spacing change that type measures without a second
+/// struct and a second walk that would differ from this one in exactly one
+/// line. The real coding path for `C = Sse`
+/// (`codec::SURPRISE_MIN_VERSION`): [`Literal::encode_logistic_surprise`]/
+/// `decode_logistic_surprise`; for `C = `[`crate::sse::LogitSse`]
+/// (`codec::LOGIT_SSE_MIN_VERSION`, `research/JOURNAL.md` S2-A108,
+/// `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`):
+/// [`Literal::encode_logit_sse`]/`decode_logit_sse`.
 #[derive(Debug, Clone)]
-pub struct SurpriseLogisticMix {
+pub struct SurpriseLogisticMix<C = Sse> {
     /// One weight vector per [`WEIGHT_CONTEXTS`] key, same shape and
     /// starting point as [`LogisticMix::weights`].
     weights: Vec<[f64; EXPERTS]>,
@@ -769,10 +783,14 @@ pub struct SurpriseLogisticMix {
     baseline_sq_error: Vec<f64>,
     /// This mixer's own calibration table, same shape as
     /// [`LogisticMix::sse`].
-    sse: Sse,
+    sse: C,
 }
 
-impl SurpriseLogisticMix {
+/// [`SurpriseLogisticMix`] over [`crate::sse::LogitSse`] instead of
+/// [`Sse`]'s default: see [`SurpriseLogisticMix`]'s own docs.
+pub type SurpriseLogisticMixLogitSse = SurpriseLogisticMix<crate::sse::LogitSse>;
+
+impl<C: Calibrate> SurpriseLogisticMix<C> {
     /// A fresh mixer: every weight at [`LOGISTIC_INITIAL_WEIGHT`], every
     /// error EMA at zero (read by [`surprise_rate`] as "not yet
     /// established," the same maximum-surprise starting point
@@ -783,7 +801,7 @@ impl SurpriseLogisticMix {
             weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
             recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
-            sse: Sse::new(bittree::SSE_CONTEXTS),
+            sse: C::new(bittree::SSE_CONTEXTS),
         }
     }
 
@@ -791,77 +809,20 @@ impl SurpriseLogisticMix {
     /// [`LogisticMix::try_new`] gives its own mixer:
     /// [`crate::codec::decode`]'s real decode path constructs a
     /// `SurpriseLogisticMix` per frame now that
-    /// [`Literal::decode_logistic_surprise`] reaches it, and the
-    /// allocation can still fail, so hard rule 2 requires
-    /// `Error::OutOfMemory` there instead of an abort.
+    /// [`Literal::decode_logistic_surprise`]/[`Literal::decode_logit_sse`]
+    /// reach it, and the allocation can still fail, so hard rule 2
+    /// requires `Error::OutOfMemory` there instead of an abort.
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
             recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
             baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
-            sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
+            sse: C::try_new(bittree::SSE_CONTEXTS)?,
         })
     }
 }
 
-impl Default for SurpriseLogisticMix {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Identical to [`SurpriseLogisticMix`] in every field and update rule
-/// except its own calibration table, [`crate::sse::LogitSse`] instead of
-/// [`Sse`] — the mixing weights, error EMAs and rate schedule are
-/// untouched, isolating the bin-spacing change this type measures
-/// (`research/JOURNAL.md` S2-A106). The real coding path
-/// (`codec::LOGIT_SSE_MIN_VERSION`):
-/// [`Literal::encode_logit_sse`]/`decode_logit_sse`
-/// (`research/JOURNAL.md` S2-A108, `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`).
-#[derive(Debug, Clone)]
-pub struct SurpriseLogisticMixLogitSse {
-    /// Same shape as [`SurpriseLogisticMix::weights`].
-    weights: Vec<[f64; EXPERTS]>,
-    /// Same shape as [`SurpriseLogisticMix::recent_sq_error`].
-    recent_sq_error: Vec<f64>,
-    /// Same shape as [`SurpriseLogisticMix::baseline_sq_error`].
-    baseline_sq_error: Vec<f64>,
-    /// This candidate's own calibration table, logit-domain bins instead
-    /// of [`SurpriseLogisticMix::sse`]'s linear ones.
-    sse: crate::sse::LogitSse,
-}
-
-impl SurpriseLogisticMixLogitSse {
-    /// A fresh mixer, the same starting point [`SurpriseLogisticMix::new`]
-    /// gives its own fields.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
-            recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
-            baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
-            sse: crate::sse::LogitSse::new(bittree::SSE_CONTEXTS),
-        }
-    }
-
-    /// Fallible counterpart to [`Self::new`], the same shape
-    /// [`SurpriseLogisticMix::try_new`] gives its own mixer:
-    /// [`crate::codec::decode`]'s real decode path constructs a
-    /// `SurpriseLogisticMixLogitSse` per frame now that
-    /// [`Literal::decode_logit_sse`] reaches it, and the allocation can
-    /// still fail, so hard rule 2 requires `Error::OutOfMemory` there
-    /// instead of an abort.
-    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
-        Ok(Self {
-            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
-            recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
-            baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
-            sse: crate::sse::LogitSse::try_new(bittree::SSE_CONTEXTS)?,
-        })
-    }
-}
-
-impl Default for SurpriseLogisticMixLogitSse {
+impl<C: Calibrate> Default for SurpriseLogisticMix<C> {
     fn default() -> Self {
         Self::new()
     }
@@ -1147,8 +1108,9 @@ impl Literal {
 
     /// [`Self::ideal_cost_bits_logistic_surprise`]'s counterpart for the
     /// [`SurpriseLogisticMixLogitSse`] research candidate
-    /// (`research/JOURNAL.md` S2-A106): identical pricing, through
-    /// [`Self::logit_sse_code_bit`] instead of [`Self::surprise_code_bit`].
+    /// (`research/JOURNAL.md` S2-A106): identical pricing, over a
+    /// [`SurpriseLogisticMix`] keyed to [`crate::sse::LogitSse`] instead of
+    /// [`Sse`].
     #[must_use]
     pub fn ideal_cost_bits_logistic_surprise_logit_sse(
         &mut self,
@@ -1159,7 +1121,7 @@ impl Literal {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
         let mut bits = 0.0f64;
-        let landed = self.logit_sse_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
             bits += bittree::ideal_cost_bit(bit, p);
             bit
@@ -1569,43 +1531,15 @@ impl Literal {
     /// `recent_sq_error`/`baseline_sq_error` instead of
     /// [`logistic_rate`]'s step count, then both EMAs advanced from this
     /// node's own prediction error at [`SURPRISE_RECENT_DECAY`]/
-    /// [`SURPRISE_BASELINE_DECAY`].
-    fn surprise_code_bit(
+    /// [`SURPRISE_BASELINE_DECAY`]. Generic over `mixer`'s own calibration
+    /// table `C` ([`Calibrate`]) so [`SurpriseLogisticMix<Sse>`] and
+    /// [`SurpriseLogisticMixLogitSse`] share this one walk rather than two
+    /// that would differ only in which table's `refine`/`update` it calls.
+    fn surprise_code_bit<C: Calibrate>(
         &self,
         bank_indices: &[usize; EXPERTS],
         weight_index: usize,
-        mixer: &mut SurpriseLogisticMix,
-        mut code_bit: impl FnMut(usize, f64) -> bool,
-    ) -> u8 {
-        let prefix = self.expert_prefix_sums(bank_indices);
-        let weights = &mut mixer.weights[weight_index];
-        let recent = &mut mixer.recent_sq_error[weight_index];
-        let baseline = &mut mixer.baseline_sq_error[weight_index];
-        let sse = &mut mixer.sse;
-        bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let (stretched, dot) = logistic_mix_node(&prefix, weights, lo, mid, hi);
-            let p = clamp_logistic_probability(squash(dot));
-            let node_context = bittree::sse_context(depth, node_prefix);
-            let refined = sse.refine(node_context, p);
-            let bit = code_bit(mid, refined);
-            sse.update(node_context, p, bit);
-            let rate = surprise_rate(*recent, *baseline);
-            logistic_gradient_step(weights, &stretched, rate, bit, p);
-            surprise_error_tracking_step(recent, baseline, SURPRISE_RECENT_DECAY, bit, p);
-            bit
-        })
-    }
-
-    /// [`Self::surprise_code_bit`]'s counterpart under
-    /// [`SurpriseLogisticMixLogitSse`]: identical walk, rate schedule and
-    /// gradient step, refined through [`crate::sse::LogitSse`] instead of
-    /// [`Sse`] — the only line that differs from [`Self::surprise_code_bit`]
-    /// is which calibration table's `refine`/`update` this walk calls.
-    fn logit_sse_code_bit(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        weight_index: usize,
-        mixer: &mut SurpriseLogisticMixLogitSse,
+        mixer: &mut SurpriseLogisticMix<C>,
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let prefix = self.expert_prefix_sums(bank_indices);
@@ -1697,7 +1631,7 @@ impl Literal {
     ) {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
-        let landed = self.logit_sse_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
             encoder.encode_bit(bit, p);
             bit
@@ -1713,7 +1647,7 @@ impl Literal {
     /// Never panics on adversarial `decoder` state, the same argument
     /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
     /// over any coded bit pattern, and every probability
-    /// [`Self::logit_sse_code_bit`] derives is this model's and `mixer`'s
+    /// [`Self::surprise_code_bit`] derives is this model's and `mixer`'s
     /// own invariant, never derived from `decoder`'s bytes.
     #[must_use]
     pub fn decode_logit_sse(
@@ -1723,7 +1657,7 @@ impl Literal {
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
-        let byte = self.logit_sse_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
+        let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
             decoder.decode_bit(p)
         });
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
@@ -2653,7 +2587,7 @@ mod tests {
 
     #[test]
     fn surprise_logistic_mix_new_starts_at_uniform_weights_and_zero_error_state() {
-        let mix = SurpriseLogisticMix::new();
+        let mix: SurpriseLogisticMix = SurpriseLogisticMix::new();
         assert_eq!(
             mix.weights,
             vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
