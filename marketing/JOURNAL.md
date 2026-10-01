@@ -18,6 +18,134 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-01 — Survey: the repo doubled, the site halved, and the README makes them scroll
+
+Fifth survey, six days after the fourth, same cadence the fourth had.
+This morning's editorial run read "within the last 6 days" as covering
+09-25 and skipped; the 09-25 run read the same gap the other way and
+surveyed. Recorded so the next reader knows the rule is ambiguous at
+exactly six, not so either run is wrong.
+
+### (a) Audience
+
+| Metric | 2026-10-01 | 2026-09-25 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 127 | 0 of 125 | `gh issue list --state all --limit 2000`: 96 `app/claude`, 31 `bugabinga`; `app/github-actions` excluded |
+| External issue authors, all | 0 of 216 | 0 of 194 | same call, plus 89 `app/github-actions` |
+| External PR authors | 0 of 632 | 0 of 557 | `gh pr list --state all --limit 3000`: 590 `app/claude`, 33 `bugabinga`, 9 `app/dependabot` |
+| mothergod.dev pageloads | 4 in 7d | 7 in 6d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-09-25..10-01, read 18:52 UTC |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod` returns the usual unrelated fuzzy matches ("Motherlode") |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent, 20 of 20 results are `github.com` | absent, 20 of 20 | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`, 10 results each |
+| GitHub repo views, 14d | 56, 22 unique | 37, 12 unique | issue #435 ledger, top table, snapshot run 36311399753 (2026-09-27), window 2026-09-10..09-23 |
+
+**The denominator change landed as promised, both figures shown once.**
+Machine-filed issues grew by 20 this week and every other author by 2.
+From the next survey the machine-filed row goes, and the series reads
+0 of 127 onward.
+
+**The repo-traffic window is the 14 days ending at the ledger's last
+populated date, same rule as last week.** That date is now 09-23, four
+days before the snapshot that wrote it, against one day the week before.
+The API lags; nothing is stale.
+
+**Site detail, same source, by hour:** 09-26 03:00 UTC one Chrome;
+10-01 06:00 UTC two Edge; 10-01 09:00 UTC one Chrome. All on `/`, all
+desktop, all US, every referrer empty. The two Edge loads fall in the
+hour a `deploy-site` run (06:45) and this morning's herald run (06:49)
+started. That proves nothing either way, and the hour is the finest
+grain the query returns, so it stays a caveat: if both were the
+factory, the week's human count is 2.
+
+**The URL layer is fixed on the live site, which starts last week's
+clock.** Fetched just now: `/zzz-nonexistent` and `/decisions` answer
+404 with the 2979-byte not-found page, `/robots.txt` is 67 bytes of
+`text/plain`, `/sitemap.xml` is `application/xml`, `/status.html`
+308s to `/status`. #753 and #754 both shipped (8130319, 1dbd623,
+66216d3). The 09-25 conjecture, sub-page pageloads off zero within a
+month of the first indexed crawl, is now testable. This week's
+reading: still zero, and still not indexed. The search engines index
+the repository and its PRs, and one result's snippet quoted
+Canterbury at 1.374 and "5 of 11" while the README now says 1.366 and
+"6 of 11", so the index is also days stale on the repo. Nothing on
+our side fixes a crawler's schedule.
+
+**The week's finding is the split.** Repo views rose from 37 to 56 and
+repo uniques from 12 to 22. Site pageloads fell from 7 to at most 4.
+The reader who exists arrives at `github.com/bugabinga/mothergod`, and
+what they read first is `README.md`, not `/`. Every survey so far has
+studied and tuned the site's first screen. This one studies the
+README's.
+
+### (b) Study: uv's README
+
+Chosen because uv is the most-cited Rust tool launch of the last two
+years and its README, not a site, does most of the selling. Read
+2026-10-01 from `raw.githubusercontent.com/astral-sh/uv/main/README.md`.
+
+1. **The next step is the second heading.** The order is tagline, one
+   chart, "Highlights", then "Installation" with the command to paste.
+   A reader on the first screen is one scroll from running it.
+2. **The chart's caption names the workload.** "Installing Trio's
+   dependencies with a warm cache." That is our house rule 4 in seven
+   words, done by a team that has no such rule.
+3. **Every highlight that is a claim links its evidence.** "10-100x
+   faster" links `BENCHMARKS.md`. The ones that are not claims ("Supports
+   macOS, Linux, and Windows") link nothing.
+4. **Who stands behind it is one sentence, last in the pitch, and links
+   out.** "uv is backed by Astral, the creators of Ruff and ty."
+
+Already true here: (2), because our table's lead-in pins both corpora by
+URL and SHA-256; (3), because the table links `docs/benchmarks/`; (4),
+because "Who builds it" is one paragraph with one link.
+
+**Adopting (1), and it is where our README is weakest.** "Try it" is
+line 66, after 547 words. Between the table and it sit two paragraphs:
+a 16-line speed paragraph that carries two caveats announced as "One
+caveat" and "One more worth adding", and an 11-line pre-alpha paragraph
+that cites `FORMAT_VERSION` 7, journal ids S2-D2/S2-D3 and ADR-0050 at
+a first-time reader. Both are true and both have a home one link away:
+`docs/benchmarks/` for the throughput detail, `docs/format/SPEC.md` for
+the retirement policy. The first screen needs the verdict (slow,
+pre-alpha, do not trust it with data yet) and the link, not the
+argument. That is #411's zero-internal-vocabulary rule, which the site
+now mostly follows and the README, the page readers actually open,
+does not.
+
+**Rejected: the chart.** uv's margin is 10-100x and a bar chart shows
+it from across the room. Against the stronger of the two references,
+`xz -9e`, ours is under 3% ahead on Canterbury and 12% behind on
+Silesia, and the table states both in two rows a reader
+takes in at a glance. A chart would make the reader estimate bar
+lengths for a difference the table already prints, and a chart of a
+mixed result invites cropping to the half that flatters.
+
+**Rejected: the "Highlights" list.** uv's list answers "what does this
+replace", which is eleven tools for uv. A compressor with one CLI shape
+and no flags has two subcommands to list, and "Try it" already shows
+both.
+
+### (c) What changes because of (a) and (b)
+
+- **One new issue: the README reaches "Try it" in one screen**, by
+  cutting the speed and pre-alpha paragraphs to their verdicts and
+  linking the rest: #849. README numbers are guarded by
+  `cargo test -p mothergod --test claims`, which reads the README's
+  `FORMAT_VERSION` mention, and the issue names that so the cut moves
+  the number rather than orphaning the guard.
+- The sub-page conjecture's clock starts at 2026-09-27, the soft-404
+  page's deploy (`deploy-site` on 8130319, 07:03 UTC).
+  Its test is the 2026-10-27 survey, or the first one after it.
+- The machine-filed issue row retires next survey, stated above.
+
+Rejected again, same reason as every prior week: buying reach by
+posting anywhere. Zero mentions across Hacker News, lobste.rs and
+reddit is a real number and it stays one.
+
 ## 2026-10-01 — Editorial: the Silesia caption named "the same two" instead of naming them
 
 Queue checked first: #443 is the only open `marketing` issue and its build
