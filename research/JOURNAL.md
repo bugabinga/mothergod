@@ -7529,3 +7529,28 @@ record.
   identically from coded history, the same reasoning S2-A104's own entry
   gives for why a rate-schedule change is a format change even though no
   frame byte encodes it directly. `research/progress.jsonl` it174.
+- S2-A107 | ACCEPTED | Issue #828: one pairing driver,
+  `mothergod_bench::literal_pairing`, for every champion-vs-candidate
+  ideal-cost measurement over a case's literal sub-stream, so no future
+  scratch binary redoes `lz::parse_optimal` plus the replay by hand the way
+  S2-A104, S2-R27 and S2-A106 each did. `literal_replay` is the shared
+  single-case primitive (parse, walk `Context::after_literal`/`after_copy`,
+  price each literal byte through a caller-supplied closure against a fresh
+  `Literal`), reused by `tans_literal_measure`'s own champion pricer so the
+  walk has a second caller; `train_and_sealed_delta_bpb` runs it over
+  `baseline::cases()`'s eleven train cases plus `access_log`/`gradient_image`
+  sealed at `sealed_seed(CASE_SEED)`, same length, denominating every delta
+  by `CASE_LEN` (never the literal count) per `research/README.md`'s schema,
+  taking a fresh pricing closure per case so a candidate needing extra state
+  beyond `Literal` itself (a mixer, as `ideal_cost_bits_logistic_surprise`'s
+  own signature takes) never carries it across unrelated cases. | A unit
+  test prices a 10,000-byte run of one repeated byte (far fewer literals
+  than its length) through a champion/candidate pair differing by a fixed
+  per-literal cost, and asserts the resulting delta matches the
+  length-denominated figure, not the literal-count one it174 (PR #823)
+  used; `cargo x check` and the `ratio` baseline gate both clean. | No bpb
+  measurement of its own: this is the apparatus the next literal-candidate
+  pairing measures through, not an experiment against the champion, so
+  `progress.jsonl` records it as `kind: "patch"` with null bpb deltas, same
+  as S2-A1. The `compression-experiment` skill's step 4 pointer now names
+  this module instead of the issue. `research/progress.jsonl` it175.
