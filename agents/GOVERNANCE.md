@@ -225,7 +225,7 @@ recall: `.github/scripts/stalled-prs` reads every open PR each BDFL
 run and prints the stalled ones with the rescue named. Its docstring
 is the list of signatures it matches and the ones it deliberately
 skips. With `--rescue`, the BDFL's standing invocation, it also applies
-the three rescues that are one command (issue #566: a dead review was
+the rescues that are one command (issue #566: a dead review was
 refired by hand twice in three days, by a wake reading the report and
 typing what it named) and prints what it held and why. The rescues
 that are more than a command stay here, because a procedure kept in
@@ -324,6 +324,28 @@ follow, because GitHub raises no workflow run from an event its own
 `pull_request` alone. A PR opened on that identity would be born into
 the first signature above, permanently. Detection is the answer, not
 delegation.
+
+A seventh signature is main moving under a finished head. A required
+gate goes red on the PR for a reason the PR does not contain: a
+toolchain bump stabilizes a lint, main fixes it, and the PR's head, a
+commit behind that fix, stays red forever, because GitHub reruns
+nothing on its own and the author was a single-shot session (first hit
+PR #843: approved at 12:59Z with auto-merge armed on a `clippy` that
+Rust 1.99 had reddened, main green again at 15:36Z, still waiting at
+16:12Z; dependabot's #844 beside it, which the heartbeat merges only
+green and nobody refreshes). The script's docstring until then said a
+red gate is the author's next move, which is true of an author that
+still exists. Rescue, one command: `gh pr update-branch <pr>` on the
+session token, main merged onto the branch, which is a new head, so
+`ci` and `agent-review` fire on it and the reviewer lands or returns
+it. `stalled-prs --rescue` runs it itself when the head is behind
+main's newest green push run, the PR carries no `changes-requested`,
+no review is mid-flight, and the gate has been red for over an hour:
+inside the hour the author's own session may still be alive, and a
+merge commit pushed under it turns its next `push-branch`
+non-fast-forward. The refresh is bounded by construction: the
+refreshed head is no longer behind main, so a PR whose red is its own
+costs one extra `ci` run per green main advance, never a cycle.
 
 ## Push identity
 
