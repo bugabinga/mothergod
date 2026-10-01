@@ -139,7 +139,7 @@ pb = importlib.util.module_from_spec(spec)
 loader.exec_module(pb)
 tree_sha = sys.argv[2]
 try:
-    pb.guard_not_empty("claude/x", "base-tree", tree_sha, ["research/JOURNAL.md", "research/progress.jsonl"])
+    pb.guard_not_empty("claude/x's head", "base-tree", tree_sha, ["research/JOURNAL.md", "research/progress.jsonl"])
     died = False
 except SystemExit:
     died = True
@@ -155,7 +155,7 @@ function guardEmpty(treeSha) {
 test("a tree identical to the branch head's dies naming #848 and the two paths", () => {
   const r = guardEmpty("base-tree");
   assert.equal(r.died, true);
-  assert.match(r.stderr, /2 path\(s\) named are byte-identical to claude\/x/);
+  assert.match(r.stderr, /2 path\(s\) named are byte-identical to claude\/x's head/);
   assert.match(r.stderr, /#848/);
   assert.match(r.stderr, /git status/);
 });

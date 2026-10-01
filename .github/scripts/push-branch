@@ -229,7 +229,7 @@ def merge_paths(merge_sha):
     return head2_sha, paths, deletions
 
 
-def guard_not_empty(branch, base_tree, tree_sha, named):
+def guard_not_empty(against, base_tree, tree_sha, named):
     """Refuse a commit whose tree is its parent's: the push would change nothing.
 
     Trees are content-addressed, so a tree built from blobs identical to the
@@ -242,11 +242,13 @@ def guard_not_empty(branch, base_tree, tree_sha, named):
     A commit that changes nothing is never what a `<path>...` push means, so
     it dies here, before the branch moves and before a PR is owed a review.
     Merge mode is exempt by its caller: a merge resolved entirely to the
-    branch's side legitimately reuses the base tree."""
+    branch's side legitimately reuses the base tree. `against` names what the
+    tree was built on, the branch's head on an update and main on a create,
+    because on a first push there is no head to be identical to."""
     if tree_sha != base_tree:
         return
     die(
-        f"the {len(named)} path(s) named are byte-identical to {branch}'s head; "
+        f"the {len(named)} path(s) named are byte-identical to {against}; "
         "the commit would carry no change.",
         "a PR on it has nothing to review and costs a round (PR #848). Check "
         "`git status` and `git diff`: the edit this push describes is not in "
@@ -423,7 +425,8 @@ def main() -> int:
         else base_tree
     )
     if not merge_sha:
-        guard_not_empty(branch, base_tree, tree_sha, paths + deletions)
+        against = "main" if action == "create" else f"{branch}'s head"
+        guard_not_empty(against, base_tree, tree_sha, paths + deletions)
     parents = [base_sha] + ([merge_sha] if merge_sha else [])
     commit = api(
         "POST",
