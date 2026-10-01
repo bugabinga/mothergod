@@ -114,6 +114,23 @@ fn fill_identity(table: &mut [f64], contexts: usize) {
     }
 }
 
+/// Two-bin linear interpolation, shared by [`Sse::refine`] and
+/// [`LogitSse::refine`]: the two only ever differed in how `fraction`
+/// (and the two bins themselves) were found, never in this formula.
+fn interpolate(lower: f64, upper: f64, fraction: f64) -> f64 {
+    lower
+        .mul_add(1.0 - fraction, upper * fraction)
+        .clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+}
+
+/// Nudges `table[lower]`/`table[upper]` toward `target` by [`LEARNING_RATE`],
+/// weighted by `fraction`. Shared by [`Sse::update`] and [`LogitSse::update`]
+/// the same way [`interpolate`] is shared by their `refine`s.
+fn nudge(table: &mut [f64], lower: usize, upper: usize, fraction: f64, target: f64) {
+    table[lower] += LEARNING_RATE * (1.0 - fraction) * (target - table[lower]);
+    table[upper] += LEARNING_RATE * fraction * (target - table[upper]);
+}
+
 impl Sse {
     /// A fresh table over `contexts` independent contexts, every bin
     /// initialized to the identity mapping (see the struct docs).
@@ -199,11 +216,11 @@ impl Sse {
         assert!(context < self.contexts, "Sse context out of range");
         let base = context * BINS;
         let (lower_index, fraction) = Self::position(p);
-        let value = self.table[base + lower_index].mul_add(
-            1.0 - fraction,
-            self.table[base + lower_index + 1] * fraction,
-        );
-        value.clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+        interpolate(
+            self.table[base + lower_index],
+            self.table[base + lower_index + 1],
+            fraction,
+        )
     }
 
     /// Adapts `context`'s two bins nearest `p` toward the observed
@@ -223,10 +240,13 @@ impl Sse {
         let base = context * BINS;
         let (lower_index, fraction) = Self::position(p);
         let target = if outcome { 1.0 } else { 0.0 };
-        let lower = base + lower_index;
-        let upper = lower + 1;
-        self.table[lower] += LEARNING_RATE * (1.0 - fraction) * (target - self.table[lower]);
-        self.table[upper] += LEARNING_RATE * fraction * (target - self.table[upper]);
+        nudge(
+            &mut self.table,
+            base + lower_index,
+            base + lower_index + 1,
+            fraction,
+            target,
+        );
     }
 }
 
@@ -399,11 +419,11 @@ impl LogitSse {
         assert!(context < self.contexts, "LogitSse context out of range");
         let base = context * BINS;
         let (lower_index, fraction) = Self::position(p);
-        let value = self.table[base + lower_index].mul_add(
-            1.0 - fraction,
-            self.table[base + lower_index + 1] * fraction,
-        );
-        value.clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+        interpolate(
+            self.table[base + lower_index],
+            self.table[base + lower_index + 1],
+            fraction,
+        )
     }
 
     /// [`Sse::update`]'s counterpart: nudges `context`'s two bins nearest
@@ -419,10 +439,13 @@ impl LogitSse {
         let base = context * BINS;
         let (lower_index, fraction) = Self::position(p);
         let target = if outcome { 1.0 } else { 0.0 };
-        let lower = base + lower_index;
-        let upper = lower + 1;
-        self.table[lower] += LEARNING_RATE * (1.0 - fraction) * (target - self.table[lower]);
-        self.table[upper] += LEARNING_RATE * fraction * (target - self.table[upper]);
+        nudge(
+            &mut self.table,
+            base + lower_index,
+            base + lower_index + 1,
+            fraction,
+            target,
+        );
     }
 }
 
