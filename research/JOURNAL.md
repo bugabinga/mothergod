@@ -7690,3 +7690,64 @@ record.
   `Literal::logit_sse_code_bit`/`ideal_cost_bits_logistic_surprise_logit_sse`
   (S2-A106, shipped at `FORMAT_VERSION` 7 by S2-A108) are unaffected.
   `research/progress.jsonl` it177.
+- S2-R29 | REJECTED | New literature idea, not tied to any existing
+  standing lead (ROADMAP M3: no standing lead is open). Mahoney's
+  `StateMap` (2005, the same paper `crate::sse`'s own module docs already
+  cite) gives a lone adaptive counter a count-based learning rate,
+  `1 / (count + 1.5)`, instead of a fixed exponential moving average step,
+  so a freshly-touched state moves most of the way to its first observed
+  outcome while a well-trained one barely moves. `crate::sse::LogitSse`
+  never took this step for its own bin update: every bin nudges by the
+  identical fixed `LEARNING_RATE` (`1/32`) from its first touch onward.
+  Hypothesis: giving `SurpriseLogisticMixLogitSse`'s own `LogitSse` table a
+  per-bin visit count and this count-based rate, floored at
+  `LEARNING_RATE` once a bin has been visited enough that the formula
+  would otherwise fall below it (so the long-run, fully-trained behavior
+  is unchanged), improves bpb by letting a freshly-touched bin reach its
+  true calibration faster, without regressing the sealed set. | Apparatus:
+  `crate::sse::CountedLogitSse` mirrors `LogitSse`'s own shape (same bins,
+  reusing `LogitSse::position` directly since only the write-side rate
+  changes), adding a per-bin `u32` visit count `nudge_counted` reads
+  through `counted_rate`; `literal::SurpriseLogisticMixCountedLogitSse`
+  needed no new mixer struct, reusing `SurpriseLogisticMix<C>`'s existing
+  `Calibrate` generic (S2-A106's own design). Measured via
+  `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb` (issue
+  #828) against the shipped champion
+  (`Literal::ideal_cost_bits_logistic_surprise_logit_sse`, `FORMAT_VERSION`
+  7's real coding path) over `bench::baseline`'s 11 train cases plus the
+  two sealed cases (`access_log`, `gradient_image`). | Train mean delta
+  **+0.002983 b/B** (a regression, sum +0.032809): 4 of 11 improved
+  (`entropy_ladder_h1` -0.000471, `entropy_ladder_h2` -0.000464,
+  `markov_h8_2_trap` -0.002076, `json_records` -0.000507), 7 regressed led
+  by `entropy_ladder_h8` **+0.011907**, `sqlite_like_records` +0.010374,
+  `x86_dense_code` +0.008858, with `entropy_ladder_h6` +0.003073,
+  `interleaved_audio16` +0.001565, `entropy_ladder_h4` +0.000417,
+  `base64_wrapped` +0.000134 the remainder. Both sealed cases improved:
+  `access_log` -0.000902, `gradient_image` **-0.019870**. Rejected: corpus
+  policy needs train improvement and no validation regression, and the
+  train mean regressed, the same reading S2-R26/S2-R27/S2-R28 already
+  applied to an improving-sealed, regressing-train split. | Mechanism: a
+  count-based rate trades bias for variance exactly where a fixed rate
+  does not. A bin's first touch moves roughly two-thirds of the way to
+  one observed outcome (`counted_rate(0)` is `1 / 1.5`, 21x
+  `LEARNING_RATE`), a genuine win when early observations are already
+  representative of the true rate (`gradient_image`'s smooth structure)
+  but a tax when they are not: `entropy_ladder_h8` spreads its mass
+  thinly across `bittree::SSE_CONTEXTS`'s many keys inside one
+  50,000-byte train slice, so a single unrepresentative early outcome
+  commits most of the way toward a wrong calibration before more evidence
+  can correct it, the same fast-reaction-misreads-noise failure S2-R26
+  diagnosed for the mixer weights' own rate schedule, now reproduced one
+  layer over in the SSE table. `sqlite_like_records`/`x86_dense_code`
+  regressing too says even record-formatted data's own per-context bin
+  visit counts stay low enough at this train slice length for the same
+  overshoot to bite; whether a longer real file's denser visit counts
+  would flip this is untested (held-out finals never enter the experiment
+  loop) and is this lead's own remaining scope if revisited. Candidate
+  code (`crate::sse::CountedLogitSse`, `counted_rate`, `nudge_counted`,
+  `literal::SurpriseLogisticMixCountedLogitSse`,
+  `Literal::ideal_cost_bits_logistic_surprise_counted_logit_sse`, their
+  unit tests, and the scratch binary
+  `bench/src/bin/scratch_counted_logit_sse.rs`) reverted in full per the
+  `compression-experiment` skill's delete-rejected-candidate-code rule.
+  `research/progress.jsonl` it178.
