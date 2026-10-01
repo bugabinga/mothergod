@@ -100,9 +100,9 @@ jobs:
                exit code. The reviewer's items are in its comment on
                the thread; a labeled PR with no push after that
                comment is yours.
-            2. Weekly survey: when marketing/JOURNAL.md has no survey
-               entry dated within the last 6 days, run the
-               `audience-survey` skill; skip it otherwise.
+            2. Weekly survey: when `.github/scripts/herald-survey-due`
+               answers `due`, run the `audience-survey` skill; skip it
+               otherwise.
             3. Otherwise ship one improvement. Queue first: the top
                open issue labeled marketing nobody has claimed (an open
                PR or claude/* branch covering it means claimed). Queue

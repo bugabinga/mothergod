@@ -32,8 +32,9 @@ is fully autonomous by design (ADR-0003).
 - *Herald*, twice daily: makes the human-facing surface (ADR-0040) —
   mothergod.dev, README reader experience, release-notes voice,
   positioning, `marketing/JOURNAL.md` as its institutional memory.
-  Weekly it measures USERS (read-only queries) and studies one OSS
-  project's marketing, on the record. Publishes only on channels
+  Weekly, as `herald-survey-due` realizes it, it measures USERS
+  (read-only queries) and studies one OSS project's marketing, on the
+  record. Publishes only on channels
   mothergod owns; external platforms (Hacker News, lobste.rs, socials)
   are queried read-only as success proxies, never posted to by the
   system, and that rule binds every seat. Never merges; the reviewer

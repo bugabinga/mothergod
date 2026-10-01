@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Answer whether this herald wake owes the weekly audience survey, and say what decided.
+
+Extensionless and executable because agents type it as a command mid-session,
+like survey-due, research-due, operator-sweep and retrospect.
+
+The survey's trigger was a sentence, kept in two places (agent-herald.yml and
+the audience-survey skill): "when marketing/JOURNAL.md has no survey entry
+dated within the last 6 days". On 2026-10-01, six days after the 09-25 survey,
+the morning herald read it as covering 09-25 and skipped; the evening herald
+read the same gap the other way and surveyed; the 09-25 run before them had
+read its own six-day gap as due. The 10-01 journal entry records the conflict
+and asks for a ruling. A prose detector three runs read three ways is the
+shape survey-due replaced for the BDFL (#558); this replaces it for the herald.
+
+One condition decides, read from the journal in the checkout, never from
+GitHub: the date on the newest `Survey` heading. The journal dates entries by
+UTC day and the cadence is weekly, so the arithmetic is whole days:
+
+    due        today's UTC date minus the newest Survey date is PERIOD_DAYS
+               or more, or the journal has no Survey heading at all
+    not-due    otherwise
+
+PERIOD_DAYS is 7: weekly means the seventh day. The herald's first wake of that
+day (06:49Z; worker.js CLOCK) carries the survey, so the slot holds week to
+week instead of creeping a day earlier every week the way a six-day gap did.
+The case that was ambiguous at exactly six is now not-due at six and due at
+seven, by subtraction, not reading.
+
+The heading is the marker. The journal's own header defines the entry kind as
+`Survey`, written first after the date: `## 2026-10-01`, a dash, `Survey:`,
+the title. The match is tolerant of the dash (an em dash today, which CLAUDE.md
+forbids in prose and #774 may one day enforce here) and strict about the kind
+word sitting right after it, so an Editorial whose title mentions a survey
+does not count as one.
+
+Deliberately NOT read: an open survey PR. The reviewer lands herald PRs
+within the hour; a duplicate costs one survey, in the open, on the next
+twelve-hour tick, and the merged entry ends it.
+
+The invariant, as in survey-due and research-due:
+
+    A JOURNAL THIS CANNOT READ ANSWERS DUE, NEVER NOT-DUE.
+
+A wrong due costs one duplicated survey. A wrong not-due skips the week's
+USERS measurement in silence, which is the exact bug a detector exists to end,
+and it leaves no trace but an absence nobody is looking for. So a missing
+file, an unreadable file and a journal with no parseable Survey heading all
+answer due.
+
+Liveness: the footer names the newest Survey date it found, how many Survey
+headings it saw and whether the journal read, so a reader can tell a survey
+that is not yet due from a detector that has gone blind to the heading format.
+
+Usage: herald-survey-due [journal-path]
+
+Exits 0 whichever way it answers. A due survey is a duty, not an error.
+"""
+
+import re
+import sys
+from datetime import date, datetime, timezone
+
+JOURNAL = "marketing/JOURNAL.md"
+PERIOD_DAYS = 7  # weekly means the seventh day; see module docstring.
+
+# `## <date> <dash> Survey`, the kind word first after the date. The dash
+# class takes hyphen, en dash, em dash, colon or pipe, or nothing at all.
+HEADING = re.compile(
+    r"^##\s+(\d{4}-\d{2}-\d{2})\s*(?:[-\u2013\u2014:|]\s*)?Survey\b",
+    re.MULTILINE,
+)
+
+
+def survey_dates(text):
+    """Every Survey heading's date, in file order; an undated one is dropped.
+
+    A heading dated 2026-13-40 matches the regex and is not a day, so it is
+    not a survey this can place in time. Dropping it rather than dying keeps
+    the invariant: fewer dates can only make the answer `due`, never
+    `not-due`."""
+    dates = []
+    for found in HEADING.findall(text):
+        try:
+            dates.append(date.fromisoformat(found))
+        except ValueError:
+            continue
+    return dates
+
+
+def decide(newest, today, error, period_days=PERIOD_DAYS):
+    """Pure verdict from already-read state. Returns (verdict, detail)."""
+    if error is not None:
+        return "due", f"journal UNREADABLE, which is not the same as no survey: {error}"
+    if newest is None:
+        return "due", "no Survey heading in the journal"
+    age = (today - newest).days
+    if age >= period_days:
+        return "due", f"newest survey {newest} is {age} days old, {period_days} or more"
+    return "not-due", f"newest survey {newest} is {age} days old, under {period_days}"
+
+
+def render(verdict, detail, newest, count, state, out=sys.stdout):
+    """Print the verdict and the liveness footer. Returns the footer."""
+    if verdict == "due":
+        print(f"\nsurvey: DUE. {detail}.", file=out)
+        print("    Run the `audience-survey` skill as this wake's one unit of work.", file=out)
+    footer = (
+        f"herald-survey-due: {verdict} ({detail})"
+        f" | newest {newest or '-'}"
+        f" | journal {state}"
+        f" | surveys {count}"
+    )
+    print(f"\n{footer}", file=out)
+    return footer
+
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else JOURNAL
+    today = datetime.now(timezone.utc).date()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as err:
+        text, error = None, str(err)
+    else:
+        error = None
+    dates = survey_dates(text) if text is not None else []
+    newest = max(dates) if dates else None
+    verdict, detail = decide(newest, today, error)
+    render(
+        verdict,
+        detail,
+        newest,
+        "-" if text is None else len(dates),
+        "unreadable" if error is not None else "readable",
+    )
+
+
+if __name__ == "__main__":
+    main()
