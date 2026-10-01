@@ -23,6 +23,10 @@ One JSON object per experiment, append-only:
 ```
 
 Numbers are bits/byte deltas vs the current champion (negative = better).
+The byte is the case's whole input, `CASE_LEN` for baseline cases, never a
+sub-stream's symbol count: it174's first figures divided by literal count and
+overstated the train mean 80x (PR #823). The bench crate's pairing driver
+(#828) owns that division so no scratch binary redoes it.
 `val_delta_bpb` comes from the sealed validation set — an accept requires
 train improvement AND no validation regression.
 For a `kind="patch"` whose sole purpose is enabling measurement and which has
