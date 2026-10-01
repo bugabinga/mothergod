@@ -620,6 +620,66 @@ mod tests {
     }
 
     #[test]
+    fn logit_sse_update_advances_the_lower_and_upper_bin_separately() {
+        // `0.5` (every other `LogitSse` test's training input) lands
+        // exactly on a bin boundary (`position`'s fraction is `0.0`), so
+        // the neighbor bin's update term is multiplied by zero and its
+        // index never matters. `0.6` lands strictly between two bins,
+        // which is what it takes to tell `lower + 1` apart from a
+        // mutant `lower * 1` (`lower + 1 == lower * 1` only at `lower ==
+        // 1`, never true here): both update terms must land, one per
+        // bin, for this test to match the independent hand simulation
+        // below.
+        let p = 0.6;
+        let (lower_index, fraction) = LogitSse::position(p);
+        assert!(
+            fraction > 0.05 && fraction < 0.95,
+            "need p=0.6 to split non-trivially between two neighboring bins, \
+             got lower_index={lower_index}, fraction={fraction}"
+        );
+
+        let bound = stretch_bound();
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "lower_index < BINS - 1 (32): exact in f64"
+        )]
+        let lower_s = -bound + lower_index as f64 / (BINS - 1) as f64 * (2.0 * bound);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "lower_index + 1 <= BINS - 1 (32): exact in f64"
+        )]
+        let upper_s = -bound + (lower_index + 1) as f64 / (BINS - 1) as f64 * (2.0 * bound);
+        // Oracle: `fill_identity_logit`'s own starting values for these
+        // two bins, then update()'s documented per-bin recurrence
+        // applied to each in isolation. If `update` really writes two
+        // distinct slots, this must match `refine` reading the real
+        // table back exactly, float for float.
+        let mut lower_value = squash(lower_s);
+        let mut upper_value = squash(upper_s);
+        for _ in 0..1000 {
+            lower_value += LEARNING_RATE * (1.0 - fraction) * (1.0 - lower_value);
+            upper_value += LEARNING_RATE * fraction * (1.0 - upper_value);
+        }
+        let expected = lower_value
+            .mul_add(1.0 - fraction, upper_value * fraction)
+            .clamp(MIN_PROBABILITY, MAX_PROBABILITY);
+
+        let mut sse = LogitSse::new(1);
+        for _ in 0..1000 {
+            sse.update(0, p, true);
+        }
+        let actual = sse.refine(0, p);
+
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "actual={actual}, expected={expected}: update must advance the \
+             lower bin (index {lower_index}) and the upper bin (index {}) \
+             as two distinct slots, not collapse them into one",
+            lower_index + 1
+        );
+    }
+
+    #[test]
     fn logit_sse_contexts_adapt_independently() {
         let mut sse = LogitSse::new(2);
         for _ in 0..5000 {
