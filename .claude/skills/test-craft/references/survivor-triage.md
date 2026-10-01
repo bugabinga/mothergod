@@ -8,13 +8,31 @@ unchecked. Triage decides where the missing check belongs; hard rule
 
 ## Surviving mutant
 
-A surviving mutant is a missing test by definition (TESTING.md layer
-4). Ask: what observable claim did the mutation break, and which is
-the cheapest layer that states that claim? Write the test there; it
-is usually an example test, not a property.
+A surviving mutant is a missing test only where the suite makes the
+claim the mutation breaks (ADR-0056; TESTING.md "Two classes"). Place
+the line first:
 
-Legitimate non-fixes, each with its evidence on the record:
+- **Decode-safety territory**: the function decodes, undoes a filter,
+  reads a header, bounds an allocation, replays tokens, or lives in
+  `coder.rs`. A missing suite test. Ask what observable claim the
+  mutation broke and which is the cheapest layer that states it, then
+  write it there: usually an example through the public API or an
+  adversarial seed, rarely a property. `mutants-debt` files these
+  after a merge; its docstring holds the territory rule.
+- **Scaffold territory**: encoder pricing, model arithmetic, apparatus,
+  anything else. A map reading. On an open PR the annotation is for
+  the reviewer, who may still ask for a test when the line carries a
+  contract the suite should state; after a merge nothing is filed and
+  no test is owed. Never answer it with a hand-computed pin on a
+  private helper, or a refactor that exposes one to a test: that is
+  scaffold held to the suite's standard, the pattern ADR-0056 retires.
 
+Legitimate non-fixes in either territory, each with its evidence on the
+record:
+
+- the mutant is equivalent, or undecidable by `cargo test` (the
+  `try_new`/`Default` allocation class only torture can see): an
+  exclusion in `tests/mutants.toml` with the proof (#391's shape);
 - the mutant sits in encoder pricing where any parse is valid output:
   round-trip cannot kill it, the real claim is ratio, and ratio is
   layer 7's job; check the gate cases cover the affected path and say

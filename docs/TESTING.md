@@ -36,6 +36,46 @@ Ledger numbers are maps, never gates; the only merge-blocking
 checks are behavioral. Items carrying issue numbers are planned; the
 layers below describe what runs today.
 
+## Two classes (ADR-0056)
+
+Tests are two artifacts with different owners and bars.
+
+**Scaffold tests** are what an implementer writes beside code to see it
+work: inline unit tests on private helpers, hand-computed pins of
+intermediate values, examples of a function's intent. A practice, not a
+deliverable. The implementer writes as many as the work needs, nobody
+else writes them, nobody maintains them: a scaffold test is deleted with
+the code it pins, and no replacement is owed when a suite layer states
+the function's observable claim. A surviving mutant in scaffold
+territory is a map reading, not debt.
+
+**The suite** is the engineered artifact: the layers below that state a
+contract (the public API, the format, a module invariant the journal
+names, a published claim) and name the failure class they catch. A suite
+test is written against the contract, never against an implementation's
+intermediate values, so a model change does not rewrite it. Location is
+not the class: a module invariant pinned inline is suite; a hand-computed
+pin in `tests/` would be scaffold.
+
+A change owes the suite exactly what its class demands, in the same PR;
+the reviewer checks this table, not the test count.
+
+| Change class | Owed to the suite, same PR |
+|---|---|
+| Codec behavior: filter, parse, model, coder | round-trip on the change's target data class (hard rule 1), a property or example at layer 1 |
+| Decode-path fix: panic, bound, hang, abort | the failing input as a `tests/adversarial/` seed named for the bug, or a torture case for an allocation (layer 2) |
+| Encoder-only output change | the regenerated current-version golden pair, declared with its measurement (layer 5, #290) |
+| Format change | `FORMAT_VERSION` bump, a new golden pair, every old pair kept (layer 5, hard rule 5) |
+| New or changed decode API | the decode-API agreement property covers it (layer 1) |
+| Published number, version, date or recipe in README, site or CHANGELOG | `tests/claims.rs` reads it from its source |
+| Experiment apparatus, measurement sinks, pre-wiring candidates | nothing: scaffold only, deleted by the wiring or rejection slice |
+| A new suite instrument: fuzz target, torture fixture, strategy | its own M7 issue, never a rider on a feature PR |
+
+Module tests live beside product code, not inside it:
+`src/<module>/tests.rs`, declared by `#[cfg(test)] mod tests;`, so a
+product file reads in one pass and test lines count by file name.
+Migration: issue #853.
+
 ## Current automated cadence
 
 Every PR retains the required job names `fmt`, `clippy`, `test`, `doc`, and
@@ -102,6 +142,9 @@ run in the existing `test` required check on every PR (layer 5), and the
 weekly monster matrix runs them on every runtime target.
 
 ## 1. Round-trip and unit tests (Rust-input PRs)
+
+The properties, the edge sizes and the named invariants here are suite;
+the rest of a module's inline tests are scaffold ("Two classes" above).
 
 - `decompress(compress(x)) == x` property tests over every generator class
   in the corpus policy (seeded, deterministic), plus edge sizes: empty, 1
@@ -225,9 +268,10 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 ## 4. Mutation testing (`mutants-check`, per PR)
 
 - `cargo-mutants` on the codec package, scoped to the lines a PR changed
-  (`--in-diff` against the merge base). A surviving mutant is a missing test
-  by definition, so the PR that created one goes red and names it, rather
-  than a later sweep filing an issue about it.
+  (`--in-diff` against the merge base). A surviving mutant is a missing
+  suite test where the suite makes the claim the mutation breaks, and a
+  map reading elsewhere (ADR-0056, "Two classes" above); the PR that
+  created one goes red and names it, so the reviewer reads it on the diff.
 - Timeouts do not red a PR: a mutant whose test run hangs is undecided, not
   evidence of a missing test. The verdict reads `mutants.out/missed.txt`,
   never the exit code, which conflates the two.
@@ -237,10 +281,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   with its proof (#391's ruling); its header says why it does not live
   in `.cargo/`.
 - A red that finishes after the PR merged has no reader on the thread, so
-  `.github/scripts/mutants-debt` files that PR's survivors as one
-  `product`+`bug` issue, slot a of the heartbeat's product queue. An open PR's
-  red stays on the diff, where the review reads it. Its docstring is the
-  contract.
+  `.github/scripts/mutants-debt` files that PR's survivors in decode-safety
+  territory (hard rule 2's claim, #390's class) as one `product`+`bug`
+  issue, slot a of the heartbeat's product queue; survivors outside it are
+  scaffold territory and are not filed. The territory rule is executable
+  in the script, and its docstring is the contract. An open PR's red stays
+  on the diff, where the review reads it.
 - Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
   at ~3.8h is a one-time backlog measurement, not weekly news.
 - Planned (#455): a monthly sharded whole-crate sweep, mutation score to

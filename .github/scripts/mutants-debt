@@ -19,15 +19,19 @@ Run as the mutants job's last step, after the report exists:
 
     mutants-debt <pr-number> [mutants-out-dir]
 
-and it does one of four things, printed on one line:
+and it does one of five things, printed on one line:
 
     no survivors     missed.txt absent or empty; nothing to file
+    scaffold         every survivor sits outside decode-safety territory
+                     (TERRITORY below, ADR-0056): a map reading, not debt,
+                     left on the diff's annotations; nothing to file
     open             the PR is still open, so the annotations on its diff
                      are the reader (agent-review.yml's step 3 names them)
     filed already    an open issue already carries this PR's survivors
-    filed #N         the PR is merged: the survivors become one issue,
-                     labeled `product` + `bug`, slot a of the heartbeat's product
-                     queue, so the fix lands while the diff is still warm
+    filed #N         the PR is merged: its decode-safety survivors become
+                     one issue, labeled `product` + `bug`, slot a of the
+                     heartbeat's product queue, so the fix lands while the
+                     diff is still warm
 
 The issue is written by gh-comment (footer, credential), never by `gh issue
 create`, and posted as the reviewer: the survivor rule is agent-review.yml
@@ -46,18 +50,39 @@ unreadable PR state or a failed filing exits 1 so the run's red says why,
 because printing the survivors to a log nobody opens is the exact failure
 this script exists to end.
 
-`decide` and `render` are pure so mutants-debt.test.mjs can pin both
-failure directions without spawning gh.
+`decide`, `render` and `in_territory` are pure so mutants-debt.test.mjs can
+pin both failure directions without spawning gh.
 """
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 LABELS = ("product", "bug")
 TITLE_MARK = "outlived PR #"
+
+# Decode-safety territory (ADR-0056): a merged PR's survivor is filed only
+# when the mutated function is one hard rule 2's claim reaches, recognised
+# by the tokens this crate's decode-path functions carry (decode, decompress,
+# undo, replay, read_, bound, ensure_room) or by living in coder.rs, whose
+# every line is the range coder's termination. A token rule, not a path
+# list, so a new decode function is covered the day it is named like one.
+# The cheap failure direction is under-filing: torture, the adversarial
+# seeds and the nightly fuzz still cover the decode path. Survivors outside
+# the territory are scaffold (docs/TESTING.md "Two classes"): annotated on
+# the open diff for the reviewer, never filed.
+TERRITORY = re.compile(
+    r"^src/coder\.rs:|decode|decompress|undo|replay|read_|bound|ensure_room",
+    re.IGNORECASE,
+)
+
+
+def in_territory(line):
+    """Whether one cargo-mutants `missed.txt` line names decode-safety territory."""
+    return TERRITORY.search(line) is not None
 
 
 def gh_json(args):
@@ -90,14 +115,18 @@ def read_report(out_dir):
     return missed, generated, decided
 
 
-def decide(missed, merged, filed):
+def decide(missed, outside, merged, filed):
     """The verdict and its one-line reason.
 
-    missed: survivor lines; merged: the PR's merged state, None when unreadable;
-    filed: an existing open issue number, None when absent or unreadable.
+    missed: survivor lines in decode-safety territory; outside: how many
+    survivors sit outside it; merged: the PR's merged state, None when
+    unreadable; filed: an existing open issue number, None when absent or
+    unreadable.
     """
-    if not missed:
+    if not missed and not outside:
         return "no survivors", "missed.txt empty or absent"
+    if not missed:
+        return "scaffold", f"{outside} survivor(s) outside decode-safety territory; scaffold, not filed (ADR-0056)"
     if merged is None:
         return "unreadable", "PR state could not be read"
     if not merged:
@@ -107,8 +136,8 @@ def decide(missed, merged, filed):
     return "file", f"{len(missed)} survivor(s) on merged code"
 
 
-def render(pr, missed, generated, decided, run_url):
-    """(title, body) for the issue the merged PR's survivors become."""
+def render(pr, missed, outside, generated, decided, run_url):
+    """(title, body) for the issue the merged PR's decode-safety survivors become."""
     files = sorted({line.split(":", 1)[0] for line in missed})
     n = len(missed)
     title = f"mutants: {n} survivor{'s' if n != 1 else ''} {TITLE_MARK}{pr} ({', '.join(files)})"
@@ -122,6 +151,12 @@ def render(pr, missed, generated, decided, run_url):
         *missed,
         "```",
     ]
+    if outside:
+        lines += [
+            "",
+            f"{outside} more survivor{'s' if outside != 1 else ''} sit outside decode-safety territory:",
+            "scaffold, not debt (ADR-0056), left on the PR's annotations.",
+        ]
     if generated is not None and decided is not None and generated > decided:
         lines += [
             "",
@@ -182,7 +217,9 @@ def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
     run_url = os.environ.get("RUN_URL", "(run url unset)")
 
-    missed, generated, decided = read_report(out_dir)
+    survivors, generated, decided = read_report(out_dir)
+    missed = [line for line in survivors if in_territory(line)]
+    outside = len(survivors) - len(missed)
     merged = filed = None
     err = None
     if missed:
@@ -191,14 +228,14 @@ def main():
             filed, err = already_filed(repo, pr)
             if err:
                 filed = None  # a dedup read that failed must not suppress the filing
-    verdict, detail = decide(missed, merged, filed)
+    verdict, detail = decide(missed, outside, merged, filed)
     if verdict == "unreadable":
         print(f"::error::mutants-debt: {detail}: {err}")
         return 1
     if verdict != "file":
         print(f"mutants-debt: {verdict} | {detail}")
         return 0
-    title, body = render(pr, missed, generated, decided, run_url)
+    title, body = render(pr, missed, outside, generated, decided, run_url)
     created, err = file_issue(title, body)
     if err:
         print(f"::error::mutants-debt: filing failed: {err}")

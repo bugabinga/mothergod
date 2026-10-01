@@ -83,4 +83,17 @@ exclude_re = [
   # terminate, so they stay live. 3 mutants.
   "^src/coder\\.rs:23:23: replace >> with <<$",
   "^src/coder\\.rs:26:23: replace - with [+/]$",
+
+  # Undecidable by cargo test: `try_new -> Result<Self, TryReserveError>`
+  # with its body replaced by `Ok(Default::default())` is byte-identical
+  # to the real code whenever the allocator succeeds, which under `cargo
+  # test` is always; only an injected allocation failure tells them
+  # apart, and that instrument is tests/torture.rs, which mutants-check
+  # cannot run (#791). Four debt issues were this class and each closed
+  # on a torture sweep by hand (#790, #815, #835, #838). Owned by
+  # torture, not by a test here (ADR-0056). Function-agnostic on
+  # purpose: a try_new whose Default is not its infallible twin is caught
+  # by the ordinary tests regardless, so excluding its mutant loses
+  # nothing.
+  "::try_new -> Result<Self, std::collections::TryReserveError> with Ok\\((Default|Self)::default\\(\\)\\)$",
 ]

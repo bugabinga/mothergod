@@ -1,4 +1,5 @@
-# Mutation testing: a surviving mutant is a missing test by definition.
+# Mutation testing: a surviving mutant is a missing suite test where the
+# suite makes the claim it breaks, a map reading elsewhere (ADR-0056).
 #
 # ROADMAP M4's "cargo-mutants in CI" (docs/TESTING.md layer 4). It runs on
 # the PR's own changed lines, not on a weekly sweep of the whole crate,
