@@ -15,7 +15,7 @@ blocking PRs.
 | Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
 | Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
 | Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451) |
-| Weekly | schedule | no, alarmed | monster matrix, large property profile (#452), coverage (#454), Miri (#456) |
+| Weekly | schedule | no, alarmed | monster matrix, large property profile (#452), coverage, Miri (#456) |
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
 
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
