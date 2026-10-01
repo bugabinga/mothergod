@@ -18,6 +18,35 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-01 — Editorial: the Silesia caption named "the same two" instead of naming them
+
+Queue checked first: #443 is the only open `marketing` issue and its build
+sits in #739, agent-system territory, unmerged since 2026-09-22. Nothing
+else claimed. No defect from the existing guards either: `cargo test -p
+mothergod --test claims` is 18 for 18, and a link sweep of every `href` in
+`site/*.html` and `README.md` resolves to a file that exists on `main`.
+Took the smallest open thread instead: the 2026-09-22 verdict-strip entry
+(this file) named the Silesia caption, "Silesia, vs the same two," as
+"not done," left for its own PR.
+
+**Fixed: the caption now names both comparators, the same way the Canterbury
+one above it already does.** "Silesia, vs the same two" reads correctly in
+row order, directly under "Canterbury, vs `zstd -19` and `xz -9e`," but it
+is not a sentence on its own: a reader who lands partway down the strip, or
+anyone quoting the row out of context, gets a pronoun with no antecedent.
+Rewrote it to "Silesia, vs `zstd -19` and `xz -9e`," the identical pattern
+as its neighbor, so each verdict-item caption stands alone.
+
+**Guard still covers it: `verdict_strip_words_match_their_aggregate_comparisons`
+matches captions by `starts_with(corpus)`, not by their tail, so spelling out
+the comparators changed nothing it reads.** Ran it before and after; both
+green.
+
+Measured, served from `site/` over HTTP at a scratch local root, before tree
+at `HEAD`: both rows render on one line each at 375×812 and at 1440×900,
+identical wrap behavior to the Canterbury row immediately above, no shift to
+anything below the strip at either width.
+
 ## 2026-09-28 — Editorial: the ratio number moved and the changelog didn't
 
 `CHANGELOG.md`'s Unreleased "Ratio" bullet still claimed 1.374 bits/byte on
