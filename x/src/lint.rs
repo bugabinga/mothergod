@@ -266,10 +266,9 @@ mod tests {
         let rules = markdown_rules();
         let config = Config::default();
         let accepted = format!("<p>lead</p>\n\n#197\n\n{}\n", "x".repeat(200));
-        assert!(
-            lint_markdown(&accepted, Path::new("a.md"), &rules, &config)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            lint_markdown(&accepted, Path::new("a.md"), &rules, &config).unwrap(),
+            [] as [LintWarning; 0]
         );
 
         let warnings = lint_markdown("# Title \n", Path::new("a.md"), &rules, &config).unwrap();
@@ -298,7 +297,7 @@ mod tests {
         let source =
             "## [Unreleased]\n\n### Added\n\n- a\n\n## [0.1.0] - 2026-01-01\n\n### Added\n\n- b\n";
         let check = check_changelog(Path::new("CHANGELOG.md"), source);
-        assert!(check.findings.is_empty());
+        assert_eq!(check.findings, [] as [String; 0]);
     }
 
     #[test]
@@ -306,7 +305,7 @@ mod tests {
         let body = "x".repeat(CHANGELOG_UNRELEASED_WARN_CHARS + 1);
         let source = format!("## [Unreleased]\n\n### Added\n\n{body}\n");
         let check = check_changelog(Path::new("CHANGELOG.md"), &source);
-        assert!(check.findings.is_empty());
+        assert_eq!(check.findings, [] as [String; 0]);
         assert!(
             check
                 .unreleased_size_warning

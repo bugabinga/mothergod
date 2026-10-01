@@ -434,7 +434,7 @@ mod tests {
         let mut baseline = BTreeMap::new();
         baseline.insert("a".to_string(), 2.0);
         let measured = baseline.clone();
-        assert!(regressions(&baseline, &measured).is_empty());
+        assert_eq!(regressions(&baseline, &measured), []);
     }
 
     #[test]
@@ -443,7 +443,7 @@ mod tests {
         baseline.insert("a".to_string(), 2.0);
         let mut measured = BTreeMap::new();
         measured.insert("a".to_string(), 2.0 + TOLERANCE_BITS);
-        assert!(regressions(&baseline, &measured).is_empty());
+        assert_eq!(regressions(&baseline, &measured), []);
     }
 
     #[test]
@@ -464,7 +464,7 @@ mod tests {
         baseline.insert("old_only".to_string(), 2.0);
         let mut measured = BTreeMap::new();
         measured.insert("new_only".to_string(), 20.0);
-        assert!(regressions(&baseline, &measured).is_empty());
+        assert_eq!(regressions(&baseline, &measured), []);
     }
 
     #[test]
@@ -473,7 +473,7 @@ mod tests {
         baseline.insert("a".to_string(), 2.0);
         let mut measured = BTreeMap::new();
         measured.insert("a".to_string(), 1.0);
-        assert!(regressions(&baseline, &measured).is_empty());
+        assert_eq!(regressions(&baseline, &measured), []);
     }
 
     #[test]
