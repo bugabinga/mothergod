@@ -22,15 +22,15 @@ All notable changes to this project are documented here. Format follows
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 6, specified in
+- Bitstream format at `FORMAT_VERSION` 7, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
 - Ratio, on the held-out finals ([`bench/corpus.toml`](bench/corpus.toml),
   pinned by URL and SHA-256): beats both `zstd -19` and `xz -9e` in
-  aggregate on Canterbury (1.367 bits/byte vs 1.470 and 1.403); trails both
-  in aggregate on Silesia (2.057 vs 1.997 and 1.829). Per-file tables and
+  aggregate on Canterbury (1.366 bits/byte vs 1.470 and 1.403); trails both
+  in aggregate on Silesia (2.056 vs 1.997 and 1.829). Per-file tables and
   the reproduction command: [`docs/benchmarks/`](docs/benchmarks/).
 - Trust: the decoder answers truncation, corruption, and any other
   adversarial input with an `Err`, never a panic or unbounded allocation,

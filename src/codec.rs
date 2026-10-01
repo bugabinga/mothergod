@@ -60,11 +60,18 @@
 //! ([`crate::literal::Literal::encode_logistic_surprise`]/`decode_logistic_surprise`,
 //! `docs/adr/0054-wire-the-surprise-rate-schedule-into-the-literal-model.md`,
 //! `research/JOURNAL.md` S2-A104/S2-A105); a version-6 `Candidate::Transpose`
-//! frame is unaffected, same carve-out as version 5. [`decode`] takes the
-//! frame's declared `version` and its already-parsed `candidate` and picks
-//! the matching literal path; every other symbol (flag/length/offset/slot)
-//! is unaffected and coded identically at every version `LZ_MIN_VERSION` or
-//! above, regardless of candidate.
+//! frame is unaffected, same carve-out as version 5. Version
+//! `LOGIT_SSE_MIN_VERSION` (7) and above codes every other candidate's
+//! literals through the same logit-domain mix and rate schedule again, but
+//! calibrated through a stretch-domain SSE table instead of a linear one
+//! ([`crate::literal::Literal::encode_logit_sse`]/`decode_logit_sse`,
+//! `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`,
+//! `research/JOURNAL.md` S2-A106/S2-A108); a version-7 `Candidate::Transpose`
+//! frame is unaffected, same carve-out as versions 5 and 6. [`decode`]
+//! takes the frame's declared `version` and its already-parsed `candidate`
+//! and picks the matching literal path; every other symbol
+//! (flag/length/offset/slot) is unaffected and coded identically at every
+//! version `LZ_MIN_VERSION` or above, regardless of candidate.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -89,6 +96,7 @@ use crate::column;
 use crate::filters::{self, select::Candidate};
 use crate::literal::{
     ColumnExpertState, Context, Literal, LogisticMix, PpmExpertState, SurpriseLogisticMix,
+    SurpriseLogisticMixLogitSse,
 };
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
@@ -102,10 +110,12 @@ use crate::model::Model;
 /// below `LOGISTIC_MIN_VERSION`, `encode_logistic`/`decode_logistic` at
 /// `LOGISTIC_MIN_VERSION` and above but below `SURPRISE_MIN_VERSION`,
 /// `encode_logistic_surprise`/`decode_logistic_surprise` at
-/// `SURPRISE_MIN_VERSION` and above (or, at version 4 on a
-/// `Candidate::Transpose` frame, [`crate::literal::Literal::encode_column`]/
-/// `decode_column` regardless of either gate); no version this build
-/// decodes still needs a separate literal-coding floor.
+/// `SURPRISE_MIN_VERSION` and above but below `LOGIT_SSE_MIN_VERSION`,
+/// `encode_logit_sse`/`decode_logit_sse` at `LOGIT_SSE_MIN_VERSION` and
+/// above (or, at version 4 on a `Candidate::Transpose` frame,
+/// [`crate::literal::Literal::encode_column`]/`decode_column` regardless of
+/// any of those three gates); no version this build decodes still needs a
+/// separate literal-coding floor.
 pub(crate) const LZ_MIN_VERSION: u8 = 3;
 
 /// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
@@ -148,6 +158,23 @@ const LOGISTIC_MIN_VERSION: u8 = 5;
 /// Every candidate at a lower version is unaffected — see the module docs'
 /// "Payload layout" section.
 const SURPRISE_MIN_VERSION: u8 = 6;
+
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a literal
+/// sub-stream through [`crate::literal::Literal::encode_logit_sse`]/
+/// `decode_logit_sse` (the same logit-domain mix and learned-baseline rate
+/// schedule as `SURPRISE_MIN_VERSION`, but
+/// [`crate::literal::SurpriseLogisticMixLogitSse`]'s stretch-domain SSE
+/// bin spacing in place of [`crate::literal::SurpriseLogisticMix`]'s
+/// linear one, `research/JOURNAL.md` S2-A106/S2-A108,
+/// `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`)
+/// instead of [`crate::literal::Literal::encode_logistic_surprise`]/
+/// `decode_logistic_surprise`. Applies to every candidate except
+/// [`Candidate::Transpose`] at `COLUMN_EXPERT_MIN_VERSION` and above, which
+/// keeps coding through [`crate::literal::Literal::encode_column`]/
+/// `decode_column` regardless of this constant, same carve-out as
+/// `SURPRISE_MIN_VERSION`'s own docs give. Every candidate at a lower
+/// version is unaffected — see the module docs' "Payload layout" section.
+const LOGIT_SSE_MIN_VERSION: u8 = 7;
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -216,6 +243,10 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// `decode_logistic_surprise` replaces `decode_logistic`'s per-node step
 /// count with two EMA updates at `SURPRISE_MIN_VERSION` and above, still a
 /// bounded constant more, no new loop or allocation; the same argument
+/// covers it too. ADR-0055's `decode_logit_sse` replaces `decode_logistic_
+/// surprise`'s linear-domain `Sse` lookup with `LogitSse`'s own (one extra
+/// `stretch` call per node) at `LOGIT_SSE_MIN_VERSION` and above, still a
+/// bounded constant more, no new loop or allocation; the same argument
 /// covers it too.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
@@ -265,10 +296,15 @@ struct Models {
     logistic: LogisticMix,
     /// [`crate::literal::Literal::encode_logistic_surprise`]/
     /// `decode_logistic_surprise` code every non-`Candidate::Transpose`
-    /// literal through at `SURPRISE_MIN_VERSION` and above: its own
-    /// weights, error EMAs and `Sse` table, independent of `logistic`'s
-    /// own, same lifetime.
+    /// literal through at `SURPRISE_MIN_VERSION` and above, below
+    /// `LOGIT_SSE_MIN_VERSION`: its own weights, error EMAs and `Sse`
+    /// table, independent of `logistic`'s own, same lifetime.
     surprise: SurpriseLogisticMix,
+    /// [`crate::literal::Literal::encode_logit_sse`]/`decode_logit_sse`
+    /// code every non-`Candidate::Transpose` literal through at
+    /// `LOGIT_SSE_MIN_VERSION` and above: its own weights, error EMAs and
+    /// `LogitSse` table, independent of `surprise`'s own, same lifetime.
+    logit_sse: SurpriseLogisticMixLogitSse,
     /// One flag table per "was the previous token a copy" state (the
     /// archive's `flag[2]`): a literal run and a post-copy position have
     /// different flag distributions worth modeling separately. Indexed by
@@ -285,6 +321,7 @@ impl Models {
             literal: Literal::new(),
             logistic: LogisticMix::new(),
             surprise: SurpriseLogisticMix::new(),
+            logit_sse: SurpriseLogisticMixLogitSse::new(),
             flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
             length: Model::new(lz::LENGTH_BUCKETS),
             offset: Model::new(lz::OFFSET_BUCKETS),
@@ -304,6 +341,7 @@ impl Models {
             literal: Literal::try_new()?,
             logistic: LogisticMix::try_new()?,
             surprise: SurpriseLogisticMix::try_new()?,
+            logit_sse: SurpriseLogisticMixLogitSse::try_new()?,
             flag: [
                 Model::try_new(FLAG_ALPHABET)?,
                 Model::try_new(FLAG_ALPHABET)?,
@@ -454,8 +492,8 @@ struct ColumnCoding<'a> {
 /// [`encode_tokens`]. `column` is `Some` exactly when the candidate under
 /// trial is [`Candidate::Transpose`] (`encode`'s caller), selecting
 /// [`crate::literal::Literal::encode_column`] over
-/// [`crate::literal::Literal::encode_logistic_surprise`] for every literal
-/// in this trial (`research/JOURNAL.md` S1-P5, `COLUMN_EXPERT_MIN_VERSION`).
+/// [`crate::literal::Literal::encode_logit_sse`] for every literal in this
+/// trial (`research/JOURNAL.md` S1-P5, `COLUMN_EXPERT_MIN_VERSION`).
 struct EncodeSink<'a> {
     ac: &'a mut Encoder,
     column: Option<ColumnCoding<'a>>,
@@ -484,12 +522,9 @@ impl TokenSink for EncodeSink<'_> {
                     .encode_column(self.ac, context, byte, bank, col.state);
             }
             None => {
-                models.literal.encode_logistic_surprise(
-                    self.ac,
-                    context,
-                    byte,
-                    &mut models.surprise,
-                );
+                models
+                    .literal
+                    .encode_logit_sse(self.ac, context, byte, &mut models.logit_sse);
             }
         }
     }
@@ -520,16 +555,17 @@ impl TokenSink for CostSink {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        // Matches EncodeSink::literal's None branch (encode_logistic_surprise;
+        // Matches EncodeSink::literal's None branch (encode_logit_sse;
         // every CostSink caller here parses `data` with no filter selection,
         // so Candidate::Transpose's encode_column never arises) — this
         // trait's own docs: CostSink and EncodeSink must price and code the
         // same thing, so ideal_cost_bits stays a true estimate of what
         // encode_tokens's real Encoder pays.
-        self.bits +=
-            models
-                .literal
-                .ideal_cost_bits_logistic_surprise(context, byte, &mut models.surprise);
+        self.bits += models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
+            context,
+            byte,
+            &mut models.logit_sse,
+        );
     }
 
     fn length(&mut self, models: &mut Models, value: u32) {
@@ -1038,26 +1074,30 @@ fn decode_tokens<S: DecodeSink>(
 
 /// Which mixer a decoded frame's non-`Candidate::Transpose` literal
 /// sub-stream codes through, selected once from the frame's declared
-/// `version`: three mutually exclusive states derived from two
-/// thresholds (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`) rather than
-/// carried as independent bools, so a version cannot read as selecting
-/// "both" or "neither" mixer (CLAUDE.md's precision value, illegal states
-/// unrepresentable). `Candidate::Transpose` never consults this: its own
-/// `COLUMN_EXPERT_MIN_VERSION` gate picks `encode_column`/`decode_column`
-/// regardless.
+/// `version`: four mutually exclusive states derived from three
+/// thresholds (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`,
+/// `LOGIT_SSE_MIN_VERSION`) rather than carried as independent bools, so a
+/// version cannot read as selecting more than one mixer at once (CLAUDE.md's
+/// precision value, illegal states unrepresentable). `Candidate::Transpose`
+/// never consults this: its own `COLUMN_EXPERT_MIN_VERSION` gate picks
+/// `encode_column`/`decode_column` regardless.
 #[derive(Clone, Copy)]
 enum LiteralPath {
     Sse,
     Logistic,
     LogisticSurprise,
+    LogitSse,
 }
 
 impl LiteralPath {
     /// Picks the path a frame declaring `version` codes its literals
     /// through, mirroring [`decode`]'s own version gates
-    /// (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`).
+    /// (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`,
+    /// `LOGIT_SSE_MIN_VERSION`).
     const fn for_version(version: u8) -> Self {
-        if version >= SURPRISE_MIN_VERSION {
+        if version >= LOGIT_SSE_MIN_VERSION {
+            Self::LogitSse
+        } else if version >= SURPRISE_MIN_VERSION {
             Self::LogisticSurprise
         } else if version >= LOGISTIC_MIN_VERSION {
             Self::Logistic
@@ -1077,6 +1117,11 @@ fn decode_literal_path(
     context: Context,
 ) -> u8 {
     match path {
+        LiteralPath::LogitSse => {
+            models
+                .literal
+                .decode_logit_sse(ac, context, &mut models.logit_sse)
+        }
         LiteralPath::LogisticSurprise => {
             models
                 .literal
@@ -1197,15 +1242,18 @@ impl DecodeSink for VecSink<'_> {
 /// sub-stream through [`crate::literal::Literal::decode_sse`]; versions
 /// `LOGISTIC_MIN_VERSION` (5) and above but below `SURPRISE_MIN_VERSION`
 /// decode it through [`crate::literal::Literal::decode_logistic`] instead;
-/// versions `SURPRISE_MIN_VERSION` (6) and above decode it through
-/// [`crate::literal::Literal::decode_logistic_surprise`] instead — except,
-/// at every one of those versions, for a [`Candidate::Transpose`] frame,
-/// version `COLUMN_EXPERT_MIN_VERSION` (4) and above, which decodes
-/// through [`crate::literal::Literal::decode_column`] regardless, blending
-/// a column-keyed seventh expert into the mix (see the module docs'
-/// "Payload layout" section). Every other symbol decodes identically
-/// regardless of `version` or candidate, since only the literal
-/// sub-stream's internal shape changed.
+/// versions `SURPRISE_MIN_VERSION` (6) and above but below
+/// `LOGIT_SSE_MIN_VERSION` decode it through
+/// [`crate::literal::Literal::decode_logistic_surprise`] instead; versions
+/// `LOGIT_SSE_MIN_VERSION` (7) and above decode it through
+/// [`crate::literal::Literal::decode_logit_sse`] instead — except, at every
+/// one of those versions, for a [`Candidate::Transpose`] frame, version
+/// `COLUMN_EXPERT_MIN_VERSION` (4) and above, which decodes through
+/// [`crate::literal::Literal::decode_column`] regardless, blending a
+/// column-keyed seventh expert into the mix (see the module docs' "Payload
+/// layout" section). Every other symbol decodes identically regardless of
+/// `version` or candidate, since only the literal sub-stream's internal
+/// shape changed.
 ///
 /// # Panics
 ///
@@ -1441,7 +1489,8 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
 /// [`read_header`]'s expected input. `version` is the frame's declared
 /// `FORMAT_VERSION` byte, [`decode_to_writer`]'s own parameter passed
 /// through unchanged, gating the literal sub-stream exactly as [`decode`]'s
-/// own `version` does (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`).
+/// own `version` does (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`,
+/// `LOGIT_SSE_MIN_VERSION`).
 fn decode_undoable_streaming<W: std::io::Write>(
     payload: &[u8],
     version: u8,
@@ -1858,6 +1907,29 @@ mod tests {
             decode(&encoded, LOGISTIC_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
             Ok(data.as_slice()),
             "decoding a SURPRISE_MIN_VERSION frame as LOGISTIC_MIN_VERSION must not \
+             silently reproduce the original data"
+        );
+    }
+
+    #[test]
+    fn logit_sse_path_is_gated_on_version_alone() {
+        // Same shape as logistic_surprise_path_is_gated_on_version_alone,
+        // one threshold up: a non-Transpose frame the real encoder built
+        // (through encode_logit_sse, LOGIT_SSE_MIN_VERSION and up) must
+        // decode through the older SurpriseLogisticMix path
+        // (Literal::decode_logistic_surprise) when declared at
+        // SURPRISE_MIN_VERSION, still below LOGIT_SSE_MIN_VERSION, never
+        // decode_logit_sse. Decoding it there must NOT reproduce the
+        // original data, proving the `version >= LOGIT_SSE_MIN_VERSION`
+        // check is live dispatch, not dead code a future refactor could
+        // drop unnoticed.
+        let data = columnar_drift_data();
+        let encoded = encode(&data);
+        assert_eq!(encoded[0], 1, "fixture must select Delta, not Transpose");
+        assert_ne!(
+            decode(&encoded, SURPRISE_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
+            Ok(data.as_slice()),
+            "decoding a LOGIT_SSE_MIN_VERSION frame as SURPRISE_MIN_VERSION must not \
              silently reproduce the original data"
         );
     }
