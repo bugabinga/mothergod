@@ -35,7 +35,8 @@ All notable changes to this project are documented here. Format follows
 - Trust: the decoder answers truncation, corruption, and any other
   adversarial input with an `Err`, never a panic or unbounded allocation,
   verified by a fuzzed, mutation-tested, and allocation-torture-swept test
-  suite ([`docs/TESTING.md`](docs/TESTING.md)).
+  suite, with region coverage measured weekly and trended on the status
+  page ([`docs/TESTING.md`](docs/TESTING.md)).
 - Status page: the SIMPLICITY scorecard's public API surface (item count
   visible on docs.rs, with a trend once a second reading exists), the other
   half of the metric alongside the existing `src/` line counts. `cargo x
