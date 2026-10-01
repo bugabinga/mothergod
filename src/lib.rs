@@ -100,13 +100,16 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// every candidate except that same `Candidate::Transpose` case through
 /// [`literal::Literal::decode_logistic`] instead; a version-6 frame codes
 /// that same set of candidates through [`literal::Literal::decode_logistic_surprise`]
-/// instead. [`codec::decode`] takes the frame's declared version (and, for
-/// `Candidate::Transpose`, its already-parsed candidate) and picks between
-/// them, so hard rule 5's "decode support for every version the spec still
-/// covers" is satisfied by dispatch, not by dropping an old path
-/// (`tests/golden/v3-*.mgdc`, `tests/golden/v4-*.mgdc`,
-/// `tests/golden/v5-*.mgdc`, and `tests/golden/v6-*.mgdc` pin that forever).
-pub const FORMAT_VERSION: u8 = 6;
+/// instead; a version-7 frame codes that same set of candidates through
+/// [`literal::Literal::decode_logit_sse`] instead. [`codec::decode`] takes
+/// the frame's declared version (and, for `Candidate::Transpose`, its
+/// already-parsed candidate) and picks between them, so hard rule 5's
+/// "decode support for every version the spec still covers" is satisfied
+/// by dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
+/// `tests/golden/v4-*.mgdc`, `tests/golden/v5-*.mgdc`,
+/// `tests/golden/v6-*.mgdc`, and `tests/golden/v7-*.mgdc` pin that
+/// forever).
+pub const FORMAT_VERSION: u8 = 7;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

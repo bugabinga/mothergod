@@ -81,6 +81,17 @@
 //! [`LogisticMix`]'s step-count-derived schedule, so a converged-but-noisy
 //! context's stable residual reads as "no surprise" while genuine drift
 //! still raises the rate.
+//!
+//! **Logit-domain SSE bins (`JOURNAL` S2-A106/S2-A108, `FORMAT_VERSION`
+//! `codec::LOGIT_SSE_MIN_VERSION` (7), ADR-0055).**
+//! [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`] replace
+//! [`Literal::encode_logistic_surprise`]/`decode_logistic_surprise` for
+//! every candidate except `Candidate::Transpose`: the identical walk,
+//! rate schedule and gradient step, but [`SurpriseLogisticMixLogitSse`]'s
+//! calibration table spaces its bins evenly in
+//! [`crate::logistic::stretch`]-space instead of [`Sse`]'s own linear
+//! probability space, concentrating resolution near 0/1 where a
+//! calibration error costs most.
 
 use std::num::NonZeroUsize;
 
@@ -799,11 +810,14 @@ impl Default for SurpriseLogisticMix {
     }
 }
 
-/// Research candidate (`research/JOURNAL.md` S2-A106): identical to
-/// [`SurpriseLogisticMix`] in every field and update rule except its own
-/// calibration table, [`crate::sse::LogitSse`] instead of [`Sse`] — the
-/// mixing weights, error EMAs and rate schedule are untouched, isolating
-/// the bin-spacing change this candidate measures.
+/// Identical to [`SurpriseLogisticMix`] in every field and update rule
+/// except its own calibration table, [`crate::sse::LogitSse`] instead of
+/// [`Sse`] — the mixing weights, error EMAs and rate schedule are
+/// untouched, isolating the bin-spacing change this type measures
+/// (`research/JOURNAL.md` S2-A106). The real coding path
+/// (`codec::LOGIT_SSE_MIN_VERSION`):
+/// [`Literal::encode_logit_sse`]/`decode_logit_sse`
+/// (`research/JOURNAL.md` S2-A108, `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`).
 #[derive(Debug, Clone)]
 pub struct SurpriseLogisticMixLogitSse {
     /// Same shape as [`SurpriseLogisticMix::weights`].
@@ -828,6 +842,22 @@ impl SurpriseLogisticMixLogitSse {
             baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             sse: crate::sse::LogitSse::new(bittree::SSE_CONTEXTS),
         }
+    }
+
+    /// Fallible counterpart to [`Self::new`], the same shape
+    /// [`SurpriseLogisticMix::try_new`] gives its own mixer:
+    /// [`crate::codec::decode`]'s real decode path constructs a
+    /// `SurpriseLogisticMixLogitSse` per frame now that
+    /// [`Literal::decode_logit_sse`] reaches it, and the allocation can
+    /// still fail, so hard rule 2 requires `Error::OutOfMemory` there
+    /// instead of an abort.
+    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
+            recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
+            baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
+            sse: crate::sse::LogitSse::try_new(bittree::SSE_CONTEXTS)?,
+        })
     }
 }
 
@@ -1643,6 +1673,57 @@ impl Literal {
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
         let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
+            decoder.decode_bit(p)
+        });
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        byte
+    }
+
+    /// Codes `byte` through `encoder` under `context`, blending this
+    /// model's six expert banks through `mixer`'s logit-domain mix under
+    /// [`SurpriseLogisticMix`]'s own rate schedule, refined through
+    /// [`crate::sse::LogitSse`] instead of [`Sse`]
+    /// (`research/JOURNAL.md` S2-A106/S2-A108, `codec::LOGIT_SSE_MIN_VERSION`),
+    /// then updates every expert bank exactly as
+    /// [`Self::encode_logistic_surprise`] does. The six real experts' own
+    /// linear weights adapt unperturbed, the same layering every other
+    /// `encode_*` method in this file uses.
+    pub fn encode_logit_sse(
+        &mut self,
+        encoder: &mut Encoder,
+        context: Context,
+        byte: u8,
+        mixer: &mut SurpriseLogisticMixLogitSse,
+    ) {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+        let landed = self.logit_sse_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+            let bit = symbol >= mid;
+            encoder.encode_bit(bit, p);
+            bit
+        });
+        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
+        self.update(&bank_indices, weight_index, symbol, exp);
+    }
+
+    /// Decodes one byte from `decoder` under `context`, the exact inverse
+    /// of [`Self::encode_logit_sse`]; see that method's docs for the coding
+    /// and update shape.
+    ///
+    /// Never panics on adversarial `decoder` state, the same argument
+    /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
+    /// over any coded bit pattern, and every probability
+    /// [`Self::logit_sse_code_bit`] derives is this model's and `mixer`'s
+    /// own invariant, never derived from `decoder`'s bytes.
+    #[must_use]
+    pub fn decode_logit_sse(
+        &mut self,
+        decoder: &mut Decoder,
+        context: Context,
+        mixer: &mut SurpriseLogisticMixLogitSse,
+    ) -> u8 {
+        let (bank_indices, weight_index) = banks(context);
+        let byte = self.logit_sse_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
             decoder.decode_bit(p)
         });
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
@@ -2911,6 +2992,157 @@ mod tests {
         }
         let (_, weight_index) = banks(context);
         model.encode_logistic_surprise(&mut Encoder::new(), context, b'x', &mut mixer);
+        for key in 0..WEIGHT_CONTEXTS {
+            if key == weight_index {
+                assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
+                assert_ne!(mixer.baseline_sq_error[key].to_bits(), 0.0f64.to_bits());
+                assert_ne!(
+                    mixer.weights[key].map(f64::to_bits),
+                    [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
+                );
+            } else {
+                assert_eq!(
+                    mixer.recent_sq_error[key].to_bits(),
+                    0.0f64.to_bits(),
+                    "key {key}"
+                );
+                assert_eq!(
+                    mixer.baseline_sq_error[key].to_bits(),
+                    0.0f64.to_bits(),
+                    "key {key}"
+                );
+                assert_eq!(
+                    mixer.weights[key].map(f64::to_bits),
+                    [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
+                );
+            }
+        }
+    }
+
+    fn roundtrip_bytes_logit_sse(bytes: &[u8]) {
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in bytes {
+            model.encode_logit_sse(&mut enc, context, b, &mut mixer);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(&encoded);
+        let mut got = Vec::with_capacity(bytes.len());
+        for _ in bytes {
+            let b = model.decode_logit_sse(&mut dec, context, &mut mixer);
+            context = context.after_literal(b);
+            got.push(b);
+        }
+        assert_eq!(got, bytes);
+    }
+
+    #[test]
+    fn empty_stream_round_trips_through_logit_sse() {
+        roundtrip_bytes_logit_sse(&[]);
+    }
+
+    #[test]
+    fn single_byte_round_trips_through_logit_sse() {
+        roundtrip_bytes_logit_sse(b"x");
+    }
+
+    #[test]
+    fn ascii_text_round_trips_through_logit_sse() {
+        let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
+        roundtrip_bytes_logit_sse(&text);
+    }
+
+    #[test]
+    fn pseudo_random_bytes_round_trip_through_logit_sse() {
+        let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
+            .take(5000)
+            .map(|state| u8::try_from(state % 256).unwrap())
+            .collect();
+        roundtrip_bytes_logit_sse(&bytes);
+    }
+
+    #[test]
+    fn decoding_truncated_stream_does_not_panic_through_logit_sse() {
+        let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let mut context = Context::default();
+        let mut enc = Encoder::new();
+        for &b in &bytes {
+            model.encode_logit_sse(&mut enc, context, b, &mut mixer);
+            context = context.after_literal(b);
+        }
+        let encoded = enc.finish();
+        let truncated = &encoded[..encoded.len() / 2];
+
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let mut context = Context::default();
+        let mut dec = Decoder::new(truncated);
+        for _ in &bytes {
+            let b = model.decode_logit_sse(&mut dec, context, &mut mixer);
+            context = context.after_literal(b);
+        }
+        // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
+    }
+
+    /// [`Literal::encode_logit_sse`] must leave the six real experts' banks
+    /// and linear weights exactly where [`Literal::encode_sse`] would, the
+    /// same guarantee
+    /// `encode_logistic_surprise_updates_the_six_real_experts_same_as_encode_sse`
+    /// checks for [`SurpriseLogisticMix`]'s own path.
+    #[test]
+    fn encode_logit_sse_updates_the_six_real_experts_same_as_encode_sse() {
+        let bytes = b"hello world hello again";
+        let mut via_logit_sse = Literal::new();
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let mut context_logit_sse = Context::default();
+        let mut enc_logit_sse = Encoder::new();
+        for &b in bytes {
+            via_logit_sse.encode_logit_sse(&mut enc_logit_sse, context_logit_sse, b, &mut mixer);
+            context_logit_sse = context_logit_sse.after_literal(b);
+        }
+
+        let mut via_sse = Literal::new();
+        let mut context_sse = Context::default();
+        let mut enc_sse = Encoder::new();
+        for &b in bytes {
+            via_sse.encode_sse(&mut enc_sse, context_sse, b);
+            context_sse = context_sse.after_literal(b);
+        }
+
+        assert_eq!(via_logit_sse.freq, via_sse.freq);
+        assert_eq!(via_logit_sse.total, via_sse.total);
+        assert_eq!(via_logit_sse.weights, via_sse.weights);
+    }
+
+    #[test]
+    fn encode_logit_sse_steps_only_its_own_weight_key_once_per_node() {
+        let mut model = Literal::new();
+        let mut mixer = SurpriseLogisticMixLogitSse::new();
+        let context = Context {
+            prev1: 0x25,
+            ..Context::default()
+        };
+        // Give the banks a skew first, so the stretches (and therefore the
+        // gradient step) are nonzero.
+        for _ in 0..4 {
+            model.encode_logit_sse(
+                &mut Encoder::new(),
+                context,
+                b'x',
+                &mut SurpriseLogisticMixLogitSse::new(),
+            );
+        }
+        let (_, weight_index) = banks(context);
+        model.encode_logit_sse(&mut Encoder::new(), context, b'x', &mut mixer);
         for key in 0..WEIGHT_CONTEXTS {
             if key == weight_index {
                 assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());

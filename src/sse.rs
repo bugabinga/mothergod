@@ -297,6 +297,25 @@ impl LogitSse {
         Self { contexts, table }
     }
 
+    /// Fallible counterpart to [`Self::new`]: the same fresh,
+    /// logit-domain-identity-mapped table, but returns `Err` instead of
+    /// aborting if the allocator cannot satisfy `contexts * BINS` entries.
+    /// [`crate::literal::SurpriseLogisticMixLogitSse::try_new`] uses this on
+    /// the real decode path (hard rule 2, `rust-craft` skill's
+    /// allocation-discipline, `tests/torture.rs`, #453); [`Self::new`] stays
+    /// the panicking constructor the encoder and every test use.
+    ///
+    /// # Panics
+    ///
+    /// Same as [`Self::new`]: `contexts` zero is a caller bug, never
+    /// something adversarial input can trigger.
+    pub(crate) fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
+        assert!(contexts > 0, "LogitSse must have at least one context");
+        let mut table = crate::try_filled_vec(contexts * BINS, 0.0)?;
+        fill_identity_logit(&mut table, contexts);
+        Ok(Self { contexts, table })
+    }
+
     /// The number of independent contexts this table calibrates.
     #[must_use]
     pub fn contexts(&self) -> usize {
