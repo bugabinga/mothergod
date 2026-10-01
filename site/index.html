@@ -257,7 +257,7 @@
           Aggregate bits per byte on the two named corpora, lower is better.
           Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
           both are pinned by URL and SHA-256, fetched at measurement time and
-          never committed. Measured 2026-09-28 against <code>gzip 1.12</code>,
+          never committed. Measured 2026-10-01 against <code>gzip 1.12</code>,
           <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
           flags in the header row.
         </p>
@@ -283,14 +283,14 @@
             <tbody>
               <tr>
                 <th scope="row">Canterbury</th>
-                <td class="ours">1.367</td>
+                <td class="ours">1.366</td>
                 <td>2.081</td>
                 <td>1.470</td>
                 <td>1.403</td>
               </tr>
               <tr>
                 <th scope="row">Silesia</th>
-                <td class="ours">2.057</td>
+                <td class="ours">2.056</td>
                 <td>2.553</td>
                 <td>1.997</td>
                 <td>1.829</td>
@@ -320,7 +320,7 @@
         <p>
           Slow, and that is the honest headline. mothergod's codec has no
           internal parallelism; the reports measure it one thread per file,
-          several files at once, on one CI machine (AMD EPYC 7763, 4 logical
+          several files at once, on one CI machine (AMD EPYC 9V74, 4 logical
           cores), more threads than cores, so the rate is a lower bound on what
           an isolated single-file run would show.
         </p>
@@ -339,13 +339,13 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.126</td>
-              <td>2.921</td>
+              <td>0.154</td>
+              <td>2.887</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.058</td>
-              <td>1.222</td>
+              <td>0.065</td>
+              <td>1.338</td>
             </tr>
           </tbody>
         </table>

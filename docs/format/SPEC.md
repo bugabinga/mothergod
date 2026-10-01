@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 6)
+# mothergod bitstream format (FORMAT_VERSION 7)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -61,7 +61,7 @@ offset  size  field
 ```
 
 **Literal sub-stream shape is version- (and, at version 4 and above,
-candidate-) gated (ADR-0038, ADR-0046, ADR-0052).** At format version 3
+candidate-) gated (ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055).** At format version 3
 (`codec::LZ_MIN_VERSION`) and above, each literal byte is 8 chained binary
 decisions over the six-expert mixer's cumulative table
 (`bittree::encode_symbol`/`decode_symbol`'s chain-rule decomposition),
@@ -91,9 +91,17 @@ key's own squared prediction error read against a slower EMA of the
 identical signal) instead of version 5's annealed step count
 (`literal::Literal::encode_logistic_surprise`/`decode_logistic_surprise`);
 a version-6 `Candidate::Transpose` frame still codes through
-`encode_column`/`decode_column` exactly as versions 4 and 5 do. Every
-candidate at a version below its own gate codes its literals exactly as
-the next lower version does. Every other symbol in the stream
+`encode_column`/`decode_column` exactly as versions 4 and 5 do. At format
+version 7 and above (`codec::LOGIT_SSE_MIN_VERSION`), the same *other*
+candidates code their literals through the identical logit-domain mix and
+rate schedule again, but calibrated through a stretch-domain SSE table
+(evenly spaced bins in logit space, concentrating resolution near 0/1)
+instead of version 6's linear-domain one
+(`literal::Literal::encode_logit_sse`/`decode_logit_sse`); a version-7
+`Candidate::Transpose` frame still codes through `encode_column`/
+`decode_column` exactly as versions 4 through 6 do. Every candidate at a
+version below its own gate codes its literals exactly as the next lower
+version does. Every other symbol in the stream
 (flag/length/offset/slot) is coded identically regardless of version or
 candidate; a decoder dispatches only the literal sub-stream, on the
 frame's declared version and (at version 4 and above) its own

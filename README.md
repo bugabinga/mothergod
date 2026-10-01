@@ -20,13 +20,13 @@ below. Every design decision traces to a recorded experiment in
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-09-28 against
+measurement time and never committed. Measured 2026-10-01 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
 |---|---|---|---|---|
-| Canterbury | **1.367** | 2.081 | 1.470 | 1.403 |
-| Silesia | **2.057** | 2.553 | 1.997 | 1.829 |
+| Canterbury | **1.366** | 2.081 | 1.470 | 1.403 |
+| Silesia | **2.056** | 2.553 | 1.997 | 1.829 |
 
 mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and
 loses to both in aggregate on Silesia. Per file, against whichever of the two
@@ -37,16 +37,16 @@ each report: [`docs/benchmarks/`](docs/benchmarks/).
 
 **It is slow.** mothergod's codec has no internal parallelism; the reports
 measure it one thread per file, several files at once, on one CI machine
-(AMD EPYC 7763, 4 logical cores), more threads than cores, so the rate is a
+(AMD EPYC 9V74, 4 logical cores), more threads than cores, so the rate is a
 lower bound on what an isolated single-file run would show. On that run,
-mothergod encoded Canterbury at 0.126 MB/s and
-decoded it at 2.921 MB/s; it encoded Silesia at 0.058 MB/s and decoded it at
-1.222 MB/s. Silesia's 212 MB took about an hour to compress and about three
+mothergod encoded Canterbury at 0.154 MB/s and
+decoded it at 2.887 MB/s; it encoded Silesia at 0.065 MB/s and decoded it at
+1.338 MB/s. Silesia's 212 MB took about an hour to compress and about three
 minutes to read back; encoding carries the optimal parse, so it runs roughly
 twenty times slower than decoding. One caveat the reports state themselves:
 these are single-run figures from one machine, not a cross-machine claim. One
 more worth adding: an aggregate is total bytes over total time rather than a
-typical file, with per-file decode rates running from 0.2 to 24.9 MB/s. Speed is
+typical file, with per-file decode rates running from 0.2 to 26.3 MB/s. Speed is
 measured every benchmark run and becomes a target of its own at
 [`ROADMAP.md`](ROADMAP.md)'s speed-tiers milestone; nothing before then is
 tuned for it.

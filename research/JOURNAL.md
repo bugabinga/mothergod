@@ -7554,3 +7554,60 @@ record.
   `progress.jsonl` records it as `kind: "patch"` with null bpb deltas, same
   as S2-A1. The `compression-experiment` skill's step 4 pointer now names
   this module instead of the issue. `research/progress.jsonl` it175.
+- S2-A108 | ACCEPTED | S2-A106's real-wiring slice, closing that entry's own
+  remaining scope (`FORMAT_VERSION` 7, ADR-0055):
+  `Literal::encode_logit_sse`/`decode_logit_sse` code every candidate except
+  `Candidate::Transpose`'s literal sub-stream through
+  `SurpriseLogisticMixLogitSse` instead of `SurpriseLogisticMix`, reusing
+  `Literal::logit_sse_code_bit` verbatim (S2-A106's own ideal-cost walk, now
+  a real coding path) and `Literal::update` exactly as `encode_logistic_
+  surprise` does (the six real experts and the rate schedule adapt
+  unperturbed, only the calibration table's bin spacing changes). `codec::
+  Models` gained a `logit_sse: SurpriseLogisticMixLogitSse` field alongside
+  `surprise`; `VecSink`/`StreamingSink`'s shared `LiteralPath` enum (S2-A105's
+  three-state version) grew a fourth state, still derived once from the
+  declared version so no version can dispatch to more than one mixer.
+  `crate::sse::LogitSse` and `literal::SurpriseLogisticMixLogitSse` each
+  gained a `try_new` (hard rule 2), mirroring `Sse`'s/`SurpriseLogisticMix`'s
+  own. | Measured, real bitstreams (`mothergod::compress`, this run's
+  sandbox): `bench/baseline.json`'s 11 fixed train-tier cases, all inside
+  `TOLERANCE_BITS` (`baseline_gate check` passes): `base64_wrapped` 0.584640
+  -> 0.581600 (-0.003040), `entropy_ladder_h1` 1.261920 -> 1.262880
+  (+0.000960), `entropy_ladder_h2` 2.428320 -> 2.428640 (+0.000320),
+  `entropy_ladder_h4` 4.475200 -> 4.475680 (+0.000480), `entropy_ladder_h6`
+  6.178240 -> 6.178240 (unchanged), `entropy_ladder_h8` 8.000960 -> 8.000960
+  (unchanged), `interleaved_audio16` 5.786400 -> 5.785600 (-0.000800),
+  `json_records` 0.599040 -> 0.596000 (-0.003040), `markov_h8_2_trap`
+  2.428160 -> 2.428640 (+0.000480), `sqlite_like_records` 3.432480 ->
+  3.438560 (**+0.006080**, this slice's largest single regression),
+  `x86_dense_code` 2.708000 -> 2.704960 (-0.003040); train mean
+  **-0.000145 b/B**, a thin net improvement (6 of 11 cases improve, 2 flat,
+  3 regress). Sealed-only kinds (`sealed_seed(CASE_SEED)`, same length):
+  `access_log` 0.905760 -> 0.904320 (-0.001440), `gradient_image` 5.910720
+  -> 5.870400 (**-0.040320**), both improve. Held-out finals, regenerated in
+  this PR (`docs/benchmarks/canterbury.md`, `docs/benchmarks/silesia.md`):
+  Canterbury aggregate 1.366878 -> 1.365936 b/B (-0.000942, all 11 files
+  improve), Silesia aggregate 2.057119 -> 2.056363 b/B (-0.000756, 9 of 12
+  files improve, `x-ray` unchanged, `osdb` +0.001636 and `sao` +0.008638
+  the two regressions). Corpus policy's
+  accept rule (train improvement, no validation regression) passes on every
+  tier measured. | Mechanism: matches S2-A106's own ideal-cost reading in
+  sign on most cases (`base64_wrapped`, `json_records`, `x86_dense_code`,
+  both sealed kinds, both finals all improve as predicted), but not every
+  one — `markov_h8_2_trap` flipped from S2-A106's ideal-cost -0.014293 to a
+  real +0.000480, and the real win magnitudes run smaller than the
+  ideal-cost reading almost everywhere it predicted a large one
+  (`x86_dense_code` -0.003040 here vs -0.013571 ideal-cost), the same
+  real-bitstream-vs-ideal-cost gap S2-L1 already named and ADR-0052/ADR-0054's
+  own wiring slices (S2-A102, S2-A105) each re-confirmed for this mixer
+  lineage: an isolated literal-stream pairing does not see the real
+  encoder's candidate/window selection and LZ parse interacting with the
+  literal model's cost. `gradient_image`'s real delta (-0.040320) lands
+  within 0.1% of S2-A106's own ideal-cost prediction (-0.040248), the
+  closest real-vs-ideal agreement this mixer lineage's own wiring history
+  has measured yet — this lead's deciding sealed case (S2-R20 onward)
+  continues to be where the ideal-cost pairing is most trustworthy. New
+  golden fixture `tests/golden/v7-lz-repeated-text` (same plaintext as
+  `v6-lz-repeated-text`, re-encoded); every version-3 through version-6
+  fixture stays committed, decode-only, forever. `research/progress.jsonl`
+  it176.
