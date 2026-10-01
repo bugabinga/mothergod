@@ -57,13 +57,17 @@ rewrites the comment, but it has no ecosystem for pinned _tool_ versions, so
 those need their own sweep.
 
 This repository is half-converted, and knowing which half you are in matters.
-Thirty-one `uses:` lines carry SHAs, across six distinct actions. Thirty-five
-lines across fourteen files are still tags, including
-`anthropics/claude-code-action@v1`, which is the action that holds the session
-credential. `actions/upload-artifact` appears at both `@v4` and `@v7` in the
-same tree, which is what a half-swept tag pin looks like from the inside.
-Convert the file you are touching; do not open a thirty-five-line sweep PR that
-nobody can review.
+Measure it; no count written here stays true (issue #559 watched one rot in
+four days):
+
+```
+grep -rhoE 'uses: [^@ ]+@[0-9a-f]{40}' .github/workflows | wc -l       # SHA-pinned
+grep -rhoE 'uses: [^@ ]+@v[0-9][^ ]*' .github/workflows | sort | uniq -c   # still tags
+```
+
+Whichever list `anthropics/claude-code-action` is on is the one that matters
+most, because that action holds the session credential. Convert the file you
+are touching; do not open a sweep PR that nobody can review.
 
 ## Keep the logic out of the YAML
 
@@ -80,20 +84,21 @@ new script's tests are picked up with no wiring.
 
 - `set -euo pipefail`.
 - Never interpolate `${{ }}` into a shell body. Pass it through `env:` so a
-  branch named `"; rm -rf /` is a string and not a statement. Three lines in
-  this tree still do it (`ci.yml:65`, `ci.yml:72`,
-  `agent-model-intel.yml:120`); all three interpolate values GitHub controls
-  rather than values a contributor does, which is why they are debt and not an
-  incident. Fix the one in the file you are touching.
+  branch named `"; rm -rf /` is a string and not a statement. A few lines in
+  this tree still do it, every one interpolating a value GitHub controls
+  rather than one a contributor does, which is why they are debt and not an
+  incident. `grep -n '\${{' <file>` lists a file's expressions; the ones
+  inside a `run:` block are the debt, and you fix the one in the file you are
+  touching.
 - A `prompt:` block takes no `${{ }}` either, for an unrelated reason worth
   knowing before you reach for one. A single expression makes the **whole
   block** an expression, and an expression is capped at 21,000 characters.
   `agent-bdfl.yml`'s prompt is around 26,000, and GitHub rejected every push of
   that file on 2026-08-23 with `Exceeded max expression length 21000` until the
   last interpolation came out. Personas arrive via
-  `--append-system-prompt-file`, other dynamic values via `env:`. All 28
-  `${{ }}` in that file sit outside the prompt block, in `env:`, `with:` and
-  `permissions:`; the rule is recorded at `agent-bdfl.yml:225`.
+  `--append-system-prompt-file`, other dynamic values via `env:`. Every
+  `${{ }}` in that file sits outside the prompt block, in `env:`, `with:` and
+  `permissions:`; the file records the rule in a comment beside its prompt.
 
 ## Caching
 
@@ -120,8 +125,9 @@ without anything getting faster.
 
 A public repository is charged nothing for standard runners, which is not the
 same as free. Concurrent jobs are limited **per account**, not per repository,
-and this account runs twenty workflow files, seven of them
-model-carrying agent seats. Optimise as though the
+and this account runs every file in `.github/workflows/` at once
+(`grep -l 'uses: anthropics/claude-code-action' .github/workflows/*.yml`
+names the model-carrying seats among them). Optimise as though the
 minutes were billed: the discipline is identical and only the unit changes.
 
 What saves minutes, in order of effect:
@@ -182,9 +188,9 @@ it here. The two scars, so you recognise the symptom:
   the OIDC token exchange rejects a bot actor, so the clock is a Cloudflare
   Worker dispatching on the operator's PAT (ADR-0035). The qualifier is the
   whole rule: a script-only workflow exchanges no token and keeps its native
-  cron safely, which seven files here do, `agent-model-intel.yml:33` among
-  them. Read ADR-0035 and GOVERNANCE "Push identity" before adding either
-  kind.
+  cron safely, as `grep -l '^ *- cron:' .github/workflows/*.yml` shows
+  several here do, `agent-model-intel.yml` among them. Read ADR-0035 and
+  GOVERNANCE "Push identity" before adding either kind.
 
 A second exception with a different symptom: a pull request the token opens or
 updates, including by pushing to an open one, **does** create a run, held in an

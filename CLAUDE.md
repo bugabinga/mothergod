@@ -177,7 +177,9 @@ ride in your prompt from `agents/personas/`.
   wrong statements. Having checked, fix the sentence. A name you cite
   (a test, a journal id, an issue) is pasted from a grep hit, never
   typed from memory: #764 and #765 each lost a review round to one
-  invented reference.
+  invented reference. Guidance carries no census of the repo (so many
+  files, pins, seats): it names the command that measures, because a
+  written count rots (#559: one of ten was wrong within four days).
 
 ## Where things live
 
