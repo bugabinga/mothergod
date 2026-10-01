@@ -126,3 +126,42 @@ test("a bare branch name is never scoped, PR_NUMBER or not", () => {
   const r = runScope("claude/some-branch", { PR_NUMBER: "768" });
   assert.equal(r.died, false);
 });
+
+// The empty-commit refusal (PR #848): a `<path>...` push whose named files
+// match the branch head byte for byte builds the head's own tree, and the
+// commit on it has no diff. `guard_not_empty` is pure (tree shas in, die or
+// return) so both directions pin without a network.
+const emptyDriver = `
+import importlib.machinery, importlib.util, json, os, sys
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+tree_sha = sys.argv[2]
+try:
+    pb.guard_not_empty("claude/x", "base-tree", tree_sha, ["research/JOURNAL.md", "research/progress.jsonl"])
+    died = False
+except SystemExit:
+    died = True
+print(json.dumps({"died": died}))
+`;
+
+function guardEmpty(treeSha) {
+  const proc = spawnSync("python3", ["-c", emptyDriver, scriptsDir, treeSha], { encoding: "utf8" });
+  assert.equal(proc.status, 0, proc.stderr);
+  return { ...JSON.parse(proc.stdout), stderr: proc.stderr };
+}
+
+test("a tree identical to the branch head's dies naming #848 and the two paths", () => {
+  const r = guardEmpty("base-tree");
+  assert.equal(r.died, true);
+  assert.match(r.stderr, /2 path\(s\) named are byte-identical to claude\/x/);
+  assert.match(r.stderr, /#848/);
+  assert.match(r.stderr, /git status/);
+});
+
+test("a tree that differs from the branch head's passes silently", () => {
+  const r = guardEmpty("new-tree");
+  assert.equal(r.died, false);
+  assert.equal(r.stderr, "");
+});
