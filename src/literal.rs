@@ -477,34 +477,11 @@ impl Default for PpmExpertState {
     }
 }
 
-/// The linear-space probability [`Ppm::price_symbol`]'s `-log2(p)` bits
-/// describes: the inverse transform [`ppm_probability`] needs, since
-/// [`Literal::mix`]/[`Literal::mix7`] both scale a raw frequency ratio
-/// directly into fixed-point space, but [`Ppm`] only exposes its own
-/// distribution as an already-logged advisory price, never a raw
-/// frequency/total pair a caller outside `ppm.rs` could read.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "advisory measurement-only inverse of Ppm::price_symbol, off the coding path, same carve-out that method's own doc claims (ADR-0024's determinism rule doesn't apply here)"
-)]
-fn probability_from_price_bits(bits: f64) -> f64 {
-    2f64.powf(-bits)
-}
-
-/// `table`'s own linear-space probability estimate for `symbol`: `0.0` if
-/// `table` has never observed it ([`Ppm::is_escape`]), converted back from
-/// [`Ppm::price_symbol`]'s bits otherwise. Shared by [`Literal::mix_ppm`]
-/// and [`Literal::update_ppm_expert`] so both price the identical number.
+/// `table`'s own linear-space probability estimate for `symbol`
+/// ([`Ppm::probability`]). Shared by [`Literal::mix_ppm`] and
+/// [`Literal::update_ppm_expert`] so both price the identical number.
 fn ppm_probability(table: &Ppm, symbol: usize) -> f64 {
-    if table.is_escape(symbol) {
-        0.0
-    } else {
-        probability_from_price_bits(
-            table
-                .price_symbol(symbol)
-                .expect("is_escape returned false, so price_symbol must return Some"),
-        )
-    }
+    table.probability(symbol)
 }
 
 /// [`fixed_point_scale`]'s own shape, but for an expert like
@@ -2253,34 +2230,18 @@ mod tests {
         }
     }
 
-    /// #697: pins the `2f64.powf(-bits)` transform directly, independent
-    /// of any caller, so a return-value or sign mutation in the function
-    /// body is visible without going through [`ppm_probability`].
+    /// #697: pins [`ppm_probability`] as a plain pass-through to
+    /// [`Ppm::probability`], independent of either's own internals, so a
+    /// swapped argument or an added transform in the wrapper is visible.
     #[test]
-    fn probability_from_price_bits_inverts_the_log2_bits_transform() {
-        assert!((probability_from_price_bits(0.0) - 1.0).abs() < 1e-12);
-        assert!((probability_from_price_bits(1.0) - 0.5).abs() < 1e-12);
-        assert!((probability_from_price_bits(2.0) - 0.25).abs() < 1e-12);
-    }
-
-    /// #697: an unobserved symbol must report exactly `0.0` (the escape
-    /// branch), and an observed one must report a value strictly between
-    /// `0.0` and `1.0` that matches [`probability_from_price_bits`]'s own
-    /// conversion of [`Ppm::price_symbol`] — the two branches together
-    /// rule out every constant-return mutant.
-    #[test]
-    fn ppm_probability_is_zero_unobserved_and_matches_the_price_conversion_once_observed() {
+    fn ppm_probability_matches_the_table_probability_it_wraps() {
         let mut table = Ppm::new(ALPHABET);
-        assert!((ppm_probability(&table, 0) - 0.0).abs() < 1e-12);
+        assert!((ppm_probability(&table, 0) - table.probability(0)).abs() < 1e-12);
 
         table.observe(0);
-        let bits = table
-            .price_symbol(0)
-            .expect("just observed, no longer an escape");
-        let expected = probability_from_price_bits(bits);
         let got = ppm_probability(&table, 0);
         assert!(got > 0.0 && got < 1.0, "got={got}");
-        assert!((got - expected).abs() < 1e-12);
+        assert!((got - table.probability(0)).abs() < 1e-12);
     }
 
     /// #697: a concrete `(weight, weight_sum, probability)` triple whose

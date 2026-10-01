@@ -263,6 +263,20 @@ impl Ppm {
         Some(-(f64::from(self.freq[symbol]) / denom).log2())
     }
 
+    /// `symbol`'s own linear-space share of [`Self::space`], or `0.0` if
+    /// `symbol` has never been observed. The same distribution
+    /// [`Self::price_symbol`] reports in bits, for a caller that mixes
+    /// raw probabilities instead of summing prices
+    /// ([`crate::literal::Literal::mix_ppm`]).
+    #[must_use]
+    pub(crate) fn probability(&self, symbol: usize) -> f64 {
+        if self.freq[symbol] == 0 {
+            0.0
+        } else {
+            f64::from(self.freq[symbol]) / f64::from(self.space())
+        }
+    }
+
     /// `-log2` price, in bits, of the escape event itself: this context
     /// has nothing to say about the symbol actually coming next, fall back
     /// to a lower order. A table that has observed nothing yet
@@ -418,6 +432,20 @@ mod tests {
         let third = ppm.price_symbol(0).unwrap();
         assert!(second < first, "second={second} first={first}");
         assert!(third < second, "third={third} second={second}");
+    }
+
+    #[test]
+    fn probability_is_zero_unobserved_and_the_freq_over_space_ratio_once_observed() {
+        let mut ppm = Ppm::new(4);
+        assert!((ppm.probability(0) - 0.0).abs() < 1e-12);
+
+        ppm.observe(0);
+        ppm.observe(1);
+        // Both symbols observed once: freq[0] == freq[1] ==
+        // DEFAULT_RESCALE_INCREMENT, total == 2 * that, distinct == 2.
+        let increment = f64::from(crate::DEFAULT_RESCALE_INCREMENT);
+        let expected = increment / (2.0 * increment + 2.0);
+        assert!((ppm.probability(0) - expected).abs() < 1e-12);
     }
 
     #[test]
