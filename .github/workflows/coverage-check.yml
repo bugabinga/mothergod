@@ -1,0 +1,87 @@
+# Weekly region coverage: publish the number, never gate on it (#454,
+# ADR-0043, docs/TESTING.md #9).
+#
+# Region coverage, not line: `cargo-llvm-cov`'s region granularity counts a
+# `match` arm or a boolean's each branch separately, closer to how a decoder
+# actually fails than a line count that calls a match statement "covered"
+# the instant any one arm runs. Branch coverage would be closer still, but
+# it is nightly-toolchain-only; region is the honest number on stable.
+#
+# Weekly, not per-PR: instrumented coverage builds and runs the whole suite
+# a second way, too slow for the required gate that `cargo x check` already
+# owns. Scoped to `--package mothergod` alone, same as `mutants-check.yml`:
+# `bench` and `x` measure and orchestrate, they are not the codec under
+# test.
+#
+# The number and the three worst-covered files are never a gate (a
+# threshold here manufactures assertions, hard rule 3's cousin): the crate
+# percentage goes to the trust ledger (#449) via
+# `.github/scripts/coverage-ledger.py`, which also prints the worst files
+# as `::notice::` annotations for whoever picks up the triage this feeds
+# ("a stalled number sends the worst-covered module to the heartbeat as
+# one scoped issue", docs/TESTING.md #9).
+name: coverage-check
+
+on:
+  schedule:
+    # Sunday 04:51 UTC: clear of codeql (4:07), traffic-snapshot (4:23),
+    # agent-model-intel (5:07), corpus-fetch-check (5:41), so the weekly
+    # sweeps don't contend for runners.
+    - cron: "51 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-check
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: rustup component add llvm-tools-preview
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-${{ runner.os }}-0.9.1
+      # Guarded by the binary, not by `cargo install`'s own check: the cache
+      # restores the binary without ~/.cargo/.crates.toml, so an unguarded
+      # install rebuilds from source on every hit (fuzz-check learned this).
+      - run: test -x ~/.cargo/bin/cargo-llvm-cov || cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: coverage
+          workspaces: . -> target
+
+      - name: measure region coverage
+        run: cargo llvm-cov --package mothergod --json --output-path coverage.json
+
+      # if: always() so a broken instrumentation run still reports a null
+      # coverage entry naming why, instead of the ledger going silent.
+      - name: build trust-ledger entry
+        if: always()
+        run: python3 .github/scripts/coverage-ledger.py coverage.json entry.json
+
+      - name: upload trust-ledger entry
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: trust-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: entry.json
+          retention-days: 90
+
+      - name: upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: coverage.json
+          if-no-files-found: ignore
+          retention-days: 90

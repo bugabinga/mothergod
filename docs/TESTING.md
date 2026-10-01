@@ -28,9 +28,10 @@ economics, and for the same reason (a tracked file collects
 concurrent-append conflicts, PR #34). `.github/scripts/trust-telemetry.py`
 aggregates them into `site/trust-data.json` at deploy time, and
 `status.html` renders them under "Is it tested?". Writers landed:
-`fuzz-check`, timed fuzz seconds and new-crasher count per run (#462).
-Writers pending: mutation score (#455) and region coverage (#454),
-shown as not yet measured until their sweeps land.
+`fuzz-check`, timed fuzz seconds and new-crasher count per run (#462);
+`coverage-check`, region coverage percent per run (#454).
+Writers pending: mutation score (#455), shown as not yet measured
+until its sweep lands.
 Ledger numbers are maps, never gates; the only merge-blocking
 checks are behavioral. Items carrying issue numbers are planned; the
 layers below describe what runs today.
@@ -86,6 +87,12 @@ excludes alternate macOS slots because Rust exposes only the Darwin libc ABI
 for each host architecture. Failed monster lanes update and reopen one
 `bug`/`agent-system` issue with the run, job, lane identity, and first useful
 failure.
+
+The advisory `coverage-check` workflow runs Sundays at 04:51 UTC and on
+manual dispatch: `cargo llvm-cov --package mothergod --json`, region
+granularity (layer 9, #454). The crate percentage goes to the trust
+ledger; the three worst-covered files print as `::notice::` annotations
+for whoever picks up the triage. Never a gate.
 
 Mutation, C ABI, and external E2E surfaces
 are not part of current automation; their layers below remain plans owned
@@ -303,7 +310,7 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   integration-test binary. Every abort the sweep finds is a place decode
   grows memory before validating input, which is hard rule 2's audit.
 
-## 9. Coverage map (planned, #454)
+## 9. Coverage map (scheduled: `coverage-check`, weekly)
 
 - Weekly cargo-llvm-cov region coverage, published to the trust ledger
   and status page with trend. Never a gate: a coverage target
