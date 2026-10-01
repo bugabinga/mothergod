@@ -230,6 +230,41 @@ impl Sse {
     }
 }
 
+/// [`Sse`] and [`LogitSse`] in exactly the shape a generic mixer needs:
+/// both differ only in [`Self::refine`]/[`Self::update`]'s bin-lookup
+/// (`position`), never in construction or the two public methods' own
+/// signatures. [`crate::literal::SurpriseLogisticMix`] is generic over
+/// this trait so its one walk serves both calibration tables, rather than
+/// two structs and two walks that differ only in which table they call.
+pub trait Calibrate: Sized {
+    /// Same contract as [`Sse::new`]/[`LogitSse::new`].
+    fn new(contexts: usize) -> Self;
+    /// Same contract as `Sse::try_new`/`LogitSse::try_new`.
+    fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError>;
+    /// Same contract as [`Sse::refine`]/[`LogitSse::refine`].
+    fn refine(&self, context: usize, p: f64) -> f64;
+    /// Same contract as [`Sse::update`]/[`LogitSse::update`].
+    fn update(&mut self, context: usize, p: f64, outcome: bool);
+}
+
+impl Calibrate for Sse {
+    fn new(contexts: usize) -> Self {
+        Self::new(contexts)
+    }
+
+    fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
+        Self::try_new(contexts)
+    }
+
+    fn refine(&self, context: usize, p: f64) -> f64 {
+        Self::refine(self, context, p)
+    }
+
+    fn update(&mut self, context: usize, p: f64, outcome: bool) {
+        Self::update(self, context, p, outcome);
+    }
+}
+
 /// Logit-domain counterpart to [`Sse`]'s bin spacing, a research candidate
 /// (`research/JOURNAL.md` S2-A106): [`Sse`]'s own module doc records a
 /// deliberate deviation from the classic APM (Mahoney 2005) because this
@@ -388,6 +423,24 @@ impl LogitSse {
         let upper = lower + 1;
         self.table[lower] += LEARNING_RATE * (1.0 - fraction) * (target - self.table[lower]);
         self.table[upper] += LEARNING_RATE * fraction * (target - self.table[upper]);
+    }
+}
+
+impl Calibrate for LogitSse {
+    fn new(contexts: usize) -> Self {
+        Self::new(contexts)
+    }
+
+    fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
+        Self::try_new(contexts)
+    }
+
+    fn refine(&self, context: usize, p: f64) -> f64 {
+        Self::refine(self, context, p)
+    }
+
+    fn update(&mut self, context: usize, p: f64, outcome: bool) {
+        Self::update(self, context, p, outcome);
     }
 }
 
