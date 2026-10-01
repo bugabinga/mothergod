@@ -5,6 +5,9 @@
 // module's own `api` against a fake `gh`, so no network and no real token.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
@@ -137,17 +140,24 @@ loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.ar
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
 loader.exec_module(pb)
-tree_sha = sys.argv[2]
+tree_sha, already_landed = sys.argv[2], sys.argv[3] == "landed"
 try:
-    pb.guard_not_empty("claude/x's head", "base-tree", tree_sha, ["research/JOURNAL.md", "research/progress.jsonl"])
+    pb.guard_not_empty(
+        "claude/x's head", "base-tree", tree_sha,
+        ["research/JOURNAL.md", "research/progress.jsonl"], already_landed,
+    )
     died = False
 except SystemExit:
     died = True
 print(json.dumps({"died": died}))
 `;
 
-function guardEmpty(treeSha) {
-  const proc = spawnSync("python3", ["-c", emptyDriver, scriptsDir, treeSha], { encoding: "utf8" });
+function guardEmpty(treeSha, alreadyLanded = false) {
+  const proc = spawnSync(
+    "python3",
+    ["-c", emptyDriver, scriptsDir, treeSha, alreadyLanded ? "landed" : "fresh"],
+    { encoding: "utf8" },
+  );
   assert.equal(proc.status, 0, proc.stderr);
   return { ...JSON.parse(proc.stdout), stderr: proc.stderr };
 }
@@ -155,7 +165,7 @@ function guardEmpty(treeSha) {
 test("a tree identical to the branch head's dies naming #848 and the two paths", () => {
   const r = guardEmpty("base-tree");
   assert.equal(r.died, true);
-  assert.match(r.stderr, /2 path\(s\) named are byte-identical to claude\/x's head/);
+  assert.match(r.stderr, /2 path\(s\) named would leave claude\/x's head's tree unchanged/);
   assert.match(r.stderr, /#848/);
   assert.match(r.stderr, /git status/);
 });
@@ -164,4 +174,63 @@ test("a tree that differs from the branch head's passes silently", () => {
   const r = guardEmpty("new-tree");
   assert.equal(r.died, false);
   assert.equal(r.stderr, "");
+});
+
+// Round 3 (#851): a retry after this run's own write landed but its read-back
+// lagged (issue #193) rebuilds the identical tree against its own prior
+// commit. That match is confirmation, not the #848 mistake, so a base that is
+// this run's own recorded push exempts the guard even though the tree matches.
+test("a tree identical to the base passes when the base is this run's own recorded push", () => {
+  const r = guardEmpty("base-tree", true);
+  assert.equal(r.died, false);
+  assert.equal(r.stderr, "");
+});
+
+// End-to-end through the real record_push/own_pushes round trip (same style
+// as settle-push.test.mjs), not just a hand-passed boolean: a P1 that wrote
+// S1 and recorded it before its read-back lagged and died must exempt a P2
+// retry that rebuilds the identical tree against S1, and must never exempt
+// some other branch's base by accident.
+const wiringDriver = `
+import importlib.machinery, importlib.util, json, os, sys
+
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+os.chdir(sys.argv[2])
+pb.record_push("claude/x", "s1")  # P1's write landed, read-back died after
+
+def tried(branch, base_sha):
+    try:
+        pb.guard_not_empty(
+            f"{branch}'s head", "t1", "t1", ["research/JOURNAL.md"],
+            pb.own_pushes().get(branch) == base_sha,
+        )
+        return False
+    except SystemExit:
+        return True
+
+print(json.dumps({
+    "retry_on_own_base": tried("claude/x", "s1"),
+    "other_branch_same_sha": tried("claude/y", "s1"),
+    "same_branch_other_sha": tried("claude/x", "s0"),
+}))
+`;
+
+test("a P2 retry against this run's own recorded push exempts the guard, nothing else does", () => {
+  const repo = mkdtempSync(join(tmpdir(), "push-branch-test-"));
+  try {
+    const init = spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
+    assert.equal(init.status, 0, init.stderr);
+    const run = spawnSync("python3", ["-c", wiringDriver, scriptsDir, repo], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const out = JSON.parse(run.stdout);
+    assert.equal(out.retry_on_own_base, false, "P2 on P1's own landed base must not die");
+    assert.equal(out.other_branch_same_sha, true, "a different branch at the same sha is not this run's push");
+    assert.equal(out.same_branch_other_sha, true, "the same branch at a base we never recorded is not exempt");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

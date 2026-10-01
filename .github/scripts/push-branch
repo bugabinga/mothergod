@@ -229,7 +229,7 @@ def merge_paths(merge_sha):
     return head2_sha, paths, deletions
 
 
-def guard_not_empty(against, base_tree, tree_sha, named):
+def guard_not_empty(against, base_tree, tree_sha, named, already_landed):
     """Refuse a commit whose tree is its parent's: the push would change nothing.
 
     Trees are content-addressed, so a tree built from blobs identical to the
@@ -244,12 +244,19 @@ def guard_not_empty(against, base_tree, tree_sha, named):
     Merge mode is exempt by its caller: a merge resolved entirely to the
     branch's side legitimately reuses the base tree. `against` names what the
     tree was built on, the branch's head on an update and main on a create,
-    because on a first push there is no head to be identical to."""
-    if tree_sha != base_tree:
+    because on a first push there is no head to be identical to.
+
+    `already_landed` is the other exemption: a base that is this run's own
+    recorded prior push to this branch (issue #193's read-back retry, PR #851
+    round 3). That push already carried the edit; a retry after a lagging
+    read-back rebuilds the identical tree against its own result, and the
+    match is confirmation, not the #848 mistake. The resulting same-tree
+    commit is harmless, same as a merge resolved entirely to one side."""
+    if tree_sha != base_tree or already_landed:
         return
     die(
-        f"the {len(named)} path(s) named are byte-identical to {against}; "
-        "the commit would carry no change.",
+        f"the {len(named)} path(s) named would leave {against}'s tree "
+        "unchanged; the commit would carry no change.",
         "a PR on it has nothing to review and costs a round (PR #848). Check "
         "`git status` and `git diff`: the edit this push describes is not in "
         "the checkout. Make it, then push again.",
@@ -426,7 +433,13 @@ def main() -> int:
     )
     if not merge_sha:
         against = "main" if action == "create" else f"{branch}'s head"
-        guard_not_empty(against, base_tree, tree_sha, paths + deletions)
+        guard_not_empty(
+            against,
+            base_tree,
+            tree_sha,
+            paths + deletions,
+            own_pushes().get(branch) == base_sha,
+        )
     parents = [base_sha] + ([merge_sha] if merge_sha else [])
     commit = api(
         "POST",
@@ -440,6 +453,13 @@ def main() -> int:
         api("POST", "git/refs", cred, {"ref": f"refs/heads/{branch}", "sha": sha})
     else:
         api("PATCH", f"git/refs/heads/{branch}", cred, {"sha": sha})
+    # Recorded the moment the write itself succeeds, not after the read-back
+    # below confirms it: a write that lands but reads back stale (issue #193)
+    # must already count as ours, or a retry rebuilds the identical tree,
+    # guard_not_empty sees it match base_tree, and (pre-already_landed) misread
+    # a race against this run's own prior success as the edit having gone
+    # missing (PR #851 round 3).
+    record_push(branch, sha)
 
     # The failure this replaces is a branch that silently does not move, so the
     # write's own answer is not evidence: read the ref back (issue #133). Refs
@@ -473,7 +493,6 @@ def main() -> int:
             "Retry, and if it repeats, say so on the thread rather than "
             "pushing again.",
         )
-    record_push(branch, sha)
 
     note(
         f"{action} {branch} {sha[:7]} on the {cred.identity}, "
