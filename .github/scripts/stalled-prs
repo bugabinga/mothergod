@@ -41,6 +41,17 @@ Signatures, most specific first, at most one reported per PR:
                          open: the unsigned-tip asymmetry, where GitHub
                          evaluates `blocked` while the REST merge succeeds
                          (first hit PR #84).
+    red-from-drift       a required gate red on a head that is behind
+                         main's newest green push run, with no
+                         changes-requested verdict. Main moved under a
+                         finished head (a toolchain bump stabilized a
+                         lint, main fixed it, the PR predates the fix),
+                         and nothing reruns a finished head: GitHub
+                         retries nothing, the author was a single-shot
+                         session, an armed auto-merge waits on a gate
+                         that never fires again (first hit PR #843,
+                         three hours red behind the main that carried
+                         its fix, dependabot's #844 beside it).
 
 One signature has no PR to hang on, which is the whole point of it:
 
@@ -55,12 +66,12 @@ One signature has no PR to hang on, which is the whole point of it:
 A rescue of more than a command or two names its recipe by reference, and
 that recipe lives in agents/GOVERNANCE.md "Stalled auto-merge" and nowhere
 else, because a multi-step procedure kept in two places drifts in one of
-them. The three single-command rescues state the command inline instead:
+them. The single-command rescues state the command inline instead:
 sending a reader to a document to be told `gh pr reopen` is ceremony, and
-GOVERNANCE's copy of those three is the explanation of why the PR stalled,
+GOVERNANCE's copy of those is the explanation of why the PR stalled,
 not a second copy of the command.
 
-`--rescue` applies those three itself and prints one line per command it
+`--rescue` applies those itself and prints one line per command it
 ran (issue #566: a dead review was refired by hand twice in three days, by
 a BDFL wake reading this report and typing the two commands it names). The
 decision behind each was already made by machinery or by the reviewer, so
@@ -72,6 +83,10 @@ nothing is left to judge:
     approved-not-landing             merge-pr <n> --sha <head>, the exact
                                      command the reviewer's own merge would
                                      have run had GitHub let it fire.
+    red-from-drift                   gh pr update-branch <n>: main merged
+                                     onto the branch is a new head, and a
+                                     new head refires ci and the review,
+                                     which land it or return it.
 
 Two holds keep the merge arm honest, and a held PR is reported with the
 reason instead of touched. A PR touching `.github/workflows/` is the
@@ -82,8 +97,14 @@ older head, so that PR stays a report too. Either read failing (the file
 list, the label timeline) holds the same way: a merge on a vacuous read
 is not proof, and a failed read never ends the sweep. A refire inside the
 grace is held as well, so a review that died into an outage is not
-reopened into the same wall by a wake minutes later. Every other
-signature stays report-only: their rescues are judgement.
+reopened into the same wall by a wake minutes later. A refresh inside
+the hour after the gate went red is held too: the author's own session
+lives about as long as its app token (issue #81), and a merge commit
+pushed under a live session turns its next push-branch non-fast-forward.
+The refresh is bounded by construction: a refreshed head is no longer
+behind main, so a PR whose red is its own costs one extra ci run per
+green main advance, never a cycle. Every other signature stays
+report-only: their rescues are judgement.
 
 Deliberately NOT reported, said plainly so nothing claims a completeness it
 lacks. A `claude/*` branch whose PR was merged or closed is undeleted
@@ -91,14 +112,16 @@ clutter, not stalled work, and a branch outside that prefix belongs to
 somebody who is not this machinery. A PR labeled `blocked-on-human` is parked on purpose, and suppressing
 it is what that label is for. A draft is a human's work-in-progress signal
 (CLAUDE.md rule 11); agent-review's `undraft` job owns bot drafts. A fork PR
-carries no secrets and belongs to the heartbeat. A PR with a red or still
-running gate is not stalled: its author owns the next move. An open PR that
-is simply old and abandoned is a different class, and this detector does not
-pretend to find it.
+carries no secrets and belongs to the heartbeat. A PR with a still running
+gate is not stalled, and neither is a red one whose red is its own (a head
+that carries main, or a changes-requested verdict): its author owns the
+next move. An open PR that is simply old and abandoned is a different
+class, and this detector does not pretend to find it.
 
 Liveness: the footer always prints how many PRs and branches were read, how
-many stalled, and how many were suppressed, so a detector that has silently
-stopped matching is distinguishable from a quiet queue. With `--rescue` it
+many stalled, how many were suppressed, and which green main it measured
+drift against (or `unread`), so a detector that has silently stopped
+matching is distinguishable from a quiet queue. With `--rescue` it
 also prints how many it rescued and how many it held.
 
 Usage: stalled-prs [--rescue]
@@ -160,6 +183,13 @@ FIELDS = (
 # reviewer's own merge command, run late.
 REFIRE = frozenset({"reviewer-died", "verdict-missing"})
 LAND = "approved-not-landing"
+REFRESH = "red-from-drift"
+
+# How long a red gate stays the author's before a refresh may run under it.
+# The author's session lives about as long as its app token (issue #81), and
+# a merge commit pushed under a live session turns its next push-branch
+# non-fast-forward. An hour after the gate ended, nobody is coming.
+DRIFT_GRACE = timedelta(hours=1)
 
 # The one path prefix that makes a merge the BDFL's by operator ruling
 # (issue #136; GOVERNANCE "Merging"). Same constant push-branch keys its
@@ -187,16 +217,25 @@ def latest(rollup, key):
     return newest
 
 
-def finding(kind, detail, rescue, review=None):
+def finding(kind, detail, rescue, review=None, ended=None):
     """One reported stall. `review` carries the head's review-check timestamps
-    for the kinds --rescue can act on, so plan() needs no second rollup read."""
+    and `ended` when a red gate finished, for the kinds --rescue can act on,
+    so plan() needs no second rollup read."""
     found = {"kind": kind, "detail": detail, "rescue": rescue}
     if review is not None:
         found["review"] = {
             "startedAt": review.get("startedAt"),
             "completedAt": review.get("completedAt"),
         }
+    if ended is not None:
+        found["ended"] = ended
     return found
+
+
+def required_gates(pr):
+    """The newest run of each required gate on the head, in REQUIRED_GATES order."""
+    by_name = latest(pr["statusCheckRollup"] or [], lambda c: c["name"])
+    return [by_name[name] for name in REQUIRED_GATES if name in by_name]
 
 
 def suppress(pr):
@@ -205,8 +244,12 @@ def suppress(pr):
     return PARKED_LABEL in labels or pr["isDraft"] or pr["isCrossRepository"]
 
 
-def classify(pr, now):
+def classify(pr, now, drift=None):
     """Return the one finding for this PR, or None. Pure: no network, no clock.
+
+    `drift` is the caller's one network read for a red head, {"sha", "behind_by"}
+    against main's newest green push run, or None when unread, which keeps
+    red-from-drift inert rather than wrong.
 
     Order is specificity, not severity. A dirty PR whose reviewer also died
     needs the merge first; reporting both would be two lines describing one
@@ -217,9 +260,8 @@ def classify(pr, now):
     labels = {label["name"] for label in pr["labels"]}
 
     rollup = pr["statusCheckRollup"] or []
-    by_name = latest(rollup, lambda c: c["name"])
     by_job = latest(rollup, lambda c: (c.get("workflowName"), c["name"]))
-    gates = [by_name[name] for name in REQUIRED_GATES if name in by_name]
+    gates = required_gates(pr)
 
     if not gates:
         born = datetime.strptime(iso(pr["createdAt"]), STAMP).replace(
@@ -246,10 +288,31 @@ def classify(pr, now):
 
     if any(gate["status"] != "COMPLETED" for gate in gates):
         return None
-    if any(gate["conclusion"] in DEAD for gate in gates):
+    red = [gate for gate in gates if gate["conclusion"] in DEAD]
+    if red:
+        # Red is the author's, unless main moved under a finished head: then
+        # the head is behind a green main, no reviewer has returned it, and
+        # no review is mid-flight that a new head would throw away.
+        review = by_job.get(REVIEW_CHECK)
+        if (
+            drift
+            and drift["behind_by"] > 0
+            and "changes-requested" not in labels
+            and (review is None or review["status"] == "COMPLETED")
+        ):
+            names = ", ".join(gate["name"] for gate in red)
+            return finding(
+                REFRESH,
+                f"{names} red on a head {drift['behind_by']} commit(s) behind main's "
+                f"green {drift['sha'][:7]}; nothing reruns a finished head",
+                f"`gh pr update-branch {pr['number']}`: the new head refires ci and "
+                "the review",
+                ended=max(gate.get("completedAt") or "" for gate in red) or None,
+            )
         return None
     if len(gates) < len(REQUIRED_GATES):
-        missing = ", ".join(n for n in REQUIRED_GATES if n not in by_name)
+        present = {gate["name"] for gate in gates}
+        missing = ", ".join(n for n in REQUIRED_GATES if n not in present)
         return finding(
             "never-fired",
             f"required gate(s) absent on the head SHA: {missing}",
@@ -327,6 +390,19 @@ def plan(pr, found, now, files=None, approved_at=None):
                 }
         return {"argv": [["gh", "pr", "close", number], ["gh", "pr", "reopen", number]]}
 
+    if kind == REFRESH:
+        ended = found.get("ended")
+        if ended:
+            age = now - stamp_to_dt(iso(ended))
+            if age < DRIFT_GRACE:
+                return {
+                    "hold": f"the gate went red {int(age.total_seconds() // 60)}m ago, "
+                    f"inside the {int(DRIFT_GRACE.total_seconds() // 60)}m drift grace: "
+                    "the author's session may still be alive, and a merge commit under "
+                    "it turns its next push non-fast-forward; the next wake refreshes it"
+                }
+        return {"argv": [["gh", "pr", "update-branch", number]]}
+
     if kind == LAND:
         if files is None:
             return {"hold": "the file list did not read, and a merge on a vacuous read is not proof"}
@@ -384,6 +460,48 @@ def approved_at(number):
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
     return max(stamps) if stamps else None
+
+
+def green_main():
+    """The head SHA of main's newest successful push `ci` run, or None when unread.
+
+    Workflow conclusion, not per-gate: on push events ci.yml runs every gate
+    (its path filter skips on PR events only), so a success here is the whole
+    gate on that commit. Fails soft like changed_files(): an unread main
+    leaves red-from-drift inert for this sweep, never wrong.
+    """
+    proc = subprocess.run(
+        ["gh", "run", "list", "--workflow", "ci", "--branch", "main", "--event", "push",
+         "--status", "success", "--limit", "1", "--json", "headSha"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout)[0]["headSha"]
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+
+
+def drift_of(green, head):
+    """How far `head` is behind `green`, as {"sha", "behind_by"}, or None when unread.
+
+    behind_by counts the commits in main's green history the head lacks, which
+    is exactly "main was verified at a state this PR does not carry". It is
+    also the loop bound: a refreshed head is behind by zero until main moves
+    again.
+    """
+    proc = subprocess.run(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/compare/{green}...{head}",
+         "--jq", ".behind_by"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return {"sha": green, "behind_by": int(proc.stdout.strip())}
+    except ValueError:
+        return None
 
 
 def changed_files(number):
@@ -517,7 +635,7 @@ def rescue(pr, found, now):
     return "rescued" if apply(step["argv"]) else "failed"
 
 
-def render(rows, branch_rows, read, branches, suppressed, now, rescuing):
+def render(rows, branch_rows, read, branches, suppressed, green, now, rescuing):
     tally = {"rescued": 0, "held": 0, "failed": 0}
     for pr, found in rows:
         print(f"#{pr['number']:<5} {found['kind']:<21} {pr['title'][:52]}")
@@ -538,6 +656,7 @@ def render(rows, branch_rows, read, branches, suppressed, now, rescuing):
         f"stalled {len(rows) + len(branch_rows)} | suppressed {suppressed}"
         f" | grace {int(GRACE.total_seconds() // 60)}m"
         f"/{int(BRANCH_GRACE.total_seconds() // 60)}m"
+        f" | main {green[:7] if green else 'unread'}"
     )
     if rescuing:
         footer += f" | rescued {tally['rescued']} | held {tally['held']} | failed {tally['failed']}"
@@ -554,7 +673,17 @@ def main():
         gh("pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS)
     )
     now = datetime.now(timezone.utc)
-    rows = [(pr, classify(pr, now)) for pr in pulls]
+    # One read of main per sweep, one compare per red head: the drift
+    # signature costs nothing on a green queue.
+    green = green_main()
+    rows = []
+    for pr in pulls:
+        drift = None
+        if green and not suppress(pr) and any(
+            gate["conclusion"] in DEAD for gate in required_gates(pr)
+        ):
+            drift = drift_of(green, pr["headRefOid"])
+        rows.append((pr, classify(pr, now, drift)))
     branch_rows, branches = orphans({pr["headRefName"] for pr in pulls}, now)
     render(
         [(pr, found) for pr, found in rows if found],
@@ -562,6 +691,7 @@ def main():
         len(pulls),
         branches,
         sum(1 for pr in pulls if suppress(pr)),
+        green,
         now,
         rescuing,
     )

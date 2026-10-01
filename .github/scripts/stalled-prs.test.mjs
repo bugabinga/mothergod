@@ -22,23 +22,24 @@ spec = importlib.util.spec_from_loader("stalled_prs", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
-print(json.dumps(getattr(mod, sys.argv[4])(json.loads(sys.argv[3]), now)))
+extra = json.loads(sys.argv[5]) if len(sys.argv) > 5 else {}
+print(json.dumps(getattr(mod, sys.argv[4])(json.loads(sys.argv[3]), now, **extra)))
 `;
 
 const NOW = "2026-08-30T12:11:00Z";
 
-function call(fn, subject, now) {
+function call(fn, subject, now, extra = {}) {
   const run = spawnSync(
     "python3",
-    ["-c", driver, scriptsDir, now, JSON.stringify(subject), fn],
+    ["-c", driver, scriptsDir, now, JSON.stringify(subject), fn, JSON.stringify(extra)],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0, run.stderr);
   return JSON.parse(run.stdout);
 }
 
-function classify(pr, now = NOW) {
-  return call("classify", pr, now);
+function classify(pr, now = NOW, extra = {}) {
+  return call("classify", pr, now, extra);
 }
 
 function classifyBranch(branch, now = NOW) {
@@ -222,6 +223,67 @@ test("a gate still running is not a stall", () => {
   assert.equal(found, null);
 });
 
+// red-from-drift (PR #843, 2026-10-01): approved at 12:59Z with auto-merge
+// armed and `clippy` red from a lint Rust 1.99 had just stabilized. Main fixed
+// it at 15:36Z (32db2e0); the PR's head, one commit behind that fix, stayed
+// red at 16:12Z because nothing reruns a finished head. Dependabot's #844 sat
+// beside it, unreviewed by design and merged by the heartbeat only when green.
+const DRIFT = { sha: "32db2e060c0c4b939ad8a68681ccb020f83d0e9a", behind_by: 1 };
+const redClippy = (verdict) => [
+  ...GREEN_GATES.filter((c) => c.name !== "clippy"),
+  check("clippy", "FAILURE"),
+  review(verdict),
+];
+const driftRed = (overrides = {}) =>
+  pr({
+    number: 843,
+    labels: [{ name: "agent-approved" }],
+    statusCheckRollup: redClippy("SUCCESS"),
+    ...overrides,
+  });
+
+test("PR #843: approved, clippy red, head behind a green main: red-from-drift", () => {
+  const found = classify(driftRed(), NOW, { drift: DRIFT });
+  assert.equal(found.kind, "red-from-drift");
+  assert.match(found.detail, /clippy red on a head 1 commit\(s\) behind main's green 32db2e0/);
+  assert.match(found.rescue, /gh pr update-branch 843/);
+  assert.equal(found.ended, "2026-08-30T10:53:00Z");
+});
+
+test("PR #844: the reviewer skips dependabot, so no verdict label; still drift", () => {
+  const found = classify(
+    driftRed({ number: 844, labels: [], statusCheckRollup: redClippy("SKIPPED") }),
+    NOW,
+    { drift: DRIFT },
+  );
+  assert.equal(found.kind, "red-from-drift");
+});
+
+test("the same red on a head that carries main is the PR's own, not a stall", () => {
+  assert.equal(classify(driftRed(), NOW, { drift: { ...DRIFT, behind_by: 0 } }), null);
+});
+
+test("changes-requested on a red head is the author's, behind main or not", () => {
+  const returned = driftRed({ labels: [{ name: "changes-requested" }] });
+  assert.equal(classify(returned, NOW, { drift: DRIFT }), null);
+});
+
+test("an unread main leaves the drift signature inert, never wrong", () => {
+  assert.equal(classify(driftRed(), NOW, { drift: null }), null);
+  assert.equal(classify(driftRed()), null);
+});
+
+test("a review mid-flight on the red head waits: a new head would throw it away", () => {
+  const inFlight = driftRed({
+    statusCheckRollup: [
+      ...GREEN_GATES.filter((c) => c.name !== "clippy"),
+      check("clippy", "FAILURE"),
+      review(null, { status: "IN_PROGRESS", startedAt: "2026-08-30T12:09:00Z", completedAt: null }),
+    ],
+  });
+  assert.equal(classify(inFlight, NOW, { drift: DRIFT }), null);
+});
+
 for (
   const [why, overrides] of [
     ["blocked-on-human is parked on purpose", { labels: [{ name: "blocked-on-human" }] }],
@@ -326,7 +388,7 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
-found = mod.classify(case["pr"], now)
+found = mod.classify(case["pr"], now, case.get("drift"))
 print(json.dumps({"found": found, "plan": mod.plan(case["pr"], found, now, case.get("files"), case.get("approved_at"))}))
 `;
 
@@ -416,6 +478,18 @@ test("a dirty PR has no mechanical rescue", () => {
   );
   assert.equal(found.kind, "dirty");
   assert.equal(plan, null);
+});
+
+test("red-from-drift past the hour refreshes the branch, one command", () => {
+  const { found, plan } = planFor(driftRed(), { drift: DRIFT });
+  assert.equal(found.kind, "red-from-drift");
+  assert.deepEqual(plan, { argv: [["gh", "pr", "update-branch", "843"]] });
+});
+
+test("a gate that went red minutes ago is held: the author's session may be alive", () => {
+  const { plan } = planFor(driftRed(), { drift: DRIFT }, "2026-08-30T11:20:00Z");
+  assert.match(plan.hold, /27m ago, inside the 60m drift grace/);
+  assert.match(plan.hold, /non-fast-forward/);
 });
 
 const applyDriver = `
