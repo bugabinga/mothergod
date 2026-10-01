@@ -1348,7 +1348,7 @@ mod tests {
         let spread = spread_symbols(&freq, 4);
         let encode = build_encode_table(&spread, &freq, 4);
         assert_eq!(encode.len(), 3);
-        assert!(encode[1].is_empty());
+        assert_eq!(encode[1], [] as [u32; 0]);
     }
 
     #[test]
@@ -1507,7 +1507,7 @@ mod tests {
 
         let symbols = vec![0u32; 25];
         let (bytes, initial_state) = encode_message(&symbols, &encode, &decode);
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, [] as [u8; 0]);
         let decoded = decode_message(&bytes, initial_state, symbols.len(), &decode);
         assert_eq!(decoded, symbols);
     }
@@ -1522,10 +1522,10 @@ mod tests {
         let encode = build_encode_table(&spread, &freq, table_log2);
 
         let (bytes, initial_state) = encode_message(&[], &encode, &decode);
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, [] as [u8; 0]);
         assert_eq!(initial_state, 0);
         let decoded = decode_message(&bytes, initial_state, 0, &decode);
-        assert!(decoded.is_empty());
+        assert_eq!(decoded, [] as [u32; 0]);
     }
 
     #[test]
@@ -1571,7 +1571,7 @@ mod tests {
             write_varint_u32(value, &mut bytes);
             let (read, rest) = read_varint_u32(&bytes).unwrap();
             assert_eq!(read, value, "value={value}");
-            assert!(rest.is_empty());
+            assert_eq!(rest, []);
         }
     }
 
