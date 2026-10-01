@@ -1067,6 +1067,28 @@ impl LiteralPath {
     }
 }
 
+/// Decodes one non-column literal through `path`'s mixer: [`VecSink`] and
+/// [`StreamingSink`] both need exactly this dispatch, named once so the two
+/// sinks' version gates cannot drift apart from each other.
+fn decode_literal_path(
+    path: LiteralPath,
+    models: &mut Models,
+    ac: &mut Decoder,
+    context: Context,
+) -> u8 {
+    match path {
+        LiteralPath::LogisticSurprise => {
+            models
+                .literal
+                .decode_logistic_surprise(ac, context, &mut models.surprise)
+        }
+        LiteralPath::Logistic => models
+            .literal
+            .decode_logistic(ac, context, &mut models.logistic),
+        LiteralPath::Sse => models.literal.decode_sse(ac, context),
+    }
+}
+
 /// [`DecodeSink`] for [`decode`]'s whole-buffer path: a literal byte is
 /// pushed onto `output`, and a copy replays [`copy_checked`] over what
 /// `output` already holds. `column` mirrors [`encode_tokens`]'s
@@ -1106,19 +1128,7 @@ impl DecodeSink for VecSink<'_> {
                 );
                 models.literal.decode_column(ac, context, bank, state)
             }
-            None => match self.literal_path {
-                LiteralPath::LogisticSurprise => {
-                    models
-                        .literal
-                        .decode_logistic_surprise(ac, context, &mut models.surprise)
-                }
-                LiteralPath::Logistic => {
-                    models
-                        .literal
-                        .decode_logistic(ac, context, &mut models.logistic)
-                }
-                LiteralPath::Sse => models.literal.decode_sse(ac, context),
-            },
+            None => decode_literal_path(self.literal_path, models, ac, context),
         };
         self.output.push(byte);
         Ok(byte)
@@ -1401,19 +1411,7 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
         ac: &mut Decoder,
         context: Context,
     ) -> Result<u8, crate::WriteError> {
-        let byte = match self.literal_path {
-            LiteralPath::LogisticSurprise => {
-                models
-                    .literal
-                    .decode_logistic_surprise(ac, context, &mut models.surprise)
-            }
-            LiteralPath::Logistic => {
-                models
-                    .literal
-                    .decode_logistic(ac, context, &mut models.logistic)
-            }
-            LiteralPath::Sse => models.literal.decode_sse(ac, context),
-        };
+        let byte = decode_literal_path(self.literal_path, models, ac, context);
         self.window.push(byte);
         self.undo.apply(byte, self.writer)?;
         Ok(byte)
