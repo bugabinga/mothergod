@@ -7611,3 +7611,82 @@ record.
   `v6-lz-repeated-text`, re-encoded); every version-3 through version-6
   fixture stays committed, decode-only, forever. `research/progress.jsonl`
   it176.
+- S2-R28 | REJECTED | New literature idea, not tied to any existing
+  standing lead (ROADMAP M3: no standing lead is open, matching S2-A106's
+  own framing): the PAQ/lpaq family's own APM usage blends its calibrated
+  output with the pre-calibration estimate at a fixed ratio (Mahoney,
+  "Adaptive Weighing of Context Models for Lossless Data Compression",
+  2005; `lpaq1`'s `APM::pp` returns `(3 * apm_output + raw) / 4` rather
+  than the calibrated value alone) so a sparsely-trained bin never fully
+  overrides the primary estimate. `crate::sse::Sse`/`LogitSse`
+  (`JOURNAL` S1-P1, S2-A106) never took this step: `refine`'s output is
+  coded as-is. Hypothesis: blending `SurpriseLogisticMixLogitSse`'s own
+  calibrated output with the pre-calibration mix at a fixed 3:1 ratio
+  (`BLEND_SSE_WEIGHT = 0.75`, registered before measuring) improves bpb by
+  damping an undertrained bin's correction, without regressing the sealed
+  set. | Apparatus: `Literal::surprise_code_bit_blended`, a copy of
+  `Literal::surprise_code_bit` generic over the same `Calibrate` table,
+  except the probability `code_bit` prices/codes is
+  `blend_weight.mul_add(refined, (1.0 - blend_weight) * p)` instead of
+  `refined` alone; `sse.update` still indexes by the unblended `p`, so the
+  calibration table's own fit is unaffected and only the coded value
+  changes. `Literal::ideal_cost_bits_logistic_surprise_logit_sse_blended`
+  mirrors `ideal_cost_bits_logistic_surprise_logit_sse` exactly, calling
+  the blended walk at `BLEND_SSE_WEIGHT` instead. Three unit tests: the
+  blend formula's `blend_weight = 1.0` edge case matches the unblended
+  champion bit-for-bit; its `blend_weight = 0.0` edge case costs identically
+  whether the calibration table is fresh or has been adapted far from
+  identity (proving it ignores the table entirely, as the formula implies);
+  a finite/positive sanity check on the public entry point. Measured via a
+  scratch binary (`bench/src/bin/scratch_sse_blend.rs`, deleted with this
+  verdict) that calls `mothergod_bench::literal_pairing::
+  train_and_sealed_delta_bpb` (issue #828) rather than a hand-rolled walk:
+  `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` sealed at
+  `sealed_seed(CASE_SEED)`, same length, champion
+  `Literal::ideal_cost_bits_logistic_surprise_logit_sse` (S2-A106/S2-A108's
+  shipped `FORMAT_VERSION` 7 mixer). | Train mean delta (candidate minus
+  champion) **-0.001585 b/B** (sum -0.017431), 5 of 11 improved:
+  `entropy_ladder_h8` **-0.031958** (the largest single move),
+  `entropy_ladder_h6` -0.017263, `entropy_ladder_h4` -0.007018,
+  `sqlite_like_records` -0.004805, `entropy_ladder_h2` -0.001234; 6
+  regressed: `interleaved_audio16` **+0.020224**, `markov_h8_2_trap`
+  +0.015325, `x86_dense_code` +0.006314, `base64_wrapped` +0.001479,
+  `json_records` +0.001319, `entropy_ladder_h1` +0.000185. Sealed: both
+  regressed, `access_log` +0.001095, `gradient_image` +0.012965.
+  **Rejected**: corpus policy's accept rule needs train improvement *and*
+  no validation regression; both sealed cases regress, the same reading
+  S2-R1/S2-R3/S2-R6/S2-R7/S2-R27 already applied to a case with an
+  improving train mean. | Mechanism: the entropy ladder's higher-entropy
+  points improve the most, and by increasing amounts as entropy rises
+  (h2 through h8), the opposite pattern from S1-L4's usual richness tax
+  and consistent instead with the blend's one literature justification
+  landing exactly where it should: a near-uniform iid source keeps the
+  mixer's raw `p` close to 0.5 across many distinct tree-position/byte-class
+  contexts, so `LogitSse`'s extremes-concentrated bins (S2-A106's own
+  design) see comparatively few observations for that central region and
+  are prone to noisy, over-committed corrections there, which diluting a
+  quarter of the way back toward the raw estimate measurably fixes.
+  Every genuinely structured case this crate targets
+  (`markov_h8_2_trap`, `json_records`, `base64_wrapped`,
+  `interleaved_audio16`, `x86_dense_code`, both sealed kinds) has
+  well-trained, confidently-skewed node probabilities exactly where
+  `LogitSse`'s own resolution does real calibration work (S2-A108's own
+  real-bitstream win read), so diluting an already-correct, well-supported
+  correction with a worse, pre-calibration estimate is a straightforward
+  tax there: the technique's literature justification (protect against an
+  undertrained table) is real only where a table has few observations to
+  protect against in the first place, and this crate's tables are already
+  dense enough on real/structured data that the dilution cost dominates.
+  `gradient_image`'s regression (+0.012965) is the same order of magnitude
+  as this lead line's other dampening-shaped rejections (S2-R7's window
+  growth, a similarly "protect the general case, cost the specific one"
+  trade), not a noise-level move. Candidate code
+  (`Literal::surprise_code_bit_blended`,
+  `Literal::ideal_cost_bits_logistic_surprise_logit_sse_blended`,
+  `BLEND_SSE_WEIGHT`, their three unit tests, and the scratch binary)
+  reverted in full per the `compression-experiment` skill's
+  delete-rejected-candidate-code rule; `SurpriseLogisticMixLogitSse`/
+  `Literal::logit_sse_code_bit`/`ideal_cost_bits_logistic_surprise_logit_sse`
+  (S2-A106, shipped at `FORMAT_VERSION` 7 by S2-A108) are unaffected.
+  `research/progress.jsonl` it177.
