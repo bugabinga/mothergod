@@ -7888,3 +7888,66 @@ record.
   binary `bench/src/bin/scratch_order2_recency.rs`) reverted in full per
   the `compression-experiment` skill's delete-rejected-candidate-code
   rule. `research/progress.jsonl` it180.
+- S2-R32 | REJECTED | Cheap wild swing, not tied to any existing standing
+  lead (ROADMAP M3: no standing lead is open). The alignment expert's
+  bank index (`ALIGN_BASE + align`) spends its 64-bank budget on 2 bits
+  of `position` (stride 4, `position & 3`) and `prev1`'s high nibble in
+  full; every other byte-level expert (`FAST`/`SLOW`) already keys on
+  `prev1` in full, the same redundant-resolution reading S2-R31 applied
+  to the order-2 expert's `prev2`. Hypothesis: trading that redundant
+  `prev1` resolution for one more bit of position-stride resolution
+  (`position & 7`, stride 8, `prev1 >> 5` instead of `prev1 >> 4`) over
+  the identical 64-bank budget reduces bpb on data with 8-byte-or-wider
+  periodic structure (`x86_dense_code`, `sqlite_like_records`) without
+  regressing the sealed set. | Apparatus: `literal::banks_align_stride8`
+  mirrors `banks` with one line changed (`((position & 7) << 3) | (prev1 >>
+  5)` in place of `((position & 3) << 4) | (prev1 >> 4)`), same bank
+  range, zero added memory; `Literal::ideal_cost_bits_align_stride8_logit_sse`
+  mirrors `Literal::ideal_cost_bits_logistic_surprise_logit_sse`
+  (S2-A106/S2-A108's shipped `FORMAT_VERSION` 7 mixer) with its one
+  `banks` call swapped for `banks_align_stride8`, everything downstream
+  (`surprise_code_bit`, `update`) unchanged. Two unit tests for the bank
+  function alone (a hand-computed check that every slot but the align one
+  matches `banks` exactly; an exhaustive `position`/`prev1` sweep
+  confirming the align slot never leaves `[ALIGN_BASE, ALIGN_BASE +
+  ALIGN_BANKS)`), one smoke test walking real text through
+  `Context::after_literal` confirming both the champion and candidate
+  price every byte to a finite, non-negative cost. Measured via
+  `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb` (issue
+  #828): `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image`
+  sealed at `sealed_seed(CASE_SEED)`, same length, champion
+  `Literal::ideal_cost_bits_logistic_surprise_logit_sse`. | Train mean
+  delta **-0.004039 b/B** (sum -0.044426), 5 of 11 improved:
+  `x86_dense_code` **-0.056257** the largest single move,
+  `sqlite_like_records` -0.019172, `entropy_ladder_h8` -0.000648, `h6`
+  -0.000102, `h1` -0.000017; 6 regressed, led by `markov_h8_2_trap`
+  **+0.026341**, `interleaved_audio16` +0.004133, `base64_wrapped`
+  +0.000609, `json_records` +0.000445, `entropy_ladder_h4` +0.000195,
+  `h2` +0.000045. Sealed: `access_log` +0.000230 (flat, within noise),
+  `gradient_image` **+0.022731** (regressed). **Rejected**: corpus
+  policy's accept rule needs train improvement AND no validation
+  regression; the train mean improved but `gradient_image`'s real
+  regression fails the rule outright, the same "either side alone is
+  sufficient to reject" reading S2-R18/S2-R20/S2-R31 each applied. |
+  Mechanism: the swap pays off exactly where a record format has
+  genuine stride-8-or-wider periodicity for the extra position bit to
+  exploit: `x86_dense_code`'s instruction/struct alignment and
+  `sqlite_like_records`'s fixed-width fields both improved by far more
+  than any other case moved in either direction, but on data with no
+  such structure the sacrificed `prev1` resolution is pure loss, the
+  same richness tax S1-L4 names for a context that does not pay for
+  itself: `markov_h8_2_trap`'s uniform byte histogram (this run's single
+  largest regression) and sealed `gradient_image`'s smooth
+  sine-plus-gaussian-noise surface (`bench::gradient_image`'s own module
+  doc) have no record-level position structure at all, so the traded
+  `prev1` resolution has nothing to buy it back.
+  `interleaved_audio16`'s own period-4 channel structure is already
+  exactly what the shipped stride-4 mask targets, re-confirming S2-R31's
+  reading from the other side: widening to stride-8 only dilutes an
+  already-correct fit, a small but consistent regression (+0.004133).
+  Candidate code (`literal::banks_align_stride8`,
+  `Literal::ideal_cost_bits_align_stride8_logit_sse`, their three unit
+  tests, and the scratch binary `bench/src/bin/scratch_align_stride8.rs`)
+  reverted in full per the `compression-experiment` skill's
+  delete-rejected-candidate-code rule. `research/progress.jsonl` it181.
