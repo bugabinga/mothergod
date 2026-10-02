@@ -74,7 +74,6 @@ the reviewer checks this table, not the test count.
 Module tests live beside product code, not inside it:
 `src/<module>/tests.rs`, declared by `#[cfg(test)] mod tests;`, so a
 product file reads in one pass and test lines count by file name.
-Migration: issue #853.
 
 ## Current automated cadence
 

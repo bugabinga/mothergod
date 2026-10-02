@@ -314,31 +314,19 @@ def _split_sloc():
 
     A single total counted unit tests as product code, 4453 of 10564
     lines on 2026-09-01, and the operator called the published number
-    misleading. Every test line in src/ lives in a `#[cfg(test)] mod`
-    block, and `cargo x fmt --check` gates every merge, so the block
-    reliably ends at a lone `}` on the attribute's own indentation; no
-    brace counting through string literals needed. A `#[cfg(test)]` on
-    anything but a `mod` counts as code, which today matches reality
-    (there are none) and fails toward the smaller test number.
+    misleading. ADR-0056 moved every test module out to its own sibling
+    file (`src/<module>/tests.rs`, `proptests.rs`, `window_tests.rs`,
+    `undo_tests.rs`, `src/test_support.rs`), so a file is a test file by
+    its name, never by matching the `#[cfg(test)] mod` brace it used to
+    take a counter to find (#853).
     """
     code = test = 0
     for p in (ROOT / "src").rglob("*.rs"):
-        lines = p.read_text(encoding="utf-8").splitlines()
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if line.strip() == "#[cfg(test)]" and i + 1 < len(lines) and re.match(
-                r"\s*(pub(\([^)]*\))?\s+)?mod\s", lines[i + 1]
-            ):
-                close = line[: len(line) - len(line.lstrip())] + "}"
-                j = i + 1
-                while j < len(lines) and lines[j].rstrip() != close:
-                    j += 1
-                test += j - i + 1
-                i = j + 1
-            else:
-                code += 1
-                i += 1
+        n = len(p.read_text(encoding="utf-8").splitlines())
+        if p.stem == "test_support" or p.stem.endswith("tests"):
+            test += n
+        else:
+            code += n
     return code, test
 
 
