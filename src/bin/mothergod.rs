@@ -54,8 +54,7 @@ fn main() -> ExitCode {
     let command = args.next();
     let path = args.next();
     if args.next().is_some() {
-        eprintln!("mothergod: too many arguments\n\n{USAGE}");
-        return ExitCode::FAILURE;
+        return usage_fail("too many arguments");
     }
 
     match command.as_deref().and_then(OsStr::to_str) {
@@ -65,15 +64,19 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
-        Some(other) => {
-            eprintln!("mothergod: unknown command {other:?}\n\n{USAGE}");
-            ExitCode::FAILURE
-        }
+        Some(other) => usage_fail(&format!("unknown command {other:?}")),
         None => {
             eprintln!("{USAGE}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// Reports `message` with [`USAGE`] appended, [`fail`]'s shape for a usage
+/// error specifically. Not shared with `main`'s `None` branch or `-h`/
+/// `--help`: those print a bare usage dump, with no error to prefix.
+fn usage_fail(message: &str) -> ExitCode {
+    fail(&format!("{message}\n\n{USAGE}"))
 }
 
 /// Reads input (stdin, or `path` if given), compresses it, and writes the
