@@ -190,7 +190,8 @@ test("a tree identical to the base passes when the base is this run's own record
 // as settle-push.test.mjs), not just a hand-passed boolean: a P1 that wrote
 // S1 and recorded it before its read-back lagged and died must exempt a P2
 // retry that rebuilds the identical tree against S1, and must never exempt
-// some other branch's base by accident.
+// some other branch's base by accident. `tried` computes already_landed the
+// same way main() does (push-branch:477-483), not the round-3 shortcut.
 const wiringDriver = `
 import importlib.machinery, importlib.util, json, os, sys
 
@@ -203,10 +204,11 @@ os.chdir(sys.argv[2])
 pb.record_push("claude/x", "s1")  # P1's write landed, read-back died after
 
 def tried(branch, base_sha):
+    own = pb.own_pushes().get(branch, {})
     try:
         pb.guard_not_empty(
             f"{branch}'s head", "t1", "t1", ["research/JOURNAL.md"],
-            pb.own_pushes().get(branch) == base_sha,
+            own.get("sha") == base_sha and not own.get("confirmed"),
         )
         return False
     except SystemExit:
@@ -230,6 +232,92 @@ test("a P2 retry against this run's own recorded push exempts the guard, nothing
     assert.equal(out.retry_on_own_base, false, "P2 on P1's own landed base must not die");
     assert.equal(out.other_branch_same_sha, true, "a different branch at the same sha is not this run's push");
     assert.equal(out.same_branch_other_sha, true, "the same branch at a base we never recorded is not exempt");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Round 4 (#851 review, "must"): own_pushes recorded only the last sha a
+// checkout wrote, with no bit for whether the read-back ever confirmed it.
+// That let the round-3 exemption cover every later same-tree push to a
+// branch this checkout had ever landed on, not just the one lagging retry it
+// was built for; a forgotten edit on push N would have been waved through
+// the same way the original #848 bug was. confirm_push flips that bit once
+// the read-back loop actually proves the ref moved, and guard_not_empty's
+// exemption must stop applying the moment it does: a confirmed base is a
+// push that already fully landed, so a later same-tree push against it is a
+// forgotten edit, not a retry, and must still die.
+const confirmDriver = `
+import importlib.machinery, importlib.util, json, os, sys
+
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+os.chdir(sys.argv[2])
+pb.record_push("claude/x", "s1")
+
+def tried():
+    own = pb.own_pushes().get("claude/x", {})
+    try:
+        pb.guard_not_empty(
+            "claude/x's head", "t1", "t1", ["research/JOURNAL.md"],
+            own.get("sha") == "s1" and not own.get("confirmed"),
+        )
+        return False
+    except SystemExit:
+        return True
+
+before_confirm = tried()
+pb.confirm_push("claude/x", "s1")
+after_confirm = tried()
+print(json.dumps({"before_confirm": before_confirm, "after_confirm": after_confirm}))
+`;
+
+test("confirm_push ends the already_landed exemption; an unconfirmed push still gets it", () => {
+  const repo = mkdtempSync(join(tmpdir(), "push-branch-test-"));
+  try {
+    const init = spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
+    assert.equal(init.status, 0, init.stderr);
+    const run = spawnSync("python3", ["-c", confirmDriver, scriptsDir, repo], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const out = JSON.parse(run.stdout);
+    assert.equal(out.before_confirm, false, "unconfirmed: a same-tree retry must not die");
+    assert.equal(out.after_confirm, true, "confirmed: a later same-tree push must die, a forgotten edit");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// own_pushes must also hand settle-push and site-shots a plain sha, not the
+// {"sha", "confirmed"} shape push-branch stores it in: both read the same
+// file for a different purpose (which commit landed, not whether a retry is
+// safe) and a dict leaking through would break their sha comparisons.
+const shapeDriver = `
+import importlib.machinery, importlib.util, json, os, sys
+
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+os.chdir(sys.argv[2])
+pb.record_push("claude/x", "s1")
+entry = pb.own_pushes()["claude/x"]
+print(json.dumps({"sha": entry.get("sha"), "confirmed": entry.get("confirmed")}))
+`;
+
+test("own_pushes stores sha and a confirmed bit, not a bare sha", () => {
+  const repo = mkdtempSync(join(tmpdir(), "push-branch-test-"));
+  try {
+    const init = spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
+    assert.equal(init.status, 0, init.stderr);
+    const run = spawnSync("python3", ["-c", shapeDriver, scriptsDir, repo], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const out = JSON.parse(run.stdout);
+    assert.equal(out.sha, "s1");
+    assert.equal(out.confirmed, false, "record_push must leave a fresh write unconfirmed");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

@@ -302,13 +302,23 @@ def ensure_object(branch: str, sha: str) -> None:
 
 
 def own_pushes() -> dict:
+    """branch -> sha, pushed or not. push-branch (PR #851 round 4) stores
+    `{"sha": ..., "confirmed": bool}` per branch so its own guard can tell a
+    lagging read-back retry from a push already proven to land; this caller
+    only ever wants the sha. A bare-string entry (a state file an older
+    push-branch wrote earlier in the same checkout) is read the same way."""
     path = git("rev-parse", "--git-path", OWN_PUSHES).strip()
     try:
         with open(path, encoding="utf-8") as fh:
             record = json.load(fh)
     except (OSError, ValueError):
         return {}
-    return record if isinstance(record, dict) else {}
+    if not isinstance(record, dict):
+        return {}
+    return {
+        branch: entry.get("sha") if isinstance(entry, dict) else entry
+        for branch, entry in record.items()
+    }
 
 
 def pr_number(branch: str):
