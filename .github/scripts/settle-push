@@ -84,15 +84,24 @@ OWN_PUSHES = "push-branch-refs.json"
 
 
 def pushed_sha(branch):
-    """What push-branch pushed to `branch` from this checkout, or None."""
+    """What push-branch pushed to `branch` from this checkout, or None.
+
+    push-branch (PR #851 round 4) records `{"sha": ..., "confirmed": bool}`
+    per branch, not a bare sha, so its own already_landed guard can tell a
+    lagging read-back retry from a push it already proved landed. settle-push
+    only ever wants the sha, confirmed or not: it is naming the commit it
+    expects the PR's head to reach, not re-deriving push-branch's guard. A
+    bare-string entry (a state file a pre-round-4 push-branch wrote earlier
+    in the same checkout) is read the same way."""
     path = git("rev-parse", "--git-path", OWN_PUSHES)
     if not path:
         return None
     try:
         with open(path) as fh:
-            return json.load(fh).get(branch)
+            entry = json.load(fh).get(branch)
     except (OSError, ValueError):
         return None
+    return entry.get("sha") if isinstance(entry, dict) else entry
 
 
 def same(sha, other):

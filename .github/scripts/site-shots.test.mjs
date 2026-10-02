@@ -130,6 +130,22 @@ test("the push record is the default input, and a branch outside site/ costs not
   assert.deepEqual(manifest(out), []);
 });
 
+test("the push record reads push-branch's {sha, confirmed} shape, not just a bare sha", () => {
+  const { dir, git, base } = repo();
+  writeFileSync(join(dir, "README.md"), "changed");
+  git("commit", "-q", "-am", "readme only");
+  const head = git("rev-parse", "HEAD");
+  writeFileSync(
+    join(dir, ".git/push-branch-refs.json"),
+    JSON.stringify({ "claude/docs": { sha: head, confirmed: false } }),
+  );
+  const out = join(dir, "shots");
+  const r = run(dir, out, ["--base", base]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /claude\/docs: no change under site\//);
+  assert.deepEqual(manifest(out), []);
+});
+
 test("no record and no --branch is a one-line no-op", () => {
   const { dir, base } = repo();
   const r = run(dir, join(dir, "shots"), ["--base", base]);
