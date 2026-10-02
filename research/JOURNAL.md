@@ -7751,3 +7751,82 @@ record.
   `bench/src/bin/scratch_counted_logit_sse.rs`) reverted in full per the
   `compression-experiment` skill's delete-rejected-candidate-code rule.
   `research/progress.jsonl` it178.
+- S2-R30 | REJECTED | New literature idea, not tied to any existing
+  standing lead (ROADMAP M3: no standing lead is open). Katz backoff
+  (1987) / interpolated smoothing (Chen & Goodman, "An Empirical Study of
+  Smoothing Techniques for Language Modeling," 1998): a sparse, specific
+  estimate is blended with a dense, general one, weighted by how much
+  evidence the specific one has, so an undertrained specific model never
+  has to stand alone. `SurpriseLogisticMix`'s per-`WEIGHT_CONTEXTS`-key
+  weight vector never took this step: each of the 32 keys mixes its six
+  experts under its own weight vector alone, from its first gradient
+  step. Hypothesis: backing a key's own weight vector off toward one
+  globally-shared vector (dot products blended by `confidence =
+  min(visits / 1024, 1.0)`, `visits` the key's own gradient-step count,
+  the floor registered before measuring) improves bpb by stabilizing a
+  key's early, undertrained mix, without regressing the sealed set. |
+  Apparatus: `literal::GlobalBlendMix<C>` mirrors `SurpriseLogisticMix<C>`'s
+  own shape (same weights/`recent_sq_error`/`baseline_sq_error`/
+  calibration table), adding one globally-shared `global_weights:
+  [f64; EXPERTS]` and a per-key `visits: Vec<u64>`;
+  `Literal::surprise_code_bit_global_blend` mirrors `surprise_code_bit`,
+  computing both the key's own dot product and `global_weights`'s dot
+  product from the same stretched experts, blending them through
+  `blend_dot` at `global_blend_confidence(visits)`, and splitting the
+  gradient step across both vectors at the same two weights the blend
+  used (`rate * confidence` to the key's own vector, `rate * (1.0 -
+  confidence)` to the global one). `Literal::ideal_cost_bits_global_blend`
+  mirrors `ideal_cost_bits_logistic_surprise_logit_sse`. Three unit tests:
+  `global_blend_confidence`'s own linear rise from 0.0 to 1.0 at the
+  registered floor; `blend_dot`'s zero/one/midpoint edge cases against
+  hand-computed values; an integration check that pre-seeding every key's
+  `visits` past the floor (so `confidence` is 1.0 everywhere and
+  `global_weights`'s own coefficient is exactly zero) makes the candidate
+  cost identically to the champion over a real byte stream regardless of
+  what `global_weights` holds. Measured via
+  `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb` (issue
+  #828): `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` sealed at
+  `sealed_seed(CASE_SEED)`, same length, champion
+  `Literal::ideal_cost_bits_logistic_surprise_logit_sse` (S2-A106/S2-A108's
+  shipped `FORMAT_VERSION` 7 mixer). | Train mean delta (candidate minus
+  champion) **+0.000051 b/B** (sum +0.000560), 7 of 11 improved:
+  `markov_h8_2_trap` **-0.010985** (the largest single move),
+  `base64_wrapped` -0.000796, `entropy_ladder_h8` -0.000720,
+  `entropy_ladder_h6` -0.000371, `json_records` -0.000152,
+  `entropy_ladder_h2` -0.000071, `entropy_ladder_h1` -0.000007; 4
+  regressed: `x86_dense_code` **+0.007541**, `interleaved_audio16`
+  +0.004601, `sqlite_like_records` +0.001364, `entropy_ladder_h4`
+  +0.000158. Sealed: both improved, `access_log` -0.000514,
+  `gradient_image` -0.006896. **Rejected**: corpus policy's accept rule
+  needs train improvement; the train mean regressed, the same reading
+  S2-R29 already applied to an improving-sealed, regressing-train split. |
+  Mechanism: the backoff splits the gradient step itself, not only the
+  coded prediction, so a key below the confidence floor learns its own
+  weight vector at `rate * confidence < rate`, a fraction of the
+  champion's own step size, every node until that key crosses 1024
+  visits. On the three worst regressions, all fixed-record/periodic data
+  (`x86_dense_code`, `sqlite_like_records`, `interleaved_audio16`), a
+  `WEIGHT_CONTEXTS` key repeats on a short, predictable cadence, so every
+  key crosses the confidence floor within the case's first few records;
+  by the time `confidence` reaches 1.0 and the blend stops touching the
+  coded probability, that key's own weight vector has absorbed strictly
+  fewer cumulative gradient steps than the champion's equivalent vector
+  would have by the same byte, a real adaptation-speed tax the backoff's
+  intended benefit (stabilizing early, unreliable predictions) does not
+  buy back on data where the early per-key signal was already reliable.
+  The improving cases read the inverse: `markov_h8_2_trap`'s uniform
+  histogram and the entropy ladder's iid bytes give each key's own early
+  mix genuinely unreliable, noisy estimates (S1-L4's richness tax, a
+  fresh key's few observations), so borrowing a well-trained global
+  estimate during exactly that window is a real win the slower
+  own-vector adaptation does not cancel out; both sealed cases
+  (`access_log`, `gradient_image`) read the same way, smooth/low-order
+  structure rather than sharp periodic record boundaries. Candidate code
+  (`literal::GlobalBlendMix`, `GlobalBlendMixLogitSse`,
+  `global_blend_confidence`, `blend_dot`,
+  `Literal::surprise_code_bit_global_blend`,
+  `Literal::ideal_cost_bits_global_blend`, their three unit tests, and the
+  scratch binary `bench/src/bin/scratch_global_blend_mix.rs`) reverted in
+  full per the `compression-experiment` skill's delete-rejected-candidate-
+  code rule. `research/progress.jsonl` it179.
