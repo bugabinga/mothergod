@@ -7951,3 +7951,86 @@ record.
   tests, and the scratch binary `bench/src/bin/scratch_align_stride8.rs`)
   reverted in full per the `compression-experiment` skill's
   delete-rejected-candidate-code rule. `research/progress.jsonl` it181.
+- S2-R33 | REJECTED | S1-P8's own remaining-scope note's second branch,
+  promoted (ROADMAP M3): "the full GLN gating architecture this lead
+  names, whose gate is exactly the per-context trust a single global
+  rate cannot express" (GLN-style gating, 2026 AIT Challenge entries,
+  this lead's own cited source). [`SurpriseLogisticMix`] (S2-A104/
+  S2-A105) already took that note's first branch, a rate *rule*; this
+  candidate takes the gating branch's smallest testable slice: one
+  shared `recent_sq_error`/`baseline_sq_error` pair per `WEIGHT_CONTEXTS`
+  key becomes six, one per expert, each read against that expert's OWN
+  prediction (`squash(stretched[expert])`) rather than the mix's blended
+  one, so each of the six weights in a key's vector gets its own
+  [`surprise_rate`]-derived step size instead of sharing one. The
+  gradient term itself (`rate * error * stretched[expert]`, `error`
+  still the mix's) is untouched; only the rate scaling it varies per
+  expert now. Hypothesis: letting an unreliable expert's own weight
+  adapt cautiously while a reliable one in the same context keeps
+  moving at full speed reduces bpb on data where the six experts'
+  reliability genuinely differs by context, without regressing the
+  sealed set. | Apparatus: `literal::GatedSurpriseLogisticMix<C>` mirrors
+  `SurpriseLogisticMix<C>` with `recent_sq_error`/`baseline_sq_error`
+  widened from `Vec<f64>` to `Vec<[f64; EXPERTS]>`;
+  `gated_logistic_gradient_step` takes one rate per expert instead of
+  `logistic_gradient_step`'s one shared rate (and collapses to it
+  exactly under a uniform rate vector, pinned by a unit test);
+  `gated_error_tracking_step` advances each expert's own EMA pair from
+  that expert's own error, mirroring `surprise_error_tracking_step`;
+  `Literal::gated_surprise_code_bit`/`ideal_cost_bits_gated_surprise_logit_sse`
+  mirror `surprise_code_bit`/`ideal_cost_bits_logistic_surprise_logit_sse`
+  exactly except for reading/writing the per-expert state.
+  `GatedSurpriseLogisticMixLogitSse` pairs the candidate with
+  `SurpriseLogisticMixLogitSse`'s own champion calibration
+  (`crate::sse::LogitSse`), so the comparison isolates gating from bin
+  spacing. Six unit tests: the gradient step against hand-computed
+  deltas (plus the uniform-rate-equals-champion check above); the
+  error-tracking step reading two experts with different stretches to
+  different error trajectories from the identical bit; fresh-state
+  construction; a finite/non-negative pricing smoke test; a
+  near-identical-at-the-first-byte, free-to-diverge-after divergence
+  check against the champion, the same shape S2-A106's own champion-vs-
+  candidate test uses. Measured via
+  `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb` (issue
+  #828): `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image`
+  sealed at `sealed_seed(CASE_SEED)`, same length, champion
+  `Literal::ideal_cost_bits_logistic_surprise_logit_sse`. | Train mean
+  delta **+0.000027 b/B** (sum +0.000293), nearly flat either way: 4 of
+  11 improved (`entropy_ladder_h8` -0.000144, `markov_h8_2_trap`
+  -0.000059, `entropy_ladder_h1` -0.000047, `h6` -0.000026), 7 regressed,
+  led by `interleaved_audio16` **+0.000221**, `sqlite_like_records`
+  +0.000152, `x86_dense_code` +0.000140, with `entropy_ladder_h4`
+  +0.000030, `h2` +0.000006, `json_records` +0.000004, `base64_wrapped`
+  +0.000018. Sealed: both improved, `access_log` -0.000020,
+  `gradient_image` -0.000559. **Rejected**: corpus policy's accept rule
+  needs train improvement AND no validation regression; the train mean
+  regressed, the same improving-sealed/regressing-train split S2-R29 and
+  S2-R30 already applied this reading to, now at a smaller magnitude
+  than either. | Mechanism: the three cases that regressed most
+  (`interleaved_audio16`, `sqlite_like_records`, `x86_dense_code`) are
+  the same fixed-record/periodic trio S2-R25's own entry named as this
+  mixer's biggest train win, because several experts agree there and the
+  mix compounds that agreement. Gating each weight's step size by that
+  expert's own solo prediction accuracy judges experts on the wrong
+  axis: an expert can be a weak standalone predictor yet a valuable
+  contributor to the mix precisely because it agrees with others on the
+  cases that matter, and this candidate throttles exactly that expert's
+  own adaptation on no evidence beyond its own isolated error, which the
+  shared-rate champion never penalized. The improving cases are all
+  near-memoryless (the entropy ladder, `markov_h8_2_trap`): with little
+  real structure for any expert to be confidently right or wrong about,
+  splitting the trust signal six ways costs nothing and the extra
+  granularity occasionally helps by luck, consistent with how small
+  every delta here is next to this lead's earlier slices. Candidate code
+  (`literal::GatedSurpriseLogisticMix`, `GatedSurpriseLogisticMixLogitSse`,
+  `gated_logistic_gradient_step`, `gated_error_tracking_step`,
+  `Literal::gated_surprise_code_bit`/`ideal_cost_bits_gated_surprise_logit_sse`,
+  their six unit tests, and the scratch binary
+  `bench/src/bin/scratch_gated_surprise_mix.rs`) reverted in full per the
+  `compression-experiment` skill's delete-rejected-candidate-code rule.
+  `research/progress.jsonl` it182. What remains of S1-P8's gating branch
+  after this slice is deeper than a rate tweak: real GLN-style gating on
+  which expert's signal counts, not merely how fast one shared weight
+  set moves; a literature idea or a cheap wild swing is the next pick
+  either way (ROADMAP M3).
