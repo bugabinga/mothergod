@@ -46,7 +46,18 @@ is invisible to the eye and fatal to a literal `find`.
 
 `cargo test -p mothergod --test claims`: 18 for 18, before and after.
 `cargo x check`: clean. No CHANGELOG entry: this is a copy edit, not a
-product change, same precedent as #547.
+product change, same precedent as `72baf65` (#803), which touched these
+same two paragraphs and carries no `CHANGELOG.md` diff.
+
+**Correction: the reviewer's probe caught a wrong citation here.** The
+first draft of this entry cited #547 for the same precedent; #547
+(`5e44e26`) is the opposite case, a copy edit that *did* add a
+`CHANGELOG.md` entry. Fixed to the real precedent above before merge.
+Also caught: the "547 words" figure this entry inherited from #849
+doesn't reproduce. Direct `wc -w` on the pre-PR tree, same slice (top
+of file through the line before `## Try it`), gives 544, not 547. Not
+this PR's error since #849 predates it, but recorded so the number
+stops propagating unverified.
 
 ## 2026-10-01 — Survey: the repo doubled, the site halved, and the README makes them scroll
 
