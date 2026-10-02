@@ -1179,10 +1179,7 @@ impl PriceCounts {
         let mut literal = vec![0.0; LITERAL_CONTEXTS * 256];
         for context in 0..LITERAL_CONTEXTS {
             let row = &self.literal[context * 256..context * 256 + 256];
-            let total: u32 = row.iter().sum();
-            for (symbol, &freq) in row.iter().enumerate() {
-                literal[context * 256 + symbol] = price(freq, total);
-            }
+            literal[context * 256..context * 256 + 256].copy_from_slice(&to_prices(row));
         }
         let total_tokens = u32::try_from(total_tokens).expect(
             "token count bounded by input length, already checked to fit u32 by parse_greedy",
@@ -2555,6 +2552,22 @@ mod tests {
         counts.observe(Token::Literal(b'a'), None);
         counts.observe(Token::Literal(b'a'), None);
         assert_eq!(counts.literal[usize::from(b'a')], 3);
+    }
+
+    #[test]
+    fn price_counts_prices_computes_shannon_price_per_literal_context() {
+        let mut counts = PriceCounts::new();
+        counts.observe(Token::Literal(b'a'), None);
+        counts.observe(Token::Literal(b'a'), None);
+        counts.observe(Token::Literal(b'b'), Some(b'a'));
+        let table = counts.prices(3);
+
+        assert_eq!(table.literal[usize::from(b'a')], price(3, 258));
+        assert_eq!(table.literal[0], price(1, 258));
+
+        let context6 = 6 * 256;
+        assert_eq!(table.literal[context6 + usize::from(b'b')], price(2, 257));
+        assert_eq!(table.literal[context6], price(1, 257));
     }
 
     #[test]
