@@ -256,11 +256,10 @@ impl Ppm {
         reason = "advisory price estimate only, never drives an Encoder or Decoder (ADR-0024's determinism rule doesn't apply off the coding path), same carve-out as lz.rs's PriceCounts::price"
     )]
     pub fn price_symbol(&self, symbol: usize) -> Option<f64> {
-        if self.freq[symbol] == 0 {
+        if self.is_escape(symbol) {
             return None;
         }
-        let denom = f64::from(self.space());
-        Some(-(f64::from(self.freq[symbol]) / denom).log2())
+        Some(-self.probability(symbol).log2())
     }
 
     /// `symbol`'s own linear-space share of [`Self::space`], or `0.0` if
@@ -311,7 +310,7 @@ impl Ppm {
     /// [`crate::model::Model::encode`].
     pub fn encode(&mut self, encoder: &mut Encoder, symbol: usize) {
         assert!(
-            self.freq[symbol] > 0,
+            !self.is_escape(symbol),
             "Ppm::encode called on a never-observed symbol; use encode_escape"
         );
         crate::encode_symbol(encoder, &self.freq, symbol, u64::from(self.space()));
