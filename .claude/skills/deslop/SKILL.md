@@ -78,6 +78,10 @@ idioms at once, which is worse than either idiom alone.
   not an error's meaning, not a panic into a `Result` or back.
 - Never touch a test to make it pass. If a test breaks, the change was
   wrong. Tests are the measurement; you do not adjust the ruler.
+- A scaffold test (TESTING.md "Two classes", ADR-0056) goes with the
+  code it pins: delete it in the same change and owe no replacement when
+  a suite layer states the function's observable claim. That is
+  deletion, not adjusting the ruler.
 - CLAUDE.md's hard rules outrank everything here. In particular: the
   decoder never panics on any input, and comments that record invariants
   stay, however redundant they look.
