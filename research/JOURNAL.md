@@ -7830,3 +7830,61 @@ record.
   scratch binary `bench/src/bin/scratch_global_blend_mix.rs`) reverted in
   full per the `compression-experiment` skill's delete-rejected-candidate-
   code rule. `research/progress.jsonl` it179.
+- S2-R31 | REJECTED | Cheap wild swing, not tied to any existing standing
+  lead (ROADMAP M3: no standing lead is open). `banks`'s order-2 expert
+  masks `(prev1 << 8) | prev2` down to [`ORDER2_BANKS`]'s low 12 bits,
+  which keeps all of `prev2` (the byte two back) and only `prev1`'s
+  (the immediately preceding byte) low nibble; every other byte-level
+  expert (`FAST`/`SLOW`) already keys on `prev1` in full, so the order-2
+  expert is the only one carrying any `prev2` signal at all, but no
+  entry in this journal had measured whether trading that asymmetry the
+  other way, toward `prev1`-recency instead of `prev2`-uniqueness, helps
+  or hurts. Hypothesis: swapping the mask so `prev1` keeps full
+  resolution and `prev2` is cut to its own low nibble instead reduces
+  bpb on data with strong byte-adjacency structure
+  (`x86_dense_code`, `sqlite_like_records`, `interleaved_audio16`),
+  without regressing the sealed set. | Apparatus: `literal::
+  banks_order2_recency` mirrors `banks` with one line changed
+  (`((prev2 << 8) | prev1) & (ORDER2_BANKS - 1)` in place of
+  `((prev1 << 8) | prev2) & (ORDER2_BANKS - 1)`, same bank range, zero
+  memory cost); `Literal::ideal_cost_bits_order2_recency_logit_sse`
+  mirrors `Literal::ideal_cost_bits_logistic_surprise_logit_sse`
+  (S2-A106/S2-A108's shipped `FORMAT_VERSION` 7 mixer) with its one
+  `banks` call swapped for `banks_order2_recency`, everything downstream
+  (`surprise_code_bit`, `update`) unchanged. Measured via
+  `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb` (issue
+  #828): `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000,
+  `CASE_SEED` 0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image`
+  sealed at `sealed_seed(CASE_SEED)`, same length, champion
+  `Literal::ideal_cost_bits_logistic_surprise_logit_sse`. | Train mean
+  delta **+0.057638 b/B** (sum +0.634014), overwhelmingly one case:
+  `interleaved_audio16` **+0.632856**, by two orders of magnitude the
+  largest single move any entry in this lead line has measured; the
+  other 10 train cases stayed within noise (`entropy_ladder_h4`
+  +0.000478, `h6` -0.000583, `h8` +0.000232, `json_records` -0.000065,
+  `base64_wrapped` +0.000689, `sqlite_like_records` +0.001201,
+  `x86_dense_code` -0.000794, `entropy_ladder_h1`/`h2`/`markov_h8_2_trap`
+  unchanged to six decimals). Sealed: `access_log` -0.000026 flat,
+  `gradient_image` **+0.015378** regressed. **Rejected**: corpus policy's
+  accept rule needs train improvement and no validation regression;
+  both fail here, independent of each other. | Mechanism: the swap's
+  direction was wrong, and `interleaved_audio16`'s own name says why.
+  Interleaved multi-channel audio repeats structure at the channel
+  stride, not at one byte back: the byte two positions back
+  (`prev2`) is the same channel's own preceding sample far more often
+  than the immediately preceding byte (`prev1`, usually a different
+  channel), so `prev2` in full resolution is exactly the signal this
+  expert's shipped masking already protects, and `FAST`/`SLOW` already
+  cover `prev1` in full, so trading `prev2`'s resolution away for a
+  `prev1` this mixer already has elsewhere is pure loss on this case
+  with no offsetting gain, the same "only `prev2`-unique signal is
+  worth this expert's own bank" reading the shipped mask already
+  encodes, now falsified in the opposite direction rather than merely
+  assumed correct. `x86_dense_code`/`sqlite_like_records` moved by far
+  less in either direction, consistent with neither having
+  `interleaved_audio16`'s strict period-2 structure. Candidate code
+  (`literal::banks_order2_recency`,
+  `Literal::ideal_cost_bits_order2_recency_logit_sse`, and the scratch
+  binary `bench/src/bin/scratch_order2_recency.rs`) reverted in full per
+  the `compression-experiment` skill's delete-rejected-candidate-code
+  rule. `research/progress.jsonl` it180.
