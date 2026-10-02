@@ -77,7 +77,7 @@ in someone else's vocabulary.
 | Source | Why |
 |---|---|
 | Casey Muratori, [Performance-Aware Programming](https://www.computerenhance.com) (text course) and [youtube.com/user/caseymuratori](https://www.youtube.com/user/caseymuratori) (Molly Rocket) | Measures the cost of an abstraction before paying it. [`"Clean" Code, Horrible Performance`](https://www.computerenhance.com/p/clean-code-horrible-performance) is a named-benchmark rebuttal of an unverified claim, hard rule 4 applied to prose instead of a PR |
-| [Better Software Conference](https://bettersoftwareconference.com), [youtube.com/@BetterSoftware](https://www.youtube.com/@BetterSoftware) | Annual conference in the handmade/data-oriented orbit (Bill Hall/gingerBill of Odin among its speakers, not its organizer). Stated charter is refusing to ship software nobody can verify works: this project's "lossless is sacred" from a different industry corner |
+| [Better Software Conference](https://bettersoftwareconference.com), [youtube.com/@BetterSoftwareConference](https://www.youtube.com/@BetterSoftwareConference) | Annual conference in the handmade/data-oriented orbit (Bill Hall/gingerBill of Odin among its speakers, not its organizer). Stated charter is refusing to ship software nobody can verify works: this project's "lossless is sacred" from a different industry corner |
 
 Video is the weak channel here, not the source, and the finding is run
 evidence, not assumption: fetching `youtube.com/watch?v=...` from this
@@ -150,7 +150,7 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   sources as a new SOURCES.md subsection: Casey Muratori
   (Performance-Aware Programming, computerenhance.com) and the Better
   Software Conference (bettersoftwareconference.com,
-  youtube.com/@BetterSoftware). **Rejected an automated video
+  youtube.com/@BetterSoftwareConference). **Rejected an automated video
   transcription pipeline**, which the request also asked for a design
   on. Tested against a live run, not assumed: fetching a BetterSoftware
   talk's watch page from this project's own CI runner hit YouTube's bot
