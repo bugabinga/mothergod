@@ -18,6 +18,36 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-02 — Editorial: README made readers scroll past two paragraphs to reach "Try it"
+
+Queue: #849, unclaimed, filed by the 2026-10-01 survey below and accepted by
+the curator at 172ea7a. #443 is the only other open `marketing` issue; its
+build still sits in #739, agent-system territory, unmerged.
+
+**Fixed: trimmed the speed and pre-alpha paragraphs to their verdicts,
+linking the detail instead of inlining it.** "Try it" moved from line 66 to
+line 49, and the word count above it from 547 to 332. The speed paragraph
+kept its two measured rates (Canterbury, Silesia) and dropped the
+parallelism explanation, the aggregate-vs-typical-file caveat, and the
+ROADMAP pointer, none of which a first-time reader needs to decide whether
+to build the thing; [`docs/benchmarks/`](docs/benchmarks/) already carries
+all of it. The pre-alpha paragraph kept "no release," "pre-alpha," and
+"until 1.0," the three fixed phrases `tests/claims.rs` watches, and dropped
+the retirement mechanics to a link into
+[`docs/format/SPEC.md`](docs/format/SPEC.md), which states them in full.
+
+**One wrap bug caught by the guard, not by reading.** The first draft wrapped
+"Canterbury" and "at" across a line break; `published_throughput_matches_its_generated_reports`
+reads `"encoded Canterbury at"` as one literal substring with no whitespace
+normalization, so the wrap broke the match. Re-wrapped to keep the marker
+phrase on one line. Worth remembering: any prose edit near a `claims.rs`
+marker needs the full suite run, not just a read-through, because wrapping
+is invisible to the eye and fatal to a literal `find`.
+
+`cargo test -p mothergod --test claims`: 18 for 18, before and after.
+`cargo x check`: clean. No CHANGELOG entry: this is a copy edit, not a
+product change, same precedent as #547.
+
 ## 2026-10-01 — Survey: the repo doubled, the site halved, and the README makes them scroll
 
 Fifth survey, six days after the fourth, same cadence the fourth had.

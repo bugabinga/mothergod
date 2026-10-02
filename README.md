@@ -35,33 +35,16 @@ Silesia. Closing Silesia is [`ROADMAP.md`](ROADMAP.md)'s current milestone.
 Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).
 
-**It is slow.** mothergod's codec has no internal parallelism; the reports
-measure it one thread per file, several files at once, on one CI machine
-(AMD EPYC 9V74, 4 logical cores), more threads than cores, so the rate is a
-lower bound on what an isolated single-file run would show. On that run,
-mothergod encoded Canterbury at 0.154 MB/s and
-decoded it at 2.887 MB/s; it encoded Silesia at 0.065 MB/s and decoded it at
-1.338 MB/s. Silesia's 212 MB took about an hour to compress and about three
-minutes to read back; encoding carries the optimal parse, so it runs roughly
-twenty times slower than decoding. One caveat the reports state themselves:
-these are single-run figures from one machine, not a cross-machine claim. One
-more worth adding: an aggregate is total bytes over total time rather than a
-typical file, with per-file decode rates running from 0.2 to 26.3 MB/s. Speed is
-measured every benchmark run and becomes a target of its own at
-[`ROADMAP.md`](ROADMAP.md)'s speed-tiers milestone; nothing before then is
-tuned for it.
+**It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
+0.154 MB/s and decoded it at 2.887 MB/s; it encoded Silesia at 0.065 MB/s and
+decoded it at 1.338 MB/s. Methodology, per-file rates, and the regeneration
+command: [`docs/benchmarks/`](docs/benchmarks/).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 7) carries `Stored` and `Lz` (optimal-parse LZ over
-an adaptive, context-mixing range coder; `research/JOURNAL.md` S2-D2/S2-D3).
-That format is specified ([`docs/format/SPEC.md`](docs/format/SPEC.md)) and
-versioned, not frozen: until 1.0 a version can be retired, and a frame from
-a build before the first release has no promise at all. A version a release
-has written is retired only after a later release that still reads it and
-writes its successor, named in the changelog, so you can re-compress first
-(ADR-0050). From 1.0 on, no version is ever retired. Everything around it
-still moves: the library API, the CLI, and the ratio above. Do not use this
-for data you care about yet.
+format (`FORMAT_VERSION` 7) is specified but not frozen: until 1.0 a version
+can be retired. What each version promises and the retirement rules:
+[`docs/format/SPEC.md`](docs/format/SPEC.md). Do not use this for data you
+care about yet.
 
 ## Try it
 
