@@ -79,6 +79,12 @@ fn unknown_command_fails_with_usage() {
 }
 
 #[test]
+fn too_many_arguments_fails_with_usage() {
+    let (_stdout, code) = run(bin().arg("compress").arg("a").arg("b"), b"");
+    assert_ne!(code, 0);
+}
+
+#[test]
 fn help_flag_succeeds() {
     let (stdout, code) = run(bin().arg("--help"), b"");
     assert_eq!(code, 0);
