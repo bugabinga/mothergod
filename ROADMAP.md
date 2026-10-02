@@ -139,11 +139,20 @@ stable residual uncertainty with genuine drift; the fix S2-R26's own
 diagnosis named was tried next and ACCEPTED (JOURNAL S2-A104: a learned
 baseline instead of one shared constant), then wired into a real
 bitstream (JOURNAL S2-A105, ADR-0054, `FORMAT_VERSION` 6), closing that
-thread. No standing lead is open: the next candidate is a literature idea
-or a cheap wild swing per the `compression-experiment` skill, unless the
-one remaining untried thread is promoted: S2-A102's other original
-thread, the from-scratch GLN gating architecture. Target: beat zstd -19
-per-file on all of Silesia/Canterbury with real bitstreams; then xz -9e.
+thread. The other thread, the from-scratch GLN gating architecture, was
+promoted next and tried at its smallest testable slice: per-expert
+learning-rate gating, each of the six experts' own weight stepping at a
+rate read from that expert's own prediction error instead of one shared
+per-key rate. REJECTED (JOURNAL S2-R33): train regressed by a hair even
+though both sealed cases improved, the same improving-sealed/
+regressing-train split S2-R29 and S2-R30 already hit. No standing lead
+is open: the next candidate is a literature idea or a cheap wild swing
+per the `compression-experiment` skill; what remains of the gating
+thread is deeper than a rate tweak (real gating on which expert's
+signal counts, not merely how fast one shared weight set moves) and is
+not itself a standing lead until a genuinely new mechanism for it
+exists. Target: beat zstd -19 per-file on all of Silesia/Canterbury with
+real bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
 
