@@ -1538,6 +1538,46 @@ impl Literal {
         })
     }
 
+    /// [`Self::encode_logistic_surprise`]/[`Self::encode_logit_sse`]'s
+    /// shared body: generic over `mixer`'s own calibration table `C`
+    /// ([`Calibrate`]) the same way [`Self::surprise_code_bit`] is, since
+    /// coding `byte` and updating the six expert banks afterward never
+    /// depends on which table refines each node's probability.
+    fn encode_surprise<C: Calibrate>(
+        &mut self,
+        encoder: &mut Encoder,
+        context: Context,
+        byte: u8,
+        mixer: &mut SurpriseLogisticMix<C>,
+    ) {
+        let (bank_indices, weight_index) = banks(context);
+        let symbol = usize::from(byte);
+        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+            let bit = symbol >= mid;
+            encoder.encode_bit(bit, p);
+            bit
+        });
+        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
+        self.update(&bank_indices, weight_index, symbol, exp);
+    }
+
+    /// [`Self::decode_logistic_surprise`]/[`Self::decode_logit_sse`]'s
+    /// shared body; see [`Self::encode_surprise`] for why this is generic
+    /// over `mixer`'s calibration table.
+    fn decode_surprise<C: Calibrate>(
+        &mut self,
+        decoder: &mut Decoder,
+        context: Context,
+        mixer: &mut SurpriseLogisticMix<C>,
+    ) -> u8 {
+        let (bank_indices, weight_index) = banks(context);
+        let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
+            decoder.decode_bit(p)
+        });
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        byte
+    }
+
     /// Codes `byte` through `encoder` under `context`, blending this
     /// model's six expert banks through `mixer`'s logit-domain mix under
     /// [`SurpriseLogisticMix`]'s learned-baseline rate schedule instead of
@@ -1555,15 +1595,7 @@ impl Literal {
         byte: u8,
         mixer: &mut SurpriseLogisticMix,
     ) {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
-            let bit = symbol >= mid;
-            encoder.encode_bit(bit, p);
-            bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
+        self.encode_surprise(encoder, context, byte, mixer);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -1582,12 +1614,7 @@ impl Literal {
         context: Context,
         mixer: &mut SurpriseLogisticMix,
     ) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
-            decoder.decode_bit(p)
-        });
-        self.update(&bank_indices, weight_index, usize::from(byte), exp);
-        byte
+        self.decode_surprise(decoder, context, mixer)
     }
 
     /// Codes `byte` through `encoder` under `context`, blending this
@@ -1606,15 +1633,7 @@ impl Literal {
         byte: u8,
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
-            let bit = symbol >= mid;
-            encoder.encode_bit(bit, p);
-            bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
+        self.encode_surprise(encoder, context, byte, mixer);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -1633,12 +1652,7 @@ impl Literal {
         context: Context,
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
-            decoder.decode_bit(p)
-        });
-        self.update(&bank_indices, weight_index, usize::from(byte), exp);
-        byte
+        self.decode_surprise(decoder, context, mixer)
     }
 
     /// Codes `byte` through `encoder` under `context`, blending this
