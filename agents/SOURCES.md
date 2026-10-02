@@ -66,6 +66,34 @@ post is the artifact worth reading, not just the person.
 | [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html) | The official checklist. `C-NEWTYPE` and `C-CUSTOM-TYPE` ("arguments convey meaning through types, not `bool` or `Option`") are our precision value already codified by the library team |
 | [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) | Coverage-guided fuzzing. Hard rule 2 says the decoder never panics on any input; fuzzing is how that claim stops being an assertion |
 
+### Pragmatic, verifiable coding practice (operator-seeded 2026-10-01)
+
+Operator ask (Telegram inbox, msg 814): a standing thread on verifiable,
+pragmatic coding practice, not specific to Rust or to compression.
+Selection rule: people who measure a claim before shipping it and
+publish the measurement, which is this project's own RATIO discipline
+in someone else's vocabulary.
+
+| Source | Why |
+|---|---|
+| Casey Muratori, [Performance-Aware Programming](https://www.computerenhance.com) (text course) and [youtube.com/user/caseymuratori](https://www.youtube.com/user/caseymuratori) (Molly Rocket) | Measures the cost of an abstraction before paying it. [`"Clean" Code, Horrible Performance`](https://www.computerenhance.com/p/clean-code-horrible-performance) is a named-benchmark rebuttal of an unverified claim, hard rule 4 applied to prose instead of a PR |
+| [Better Software Conference](https://bettersoftwareconference.com), [youtube.com/@BetterSoftwareConference](https://www.youtube.com/@BetterSoftwareConference) | Annual conference in the handmade/data-oriented orbit (Bill Hall/gingerBill of Odin among its speakers, not its organizer). Stated charter is refusing to ship software nobody can verify works: this project's "lossless is sacred" from a different industry corner |
+
+Video is the weak channel here, not the source, and the finding is run
+evidence, not assumption: fetching `youtube.com/watch?v=...` from this
+project's own CI runner for a BetterSoftware talk hit YouTube's bot wall
+("Sign in to confirm you're not a bot"), while an unrelated high-traffic
+control video passed clean. An inconsistent block is worse than a
+reliable one: a standing crawl would look healthy for weeks and then
+silently miss the one niche talk that mattered. The Data API's caption
+download also needs OAuth as the video's owner, which this project is
+not, for either channel. Conclusion: no automated transcription
+pipeline. Read a cited talk by hand when a claim needs checking, the
+same as reading a block of code already requires, and prefer these
+people's own text where it exists: Muratori publishes the course as
+prose, and gingerBill writes at
+[gingerbill.org/article](https://www.gingerbill.org/article).
+
 ### The lineage, mostly not Rust
 
 Read for the ideas, not the code. Our architecture target descends from
@@ -116,6 +144,29 @@ measure directly on the workload we actually care about.
 ## Adoption log
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
+
+- 2026-10-01: operator request (Telegram inbox, msg 814) for a research
+  thread on verifiable, pragmatic coding practice. Adopted the two seed
+  sources as a new SOURCES.md subsection: Casey Muratori
+  (Performance-Aware Programming, computerenhance.com) and the Better
+  Software Conference (bettersoftwareconference.com,
+  youtube.com/@BetterSoftwareConference). **Rejected an automated video
+  transcription pipeline**, which the request also asked for a design
+  on. Tested against a live run, not assumed: fetching a BetterSoftware
+  talk's watch page from this project's own CI runner hit YouTube's bot
+  wall ("Sign in to confirm you're not a bot"); an unrelated
+  high-traffic control video on the same runner passed clean in the
+  same run. The inconsistency, not a flat block, is the disqualifying
+  finding: a scheduled crawl would read healthy for weeks and then
+  silently miss the one niche talk that mattered, and the Data API's
+  caption download needs OAuth as the video's owner for either channel,
+  which this project is not. No new workflow, script, or ledger issue:
+  "expand beyond seed topics" and "let results flow into project" are
+  already this file's standing job (BDFL curation plus the adoption log
+  below), and video content gets read by hand, by whoever is citing a
+  specific talk, the same as reading a block of code already requires.
+  Text-first material from the same people (Muratori's prose course,
+  gingerBill's blog) is preferred over video wherever both exist.
 
 - 2026-09-27: weekly deep survey, model ladders duty. The 2026-09-24
   `claude-opus-5-5` curator canary came back green: `run-telemetry.py`'s
