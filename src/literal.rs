@@ -574,12 +574,11 @@ fn logistic_gradient_step(
 /// One bit-tree node's six-expert logit-domain mix: `prefix`'s per-expert
 /// prefix sums at `(lo, mid, hi)` give each expert's upper-half
 /// probability, [`stretch`]ed and weighted-summed against `weights`.
-/// Shared by [`Literal::logistic_code_bit`] and
-/// [`Literal::surprise_code_bit`], the one step both take before diverging
-/// into their own rate schedules. Split out on [`logistic_gradient_step`]'s
-/// own grounds (#783): checkable against directly-chosen prefix sums,
-/// independent of the walk's chained state (`test-craft`'s
-/// survivor-triage, #810).
+/// Shared by every [`Literal::code_bit_walk`] instantiation, the one step
+/// they all take before diverging into their own rate schedules. Split out
+/// on [`logistic_gradient_step`]'s own grounds (#783): checkable against
+/// directly-chosen prefix sums, independent of the walk's chained state
+/// (`test-craft`'s survivor-triage, #810).
 fn logistic_mix_node(
     prefix: &[[u64; ALPHABET + 1]; EXPERTS],
     weights: &[f64; EXPERTS],
@@ -601,8 +600,8 @@ fn logistic_mix_node(
     (stretched, dot)
 }
 
-/// [`Literal::surprise_code_bit`]'s per-node error-tracking step: squares
-/// the node's prediction error (target bit minus the pre-refine mix `p`)
+/// [`SurpriseLogisticMix`]'s [`LogisticMixer::advance`]: squares the node's
+/// prediction error (target bit minus the pre-refine mix `p`)
 /// and advances `recent` at `recent_decay` and `baseline` at
 /// [`SURPRISE_BASELINE_DECAY`], both through [`surprise_ema_update`].
 /// Split out on [`logistic_gradient_step`]'s own grounds (#783): checkable
@@ -802,6 +801,79 @@ impl<C: Calibrate> SurpriseLogisticMix<C> {
 impl<C: Calibrate> Default for SurpriseLogisticMix<C> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// [`Literal::code_bit_walk`]'s per-mixer interface: the weight vector and
+/// calibration table both mixers keep per [`WEIGHT_CONTEXTS`] key, plus the
+/// one place [`LogisticMix`]'s step-count rate and [`SurpriseLogisticMix`]'s
+/// error-EMA rate diverge ([`logistic_mix_node`]'s own docs), named once so
+/// the walk between them is not duplicated.
+trait LogisticMixer {
+    /// This mixer's own calibration table type.
+    type Calibrator: Calibrate;
+
+    /// `weight_index`'s weight vector.
+    fn weights_mut(&mut self, weight_index: usize) -> &mut [f64; EXPERTS];
+
+    /// This mixer's calibration table.
+    fn sse_mut(&mut self) -> &mut Self::Calibrator;
+
+    /// `weight_index`'s step size for the node about to be coded, before
+    /// that node's bit is known.
+    fn rate(&self, weight_index: usize) -> f64;
+
+    /// Bookkeeping once the node's bit and pre-refine probability are
+    /// known.
+    fn advance(&mut self, weight_index: usize, bit: bool, p: f64);
+}
+
+impl LogisticMixer for LogisticMix {
+    type Calibrator = Sse;
+
+    fn weights_mut(&mut self, weight_index: usize) -> &mut [f64; EXPERTS] {
+        &mut self.weights[weight_index]
+    }
+
+    fn sse_mut(&mut self) -> &mut Sse {
+        &mut self.sse
+    }
+
+    fn rate(&self, weight_index: usize) -> f64 {
+        logistic_rate(self.update_count[weight_index], LOGISTIC_RATE_DECAY)
+    }
+
+    fn advance(&mut self, weight_index: usize, _bit: bool, _p: f64) {
+        self.update_count[weight_index] += 1;
+    }
+}
+
+impl<C: Calibrate> LogisticMixer for SurpriseLogisticMix<C> {
+    type Calibrator = C;
+
+    fn weights_mut(&mut self, weight_index: usize) -> &mut [f64; EXPERTS] {
+        &mut self.weights[weight_index]
+    }
+
+    fn sse_mut(&mut self) -> &mut C {
+        &mut self.sse
+    }
+
+    fn rate(&self, weight_index: usize) -> f64 {
+        surprise_rate(
+            self.recent_sq_error[weight_index],
+            self.baseline_sq_error[weight_index],
+        )
+    }
+
+    fn advance(&mut self, weight_index: usize, bit: bool, p: f64) {
+        surprise_error_tracking_step(
+            &mut self.recent_sq_error[weight_index],
+            &mut self.baseline_sq_error[weight_index],
+            SURPRISE_RECENT_DECAY,
+            bit,
+            p,
+        );
     }
 }
 
@@ -1057,7 +1129,7 @@ impl Literal {
     /// [`Self::ideal_cost_bits_sse`]'s counterpart for
     /// [`Self::encode_logistic_surprise`]: sums the ideal cost of `byte`'s
     /// `LEVELS` `mixer`-refined binary decisions through
-    /// [`Self::surprise_code_bit`] at the registered [`SURPRISE_RECENT_DECAY`],
+    /// [`Self::code_bit_walk`] at the registered [`SURPRISE_RECENT_DECAY`],
     /// so a caller pricing a whole stream this way reflects what
     /// `Self::encode_logistic_surprise` actually pays (`crate::codec`'s
     /// `CostSink`/`EncodeSink` invariant, [`Self::ideal_cost_bits_sse`]'s
@@ -1073,7 +1145,7 @@ impl Literal {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
         let mut bits = 0.0f64;
-        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+        let landed = self.code_bit_walk(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
             bits += bittree::ideal_cost_bit(bit, p);
             bit
@@ -1098,7 +1170,7 @@ impl Literal {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
         let mut bits = 0.0f64;
-        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+        let landed = self.code_bit_walk(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
             bits += bittree::ideal_cost_bit(bit, p);
             bit
@@ -1459,88 +1531,57 @@ impl Literal {
         prefix
     }
 
-    /// Shared skeleton behind [`Self::encode_logistic`] and
-    /// [`Self::decode_logistic`], the [`LogisticMix`] counterpart of
+    /// Shared skeleton behind [`Self::encode_logistic`]/
+    /// [`Self::decode_logistic`] and [`Self::encode_surprise`]/
+    /// [`Self::decode_surprise`], the [`LogisticMixer`] counterpart of
     /// [`bittree::walk_sse`]: walks [`bittree::walk_nodes`], the shipped
     /// coder's own tree traversal, blending this model's six expert banks
-    /// in the logit domain under `logistic`'s `weight_index` vector,
-    /// refining through `logistic`'s own [`Sse`] table, and taking one
-    /// gradient step per node at [`logistic_rate`]`(steps,
-    /// LOGISTIC_RATE_DECAY)`. `code_bit` receives each node's midpoint and
-    /// refined probability and returns the bit that node resolved to —
-    /// already known from a caller's own `symbol` for
-    /// [`Self::encode_logistic`], decoded from [`Decoder::decode_bit`] for
-    /// [`Self::decode_logistic`] — so the two callers differ only in what
-    /// they do with that bit and probability, never in the walk itself.
+    /// in the logit domain under `mixer`'s `weight_index` vector, refining
+    /// through `mixer`'s own calibration table, and taking one gradient
+    /// step per node at `mixer`'s own rate ([`LogisticMixer::rate`]) —
+    /// [`LogisticMix`]'s step-count decay or [`SurpriseLogisticMix`]'s
+    /// error-EMA one, the one place the two mixers differ
+    /// ([`logistic_mix_node`]'s own docs). `code_bit` receives each node's
+    /// midpoint and refined probability and returns the bit that node
+    /// resolved to — already known from a caller's own `symbol` for an
+    /// encode, decoded from [`Decoder::decode_bit`] for a decode — so
+    /// callers differ only in what they do with that bit and probability,
+    /// never in the walk itself. Generic over `mixer`'s own calibration
+    /// table ([`LogisticMixer::Calibrator`]) so [`SurpriseLogisticMix<Sse>`]
+    /// and [`SurpriseLogisticMixLogitSse`] share this one walk rather than
+    /// two that would differ only in which table's `refine`/`update` it
+    /// calls.
     ///
     /// Every expert's upper-half probability lies strictly inside `(0, 1)`
     /// before [`clamp_logistic_probability`] even runs: every bank
     /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
     /// every node's range holds at least one symbol on each side.
-    fn logistic_code_bit(
+    fn code_bit_walk<M: LogisticMixer>(
         &self,
         bank_indices: &[usize; EXPERTS],
         weight_index: usize,
-        logistic: &mut LogisticMix,
+        mixer: &mut M,
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let prefix = self.expert_prefix_sums(bank_indices);
-        let weights = &mut logistic.weights[weight_index];
-        let steps = &mut logistic.update_count[weight_index];
-        let sse = &mut logistic.sse;
         bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let (stretched, dot) = logistic_mix_node(&prefix, weights, lo, mid, hi);
+            let (stretched, dot) =
+                logistic_mix_node(&prefix, mixer.weights_mut(weight_index), lo, mid, hi);
             let p = clamp_logistic_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
-            let refined = sse.refine(node_context, p);
+            let refined = mixer.sse_mut().refine(node_context, p);
             let bit = code_bit(mid, refined);
-            sse.update(node_context, p, bit);
-            let rate = logistic_rate(*steps, LOGISTIC_RATE_DECAY);
-            logistic_gradient_step(weights, &stretched, rate, bit, p);
-            *steps += 1;
-            bit
-        })
-    }
-
-    /// [`Self::logistic_code_bit`]'s counterpart under
-    /// [`SurpriseLogisticMix`]: identical walk and gradient step, its rate
-    /// read from [`surprise_rate`] over `mixer`'s own per-key
-    /// `recent_sq_error`/`baseline_sq_error` instead of
-    /// [`logistic_rate`]'s step count, then both EMAs advanced from this
-    /// node's own prediction error at [`SURPRISE_RECENT_DECAY`]/
-    /// [`SURPRISE_BASELINE_DECAY`]. Generic over `mixer`'s own calibration
-    /// table `C` ([`Calibrate`]) so [`SurpriseLogisticMix<Sse>`] and
-    /// [`SurpriseLogisticMixLogitSse`] share this one walk rather than two
-    /// that would differ only in which table's `refine`/`update` it calls.
-    fn surprise_code_bit<C: Calibrate>(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        weight_index: usize,
-        mixer: &mut SurpriseLogisticMix<C>,
-        mut code_bit: impl FnMut(usize, f64) -> bool,
-    ) -> u8 {
-        let prefix = self.expert_prefix_sums(bank_indices);
-        let weights = &mut mixer.weights[weight_index];
-        let recent = &mut mixer.recent_sq_error[weight_index];
-        let baseline = &mut mixer.baseline_sq_error[weight_index];
-        let sse = &mut mixer.sse;
-        bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let (stretched, dot) = logistic_mix_node(&prefix, weights, lo, mid, hi);
-            let p = clamp_logistic_probability(squash(dot));
-            let node_context = bittree::sse_context(depth, node_prefix);
-            let refined = sse.refine(node_context, p);
-            let bit = code_bit(mid, refined);
-            sse.update(node_context, p, bit);
-            let rate = surprise_rate(*recent, *baseline);
-            logistic_gradient_step(weights, &stretched, rate, bit, p);
-            surprise_error_tracking_step(recent, baseline, SURPRISE_RECENT_DECAY, bit, p);
+            mixer.sse_mut().update(node_context, p, bit);
+            let rate = mixer.rate(weight_index);
+            logistic_gradient_step(mixer.weights_mut(weight_index), &stretched, rate, bit, p);
+            mixer.advance(weight_index, bit, p);
             bit
         })
     }
 
     /// [`Self::encode_logistic_surprise`]/[`Self::encode_logit_sse`]'s
     /// shared body: generic over `mixer`'s own calibration table `C`
-    /// ([`Calibrate`]) the same way [`Self::surprise_code_bit`] is, since
+    /// ([`Calibrate`]) the same way [`Self::code_bit_walk`] is, since
     /// coding `byte` and updating the six expert banks afterward never
     /// depends on which table refines each node's probability.
     fn encode_surprise<C: Calibrate>(
@@ -1552,7 +1593,7 @@ impl Literal {
     ) {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
-        let landed = self.surprise_code_bit(&bank_indices, weight_index, mixer, |mid, p| {
+        let landed = self.code_bit_walk(&bank_indices, weight_index, mixer, |mid, p| {
             let bit = symbol >= mid;
             encoder.encode_bit(bit, p);
             bit
@@ -1571,7 +1612,7 @@ impl Literal {
         mixer: &mut SurpriseLogisticMix<C>,
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
-        let byte = self.surprise_code_bit(&bank_indices, weight_index, mixer, |_mid, p| {
+        let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, |_mid, p| {
             decoder.decode_bit(p)
         });
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
@@ -1605,7 +1646,7 @@ impl Literal {
     /// Never panics on adversarial `decoder` state, the same argument
     /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
     /// over any coded bit pattern, and every probability
-    /// [`Self::surprise_code_bit`] derives is this model's and `mixer`'s
+    /// [`Self::code_bit_walk`] derives is this model's and `mixer`'s
     /// own invariant, never derived from `decoder`'s bytes.
     #[must_use]
     pub fn decode_logistic_surprise(
@@ -1643,7 +1684,7 @@ impl Literal {
     /// Never panics on adversarial `decoder` state, the same argument
     /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
     /// over any coded bit pattern, and every probability
-    /// [`Self::surprise_code_bit`] derives is this model's and `mixer`'s
+    /// [`Self::code_bit_walk`] derives is this model's and `mixer`'s
     /// own invariant, never derived from `decoder`'s bytes.
     #[must_use]
     pub fn decode_logit_sse(
@@ -1673,7 +1714,7 @@ impl Literal {
     ) {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
-        let landed = self.logistic_code_bit(&bank_indices, weight_index, logistic, |mid, p| {
+        let landed = self.code_bit_walk(&bank_indices, weight_index, logistic, |mid, p| {
             let bit = symbol >= mid;
             encoder.encode_bit(bit, p);
             bit
@@ -1689,7 +1730,7 @@ impl Literal {
     /// Never panics on adversarial `decoder` state, the same argument
     /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
     /// over any coded bit pattern, and every probability
-    /// [`Self::logistic_code_bit`] derives is this model's and `logistic`'s
+    /// [`Self::code_bit_walk`] derives is this model's and `logistic`'s
     /// own invariant, never derived from `decoder`'s bytes.
     #[must_use]
     pub fn decode_logistic(
@@ -1699,7 +1740,7 @@ impl Literal {
         logistic: &mut LogisticMix,
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
-        let byte = self.logistic_code_bit(&bank_indices, weight_index, logistic, |_mid, p| {
+        let byte = self.code_bit_walk(&bank_indices, weight_index, logistic, |_mid, p| {
             decoder.decode_bit(p)
         });
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
