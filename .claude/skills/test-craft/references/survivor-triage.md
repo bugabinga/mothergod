@@ -12,13 +12,14 @@ A surviving mutant is a missing test only where the suite makes the
 claim the mutation breaks (ADR-0056; TESTING.md "Two classes"). Place
 the line first:
 
-- **Decode-safety territory**: the function decodes, undoes a filter,
-  reads a header, bounds an allocation, replays tokens, or lives in
-  `coder.rs`. A missing suite test. Ask what observable claim the
-  mutation broke and which is the cheapest layer that states it, then
-  write it there: usually an example through the public API or an
+- **Decode-safety territory**: `.github/scripts/mutants-debt`'s
+  `TERRITORY` regex is the one place that rule lives; read it there; a
+  restatement here would drift the moment the regex is corrected
+  without this file. A missing suite test. Ask what observable claim
+  the mutation broke and which is the cheapest layer that states it,
+  then write it there: usually an example through the public API or an
   adversarial seed, rarely a property. `mutants-debt` files these
-  after a merge; its docstring holds the territory rule.
+  after a merge.
 - **Scaffold territory**: encoder pricing, model arithmetic, apparatus,
   anything else. A map reading. On an open PR the annotation is for
   the reviewer, who may still ask for a test when the line carries a

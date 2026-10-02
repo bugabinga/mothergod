@@ -55,9 +55,12 @@ test("territory is read off the function the line names, cheap direction is unde
     "src/codec.rs:897:1: replace read_u32_le -> Result<u32, Error> with Ok(0)",
     ...scaffold,
     "src/lz.rs:1200:9: replace < with <= in dp_round",
+    // Proven override (#854 review): bare substring match on "bound" would
+    // otherwise file SSE's logit-clamp constant as decode-safety.
+    "src/sse.rs:315:1: replace stretch_bound -> f64 with 1.0",
   ];
   const out = call({ fn: "territory", lines });
-  assert.deepEqual(out, [true, true, true, true, true, false, false, false]);
+  assert.deepEqual(out, [true, true, true, true, true, false, false, false, false]);
 });
 
 test("scaffold-only survivors are not filed, whatever the PR state", () => {

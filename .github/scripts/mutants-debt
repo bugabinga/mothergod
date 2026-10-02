@@ -79,9 +79,19 @@ TERRITORY = re.compile(
     re.IGNORECASE,
 )
 
+# Proven non-match (ADR-0056 PR #854 review): `stretch_bound` is
+# `LogitSse`'s logit-domain clamp range, model arithmetic with no
+# allocation or untrusted-input surface, so it reads as decode-safety on
+# the bare "bound" token despite failing every test hard rule 2 states.
+# Scoped to the one function proven scaffold; a new decode function is
+# still caught, named or not.
+SCAFFOLD_OVERRIDE = re.compile(r"\bstretch_bound\b")
+
 
 def in_territory(line):
     """Whether one cargo-mutants `missed.txt` line names decode-safety territory."""
+    if SCAFFOLD_OVERRIDE.search(line):
+        return False
     return TERRITORY.search(line) is not None
 
 
