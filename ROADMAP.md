@@ -151,8 +151,19 @@ per the `compression-experiment` skill; what remains of the gating
 thread is deeper than a rate tweak (real gating on which expert's
 signal counts, not merely how fast one shared weight set moves) and is
 not itself a standing lead until a genuinely new mechanism for it
-exists. Target: beat zstd -19 per-file on all of Silesia/Canterbury with
-real bitstreams; then xz -9e.
+exists. Picked next: a different stage than the literal mixer every
+S2-R2x/S2-R3x slice above worked. LZMA's own length coding splits match
+lengths and repeated-offset lengths into two independent tables; this
+project's shared, unconditioned length model never had that split.
+ACCEPTED (JOURNAL S2-A109): train mean -0.002514 b/B, 7 of 11 cases
+improved (`sqlite_like_records` -0.015901 the largest move), both
+sealed cases cleared the bar. Accepted unwired, the same state S1-P3's
+own additive PPM expert (S2-A100) has waited in since 2026-09-23: the
+apparatus stays on `main`, and the real-bitstream wiring slice (a
+`FORMAT_VERSION` bump and ADR, since this changes model semantics
+visible in the bitstream) is unclaimed, separate scope. Target: beat
+zstd -19 per-file on all of Silesia/Canterbury with real bitstreams;
+then xz -9e.
 
 ## M4 — Production hardening ✅
 

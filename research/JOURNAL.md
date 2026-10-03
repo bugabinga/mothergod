@@ -8034,3 +8034,88 @@ record.
   which expert's signal counts, not merely how fast one shared weight
   set moves; a literature idea or a cheap wild swing is the next pick
   either way (ROADMAP M3).
+- S2-A109 | ACCEPTED, unwired | New literature idea, not tied to any
+  existing standing lead (ROADMAP M3: no standing lead is open), and a
+  different stage than every S2-R2x/S2-R3x slice on this lead's own list:
+  the length model, not the literal mixer. LZMA (7-Zip's own
+  `lzma-specification.txt`) codes match lengths and repeated-offset
+  lengths through two independent coders (`LenCoder`/`RepLenCoder`),
+  never one shared table. `Models::length` (`src/codec.rs`) is one
+  order-0 [`Model`] shared by every `Token::Match` and `Token::Rep`
+  length regardless of which kind produced it, unconditioned since
+  `S2-D2`'s own wiring. Hypothesis: a cached distance's length tends to
+  come from a different distribution than a freshly found one (repeat
+  offsets recur in tight, short copies; fresh matches span whatever the
+  dictionary happens to offer), so splitting the shared model in two,
+  selected by which kind is being priced, improves bpb without
+  regressing the sealed set. | Apparatus: `LengthSplitState`
+  (`src/codec.rs`) holds two `Model`s (`match_length`, `rep_length`),
+  both sized `lz::LENGTH_BUCKETS`, same construction as `Models::length`;
+  `LengthSplitSink` is a `TokenSink` mirroring `CostSink` for every field
+  except `length`, which prices the baseline side through the shared
+  `models.length` (unchanged) and the candidate side through whichever of
+  `LengthSplitState`'s two models matches the copy kind its own `flag`
+  call most recently recorded (`walk_tokens` always calls `flag`
+  immediately before `length` for both `Token::Match` and `Token::Rep`,
+  so the recorded kind is never `Literal` by the time `length` reads it).
+  `ideal_cost_bits_length_split_experiment` walks one real
+  `lz::parse_optimal` token stream and returns `(baseline_bits,
+  candidate_bits)`, the same before-wiring shape
+  `ideal_cost_bits_ppm_expert_experiment` (S2-A100) already established
+  for a whole-codec (not literal-substream) paired measurement. One unit
+  test: a mixed buffer of literals, fresh matches, and rep matches prices
+  finitely on both sides. Measured with a throwaway (uncommitted) scratch
+  binary, `bench/src/bin/scratch_length_split.rs`, over
+  `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` sealed at
+  `sealed_seed(CASE_SEED)`, same length, dividing each case's delta by
+  `data.len()` (`research/README.md`'s schema), against the real
+  `encode_tokens`/`CostSink` baseline (`models.length`, unconditioned).
+  Unlike every S1-P2/S1-P3/S1-P8 additive-literal-expert slice, this
+  candidate's ideal-cost pricer (`ideal_cost_bucketed`) is the exact
+  function the real bitstream path (`encode_bucketed`) already prices
+  through for length/offset: there is no SSE calibration stage between
+  them the way `S2-R19` found missing for the PPM expert, so this
+  measurement is not subject to that same ideal-cost/real-bitstream gap.
+  | Train mean **-0.002514 b/B** (sum -0.027656), 7 of 11 improved:
+  `sqlite_like_records` **-0.015901** the largest single move by a wide
+  margin, `markov_h8_2_trap` -0.004136, `json_records` -0.002609,
+  `base64_wrapped` -0.002560, `entropy_ladder_h2` -0.001255,
+  `x86_dense_code` -0.000921, `entropy_ladder_h1` -0.000677; 3 regressed,
+  all an order of magnitude smaller than the smallest improvement:
+  `interleaved_audio16` +0.000173, `entropy_ladder_h4` +0.000129,
+  `entropy_ladder_h6` +0.000100; `entropy_ladder_h8` exactly **0.000000**
+  (iid 8-bit-entropy data has no profitable match at this length, so
+  `lz::parse_optimal` emits no `Match`/`Rep` tokens at all, and neither
+  side's length model is ever touched). Sealed: `access_log` **-0.000768**
+  improved, `gradient_image` exactly **0.000000** (flat, not a
+  regression). Corpus policy's accept rule (train improvement AND no
+  validation regression) passes outright. **Accepted.** Mechanism:
+  record-structured and text-record formats (`sqlite_like_records`'s
+  fixed-width fields, `json_records`, `base64_wrapped`'s decoded
+  payload) carry exactly the asymmetry LZMA's own two-coder design
+  assumes — a rep token re-uses a very recently proven-good distance,
+  typically for a short, specific run (padding, a repeated delimiter, a
+  field reused verbatim), while a fresh match's length reflects whatever
+  the dictionary happens to offer at a newly found distance, a wider and
+  differently shaped distribution; conflating both into one adaptive
+  table taxes each with the other's statistics, and `sqlite_like_records`
+  both being this corpus's most rep-heavy generator and this slice's
+  largest win is not a coincidence. The three regressions are all
+  near-memoryless or thinly structured at this train slice's length
+  (the entropy ladder, `interleaved_audio16`'s fixed period), where
+  splitting one already-small sample of length observations into two
+  smaller ones costs real bias/variance (S1-L4's richness tax) with no
+  genuine distributional difference to recover it — consistent with
+  every regression here being far smaller than the smallest win.
+  Remaining scope: the real-bitstream wiring slice — splitting
+  `Models::length` into `length_match`/`length_rep` inside `encode_tokens`/
+  `decode`, a `FORMAT_VERSION` bump and ADR (model semantics visible in
+  the bitstream, CLAUDE.md hard rule 5), decode support for every earlier
+  version, and a real-bitstream measurement, the same shape S1-P3's own
+  `PpmExpertState` (S2-A100) is still waiting on. Apparatus
+  (`LengthSplitState`, `LengthSplitSink`,
+  `ideal_cost_bits_length_split_experiment`, its unit test) stays on
+  `main`, unwired, per the `compression-experiment` skill; the scratch
+  binary is deleted, its numbers recorded here. `research/progress.jsonl`
+  it183.
