@@ -8,7 +8,12 @@
 //! [`parse_manifest`] reads `bench/corpus.toml`'s `[[file]]` entries;
 //! [`fetch_and_cache`] resolves one entry by name, serving it from a
 //! local on-disk cache keyed by its pinned hash when present and
-//! refusing to return bytes that don't match the pin. The pinned bytes
+//! refusing to return bytes that don't match the pin. An entry may carry
+//! one or more `mirror = "..."` lines alongside its primary `url`;
+//! [`fetch_and_cache`] tries `url` first, then each mirror in listed
+//! order, against the one unchanged `sha256` pin, stopping at the first
+//! source whose bytes verify (issue #875: a host's download going dark
+//! should not block the whole gate). The pinned bytes
 //! are the compressed download, not the corpus file itself:
 //! [`decompress_silesia`] unwraps one Silesia file's bzip2 stream, and
 //! [`extract_canterbury`] lists every file inside Canterbury's
@@ -31,6 +36,10 @@ pub struct ManifestEntry {
     pub corpus: String,
     /// Where to download the (compressed) bytes from.
     pub url: String,
+    /// Fallback download locations, tried in order after `url`, each
+    /// verified against the same `sha256` pin. Populated from zero or
+    /// more `mirror = "..."` lines inside the entry's `[[file]]` table.
+    pub mirrors: Vec<String>,
     /// SHA-256, lowercase hex, of the bytes as downloaded from `url`.
     pub sha256: String,
 }
@@ -59,6 +68,7 @@ pub fn parse_manifest(toml: &str) -> Vec<ManifestEntry> {
                 name: String::new(),
                 corpus: String::new(),
                 url: String::new(),
+                mirrors: Vec::new(),
                 sha256: String::new(),
             });
             continue;
@@ -72,6 +82,7 @@ pub fn parse_manifest(toml: &str) -> Vec<ManifestEntry> {
                 "name" => value.clone_into(&mut entry.name),
                 "corpus" => value.clone_into(&mut entry.corpus),
                 "url" => value.clone_into(&mut entry.url),
+                "mirror" => entry.mirrors.push(value.to_string()),
                 "sha256" => value.clone_into(&mut entry.sha256),
                 _ => {}
             }
@@ -144,14 +155,18 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// every byte against that pin before returning it or writing it to the
 /// cache; a checksum mismatch is [`FetchError::ChecksumMismatch`], never
 /// a silently wrong result (`research/corpus/POLICY.md`, "refuses to run
-/// on a checksum mismatch").
+/// on a checksum mismatch"). Tries the entry's `url`, then each of its
+/// `mirrors` in order, stopping at the first source whose bytes verify;
+/// one source refusing the request (issue #875) does not fail the fetch
+/// as long as a later source still produces the pinned bytes.
 ///
 /// # Errors
 ///
 /// Returns [`FetchError::UnknownName`] if `manifest` has no entry called
-/// `name`, [`FetchError::Io`] if the download or the local cache
-/// read/write fails, and [`FetchError::ChecksumMismatch`] if the fetched
-/// bytes don't hash to the entry's pin.
+/// `name`. If every source (`url` and `mirrors`) fails, returns the last
+/// source's error: [`FetchError::Io`] if it was a download/cache failure,
+/// or [`FetchError::ChecksumMismatch`] if it was a hash that didn't match
+/// the entry's pin.
 pub fn fetch_and_cache(
     manifest: &[ManifestEntry],
     name: &str,
@@ -164,7 +179,7 @@ fn fetch_and_cache_with(
     manifest: &[ManifestEntry],
     name: &str,
     cache_dir: &Path,
-    fetch: impl FnOnce(&str) -> Result<Vec<u8>, FetchError>,
+    fetch: impl Fn(&str) -> Result<Vec<u8>, FetchError>,
 ) -> Result<Vec<u8>, FetchError> {
     let entry = manifest
         .iter()
@@ -181,19 +196,34 @@ fn fetch_and_cache_with(
         return Ok(cached);
     }
 
-    let bytes = fetch(&entry.url)?;
-    let actual = sha256_hex(&bytes);
-    if actual != entry.sha256 {
-        return Err(FetchError::ChecksumMismatch {
-            name: name.to_string(),
-            expected: entry.sha256.clone(),
-            actual,
+    let sources =
+        std::iter::once(entry.url.as_str()).chain(entry.mirrors.iter().map(String::as_str));
+    let mut last_err = None;
+    for url in sources {
+        let result = fetch(url).and_then(|bytes| {
+            let actual = sha256_hex(&bytes);
+            if actual == entry.sha256 {
+                Ok(bytes)
+            } else {
+                Err(FetchError::ChecksumMismatch {
+                    name: name.to_string(),
+                    expected: entry.sha256.clone(),
+                    actual,
+                })
+            }
         });
+        match result {
+            Ok(bytes) => {
+                std::fs::create_dir_all(cache_dir)?;
+                std::fs::write(&cache_path, &bytes)?;
+                return Ok(bytes);
+            }
+            Err(err) => last_err = Some(err),
+        }
     }
-
-    std::fs::create_dir_all(cache_dir)?;
-    std::fs::write(&cache_path, &bytes)?;
-    Ok(bytes)
+    // `sources` always yields `entry.url` first, so the loop above runs
+    // at least once and `last_err` is always set by the time it exits.
+    Err(last_err.expect("at least one source (entry.url) is always tried"))
 }
 
 fn cache_path_for(cache_dir: &Path, entry: &ManifestEntry) -> PathBuf {
@@ -278,6 +308,8 @@ mod tests {
             name = "cantrbry"
             corpus = "canterbury"
             url = "https://example.invalid/cantrbry.tar.gz"
+            mirror = "https://mirror-one.invalid/cantrbry.tar.gz"
+            mirror = "https://mirror-two.invalid/cantrbry.tar.gz"
             sha256 = "def456"
         "#;
         let entries = parse_manifest(toml);
@@ -288,12 +320,17 @@ mod tests {
                     name: "dickens".to_string(),
                     corpus: "silesia".to_string(),
                     url: "https://example.invalid/dickens.bz2".to_string(),
+                    mirrors: Vec::new(),
                     sha256: "abc123".to_string(),
                 },
                 ManifestEntry {
                     name: "cantrbry".to_string(),
                     corpus: "canterbury".to_string(),
                     url: "https://example.invalid/cantrbry.tar.gz".to_string(),
+                    mirrors: vec![
+                        "https://mirror-one.invalid/cantrbry.tar.gz".to_string(),
+                        "https://mirror-two.invalid/cantrbry.tar.gz".to_string(),
+                    ],
                     sha256: "def456".to_string(),
                 },
             ]
@@ -311,6 +348,13 @@ mod tests {
                 "{} url isn't https",
                 entry.name
             );
+            for mirror in &entry.mirrors {
+                assert!(
+                    mirror.starts_with("https://"),
+                    "{} mirror isn't https",
+                    entry.name
+                );
+            }
             assert_eq!(entry.sha256.len(), 64, "{} has a malformed pin", entry.name);
             assert!(
                 entry.sha256.chars().all(|c| c.is_ascii_hexdigit()),
@@ -338,6 +382,17 @@ mod tests {
             name: "fixture".to_string(),
             corpus: "test".to_string(),
             url: "https://example.invalid/fixture".to_string(),
+            mirrors: Vec::new(),
+            sha256: sha256.to_string(),
+        }]
+    }
+
+    fn manifest_with_one_entry_and_mirror(sha256: &str, mirror: &str) -> Vec<ManifestEntry> {
+        vec![ManifestEntry {
+            name: "fixture".to_string(),
+            corpus: "test".to_string(),
+            url: "https://example.invalid/fixture".to_string(),
+            mirrors: vec![mirror.to_string()],
             sha256: sha256.to_string(),
         }]
     }
@@ -350,8 +405,31 @@ mod tests {
         let cache_dir = temp_cache_dir("hit");
 
         let fetched = payload.clone();
-        let result =
-            fetch_and_cache_with(&manifest, "fixture", &cache_dir, move |_url| Ok(fetched));
+        let result = fetch_and_cache_with(&manifest, "fixture", &cache_dir, move |_url| {
+            Ok(fetched.clone())
+        });
+        assert_eq!(result.unwrap(), payload);
+        assert!(cache_dir.join(&expected).exists());
+    }
+
+    #[test]
+    fn fetch_and_cache_falls_back_to_a_mirror_when_the_primary_fails() {
+        let payload = b"mirrored bytes".to_vec();
+        let expected = super::sha256_hex(&payload);
+        let manifest =
+            manifest_with_one_entry_and_mirror(&expected, "https://mirror.invalid/fixture");
+        let cache_dir = temp_cache_dir("mirror-fallback");
+
+        let fetched = payload.clone();
+        let result = fetch_and_cache_with(&manifest, "fixture", &cache_dir, move |url| {
+            if url == "https://mirror.invalid/fixture" {
+                Ok(fetched.clone())
+            } else {
+                Err(FetchError::Io(std::io::Error::other(
+                    "primary host refused",
+                )))
+            }
+        });
         assert_eq!(result.unwrap(), payload);
         assert!(cache_dir.join(&expected).exists());
     }
@@ -365,7 +443,7 @@ mod tests {
 
         fetch_and_cache_with(&manifest, "fixture", &cache_dir, {
             let payload = payload.clone();
-            move |_url| Ok(payload)
+            move |_url| Ok(payload.clone())
         })
         .unwrap();
 

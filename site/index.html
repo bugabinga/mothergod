@@ -285,14 +285,14 @@
             <tbody>
               <tr>
                 <th scope="row">Canterbury</th>
-                <td class="ours">1.364</td>
+                <td class="ours">1.366</td>
                 <td>2.081</td>
                 <td>1.470</td>
                 <td>1.403</td>
               </tr>
               <tr>
                 <th scope="row">Silesia</th>
-                <td class="ours">2.053</td>
+                <td class="ours">2.052</td>
                 <td>2.553</td>
                 <td>1.997</td>
                 <td>1.829</td>
@@ -322,7 +322,7 @@
         <p>
           Slow, and that is the honest headline. mothergod's codec has no
           internal parallelism; the reports measure it one thread per file,
-          several files at once, on one CI machine (AMD EPYC 9V45, 4 logical
+          several files at once, on one CI machine (AMD EPYC 7763, 4 logical
           cores), more threads than cores, so the rate is a lower bound on what
           an isolated single-file run would show.
         </p>
@@ -341,13 +341,13 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.199</td>
-              <td>4.243</td>
+              <td>0.126</td>
+              <td>3.016</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.067</td>
-              <td>1.716</td>
+              <td>0.055</td>
+              <td>1.215</td>
             </tr>
           </tbody>
         </table>
@@ -361,7 +361,7 @@
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.2 to 24.9 MB/s</span>. Speed is measured on every
+          <span class="rate">0.2 to 24.1 MB/s</span>. Speed is measured on every
           benchmark run and becomes a target of its own at the speed-tiers
           milestone on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
