@@ -2,7 +2,8 @@
 //! `FORMAT_VERSION`, the
 //! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
-//! encode/decode MB/s, the benchmark CPU model, the measurement date, the
+//! encode/decode MB/s, the benchmark CPU model, the per-file win count, the
+//! measurement date, the
 //! reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
 //! recipe a reader is told to type, instead of
@@ -14,7 +15,8 @@
 //! left only the restated date stale, and nothing compared it; the CPU
 //! model had the same gap until this guard: the CI runner rotated between
 //! 2026-09-27 and 2026-10-03 and `site/index.html` kept quoting the old
-//! one). Compares
+//! one; the per-file win count had the same gap too, unguarded since the
+//! sentence was written). Compares
 //! every restated claim against its single source of truth:
 //! `FORMAT_VERSION` against `src/lib.rs`'s own constant, the aggregate
 //! figures, date and tool versions against the matching generated
@@ -368,6 +370,91 @@ fn changelog_ratio_claim_matches_its_generated_reports() {
             assert_eq!(
                 changelog_claim, rounded,
                 "CHANGELOG.md's {corpus} {column} bits/byte is {changelog_claim}, docs/benchmarks/{report_file} says {rounded}"
+            );
+        }
+    }
+}
+
+/// Plain (non-decimal) integers anywhere in free-flowing prose, in
+/// encounter order: `"wins 6 of 11 on Canterbury"` -> `[6, 11]`. Separate
+/// from `prose_numbers` because a win count has no fractional part, and
+/// parsing straight to `usize` avoids a float-to-int cast on a count.
+fn prose_integers(text: &str) -> Vec<usize> {
+    let mut values = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() {
+            let start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            if let Ok(value) = text[start..index].parse::<usize>() {
+                values.push(value);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    values
+}
+
+/// Each data row's regret column (mothergod's bits/byte minus the stronger
+/// of zstd/xz, `docs/benchmarks/{canterbury,silesia}.md`'s own header),
+/// read off the single source of truth rather than recomputed from the
+/// four compressor columns, so this guard and the report agree on what
+/// "stronger" means by construction. Excludes the `**aggregate` row, which
+/// a per-file win count never counts.
+fn per_file_regrets(report_file: &str) -> Vec<f64> {
+    let text = read(&format!("docs/benchmarks/{report_file}"));
+    text.lines()
+        .filter(|line| line.starts_with("| `"))
+        .map(|line| markdown_numbers(line)[5])
+        .collect()
+}
+
+/// How many files mothergod wins (negative regret) out of how many total.
+fn win_count_from_report(report_file: &str) -> (usize, usize) {
+    let regrets = per_file_regrets(report_file);
+    let wins = regrets.iter().filter(|regret| **regret < 0.0).count();
+    (wins, regrets.len())
+}
+
+/// The "wins `<N>` of `<M>` on Canterbury and `<N>` of `<M>` on Silesia"
+/// sentence's four numbers, in that order.
+fn win_claim(text: &str) -> [(usize, usize); 2] {
+    let marker = "wins ";
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found"))
+        + marker.len();
+    let rest = &text[start..];
+    let end = rest.find('.').unwrap_or(rest.len());
+    let numbers = prose_integers(&rest[..end]);
+    assert_eq!(
+        numbers.len(),
+        4,
+        "expected 4 numbers (wins, total, wins, total) in the win-count sentence, found {numbers:?}"
+    );
+    [(numbers[0], numbers[1]), (numbers[2], numbers[3])]
+}
+
+#[test]
+fn win_count_claims_match_their_generated_reports() {
+    let corpora = [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")];
+    let surfaces = [
+        ("README.md", read("README.md")),
+        ("site/index.html", read("site/index.html")),
+    ];
+
+    for (surface_name, text) in &surfaces {
+        let claims = win_claim(text);
+        for (index, (corpus, report_file)) in corpora.iter().enumerate() {
+            let truth = win_count_from_report(report_file);
+            assert_eq!(
+                claims[index], truth,
+                "{surface_name}'s {corpus} per-file win claim is {} of {}, docs/benchmarks/{report_file} says {} of {}",
+                claims[index].0, claims[index].1, truth.0, truth.1
             );
         }
     }
