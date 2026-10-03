@@ -145,6 +145,30 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-10-03, later: operator (Telegram, inbox msg 859): "claude allows
+  to use model family aliases: fable, opus, sonnet ... we only care about
+  the alias and effort level. Research only needs to find new families."
+  Adopted as ADR-0059: every rung in `agents/models.json` is a family
+  alias, effort is explicit on every seat and thrift block, and
+  `agent-pause` keys the model-limits ledger by the rung the guard chose
+  rather than the runtime's resolved id, the one coupling that would have
+  made an alias ladder unblockable. Verified against a run, not the docs:
+  `claude --help` on the fleet's CLI (2.1.288, the version
+  claude-code-action@v1 installs) documents the aliases, and a nested
+  `claude -p` (no login, as the 2026-09-24 entry found, but its init
+  event still prints the alias table) resolved sonnet, opus and fable to
+  `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`, the ids
+  the ladders carried that morning. The family rule in the entry below
+  is withdrawn after seven hours: it still cost one decision per launch,
+  and #890's launch watch is moot for generations; new families are what
+  model-intel and the cli-reference page in #578 report. Effort pins
+  record today's actuals, herald and researcher at medium included,
+  which Opus 5.5's default handed them unnoticed on 2026-09-27: now a
+  written choice under "cost effective for the others", not a drift.
+  Falsification: an alias 404 in #110 (the CLI moved a family to a
+  generation this subscription does not serve), or run-telemetry's
+  "model actually run" column naming a generation nobody expected.
+
 - 2026-10-03: operator (Telegram, inbox msg 857): "Sonnet-5? Why not
   sonnet-5-5? We should prefer latest models from a family." Adopted:
   `claude-sonnet-5-5` prepended above `claude-sonnet-5` on every ladder
