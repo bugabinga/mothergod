@@ -620,6 +620,22 @@ fn surprise_error_tracking_step(
     *baseline = surprise_ema_update(*baseline, error_sq, SURPRISE_BASELINE_DECAY);
 }
 
+/// A fresh weight vector, one per [`WEIGHT_CONTEXTS`] key, every expert at
+/// [`LOGISTIC_INITIAL_WEIGHT`]: the shape [`LogisticMix::new`] and
+/// [`SurpriseLogisticMix::new`] both start from, named once so a future
+/// change to either constant cannot update one copy and miss the other.
+fn fresh_logistic_weights() -> Vec<[f64; EXPERTS]> {
+    vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
+}
+
+/// Fallible counterpart to [`fresh_logistic_weights`], the same relationship
+/// [`crate::try_filled_vec`] bears to a plain `vec![]` everywhere else in
+/// this crate: [`LogisticMix::try_new`] and [`SurpriseLogisticMix::try_new`]
+/// both start from this.
+fn try_fresh_logistic_weights() -> Result<Vec<[f64; EXPERTS]>, std::collections::TryReserveError> {
+    crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])
+}
+
 /// Logit-domain mixer over [`Literal`]'s own six expert banks
 /// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
 /// probability of the upper half is [`stretch`]ed, the stretches are
@@ -647,7 +663,7 @@ impl LogisticMix {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
+            weights: fresh_logistic_weights(),
             update_count: vec![0; WEIGHT_CONTEXTS],
             sse: Sse::new(bittree::SSE_CONTEXTS),
         }
@@ -661,7 +677,7 @@ impl LogisticMix {
     /// `Error::OutOfMemory` there instead of an abort.
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
-            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
+            weights: try_fresh_logistic_weights()?,
             update_count: crate::try_filled_vec(WEIGHT_CONTEXTS, 0)?,
             sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
         })
@@ -774,7 +790,7 @@ impl<C: Calibrate> SurpriseLogisticMix<C> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
+            weights: fresh_logistic_weights(),
             recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             sse: C::new(bittree::SSE_CONTEXTS),
@@ -790,7 +806,7 @@ impl<C: Calibrate> SurpriseLogisticMix<C> {
     /// requires `Error::OutOfMemory` there instead of an abort.
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
-            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
+            weights: try_fresh_logistic_weights()?,
             recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
             baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
             sse: C::try_new(bittree::SSE_CONTEXTS)?,
