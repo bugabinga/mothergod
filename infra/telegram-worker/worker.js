@@ -315,6 +315,7 @@ const HELP = [
   "/blocked: blocked-on-human items",
   "/diff <pr>: pull request diff summary",
   "/agents: each agent's latest run",
+  "/models: each role's current model and effort",
   "/digest: latest operations digest",
 ].join("\n");
 
@@ -743,6 +744,121 @@ async function agents(env, args) {
   ].join("\n");
 }
 
+function decodeBase64(content) {
+  const binary = atob(content.replace(/\n/g, ""));
+  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+}
+
+// The JSON object inside a ledger issue body's first ```json fence, same
+// contract as guard-decide.py's `_fenced` (model-limits and allowance-state
+// are both written in that shape). This worker cannot call that Python file,
+// so /models repeats the ladder/thrift half of its `decide()` in JS, the same
+// boundary telegramText already repeats tg-send's escaping contract across.
+// guard-decide.test.mjs and this file's /models tests both pin the ladder
+// and thrift cases so the two cannot drift silently.
+function fenced(body) {
+  const match = /```json\s*([\s\S]*?)\s*```/.exec(body ?? "");
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function blockedModels(limits, now) {
+  const entries = plainObject(limits);
+  const blocked = new Set();
+  if (!entries) return blocked;
+  for (const [model, resetAt] of Object.entries(entries)) {
+    const epoch = Number(resetAt);
+    if (Number.isFinite(epoch) && epoch > now) blocked.add(model);
+  }
+  return blocked;
+}
+
+const ALLOWANCE_WEEK = 604800;
+
+// Mirrors allowance.py's `project`: a week-average burn projected against
+// the next reset, or null for "no usable reading", which leaves the role in
+// its normal tier the same way a missing ledger does.
+function project(reading) {
+  const observed = Number(reading?.observedAt);
+  const resets = Number(reading?.resetsAt);
+  const used = Number(reading?.utilization);
+  if (![observed, resets, used].every(Number.isFinite)) return null;
+  const elapsed = observed - (resets - ALLOWANCE_WEEK);
+  const remaining = resets - observed;
+  if (elapsed <= 0 || remaining <= 0) return null;
+  const rate = used / elapsed;
+  if (!(rate > 0)) return null;
+  const exhaustsAt = observed + (1 - used) / rate;
+  return exhaustsAt < resets;
+}
+
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+// Mirrors guard-decide.py's decide(), the ladder/thrift resolution half only
+// (not the pause, stale-wake, or second-gear reasons: those gate whether a
+// run happens at all, not which model it would use).
+function resolveModel(entry, blocked, thriftActive) {
+  let chosen = plainObject(entry) ?? {};
+  let thrift = false;
+  if (thriftActive && plainObject(chosen.thrift)) {
+    chosen = chosen.thrift;
+    thrift = true;
+  }
+  const effort = EFFORTS.has(chosen.effort) ? chosen.effort : "";
+  const ladder = Array.isArray(chosen.ladder) ? chosen.ladder : [];
+  if (!ladder.length) return { model: null, effort, thrift, exhausted: false };
+  const model = ladder.find((candidate) => !blocked.has(candidate));
+  return model
+    ? { model, effort, thrift, exhausted: false }
+    : { model: null, effort, thrift, exhausted: true };
+}
+
+async function models(env, args) {
+  const usage = noArgs("models", args);
+  if (usage) return usage;
+  const [{ data: file }, { data: limitIssues }, { data: allowanceIssues }] = await Promise.all([
+    github(env, "/contents/agents/models.json"),
+    github(env, "/issues?state=open&labels=model-limits&per_page=1"),
+    github(env, "/issues?state=open&labels=allowance-state&per_page=1"),
+  ]);
+  if (typeof file?.content !== "string") throw new UpstreamError();
+  let roles;
+  try {
+    roles = plainObject(JSON.parse(decodeBase64(file.content))?.roles);
+  } catch {
+    throw new UpstreamError();
+  }
+  if (!roles) throw new UpstreamError();
+
+  const now = Date.now() / 1000;
+  const blocked = blockedModels(fenced(array(limitIssues)[0]?.body), now);
+  // Pre-#369 ledgers nest the reading under "current"; a flat object IS the
+  // reading now. One ?? carries the transition, same as guard-decide.py.
+  const ledger = plainObject(fenced(array(allowanceIssues)[0]?.body));
+  const reading = plainObject(ledger?.current) ?? ledger;
+  const thriftActive = Boolean(reading && project(reading));
+
+  const lines = Object.entries(roles).map(([role, entry]) => {
+    const { model, effort, thrift, exhausted } = resolveModel(entry, blocked, thriftActive);
+    if (exhausted) return `${role}: exhausted, every rung rate-limited`;
+    const label = model ?? "(action default)";
+    return `${role}: ${label}${effort ? `, ${effort}` : ""}${thrift ? " [THRIFT]" : ""}`;
+  });
+  return [
+    "Current models:",
+    ...lines,
+    ...(thriftActive ? ["Thrift active: allowance projected to miss the weekly reset."] : []),
+  ].join("\n");
+}
+
 function lastPage(link) {
   if (!link) return null;
   const match = link.match(/[?&]page=(\d+)[^>]*>;\s*rel="last"/);
@@ -787,6 +903,7 @@ const COMMANDS = {
   blocked,
   diff,
   agents,
+  models,
   digest,
 };
 
