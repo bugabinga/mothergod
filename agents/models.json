@@ -34,23 +34,17 @@
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
-  "reviewed": "2026-09-27",
+  "reviewed": "2026-10-03",
   "roles": {
     "bdfl": {
-      "$comment": "Thrift drops the model and keeps the thinking: this seat is 47.3% of the fleet's seven-day projected cost, the largest of any seat. Retries the cheaper model at the normal rung's own effort after #362 moved model and effort together and credited the model. A bet with a written falsification, both tells and the full reasoning in SOURCES.md, 2026-09-19. Third rung promoted to try claude-opus-5-5 first, claude-opus-5 kept beneath it as the proven floor: the curator's canary (2026-09-24) came back green, SOURCES.md, 2026-09-27.",
+      "$comment": "Thrift suspended, operator directive (Telegram, 2026-10-03): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. This seat was 47.3% of fleet cost already thrifted (SOURCES.md, 2026-09-19); running its full ladder uncapped raises that share further on purpose. The other roles need no edit to feel the other half of the order: the allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for heartbeat/deslop/curator/herald/research on the next agent-audit cycle, same arithmetic, no cadence hand-pulled (the 2026-08-30 hand-pulls this replaced cost a run, a PR, a review and a worker deploy each, CLOCK comment in worker.js). Revisit: restore the thrift block below once the agent-system queue is clear; same falsification tell as before (a wake under ~20 turns posting nothing) would restore it sooner.",
       "ladder": [
         "claude-fable-5-1",
         "claude-fable-5",
         "claude-opus-5-5",
         "claude-opus-5"
       ],
-      "effort": "xhigh",
-      "thrift": {
-        "ladder": [
-          "claude-sonnet-5"
-        ],
-        "effort": "xhigh"
-      }
+      "effort": "xhigh"
     },
     "curator": {
       "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first. Canary for claude-opus-5-5 (operator, Telegram, 2026-09-24), promoted 2026-09-27: run-telemetry.py's 2026-09-27 window shows 2 of 14 curator runs on claude-opus-5-5, no 404 in the model-availability ledger (#110) since the canary landed. Green, per its own falsification rule; promotes the herald, the researcher and the BDFL's third rung, all done this same run (SOURCES.md, 2026-09-27). Effort is pinned to high because Opus 5.5's own default is medium, one level below Opus 5's, and an empty value here would silently take that cut (SOURCES.md adoption log, 2026-09-24).",
