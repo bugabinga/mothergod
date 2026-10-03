@@ -40,9 +40,15 @@ pick `length_match`/`length_rep` by `kind` unconditionally (compression
 always targets the newest version, mirroring every literal-mixer
 `EncodeSink` branch's own unconditional pick); `PairedTokenSink::length`
 (`ideal_cost_bits_ppm_expert_experiment`'s sink) does too, since its
-baseline half must keep equaling `ideal_cost_bits` exactly, the existing
-`ppm_expert_experiment_baseline_is_exactly_ideal_cost_bits` guard already
-checks. `decode_tokens` gains a `length_split: bool` parameter instead of
+baseline half must keep equaling `ideal_cost_bits`'s own length pricing
+exactly (factual correction, issue #879: this record originally named
+that guard `ppm_expert_experiment_baseline_is_exactly_ideal_cost_bits`
+as already existing; it did not, and the whole-sink equality it
+described is false, since the baseline's literal half diverges from
+`ideal_cost_bits` on purpose. The real guard is
+`ppm_expert_experiment_baseline_non_literal_subtotal_matches_ideal_cost_bits`,
+scoped to the non-literal subtotal). `decode_tokens` gains a
+`length_split: bool` parameter instead of
 promoting `length` into `DecodeSink` (unlike the literal sub-stream,
 `offset`/`slot` are not version-gated, so only `length`'s own two call
 sites need the branch, not a new sink method every `DecodeSink` impl

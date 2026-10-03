@@ -971,15 +971,18 @@ where
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
         // Matches CostSink::length (the split models): this sink's
-        // baseline half must equal ideal_cost_bits exactly, the guard
-        // `ppm_expert_experiment_baseline_is_exactly_ideal_cost_bits` checks.
+        // baseline half must equal ideal_cost_bits's own length pricing
+        // exactly (not its literal pricing, which differs on purpose — see
+        // `tests::LiteralOnlyCostSink`'s docs), the guard
+        // `ppm_expert_experiment_baseline_non_literal_subtotal_matches_ideal_cost_bits`
+        // checks.
         self.cost.add_same(price_length(models, kind, value));
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
         // Matches CostSink::offset (the length-keyed models): this sink's
-        // baseline half must equal ideal_cost_bits exactly, the same
-        // guard `length`'s own comment above names.
+        // baseline half must equal ideal_cost_bits's own offset pricing
+        // exactly, the same guard `length`'s own comment above names.
         self.cost.add_same(price_offset(models, len, value));
     }
 
