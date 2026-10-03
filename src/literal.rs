@@ -1547,9 +1547,8 @@ impl Literal {
         prefix
     }
 
-    /// Shared skeleton behind [`Self::encode_logistic`]/
-    /// [`Self::decode_logistic`] and [`Self::encode_surprise`]/
-    /// [`Self::decode_surprise`], the [`LogisticMixer`] counterpart of
+    /// Shared skeleton behind [`Self::encode_mix`]/[`Self::decode_mix`],
+    /// the [`LogisticMixer`] counterpart of
     /// [`bittree::walk_sse`]: walks [`bittree::walk_nodes`], the shipped
     /// coder's own tree traversal, blending this model's six expert banks
     /// in the logit domain under `mixer`'s `weight_index` vector, refining
@@ -1595,17 +1594,18 @@ impl Literal {
         })
     }
 
-    /// [`Self::encode_logistic_surprise`]/[`Self::encode_logit_sse`]'s
-    /// shared body: generic over `mixer`'s own calibration table `C`
-    /// ([`Calibrate`]) the same way [`Self::code_bit_walk`] is, since
+    /// [`Self::encode_logistic`]/[`Self::encode_logistic_surprise`]/
+    /// [`Self::encode_logit_sse`]'s shared body: generic over `M`
+    /// ([`LogisticMixer`]) the same way [`Self::code_bit_walk`] is, since
     /// coding `byte` and updating the six expert banks afterward never
-    /// depends on which table refines each node's probability.
-    fn encode_surprise<C: Calibrate>(
+    /// depends on which mixer or calibration table refines each node's
+    /// probability.
+    fn encode_mix<M: LogisticMixer>(
         &mut self,
         encoder: &mut Encoder,
         context: Context,
         byte: u8,
-        mixer: &mut SurpriseLogisticMix<C>,
+        mixer: &mut M,
     ) {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
@@ -1618,14 +1618,14 @@ impl Literal {
         self.update(&bank_indices, weight_index, symbol, exp);
     }
 
-    /// [`Self::decode_logistic_surprise`]/[`Self::decode_logit_sse`]'s
-    /// shared body; see [`Self::encode_surprise`] for why this is generic
-    /// over `mixer`'s calibration table.
-    fn decode_surprise<C: Calibrate>(
+    /// [`Self::decode_logistic`]/[`Self::decode_logistic_surprise`]/
+    /// [`Self::decode_logit_sse`]'s shared body; see [`Self::encode_mix`]
+    /// for why this is generic over the mixer.
+    fn decode_mix<M: LogisticMixer>(
         &mut self,
         decoder: &mut Decoder,
         context: Context,
-        mixer: &mut SurpriseLogisticMix<C>,
+        mixer: &mut M,
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
         let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, |_mid, p| {
@@ -1652,7 +1652,7 @@ impl Literal {
         byte: u8,
         mixer: &mut SurpriseLogisticMix,
     ) {
-        self.encode_surprise(encoder, context, byte, mixer);
+        self.encode_mix(encoder, context, byte, mixer);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -1671,7 +1671,7 @@ impl Literal {
         context: Context,
         mixer: &mut SurpriseLogisticMix,
     ) -> u8 {
-        self.decode_surprise(decoder, context, mixer)
+        self.decode_mix(decoder, context, mixer)
     }
 
     /// Codes `byte` through `encoder` under `context`, blending this
@@ -1690,7 +1690,7 @@ impl Literal {
         byte: u8,
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) {
-        self.encode_surprise(encoder, context, byte, mixer);
+        self.encode_mix(encoder, context, byte, mixer);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -1709,7 +1709,7 @@ impl Literal {
         context: Context,
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) -> u8 {
-        self.decode_surprise(decoder, context, mixer)
+        self.decode_mix(decoder, context, mixer)
     }
 
     /// Codes `byte` through `encoder` under `context`, blending this
@@ -1728,15 +1728,7 @@ impl Literal {
         byte: u8,
         logistic: &mut LogisticMix,
     ) {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let landed = self.code_bit_walk(&bank_indices, weight_index, logistic, |mid, p| {
-            let bit = symbol >= mid;
-            encoder.encode_bit(bit, p);
-            bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
+        self.encode_mix(encoder, context, byte, logistic);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -1755,12 +1747,7 @@ impl Literal {
         context: Context,
         logistic: &mut LogisticMix,
     ) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let byte = self.code_bit_walk(&bank_indices, weight_index, logistic, |_mid, p| {
-            decoder.decode_bit(p)
-        });
-        self.update(&bank_indices, weight_index, usize::from(byte), exp);
-        byte
+        self.decode_mix(decoder, context, logistic)
     }
 }
 
