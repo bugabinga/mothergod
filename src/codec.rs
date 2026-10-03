@@ -459,6 +459,47 @@ fn split_length_model(models: &mut Models, kind: FlagKind) -> &mut Model {
     }
 }
 
+/// `-log2(p)` cost of a flag symbol under the shared `models.flag` tables:
+/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`],
+/// [`OffsetLenSplitSink`]) must price `flag` this same way, since none of
+/// them vary its coding.
+fn price_flag(models: &mut Models, flag_table: usize, kind: FlagKind) -> f64 {
+    models.flag[flag_table].ideal_cost_bits(kind.index())
+}
+
+/// `-log2(p)` cost of a literal byte under the shared, no-column-expert
+/// literal path: [`CostSink`]'s and [`OffsetLenSplitSink`]'s shared
+/// `literal` pricing (neither trials [`Candidate::Transpose`]; see each
+/// sink's own docs).
+fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
+    models
+        .literal
+        .ideal_cost_bits_logistic_surprise_logit_sse(context, byte, &mut models.logit_sse)
+}
+
+/// `-log2(p)` cost of a copy token's length symbol, through whichever of
+/// [`Models::length_match`]/`length_rep` [`split_length_model`] selects:
+/// [`CostSink`]'s, [`PairedTokenSink`]'s, and [`OffsetLenSplitSink`]'s
+/// shared `length` pricing.
+fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
+    ideal_cost_bucketed(split_length_model(models, kind), value)
+}
+
+/// `-log2(p)` cost of a match's distance under the shared, unconditioned
+/// `models.offset`: [`CostSink`]'s and [`PairedTokenSink`]'s shared
+/// `offset` pricing, and [`OffsetLenSplitSink`]'s baseline half.
+fn price_offset(models: &mut Models, value: u32) -> f64 {
+    ideal_cost_bucketed(&mut models.offset, value)
+}
+
+/// `-log2(p)` cost of a rep-slot symbol under the shared `models.slot`:
+/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`],
+/// [`OffsetLenSplitSink`]) must price `slot` this same way, since none of
+/// them vary its coding.
+fn price_slot(models: &mut Models, symbol: usize) -> f64 {
+    models.slot.ideal_cost_bits(symbol)
+}
+
 /// Applies `candidate`'s filter to `data`, or returns a copy of it
 /// unchanged for [`Candidate::Identity`]. Every filter here preserves
 /// length, so the result is always `data.len()` bytes.
@@ -622,7 +663,7 @@ struct CostSink {
 
 impl TokenSink for CostSink {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.bits += models.flag[flag_table].ideal_cost_bits(kind.index());
+        self.bits += price_flag(models, flag_table, kind);
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -632,25 +673,21 @@ impl TokenSink for CostSink {
         // trait's own docs: CostSink and EncodeSink must price and code the
         // same thing, so ideal_cost_bits stays a true estimate of what
         // encode_tokens's real Encoder pays.
-        self.bits += models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
-            context,
-            byte,
-            &mut models.logit_sse,
-        );
+        self.bits += price_literal(models, context, byte);
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
         // Matches EncodeSink::length (the split models): ideal_cost_bits
         // stays a true estimate of what encode_tokens's real Encoder pays.
-        self.bits += ideal_cost_bucketed(split_length_model(models, kind), value);
+        self.bits += price_length(models, kind, value);
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
-        self.bits += ideal_cost_bucketed(&mut models.offset, value);
+        self.bits += price_offset(models, value);
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.bits += models.slot.ideal_cost_bits(symbol);
+        self.bits += price_slot(models, symbol);
     }
 }
 
@@ -861,8 +898,7 @@ where
     F: FnMut(&mut Models, Context, u8) -> (f64, f64),
 {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.cost
-            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
+        self.cost.add_same(price_flag(models, flag_table, kind));
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
@@ -874,17 +910,15 @@ where
         // Matches CostSink::length (the split models): this sink's
         // baseline half must equal ideal_cost_bits exactly, the guard
         // `ppm_expert_experiment_baseline_is_exactly_ideal_cost_bits` checks.
-        self.cost
-            .add_same(ideal_cost_bucketed(split_length_model(models, kind), value));
+        self.cost.add_same(price_length(models, kind, value));
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
-        self.cost
-            .add_same(ideal_cost_bucketed(&mut models.offset, value));
+        self.cost.add_same(price_offset(models, value));
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
+        self.cost.add_same(price_slot(models, symbol));
     }
 }
 
@@ -1002,36 +1036,29 @@ struct OffsetLenSplitSink<'a> {
 
 impl TokenSink for OffsetLenSplitSink<'_> {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.cost
-            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
+        self.cost.add_same(price_flag(models, flag_table, kind));
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        self.cost
-            .add_same(models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
-                context,
-                byte,
-                &mut models.logit_sse,
-            ));
+        self.cost.add_same(price_literal(models, context, byte));
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
         if kind == FlagKind::Match {
             self.last_match_len = value;
         }
-        self.cost
-            .add_same(ideal_cost_bucketed(split_length_model(models, kind), value));
+        self.cost.add_same(price_length(models, kind, value));
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
-        let baseline = ideal_cost_bucketed(&mut models.offset, value);
+        let baseline = price_offset(models, value);
         let candidate_model = &mut self.state.offset[offset_len_state(self.last_match_len)];
         let candidate = ideal_cost_bucketed(candidate_model, value);
         self.cost.add(baseline, candidate);
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
+        self.cost.add_same(price_slot(models, symbol));
     }
 }
 
