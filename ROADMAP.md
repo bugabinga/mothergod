@@ -157,13 +157,24 @@ lengths and repeated-offset lengths into two independent tables; this
 project's shared, unconditioned length model never had that split.
 ACCEPTED (JOURNAL S2-A109): train mean -0.002514 b/B, 7 of 11 cases
 improved (`sqlite_like_records` -0.015901 the largest move), both
-sealed cases cleared the bar. Accepted unwired, the same state S1-P3's
-own additive PPM expert (S2-A100) has waited in since 2026-09-23: the
-apparatus stays on `main`, and the real-bitstream wiring slice (a
-`FORMAT_VERSION` bump and ADR, since this changes model semantics
-visible in the bitstream) is unclaimed, separate scope. Target: beat
-zstd -19 per-file on all of Silesia/Canterbury with real bitstreams;
-then xz -9e.
+sealed cases cleared the bar. Wired next (JOURNAL S2-A110, ADR-0057,
+`FORMAT_VERSION` 8): `Models::length` split into independent
+`length_match`/`length_rep` for real, closing that thread; the real
+bitstream moved less than the ideal-cost pairing predicted (train mean
+-0.000727 b/B, 5 of 11 improved), S2-A110's own diagnosis being that
+the ideal-cost pass walked the raw byte stream while the real encoder
+parses the filtered one. Picked next: the same literature source's
+other split, on the offset model instead of the length model. LZMA
+also conditions a match's distance-slot coding on a coarse bucket of
+that match's own length (`len_to_pos_state`); this project's offset
+model has never been conditioned on anything. ACCEPTED, unwired
+(JOURNAL S2-A111): train mean -0.003526 b/B, 10 of 11 cases improved
+(`x86_dense_code` -0.016795 the largest move) and the eleventh flat at
+exactly 0.0, both sealed cases improved too (`access_log` -0.009795).
+The apparatus stays on `main`; the real-bitstream wiring slice (a
+`FORMAT_VERSION` bump and ADR) is unclaimed, separate scope. Target:
+beat zstd -19 per-file on all of Silesia/Canterbury with real
+bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
 

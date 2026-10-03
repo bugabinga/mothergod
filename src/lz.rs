@@ -40,7 +40,12 @@ pub const WINDOW: usize = 1 << 20;
 
 /// Shortest run [`parse_greedy`] emits as [`Token::Match`]. Below this a
 /// literal costs fewer bits than a match's length+distance overhead.
-const MIN_MATCH_LEN: usize = 4;
+///
+/// Shared with [`crate::codec`]'s offset-length-split experiment
+/// (`JOURNAL` S2-A111), so the match-length-state formula it derives from
+/// this floor has one source of truth instead of a copy that could drift,
+/// matching [`LENGTH_BUCKETS`]/[`OFFSET_BUCKETS`]'s own reasoning.
+pub(crate) const MIN_MATCH_LEN: usize = 4;
 
 /// Shortest run [`parse_greedy`] emits as [`Token::Rep`]. Cheaper than
 /// [`MIN_MATCH_LEN`] because a repeat costs no distance field, only a

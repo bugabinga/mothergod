@@ -8176,3 +8176,89 @@ record.
   rule; two new tests (`length_split_is_gated_on_version_alone`,
   `length_match_and_rep_models_adapt_independently`) replace it.
   `research/progress.jsonl` it184.
+- S2-A111 | ACCEPTED, unwired | S2-A109/S2-A110 closed the length-model
+  split; this candidate is the same literature source's other axis, not
+  a variant of it. LZMA (`lzma-specification.txt`) prices a match's
+  distance slot through one of four independent probability trees
+  selected by `len_to_pos_state`, a coarse bucket of the match's own
+  length. `Models::offset` (`src/codec.rs`) has been one shared,
+  unconditioned `Model` since `S2-D2`'s own wiring, coding every
+  `Token::Match`'s distance regardless of that match's own length
+  (`Token::Rep` never reaches `offset` at all — a repeat prices through
+  `models.slot` instead, choosing which cached distance to reuse, never
+  a fresh one). Hypothesis: a short match's distance and a long match's
+  distance come from measurably different populations (a short copy is
+  more likely an incidental near-range coincidence an optimal parse took
+  because it was locally cheap; a long one more likely a genuine
+  structural recurrence reaching deliberately further back), so
+  splitting `Models::offset` by the triggering match's own length state
+  improves bpb without regressing the sealed set. | Apparatus:
+  `OffsetLenSplitState` (`src/codec.rs`) holds four `Model`s, each sized
+  `lz::OFFSET_BUCKETS`, same construction as `Models::offset`;
+  `offset_len_state` adapts LZMA's own `len_to_pos_state` formula to
+  this crate's `lz::MIN_MATCH_LEN` floor (4, not LZMA's 2): the first
+  four match lengths each get their own state, every longer length
+  saturates into the last one (made `pub(crate)` for this slice, same
+  single-source-of-truth reasoning `LENGTH_BUCKETS`/`OFFSET_BUCKETS`
+  already give). `OffsetLenSplitSink` is a `TokenSink` mirroring
+  `CostSink` for every field except `offset`, which prices the baseline
+  side through the shared `models.offset` (unchanged) and the candidate
+  side through whichever of `OffsetLenSplitState`'s four models
+  `offset_len_state` selects from the match length `length` most
+  recently recorded (`walk_tokens` only ever calls `offset` immediately
+  after `length` for a `Token::Match`, never for a `Token::Rep`, so the
+  recorded length is always current by the time `offset` reads it).
+  `ideal_cost_bits_offset_length_split_experiment` walks one real
+  `lz::parse_optimal` token stream and returns `(baseline_bits,
+  candidate_bits)`, the same before-wiring shape
+  `ideal_cost_bits_length_split_experiment` (S2-A109) established. Two
+  unit tests: a mixed buffer of literals, short fresh matches, and one
+  long fresh match at a second distance prices finitely on both sides;
+  `offset_len_state` saturates (does not panic) on a length far past the
+  fourth state. Measured with a throwaway (uncommitted) scratch binary,
+  `bench/src/bin/scratch_offset_length_split.rs`, over `bench::baseline`'s
+  11 train cases (`CASE_LEN` 50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) plus
+  `access_log`/`gradient_image` sealed at `sealed_seed(CASE_SEED)`, same
+  length, dividing each case's delta by `data.len()`, against the real
+  `encode_tokens`/`CostSink` baseline (`models.offset`, unconditioned).
+  Like S2-A109, this candidate's ideal-cost pricer (`ideal_cost_bucketed`)
+  is the exact function the real bitstream path (`encode_bucketed`)
+  already prices offsets through: no SSE calibration stage sits between
+  them, so this measurement is not subject to the real-bitstream/ideal-
+  cost gap S2-A110 diagnosed for the length split. | Train mean
+  **-0.003526 b/B** (sum -0.038784), 10 of 11 improved:
+  `x86_dense_code` **-0.016795** the largest single move,
+  `entropy_ladder_h4` -0.009319, `access_log`-adjacent `markov_h8_2_trap`
+  -0.004742, `entropy_ladder_h2` -0.003627, `base64_wrapped` -0.002171,
+  `json_records` -0.001068, `sqlite_like_records` -0.000581,
+  `entropy_ladder_h6` -0.000321, `interleaved_audio16` -0.000141,
+  `entropy_ladder_h1` -0.000019; the eleventh, `entropy_ladder_h8`,
+  exactly **0.000000** (iid 8-bit-entropy data profits from no match at
+  all, the same floor S2-A109 hit). No case regressed. Sealed:
+  `access_log` **-0.009795** improved (this lead's largest sealed move of
+  any slice since S2-A109/S2-A110), `gradient_image` **-0.000289**
+  improved. Corpus policy's accept rule (train improvement AND no
+  validation regression) passes outright, and unlike S2-A109 every
+  single measured case moved the same direction or stayed flat.
+  **Accepted.** Mechanism: `x86_dense_code`'s own structure (opcode
+  sequences with a handful of characteristic operand-length classes) is
+  exactly the kind of length-correlated-distance structure
+  `len_to_pos_state` was designed for, and its being this slice's largest
+  win is not a coincidence; `access_log`'s short, line-anchored repeats
+  (IP octets, timestamp fields) separating cleanly from its occasional
+  longer structural recurrences explains the sealed set's own biggest
+  move. No case shows the entropy-ladder/periodic-data tax S2-R15 and
+  several S1-P8 slices paid for splitting a model that had nothing to
+  split on: the length state captures real structure in every tested
+  case, including the iid ladder, where it simply never fires (no match
+  tokens to split). Remaining scope: the real-bitstream wiring slice —
+  splitting `Models::offset` into four length-state-keyed models inside
+  `encode_tokens`/`decode`, a `FORMAT_VERSION` bump and ADR (model
+  semantics visible in the bitstream, CLAUDE.md hard rule 5), decode
+  support for every earlier version, and a real-bitstream measurement,
+  the same shape S2-A109's own remaining scope named before S2-A110
+  closed it. Apparatus (`OffsetLenSplitState`, `OffsetLenSplitSink`,
+  `ideal_cost_bits_offset_length_split_experiment`, its two unit tests,
+  `lz::MIN_MATCH_LEN`'s visibility bump) stays on `main`, unwired, per
+  the `compression-experiment` skill; the scratch binary is deleted, its
+  numbers recorded here. `research/progress.jsonl` it185.

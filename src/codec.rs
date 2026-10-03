@@ -914,6 +914,167 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     (sink.cost.baseline, sink.cost.candidate)
 }
 
+/// `research/JOURNAL.md` S2-A109/S2-A110 split the shared length model by
+/// copy kind; this candidate targets a different split axis LZMA also
+/// conditions on. LZMA (`lzma-specification.txt`) prices a match's
+/// distance slot through one of four independent probability trees
+/// selected by `len_to_pos_state`, a coarse bucket of the match's own
+/// length, not by copy kind: `Models::offset` only ever prices a
+/// [`Token::Match`]'s distance in the first place ([`Token::Rep`] reuses a
+/// cached distance and prices through `models.slot` instead). Hypothesis:
+/// a short match's distance and a long match's distance come from
+/// measurably different distributions (a short copy is more likely an
+/// incidental near-range coincidence, a long one more likely a genuine
+/// structural recurrence reaching further back), so splitting
+/// `Models::offset` by the triggering match's own length state improves
+/// bpb without regressing the sealed set. Priced through
+/// `OffsetLenSplitSink`, the same before-wiring shape `research/JOURNAL.md`
+/// S2-A109's own (since-wired-and-deleted) `ideal_cost_bits_length_split_experiment`
+/// established.
+///
+/// Not reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
+/// wiring, measurement only.
+///
+/// Returns `(baseline_bits, with_split_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_offset_length_split_experiment(data: &[u8]) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut state = OffsetLenSplitState::new();
+    let mut sink = OffsetLenSplitSink {
+        cost: PairedCost::default(),
+        state: &mut state,
+        last_match_len: 0,
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.cost.baseline, sink.cost.candidate)
+}
+
+/// How many independent [`Model`]s [`OffsetLenSplitState`] holds, and the
+/// bucket count [`offset_len_state`] ever returns: LZMA's own
+/// `len_to_pos_state` uses four states (`lzma-specification.txt`).
+const OFFSET_LEN_STATES: usize = 4;
+
+/// LZMA's `len_to_pos_state` formula, adapted to this crate's own
+/// [`lz::MIN_MATCH_LEN`] floor (LZMA's own floor is 2, not 4): the first
+/// [`OFFSET_LEN_STATES`] match lengths each get their own state, every
+/// longer length saturates into the last one. `len` is always a real
+/// [`Token::Match`] length (`>= lz::MIN_MATCH_LEN` by that variant's own
+/// construction), so the saturating subtraction only ever guards against
+/// that invariant being violated, never a real underflow.
+fn offset_len_state(len: u32) -> usize {
+    let min = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN (4) always fits u32");
+    (len.saturating_sub(min) as usize).min(OFFSET_LEN_STATES - 1)
+}
+
+/// [`ideal_cost_bits_offset_length_split_experiment`]'s own state: four
+/// offset [`Model`]s instead of [`Models::offset`]'s one, selected by
+/// [`offset_len_state`] of the triggering match's own length.
+struct OffsetLenSplitState {
+    offset: [Model; OFFSET_LEN_STATES],
+}
+
+impl OffsetLenSplitState {
+    fn new() -> Self {
+        Self {
+            offset: std::array::from_fn(|_| Model::new(lz::OFFSET_BUCKETS)),
+        }
+    }
+}
+
+/// [`TokenSink`] for [`ideal_cost_bits_offset_length_split_experiment`]:
+/// every field prices identically to [`CostSink`] except `offset`, which
+/// the baseline side still prices through the shared `models.offset` and
+/// the candidate side prices through whichever of
+/// [`OffsetLenSplitState`]'s four models [`offset_len_state`] selects from
+/// the match length [`Self::length`] most recently recorded.
+struct OffsetLenSplitSink<'a> {
+    cost: PairedCost,
+    state: &'a mut OffsetLenSplitState,
+    /// The length `walk_tokens` most recently passed to [`Self::length`]
+    /// for a [`Token::Match`]: always current by the time [`Self::offset`]
+    /// reads it, since `walk_tokens` only ever calls `offset` immediately
+    /// after `length` for a `Token::Match` (never for a `Token::Rep`,
+    /// which has no `offset` call at all — see this sink's own `offset`
+    /// doc).
+    last_match_len: u32,
+}
+
+impl TokenSink for OffsetLenSplitSink<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
+        self.cost
+            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        self.cost
+            .add_same(models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
+                context,
+                byte,
+                &mut models.logit_sse,
+            ));
+    }
+
+    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+        if kind == FlagKind::Match {
+            self.last_match_len = value;
+        }
+        self.cost
+            .add_same(ideal_cost_bucketed(split_length_model(models, kind), value));
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        let baseline = ideal_cost_bucketed(&mut models.offset, value);
+        let candidate_model = &mut self.state.offset[offset_len_state(self.last_match_len)];
+        let candidate = ideal_cost_bucketed(candidate_model, value);
+        self.cost.add(baseline, candidate);
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
+    }
+}
+
+#[cfg(test)]
+mod offset_length_split_tests {
+    use super::ideal_cost_bits_offset_length_split_experiment;
+
+    /// Sanity check that both totals are finite and non-negative over a
+    /// buffer containing a real mix of literals and fresh matches at two
+    /// different distances (`"ab"` repeated, then a long run of one byte,
+    /// then `"ab"` repeated again), before any corpus-scale measurement is
+    /// trusted.
+    #[test]
+    fn offset_length_split_prices_a_mixed_buffer_finitely() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"ab");
+        for _ in 0..40 {
+            data.extend_from_slice(b"ab");
+        }
+        data.extend_from_slice(&[0x5Au8; 200]);
+        data.extend_from_slice(b"ab");
+        for _ in 0..40 {
+            data.extend_from_slice(b"ab");
+        }
+        let (baseline, candidate) = ideal_cost_bits_offset_length_split_experiment(&data);
+        assert!(baseline.is_finite() && baseline >= 0.0);
+        assert!(candidate.is_finite() && candidate >= 0.0);
+    }
+
+    /// [`offset_len_state`] saturates instead of panicking on a length at
+    /// or above `lz::MIN_MATCH_LEN + OFFSET_LEN_STATES`: real callers only
+    /// ever pass a [`Token::Match`] length, which can run into the
+    /// thousands on highly repetitive input.
+    #[test]
+    fn offset_len_state_saturates_on_a_long_match() {
+        use super::offset_len_state;
+        assert_eq!(
+            offset_len_state(u32::try_from(crate::lz::MIN_MATCH_LEN).unwrap() + 1_000),
+            super::OFFSET_LEN_STATES - 1
+        );
+    }
+}
+
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
 /// filter [`filters::select::pick`] shortlists, keeps whichever produces
 /// the smallest `encode_tokens` body, and prefixes that body with the
