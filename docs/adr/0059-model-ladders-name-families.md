@@ -42,7 +42,10 @@ The retrospect, which reads every session, is the tell for a generation that rea
 An alias the subscription does not serve, or that the CLI moved to a generation it does not serve yet, is a 404 like any other rung: ledgered for seven days, the seat drops to the next family at the cost of one run, visible in the ledger issue.
 
 `/models` and the ladder now state intent, family and effort, and nothing else.
-The operator's premise becomes a dependency: the fleet's CLI must stay current, which the floating `v1` tag provides and a SHA pin on `claude-code-action` would silently end.
+The operator's premise becomes a dependency: the fleet's CLI must stay current.
+The floating `v1` tag provides that within hours of each action release.
+A SHA pin would provide it one weekly dependabot PR at a time, because the action hardcodes the CLI version it installs (`base-action/action.yml`, `CLAUDE_CODE_VERSION`) and the pin fixes that version until the pin moves.
+(Corrected 2026-10-03: this line first said a SHA pin "would silently end" the currency. Dependabot has moved this repository's SHA pins since PR #514; operator question, Telegram message 863.)
 
 ## Rejected alternatives
 
