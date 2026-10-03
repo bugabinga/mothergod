@@ -331,7 +331,13 @@ def governor(observed, resets, used):
         "discretionary wakes being skipped."
     )
     print("        SLOW DOWN: cut discretionary work, or the pause "
-          "machinery stops the factory before the reset.")
+          "machinery stops the factory before the reset. Shed cheapest "
+          "loss first: the agent-system queue item, then the retrospect "
+          "deep-read, then the digest's depth; a due deep survey last, "
+          "because it alone sees what a week of delta cores cannot "
+          "(operator directive, 2026-09-13). The clock is not a lever: "
+          "the guard already skips ticks (ADR-0039), and wrangler.toml's "
+          "cron is the ceiling, never pulled by hand for budget.")
 
 
 def budget(samples, anchor, now=None):
