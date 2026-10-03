@@ -838,6 +838,131 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     (sink.cost.baseline, sink.cost.candidate)
 }
 
+/// `research/JOURNAL.md` S1-P2 and S1-P3 both reached "repeated
+/// rejections, no further named branch" on the literal mixer's own class
+/// of change; this candidate targets a different stage entirely. LZMA
+/// (7-Zip's `lzma-specification.txt`) codes match lengths and
+/// repeated-offset lengths through two independent length coders
+/// (`LenCoder`/`RepLenCoder`), never one shared table: whether reusing a
+/// cached distance tends to produce a different length distribution than
+/// finding a fresh one is exactly what this tests. `Models::length` is
+/// one order-0 [`Model`] shared by every `Token::Match` and `Token::Rep`
+/// length regardless of which kind produced it; this pairs that shared
+/// baseline against a split candidate, priced through `LengthSplitSink`,
+/// the same before-wiring shape as
+/// [`ideal_cost_bits_ppm_expert_experiment`].
+///
+/// Not reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
+/// wiring, measurement only.
+///
+/// Returns `(baseline_bits, with_split_bits)`.
+#[must_use]
+pub fn ideal_cost_bits_length_split_experiment(data: &[u8]) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut state = LengthSplitState::new();
+    let mut sink = LengthSplitSink {
+        cost: PairedCost::default(),
+        state: &mut state,
+        last_kind: FlagKind::Literal,
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.cost.baseline, sink.cost.candidate)
+}
+
+/// [`ideal_cost_bits_length_split_experiment`]'s own state: two length
+/// [`Model`]s instead of [`Models::length`]'s one, selected by which kind
+/// of copy token is being priced.
+struct LengthSplitState {
+    match_length: Model,
+    rep_length: Model,
+}
+
+impl LengthSplitState {
+    fn new() -> Self {
+        Self {
+            match_length: Model::new(lz::LENGTH_BUCKETS),
+            rep_length: Model::new(lz::LENGTH_BUCKETS),
+        }
+    }
+}
+
+/// [`TokenSink`] for [`ideal_cost_bits_length_split_experiment`]: every
+/// field prices identically to [`CostSink`] except `length`, which the
+/// baseline side still prices through the shared `models.length` and the
+/// candidate side prices through whichever of [`LengthSplitState`]'s two
+/// models matches the copy kind [`Self::flag`] just recorded.
+struct LengthSplitSink<'a> {
+    cost: PairedCost,
+    state: &'a mut LengthSplitState,
+    /// The copy kind `flag` most recently priced: `walk_tokens` always
+    /// calls `flag` immediately before `length` for both `Token::Match`
+    /// and `Token::Rep`, so this is always one of those two by the time
+    /// `length` reads it.
+    last_kind: FlagKind,
+}
+
+impl TokenSink for LengthSplitSink<'_> {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
+        self.last_kind = kind;
+        self.cost
+            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        self.cost
+            .add_same(models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
+                context,
+                byte,
+                &mut models.logit_sse,
+            ));
+    }
+
+    fn length(&mut self, models: &mut Models, value: u32) {
+        let baseline = ideal_cost_bucketed(&mut models.length, value);
+        let candidate_model = match self.last_kind {
+            FlagKind::Match => &mut self.state.match_length,
+            FlagKind::Rep => &mut self.state.rep_length,
+            FlagKind::Literal => {
+                unreachable!("walk_tokens only calls length after a Match or Rep flag")
+            }
+        };
+        let candidate = ideal_cost_bucketed(candidate_model, value);
+        self.cost.add(baseline, candidate);
+    }
+
+    fn offset(&mut self, models: &mut Models, value: u32) {
+        self.cost
+            .add_same(ideal_cost_bucketed(&mut models.offset, value));
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
+    }
+}
+
+#[cfg(test)]
+mod length_split_tests {
+    use super::ideal_cost_bits_length_split_experiment;
+
+    /// Sanity check that both totals are finite and non-negative over a
+    /// buffer containing a real mix of literals, fresh matches, and rep
+    /// matches (`xyz` repeated immediately re-triggers the same distance,
+    /// `lz::parse_optimal`'s rep path), before any corpus-scale
+    /// measurement is trusted.
+    #[test]
+    fn length_split_prices_a_mixed_buffer_finitely() {
+        let mut data = Vec::new();
+        for _ in 0..40 {
+            data.extend_from_slice(b"abcabcabcabc");
+        }
+        data.extend_from_slice(b"xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz");
+        let (baseline, candidate) = ideal_cost_bits_length_split_experiment(&data);
+        assert!(baseline.is_finite() && baseline >= 0.0);
+        assert!(candidate.is_finite() && candidate >= 0.0);
+    }
+}
+
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
 /// filter [`filters::select::pick`] shortlists, keeps whichever produces
 /// the smallest `encode_tokens` body, and prefixes that body with the
