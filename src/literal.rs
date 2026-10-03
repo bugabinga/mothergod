@@ -620,13 +620,6 @@ fn surprise_error_tracking_step(
     *baseline = surprise_ema_update(*baseline, error_sq, SURPRISE_BASELINE_DECAY);
 }
 
-/// Logit-domain mixer over [`Literal`]'s own six expert banks
-/// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
-/// probability of the upper half is [`stretch`]ed, the stretches are
-/// summed under one weight vector per `WEIGHT_CONTEXTS` key (the same
-/// key `banks` selects [`Literal`]'s linear weights by), and the sum is
-/// [`squash`]ed back, then refined through this mixer's own [`Sse`] over
-/// the same [`bittree::SSE_CONTEXTS`] contexts the shipped coder uses.
 /// A fresh weight vector, one per [`WEIGHT_CONTEXTS`] key, every expert at
 /// [`LOGISTIC_INITIAL_WEIGHT`]: the shape [`LogisticMix::new`] and
 /// [`SurpriseLogisticMix::new`] both start from, named once so a future
@@ -643,6 +636,13 @@ fn try_fresh_logistic_weights() -> Result<Vec<[f64; EXPERTS]>, std::collections:
     crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])
 }
 
+/// Logit-domain mixer over [`Literal`]'s own six expert banks
+/// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
+/// probability of the upper half is [`stretch`]ed, the stretches are
+/// summed under one weight vector per `WEIGHT_CONTEXTS` key (the same
+/// key `banks` selects [`Literal`]'s linear weights by), and the sum is
+/// [`squash`]ed back, then refined through this mixer's own [`Sse`] over
+/// the same [`bittree::SSE_CONTEXTS`] contexts the shipped coder uses.
 /// Reads [`Literal`]'s banks, never writes them: [`Literal::encode_logistic`]/
 /// `decode_logistic` are the real coding path (`codec::LOGISTIC_MIN_VERSION`).
 #[derive(Debug, Clone)]
