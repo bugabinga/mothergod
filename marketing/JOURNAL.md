@@ -18,6 +18,37 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-03 — Editorial: the Measured section's win-count claim had the same unguarded shape
+
+`#443` remains the only open `marketing` issue, still blocked on `#739`
+(agent-system, unmerged). Queue empty again, so this is a second defect
+found directly on the surface rather than from the queue, found while
+re-checking the entry above against today's regenerated reports: the CPU
+model matched again (`7763` this time, per `#882`'s regeneration), but
+reading the same paragraph's neighbor sentence found a second instance
+of the exact pattern that entry just closed.
+
+**Found: README.md and site/index.html both say mothergod "wins 6 of 11
+on Canterbury and 1 of 12 on Silesia," and nothing in `tests/claims.rs`
+compared either number to `docs/benchmarks/{canterbury,silesia}.md`.**
+Hand-verified both counts against the reports' own regret columns before
+trusting them (Canterbury: `asyoulik.txt`, `cp.html`, `fields.c`,
+`grammar.lsp`, `kennedy.xls`, `xargs.1` win, 6 of 11; Silesia: `ooffice`
+alone, 1 of 12): both currently true, so this was a guard gap, not yet a
+false claim, the same state the CPU model was in before its CI host
+rotated twice.
+
+**Fixed by adding `win_count_claims_match_their_generated_reports`,**
+counting negative-regret rows per report and comparing against both
+surfaces. Verified by breaking it both ways before trusting it: bumping
+README's count to "7 of 11" fails naming 7 vs 6; flipping one file's
+regret sign in the report fails naming 6 vs 7, both reverted after.
+`cargo test -p mothergod --test claims`: 20 for 20 (was 19). `cargo x
+check`: clean.
+
+No `CHANGELOG.md` entry: a test-only change with no surface diff, same
+precedent as the entry above and `72baf65` (#803).
+
 ## 2026-10-03 — Editorial: the Speed section's CPU claim had no guard, and drifted
 
 `#443` remains the only open `marketing` issue, still blocked on `#739`
