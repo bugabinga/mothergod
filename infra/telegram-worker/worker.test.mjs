@@ -537,6 +537,105 @@ test("Telegram command and prose routes", async (t) => {
     assert.equal(githubPaths(result.calls).length, 5);
   });
 
+  await t.test("models resolves each role's ladder with no ledgers open", async () => {
+    const roles = {
+      bdfl: { ladder: ["claude-opus-5"], effort: "high" },
+      reviewer: { ladder: ["claude-sonnet-5"], effort: "" },
+    };
+    const result = await invoke(
+      "/models",
+      harness((url) => {
+        if (url.pathname.endsWith("/contents/agents/models.json")) {
+          return json({ content: Buffer.from(JSON.stringify({ roles })).toString("base64") });
+        }
+        return json([]);
+      }),
+    );
+    const body = sent(result.calls).text;
+    assert.match(body, /^bdfl: claude-opus-5, high$/m);
+    assert.match(body, /^reviewer: claude-sonnet-5$/m);
+    assert.doesNotMatch(body, /THRIFT/);
+    assert.doesNotMatch(body, /Thrift active/);
+  });
+
+  await t.test("models applies thrift only to roles carrying a thrift block", async () => {
+    const roles = {
+      bdfl: {
+        ladder: ["claude-opus-5"],
+        effort: "high",
+        thrift: { ladder: ["claude-sonnet-5"], effort: "medium" },
+      },
+      reviewer: { ladder: ["claude-sonnet-5"], effort: "" },
+    };
+    // A week-average burn that overshoots the reset (guard-decide.test.mjs's
+    // `missing()`): half the window elapsed, 90% of the allowance spent.
+    const resets = 1_700_000_000;
+    const allowance = {
+      observedAt: resets - 604800 * 0.5,
+      resetsAt: resets,
+      utilization: 0.9,
+    };
+    const result = await invoke(
+      "/models",
+      harness((url) => {
+        if (url.pathname.endsWith("/contents/agents/models.json")) {
+          return json({ content: Buffer.from(JSON.stringify({ roles })).toString("base64") });
+        }
+        if (url.searchParams.get("labels") === "allowance-state") {
+          return json([{ body: "```json\n" + JSON.stringify(allowance) + "\n```" }]);
+        }
+        return json([]);
+      }),
+    );
+    const body = sent(result.calls).text;
+    assert.match(body, /^bdfl: claude-sonnet-5, medium \[THRIFT\]$/m);
+    assert.match(body, /^reviewer: claude-sonnet-5$/m);
+    assert.match(body, /Thrift active: allowance projected to miss the weekly reset\./);
+  });
+
+  await t.test("models falls through a rate-limited rung and reports an exhausted ladder", async () => {
+    const limited = await invoke(
+      "/models",
+      harness((url) => {
+        if (url.pathname.endsWith("/contents/agents/models.json")) {
+          return json({
+            content: Buffer.from(
+              JSON.stringify({ roles: { bdfl: { ladder: ["claude-opus-5", "claude-sonnet-5"] } } }),
+            ).toString("base64"),
+          });
+        }
+        if (url.searchParams.get("labels") === "model-limits") {
+          return json([{ body: "```json\n" + JSON.stringify({ "claude-opus-5": 9_999_999_999 }) + "\n```" }]);
+        }
+        return json([]);
+      }),
+    );
+    assert.match(sent(limited.calls).text, /^bdfl: claude-sonnet-5$/m);
+
+    const exhausted = await invoke(
+      "/models",
+      harness((url) => {
+        if (url.pathname.endsWith("/contents/agents/models.json")) {
+          return json({
+            content: Buffer.from(
+              JSON.stringify({ roles: { bdfl: { ladder: ["claude-opus-5"] } } }),
+            ).toString("base64"),
+          });
+        }
+        if (url.searchParams.get("labels") === "model-limits") {
+          return json([{ body: "```json\n" + JSON.stringify({ "claude-opus-5": 9_999_999_999 }) + "\n```" }]);
+        }
+        return json([]);
+      }),
+    );
+    assert.match(sent(exhausted.calls).text, /^bdfl: exhausted, every rung rate-limited$/m);
+  });
+
+  await t.test("models reports GitHub failures the same as other commands", async () => {
+    const result = await invoke("/models", harness(() => json({ message: "down" }, 503)));
+    assert.match(sent(result.calls).text, /\/models unavailable/);
+  });
+
   await t.test("digest reads the latest comments page and strips the generated footer", async () => {
     const result = await invoke(
       "/digest",
