@@ -145,6 +145,27 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-10-03: operator (Telegram, inbox msg 857): "Sonnet-5? Why not
+  sonnet-5-5? We should prefer latest models from a family." Adopted:
+  `claude-sonnet-5-5` prepended above `claude-sonnet-5` on every ladder
+  and thrift ladder that carried it (curator floor, deslopper, maintainer,
+  reviewer, herald thrift, researcher), the old rung kept beneath as the
+  404 floor, and the family rule written into `agents/models.json`'s
+  header so the next drop is a one-line edit, not a decision. Terms from
+  the `claude-api` skill's model table (cached 2026-09-25): same price as
+  Sonnet 5 ($2/$10 per MTok), same tokenizer and context, effort default
+  still high, so the empty effort on those seats takes no cut. Not
+  canaried on one seat first, unlike opus-5-5: the operator ordered the
+  rule, a 404 costs one run fleet-wide (ledgered once, #110), and a
+  same-tier successor judged by the retrospect every wake needs no
+  quarantine. Falsification: a `claude-sonnet-5-5` 404 in #110, or the
+  reviewer's round count (retrospect ROUNDS) rising over the next week.
+  Gap, second time: both model watches (agent-model-intel's third-party
+  index, docs-watch's Claude Code pages) missed a first-party launch;
+  #890. Footnote the thrift era closed by #888 earned: every BDFL run
+  before it this day, the one that "reviewed every seat's ladder and
+  found them optimal" included, ran on thrift `claude-sonnet-5`.
+
 - 2026-10-01: operator request (Telegram inbox, msg 814) for a research
   thread on verifiable, pragmatic coding practice. Adopted the two seed
   sources as a new SOURCES.md subsection: Casey Muratori

@@ -31,6 +31,18 @@
     "allowance shows slack again. Only roles worth thinning need an entry;",
     "a role already on its floor model has nothing cheaper to fall back to.",
     "",
+    "",
+    "Family rule (operator directive, Telegram, 2026-10-03): within one family",
+    "the newest generation is the first rung and the generation it replaced is",
+    "the rung beneath it, the proven floor; a ladder never carries more than",
+    "two of one family. Reachability on this subscription cannot be probed",
+    "from inside a run (SOURCES.md, 2026-09-24), so a new id's first run may",
+    "404: agent-pause ledgers that for seven days (#110) and every later wake",
+    "falls through, one lost run fleet-wide. Check the new generation's default",
+    "effort before leaving a seat's effort empty: Sonnet 5.5 kept Sonnet 5's",
+    "(high), Opus 5.5 did not (medium), which is why the curator pins high.",
+    "Both drops to date were noticed by the operator, not the factory: #890.",
+    "",
     "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
     "it is an ordinary app-token commit, not an admin-PAT workflow push."
   ],
@@ -51,11 +63,13 @@
       "ladder": [
         "claude-opus-5-5",
         "claude-opus-5",
+        "claude-sonnet-5-5",
         "claude-sonnet-5"
       ],
       "effort": "high",
       "thrift": {
         "ladder": [
+          "claude-sonnet-5-5",
           "claude-sonnet-5"
         ],
         "effort": ""
@@ -63,6 +77,7 @@
     },
     "deslopper": {
       "ladder": [
+        "claude-sonnet-5-5",
         "claude-sonnet-5"
       ],
       "effort": ""
@@ -76,6 +91,7 @@
       "effort": "",
       "thrift": {
         "ladder": [
+          "claude-sonnet-5-5",
           "claude-sonnet-5"
         ],
         "effort": ""
@@ -83,6 +99,7 @@
     },
     "maintainer": {
       "ladder": [
+        "claude-sonnet-5-5",
         "claude-sonnet-5"
       ],
       "effort": ""
@@ -92,11 +109,13 @@
       "ladder": [
         "claude-opus-5-5",
         "claude-opus-5",
+        "claude-sonnet-5-5",
         "claude-sonnet-5"
       ],
       "effort": "",
       "thrift": {
         "ladder": [
+          "claude-sonnet-5-5",
           "claude-sonnet-5"
         ],
         "effort": ""
@@ -105,6 +124,7 @@
     "reviewer": {
       "$comment": "Sonnet held deliberately: highest session count in the fleet. The 2026-09-01 entry deferred this raise until #439 made per-seat burn share measurable; #439 shipped, and run-telemetry.py has published it since (site/agent-metrics.json). Priced 2026-09-19: 22.9% of fleet cost at a $0.71 median per run, the cheapest seat per run. The raise is now pricable and is deliberately not taken while the governor reads SLOW DOWN. SOURCES.md adoption log, 2026-09-01 and 2026-09-19.",
       "ladder": [
+        "claude-sonnet-5-5",
         "claude-sonnet-5"
       ],
       "effort": ""
