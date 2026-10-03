@@ -8332,3 +8332,58 @@ record.
   ratio numbers and both finals reports together is named follow-up work
   for a session whose network reaches both hosts. `research/progress.jsonl`
   it186.
+- S2-R34 | REJECTED | New literature idea, not tied to any standing lead
+  (ROADMAP M3: none open), and a different stage than S2-A109 through
+  S2-A112: the flag symbol, conditioned on the *previous* token's kind,
+  not a copy's own length. LZMA (`lzma-specification.txt`) prices its
+  is-match/is-rep decisions through a `state` whose coarsest axis is
+  literal-last versus match-last versus rep-last. `Models::flag`
+  (`src/codec.rs`) has been two tables keyed by `Context::after_copy`
+  since `S2-D2`'s own wiring: a post-`Match` and a post-`Rep` position
+  share one table. Hypothesis: those two positions are different
+  populations for what comes next, so keying the flag on the previous
+  token's own `FlagKind` (three tables, start state `Literal`, matching
+  `Context::default().after_copy == false`) improves train bpb, largest
+  on rep-heavy cases, exactly 0.0 on `entropy_ladder_h8`, no sealed
+  regression. `Context::after_copy` itself was left alone: the literal
+  mixer reads it too. | Apparatus: a paired `TokenSink` tracking the
+  previous `FlagKind` itself (no `walk_tokens` change), baseline half
+  through `price_flag` and bit-identical to `ideal_cost_bits`, candidate
+  flag through its own three fresh tables, every other field priced
+  identically on both halves; an `ideal_cost_bits_*_experiment(data) ->
+  (baseline_bits, candidate_bits)` entry point over one raw
+  `lz::parse_optimal` token stream; a throwaway scratch binary over
+  `bench::baseline`'s 11 train cases (`CASE_LEN` 50,000, `CASE_SEED`
+  0xBA5E11E5BA5E11E5) plus `access_log`/`gradient_image` at
+  `sealed_seed(CASE_SEED)`, same length, each delta divided by
+  `data.len()`. Ideal cost, not real bitstreams. | Train mean
+  **-0.000876 b/B** (sum -0.009639), but carried by one case:
+  `sqlite_like_records` **-0.010565**; 9 of the other 10 regressed, all
+  small (`markov_h8_2_trap` +0.000241, `json_records` +0.000172,
+  `base64_wrapped` +0.000168, `entropy_ladder_h1` +0.000119,
+  `entropy_ladder_h2` +0.000104, `interleaved_audio16` +0.000055,
+  `entropy_ladder_h6` +0.000034, `x86_dense_code` +0.000021,
+  `entropy_ladder_h4` +0.000012); `entropy_ladder_h8` exactly 0.000000.
+  Sealed: `access_log` **+0.000140 regressed**, `gradient_image` exactly
+  0.000000 (its parse emits no `Rep` at all, so the post-`Match` table
+  replays `models.flag[1]` exactly). Corpus policy: validation
+  regression, **rejected**. Mechanism, from the parse's own token
+  transition counts (rows previous kind L/M/R, columns next kind):
+  `sqlite_like_records` is the one case whose post-copy rows genuinely
+  differ, post-`Match` [965, 1, 5] almost always a literal, post-`Rep`
+  [2244, 539, 852] chaining reps and fresh matches, and the shared table
+  had been averaging the two. Everywhere else the post-`Rep` row is
+  either tiny (`x86_dense_code` 93 events, `access_log` 152,
+  `markov_h8_2_trap` 272) or shaped like the post-`Match` row
+  (`json_records` post-`Match` [382, 16, 17], post-`Rep` [1372, 70, 40],
+  both overwhelmingly literal), so the split buys no information and
+  pays a second fresh table's learning cost: S1-L4's richness tax, at
+  this slice's scale. The one win is also suspect for the real encoder:
+  S2-A110 found `sqlite_like_records`'s real frame selects
+  `Candidate::Delta`, whose parse is not the raw one measured here.
+  Revisit only with a candidate that does not pay a fresh table where
+  reps are rare (e.g. a post-`Rep` table that starts from or mixes with
+  the shared post-copy one), or at slice sizes where the post-`Rep` row
+  is well populated. Apparatus (sink, experiment entry point, its unit
+  tests, scratch binary) deleted in the same PR; this entry is the only
+  trace. `research/progress.jsonl` it187.

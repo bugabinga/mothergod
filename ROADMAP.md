@@ -177,9 +177,15 @@ closing that thread; unlike the length split, the real bitstream tracked
 the ideal-cost prediction fairly closely (train mean -0.002836 b/B,
 every one of the 11 cases improved or flat, none regressed;
 `x86_dense_code` -0.011200 against its own predicted -0.016795, same
-direction, about two-thirds the magnitude). No standing lead is open:
-the next candidate is a literature idea or a cheap wild swing per the
-`compression-experiment` skill. Target: beat zstd -19 per-file on all of
+direction, about two-thirds the magnitude). The same specification's
+coarsest `state` axis came next: the flag symbol keyed on the previous
+token's kind (literal/match/rep-last) instead of today's two-way
+literal/copy-last split. REJECTED (JOURNAL S2-R34): train mean
+-0.000876 b/B, carried by `sqlite_like_records` alone while 9 of the
+other 10 cases and sealed `access_log` regressed, because a post-rep
+position only differs from a post-match one where reps are dense.
+No standing lead is open: the next candidate is a literature idea or a
+cheap wild swing per the `compression-experiment` skill. Target: beat zstd -19 per-file on all of
 Silesia/Canterbury with real bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
