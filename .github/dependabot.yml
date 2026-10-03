@@ -1,21 +1,30 @@
 version: 2
 updates:
+  # `/` alone scans .github/workflows and a root action.yml, never
+  # .github/actions/ (#267 bumped upload-artifact in a workflow and left
+  # agent-audit/action.yml on v4). Groups: one PR per ecosystem per week;
+  # security updates stay immediate and ungrouped.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
   # x/ and fuzz/ each declare their own [workspace] table (cargo-x and
   # cargo-fuzz both require a standalone workspace), so they are not part
-  # of the root's and dependabot does not discover them via directory: /.
+  # of the root's and `/` alone would not discover them.
   - package-ecosystem: cargo
-    directory: /x
+    directories:
+      - /
+      - /x
+      - /fuzz
     schedule:
       interval: weekly
-  - package-ecosystem: cargo
-    directory: /fuzz
-    schedule:
-      interval: weekly
+    groups:
+      cargo:
+        patterns:
+          - "*"
