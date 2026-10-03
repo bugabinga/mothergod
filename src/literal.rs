@@ -1143,20 +1143,23 @@ impl Literal {
     }
 
     /// [`Self::ideal_cost_bits_sse`]'s counterpart for
-    /// [`Self::encode_logistic_surprise`]: sums the ideal cost of `byte`'s
-    /// `LEVELS` `mixer`-refined binary decisions through
-    /// [`Self::code_bit_walk`] at the registered [`SURPRISE_RECENT_DECAY`],
-    /// so a caller pricing a whole stream this way reflects what
-    /// `Self::encode_logistic_surprise` actually pays (`crate::codec`'s
+    /// [`Self::encode_logistic_surprise`]/[`Self::encode_logit_sse`]:
+    /// shared body, generic over `M` ([`LogisticMixer`]) the same way
+    /// [`Self::encode_mix`] is, since pricing `byte` and updating the six
+    /// expert banks afterward never depends on which mixer or calibration
+    /// table refines each node's probability. Sums the ideal cost of
+    /// `byte`'s `LEVELS` `mixer`-refined binary decisions through
+    /// [`Self::code_bit_walk`], so a caller pricing a whole stream this way
+    /// reflects what [`Self::encode_mix`] actually pays (`crate::codec`'s
     /// `CostSink`/`EncodeSink` invariant, [`Self::ideal_cost_bits_sse`]'s
     /// own docs). Updates the six real experts' banks and takes the same
     /// gradient step `mixer` would, same as [`Self::ideal_cost_bits_sse`].
     #[must_use]
-    pub fn ideal_cost_bits_logistic_surprise(
+    fn ideal_cost_bits_mix<M: LogisticMixer>(
         &mut self,
         context: Context,
         byte: u8,
-        mixer: &mut SurpriseLogisticMix,
+        mixer: &mut M,
     ) -> f64 {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
@@ -1171,6 +1174,21 @@ impl Literal {
         bits
     }
 
+    /// [`Self::ideal_cost_bits_sse`]'s counterpart for
+    /// [`Self::encode_logistic_surprise`]: sums the ideal cost of `byte`'s
+    /// `LEVELS` `mixer`-refined binary decisions at the registered
+    /// [`SURPRISE_RECENT_DECAY`], reflecting what
+    /// `Self::encode_logistic_surprise` actually pays.
+    #[must_use]
+    pub fn ideal_cost_bits_logistic_surprise(
+        &mut self,
+        context: Context,
+        byte: u8,
+        mixer: &mut SurpriseLogisticMix,
+    ) -> f64 {
+        self.ideal_cost_bits_mix(context, byte, mixer)
+    }
+
     /// [`Self::ideal_cost_bits_logistic_surprise`]'s counterpart for the
     /// [`SurpriseLogisticMixLogitSse`] research candidate
     /// (`research/JOURNAL.md` S2-A106): identical pricing, over a
@@ -1183,17 +1201,7 @@ impl Literal {
         byte: u8,
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) -> f64 {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let mut bits = 0.0f64;
-        let landed = self.code_bit_walk(&bank_indices, weight_index, mixer, |mid, p| {
-            let bit = symbol >= mid;
-            bits += bittree::ideal_cost_bit(bit, p);
-            bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
-        bits
+        self.ideal_cost_bits_mix(context, byte, mixer)
     }
 
     /// `weights6`, the extra expert's own weight, and their sum: the
