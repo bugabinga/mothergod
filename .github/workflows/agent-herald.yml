@@ -79,9 +79,7 @@ jobs:
           use_commit_signing: true
           prompt: |
             Read marketing/JOURNAL.md through its headings (ADR-0025):
-            your institutional memory; ADR-0040 is your charter. When
-            work changes site/, page layout, styling, browser
-            interaction, or accessibility, use the `web-ui` skill.
+            your institutional memory; ADR-0040 is your charter.
 
             Territory, the human-facing surface: site/, README.md's
             reader experience, CHANGELOG.md and release-notes voice,
