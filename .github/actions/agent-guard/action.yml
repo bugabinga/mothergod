@@ -89,6 +89,13 @@ outputs:
   effort_flag:
     description: "'--effort <level>' for this role, or '' for the session default"
     value: ${{ steps.check.outputs.effort_flag }}
+  model:
+    description: >-
+      The rung model_flag carries, bare: agent-pause keys the model-limits
+      ledger by it, because this guard compares rungs against ledger keys
+      by exact string and a rung is a family alias (ADR-0059). '' for the
+      action default.
+    value: ${{ steps.check.outputs.model }}
 runs:
   using: composite
   steps:
@@ -104,6 +111,7 @@ runs:
       run: |
         set -euo pipefail
         paused=false
+        model=''
         model_flag=''
         effort_flag=''
 
@@ -166,5 +174,6 @@ runs:
         fi
 
         echo "paused=$paused" >> "$GITHUB_OUTPUT"
+        echo "model=$model" >> "$GITHUB_OUTPUT"
         echo "model_flag=$model_flag" >> "$GITHUB_OUTPUT"
         echo "effort_flag=$effort_flag" >> "$GITHUB_OUTPUT"

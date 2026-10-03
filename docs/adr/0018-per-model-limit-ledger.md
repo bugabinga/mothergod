@@ -1,6 +1,6 @@
 # ADR-0018: Per-model limit ledger and agent model ladders
 
-Status: accepted · Date: 2026-08-23 · Amends ADR-0004 (limit handling), ADR-0012 (how the floor is expressed)
+Status: accepted · Date: 2026-08-23 · Amends ADR-0004 (limit handling), ADR-0012 (how the floor is expressed) · Amended by ADR-0059 (rungs are family aliases; the ledger keys by rung)
 
 ## Context
 

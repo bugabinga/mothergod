@@ -1,6 +1,6 @@
 # ADR-0019: Model capability intake is a script, not an agent
 
-Status: accepted · Date: 2026-08-23 · Serves ADR-0012
+Status: accepted · Date: 2026-08-23 · Serves ADR-0012 · Amended by ADR-0059 (intake narrows to new families)
 
 ## Context
 

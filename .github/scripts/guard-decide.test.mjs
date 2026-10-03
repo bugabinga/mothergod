@@ -272,4 +272,15 @@ test("first gear and ladder resolution, unchanged by the extraction", async (t) 
     const d = decide({ ledger: "```json\n[1, 2, 3]\n```" });
     assert.equal(d.model, "claude-opus-5");
   });
+
+  await t.test("rungs are family aliases and only the rung string blocks one (ADR-0059)", () => {
+    const roles = { bdfl: { ladder: ["fable", "opus"] } };
+    const soon = Math.floor(Date.now() / 1000) + 3600;
+    // The runtime's resolved id is not the key: agent-pause ledgers the rung
+    // the guard chose, because this comparison is exact and knows no families.
+    assert.equal(decide({ roles, ledger: fence({ "claude-fable-5-1": soon }) }).model, "fable");
+    const d = decide({ roles, ledger: fence({ fable: soon }) });
+    assert.equal(d.model, "opus");
+    assert.match(d.note, /limited: fable/);
+  });
 });

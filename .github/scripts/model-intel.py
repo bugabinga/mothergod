@@ -123,6 +123,10 @@ def same_model(a, b):
     na, nb = norm(a), norm(b)
     return na == nb or na in nb or nb in na
 
+# Rungs are family aliases (ADR-0059), so `match("sonnet")` is that family's
+# best-scoring catalogue entry, and a finding is a Claude model outside every
+# family on the ladder: a new family, the one thing the CLI's alias cannot
+# adopt for us. A generation inside a family is never a finding.
 def match(rung):
     for m in models:
         if same_model(rung, m["id"]):

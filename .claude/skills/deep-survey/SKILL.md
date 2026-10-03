@@ -83,14 +83,17 @@ filter would have skipped entirely. Fix by PR like any defect.
 
 ## 6. Model ladders
 
-ADR-0031 and ADR-0018. Track model releases against `agents/models.json`:
-when a stronger model ships, prepend it by PR and say why.
+ADR-0031, ADR-0018, ADR-0059. Rungs in `agents/models.json` are family
+aliases, so a generation launch needs no edit; the CLI adopts it. What
+needs you: a new family (the model-intel issue or the cli-reference page
+in #578 names it), a seat whose retrospect says its tier or effort is
+wrong, or an alias 404 in the model-limits ledger.
 
-Set the other seats deliberately, from published news and lived
-experience of where each role struggles: judgment-heavy roles reward
-strength, mechanical roles may not. Unpinned means drifting with a
-default nobody chose. Log each change in the SOURCES.md adoption log with
-the reason.
+Set each seat deliberately, from published news and lived experience of
+where the role struggles: judgment-heavy roles reward strength,
+mechanical roles may not, and effort is explicit on every seat because
+an empty one drifts with a default nobody chose. Log each change in the
+SOURCES.md adoption log with the reason.
 
 ## 7. Roster charters
 

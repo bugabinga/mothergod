@@ -1,133 +1,105 @@
 {
   "$comment": [
-    "Per-role model ladder and effort level. ADR-0018 (ladder), ADR-0021 (effort).",
-    "One object per role so the two never drift apart: two maps keyed by role",
-    "would be a synchronization debt, and this file exists to be a single source.",
+    "Per-role model ladder and effort level. ADR-0018 (ladder), ADR-0021",
+    "(effort), ADR-0059 (rungs are family aliases). One object per role so",
+    "the two never drift apart: two maps keyed by role would be a",
+    "synchronization debt, and this file exists to be a single source.",
     "",
-    "ladder: ordered by preference. The guard runs the first rung that is not",
-    "rate-limited, per the ledger issue labeled model-limits. The LAST rung is",
-    "the floor: nothing below it is reachable, so an exhausted ladder means the",
-    "agent skips this cycle rather than silently dropping to a weaker model.",
-    "An empty ladder means no --model flag: action default, never falls back,",
-    "never skipped for model reasons.",
+    "ladder: family aliases (fable, opus, sonnet, haiku), ordered by",
+    "preference. The Claude Code CLI resolves an alias to that family's",
+    "newest generation, so a generation launch changes nothing here; a new",
+    "family, or a changed judgement about a seat, is the only edit. The",
+    "guard runs the first rung not listed in the ledger issue labeled",
+    "model-limits, which agent-pause keys by rung. The LAST rung is the",
+    "floor: an exhausted ladder skips the cycle rather than silently",
+    "dropping to a weaker model. An empty ladder means no --model flag:",
+    "action default, never falls back, never skipped for model reasons.",
     "",
-    "The BDFL's rung is a budget decision, not a permission one. ADR-0031",
-    "gives the BDFL every role's model and effort choice under the standard",
-    "most capable this project can afford. Current choices are the data below;",
-    "the allowance incident that established the rule lives in issue #197.",
+    "effort: one of low, medium, high, xhigh, max. Always set, never empty:",
+    "an empty value takes the model's own default, and that default moved",
+    "between generations once already (Opus 5 high, Opus 5.5 medium), a cut",
+    "an alias rung would now import silently. An unrecognized value is",
+    "ignored with a log line rather than failing the run.",
     "",
-    "effort: one of low, medium, high, xhigh, max, or empty for the",
-    "session default. Available levels depend on the model, which this file",
-    "cannot check; an unrecognized value is ignored with a log line rather than",
-    "failing the run.",
+    "thrift (issue #202): optional per-role ladder/effort override, applied",
+    "for one cycle whenever agent-guard projects the allowance-state ledger's",
+    "week-average burn to miss the next seven-day reset. No file edit either",
+    "direction: the guard re-projects on every wake. A role already on its",
+    "floor family has nothing cheaper to fall back to and needs no entry.",
     "",
-    "thrift (issue #202): optional per-role ladder/effort override. Absent",
-    "means unchanged. agent-guard reads the allowance-state ledger issue",
-    "(written by agent-audit) and projects its week-average burn rate against",
-    "the next seven-day reset; when the projection misses the reset, it runs",
-    "this role at 'thrift' instead of its normal ladder/effort for that one",
-    "cycle. No file edit needed either direction: the guard re-projects on",
-    "every wake, so restoring the normal tier costs nothing once the",
-    "allowance shows slack again. Only roles worth thinning need an entry;",
-    "a role already on its floor model has nothing cheaper to fall back to.",
-    "",
-    "",
-    "Family rule (operator directive, Telegram, 2026-10-03): within one family",
-    "the newest generation is the first rung and the generation it replaced is",
-    "the rung beneath it, the proven floor; a ladder never carries more than",
-    "two of one family. Reachability on this subscription cannot be probed",
-    "from inside a run (SOURCES.md, 2026-09-24), so a new id's first run may",
-    "404: agent-pause ledgers that for seven days (#110) and every later wake",
-    "falls through, one lost run fleet-wide. Check the new generation's default",
-    "effort before leaving a seat's effort empty: Sonnet 5.5 kept Sonnet 5's",
-    "(high), Opus 5.5 did not (medium), which is why the curator pins high.",
-    "Both drops to date were noticed by the operator, not the factory: #890.",
-    "",
-    "The BDFL owns this file (ADR-0031). It lives outside .github/ so changing",
-    "it is an ordinary app-token commit, not an admin-PAT workflow push."
+    "The BDFL owns this file (ADR-0031). It lives outside .github/ so an edit",
+    "is an ordinary app-token commit. Each seat's $comment carries its current",
+    "reason; the history is agents/SOURCES.md's adoption log."
   ],
   "reviewed": "2026-10-03",
   "roles": {
     "bdfl": {
-      "$comment": "Thrift suspended, operator directive (Telegram, 2026-10-03): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. This seat was 47.3% of fleet cost already thrifted (SOURCES.md, 2026-09-19); running its full ladder uncapped raises that share further on purpose. The other roles need no edit to feel the other half of the order: the allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for heartbeat/deslop/curator/herald/research on the next agent-audit cycle, same arithmetic, no cadence hand-pulled (the 2026-08-30 hand-pulls this replaced cost a run, a PR, a review and a worker deploy each, CLOCK comment in worker.js). Revisit: restore the thrift block below once the agent-system queue is clear; same falsification tell as before (a wake under ~20 turns posting nothing) would restore it sooner.",
+      "$comment": "Thrift suspended (operator directive, Telegram, 2026-10-03): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. The allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for the other seats on the next agent-audit cycle, no cadence hand-pulled. Restore a thrift block once the queue is clear; a wake under ~20 turns posting nothing would restore it sooner.",
       "ladder": [
-        "claude-fable-5-1",
-        "claude-fable-5",
-        "claude-opus-5-5",
-        "claude-opus-5"
+        "fable",
+        "opus"
       ],
       "effort": "xhigh"
     },
     "curator": {
-      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's entire output, and weak sparring is noise that trains authors to ignore it (ADR-0044). One daily wake, so the raise costs one sonnet-to-opus delta a day; thrift sheds it first. Canary for claude-opus-5-5 (operator, Telegram, 2026-09-24), promoted 2026-09-27: run-telemetry.py's 2026-09-27 window shows 2 of 14 curator runs on claude-opus-5-5, no 404 in the model-availability ledger (#110) since the canary landed. Green, per its own falsification rule; promotes the herald, the researcher and the BDFL's third rung, all done this same run (SOURCES.md, 2026-09-27). Effort is pinned to high because Opus 5.5's own default is medium, one level below Opus 5's, and an empty value here would silently take that cut (SOURCES.md adoption log, 2026-09-24).",
+      "$comment": "Opus first, sonnet floor: adversarial critique is this seat's whole output, and weak sparring trains authors to ignore it (ADR-0044). One daily wake; thrift sheds the opus delta first.",
       "ladder": [
-        "claude-opus-5-5",
-        "claude-opus-5",
-        "claude-sonnet-5-5",
-        "claude-sonnet-5"
+        "opus",
+        "sonnet"
       ],
       "effort": "high",
       "thrift": {
         "ladder": [
-          "claude-sonnet-5-5",
-          "claude-sonnet-5"
+          "sonnet"
         ],
-        "effort": ""
+        "effort": "high"
       }
     },
     "deslopper": {
       "ladder": [
-        "claude-sonnet-5-5",
-        "claude-sonnet-5"
+        "sonnet"
       ],
-      "effort": ""
+      "effort": "high"
     },
     "herald": {
-      "$comment": "Opus floor, no sonnet rung: writing quality for humans is this seat's entire output, and a weaker writer defeats the seat (ADR-0040). Thrift trades that deliberately when the alternative is a dead factory. claude-opus-5-5 promoted above claude-opus-5, same tier at 20% less per token: the curator's canary came back green (SOURCES.md, 2026-09-27).",
+      "$comment": "Opus floor, no sonnet rung: writing quality for humans is this seat's whole output (ADR-0040); thrift trades it only against a dead factory. Effort medium is what Opus 5.5's default handed this seat unpinned since 2026-09-27, kept as a stated choice under 'cost effective for the others' (operator, Telegram, 2026-10-03); raise to high when the retrospect reads the prose as thin.",
       "ladder": [
-        "claude-opus-5-5",
-        "claude-opus-5"
+        "opus"
       ],
-      "effort": "",
+      "effort": "medium",
       "thrift": {
         "ladder": [
-          "claude-sonnet-5-5",
-          "claude-sonnet-5"
+          "sonnet"
         ],
-        "effort": ""
+        "effort": "high"
       }
     },
     "maintainer": {
       "ladder": [
-        "claude-sonnet-5-5",
-        "claude-sonnet-5"
+        "sonnet"
       ],
-      "effort": ""
+      "effort": "high"
     },
     "researcher": {
-      "$comment": "Opus first: each research session is the fleet's judgment-densest, so the raise costs one sonnet-to-opus delta per session (operator directive, Telegram, 2026-09-01). Cadence moved off a fixed weekly wake to research-due's claim check (issue #541, operator request, Telegram, 2026-09-21), roughly twice weekly now, so this raise now costs about twice what it did when priced. claude-opus-5-5 promoted above claude-opus-5, same tier at 20% less per token: the curator's canary came back green (SOURCES.md, 2026-09-27).",
+      "$comment": "Opus first: each research session is the fleet's judgment-densest (operator directive, Telegram, 2026-09-01), about twice weekly since research-due's claim check (#541). Effort medium: same provenance and same revisit tell as the herald's.",
       "ladder": [
-        "claude-opus-5-5",
-        "claude-opus-5",
-        "claude-sonnet-5-5",
-        "claude-sonnet-5"
+        "opus",
+        "sonnet"
       ],
-      "effort": "",
+      "effort": "medium",
       "thrift": {
         "ladder": [
-          "claude-sonnet-5-5",
-          "claude-sonnet-5"
+          "sonnet"
         ],
-        "effort": ""
+        "effort": "high"
       }
     },
     "reviewer": {
-      "$comment": "Sonnet held deliberately: highest session count in the fleet. The 2026-09-01 entry deferred this raise until #439 made per-seat burn share measurable; #439 shipped, and run-telemetry.py has published it since (site/agent-metrics.json). Priced 2026-09-19: 22.9% of fleet cost at a $0.71 median per run, the cheapest seat per run. The raise is now pricable and is deliberately not taken while the governor reads SLOW DOWN. SOURCES.md adoption log, 2026-09-01 and 2026-09-19.",
+      "$comment": "Sonnet held deliberately: highest session count in the fleet and the cheapest seat per run (22.9% of fleet cost at a $0.71 median, run-telemetry 2026-09-19). The opus raise is pricable and is not taken while the governor reads SLOW DOWN.",
       "ladder": [
-        "claude-sonnet-5-5",
-        "claude-sonnet-5"
+        "sonnet"
       ],
-      "effort": ""
+      "effort": "high"
     }
   }
 }
