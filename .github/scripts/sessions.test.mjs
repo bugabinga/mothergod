@@ -48,15 +48,18 @@ function run(args, env) {
 const d1 = (rows) => ({ payload: { success: true, result: [{ success: true, results: rows }] } });
 
 test("an unreadable database prints UNREADABLE and exits non-zero, never a table", async () => {
-  await withStub({ status: 500, payload: { success: false, errors: [{ message: "edge down" }] } }, async (base, seen) => {
-    const r = await run(["sql", "SELECT 1"], { D1_API_BASE: base });
-    assert.notEqual(r.code, 0);
-    assert.match(r.out, /UNREADABLE/);
-    assert.match(r.out, /HTTP 500/);
-    assert.doesNotMatch(r.out, /no rows/);
-    assert.doesNotMatch(r.out + r.err, /test-token/);
-    assert.equal(seen.length, 1);
-  });
+  await withStub(
+    { status: 500, payload: { success: false, errors: [{ message: "edge down" }] } },
+    async (base, seen) => {
+      const r = await run(["sql", "SELECT 1"], { D1_API_BASE: base });
+      assert.notEqual(r.code, 0);
+      assert.match(r.out, /UNREADABLE/);
+      assert.match(r.out, /HTTP 500/);
+      assert.doesNotMatch(r.out, /no rows/);
+      assert.doesNotMatch(r.out + r.err, /test-token/);
+      assert.equal(seen.length, 1);
+    },
+  );
 });
 
 test("success:false from the API is unreadable too, with its message", async () => {
@@ -79,9 +82,14 @@ test("sql sends the statement with its params and renders the rows aligned", asy
     { role: "reviewer", runs: 7, cost_usd: null },
   ];
   await withStub(d1(rows), async (base, seen) => {
-    const r = await run(["sql", "SELECT role, COUNT(*) runs FROM sessions WHERE at >= ?", "2026-10-01"], { D1_API_BASE: base });
+    const r = await run(["sql", "SELECT role, COUNT(*) runs FROM sessions WHERE at >= ?", "2026-10-01"], {
+      D1_API_BASE: base,
+    });
     assert.equal(r.code, 0, r.err);
-    assert.deepEqual(seen[0].body, { sql: "SELECT role, COUNT(*) runs FROM sessions WHERE at >= ?", params: ["2026-10-01"] });
+    assert.deepEqual(seen[0].body, {
+      sql: "SELECT role, COUNT(*) runs FROM sessions WHERE at >= ?",
+      params: ["2026-10-01"],
+    });
     assert.equal(seen[0].auth, "Bearer test-token");
     assert.match(seen[0].url, /\/d1\/database\/[0-9a-f-]+\/query$/);
     const lines = r.out.trimEnd().split("\n");
