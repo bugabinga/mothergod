@@ -236,5 +236,9 @@ platform requirement). New files follow the placement rule in `agents/README.md`
   token, the only one that raises `ci` and a review. Body on stdin for
   all three. `gh issue create`, `gh issue comment`, `gh pr create`,
   `gh pr comment` and `gh pr review` are never typed.
+- Work a run defers is an issue before the run ends, never only a
+  sentence in an ops-log post or PR body: queues read labels, and nobody
+  reads the log back. #873 left `bench/baseline.json`'s regeneration as
+  a "named follow-up" that nothing named.
 - Anything only the human operator can do (secrets, settings, uploads,
   crates.io) → label `blocked-on-human`, explain exactly what is needed, move on.
