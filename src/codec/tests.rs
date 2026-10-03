@@ -439,6 +439,113 @@ fn length_match_and_rep_models_adapt_independently() {
 }
 
 #[test]
+fn offset_length_split_is_gated_on_version_alone() {
+    // Same shape as length_split_is_gated_on_version_alone, but for the
+    // offset-model split (not the length symbol). A hand-built token
+    // stream over all-zero data (so any distance validly replays, no real
+    // repeat structure needed): 4 literals, then 30 Token::Match tokens of
+    // length MIN_MATCH_LEN (offset_len_state 0) at distance 1 (training
+    // offset_len[0] on distance 1 alone, under the split the real encoder
+    // takes), then 30 Token::Match tokens of a far longer length
+    // (offset_len_state OFFSET_LEN_STATES - 1, saturated) at distance 2
+    // (training offset_len[3] on distance 2 alone, starting fresh). Decoded
+    // at OFFSET_LEN_SPLIT_MIN_VERSION, offset_len[3] starts fresh when the
+    // first long match arrives, matching the real encoder's state; decoded
+    // one version below, decode_tokens's shared models.offset has already
+    // adapted to 30 observations of distance 1 by then, so the first long
+    // match's offset symbol decodes under the wrong distribution and
+    // desyncs the rest of the stream. The length sub-stream is unaffected
+    // at that version (LENGTH_SPLIT_MIN_VERSION already selects
+    // length_match/length_rep, same as the real encoder used), so any
+    // mismatch isolates to the offset gate alone. Must NOT reproduce the
+    // original data, proving `offset_split` is live dispatch, not dead code
+    // a future refactor could drop unnoticed.
+    let short_len = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN fits u32");
+    let long_len = short_len + u32::try_from(OFFSET_LEN_STATES).expect("tiny constant fits u32");
+    let distance1 = NonZeroU32::new(1).expect("1 is not zero");
+    let distance2 = NonZeroU32::new(2).expect("2 is not zero");
+    let mut tokens = vec![
+        Token::Literal(0),
+        Token::Literal(0),
+        Token::Literal(0),
+        Token::Literal(0),
+    ];
+    tokens.extend(std::iter::repeat_n(
+        Token::Match {
+            len: short_len,
+            distance: distance1,
+        },
+        30,
+    ));
+    tokens.extend(std::iter::repeat_n(
+        Token::Match {
+            len: long_len,
+            distance: distance2,
+        },
+        30,
+    ));
+    let data = vec![0u8; 4 + 30 * short_len as usize + 30 * long_len as usize];
+
+    let mut frame = Candidate::Identity.to_header_bytes().to_vec();
+    frame.extend(encode_tokens_with(&data, None, &tokens));
+
+    assert_eq!(
+        decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+        Ok(data.as_slice()),
+        "fixture must round-trip at the real FORMAT_VERSION first"
+    );
+    assert_ne!(
+        decode(&frame, LENGTH_SPLIT_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
+        Ok(data.as_slice()),
+        "decoding an OFFSET_LEN_SPLIT_MIN_VERSION frame as LENGTH_SPLIT_MIN_VERSION must not \
+         silently reproduce the original data"
+    );
+}
+
+#[test]
+fn offset_models_adapt_independently_by_length_state() {
+    // Guards against a future refactor collapsing Models::offset_len's
+    // four entries back onto fewer states (which would still round-trip
+    // correctly, since encode and decode would agree either way, so
+    // offset_length_split_is_gated_on_version_alone's own frame-level test
+    // can't catch it): trains offset_len[0] (a length-MIN_MATCH_LEN match)
+    // on distance 10 many times through the real EncodeSink path, then
+    // checks that a fresh offset_len[OFFSET_LEN_STATES - 1] (never
+    // trained, a far longer match's own state) still prices 10 at its
+    // untrained, higher cost — proving the four entries are genuinely
+    // independent state, not aliases.
+    let mut models = Models::new();
+    let mut ac = Encoder::new();
+    let short_len = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN fits u32");
+    for _ in 0..50 {
+        EncodeSink {
+            ac: &mut ac,
+            column: None,
+        }
+        .offset(&mut models, short_len, 10);
+    }
+    let trained_cost = ideal_cost_bucketed(&mut models.offset_len[0], 10);
+    let untrained_cost = ideal_cost_bucketed(&mut models.offset_len[OFFSET_LEN_STATES - 1], 10);
+    assert!(
+        trained_cost < untrained_cost,
+        "trained offset_len[0] cost ({trained_cost}) should be cheaper than untrained \
+         offset_len[OFFSET_LEN_STATES - 1] cost ({untrained_cost}) for the same value"
+    );
+}
+
+#[test]
+fn offset_len_state_saturates_on_a_long_match() {
+    // Real callers only ever pass a Token::Match length, which can run
+    // into the thousands on highly repetitive input: offset_len_state must
+    // saturate into the last state instead of panicking or indexing past
+    // Models::offset_len's bounds.
+    assert_eq!(
+        offset_len_state(u32::try_from(lz::MIN_MATCH_LEN).unwrap() + 1_000),
+        OFFSET_LEN_STATES - 1
+    );
+}
+
+#[test]
 fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
     // A run of identical 5-byte instructions in the *filtered* stream
     // gives lz::parse_optimal real match/rep tokens to find, exercising
@@ -788,7 +895,7 @@ fn paired_token_sink_non_literal_events_add_the_same_cost_to_both_totals() {
     let mut expected_models = Models::new();
     let expected = expected_models.flag[1].ideal_cost_bits(FlagKind::Match.index())
         + ideal_cost_bucketed(&mut expected_models.length_match, 17)
-        + ideal_cost_bucketed(&mut expected_models.offset, 123)
+        + ideal_cost_bucketed(&mut expected_models.offset_len[offset_len_state(17)], 123)
         + expected_models.slot.ideal_cost_bits(2);
 
     let mut models = Models::new();
@@ -800,7 +907,7 @@ fn paired_token_sink_non_literal_events_add_the_same_cost_to_both_totals() {
     };
     sink.flag(&mut models, 1, FlagKind::Match);
     sink.length(&mut models, FlagKind::Match, 17);
-    sink.offset(&mut models, 123);
+    sink.offset(&mut models, 17, 123);
     sink.slot(&mut models, 2);
 
     assert!((sink.cost.baseline - expected).abs() < 1e-9);

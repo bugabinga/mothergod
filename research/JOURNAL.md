@@ -8262,3 +8262,73 @@ record.
   `lz::MIN_MATCH_LEN`'s visibility bump) stays on `main`, unwired, per
   the `compression-experiment` skill; the scratch binary is deleted, its
   numbers recorded here. `research/progress.jsonl` it185.
+- S2-A112 | ACCEPTED | S2-A111's real-wiring slice, closing that entry's
+  own remaining scope (`FORMAT_VERSION` 9, ADR-0058): `codec::Models`
+  gained an `offset_len` field (`[Model; OFFSET_LEN_STATES]`, 4 entries)
+  alongside the existing shared `offset` (kept for decoding pre-version-9
+  frames); `TokenSink::offset` gained a `len: u32` parameter threaded by
+  `walk_tokens` from the `Token::Match` arm's own already-destructured
+  length (the same binding `TokenSink::length` already receives), so
+  `EncodeSink`/`CostSink`/`PairedTokenSink` pick `offset_len[offset_len_state(len)]`
+  unconditionally; `decode_tokens` gained an `offset_split: bool` field
+  (bundled with the existing `length_split: bool` into one `DecodeGates`
+  struct, since an eighth plain `bool` parameter tripped
+  `clippy::too_many_arguments`), computed once per frame as `version >=
+  OFFSET_LEN_SPLIT_MIN_VERSION` by both `decode` and
+  `decode_undoable_streaming`, mirroring `LiteralPath::for_version`'s own
+  once-per-frame read. `OFFSET_LEN_STATES`/`offset_len_state` move from
+  the deleted experiment apparatus into real plumbing unchanged. | Measured,
+  real bitstreams (`mothergod::compress`, this run's sandbox):
+  `bench/baseline.json`'s 11 fixed train-tier cases, none regress
+  (`baseline_gate check` passes against the unchanged committed baseline):
+  `base64_wrapped` 0.579040 -> 0.576960 (-0.002080), `entropy_ladder_h1`
+  1.262080 -> 1.262080 (unchanged), `entropy_ladder_h2` 2.427360 ->
+  2.423680 (-0.003680), `entropy_ladder_h4` 4.475840 -> 4.466400
+  (-0.009440), `entropy_ladder_h6` 6.178240 -> 6.178080 (-0.000160),
+  `entropy_ladder_h8` 8.000960 -> 8.000960 (unchanged, iid data has no
+  match tokens to split), `interleaved_audio16` 5.785760 -> 5.785600
+  (-0.000160), `json_records` 0.593440 -> 0.592320 (-0.001120),
+  `markov_h8_2_trap` 2.427360 -> 2.424000 (-0.003360), `sqlite_like_records`
+  3.438560 -> 3.438560 (unchanged), `x86_dense_code` 2.705120 -> 2.693920
+  (-0.011200); train mean **-0.002836 b/B** (sum -0.031200), every one of
+  the 11 cases improved or stayed flat, **none regressed**. Sealed-only
+  kinds (`sealed_seed(CASE_SEED)`, same length): `access_log` 0.903680 ->
+  0.893760 (**-0.009920**) improved, `gradient_image` 5.870400 -> 5.870080
+  (**-0.000320**) improved. Corpus policy's accept rule (train improvement,
+  no validation regression) passes outright. | Mechanism: unlike S2-A109/
+  S2-A110's length split, the real improvement here tracks S2-A111's own
+  ideal-cost prediction fairly closely instead of mostly evaporating:
+  `x86_dense_code`'s real -0.011200 against its predicted -0.016795 (same
+  direction, about two-thirds the magnitude) is the clearest case, and
+  every other case's sign matches its ideal-cost prediction too. The
+  offset symbol is priced through `ideal_cost_bucketed`/`encode_bucketed`
+  identically in both the ideal-cost pairing and the real encoder, with no
+  SSE-calibration stage or filtered-vs-raw parse mismatch between them,
+  the same reasons S2-A111's own entry gave for expecting a tighter
+  real/ideal correspondence than the length split got, now confirmed
+  real-bitstream side. New golden fixture `tests/golden/v9-lz-repeated-text`
+  (same plaintext as `v8-lz-repeated-text`, re-encoded, same
+  `Candidate::Delta` selection); every version-3 through version-8 fixture
+  stays committed, decode-only, forever. Superseded apparatus
+  (`OffsetLenSplitState`, `OffsetLenSplitSink`,
+  `ideal_cost_bits_offset_length_split_experiment`, its two unit tests)
+  deleted in this same PR per the `compression-experiment` skill's
+  wiring-slice rule; three tests replace it:
+  `offset_length_split_is_gated_on_version_alone`,
+  `offset_models_adapt_independently_by_length_state`, and
+  `offset_len_state_saturates_on_a_long_match` (the deleted module's own
+  saturation test, carried over unchanged). `bench/baseline.json` and
+  `docs/benchmarks/{canterbury,silesia}.md` are deliberately left
+  unregenerated this time (a departure from S2-A110's own precedent):
+  `baseline_gate check` passes clean against the *unchanged* committed
+  baseline (every real delta above sits far inside `TOLERANCE_BITS`,
+  0.02 b/B), and writing fresh numbers would retire both finals reports'
+  embedded fingerprint, forcing a same-PR regeneration of both
+  (`bench/src/bin/baseline_gate.rs`, issue #327); `silesia_report` fetched
+  cleanly from this run's sandbox (hash-verified against
+  `bench/corpus.toml`'s pin), but `corpus.canterbury.ac.nz` answered every
+  attempt with HTTP 403 regardless of retry or user agent, with general
+  internet egress otherwise confirmed working. Refreshing the committed
+  ratio numbers and both finals reports together is named follow-up work
+  for a session whose network reaches both hosts. `research/progress.jsonl`
+  it186.

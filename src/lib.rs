@@ -91,7 +91,12 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// [`lz::Token::Match`]/[`lz::Token::Rep`] to two independent ones,
 /// selected by which kind produced it, regardless of candidate
 /// (`docs/adr/0057-wire-the-match-rep-length-model-split.md`,
-/// `research/JOURNAL.md` S2-A109/S2-A110): all eight are bitstream format
+/// `research/JOURNAL.md` S2-A109/S2-A110), and to 9 when a match's
+/// distance symbol switched from one shared model regardless of that
+/// match's own length to four independent ones selected by a coarse bucket
+/// of it
+/// (`docs/adr/0058-wire-the-offset-length-state-split.md`,
+/// `research/JOURNAL.md` S2-A111/S2-A112): all nine are bitstream format
 /// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
 /// separate version-0 decode path is needed. A version-1 or version-2 frame
@@ -114,15 +119,19 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// that, regardless of candidate, a version-8 frame decodes a copy token's
 /// length through [`lz::Token::Match`]/[`lz::Token::Rep`]'s own independent
 /// model instead of one shared between them
-/// (`codec::LENGTH_SPLIT_MIN_VERSION`). [`codec::decode`] takes the
+/// (`codec::LENGTH_SPLIT_MIN_VERSION`), and a version-9 frame decodes a
+/// `Token::Match`'s distance through one of four models keyed on that
+/// match's own length (`codec::OFFSET_LEN_SPLIT_MIN_VERSION`) instead of
+/// one shared regardless of length. [`codec::decode`] takes the
 /// frame's declared version (and, for `Candidate::Transpose`, its
 /// already-parsed candidate) and picks between them, so hard rule 5's
 /// "decode support for every version the spec still covers" is satisfied
 /// by dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
 /// `tests/golden/v4-*.mgdc`, `tests/golden/v5-*.mgdc`,
-/// `tests/golden/v6-*.mgdc`, `tests/golden/v7-*.mgdc`, and
-/// `tests/golden/v8-*.mgdc` pin that forever).
-pub const FORMAT_VERSION: u8 = 8;
+/// `tests/golden/v6-*.mgdc`, `tests/golden/v7-*.mgdc`,
+/// `tests/golden/v8-*.mgdc`, and `tests/golden/v9-*.mgdc` pin that
+/// forever).
+pub const FORMAT_VERSION: u8 = 9;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
