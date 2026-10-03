@@ -1,13 +1,13 @@
 {
-  "base64_wrapped": 0.5816,
-  "entropy_ladder_h1": 1.26288,
-  "entropy_ladder_h2": 2.42864,
-  "entropy_ladder_h4": 4.47568,
+  "base64_wrapped": 0.57904,
+  "entropy_ladder_h1": 1.26208,
+  "entropy_ladder_h2": 2.42736,
+  "entropy_ladder_h4": 4.47584,
   "entropy_ladder_h6": 6.17824,
   "entropy_ladder_h8": 8.00096,
-  "interleaved_audio16": 5.7856,
-  "json_records": 0.596,
-  "markov_h8_2_trap": 2.42864,
+  "interleaved_audio16": 5.78576,
+  "json_records": 0.59344,
+  "markov_h8_2_trap": 2.42736,
   "sqlite_like_records": 3.43856,
-  "x86_dense_code": 2.70496
+  "x86_dense_code": 2.70512
 }

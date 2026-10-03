@@ -8119,3 +8119,60 @@ record.
   `main`, unwired, per the `compression-experiment` skill; the scratch
   binary is deleted, its numbers recorded here. `research/progress.jsonl`
   it183.
+- S2-A110 | ACCEPTED | S2-A109's real-wiring slice, closing that entry's
+  own remaining scope (`FORMAT_VERSION` 8, ADR-0057): `codec::Models`
+  gained `length_match`/`length_rep` fields alongside the existing shared
+  `length` (kept for decoding pre-version-8 frames); `TokenSink::length`
+  gained a `kind: FlagKind` parameter threaded by `walk_tokens` from the
+  `Token::Match`/`Token::Rep` arm it already matches on, so `EncodeSink`
+  and `codec::CostSink` pick `length_match`/`length_rep` by kind
+  unconditionally (compression always targets the newest version);
+  `decode_tokens` gained a `length_split: bool` parameter instead of
+  promoting `length` into `DecodeSink` (`offset`/`slot` are not
+  version-gated either, so only `length`'s own two call sites needed the
+  branch), computed once per frame as `version >=
+  LENGTH_SPLIT_MIN_VERSION` by both `decode` and
+  `decode_undoable_streaming`, mirroring `LiteralPath::for_version`'s own
+  once-per-frame read. Unlike every literal-mixer version gate, this one
+  carries no `Candidate::Transpose` carve-out: the length symbol sits
+  outside the literal sub-stream those gates cover. | Measured, real
+  bitstreams (`mothergod::compress`, this run's sandbox):
+  `bench/baseline.json`'s 11 fixed train-tier cases, none regress
+  (`baseline_gate check` passes): `entropy_ladder_h1` 1.262880 ->
+  1.262080 (-0.000800), `entropy_ladder_h2` 2.428640 -> 2.427360
+  (-0.001280), `entropy_ladder_h4` 4.475680 -> 4.475840 (+0.000160),
+  `entropy_ladder_h6` 6.178240 -> 6.178240 (unchanged), `entropy_ladder_h8`
+  8.000960 -> 8.000960 (unchanged), `markov_h8_2_trap` 2.428640 ->
+  2.427360 (-0.001280), `json_records` 0.596000 -> 0.593440 (-0.002560),
+  `base64_wrapped` 0.581600 -> 0.579040 (-0.002560), `interleaved_audio16`
+  5.785600 -> 5.785760 (+0.000160), `sqlite_like_records` 3.438560 ->
+  3.438560 (unchanged), `x86_dense_code` 2.704960 -> 2.705120 (+0.000160);
+  train mean **-0.000727 b/B** (sum -0.008000), 5 of 11 improved, 3
+  regressed (each the same tiny +0.000160), 3 unchanged. Sealed-only
+  kinds (`sealed_seed(CASE_SEED)`, same length): `access_log` 0.904320 ->
+  0.903680 (-0.000640) improved, `gradient_image` 5.870400 -> 5.870400
+  (unchanged, not a regression). Corpus policy's accept rule (train
+  improvement, no validation regression) passes. | Mechanism: the real
+  improvement runs far smaller than S2-A109's own ideal-cost pairing
+  predicted (train mean -0.002514, `sqlite_like_records` -0.015901 the
+  largest single predicted move, flat here instead) — `codec::encode`'s
+  own filter trial (`filters::select::pick`) runs `lz::parse_optimal`
+  against the *filtered* byte stream (confirmed: `sqlite_like_records`'s
+  real frame selects `Candidate::Delta`, kind byte 1, while raw
+  `lz::parse_optimal(data)` on the *unfiltered* bytes — what S2-A109's
+  ideal-cost pairing walked — found 971 match and 3,636 rep tokens over
+  that same input), so the real encoder's match/rep structure for a named
+  case differs from what the ideal-cost pairing measured on raw input,
+  the same real-bitstream-vs-ideal-cost gap ADR-0052's own wiring slice
+  (S2-A102) already documented once for the literal mixer: an ideal-cost
+  pairing measures a model in isolation, a wiring slice measures it
+  inside the whole encoder's own candidate/parse selection. New golden
+  fixture `tests/golden/v8-lz-repeated-text` (same plaintext as
+  `v5-lz-repeated-text`, re-encoded); every version-3 through version-7
+  fixture stays committed, decode-only, forever. Superseded apparatus
+  (`LengthSplitState`, `LengthSplitSink`,
+  `ideal_cost_bits_length_split_experiment`, its unit test) deleted in
+  this same PR per the `compression-experiment` skill's wiring-slice
+  rule; two new tests (`length_split_is_gated_on_version_alone`,
+  `length_match_and_rep_models_adapt_independently`) replace it.
+  `research/progress.jsonl` it184.

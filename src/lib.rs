@@ -78,11 +78,20 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// literal sub-stream switched from SSE-calibrated coding to a logit-domain
 /// mixer over the same six experts
 /// (`docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`,
-/// `research/JOURNAL.md` S1-P8), and to 6 when that same set of candidates
+/// `research/JOURNAL.md` S1-P8), to 6 when that same set of candidates
 /// switched to a second rate schedule over the identical logit-domain mix,
 /// a learned baseline instead of an annealed step count
 /// (`docs/adr/0054-wire-the-surprise-rate-schedule-into-the-literal-model.md`,
-/// `research/JOURNAL.md` S2-A104/S2-A105): all six are bitstream format
+/// `research/JOURNAL.md` S2-A104/S2-A105), to 7 when that same set of
+/// candidates switched its SSE calibration stage from a linear table to a
+/// stretch-domain one
+/// (`docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`,
+/// `research/JOURNAL.md` S2-A106/S2-A108), and to 8 when a copy token's
+/// length symbol switched from one shared model for every
+/// [`lz::Token::Match`]/[`lz::Token::Rep`] to two independent ones,
+/// selected by which kind produced it, regardless of candidate
+/// (`docs/adr/0057-wire-the-match-rep-length-model-split.md`,
+/// `research/JOURNAL.md` S2-A109/S2-A110): all eight are bitstream format
 /// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
 /// separate version-0 decode path is needed. A version-1 or version-2 frame
@@ -101,15 +110,19 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// [`literal::Literal::decode_logistic`] instead; a version-6 frame codes
 /// that same set of candidates through [`literal::Literal::decode_logistic_surprise`]
 /// instead; a version-7 frame codes that same set of candidates through
-/// [`literal::Literal::decode_logit_sse`] instead. [`codec::decode`] takes
-/// the frame's declared version (and, for `Candidate::Transpose`, its
+/// [`literal::Literal::decode_logit_sse`] instead. Separately from any of
+/// that, regardless of candidate, a version-8 frame decodes a copy token's
+/// length through [`lz::Token::Match`]/[`lz::Token::Rep`]'s own independent
+/// model instead of one shared between them
+/// (`codec::LENGTH_SPLIT_MIN_VERSION`). [`codec::decode`] takes the
+/// frame's declared version (and, for `Candidate::Transpose`, its
 /// already-parsed candidate) and picks between them, so hard rule 5's
 /// "decode support for every version the spec still covers" is satisfied
 /// by dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
 /// `tests/golden/v4-*.mgdc`, `tests/golden/v5-*.mgdc`,
-/// `tests/golden/v6-*.mgdc`, and `tests/golden/v7-*.mgdc` pin that
-/// forever).
-pub const FORMAT_VERSION: u8 = 7;
+/// `tests/golden/v6-*.mgdc`, `tests/golden/v7-*.mgdc`, and
+/// `tests/golden/v8-*.mgdc` pin that forever).
+pub const FORMAT_VERSION: u8 = 8;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

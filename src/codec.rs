@@ -69,9 +69,17 @@
 //! `research/JOURNAL.md` S2-A106/S2-A108); a version-7 `Candidate::Transpose`
 //! frame is unaffected, same carve-out as versions 5 and 6. [`decode`]
 //! takes the frame's declared `version` and its already-parsed `candidate`
-//! and picks the matching literal path; every other symbol
-//! (flag/length/offset/slot) is unaffected and coded identically at every
-//! version `LZ_MIN_VERSION` or above, regardless of candidate.
+//! and picks the matching literal path. The `length` symbol (a
+//! [`Token::Match`] or [`Token::Rep`]'s copy length) is coded identically
+//! regardless of candidate at every version, but is itself version-gated
+//! starting at `LENGTH_SPLIT_MIN_VERSION` (8): below it, every length
+//! shares one [`Model`] regardless of which token kind produced it; at or
+//! above it, a match's length and a rep's length code through two
+//! independent models instead
+//! (`docs/adr/0057-wire-the-match-rep-length-model-split.md`,
+//! `research/JOURNAL.md` S2-A109/S2-A110). `offset` and `slot` are
+//! unaffected and coded identically at every version `LZ_MIN_VERSION` or
+//! above, regardless of candidate.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -176,6 +184,18 @@ const SURPRISE_MIN_VERSION: u8 = 6;
 /// version is unaffected — see the module docs' "Payload layout" section.
 const LOGIT_SSE_MIN_VERSION: u8 = 7;
 
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
+/// [`Token::Match`]'s length and a [`Token::Rep`]'s length through two
+/// independent [`Model`]s (`Models::length_match`/`length_rep`) instead of
+/// one shared [`Model`] (`Models::length`) regardless of which kind
+/// produced it (`research/JOURNAL.md` S2-A109/S2-A110,
+/// `docs/adr/0057-wire-the-match-rep-length-model-split.md`). Unlike every
+/// `*_MIN_VERSION` constant above, this gate is not candidate-dependent:
+/// it applies to every [`Candidate`], `Candidate::Transpose` included,
+/// since the length symbol sits outside the literal sub-stream those
+/// constants gate. Every candidate at a lower version is unaffected.
+const LENGTH_SPLIT_MIN_VERSION: u8 = 8;
+
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
 /// a decoder reads a frame's `columns` param from untrusted input, so bank
@@ -247,7 +267,13 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// surprise`'s linear-domain `Sse` lookup with `LogitSse`'s own (one extra
 /// `stretch` call per node) at `LOGIT_SSE_MIN_VERSION` and above, still a
 /// bounded constant more, no new loop or allocation; the same argument
-/// covers it too.
+/// covers it too. `LENGTH_SPLIT_MIN_VERSION`'s length-model split touches a
+/// different symbol (the length coded with every `Token::Match`/`Token::Rep`,
+/// not the per-byte literal loop this argument is about) and replaces one
+/// `Model::decode` call on `models.length` with the same call on whichever
+/// of `models.length_match`/`length_rep` a cheap `FlagKind` branch selects:
+/// no new loop or allocation, and strictly cheaper per token than the
+/// per-byte literal cost this bound is already measured against.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Which of the three kinds a token codes as: the flag symbol coded
@@ -310,7 +336,22 @@ struct Models {
     /// different flag distributions worth modeling separately. Indexed by
     /// [`Context::after_copy`].
     flag: [Model; 2],
+    /// Shared copy-length [`Model`], regardless of [`Token::Match`]/
+    /// [`Token::Rep`]: the real coding path at versions below
+    /// `LENGTH_SPLIT_MIN_VERSION`, kept only for decoding those older
+    /// frames (`length_match`/`length_rep` below replace it at
+    /// `LENGTH_SPLIT_MIN_VERSION` and above, same role `literal` keeps for
+    /// `decode_sse` below `LOGISTIC_MIN_VERSION`).
     length: Model,
+    /// [`Token::Match`]'s own copy-length [`Model`], independent of
+    /// `length_rep`: the real coding path at `LENGTH_SPLIT_MIN_VERSION`
+    /// and above (`research/JOURNAL.md` S2-A109/S2-A110,
+    /// `docs/adr/0057-wire-the-match-rep-length-model-split.md`).
+    length_match: Model,
+    /// [`Token::Rep`]'s own copy-length [`Model`], independent of
+    /// `length_match`: the real coding path at `LENGTH_SPLIT_MIN_VERSION`
+    /// and above, same lifetime and gate as `length_match`.
+    length_rep: Model,
     offset: Model,
     slot: Model,
 }
@@ -324,6 +365,8 @@ impl Models {
             logit_sse: SurpriseLogisticMixLogitSse::new(),
             flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
             length: Model::new(lz::LENGTH_BUCKETS),
+            length_match: Model::new(lz::LENGTH_BUCKETS),
+            length_rep: Model::new(lz::LENGTH_BUCKETS),
             offset: Model::new(lz::OFFSET_BUCKETS),
             slot: Model::new(lz::REP_SLOTS),
         }
@@ -347,6 +390,8 @@ impl Models {
                 Model::try_new(FLAG_ALPHABET)?,
             ],
             length: Model::try_new(lz::LENGTH_BUCKETS)?,
+            length_match: Model::try_new(lz::LENGTH_BUCKETS)?,
+            length_rep: Model::try_new(lz::LENGTH_BUCKETS)?,
             offset: Model::try_new(lz::OFFSET_BUCKETS)?,
             slot: Model::try_new(lz::REP_SLOTS)?,
         })
@@ -394,6 +439,26 @@ fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
     cost + f64::from(bucket_bits(b))
 }
 
+/// Picks [`Models::length_match`]/`length_rep` by `kind`, the
+/// `LENGTH_SPLIT_MIN_VERSION` split every real-path [`TokenSink`] (and the
+/// `ideal_cost_bits` pricer that must price what they code) selects a copy
+/// token's length model through.
+///
+/// # Panics
+///
+/// Panics if `kind` is [`FlagKind::Literal`]: [`walk_tokens`] never calls
+/// [`TokenSink::length`] for a [`Token::Literal`], so every real caller
+/// here already has a [`FlagKind::Match`] or [`FlagKind::Rep`] in hand.
+fn split_length_model(models: &mut Models, kind: FlagKind) -> &mut Model {
+    match kind {
+        FlagKind::Match => &mut models.length_match,
+        FlagKind::Rep => &mut models.length_rep,
+        FlagKind::Literal => {
+            unreachable!("walk_tokens never calls length for a Token::Literal")
+        }
+    }
+}
+
 /// Applies `candidate`'s filter to `data`, or returns a copy of it
 /// unchanged for [`Candidate::Identity`]. Every filter here preserves
 /// length, so the result is always `data.len()` bytes.
@@ -434,7 +499,9 @@ fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Result<Vec<u8>, Error> {
 trait TokenSink {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind);
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8);
-    fn length(&mut self, models: &mut Models, value: u32);
+    /// `kind` is always [`FlagKind::Match`] or [`FlagKind::Rep`]:
+    /// [`walk_tokens`] never calls this for a [`Token::Literal`].
+    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32);
     fn offset(&mut self, models: &mut Models, value: u32);
     fn slot(&mut self, models: &mut Models, symbol: usize);
 }
@@ -458,7 +525,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
             }
             Token::Match { len, distance } => {
                 sink.flag(models, flag_table, FlagKind::Match);
-                sink.length(models, len);
+                sink.length(models, FlagKind::Match, len);
                 sink.offset(models, distance.get());
                 let end = pos + len as usize;
                 context = context.after_copy(&data[pos..end]);
@@ -467,7 +534,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
             Token::Rep { len, slot } => {
                 sink.flag(models, flag_table, FlagKind::Rep);
                 sink.slot(models, slot.index());
-                sink.length(models, len);
+                sink.length(models, FlagKind::Rep, len);
                 let end = pos + len as usize;
                 context = context.after_copy(&data[pos..end]);
                 pos = end;
@@ -529,8 +596,12 @@ impl TokenSink for EncodeSink<'_> {
         }
     }
 
-    fn length(&mut self, models: &mut Models, value: u32) {
-        encode_bucketed(&mut models.length, self.ac, value);
+    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+        // Compression always targets the newest format version, so
+        // encoding always takes the split models (LENGTH_SPLIT_MIN_VERSION);
+        // `decode` is the one that must still read older frames through
+        // the shared `models.length`.
+        encode_bucketed(split_length_model(models, kind), self.ac, value);
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
@@ -568,8 +639,10 @@ impl TokenSink for CostSink {
         );
     }
 
-    fn length(&mut self, models: &mut Models, value: u32) {
-        self.bits += ideal_cost_bucketed(&mut models.length, value);
+    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+        // Matches EncodeSink::length (the split models): ideal_cost_bits
+        // stays a true estimate of what encode_tokens's real Encoder pays.
+        self.bits += ideal_cost_bucketed(split_length_model(models, kind), value);
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
@@ -797,9 +870,12 @@ where
         self.cost.add(baseline, candidate);
     }
 
-    fn length(&mut self, models: &mut Models, value: u32) {
+    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+        // Matches CostSink::length (the split models): this sink's
+        // baseline half must equal ideal_cost_bits exactly, the guard
+        // `ppm_expert_experiment_baseline_is_exactly_ideal_cost_bits` checks.
         self.cost
-            .add_same(ideal_cost_bucketed(&mut models.length, value));
+            .add_same(ideal_cost_bucketed(split_length_model(models, kind), value));
     }
 
     fn offset(&mut self, models: &mut Models, value: u32) {
@@ -836,131 +912,6 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     };
     walk_tokens(&tokens, data, &mut models, &mut sink);
     (sink.cost.baseline, sink.cost.candidate)
-}
-
-/// `research/JOURNAL.md` S1-P2 and S1-P3 both reached "repeated
-/// rejections, no further named branch" on the literal mixer's own class
-/// of change; this candidate targets a different stage entirely. LZMA
-/// (7-Zip's `lzma-specification.txt`) codes match lengths and
-/// repeated-offset lengths through two independent length coders
-/// (`LenCoder`/`RepLenCoder`), never one shared table: whether reusing a
-/// cached distance tends to produce a different length distribution than
-/// finding a fresh one is exactly what this tests. `Models::length` is
-/// one order-0 [`Model`] shared by every `Token::Match` and `Token::Rep`
-/// length regardless of which kind produced it; this pairs that shared
-/// baseline against a split candidate, priced through `LengthSplitSink`,
-/// the same before-wiring shape as
-/// [`ideal_cost_bits_ppm_expert_experiment`].
-///
-/// Not reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
-/// wiring, measurement only.
-///
-/// Returns `(baseline_bits, with_split_bits)`.
-#[must_use]
-pub fn ideal_cost_bits_length_split_experiment(data: &[u8]) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut state = LengthSplitState::new();
-    let mut sink = LengthSplitSink {
-        cost: PairedCost::default(),
-        state: &mut state,
-        last_kind: FlagKind::Literal,
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.cost.baseline, sink.cost.candidate)
-}
-
-/// [`ideal_cost_bits_length_split_experiment`]'s own state: two length
-/// [`Model`]s instead of [`Models::length`]'s one, selected by which kind
-/// of copy token is being priced.
-struct LengthSplitState {
-    match_length: Model,
-    rep_length: Model,
-}
-
-impl LengthSplitState {
-    fn new() -> Self {
-        Self {
-            match_length: Model::new(lz::LENGTH_BUCKETS),
-            rep_length: Model::new(lz::LENGTH_BUCKETS),
-        }
-    }
-}
-
-/// [`TokenSink`] for [`ideal_cost_bits_length_split_experiment`]: every
-/// field prices identically to [`CostSink`] except `length`, which the
-/// baseline side still prices through the shared `models.length` and the
-/// candidate side prices through whichever of [`LengthSplitState`]'s two
-/// models matches the copy kind [`Self::flag`] just recorded.
-struct LengthSplitSink<'a> {
-    cost: PairedCost,
-    state: &'a mut LengthSplitState,
-    /// The copy kind `flag` most recently priced: `walk_tokens` always
-    /// calls `flag` immediately before `length` for both `Token::Match`
-    /// and `Token::Rep`, so this is always one of those two by the time
-    /// `length` reads it.
-    last_kind: FlagKind,
-}
-
-impl TokenSink for LengthSplitSink<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.last_kind = kind;
-        self.cost
-            .add_same(models.flag[flag_table].ideal_cost_bits(kind.index()));
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        self.cost
-            .add_same(models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
-                context,
-                byte,
-                &mut models.logit_sse,
-            ));
-    }
-
-    fn length(&mut self, models: &mut Models, value: u32) {
-        let baseline = ideal_cost_bucketed(&mut models.length, value);
-        let candidate_model = match self.last_kind {
-            FlagKind::Match => &mut self.state.match_length,
-            FlagKind::Rep => &mut self.state.rep_length,
-            FlagKind::Literal => {
-                unreachable!("walk_tokens only calls length after a Match or Rep flag")
-            }
-        };
-        let candidate = ideal_cost_bucketed(candidate_model, value);
-        self.cost.add(baseline, candidate);
-    }
-
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        self.cost
-            .add_same(ideal_cost_bucketed(&mut models.offset, value));
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(models.slot.ideal_cost_bits(symbol));
-    }
-}
-
-#[cfg(test)]
-mod length_split_tests {
-    use super::ideal_cost_bits_length_split_experiment;
-
-    /// Sanity check that both totals are finite and non-negative over a
-    /// buffer containing a real mix of literals, fresh matches, and rep
-    /// matches (`xyz` repeated immediately re-triggers the same distance,
-    /// `lz::parse_optimal`'s rep path), before any corpus-scale
-    /// measurement is trusted.
-    #[test]
-    fn length_split_prices_a_mixed_buffer_finitely() {
-        let mut data = Vec::new();
-        for _ in 0..40 {
-            data.extend_from_slice(b"abcabcabcabc");
-        }
-        data.extend_from_slice(b"xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz");
-        let (baseline, candidate) = ideal_cost_bits_length_split_experiment(&data);
-        assert!(baseline.is_finite() && baseline >= 0.0);
-        assert!(candidate.is_finite() && candidate >= 0.0);
-    }
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
@@ -1148,14 +1099,38 @@ trait DecodeSink {
     ) -> Result<Context, Self::Err>;
 }
 
+/// Decodes a copy token's length symbol: through [`Models::length_match`]/
+/// `length_rep` (selected by `kind`) when `length_split` is set
+/// (`LENGTH_SPLIT_MIN_VERSION` and above), or through the shared
+/// [`Models::length`] otherwise. `EncodeSink::length` always takes the
+/// split branch unconditionally (compression always targets the newest
+/// version); this function is the one that must still read older frames.
+///
+/// # Panics
+///
+/// Panics if `kind` is [`FlagKind::Literal`]: both of [`decode_tokens`]'s
+/// call sites already have a [`FlagKind::Match`] or [`FlagKind::Rep`] in
+/// hand.
+fn decode_length(models: &mut Models, ac: &mut Decoder, length_split: bool, kind: FlagKind) -> u32 {
+    if length_split {
+        decode_bucketed(split_length_model(models, kind), ac)
+    } else {
+        decode_bucketed(&mut models.length, ac)
+    }
+}
+
 /// The shared skeleton behind [`decode`] and [`decode_undoable_streaming`]:
 /// decodes `token_count` tokens off `ac` in coding order, routing every
 /// literal byte and copy through `sink`, and advancing the literal-model
 /// context and `reps` exactly as [`decode`] and [`decode_undoable_streaming`]
-/// both require. See [`DecodeSink`]'s docs for why this exists.
+/// both require. See [`DecodeSink`]'s docs for why this exists. `length_split`
+/// is the frame's declared version checked against
+/// `LENGTH_SPLIT_MIN_VERSION` once, up front, by both callers (mirroring
+/// [`LiteralPath::for_version`]'s own once-per-frame version read).
 fn decode_tokens<S: DecodeSink>(
     token_count: u32,
     declared_len: usize,
+    length_split: bool,
     models: &mut Models,
     ac: &mut Decoder,
     reps: &mut RepCache,
@@ -1171,7 +1146,7 @@ fn decode_tokens<S: DecodeSink>(
                 context = context.after_literal(byte);
             }
             FlagKind::Match => {
-                let len = decode_bucketed(&mut models.length, ac);
+                let len = decode_length(models, ac, length_split, FlagKind::Match);
                 let distance = decode_bucketed(&mut models.offset, ac);
                 // decode_bucketed always ORs in `1 << bits`, which is >= 1
                 // regardless of the residual bits: never zero.
@@ -1186,7 +1161,7 @@ fn decode_tokens<S: DecodeSink>(
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
                 let slot = RepSlot::from_index(models.slot.decode(ac));
-                let len = decode_bucketed(&mut models.length, ac);
+                let len = decode_length(models, ac, length_split, FlagKind::Rep);
                 let distance = reps.get(slot);
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
@@ -1376,9 +1351,11 @@ impl DecodeSink for VecSink<'_> {
 /// `COLUMN_EXPERT_MIN_VERSION` (4) and above, which decodes through
 /// [`crate::literal::Literal::decode_column`] regardless, blending a
 /// column-keyed seventh expert into the mix (see the module docs' "Payload
-/// layout" section). Every other symbol decodes identically regardless of
-/// `version` or candidate, since only the literal sub-stream's internal
-/// shape changed.
+/// layout" section). `offset` and `slot` decode identically regardless of
+/// `version` or candidate; `length` decodes through the shared
+/// `Models::length` below `LENGTH_SPLIT_MIN_VERSION` (8) and through
+/// `Models::length_match`/`length_rep` at or above it, regardless of
+/// candidate (see the module docs' "Payload layout" section).
 ///
 /// # Panics
 ///
@@ -1430,6 +1407,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     decode_tokens(
         token_count,
         declared_len,
+        version >= LENGTH_SPLIT_MIN_VERSION,
         &mut models,
         &mut ac,
         &mut reps,
@@ -1641,6 +1619,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
     decode_tokens(
         token_count,
         declared_len,
+        version >= LENGTH_SPLIT_MIN_VERSION,
         &mut models,
         &mut ac,
         &mut reps,
