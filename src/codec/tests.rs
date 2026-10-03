@@ -1192,3 +1192,67 @@ fn streaming_propagates_the_writer_error_unwrapped() {
         }
     }
 }
+
+/// [`TokenSink`] that isolates a token stream's literal cost through
+/// [`price_literal`], ignoring flag/length/offset/slot: the whole-file
+/// [`ideal_cost_bits`] and [`PairedTokenSink`]'s baseline share every
+/// non-literal price function but use two different literal formulas on
+/// purpose (plain [`crate::literal::Literal::ideal_cost_bits`] for the
+/// baseline vs. the wired
+/// [`crate::literal::Literal::ideal_cost_bits_logistic_surprise_logit_sse`]
+/// for `price_literal`), so comparing the two totals directly would charge
+/// that intentional difference as drift. Subtracting this sink's total from
+/// [`ideal_cost_bits`]'s leaves the non-literal subtotal, the only part
+/// [`ppm_expert_experiment_baseline_non_literal_subtotal_matches_ideal_cost_bits`]
+/// needs to compare.
+#[derive(Default)]
+struct LiteralOnlyCostSink {
+    bits: f64,
+}
+
+impl TokenSink for LiteralOnlyCostSink {
+    fn flag(&mut self, _models: &mut Models, _flag_table: usize, _kind: FlagKind) {}
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        self.bits += price_literal(models, context, byte);
+    }
+
+    fn length(&mut self, _models: &mut Models, _kind: FlagKind, _value: u32) {}
+
+    fn offset(&mut self, _models: &mut Models, _len: u32, _value: u32) {}
+
+    fn slot(&mut self, _models: &mut Models, _symbol: usize) {}
+}
+
+#[test]
+fn ppm_expert_experiment_baseline_non_literal_subtotal_matches_ideal_cost_bits() {
+    // Two Token::Match runs plus one Token::Rep (verified via
+    // lz::parse_optimal's own token kinds below), so every non-literal
+    // TokenSink method this guards (flag, length, offset, slot) is
+    // actually exercised, not just flag/length on a literal-only walk.
+    let data = b"abcabcabcabcXXXabcabcabcabcXXXabcabcabcabc".to_vec();
+    let tokens = lz::parse_optimal(&data);
+    assert!(
+        tokens.iter().any(|t| matches!(t, Token::Match { .. }))
+            && tokens.iter().any(|t| matches!(t, Token::Rep { .. })),
+        "fixture must exercise both Token::Match and Token::Rep: {tokens:?}"
+    );
+
+    let mut literal_only_models = Models::new();
+    let mut literal_only = LiteralOnlyCostSink::default();
+    walk_tokens(&tokens, &data, &mut literal_only_models, &mut literal_only);
+    let non_literal_from_whole = ideal_cost_bits(&data) - literal_only.bits;
+
+    let mut models = Models::new();
+    let mut paired = PairedTokenSink {
+        cost: PairedCost::default(),
+        pair_literal: |_: &mut Models, _: Context, _: u8| (0.0, 0.0),
+    };
+    walk_tokens(&tokens, &data, &mut models, &mut paired);
+
+    assert!(
+        (non_literal_from_whole - paired.cost.baseline).abs() < 1e-9,
+        "non_literal_from_whole={non_literal_from_whole} paired_baseline={}",
+        paired.cost.baseline
+    );
+}
