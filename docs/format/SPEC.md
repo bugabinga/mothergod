@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 7)
+# mothergod bitstream format (FORMAT_VERSION 8)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -14,7 +14,7 @@ version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 6)
+4       1     format version (currently 8)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -28,12 +28,12 @@ ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
 rather than parsed under the current layout; version 2 named this same
 outer layout but coded its literal sub-stream through a direct 256-way
 range division, and was retired outright under ADR-0050, no release ever
-having written it. Versions 3 through 6 `Lz` frames share the same outer
-payload layout below; only the literal sub-stream's internal shape
-differs between them (see "Lz" below, ADR-0038, ADR-0046, ADR-0052,
-ADR-0054) — a decoder dispatches on the declared version (and, at version
-4 and above, the frame's own filter selector) rather than rejecting any
-of them.
+having written it. Versions 3 through 8 `Lz` frames share the same outer
+payload layout below; only the literal sub-stream's internal shape and
+the length symbol's model selection differ between them (see "Lz" below,
+ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055, ADR-0057) — a decoder
+dispatches on the declared version (and, at version 4 and above, the
+frame's own filter selector) rather than rejecting any of them.
 
 ## Methods
 
@@ -101,11 +101,22 @@ instead of version 6's linear-domain one
 `Candidate::Transpose` frame still codes through `encode_column`/
 `decode_column` exactly as versions 4 through 6 do. Every candidate at a
 version below its own gate codes its literals exactly as the next lower
-version does. Every other symbol in the stream
-(flag/length/offset/slot) is coded identically regardless of version or
-candidate; a decoder dispatches only the literal sub-stream, on the
-frame's declared version and (at version 4 and above) its own
-already-parsed filter selector.
+version does. `flag`, `offset`, and `slot` are coded identically
+regardless of version or candidate; a decoder dispatches the literal
+sub-stream on the frame's declared version and (at version 4 and above)
+its own already-parsed filter selector.
+
+**The `length` symbol's model selection is version-gated too, but not
+candidate-gated (ADR-0057).** Below format version 8
+(`codec::LENGTH_SPLIT_MIN_VERSION`), a `Token::Match`'s length and a
+`Token::Rep`'s length are coded through one shared adaptive model
+regardless of which kind produced it. At format version 8 and above, they
+are coded through two independent models instead, selected by kind: a
+rep token's length tends to come from a different distribution than a
+freshly found match's (`research/JOURNAL.md` S2-A109/S2-A110). Unlike the
+literal sub-stream's gates above, this applies to every candidate,
+`Candidate::Transpose` included, since the length symbol sits outside the
+literal sub-stream those gates cover.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for

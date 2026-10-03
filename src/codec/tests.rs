@@ -358,6 +358,87 @@ fn logit_sse_path_is_gated_on_version_alone() {
 }
 
 #[test]
+fn length_split_is_gated_on_version_alone() {
+    // Same shape as logit_sse_path_is_gated_on_version_alone, but for the
+    // length-model split (not the literal sub-stream). A hand-built token
+    // stream over all-zero data (so any distance validly replays, no real
+    // repeat structure needed): 4 literals, then 30 Token::Match tokens of
+    // length 50 at distance 1 (training length_match on 50 alone, under
+    // the split the real encoder takes), then 30 Token::Rep tokens of
+    // length 5 reusing the cached distance (training length_rep on 5
+    // alone). Decoded at LENGTH_SPLIT_MIN_VERSION, length_rep starts
+    // fresh when the first Rep arrives, matching the real encoder's state;
+    // decoded one version below, decode_tokens's shared models.length has
+    // already adapted to 30 observations of 50 by then, so the first Rep
+    // length symbol decodes under the wrong distribution and desyncs the
+    // rest of the stream. The literal sub-stream is unaffected at that
+    // version (LOGIT_SSE_MIN_VERSION already selects decode_logit_sse,
+    // same as the real encoder used), so any mismatch isolates to the
+    // length gate alone. Must NOT reproduce the original data, proving
+    // `length_split` is live dispatch, not dead code a future refactor
+    // could drop unnoticed.
+    let distance = NonZeroU32::new(1).expect("1 is not zero");
+    let mut tokens = vec![
+        Token::Literal(0),
+        Token::Literal(0),
+        Token::Literal(0),
+        Token::Literal(0),
+    ];
+    tokens.extend(std::iter::repeat_n(Token::Match { len: 50, distance }, 30));
+    tokens.extend(std::iter::repeat_n(
+        Token::Rep {
+            len: 5,
+            slot: RepSlot::First,
+        },
+        30,
+    ));
+    let data = vec![0u8; 4 + 30 * 50 + 30 * 5];
+
+    let mut frame = Candidate::Identity.to_header_bytes().to_vec();
+    frame.extend(encode_tokens_with(&data, None, &tokens));
+
+    assert_eq!(
+        decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+        Ok(data.as_slice()),
+        "fixture must round-trip at the real FORMAT_VERSION first"
+    );
+    assert_ne!(
+        decode(&frame, LOGIT_SSE_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
+        Ok(data.as_slice()),
+        "decoding a LENGTH_SPLIT_MIN_VERSION frame as LOGIT_SSE_MIN_VERSION must not \
+         silently reproduce the original data"
+    );
+}
+
+#[test]
+fn length_match_and_rep_models_adapt_independently() {
+    // Guards against a future refactor collapsing Models::length_match/
+    // length_rep back onto one shared Model (which would still round-trip
+    // correctly, since encode and decode would agree either way, so
+    // length_split_is_gated_on_version_alone's own frame-level test
+    // can't catch it): trains length_match on value 10 many times through
+    // the real EncodeSink path, then checks that a fresh models.length_rep
+    // (never trained) still prices 10 at its untrained, higher cost —
+    // proving the two fields are genuinely independent state, not aliases.
+    let mut models = Models::new();
+    let mut ac = Encoder::new();
+    for _ in 0..50 {
+        EncodeSink {
+            ac: &mut ac,
+            column: None,
+        }
+        .length(&mut models, FlagKind::Match, 10);
+    }
+    let trained_match_cost = ideal_cost_bucketed(&mut models.length_match, 10);
+    let untrained_rep_cost = ideal_cost_bucketed(&mut models.length_rep, 10);
+    assert!(
+        trained_match_cost < untrained_rep_cost,
+        "trained length_match cost ({trained_match_cost}) should be cheaper than \
+         untrained length_rep cost ({untrained_rep_cost}) for the same value"
+    );
+}
+
+#[test]
 fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
     // A run of identical 5-byte instructions in the *filtered* stream
     // gives lz::parse_optimal real match/rep tokens to find, exercising
@@ -706,7 +787,7 @@ fn fresh_ppm_expert_sink() -> (Models, PpmExpertState) {
 fn paired_token_sink_non_literal_events_add_the_same_cost_to_both_totals() {
     let mut expected_models = Models::new();
     let expected = expected_models.flag[1].ideal_cost_bits(FlagKind::Match.index())
-        + ideal_cost_bucketed(&mut expected_models.length, 17)
+        + ideal_cost_bucketed(&mut expected_models.length_match, 17)
         + ideal_cost_bucketed(&mut expected_models.offset, 123)
         + expected_models.slot.ideal_cost_bits(2);
 
@@ -718,7 +799,7 @@ fn paired_token_sink_non_literal_events_add_the_same_cost_to_both_totals() {
         },
     };
     sink.flag(&mut models, 1, FlagKind::Match);
-    sink.length(&mut models, 17);
+    sink.length(&mut models, FlagKind::Match, 17);
     sink.offset(&mut models, 123);
     sink.slot(&mut models, 2);
 
