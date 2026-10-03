@@ -3,7 +3,10 @@
 # (size and third-party copyright). Each entry pins one download by URL
 # and the SHA-256 of the bytes as fetched — the compressed archive, not
 # the decompressed corpus file. `bench::corpus::fetch_and_cache` refuses
-# to return a file whose downloaded bytes don't hash to its pin.
+# to return a file whose downloaded bytes don't hash to its pin. An
+# entry may add one or more `mirror = "..."` lines, tried in order after
+# `url` against that same pin (issue #875: a primary host going dark
+# must not block the fetch).
 #
 # Decompression is wired: `bench::corpus::decompress_silesia` (bzip2) and
 # `bench::corpus::extract_canterbury` (tar+gzip) turn a fetched entry's
@@ -87,8 +90,11 @@ sha256 = "0aabaf9f4690cba2e8e8bb922cc386fc202e93bb1980747530cd8408a6ee4215"
 
 # Canterbury corpus (single tarball), source:
 # https://corpus.canterbury.ac.nz/resources/cantrbry.tar.gz
+# The host answers this fetch with 403 as of 2026-10-03 (issue #875); the
+# Wayback Machine mirror below serves the same pinned bytes.
 [[file]]
 name = "cantrbry"
 corpus = "canterbury"
 url = "https://corpus.canterbury.ac.nz/resources/cantrbry.tar.gz"
+mirror = "https://web.archive.org/web/20250211032432id_/https://corpus.canterbury.ac.nz/resources/cantrbry.tar.gz"
 sha256 = "f140e8a5b73d3f53198555a63bfb827889394a42f20825df33c810c3d5e3f8fb"
