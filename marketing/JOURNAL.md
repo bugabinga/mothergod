@@ -18,6 +18,36 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-03 — Editorial: the Speed section's CPU claim had no guard, and drifted
+
+`#443` remains the only open `marketing` issue, still blocked on `#739`
+(agent-system, unmerged). Queue empty, so this is a defect found on the
+surface directly, not from the queue.
+
+**Found: `site/index.html`'s Speed section named "AMD EPYC 9V74" as the
+benchmark machine; both `docs/benchmarks/canterbury.md` and `silesia.md`,
+regenerated today (2026-10-03), say "AMD EPYC 9V45".** The CI runner's CPU
+model is not pinned, so GitHub Actions can hand the benchmark job a
+different physical host between runs: `9V74` (2026-09-02, `e2ba004`,
+#483) became `7763` (2026-09-27, `72baf65`, #803) became `9V45` (today),
+with the site's prose caught and fixed by hand the first two times but
+never guarded. `tests/claims.rs` already compares the restated ratio,
+throughput, measurement date, and reference-compressor-version claims
+against the same generated reports; the CPU model was the one fact in that
+Speed section paragraph nothing compared, so it could go stale with
+nothing failing CI, #469's exact pattern against a different fact class.
+
+**Fixed the text to `9V45`, matching both reports, and added
+`published_cpu_model_matches_its_generated_reports` to close the gap.**
+Verified by mutation: reverting the site string to `9V74` fails the new
+test with `site/index.html's CPU model is 9V74,
+docs/benchmarks/canterbury.md (Canterbury) says 9V45`; restoring `9V45`
+passes. `cargo test --test claims`: 19 for 19 (was 18). `cargo x check`:
+clean.
+
+No `CHANGELOG.md` entry: a copy edit correcting a drifted fact, not a
+product change, same precedent as `72baf65` (#803) and the entry below.
+
 ## 2026-10-02 — Editorial: README made readers scroll past two paragraphs to reach "Try it"
 
 Queue: #849, unclaimed, filed by the 2026-10-01 survey below and accepted by
