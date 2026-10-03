@@ -2,7 +2,8 @@
 //! `FORMAT_VERSION`, the
 //! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
-//! encode/decode MB/s, the measurement date, the reference compressor
+//! encode/decode MB/s, the benchmark CPU model, the measurement date, the
+//! reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
 //! recipe a reader is told to type, instead of
 //! deriving any of them, so a codec change, a report regeneration, a
@@ -10,7 +11,10 @@
 //! renamed subcommand can leave any of them stale with nothing catching it
 //! (issue #431: twice in seven days, PR #243 and again the day this test
 //! was added; issue #469: the report regenerated under an unchanged ratio
-//! left only the restated date stale, and nothing compared it). Compares
+//! left only the restated date stale, and nothing compared it; the CPU
+//! model had the same gap until this guard: the CI runner rotated between
+//! 2026-09-27 and 2026-10-03 and `site/index.html` kept quoting the old
+//! one). Compares
 //! every restated claim against its single source of truth:
 //! `FORMAT_VERSION` against `src/lib.rs`'s own constant, the aggregate
 //! figures, date and tool versions against the matching generated
@@ -554,6 +558,37 @@ fn published_throughput_matches_its_generated_reports() {
                 "site/index.html's {corpus} {direction} MB/s is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
             );
         }
+    }
+}
+
+/// The CPU model token after "AMD EPYC ": the run of characters up to the
+/// next whitespace or comma, which strips the report's own "96-Core
+/// Processor" suffix (`"AMD EPYC 9V45 96-Core Processor,"` -> `"9V45"`) and
+/// the site prose's own trailing comma (`"AMD EPYC 9V45, 4 logical"` ->
+/// `"9V45"`) the same way regardless of which form `text` uses.
+fn epyc_model(text: &str) -> String {
+    let marker = "AMD EPYC ";
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found"))
+        + marker.len();
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == ',')
+        .unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
+#[test]
+fn published_cpu_model_matches_its_generated_reports() {
+    let site_claim = epyc_model(&read("site/index.html"));
+
+    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
+        let truth = epyc_model(&read(&format!("docs/benchmarks/{report_file}")));
+        assert_eq!(
+            site_claim, truth,
+            "site/index.html's CPU model is {site_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
+        );
     }
 }
 
