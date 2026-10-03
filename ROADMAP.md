@@ -167,14 +167,20 @@ parses the filtered one. Picked next: the same literature source's
 other split, on the offset model instead of the length model. LZMA
 also conditions a match's distance-slot coding on a coarse bucket of
 that match's own length (`len_to_pos_state`); this project's offset
-model has never been conditioned on anything. ACCEPTED, unwired
-(JOURNAL S2-A111): train mean -0.003526 b/B, 10 of 11 cases improved
+model has never been conditioned on anything. ACCEPTED (JOURNAL
+S2-A111): train mean -0.003526 b/B, 10 of 11 cases improved
 (`x86_dense_code` -0.016795 the largest move) and the eleventh flat at
 exactly 0.0, both sealed cases improved too (`access_log` -0.009795).
-The apparatus stays on `main`; the real-bitstream wiring slice (a
-`FORMAT_VERSION` bump and ADR) is unclaimed, separate scope. Target:
-beat zstd -19 per-file on all of Silesia/Canterbury with real
-bitstreams; then xz -9e.
+Wired next (JOURNAL S2-A112, ADR-0058, `FORMAT_VERSION` 9):
+`Models::offset` split into four length-state-keyed models for real,
+closing that thread; unlike the length split, the real bitstream tracked
+the ideal-cost prediction fairly closely (train mean -0.002836 b/B,
+every one of the 11 cases improved or flat, none regressed;
+`x86_dense_code` -0.011200 against its own predicted -0.016795, same
+direction, about two-thirds the magnitude). No standing lead is open:
+the next candidate is a literature idea or a cheap wild swing per the
+`compression-experiment` skill. Target: beat zstd -19 per-file on all of
+Silesia/Canterbury with real bitstreams; then xz -9e.
 
 ## M4 — Production hardening ✅
 

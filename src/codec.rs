@@ -77,9 +77,16 @@
 //! above it, a match's length and a rep's length code through two
 //! independent models instead
 //! (`docs/adr/0057-wire-the-match-rep-length-model-split.md`,
-//! `research/JOURNAL.md` S2-A109/S2-A110). `offset` and `slot` are
-//! unaffected and coded identically at every version `LZ_MIN_VERSION` or
-//! above, regardless of candidate.
+//! `research/JOURNAL.md` S2-A109/S2-A110). A [`Token::Match`]'s `offset`
+//! (its distance) is coded identically regardless of candidate at every
+//! version, but is itself version-gated starting at
+//! `OFFSET_LEN_SPLIT_MIN_VERSION` (9): below it, every distance shares one
+//! [`Model`] regardless of the triggering match's own length; at or above
+//! it, the distance codes through one of four independent models instead,
+//! selected by a coarse bucket of that match's length
+//! (`docs/adr/0058-wire-the-offset-length-state-split.md`, `research/JOURNAL.md`
+//! S2-A111/S2-A112). `slot` is unaffected and coded identically at every
+//! version `LZ_MIN_VERSION` or above, regardless of candidate.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -196,6 +203,18 @@ const LOGIT_SSE_MIN_VERSION: u8 = 7;
 /// constants gate. Every candidate at a lower version is unaffected.
 const LENGTH_SPLIT_MIN_VERSION: u8 = 8;
 
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
+/// [`Token::Match`]'s distance (`offset`) through one of four independent
+/// [`Model`]s (`Models::offset_len`, selected by [`offset_len_state`] of
+/// that match's own length) instead of one shared [`Model`]
+/// (`Models::offset`) regardless of length (`research/JOURNAL.md`
+/// S2-A111/S2-A112, `docs/adr/0058-wire-the-offset-length-state-split.md`).
+/// Like `LENGTH_SPLIT_MIN_VERSION`, this gate is not candidate-dependent:
+/// it applies to every [`Candidate`], `Candidate::Transpose` included,
+/// since `offset` sits outside the literal sub-stream those constants
+/// gate. Every candidate at a lower version is unaffected.
+const OFFSET_LEN_SPLIT_MIN_VERSION: u8 = 9;
+
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
 /// a decoder reads a frame's `columns` param from untrusted input, so bank
@@ -274,6 +293,13 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// of `models.length_match`/`length_rep` a cheap `FlagKind` branch selects:
 /// no new loop or allocation, and strictly cheaper per token than the
 /// per-byte literal cost this bound is already measured against.
+/// `OFFSET_LEN_SPLIT_MIN_VERSION`'s offset-model split is the same shape
+/// again, one level over: it replaces one `Model::decode` call on
+/// `models.offset` with the same call on whichever of `models.offset_len`'s
+/// four entries `offset_len_state` of the already-decoded match length
+/// selects, a cheap array index, not a new loop or allocation, and only
+/// reached for a `Token::Match` (never a `Token::Rep`, which has no
+/// `offset` symbol at all).
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Which of the three kinds a token codes as: the flag symbol coded
@@ -352,7 +378,20 @@ struct Models {
     /// `length_match`: the real coding path at `LENGTH_SPLIT_MIN_VERSION`
     /// and above, same lifetime and gate as `length_match`.
     length_rep: Model,
+    /// Shared match-distance [`Model`], regardless of the triggering
+    /// match's own length: the real coding path at versions below
+    /// `OFFSET_LEN_SPLIT_MIN_VERSION`, kept only for decoding those older
+    /// frames (`offset_len` below replaces it at
+    /// `OFFSET_LEN_SPLIT_MIN_VERSION` and above, same role `length` keeps
+    /// for `length_match`/`length_rep`).
     offset: Model,
+    /// [`OFFSET_LEN_STATES`] independent match-distance [`Model`]s, indexed
+    /// by [`offset_len_state`] of the triggering [`Token::Match`]'s own
+    /// length: the real coding path at `OFFSET_LEN_SPLIT_MIN_VERSION` and
+    /// above (`research/JOURNAL.md` S2-A111/S2-A112,
+    /// `docs/adr/0058-wire-the-offset-length-state-split.md`). Never
+    /// consulted for a [`Token::Rep`], which has no `offset` symbol at all.
+    offset_len: [Model; OFFSET_LEN_STATES],
     slot: Model,
 }
 
@@ -368,6 +407,7 @@ impl Models {
             length_match: Model::new(lz::LENGTH_BUCKETS),
             length_rep: Model::new(lz::LENGTH_BUCKETS),
             offset: Model::new(lz::OFFSET_BUCKETS),
+            offset_len: std::array::from_fn(|_| Model::new(lz::OFFSET_BUCKETS)),
             slot: Model::new(lz::REP_SLOTS),
         }
     }
@@ -393,6 +433,18 @@ impl Models {
             length_match: Model::try_new(lz::LENGTH_BUCKETS)?,
             length_rep: Model::try_new(lz::LENGTH_BUCKETS)?,
             offset: Model::try_new(lz::OFFSET_BUCKETS)?,
+            // One `Model::try_new` call per `OFFSET_LEN_STATES` entry
+            // (`std::array::try_from_fn` is not yet stable): the array
+            // literal's length is checked against `[Model;
+            // OFFSET_LEN_STATES]` by the compiler, so a future change to
+            // that constant without updating this list fails to build
+            // rather than silently constructing the wrong count.
+            offset_len: [
+                Model::try_new(lz::OFFSET_BUCKETS)?,
+                Model::try_new(lz::OFFSET_BUCKETS)?,
+                Model::try_new(lz::OFFSET_BUCKETS)?,
+                Model::try_new(lz::OFFSET_BUCKETS)?,
+            ],
             slot: Model::try_new(lz::REP_SLOTS)?,
         })
     }
@@ -460,17 +512,15 @@ fn split_length_model(models: &mut Models, kind: FlagKind) -> &mut Model {
 }
 
 /// `-log2(p)` cost of a flag symbol under the shared `models.flag` tables:
-/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`],
-/// [`OffsetLenSplitSink`]) must price `flag` this same way, since none of
-/// them vary its coding.
+/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`])
+/// must price `flag` this same way, since neither varies its coding.
 fn price_flag(models: &mut Models, flag_table: usize, kind: FlagKind) -> f64 {
     models.flag[flag_table].ideal_cost_bits(kind.index())
 }
 
 /// `-log2(p)` cost of a literal byte under the shared, no-column-expert
-/// literal path: [`CostSink`]'s and [`OffsetLenSplitSink`]'s shared
-/// `literal` pricing (neither trials [`Candidate::Transpose`]; see each
-/// sink's own docs).
+/// literal path: [`CostSink`]'s own `literal` pricing (it never trials
+/// [`Candidate::Transpose`]; see its own docs).
 fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
     models
         .literal
@@ -479,23 +529,22 @@ fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
 
 /// `-log2(p)` cost of a copy token's length symbol, through whichever of
 /// [`Models::length_match`]/`length_rep` [`split_length_model`] selects:
-/// [`CostSink`]'s, [`PairedTokenSink`]'s, and [`OffsetLenSplitSink`]'s
-/// shared `length` pricing.
+/// [`CostSink`]'s and [`PairedTokenSink`]'s shared `length` pricing.
 fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
     ideal_cost_bucketed(split_length_model(models, kind), value)
 }
 
-/// `-log2(p)` cost of a match's distance under the shared, unconditioned
-/// `models.offset`: [`CostSink`]'s and [`PairedTokenSink`]'s shared
-/// `offset` pricing, and [`OffsetLenSplitSink`]'s baseline half.
-fn price_offset(models: &mut Models, value: u32) -> f64 {
-    ideal_cost_bucketed(&mut models.offset, value)
+/// `-log2(p)` cost of a match's distance, through whichever of
+/// [`Models::offset_len`]'s [`OFFSET_LEN_STATES`] models [`offset_len_state`]
+/// selects from the triggering match's own `len`: [`CostSink`]'s and
+/// [`PairedTokenSink`]'s shared `offset` pricing.
+fn price_offset(models: &mut Models, len: u32, value: u32) -> f64 {
+    ideal_cost_bucketed(&mut models.offset_len[offset_len_state(len)], value)
 }
 
 /// `-log2(p)` cost of a rep-slot symbol under the shared `models.slot`:
-/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`],
-/// [`OffsetLenSplitSink`]) must price `slot` this same way, since none of
-/// them vary its coding.
+/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`])
+/// must price `slot` this same way, since neither varies its coding.
 fn price_slot(models: &mut Models, symbol: usize) -> f64 {
     models.slot.ideal_cost_bits(symbol)
 }
@@ -543,7 +592,10 @@ trait TokenSink {
     /// `kind` is always [`FlagKind::Match`] or [`FlagKind::Rep`]:
     /// [`walk_tokens`] never calls this for a [`Token::Literal`].
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32);
-    fn offset(&mut self, models: &mut Models, value: u32);
+    /// `len` is the triggering [`Token::Match`]'s own already-emitted
+    /// length: [`walk_tokens`] never calls this for a [`Token::Rep`] (which
+    /// has no `offset` symbol at all) or a [`Token::Literal`].
+    fn offset(&mut self, models: &mut Models, len: u32, value: u32);
     fn slot(&mut self, models: &mut Models, symbol: usize);
 }
 
@@ -567,7 +619,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
             Token::Match { len, distance } => {
                 sink.flag(models, flag_table, FlagKind::Match);
                 sink.length(models, FlagKind::Match, len);
-                sink.offset(models, distance.get());
+                sink.offset(models, len, distance.get());
                 let end = pos + len as usize;
                 context = context.after_copy(&data[pos..end]);
                 pos = end;
@@ -645,8 +697,16 @@ impl TokenSink for EncodeSink<'_> {
         encode_bucketed(split_length_model(models, kind), self.ac, value);
     }
 
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        encode_bucketed(&mut models.offset, self.ac, value);
+    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
+        // Compression always targets the newest format version, so
+        // encoding always takes the length-keyed models
+        // (OFFSET_LEN_SPLIT_MIN_VERSION); `decode` is the one that must
+        // still read older frames through the shared `models.offset`.
+        encode_bucketed(
+            &mut models.offset_len[offset_len_state(len)],
+            self.ac,
+            value,
+        );
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
@@ -682,8 +742,11 @@ impl TokenSink for CostSink {
         self.bits += price_length(models, kind, value);
     }
 
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        self.bits += price_offset(models, value);
+    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
+        // Matches EncodeSink::offset (the length-keyed models):
+        // ideal_cost_bits stays a true estimate of what encode_tokens's
+        // real Encoder pays.
+        self.bits += price_offset(models, len, value);
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
@@ -913,8 +976,11 @@ where
         self.cost.add_same(price_length(models, kind, value));
     }
 
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        self.cost.add_same(price_offset(models, value));
+    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
+        // Matches CostSink::offset (the length-keyed models): this sink's
+        // baseline half must equal ideal_cost_bits exactly, the same
+        // guard `length`'s own comment above names.
+        self.cost.add_same(price_offset(models, len, value));
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
@@ -948,45 +1014,10 @@ pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
     (sink.cost.baseline, sink.cost.candidate)
 }
 
-/// `research/JOURNAL.md` S2-A109/S2-A110 split the shared length model by
-/// copy kind; this candidate targets a different split axis LZMA also
-/// conditions on. LZMA (`lzma-specification.txt`) prices a match's
-/// distance slot through one of four independent probability trees
-/// selected by `len_to_pos_state`, a coarse bucket of the match's own
-/// length, not by copy kind: `Models::offset` only ever prices a
-/// [`Token::Match`]'s distance in the first place ([`Token::Rep`] reuses a
-/// cached distance and prices through `models.slot` instead). Hypothesis:
-/// a short match's distance and a long match's distance come from
-/// measurably different distributions (a short copy is more likely an
-/// incidental near-range coincidence, a long one more likely a genuine
-/// structural recurrence reaching further back), so splitting
-/// `Models::offset` by the triggering match's own length state improves
-/// bpb without regressing the sealed set. Priced through
-/// `OffsetLenSplitSink`, the same before-wiring shape `research/JOURNAL.md`
-/// S2-A109's own (since-wired-and-deleted) `ideal_cost_bits_length_split_experiment`
-/// established.
-///
-/// Not reachable from [`encode`]/[`decode`]: no `Method`/`FORMAT_VERSION`
-/// wiring, measurement only.
-///
-/// Returns `(baseline_bits, with_split_bits)`.
-#[must_use]
-pub fn ideal_cost_bits_offset_length_split_experiment(data: &[u8]) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut state = OffsetLenSplitState::new();
-    let mut sink = OffsetLenSplitSink {
-        cost: PairedCost::default(),
-        state: &mut state,
-        last_match_len: 0,
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.cost.baseline, sink.cost.candidate)
-}
-
-/// How many independent [`Model`]s [`OffsetLenSplitState`] holds, and the
+/// How many independent [`Model`]s [`Models::offset_len`] holds, and the
 /// bucket count [`offset_len_state`] ever returns: LZMA's own
-/// `len_to_pos_state` uses four states (`lzma-specification.txt`).
+/// `len_to_pos_state` uses four states (`lzma-specification.txt`,
+/// `research/JOURNAL.md` S2-A111/S2-A112).
 const OFFSET_LEN_STATES: usize = 4;
 
 /// LZMA's `len_to_pos_state` formula, adapted to this crate's own
@@ -999,107 +1030,6 @@ const OFFSET_LEN_STATES: usize = 4;
 fn offset_len_state(len: u32) -> usize {
     let min = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN (4) always fits u32");
     (len.saturating_sub(min) as usize).min(OFFSET_LEN_STATES - 1)
-}
-
-/// [`ideal_cost_bits_offset_length_split_experiment`]'s own state: four
-/// offset [`Model`]s instead of [`Models::offset`]'s one, selected by
-/// [`offset_len_state`] of the triggering match's own length.
-struct OffsetLenSplitState {
-    offset: [Model; OFFSET_LEN_STATES],
-}
-
-impl OffsetLenSplitState {
-    fn new() -> Self {
-        Self {
-            offset: std::array::from_fn(|_| Model::new(lz::OFFSET_BUCKETS)),
-        }
-    }
-}
-
-/// [`TokenSink`] for [`ideal_cost_bits_offset_length_split_experiment`]:
-/// every field prices identically to [`CostSink`] except `offset`, which
-/// the baseline side still prices through the shared `models.offset` and
-/// the candidate side prices through whichever of
-/// [`OffsetLenSplitState`]'s four models [`offset_len_state`] selects from
-/// the match length [`Self::length`] most recently recorded.
-struct OffsetLenSplitSink<'a> {
-    cost: PairedCost,
-    state: &'a mut OffsetLenSplitState,
-    /// The length `walk_tokens` most recently passed to [`Self::length`]
-    /// for a [`Token::Match`]: always current by the time [`Self::offset`]
-    /// reads it, since `walk_tokens` only ever calls `offset` immediately
-    /// after `length` for a `Token::Match` (never for a `Token::Rep`,
-    /// which has no `offset` call at all — see this sink's own `offset`
-    /// doc).
-    last_match_len: u32,
-}
-
-impl TokenSink for OffsetLenSplitSink<'_> {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.cost.add_same(price_flag(models, flag_table, kind));
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        self.cost.add_same(price_literal(models, context, byte));
-    }
-
-    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        if kind == FlagKind::Match {
-            self.last_match_len = value;
-        }
-        self.cost.add_same(price_length(models, kind, value));
-    }
-
-    fn offset(&mut self, models: &mut Models, value: u32) {
-        let baseline = price_offset(models, value);
-        let candidate_model = &mut self.state.offset[offset_len_state(self.last_match_len)];
-        let candidate = ideal_cost_bucketed(candidate_model, value);
-        self.cost.add(baseline, candidate);
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(price_slot(models, symbol));
-    }
-}
-
-#[cfg(test)]
-mod offset_length_split_tests {
-    use super::ideal_cost_bits_offset_length_split_experiment;
-
-    /// Sanity check that both totals are finite and non-negative over a
-    /// buffer containing a real mix of literals and fresh matches at two
-    /// different distances (`"ab"` repeated, then a long run of one byte,
-    /// then `"ab"` repeated again), before any corpus-scale measurement is
-    /// trusted.
-    #[test]
-    fn offset_length_split_prices_a_mixed_buffer_finitely() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"ab");
-        for _ in 0..40 {
-            data.extend_from_slice(b"ab");
-        }
-        data.extend_from_slice(&[0x5Au8; 200]);
-        data.extend_from_slice(b"ab");
-        for _ in 0..40 {
-            data.extend_from_slice(b"ab");
-        }
-        let (baseline, candidate) = ideal_cost_bits_offset_length_split_experiment(&data);
-        assert!(baseline.is_finite() && baseline >= 0.0);
-        assert!(candidate.is_finite() && candidate >= 0.0);
-    }
-
-    /// [`offset_len_state`] saturates instead of panicking on a length at
-    /// or above `lz::MIN_MATCH_LEN + OFFSET_LEN_STATES`: real callers only
-    /// ever pass a [`Token::Match`] length, which can run into the
-    /// thousands on highly repetitive input.
-    #[test]
-    fn offset_len_state_saturates_on_a_long_match() {
-        use super::offset_len_state;
-        assert_eq!(
-            offset_len_state(u32::try_from(crate::lz::MIN_MATCH_LEN).unwrap() + 1_000),
-            super::OFFSET_LEN_STATES - 1
-        );
-    }
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
@@ -1307,18 +1237,45 @@ fn decode_length(models: &mut Models, ac: &mut Decoder, length_split: bool, kind
     }
 }
 
+/// Decodes a match's distance symbol: through whichever of
+/// [`Models::offset_len`]'s [`OFFSET_LEN_STATES`] models [`offset_len_state`]
+/// of the already-decoded `len` selects, when `offset_split` is set
+/// (`OFFSET_LEN_SPLIT_MIN_VERSION` and above), or through the shared
+/// [`Models::offset`] otherwise. `EncodeSink::offset` always takes the
+/// split branch unconditionally (compression always targets the newest
+/// version); this function is the one that must still read older frames.
+fn decode_offset(models: &mut Models, ac: &mut Decoder, offset_split: bool, len: u32) -> u32 {
+    if offset_split {
+        decode_bucketed(&mut models.offset_len[offset_len_state(len)], ac)
+    } else {
+        decode_bucketed(&mut models.offset, ac)
+    }
+}
+
+/// The two real-path version gates [`decode_tokens`] must check once per
+/// frame, bundled into one parameter so a third gate never pushes that
+/// function's own argument count over `clippy::too_many_arguments`
+/// (mirroring how [`LiteralPath`] bundles the literal sub-stream's own
+/// three thresholds into one enum instead of three independent bools).
+#[derive(Clone, Copy)]
+struct DecodeGates {
+    /// `version >= LENGTH_SPLIT_MIN_VERSION`.
+    length_split: bool,
+    /// `version >= OFFSET_LEN_SPLIT_MIN_VERSION`.
+    offset_split: bool,
+}
+
 /// The shared skeleton behind [`decode`] and [`decode_undoable_streaming`]:
 /// decodes `token_count` tokens off `ac` in coding order, routing every
 /// literal byte and copy through `sink`, and advancing the literal-model
 /// context and `reps` exactly as [`decode`] and [`decode_undoable_streaming`]
-/// both require. See [`DecodeSink`]'s docs for why this exists. `length_split`
-/// is the frame's declared version checked against
-/// `LENGTH_SPLIT_MIN_VERSION` once, up front, by both callers (mirroring
+/// both require. See [`DecodeSink`]'s docs for why this exists. `gates` is
+/// computed once, up front, by both callers (mirroring
 /// [`LiteralPath::for_version`]'s own once-per-frame version read).
 fn decode_tokens<S: DecodeSink>(
     token_count: u32,
     declared_len: usize,
-    length_split: bool,
+    gates: DecodeGates,
     models: &mut Models,
     ac: &mut Decoder,
     reps: &mut RepCache,
@@ -1334,8 +1291,8 @@ fn decode_tokens<S: DecodeSink>(
                 context = context.after_literal(byte);
             }
             FlagKind::Match => {
-                let len = decode_length(models, ac, length_split, FlagKind::Match);
-                let distance = decode_bucketed(&mut models.offset, ac);
+                let len = decode_length(models, ac, gates.length_split, FlagKind::Match);
+                let distance = decode_offset(models, ac, gates.offset_split, len);
                 // decode_bucketed always ORs in `1 << bits`, which is >= 1
                 // regardless of the residual bits: never zero.
                 let distance =
@@ -1349,7 +1306,7 @@ fn decode_tokens<S: DecodeSink>(
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
                 let slot = RepSlot::from_index(models.slot.decode(ac));
-                let len = decode_length(models, ac, length_split, FlagKind::Rep);
+                let len = decode_length(models, ac, gates.length_split, FlagKind::Rep);
                 let distance = reps.get(slot);
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
@@ -1539,11 +1496,13 @@ impl DecodeSink for VecSink<'_> {
 /// `COLUMN_EXPERT_MIN_VERSION` (4) and above, which decodes through
 /// [`crate::literal::Literal::decode_column`] regardless, blending a
 /// column-keyed seventh expert into the mix (see the module docs' "Payload
-/// layout" section). `offset` and `slot` decode identically regardless of
-/// `version` or candidate; `length` decodes through the shared
-/// `Models::length` below `LENGTH_SPLIT_MIN_VERSION` (8) and through
-/// `Models::length_match`/`length_rep` at or above it, regardless of
-/// candidate (see the module docs' "Payload layout" section).
+/// layout" section). `slot` decodes identically regardless of `version` or
+/// candidate; `length` decodes through the shared `Models::length` below
+/// `LENGTH_SPLIT_MIN_VERSION` (8) and through `Models::length_match`/
+/// `length_rep` at or above it; `offset` decodes through the shared
+/// `Models::offset` below `OFFSET_LEN_SPLIT_MIN_VERSION` (9) and through
+/// `Models::offset_len` at or above it; neither is candidate-gated (see the
+/// module docs' "Payload layout" section).
 ///
 /// # Panics
 ///
@@ -1595,7 +1554,10 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     decode_tokens(
         token_count,
         declared_len,
-        version >= LENGTH_SPLIT_MIN_VERSION,
+        DecodeGates {
+            length_split: version >= LENGTH_SPLIT_MIN_VERSION,
+            offset_split: version >= OFFSET_LEN_SPLIT_MIN_VERSION,
+        },
         &mut models,
         &mut ac,
         &mut reps,
@@ -1807,7 +1769,10 @@ fn decode_undoable_streaming<W: std::io::Write>(
     decode_tokens(
         token_count,
         declared_len,
-        version >= LENGTH_SPLIT_MIN_VERSION,
+        DecodeGates {
+            length_split: version >= LENGTH_SPLIT_MIN_VERSION,
+            offset_split: version >= OFFSET_LEN_SPLIT_MIN_VERSION,
+        },
         &mut models,
         &mut ac,
         &mut reps,

@@ -41,7 +41,7 @@ decoded it at 1.716 MB/s. Methodology, per-file rates, and the regeneration
 command: [`docs/benchmarks/`](docs/benchmarks/).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 8) is specified but not frozen: until 1.0 a version
+format (`FORMAT_VERSION` 9) is specified but not frozen: until 1.0 a version
 can be retired. What each version promises and the retirement rules:
 [`docs/format/SPEC.md`](docs/format/SPEC.md). Do not use this for data you
 care about yet.
