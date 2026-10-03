@@ -346,6 +346,9 @@ jobs:
                names the recipe for the rest; a stall no recipe clears
                gets blocked-on-human. Then
                `.github/scripts/security-alerts`; triage each row.
+               Any question about runs over time, the operator's or
+               your own, is `.github/scripts/sessions` (ADR-0060):
+               SQL over one row per run, never a hand-walked archive.
             4. Retrospect (operator directive, Telegram, 2026-08-23):
                `.github/scripts/retrospect`; judge each session it
                prints: right result in a sane turn count, posted output
@@ -511,6 +514,7 @@ jobs:
         uses: ./.github/actions/agent-audit
         with:
           token: ${{ github.token }}
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           role: bdfl
           execution_file: ${{ steps.claude.outputs.execution_file }}
           redact: |

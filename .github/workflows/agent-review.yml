@@ -273,6 +273,7 @@ jobs:
         uses: ./.github/actions/agent-audit
         with:
           token: ${{ github.token }}
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           role: reviewer
           execution_file: ${{ steps.claude.outputs.execution_file }}
           redact: |

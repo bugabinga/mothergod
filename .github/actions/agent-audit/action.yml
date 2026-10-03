@@ -17,6 +17,10 @@
 # Also upserts the allowance-state ledger issue (#202) when `token` is set:
 # the rolling seven-day utilization reading agent-guard projects against to
 # pick a role's `thrift` ladder in `agents/models.json`.
+#
+# And appends the run's row to the session table (ADR-0060) when
+# `cloudflare_api_token` is set: the same whitelist the artifact carries,
+# kept past the artifact's 90 days, queried with `.github/scripts/sessions`.
 name: agent-audit
 description: Publish an agent run's persona, prompt, metadata and final response as an artifact and a step summary; upsert the allowance ledger
 inputs:
@@ -35,6 +39,12 @@ inputs:
       GitHub token with issues read/write. Optional; when empty the
       allowance ledger (below) is not written, everything else is
       unaffected.
+    required: false
+    default: ""
+  cloudflare_api_token:
+    description: >-
+      Bearer for the session table's D1 database (ADR-0060). Optional;
+      when empty the row is not written, everything else is unaffected.
     required: false
     default: ""
 runs:
@@ -64,6 +74,16 @@ runs:
         mkdir -p "$out"
         python3 "${GITHUB_ACTION_PATH}/../../scripts/audit-extract.py" "$out" \
           || echo "::warning::audit extraction incomplete"
+
+    # Session table (ADR-0060): one row of identifiers and API-authored
+    # numbers per run, from the files extracted above. session-row.py
+    # exits 0 on every path and reports a miss as a warning annotation,
+    # so this step cannot redden a run; the artifact remains the record.
+    - if: steps.extract.outcome == 'success' && inputs.cloudflare_api_token != ''
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare_api_token }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../scripts/session-row.py" "${RUNNER_TEMP}/agent-audit"
 
     - if: inputs.execution_file != ''
       uses: actions/upload-artifact@v4

@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Query the session table: one row per agent run, answered in SQL (ADR-0060).
+
+Extensionless and executable because agents type it mid-session, like inbox,
+retrospect and stalled-prs. Any question about runs over time, the operator's
+or the director's own, is a verb here, never a hand-assembled artifact walk.
+
+    A READ THIS CANNOT PERFORM PRINTS UNREADABLE AND EXITS NON-ZERO,
+    NEVER AN EMPTY TABLE.
+
+An empty table is a finding ("no reviewer run was denied a tool this week");
+an unreadable one that prints as empty is the same finding, false, with
+nothing recording the miss. inbox and security-alerts carry the same
+contract for the same reason.
+
+Verbs:
+
+    sql <statement> [param ...]   any statement; rows as one aligned table
+    roles [--since 7d|DATE]       per role over the window: runs, measured,
+                                  median and max turns, output tokens,
+                                  denials, errors, projected cost
+    show <run-id>                 one run's row, one field per line
+    migrate                       apply infra/sessions/schema.sql, idempotent
+
+The table holds identifiers and API-authored numbers only (schema.sql names
+each column); a run's prose stays in its audit artifact for 90 days, linked
+by run id. Rows exist from 2026-10-03; earlier sessions arrive with the
+backfill chartered in issue #891.
+
+Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py.
+
+Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | migrate
+"""
+
+import os
+import re
+import statistics
+import sys
+from datetime import datetime, timedelta, timezone
+
+import d1
+
+SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      "..", "..", "infra", "sessions", "schema.sql")
+
+
+def cell(value):
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+def render(rows):
+    """Rows as one aligned table: header, rule, one line per row.
+
+    Columns are the first row's keys in the order the statement produced
+    them, so `SELECT a, b` prints a then b. No rows prints the one line that
+    says so, which is a finding and not a failure.
+    """
+    if not rows:
+        return ["(no rows)"]
+    columns = list(rows[0].keys())
+    table = [[cell(r.get(c)) for c in columns] for r in rows]
+    widths = [max(len(c), *(len(t[i]) for t in table)) for i, c in enumerate(columns)]
+    line = lambda cells: "  ".join(v.ljust(w) for v, w in zip(cells, widths)).rstrip()
+    return [line(columns), line(["-" * w for w in widths]), *(line(t) for t in table)]
+
+
+def render_show(rows, run_id):
+    if not rows:
+        return [f"no session with run id {run_id}"]
+    width = max(len(k) for k in rows[0])
+    return [f"{k.ljust(width)}  {cell(v)}" for k, v in rows[0].items()]
+
+
+def since_of(spec, now):
+    """`7d` style windows and ISO dates both become an ISO instant."""
+    match = re.fullmatch(r"(\d+)d", spec)
+    if match:
+        return (now - timedelta(days=int(match.group(1)))).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        return datetime.fromisoformat(spec.replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise SystemExit(f"sessions: --since takes Nd or an ISO date, not {spec!r}")
+
+
+def med(values):
+    # Always a float: statistics.median returns the int itself for an odd
+    # count, and a column that prints 5 on one line and 20.00 on the next
+    # reads as two different measures.
+    clean = [v for v in values if v is not None]
+    return float(statistics.median(clean)) if clean else None
+
+
+def summarize_roles(rows):
+    """Per role, from per-run rows: the aggregates retrospect's reader asks first.
+
+    Medians, not means, because one 65-turn chat wake would otherwise paint
+    every BDFL run as long (ADR-0023's lesson). Measured runs only feed the
+    turn and token figures; unmeasured ones are counted, never zeroed in.
+    """
+    by_role = {}
+    for r in rows:
+        by_role.setdefault(r.get("role") or "?", []).append(r)
+    out = []
+    for role, runs in sorted(by_role.items(), key=lambda kv: -len(kv[1])):
+        measured = [r for r in runs if r.get("measured")]
+        turns = [r.get("turns") for r in measured]
+        costs = [r.get("cost_usd") for r in measured if r.get("cost_usd") is not None]
+        out.append({
+            "role": role,
+            "runs": len(runs),
+            "measured": len(measured),
+            "turns_p50": med(turns),
+            "turns_max": max((t for t in turns if t is not None), default=None),
+            "out_tokens": sum(r.get("out_tokens") or 0 for r in measured),
+            "denials": sum(r.get("denials") or 0 for r in runs),
+            "errors": sum(r.get("error") or 0 for r in runs),
+            "cost_usd": float(sum(costs)) if costs else None,
+        })
+    return out
+
+
+def unreadable(error):
+    print(f"sessions: UNREADABLE: {error}")
+    return 1
+
+
+def main(argv):
+    verb = argv[1] if len(argv) > 1 else ""
+    args = argv[2:]
+    try:
+        if verb == "sql" and args:
+            rows = d1.query(args[0], args[1:])
+            print("\n".join(render(rows)))
+        elif verb == "roles":
+            spec = args[args.index("--since") + 1] if "--since" in args else "7d"
+            since = since_of(spec, datetime.now(timezone.utc))
+            rows = d1.query("SELECT role, measured, turns, out_tokens, denials, error, cost_usd "
+                            "FROM sessions WHERE at >= ?", [since])
+            print(f"sessions since {since}: {len(rows)}")
+            print("\n".join(render(summarize_roles(rows))))
+        elif verb == "show" and len(args) == 1:
+            rows = d1.query("SELECT * FROM sessions WHERE run_id = ? ORDER BY attempt DESC LIMIT 1",
+                            [int(args[0])])
+            print("\n".join(render_show(rows, args[0])))
+        elif verb == "migrate":
+            with open(SCHEMA, encoding="utf-8") as fh:
+                d1.query(fh.read())
+            print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}")
+        else:
+            print(__doc__.strip().splitlines()[-1])
+            return 2
+    except d1.Unreadable as error:
+        return unreadable(error)
+    except OSError as error:
+        return unreadable(error)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
