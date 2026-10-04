@@ -1567,9 +1567,9 @@ dependencies = [
 
 [[package]]
 name = "rumdl"
-version = "0.2.77"
+version = "0.2.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47d2a572c67c43b91ecc5a15a39b2aaaa0eb3c8f3a8f3b8f28f86cab7e38e5fe"
+checksum = "3d27c32d4d87974aef6e275eb4dff7a3bad1addaa0abbcc0290185d4ad02845a"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1592,6 +1592,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "similar",
  "thiserror 2.0.20",
  "tikv-jemallocator",
  "toml",
@@ -1766,6 +1767,15 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
 
 [[package]]
 name = "siphasher"
