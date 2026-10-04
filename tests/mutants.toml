@@ -19,7 +19,7 @@
 # self-healing; an entry that over-matches hides a real mutant silently.
 # So entries scope to function + operator only where every current match
 # is proven, and pin file:line:col where the same function also contains
-# catchable mutants of that operator (decode's `value` line, coder.rs:303,
+# catchable mutants of that operator (decode's `value` line, coder.rs:304,
 # is catchable garbage, not a hang, and stays live).
 #
 # After editing src/coder.rs's constants or renormalization, re-verify:
