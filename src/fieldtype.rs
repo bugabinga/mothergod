@@ -57,25 +57,27 @@
 /// digits, and everything else (which includes every byte of quoted-string
 /// content, since a string's own letters carry no field-type signal this
 /// classifier can cheaply add beyond "this is text").
+///
+/// Discriminants are [`field_bank`]'s class index.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FieldClass {
     /// Space, tab, newline, or carriage return, outside a quoted string.
     /// The default: the class assigned to the very first byte's incoming
     /// state, before anything has been observed.
     #[default]
-    Whitespace,
+    Whitespace = 0,
     /// A field/record delimiter outside a quoted string: `{ } [ ] : , "`.
     /// Includes the quote byte itself, both the one that opens a string
     /// and the one that closes it.
-    Structural,
+    Structural = 1,
     /// A digit, sign, or decimal point that could be part of a numeric
     /// literal, outside a quoted string: `-`, `.`, `0..=9`.
-    Numeric,
+    Numeric = 2,
     /// Everything else: every byte inside a quoted string (including its
     /// own structural-looking characters, once escaped), bare identifiers,
     /// and any byte outside a quoted string this classifier has no
     /// sharper class for.
-    Text,
+    Text = 3,
 }
 
 /// Rolling classifier state: [`FieldState::advance`] folds in one byte at
@@ -108,28 +110,14 @@ impl FieldState {
     #[must_use]
     pub fn advance(self, byte: u8) -> Self {
         if self.in_quotes {
-            if self.escaped {
-                return Self {
-                    in_quotes: true,
-                    escaped: false,
-                    class: FieldClass::Text,
-                };
-            }
-            return match byte {
-                b'\\' => Self {
-                    in_quotes: true,
-                    escaped: true,
-                    class: FieldClass::Text,
-                },
-                b'"' => Self {
-                    in_quotes: false,
-                    escaped: false,
-                    class: FieldClass::Structural,
-                },
-                _ => Self {
-                    in_quotes: true,
-                    escaped: false,
-                    class: FieldClass::Text,
+            let closes = !self.escaped && byte == b'"';
+            return Self {
+                in_quotes: !closes,
+                escaped: !self.escaped && byte == b'\\',
+                class: if closes {
+                    FieldClass::Structural
+                } else {
+                    FieldClass::Text
                 },
             };
         }
@@ -164,13 +152,7 @@ pub const FIELD_BANKS: usize = 8;
 /// [`FieldClass::Text`].
 #[must_use]
 pub fn field_bank(state: FieldState) -> usize {
-    let class_index = match state.class {
-        FieldClass::Whitespace => 0,
-        FieldClass::Structural => 1,
-        FieldClass::Numeric => 2,
-        FieldClass::Text => 3,
-    };
-    class_index | (usize::from(state.in_quotes) << 2)
+    state.class as usize | (usize::from(state.in_quotes) << 2)
 }
 
 #[cfg(test)]
