@@ -50,8 +50,8 @@ judgment.
 ## 4. Stay current
 
 Start with the ledger issue labeled `docs-intel`, which
-`.github/workflows/docs-watch.yml` refreshes each Saturday, ahead of this
-wake, with what moved in the Claude Code docs: pages added or removed from the
+`.github/workflows/docs-watch.yml` refreshes weekly, ahead of this wake,
+with what moved in the Claude Code docs: pages added or removed from the
 index, and content changes in the reference pages that govern this
 fleet's own substrate. Read the rounds newer than the SOURCES.md
 adoption log's top entry date. That date is the review watermark, and it

@@ -129,7 +129,10 @@ test("the seventh day is due, the sixth is not", () => {
   // Monday survey: 2026-09-21 plus six is Sunday, which the Sunday clause
   // takes first; plus seven is Monday 2026-09-28.
   assert.match(show({ today: "2026-09-27", rows: [marker(MONDAY)] }), /Sunday clause/);
-  assert.match(show({ today: "2026-09-28", rows: [marker(MONDAY)] }), /seventh-day clause: newest marker 2026-09-21 is 7 days old/);
+  assert.match(
+    show({ today: "2026-09-28", rows: [marker(MONDAY)] }),
+    /seventh-day clause: newest marker 2026-09-21 is 7 days old/,
+  );
 });
 
 test("the marker's own date wins over when the comment was posted", () => {
@@ -143,12 +146,22 @@ test("the marker's own date wins over when the comment was posted", () => {
 });
 
 test("the newest marker wins, whatever order the rows come in", () => {
-  const hit = call("newest", { today: "2026-10-04", rows: [marker("2026-09-27"), marker("2026-09-13"), marker("2026-09-20")] });
+  const hit = call("newest", {
+    today: "2026-10-04",
+    rows: [marker("2026-09-27"), marker("2026-09-13"), marker("2026-09-20")],
+  });
   assert.equal(hit[0], "2026-09-27");
 });
 
 test("a malformed, impossible or future-dated marker is not a marker", () => {
-  for (const body of ["<!-- deep-survey -->", "<!-- deepsurvey 2026-09-20 -->", "deep-survey 2026-09-20", "<!-- deep-survey 2026-13-40 -->"]) {
+  for (
+    const body of [
+      "<!-- deep-survey -->",
+      "<!-- deepsurvey 2026-09-20 -->",
+      "deep-survey 2026-09-20",
+      "<!-- deep-survey 2026-13-40 -->",
+    ]
+  ) {
     assert.equal(call("newest", { today: SUNDAY, rows: [digest({ body })] }), null, body);
   }
   // A marker dated after today was produced by no survey; counting it would

@@ -238,7 +238,7 @@ jobs:
               no-op is a good outcome.
             - SURVEY: `.github/scripts/survey-due` answers `due`: the
               delta core, then the `deep-survey` skill. The inbox is the
-              one condition the script cannot see, so a due Sunday with
+              one condition the script cannot see, so a due wake with
               messages waiting is CHAT; the next scheduled wake surveys.
 
             Mandate: MISSION.md. Make mothergod the best general-purpose
