@@ -154,6 +154,10 @@ const fixtures = [
       /seven_day: 90% used, 10% left/,
       /governor: week-average 1\.07%\/h, 0\.12%\/h reaches the reset; projected exhaustion 2026-09-13T23:2\d:\d\dZ misses it by 74\.\dh\. Thrift tiers on, discretionary wakes being skipped\./,
       /SLOW DOWN: cut discretionary work/,
+      // The shed order is the operator's, and it changed once (#897): the
+      // director's queue item was the first cut from 2026-09-13 and is the
+      // third since 2026-10-03. The survey stays last either way.
+      /Shed cheapest loss first: the retrospect deep-read, then the digest's depth, then the agent-system queue item; a due deep survey last/,
     ],
     reject: [/five_hour[^\n]*\n\s+governor/],
   },
