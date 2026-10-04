@@ -1,8 +1,8 @@
 # BDFL driver: the project director (ADR-0005, cadence ADR-0007).
 # Unblocks, prunes, reprioritizes, and evolves the processes themselves,
 # without approval ceremony, but always with a written record. Most
-# scheduled runs are cheap delta checks; the first Sunday wake without
-# a digest runs the weekly deep survey with the full scorecard.
+# scheduled runs are cheap delta checks; `.github/scripts/survey-due`
+# names the wake that runs the weekly deep survey with the full scorecard.
 name: agent-bdfl
 
 on:
