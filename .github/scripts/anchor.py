@@ -32,6 +32,15 @@ RUN_WALK = 60
 # makes plain string comparison chronological.
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 
+# Hours past which an anchor is not a cadence. The BDFL cron fires every four
+# hours, so three days means an outage (the hollow-run walk above already
+# counts those, #525) or a runs page served stale: run 37152004054 anchored a
+# month back on one such page, read 166 sessions and printed a footer nobody
+# could tell was wrong (#902). Both cases get one loud line and no retry,
+# because re-reading a stale page returns the stale page; the line is what
+# makes the next occurrence diagnosable.
+STALE_HOURS = 72
+
 
 def die(message):
     """Exit non-zero. Reserved for a tool failing, never for a quiet result.
@@ -69,6 +78,13 @@ def stamp_to_dt(value):
     return datetime.strptime(value, STAMP).replace(tzinfo=timezone.utc)
 
 
+def stale(stamp, now=None):
+    """Hours since `stamp` when that exceeds STALE_HOURS, else None."""
+    now = now or datetime.now(timezone.utc)
+    age = (now - stamp_to_dt(stamp)).total_seconds() / 3600
+    return age if age > STALE_HOURS else None
+
+
 def held_session(repo, run_id):
     """True when the run uploaded an audit artifact (ADR-0023).
 
@@ -84,7 +100,7 @@ def held_session(repo, run_id):
     return int(count.strip() or 0) > 0
 
 
-def previous_run_start(repo, this_run):
+def previous_run_start(repo, this_run, now=None):
     """Start of the previous ANCHOR_WORKFLOW run that held a session, excluding this one.
 
     Returns (canonical stamp, run id). Start rather than finish, deliberately:
@@ -95,7 +111,9 @@ def previous_run_start(repo, this_run):
 
     Walks newest first and asks each candidate for its artifact, so the
     ordinary wake spends one extra call and an outage spends one per hollow
-    run it crosses.
+    run it crosses. Newest first is sorted here, not trusted from the API:
+    the one page that came back out of order anchored a duty a month back
+    (#902). `now` is for tests; the clock is the default.
     """
     runs = json.loads(
         gh(
@@ -104,12 +122,21 @@ def previous_run_start(repo, this_run):
             "--json", "databaseId,startedAt,createdAt",
         )
     )
+    runs.sort(key=lambda run: iso(run["startedAt"] or run["createdAt"]), reverse=True)
     for run in runs:
         if this_run and str(run["databaseId"]) == str(this_run):
             continue
         if not held_session(repo, run["databaseId"]):
             continue
-        return iso(run["startedAt"] or run["createdAt"]), run["databaseId"]
+        stamp = iso(run["startedAt"] or run["createdAt"])
+        if (age := stale(stamp, now)) is not None:
+            print(
+                f"{os.path.basename(sys.argv[0])}: anchor {stamp} (run {run['databaseId']}) "
+                f"is {age / 24:.1f} days old on a four-hour cron: an outage, or a runs page "
+                f"served stale (#902). Every window measured from it is that wide.",
+                file=sys.stderr,
+            )
+        return stamp, run["databaseId"]
     die(
         f"no {ANCHOR_WORKFLOW} run with an audit artifact among the last "
         f"{RUN_WALK} successes to anchor on. "
