@@ -49,7 +49,7 @@ else:
   return dir;
 }
 
-// \`now\` defaults to the fixture's own morning so the staleness line below
+// `now` defaults to the fixture's own morning so the staleness line below
 // stays out of every test that is not about it.
 function anchor(runs, artifacts, thisRun = "", now = "2026-09-17T04:12:00Z") {
   const proc = spawnSync("python3", ["-c", driver, scriptsDir, thisRun, now], {

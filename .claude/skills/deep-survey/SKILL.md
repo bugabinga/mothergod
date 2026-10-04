@@ -12,11 +12,15 @@ why they live here instead of in every wake's context.
 Run the delta core first, in full. The survey is what a clean delta core
 earns, never a reason to skip a stalled PR or an unread operator comment.
 
-The mode condition is self-healing: `.github/scripts/survey-due` keys on
-the marker this skill's completion gate emits. A survey the run never
-reached is retried by the next scheduled wake, so a missed Sunday costs
-latency and nothing else. That only holds if the digest carries the
-marker, which is why emitting it is the first line of the gate below.
+The mode condition is compiled: `.github/scripts/survey-due` keys on
+the marker this skill's completion gate emits, and on the calendar
+Sunday. A survey shed on a Sunday is not retried on Monday: the week of
+2026-09-21 was never surveyed because both 2026-09-27 wakes shed it
+under SLOW DOWN and every later wake read not-due by the clock (#910
+adds the seventh-day clause). Until it lands, a shed survey is a lost
+week, which is why the SLOW DOWN order sheds it last. Emitting the
+marker is the first line of the gate below, because a digest without
+it reports a survey as not run.
 
 ## 1. Read the state
 
