@@ -1,6 +1,6 @@
 # ADR-0015: BDFL runs hourly
 
-Status: accepted · Date: 2026-08-22 · Amended 2026-08-23 · Amends ADR-0007 (cadence only)
+Status: accepted · Date: 2026-08-22 · Amended 2026-08-23, 2026-10-04 · Amends ADR-0007 (cadence only)
 
 ## Context
 
@@ -25,6 +25,12 @@ any fixed slot silently, and did on 2026-08-23. The survey trigger is
 now evidence-based: the first scheduled Sunday wake that finds no
 deep-survey digest dated that Sunday in the ops-log runs it; chat wakes
 never carry it.
+
+Amended 2026-10-04 (#910): a second clause joins the trigger. A scheduled
+wake on any weekday whose newest deep-survey marker is seven or more days
+old runs it too, because a Sunday survey shed under SLOW DOWN was
+otherwise lost with its week (2026-09-27). The Sunday clause keeps the
+anchor; `.github/scripts/survey-due` is the rule's one home.
 
 ## Consequences
 

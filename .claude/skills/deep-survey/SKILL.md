@@ -13,12 +13,12 @@ Run the delta core first, in full. The survey is what a clean delta core
 earns, never a reason to skip a stalled PR or an unread operator comment.
 
 The mode condition is compiled: `.github/scripts/survey-due` keys on
-the marker this skill's completion gate emits, and on the calendar
-Sunday. A survey shed on a Sunday is not retried on Monday: the week of
-2026-09-21 was never surveyed because both 2026-09-27 wakes shed it
-under SLOW DOWN and every later wake read not-due by the clock (#910
-adds the seventh-day clause). Until it lands, a shed survey is a lost
-week, which is why the SLOW DOWN order sheds it last. Emitting the
+the marker this skill's completion gate emits, through two clauses. A
+Sunday with no marker dated that Sunday is due, and so is any scheduled
+wake whose newest marker is seven or more days old. The second clause
+heals a shed Sunday on Monday; it exists because the week of 2026-09-21
+was never surveyed when both 2026-09-27 wakes shed it under SLOW DOWN
+and every later wake read not-due by the clock (#910). Emitting the
 marker is the first line of the gate below, because a digest without
 it reports a survey as not run.
 
@@ -50,8 +50,8 @@ judgment.
 ## 4. Stay current
 
 Start with the ledger issue labeled `docs-intel`, which
-`.github/scripts/docs-watch.py` refreshes every Sunday at 04:47 UTC with
-what moved in the Claude Code docs: pages added or removed from the
+`.github/workflows/docs-watch.yml` refreshes weekly, ahead of this wake,
+with what moved in the Claude Code docs: pages added or removed from the
 index, and content changes in the reference pages that govern this
 fleet's own substrate. Read the rounds newer than the SOURCES.md
 adoption log's top entry date. That date is the review watermark, and it
@@ -128,7 +128,8 @@ visible and does not silently stall on the same seat.
 ## Completion gate
 
 - The digest is posted on the ops-log issue and **carries the marker**,
-  on its own line, with the survey's Sunday in UTC:
+  on its own line, with the survey's own UTC date, the Sunday as a
+  rule, or the weekday a shed Sunday healed on (#910):
 
       <!-- deep-survey 2026-09-13 -->
 
