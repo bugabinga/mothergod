@@ -19,7 +19,8 @@ const driver = `
 import sys
 sys.path.insert(0, sys.argv[1])
 import anchor
-stamp, run_id = anchor.previous_run_start("o/r", sys.argv[2] or None)
+now = anchor.stamp_to_dt(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] else None
+stamp, run_id = anchor.previous_run_start("o/r", sys.argv[2] or None, now=now)
 print(stamp, run_id)
 `;
 
@@ -48,8 +49,10 @@ else:
   return dir;
 }
 
-function anchor(runs, artifacts, thisRun = "") {
-  const proc = spawnSync("python3", ["-c", driver, scriptsDir, thisRun], {
+// \`now\` defaults to the fixture's own morning so the staleness line below
+// stays out of every test that is not about it.
+function anchor(runs, artifacts, thisRun = "", now = "2026-09-17T04:12:00Z") {
+  const proc = spawnSync("python3", ["-c", driver, scriptsDir, thisRun, now], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${stubGh(runs, artifacts)}:${process.env.PATH}` },
   });
@@ -83,6 +86,23 @@ test("this run is excluded even when it already has an artifact", () => {
   const proc = anchor(STACK, { ...HOLLOW_TOP, 35165527435: 1 }, "35165527435");
   assert.equal(proc.status, 0, proc.stderr);
   assert.equal(proc.stdout.trim(), "2026-09-15T04:11:52Z 34927890526");
+});
+
+test("a runs page served oldest-first still anchors on the newest session (#902)", () => {
+  const proc = anchor([...STACK].reverse(), { ...HOLLOW_TOP, 35165527435: 1 });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.equal(proc.stdout.trim(), "2026-09-17T00:11:33Z 35165527435");
+  assert.equal(proc.stderr, "");
+});
+
+test("an anchor older than the cron explains prints one loud line naming its age and run (#902)", () => {
+  // Run 37152004054 on 2026-10-03 anchored on a 2026-09-03 run: 30 days on
+  // a four-hour cron, and nothing said so until the footer.
+  const proc = anchor(STACK, HOLLOW_TOP, "", "2026-10-15T04:11:52Z");
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.equal(proc.stdout.trim(), "2026-09-15T04:11:52Z 34927890526");
+  assert.match(proc.stderr, /anchor 2026-09-15T04:11:52Z \(run 34927890526\) is 30\.0 days old/);
+  assert.match(proc.stderr, /#902/);
 });
 
 test("a stack with no session in it dies naming --since, never anchors on a hollow run", () => {
