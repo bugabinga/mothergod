@@ -49,8 +49,8 @@ meant "not work"; one label says it, and says it to `gh issue list` too.
 
 Deliberately NOT decided here, said plainly so nothing claims a completeness
 it lacks. Whether to ship the top item at all belongs to the caller: the
-budget footer can say SLOW DOWN, and step 5 is the prescribed first cut. This
-ranks the queue; it never argues for spending on it.
+budget footer can say SLOW DOWN and prints the shed order. This ranks the
+queue; it never argues for spending on it.
 
 The invariant that matters more than any line it prints:
 
