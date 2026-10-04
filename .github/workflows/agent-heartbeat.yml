@@ -94,8 +94,7 @@ jobs:
           use_commit_signing: true
           prompt: |
             You are on duty for today's heartbeat.
-            Read agents/GOVERNANCE.md "Push identity" before your first
-            push, ROADMAP.md when duty 4 sends you there, and
+            Read ROADMAP.md when duty 4 sends you there, and
             research/JOURNAL.md through its headings when the work
             touches src/ or research/ (ADR-0025).
 
@@ -112,8 +111,7 @@ jobs:
                code. The reviewer's items are in its comment on the
                thread; a labeled PR with no push after that comment is
                yours, and your push does not clear the label, the
-               reviewer's next PASS does (PR #44 deadlocked with each
-               side waiting for the other). Skip claude/deslop-*
+               reviewer's next PASS does. Skip claude/deslop-*
                branches: the deslopper fixes its own returned PRs
                (ADR-0016).
             2. PRs from forks, which the reviewer never runs on: review
@@ -159,17 +157,16 @@ jobs:
             not after: prefer the fix that needs no workflow edit, and
             when none exists, swap the issue's realm label to
             agent-system with a comment naming the edit, then take the
-            next item. PR #653's run confirmed the boundary by trying,
-            164 turns deep.
+            next item.
 
             Hard rules: at most ONE new PR per heartbeat, and you merge
             nothing but a green dependabot PR (duty 3).
 
             End of run: if you acted (fixed, merged, opened, filed),
             post 3 to 6 lines on the ops-log issue with
-            `.github/scripts/gh-comment <issue>`, never `gh issue
-            comment` directly (issue #510): what you did, what is next,
-            blockers. A run that changed nothing posts nothing.
+            `.github/scripts/gh-comment <issue>`: what changed, what is
+            next, blockers. A duty you found empty is not a line. A run
+            that changed nothing posts nothing.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes":
           # the old allowlist of binary names denied `ls` while granting
           # `Write`, and cost 11 median permission denials per run.
