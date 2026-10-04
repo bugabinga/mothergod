@@ -146,8 +146,9 @@ jobs:
                Claim check first, because agents run concurrently
                (ADR-0014): an item an open PR or claude/* branch already
                covers is claimed, take the next one. Implement the
-               smallest useful slice and open a PR whose body states
-               what, why, how it was verified, and which ROADMAP,
+               smallest useful slice, push it with
+               `.github/scripts/push-branch`, and open a PR whose body
+               states what, why, how it was verified, and which ROADMAP,
                journal or issue id it serves, with a Closes: line where
                it does.
 
