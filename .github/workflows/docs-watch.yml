@@ -24,18 +24,18 @@ name: docs-watch
 
 on:
   schedule:
-    # Saturday 22:47 UTC, not Sunday morning: the BDFL wakes every 4 hours
-    # on the hour+11 (infra/telegram-worker/wrangler.toml), so the earliest
-    # possible Sunday survey wake is 00:11 UTC Sunday. A Sunday-morning slot
-    # (the original 04:47, clustered with codeql 04:07/traffic-snapshot
-    # 04:23/model-intel 05:07/corpus-fetch-check 05:41) reliably lost that
-    # race: the 00:11 wake claims the week's survey and posts its marker
-    # hours before this job ever ran, so that week's ledger content went
-    # unread for a full cycle (caught live, 2026-09-20, first run of the
-    # marker-gated survey). 22:47 Saturday clears monster.yml's 03:17
-    # Saturday run by 19.5 hours and finishes well over an hour before any
-    # Sunday wake can read it.
-    - cron: "47 22 * * 6"
+    # Saturday 10:47 UTC. The BDFL wakes every 4 hours on the hour+11
+    # (infra/telegram-worker/wrangler.toml), so the earliest Sunday survey
+    # wake is 00:11 UTC Sunday, and that wake reads this job's ledger. The
+    # original Sunday-morning slot (04:47) lost that race every week (caught
+    # live 2026-09-20). The next slot, Saturday 22:47, left 84 minutes, and
+    # GitHub's native cron does not keep minutes: the 2026-09-26 run started
+    # 2026-09-27T00:56, 2h09m late and past the 00:11 wake; the 2026-10-03
+    # run had not started when the 00:12 Sunday survey read an empty week
+    # (deep-survey digest, 2026-10-04). 10:47 Saturday leaves 13 hours, more
+    # than any delay seen here, and still clears monster.yml's 03:17
+    # Saturday run by 7.5 hours.
+    - cron: "47 10 * * 6"
   workflow_dispatch:
 
 permissions: {}
