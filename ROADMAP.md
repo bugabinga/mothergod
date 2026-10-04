@@ -234,6 +234,14 @@ it needs a genuinely new idea, not a variant. The one open thread: S1-A6's
 block-parallel encode/decode is correct but its scaling is unmeasured
 beyond CI's 1-core container.
 
+The floor is the open item. Aggregate single-thread decode on Silesia
+fell from 1.88 to 1.215 MB/s between the 2026-09-01 and 2026-10-03
+snapshots (`docs/benchmarks/silesia.md`), bought by four `FORMAT_VERSION`
+bumps on the model path in six days, and nothing fails when it crosses
+1.0 (#907 makes it a gate where the ratio gate already measures). Until
+#907 lands, a wiring slice's PR body states its aggregate decode MB/s
+before and after, from the finals reports it regenerates.
+
 ## M6 — Release 0.1
 
 Items, in [milestone M6](https://github.com/bugabinga/mothergod/milestone/1):

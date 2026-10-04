@@ -31,7 +31,7 @@
     "is an ordinary app-token commit. Each seat's $comment carries its current",
     "reason; the history is agents/SOURCES.md's adoption log."
   ],
-  "reviewed": "2026-10-03",
+  "reviewed": "2026-10-04",
   "roles": {
     "bdfl": {
       "$comment": "Thrift suspended (operator directive, Telegram, 2026-10-03): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. The allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for the other seats on the next agent-audit cycle, no cadence hand-pulled. Restore a thrift block once the queue is clear; a wake under ~20 turns posting nothing would restore it sooner.",

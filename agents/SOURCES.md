@@ -145,6 +145,21 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-10-04: deep survey. Docs-intel round 2026-09-27 (#578): some
+  twenty new pages, all of them the plugin system (marketplaces,
+  manifests, loading, org management) plus two translated indexes.
+  Rejected for now: this fleet's skills load from `.claude/skills/` in
+  the one repository they serve, and a plugin is a distribution format
+  for skills across repositories; nothing here is distributed. Revisit
+  when a second repository runs these agents. The cli-reference page's
+  alias table was adopted on 2026-10-03 (ADR-0059) before this round
+  was read. Machinery: `docs-watch` moves to Saturday 10:47 UTC (#905)
+  because the 22:47 slot fired 2h09m late on 2026-09-27 and had not
+  fired when the 2026-10-04 survey read the ledger. Ladders
+  (`agents/models.json`): reviewed, unchanged. #164's 2026-09-27
+  snapshot names no family the ladders lack, and no seat's retrospect
+  read its tier or effort as wrong this week.
+
 - 2026-10-03, later: operator (Telegram, inbox msg 859): "claude allows
   to use model family aliases: fable, opus, sonnet ... we only care about
   the alias and effort level. Research only needs to find new families."
