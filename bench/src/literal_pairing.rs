@@ -5,9 +5,7 @@
 //! third (`bench/src/bin/scratch_logit_sse.rs`, deleted with its verdict)
 //! divided its bit delta by the case's literal-byte count instead of its
 //! whole length, overstating the train mean 80x and `base64_wrapped` 19x
-//! (PR #823). [`literal_replay`] is the shared single-case primitive
-//! (also `tans_literal_measure`'s own champion pricer, so the walk has a
-//! second caller and the lint gate never sees it dead);
+//! (PR #823). [`literal_replay`] is the shared single-case primitive;
 //! [`train_and_sealed_delta_bpb`] is the standard pairing: the eleven
 //! `baseline::cases()` plus `access_log`/`gradient_image` sealed at
 //! `sealed_seed(baseline::CASE_SEED)`, same length, denominated by
