@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 9)
+# mothergod bitstream format (FORMAT_VERSION 10)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -14,7 +14,7 @@ version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 9)
+4       1     format version (currently 10)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -28,11 +28,11 @@ ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
 rather than parsed under the current layout; version 2 named this same
 outer layout but coded its literal sub-stream through a direct 256-way
 range division, and was retired outright under ADR-0050, no release ever
-having written it. Versions 3 through 9 `Lz` frames share the same outer
+having written it. Versions 3 through 10 `Lz` frames share the same outer
 payload layout below; only the literal sub-stream's internal shape and
 the length/offset symbols' model selection differ between them (see "Lz"
 below, ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055, ADR-0057,
-ADR-0058) — a decoder dispatches on the declared version (and, at version
+ADR-0058, ADR-0061) — a decoder dispatches on the declared version (and, at version
 4 and above, the
 frame's own filter selector) rather than rejecting any of them.
 
@@ -132,6 +132,21 @@ this applies to every candidate, `Candidate::Transpose` included, and
 `Token::Rep` never reaches `offset` at all (a repeat prices through
 `slot` instead, choosing which cached distance to reuse, never a fresh
 one).
+
+**A copy length's residual bits are version-gated the same way
+(ADR-0061).** A length is a bucket symbol (`lz::bucket`) plus the
+residual bits below that bucket. Below format version 10
+(`codec::LENGTH_RESIDUAL_MIN_VERSION`), the residual is sent as raw
+50/50 bits. At format version 10 and above, its top four bits (all of
+them in buckets 0 through 4), most significant first, are each coded
+through an adaptive binary model chosen by the bits already coded in
+that value and by the bucket: one tree per bucket for `Token::Match`
+lengths and an independent one per bucket for `Token::Rep` lengths. Any
+bits below those four stay raw. A fresh tree prices a bit at exactly one
+bit, so the gain is adaptation alone: record-shaped data repeats exact
+lengths (`research/JOURNAL.md` S2-A114/S2-A115). A distance's residual
+bits stay raw at every version. Same as the gates above, this applies to
+every candidate.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for

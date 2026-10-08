@@ -96,7 +96,11 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// match's own length to four independent ones selected by a coarse bucket
 /// of it
 /// (`docs/adr/0058-wire-the-offset-length-state-split.md`,
-/// `research/JOURNAL.md` S2-A111/S2-A112): all nine are bitstream format
+/// `research/JOURNAL.md` S2-A111/S2-A112), and to 10 when the bits below a
+/// copy length's bucket switched from raw to an adaptive tree per length
+/// model and bucket
+/// (`docs/adr/0061-wire-the-length-residual-trees.md`,
+/// `research/JOURNAL.md` S2-A114/S2-A115): all ten are bitstream format
 /// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
 /// [`Method::Stored`], which decodes identically under this build, so no
 /// separate version-0 decode path is needed. A version-1 or version-2 frame
@@ -129,9 +133,10 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// by dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
 /// `tests/golden/v4-*.mgdc`, `tests/golden/v5-*.mgdc`,
 /// `tests/golden/v6-*.mgdc`, `tests/golden/v7-*.mgdc`,
-/// `tests/golden/v8-*.mgdc`, and `tests/golden/v9-*.mgdc` pin that
+/// `tests/golden/v8-*.mgdc`, `tests/golden/v9-*.mgdc`, and
+/// `tests/golden/v10-*.mgdc` pin that
 /// forever).
-pub const FORMAT_VERSION: u8 = 9;
+pub const FORMAT_VERSION: u8 = 10;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

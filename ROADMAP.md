@@ -184,6 +184,10 @@ literal/copy-last split. REJECTED (JOURNAL S2-R34): train mean
 -0.000876 b/B, carried by `sqlite_like_records` alone while 9 of the
 other 10 cases and sealed `access_log` regressed, because a post-rep
 position only differs from a post-match one where reps are dense.
+A different stage again: LZMA models the bits below a length's or
+distance's bucket instead of sending them raw. ACCEPTED (JOURNAL
+S2-A114), then wired for lengths only (JOURNAL S2-A115, ADR-0061,
+`FORMAT_VERSION` 10): the distance trees lost on train and stay raw.
 No standing lead is open: the next candidate is a literature idea or a
 cheap wild swing per the `compression-experiment` skill. Target: beat zstd -19 per-file on all of
 Silesia/Canterbury with real bitstreams; then xz -9e.
