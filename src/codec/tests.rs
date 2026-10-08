@@ -928,6 +928,36 @@ fn residual_tree_decode_inverts_encode_in_every_bucket() {
 }
 
 #[test]
+fn residual_tree_decode_leaves_the_encoders_node_state() {
+    // Decoding any injective relabeling of the nodes (`base - node` for
+    // `base + node`) still reproduces the values, because both trees start
+    // fresh. Only the layout invariant tells them apart: after the same
+    // stream, the decoder's nodes must sit where the encoder's did, so a
+    // walk priced through either tree costs the same.
+    let values = residual_tree_values();
+    let mut encoder_tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut ac = Encoder::new();
+    for &value in &values {
+        encoder_tree.encode(&mut ac, value);
+    }
+    let bytes = ac.finish();
+
+    let mut decoder_tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut ac = Decoder::new(&bytes);
+    for &value in &values {
+        assert_eq!(decoder_tree.decode(&mut ac, lz::bucket(value)), value);
+    }
+    for &value in &values {
+        let encoded = encoder_tree.ideal_cost_bits(value);
+        let decoded = decoder_tree.ideal_cost_bits(value);
+        assert!(
+            (encoded - decoded).abs() < 1e-12,
+            "value {value}: encoder tree prices {encoded}, decoder tree {decoded}"
+        );
+    }
+}
+
+#[test]
 fn residual_tree_price_matches_what_it_codes() {
     // CostSink must price what EncodeSink codes: the ideal cost of a
     // stream and its real coded size agree to the coder's few bytes of

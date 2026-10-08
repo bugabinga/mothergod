@@ -61,6 +61,13 @@ exclude_re = [
   "replace \\| with \\^ in field_bank$",
   "replace \\| with \\^ in banks$",
 
+  # Equivalent: ResidualTree::decode ORs `top << raw`, whose low `raw`
+  # bits are zero, with `decode_bits(raw)`, which sets only those bits, so
+  # `|` and `^` agree. Function scope: this is the function's only `|`, and
+  # a later one must repeat this proof or narrow to file:line:col (#932).
+  # 1 mutant.
+  "replace \\| with \\^ in ResidualTree::decode$",
+
   # Non-terminating: the renorm loops exit only when `low` and `high`
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or
   # shrinking it monotonically (`<< 1` to `>> 1` drives `high` to 1 via
