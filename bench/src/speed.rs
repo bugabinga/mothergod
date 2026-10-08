@@ -41,11 +41,13 @@ const REPEATS: u32 = 5;
 pub const BASELINE_DECODE_COST: f64 = 120.0;
 
 /// Fraction [`decode_cost`] may exceed [`BASELINE_DECODE_COST`] before
-/// [`slowdown`] reports it. Measured: back-to-back runs on one runner agree
-/// within 3%. Not measured: how far the cost moves between the pool's CPU
-/// models, because a hermetic run sees one. The margin is wide for that
-/// reason; `baseline_gate` prints the CPU beside every cost so the pool's
-/// spread accrues in the CI logs, and the margin tightens once those show it.
+/// [`slowdown`] reports it. Measured with `baseline_gate -- speed` on
+/// `baseline::cases()`: five runs on an Intel Xeon Platinum 8573C span 116.9
+/// to 121.1, eight runs on an AMD EPYC 7763 span 102.98 to 130.13, so the
+/// worst run on record is +8.4% over the baseline. Not measured: the pool's
+/// other CPU models. The margin is wide for that reason; `baseline_gate`
+/// prints the CPU beside every cost so the pool's spread accrues in the CI
+/// logs, and the margin tightens once those show it.
 pub const MAX_SLOWDOWN: f64 = 0.25;
 
 /// Wall time of a fixed dependent-load kernel: `CALIBRATION_STEPS` steps of

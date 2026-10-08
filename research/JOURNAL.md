@@ -8398,13 +8398,14 @@ record.
   least 1.2 to 1.7 MB/s on near-identical code, so a fixed number measures
   the runner lottery. `baseline_gate check` fails when the cost exceeds
   `speed::BASELINE_DECODE_COST` by `speed::MAX_SLOWDOWN`, and prints the CPU
-  model beside every cost. Measured on this slice's runner (Intel Xeon
-  Platinum 8573C): raw decode 1.328 to 1.362 MB/s over eight rounds, cost
-  119.4 to 121.1 over four runs, so back-to-back noise is about 1.5%.
-  **Not measured:** how the cost moves between CPU models, because a
-  hermetic run sees one. The 25% margin is therefore wide on purpose and
-  provisional; the CI logs now carry the CPU and cost of every PR, and the
-  margin tightens from that spread. **Not a Silesia floor:** the gate cases
+  model beside every cost. Measured on `baseline::cases()`: five runs on an
+  Intel Xeon Platinum 8573C span cost 116.9 to 121.1 (raw decode 1.328 to
+  1.362 MB/s over eight rounds), eight runs on an AMD EPYC 7763 span 102.98
+  to 130.13, so the worst run on record is +8.4% over the baseline 120 and
+  the constant transfers across those two CPUs. **Not measured:** the
+  pool's other CPU models (EPYC 9V74, 9V45). The 25% margin is wide on
+  purpose and provisional; the CI logs now carry the CPU and cost of every
+  PR, and the margin tightens from that spread. **Not a Silesia floor:** the gate cases
   decode at about 1.3 MB/s while Silesia's twelve files span 0.25 to 6.6
   (`docs/benchmarks/silesia.md`), so no hermetic case maps to "1 MB/s on
   Silesia" and none is claimed; the gate is a ratchet that makes every
