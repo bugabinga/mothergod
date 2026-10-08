@@ -32,9 +32,10 @@ role.
 
 Comments on `ledger` issues are skipped except the ops log: a ledger is a
 script's table (traffic, allowance, model intel), and the ops log is where
-every seat posts its digest, the status register S judges. The ledger set
-is read from the same fetch that lists the threads, because a comment
-bumps its thread's `updated_at` and so every commented thread is in it.
+every seat posts its digest, the status register S judges. Both are read
+off the thread's labels (`ledger`, `ops-log`), never a pinned number, from
+the same fetch that lists the threads, because a comment bumps its
+thread's `updated_at` and so every commented thread is in it.
 
 What this does NOT cover, said plainly: the final response, which
 `describe` prints beside its session; a CHANGELOG line, which lives in the
@@ -55,10 +56,6 @@ from attribution import issue_number
 from footer import strip
 from rounds import footer
 
-# The ops-log issue (CLAUDE.md "Where things live"): a ledger by label, the
-# status register by use.
-OPS_LOG = 3
-
 # The role on gh-comment's and gh-pr's footer line. Anchored at the start of
 # the last non-empty line, so a footer quoted mid-body does not count.
 ROLE = re.compile(r"^_([\w-]+) · \[Claude Code\]\(")
@@ -76,11 +73,16 @@ def role_of(body):
     return match.group(1) if match else None
 
 
-def kind_of(number, is_pr, is_comment, role):
+def labelled(thread, name):
+    """Whether a thread carries the label."""
+    return any(label.get("name") == name for label in thread.get("labels") or [])
+
+
+def kind_of(is_pr, is_comment, is_ops_log, role):
     """Which of the five artifact kinds a post is."""
     if not is_comment:
         return "PR" if is_pr else "issue"
-    if number == OPS_LOG:
+    if is_ops_log:
         return "digest"
     if is_pr and role == "reviewer":
         return "review"
@@ -109,10 +111,7 @@ def classify(threads, comments, anchor):
     ?since=` page: both key on update time, so creation is filtered here.
     """
     by_number = {t["number"]: t for t in threads}
-    ledger = {
-        n for n, t in by_number.items()
-        if n != OPS_LOG and any(label.get("name") == "ledger" for label in t.get("labels") or [])
-    }
+    ledger = {n for n, t in by_number.items() if labelled(t, "ledger") and not labelled(t, "ops-log")}
     found = []
     for thread in threads:
         role = role_of(thread.get("body"))
@@ -122,7 +121,7 @@ def classify(threads, comments, anchor):
         found.append({
             "at": iso(thread["created_at"]),
             "role": role,
-            "kind": kind_of(thread["number"], is_pr, False, role),
+            "kind": kind_of(is_pr, False, False, role),
             "number": thread["number"],
             "title": thread.get("title") or "",
             "url": thread.get("html_url") or "",
@@ -138,7 +137,7 @@ def classify(threads, comments, anchor):
         found.append({
             "at": iso(comment["created_at"]),
             "role": role,
-            "kind": kind_of(number, is_pr, True, role),
+            "kind": kind_of(is_pr, True, labelled(thread, "ops-log"), role),
             "number": number,
             "title": "",
             "url": comment.get("html_url") or "",
@@ -152,10 +151,8 @@ def label(artifact):
     """`issue #926 [I]`, `review on #925 [R]`: the kind, the thread, the set."""
     kind = artifact["kind"]
     where = f"#{artifact['number']}"
-    if kind in ("review", "reply"):
+    if kind in ("review", "reply", "digest"):
         where = f"on {where}"
-    elif kind == "digest":
-        where = f"on #{OPS_LOG}"
     return f"{kind} {where} [{RULES[kind]}]"
 
 

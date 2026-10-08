@@ -93,8 +93,11 @@ while it was working covered by nobody, and a second read costs a minute where
 a gap costs the finding.
 
 Liveness: the last line always prints how many sessions were read, how many
-runs were skipped, how many had no artifact, and the anchor, so a retrospect
-that returns nothing forever is distinguishable from a quiet hour.
+opened with an announcement, how many runs were skipped, had no artifact,
+were phantoms or still pending, how many artifacts and comments the window
+held and how many comments bypassed gh-comment, and the anchor, so a
+retrospect that returns nothing forever is distinguishable from a quiet
+hour.
 """
 
 import argparse
