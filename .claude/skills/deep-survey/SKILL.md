@@ -78,9 +78,6 @@ Cloudflare work starts, fetch it and wire what fits by PR.
 
 ## 5. Stay fast
 
-Operator directive, Telegram, 2026-08-22. A workflow minute is operator
-subscription and contributor wait, both budget.
-
 Read recent Actions timings and hunt three smells: a workflow that got
 slower, a cache that stopped hitting, a run a concurrency group or path
 filter would have skipped entirely. Fix by PR like any defect.
@@ -101,19 +98,19 @@ SOURCES.md adoption log with the reason.
 
 ## 7. Roster charters
 
-Operator directive, Telegram, 2026-09-01. A seat's charter is
-provisional, tuned to the project's current phase, and re-evaluated here
-alongside the model ladders: trim duties that stopped earning their
-tokens, extend or create seats when a new phase or subgoal opens.
+A seat's charter is provisional, tuned to the project's current phase,
+and re-evaluated here alongside the model ladders: trim duties that
+stopped earning their tokens, extend or create seats when a new phase or
+subgoal opens.
 
 Charter changes follow the roster rules in the prompt. The reason goes
 in the digest.
 
 ## 8. Lifecycle verification
 
-Operator directive, Telegram, 2026-08-23. Verify the recorded lifecycle
-matches what actually happened: labels, milestones, and whatever else was
-supposed to make state legible from the repo alone.
+Verify the recorded lifecycle matches what actually happened: labels,
+milestones, and whatever else was supposed to make state legible from
+the repo alone (ADR-0047).
 
 File fresh ideas for features, workflows, or comm channels that serve the
 mission as issues, each with its case.

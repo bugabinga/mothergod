@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 # A new push to the same PR or branch obsoletes the previous run's
-# verdict; cancel it instead of finishing it (operator directive:
-# workflows stay smart, cached and fast).
+# verdict; cancel it instead of finishing it, because a minute spent on
+# an obsolete verdict is operator subscription and contributor wait.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -26,9 +26,9 @@ env:
   RUSTFLAGS: --deny warnings
 
 jobs:
-  # Path filter (operator directive, Telegram, 2026-08-22). A PR that
-  # changes no gate input gets skips, and the ruleset counts a skipped
-  # required check as satisfied. Outputs describe x quality inputs, Rust
+  # Path filter: a PR that changes no gate input gets skips, and the
+  # ruleset counts a skipped required check as satisfied, so a docs PR
+  # costs no crate build. Outputs describe x quality inputs, Rust
   # build inputs, and JavaScript tests. The filter enumerates tool-input
   # file types, never tree paths: globs like *.rs and Cargo.toml stay correct
   # when directories move, so the list drifts only when a toolchain changes.

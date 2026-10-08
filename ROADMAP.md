@@ -86,10 +86,10 @@ slice of it. Items marked `blocked-on-human` need the operator.
 Research-flavored items defer to `research/JOURNAL.md` leads for their
 ordering.
 
-**Product shape** (operator directive, 2026-08-22): mothergod ships in
-the zstd/xz/gzip genre. That means one CLI that both compresses and
-decompresses, and a first-class library crate; both are table stakes,
-not stretch goals. Beyond that shape, innovation is open: anything
+**Product shape**: mothergod ships in the zstd/xz/gzip genre, because
+that is the shape a human choosing a compressor compares against. That
+means one CLI that both compresses and decompresses, and a first-class
+library crate; both are table stakes, not stretch goals. Beyond that shape, innovation is open: anything
 goes as long as it is useful to humans.
 
 ## M0 — Scaffolding ✅
@@ -203,8 +203,8 @@ decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 ## M7 — Trust engineering (ADR-0043)
 
 Numbered by creation order, placed here by priority: correctness debt
-compounds worse than a late release (operator directive, 2026-09-01),
-so the heartbeat works these ahead of M5 and M6's open items. M3 stays
+compounds worse than a late release, so the heartbeat works these ahead
+of M5 and M6's open items. M3 stays
 the researcher's program, unaffected. Strategy in `docs/TESTING.md`;
 mechanisms in the issues.
 

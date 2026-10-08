@@ -140,9 +140,6 @@ jobs:
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
           cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-      # Audit trail (operator directive): prompt and metadata in, final
-      # response out. Never the transcript, which records command lines and
-      # can carry credentials. Must not fail the run.
       - if: always() && steps.claude.outcome != 'skipped'
         continue-on-error: true
         uses: ./.github/actions/agent-audit
@@ -157,10 +154,9 @@ jobs:
             ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
             ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-      # Run notice (operator directive, Telegram, 2026-09-01): herald runs
-      # land in the operator's Telegram as a short summary, same mechanism
-      # as heartbeat runs; agent-heartbeat.yml carries the rationale.
-      # Runs after agent-audit because it reads that step's scrubbed files.
+      # Run notice: run-notice.py's docstring carries the why. Runs after
+      # agent-audit because it reads that step's scrubbed files; a paused
+      # run (claude skipped) sends nothing.
       - if: always() && steps.claude.outcome != 'skipped'
         continue-on-error: true
         env:
@@ -170,13 +166,13 @@ jobs:
           .github/scripts/run-notice.py "${RUNNER_TEMP}/agent-audit" herald \
             | .github/scripts/tg-send --notice
 
-      # Visual evidence (operator directive, Telegram, 2026-09-20; #636,
-      # #658): before/after stills of every site/ page a branch this run
-      # pushed changes, delivered as one media group per page. A post-run
-      # step rather than a session duty, so the session holds no bot token
-      # and a run that dies after pushing still ships what it pushed. Reads
-      # push-branch's own record of the pushes, so a run that never touched
-      # site/ costs one file read.
+      # Visual evidence (#636, #658): before/after stills of every site/
+      # page a branch this run pushed changes, one media group per page,
+      # because the operator wants the pixels, not a paragraph asserting
+      # they looked fine. A post-run step rather than a session duty, so
+      # the session holds no bot token and a run that dies after pushing
+      # still ships what it pushed. Reads push-branch's own record of the
+      # pushes, so a run that never touched site/ costs one file read.
       - if: always() && steps.claude.outcome != 'skipped'
         continue-on-error: true
         env:

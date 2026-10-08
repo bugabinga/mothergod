@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Compose a Telegram notice for a finished agent run.
 
-Operator directive (Telegram, 2026-08-27): heartbeat runs notify the
-operator like BDFL runs do, but nothing in the session drafts the message.
+Every seat that calls this notifies the operator the way a BDFL run does
+(operator directive, Telegram, 2026-08-27 for the heartbeat; the other seats
+followed), but nothing in the session drafts the message.
 The agent's final response already summarizes the run, so drafting a second
 summary in-session would spend context to say the same thing twice. This
 composes the notice mechanically instead, out of that response and the audit

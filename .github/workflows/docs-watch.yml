@@ -1,4 +1,6 @@
-# Claude docs watch (operator directive, Telegram, 2026-09-17).
+# Claude docs watch: crawl the Claude docs on a cadence, so the factory
+# learns platform changes itself rather than from the operator
+# (agents/SOURCES.md, 2026-09-17).
 #
 # Deliberately NOT an agent: no Claude step, no tokens, no context window
 # (ADR-0019, ADR-0023). Diffing two fetches is arithmetic. A script does it

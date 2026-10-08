@@ -34,7 +34,7 @@
   "reviewed": "2026-10-04",
   "roles": {
     "bdfl": {
-      "$comment": "Thrift suspended (operator directive, Telegram, 2026-10-03): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. The allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for the other seats on the next agent-audit cycle, no cadence hand-pulled. Restore a thrift block once the queue is clear; a wake under ~20 turns posting nothing would restore it sooner.",
+      "$comment": "Thrift suspended (#897): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. The allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for the other seats on the next agent-audit cycle, no cadence hand-pulled. Restore a thrift block once the queue is clear; a wake under ~20 turns posting nothing would restore it sooner.",
       "ladder": [
         "fable",
         "opus"
@@ -81,7 +81,7 @@
       "effort": "high"
     },
     "researcher": {
-      "$comment": "Opus first: each research session is the fleet's judgment-densest (operator directive, Telegram, 2026-09-01), about twice weekly since research-due's claim check (#541). Effort medium: same provenance and same revisit tell as the herald's.",
+      "$comment": "Opus first: each research session is the fleet's judgment-densest (agents/SOURCES.md adoption log, 2026-09-01), about twice weekly since research-due's claim check (#541). Effort medium: same provenance and same revisit tell as the herald's.",
       "ladder": [
         "opus",
         "sonnet"
