@@ -222,8 +222,8 @@ platform requirement). New files follow the placement rule in `agents/README.md`
   releases), `agent-system` for the factory (agents, workflows, prompts,
   governance). The label is routing, not decoration: `product` is the
   maintainer's queue except issues also labeled `marketing`, which are
-  the herald's (ADR-0040); `agent-system` is the BDFL's (operator
-  directive, Telegram, 2026-08-23). An unrouted issue is nobody's,
+  the herald's (ADR-0040); `agent-system` is the BDFL's, the one seat
+  whose envelope edits the factory (ADR-0005). An unrouted issue is nobody's,
   which is how a pile grows. Split by who should do the work, not by which directory it touches:
   CI that only the factory feels is `agent-system` even though it gates the
   crate.

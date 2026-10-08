@@ -41,8 +41,8 @@ is fully autonomous by design (ADR-0003).
   approves. Queue label: `marketing`.
 - *Maintainer heartbeat*: fixes red PRs, picks the top roadmap item
   and ships one small PR. Its queue is the `product` realm;
-  `agent-system` issues belong to the BDFL (operator directive, Telegram,
-  2026-08-23). Cadence rides the worker clock (ADR-0035), like every
+  `agent-system` is the BDFL's (CLAUDE.md, realm labels). Cadence rides
+  the worker clock (ADR-0035), like every
   seat's. On an empty product queue it works the journal's top standing
   lead, the researcher's source too, so the two seats share one
   concurrency group and never build one slice twice (ADR-0049); which
@@ -65,9 +65,8 @@ is fully autonomous by design (ADR-0003).
   runs one experiment from the journal's standing leads (or a wild
   swing), records verdicts in `research/`.
 
-(An interactive `@claude` mention agent existed until 2026-08-21;
-removed by operator directive. Questions go in issues, which the
-curator triages daily.)
+(No `@claude` mention agent, per ADR-0003's amendment: questions go in
+issues, which the curator triages daily.)
 
 Agent behavior is governed by `CLAUDE.md` (the contract) and the workflow
 prompts in `.github/workflows/` — both are ordinary versioned files. The

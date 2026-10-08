@@ -120,9 +120,6 @@ jobs:
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
           cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-      # Audit trail (operator directive): prompt and metadata in, final
-      # response out. Never the transcript, which records command lines and
-      # can carry credentials. Must not fail the run.
       - if: always() && steps.claude.outcome != 'skipped'
         continue-on-error: true
         uses: ./.github/actions/agent-audit
