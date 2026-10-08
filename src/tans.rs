@@ -425,20 +425,6 @@ pub fn spread_symbols(freq: &[u32], table_log2: u32) -> Vec<u32> {
     table
 }
 
-/// `floor(log2(x))`, the position of `x`'s highest set bit (`0` for
-/// `x == 1`). Every call site in this module passes a per-symbol running
-/// state that starts at that symbol's own normalized frequency
-/// ([`normalize_frequencies`]'s postcondition: at least 1 for any symbol
-/// [`spread_symbols`] ever actually places) and only grows from there, so
-/// `x` is never 0 in practice.
-fn highbit32(x: u32) -> u32 {
-    debug_assert!(
-        x > 0,
-        "highbit32 is only ever called on a live tANS state, never 0"
-    );
-    x.ilog2()
-}
-
 /// One tANS decode-table slot: the symbol table state `u` decodes to, how
 /// many bits the decoder reads off the bitstream from that state, and the
 /// baseline those bits are added to for the next state -- itself a valid
@@ -499,7 +485,9 @@ pub fn build_decode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -
             );
             let next_state = symbol_next[idx];
             symbol_next[idx] += 1;
-            let nb_bits = table_log2 - highbit32(next_state);
+            // `next_state` starts at `freq[symbol]`, at least 1 for any
+            // symbol `spread_symbols` places, and only grows: never 0.
+            let nb_bits = table_log2 - next_state.ilog2();
             let new_state_base =
                 u32::try_from((u64::from(next_state) << nb_bits) - table_size_u64).expect(
                     "new_state_base lands in [0, table_size), which fits u32 whenever table_size does",
@@ -559,6 +547,24 @@ pub fn build_encode_table(table_symbol: &[u32], freq: &[u32], table_log2: u32) -
     table
 }
 
+/// Mask of the low `nb_bits` bits, the field width [`BitWriter::write`] and
+/// [`BitReader::read`] share. Every field this module packs comes from a
+/// `table_log2 < 32` table, so `nb_bits` never legitimately exceeds 32.
+/// Within that bound `1u64 << nb_bits` stays inside u64's 64 bits, so no
+/// separate `nb_bits == 32` case is needed the way it would be at u32's
+/// own width.
+///
+/// # Panics
+///
+/// Panics if `nb_bits > 32`.
+fn low_bits_mask(nb_bits: u32) -> u64 {
+    assert!(
+        nb_bits <= 32,
+        "nb_bits {nb_bits} exceeds the 32-bit fields this module ever packs"
+    );
+    (1u64 << nb_bits) - 1
+}
+
 /// Accumulates bits least-significant-bit first into a growing byte
 /// buffer. Private: message-level packing is this slice's whole job, and
 /// nothing outside it has any use yet for a bit-at-a-time writer.
@@ -584,22 +590,12 @@ impl BitWriter {
     ///
     /// # Panics
     ///
-    /// Panics if `nb_bits > 32`: every field this module ever packs comes
-    /// from a `table_log2 < 32` table, so `nb_bits` never legitimately
-    /// exceeds 32.
+    /// Panics if `nb_bits > 32` (see [`low_bits_mask`]).
     fn write(&mut self, value: u32, nb_bits: u32) {
-        assert!(
-            nb_bits <= 32,
-            "nb_bits {nb_bits} exceeds the 32-bit fields this module ever packs"
-        );
+        let mask = low_bits_mask(nb_bits);
         if nb_bits == 0 {
             return;
         }
-        // `nb_bits <= 32` (asserted above), so `1u64 << nb_bits` never
-        // exceeds `1u64 << 32`, well within u64's 64 bits: no separate
-        // nb_bits == 32 case is needed the way it would be at u32's own
-        // width.
-        let mask = (1u64 << nb_bits) - 1;
         self.acc |= (u64::from(value) & mask) << self.nb_bits;
         self.nb_bits += nb_bits;
         while self.nb_bits >= 8 {
@@ -644,16 +640,13 @@ impl<'a> BitReader<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `nb_bits > 32` (same bound [`BitWriter::write`]
-    /// enforces), or if the buffer runs out before `nb_bits` bits have
-    /// been supplied -- caller error (asking for more than
-    /// [`BitWriter`] wrote), never a property of adversarial input: this
-    /// primitive is not yet reachable from any decode path.
+    /// Panics if `nb_bits > 32` (see [`low_bits_mask`]), or if the buffer
+    /// runs out before `nb_bits` bits have been supplied -- caller error
+    /// (asking for more than [`BitWriter`] wrote), never a property of
+    /// adversarial input: this primitive is not yet reachable from any
+    /// decode path.
     fn read(&mut self, nb_bits: u32) -> u32 {
-        assert!(
-            nb_bits <= 32,
-            "nb_bits {nb_bits} exceeds the 32-bit fields this module ever packs"
-        );
+        let mask = low_bits_mask(nb_bits);
         while self.nb_bits < nb_bits {
             let &byte = self.bytes.get(self.pos).unwrap_or_else(|| {
                 panic!(
@@ -666,9 +659,6 @@ impl<'a> BitReader<'a> {
             self.nb_bits += 8;
             self.pos += 1;
         }
-        // Same `nb_bits <= 32` bound as `BitWriter::write`: no separate
-        // nb_bits == 32 case needed against u64's own 64-bit width.
-        let mask = (1u64 << nb_bits) - 1;
         let value = u32::try_from(self.acc & mask)
             .expect("mask keeps the result within nb_bits <= 32 bits, which fits u32");
         self.acc >>= nb_bits;
