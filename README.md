@@ -8,11 +8,10 @@
 [mothergod.dev](https://mothergod.dev)
 
 **A general-purpose lossless compressor in Rust, built for compression ratio
-rather than speed.** A filter bank feeds an optimal-parse LZ with in-DP repeat
-offsets, which feeds an adaptive arithmetic coder with gradient-mixed experts.
-The way to judge it is bits per byte on the corpora everyone quotes, against
-the reference compressors at their strongest settings. That table is directly
-below. Every design decision traces to a recorded experiment in
+rather than speed.** The way to judge it is bits per byte on the corpora
+everyone quotes, against the reference compressors at their strongest
+settings. That table is directly below. Every design decision traces to a
+recorded experiment in
 [`research/JOURNAL.md`](research/JOURNAL.md), rejections included.
 
 ## Where it stands
