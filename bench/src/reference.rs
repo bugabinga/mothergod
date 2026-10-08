@@ -119,7 +119,8 @@ pub fn machine_info() -> String {
 /// [`machine_info`] falls back to a plain "unknown CPU" rather than
 /// failing the whole report over a cosmetic field.
 #[cfg(target_os = "linux")]
-fn cpu_model() -> Option<String> {
+#[must_use]
+pub fn cpu_model() -> Option<String> {
     let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
     text.lines()
         .find(|line| line.starts_with("model name"))
@@ -130,7 +131,8 @@ fn cpu_model() -> Option<String> {
 /// `sysctl -n machdep.cpu.brand_string`, macOS's equivalent of Linux's
 /// `/proc/cpuinfo` model name.
 #[cfg(target_os = "macos")]
-fn cpu_model() -> Option<String> {
+#[must_use]
+pub fn cpu_model() -> Option<String> {
     let output = Command::new("sysctl")
         .args(["-n", "machdep.cpu.brand_string"])
         .output()
@@ -145,7 +147,8 @@ fn cpu_model() -> Option<String> {
 /// Every other target: `PROCESSOR_IDENTIFIER` (set by Windows) if present,
 /// else `None`.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn cpu_model() -> Option<String> {
+#[must_use]
+pub fn cpu_model() -> Option<String> {
     std::env::var("PROCESSOR_IDENTIFIER").ok()
 }
 

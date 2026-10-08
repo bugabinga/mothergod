@@ -234,13 +234,17 @@ it needs a genuinely new idea, not a variant. The one open thread: S1-A6's
 block-parallel encode/decode is correct but its scaling is unmeasured
 beyond CI's 1-core container.
 
-The floor is the open item. Aggregate single-thread decode on Silesia
-fell from 1.88 to 1.215 MB/s between the 2026-09-01 and 2026-10-03
-snapshots (`docs/benchmarks/silesia.md`), bought by four `FORMAT_VERSION`
-bumps on the model path in six days, and nothing fails when it crosses
-1.0 (#907 makes it a gate where the ratio gate already measures). Until
-#907 lands, a wiring slice's PR body states its aggregate decode MB/s
-before and after, from the finals reports it regenerates.
+The floor is enforced as a ratchet, not as 1 MB/s on Silesia. Same-CPU
+Silesia decode snapshots (`docs/benchmarks/silesia.md`, CPU on each) fell
+from 1.879 to 1.338 MB/s on EPYC 9V74 and from 1.331 to 1.215 on EPYC
+7763, over `FORMAT_VERSION` bumps 6 through 9 plus other changes; the
+runner pool's CPU differs between snapshots, so raw MB/s across them is
+not a series. `baseline_gate check` fails when decode cost on the hermetic
+gate cases, normalized by a same-process calibration kernel, exceeds the
+committed constant by its margin (#907, `bench/src/speed.rs`). No hermetic
+case maps to Silesia's 1 MB/s (its files span 0.25 to 6.6), so
+what is held is "no unexplained slowdown", and the aggregate on the finals
+reports is still read at each regeneration.
 
 ## M6 — Release 0.1
 

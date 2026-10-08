@@ -15,15 +15,23 @@
 //! fetch real corpora over the network, too slow and non-hermetic for this
 //! required check to run on every PR.
 //!
+//! `check` also gates decode speed (issue #907): [`mothergod_bench::speed`]
+//! measures the cost in calibration steps per decoded byte and fails past
+//! `BASELINE_DECODE_COST`'s margin, with the CPU printed beside the number.
+//!
 //! Usage: `cargo run -p mothergod-bench --release --bin baseline_gate --
 //! check` (the default) or `... -- write` (after an accepted ratio change,
-//! to commit the new numbers alongside it).
+//! to commit the new numbers alongside it) or `... -- speed` (print the
+//! decode cost, to commit as `BASELINE_DECODE_COST` after an accepted
+//! slowdown).
 
 use mothergod_bench::baseline::{
     fingerprint, format_baseline, measure_all, parse_baseline, regressions,
 };
 use mothergod_bench::finals::stale_reason;
+use mothergod_bench::reference::cpu_model;
 use mothergod_bench::repo_root;
+use mothergod_bench::speed;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -60,10 +68,42 @@ fn stale_finals_reports(baseline: &std::collections::BTreeMap<String, f64>) -> V
         .collect()
 }
 
+/// Measures [`speed::decode_cost`] on the gate cases, prints it with the CPU
+/// it ran on, and returns it.
+fn measure_decode_cost() -> f64 {
+    let (seconds, bytes) = speed::decode_seconds(&mothergod_bench::baseline::cases());
+    let cost = speed::decode_cost(seconds, bytes, speed::calibration_seconds());
+    println!(
+        "bench speed gate: decode cost {cost:.2} calibration steps/byte on {}",
+        cpu_model().unwrap_or_else(|| "unknown CPU".to_string())
+    );
+    cost
+}
+
+/// Names a speed regression and the way to accept it.
+fn report_slowdown(slow: &speed::Slowdown) {
+    eprintln!(
+        "bench speed gate: decode cost {:.2} -> {:.2} calibration steps/byte \
+         (+{:.1}%, margin {:.0}%)",
+        slow.baseline,
+        slow.measured,
+        slow.fraction() * 100.0,
+        speed::MAX_SLOWDOWN * 100.0
+    );
+    eprintln!(
+        "if this slowdown is an accepted trade, set `speed::BASELINE_DECODE_COST` to the \
+         `-- speed` output in the same PR and say why in the PR body."
+    );
+}
+
 fn main() -> ExitCode {
     let mode = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "check".to_string());
+    if mode == "speed" {
+        measure_decode_cost();
+        return ExitCode::SUCCESS;
+    }
     let measured = measure_all();
 
     match mode.as_str() {
@@ -96,6 +136,11 @@ fn main() -> ExitCode {
                 }
             };
             let regs = regressions(&baseline, &measured);
+            let slow = speed::slowdown(
+                speed::BASELINE_DECODE_COST,
+                measure_decode_cost(),
+                speed::MAX_SLOWDOWN,
+            );
             let stale = stale_finals_reports(&baseline);
 
             if !regs.is_empty() {
@@ -116,6 +161,9 @@ fn main() -> ExitCode {
                      the PR body."
                 );
             }
+            if let Some(slow) = &slow {
+                report_slowdown(slow);
+            }
             if !stale.is_empty() {
                 eprintln!(
                     "bench baseline gate: {} held-out-final report(s) stale (issue #327):",
@@ -131,9 +179,9 @@ fn main() -> ExitCode {
                 );
             }
 
-            if regs.is_empty() && stale.is_empty() {
+            if regs.is_empty() && slow.is_none() && stale.is_empty() {
                 println!(
-                    "bench baseline gate: {} cases, no regression, finals reports fresh",
+                    "bench baseline gate: {} cases, no regression, decode speed within margin, finals reports fresh",
                     measured.len()
                 );
                 ExitCode::SUCCESS
@@ -142,7 +190,7 @@ fn main() -> ExitCode {
             }
         }
         other => {
-            eprintln!("unknown mode {other:?}, expected \"check\" or \"write\"");
+            eprintln!("unknown mode {other:?}, expected \"check\", \"write\" or \"speed\"");
             ExitCode::FAILURE
         }
     }
