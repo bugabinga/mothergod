@@ -208,8 +208,8 @@ decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 
 Numbered by creation order, placed here by priority: correctness debt
 compounds worse than a late release, so the heartbeat works these ahead
-of M5 and M6's open items. M3 stays
-the journal's program, worked by the heartbeat (ADR-0062), unaffected. Strategy in `docs/TESTING.md`;
+of M5 and M6's open items. M3 stays the journal's program, worked by the
+heartbeat (ADR-0062), unaffected. Strategy in `docs/TESTING.md`;
 mechanisms in the issues.
 
 Items, in [milestone M7](https://github.com/bugabinga/mothergod/milestone/2):
