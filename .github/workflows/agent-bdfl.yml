@@ -349,12 +349,13 @@ jobs:
                your own, is `.github/scripts/sessions` (ADR-0060):
                SQL over one row per run, never a hand-walked archive.
             4. Retrospect: `.github/scripts/retrospect`; judge each
-               session it prints: right result in a sane turn count,
-               posted output token-lean, correct altitude for its
-               reader, on voice per CLAUDE.md. A defect becomes a prompt
-               or machinery fix, or a scoped issue, this run; a clean
-               read changes nothing. Status quo survives only by
-               evidence.
+               session it prints (right result in a sane turn count,
+               posted output token-lean, correct altitude) and each
+               artifact it prints against the rule ids in CLAUDE.md
+               Voice; every defect names its id, a clean read names the
+               sets it checked (#485). A defect becomes a prompt or
+               machinery fix, or a scoped issue, this run; a clean read
+               changes nothing. Status quo survives only by evidence.
                Its budget footer is the one number that can stop this
                project cold. When it says SLOW DOWN, shed in the order it
                prints. Say the seven-day number in the status line, so

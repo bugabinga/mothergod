@@ -107,6 +107,8 @@ from datetime import datetime, timezone
 
 from allowance import WEEK, project, valid_fraction, valid_reset, window_readings
 from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
+from artifacts import report as artifacts_report
+from attribution import comments_since
 from attribution import report as attribution_report
 from opener import trim
 from rounds import report as rounds_report
@@ -517,7 +519,11 @@ def main():
         for run in pending:
             print(f"    {run['name']}  {run['displayTitle']}  {run['url']}")
 
-    comments, bypassed = attribution_report(repo, anchor)
+    # One fetch of the window's comments feeds both lenses: the bypass flag
+    # and the per-artifact read (#485).
+    comments = comments_since(repo, anchor)
+    artifacts = artifacts_report(repo, anchor, comments)
+    _, bypassed = attribution_report(repo, anchor, comments)
 
     print()
     rounds_report(repo, anchor)
@@ -525,7 +531,7 @@ def main():
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
         f"| no-artifact {len(orphans)} | phantom {len(phantoms)} | pending {len(pending)} "
-        f"| comments {comments} | bypassed {bypassed} | since {anchor}"
+        f"| artifacts {artifacts} | comments {len(comments)} | bypassed {bypassed} | since {anchor}"
     )
 
 

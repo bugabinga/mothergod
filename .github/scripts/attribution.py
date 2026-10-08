@@ -65,13 +65,16 @@ def comments_since(repo, anchor):
     return [comment for page in pages for comment in page]
 
 
-def report(repo, anchor):
+def report(repo, anchor, comments=None):
     """Print the bypass section if any, return (comments read, bypassed).
 
     Both numbers ride the caller's liveness line, so a check that silently
-    stopped reading is distinguishable from a clean window.
+    stopped reading is distinguishable from a clean window. `comments` is
+    the window's `comments_since` page when the caller already fetched it
+    for another lens (retrospect shares one fetch with artifacts.py).
     """
-    comments = comments_since(repo, anchor)
+    if comments is None:
+        comments = comments_since(repo, anchor)
     flags = flagged(comments)
     if flags:
         print("\nattribution bypass (comment posted around gh-comment, issues #510, #590):")
