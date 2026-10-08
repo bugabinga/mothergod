@@ -136,6 +136,17 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
   assert.equal(one.title, "mutants: 1 survivor outlived PR #5 (src/codec.rs)");
   assert.ok(!one.body.includes("never ran"), "unknown totals must not invent a shortfall");
 
-  const oneOutside = call({ fn: "render", pr: 5, missed: [survivors[0]], outside: 1, generated: null, decided: null, run_url: "u" });
-  assert.ok(oneOutside.body.includes("1 more survivor sits outside decode-safety territory"), "singular agrees (#932 read \"1 more survivor sit\")");
+  const oneOutside = call({
+    fn: "render",
+    pr: 5,
+    missed: [survivors[0]],
+    outside: 1,
+    generated: null,
+    decided: null,
+    run_url: "u",
+  });
+  assert.ok(
+    oneOutside.body.includes("1 more survivor sits outside decode-safety territory"),
+    "singular agrees (#932 read \"1 more survivor sit\")",
+  );
 });
