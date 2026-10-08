@@ -859,6 +859,62 @@ fn ideal_cost_bits_is_lower_for_repetitive_than_random_data() {
 }
 
 #[test]
+fn fresh_residual_tree_costs_exactly_the_raw_residual_bits() {
+    // A fresh binary Model prices either bit at exactly 1.0, so before any
+    // update the candidate must cost what encode_bucketed's raw bits cost:
+    // the whole S2-A114 delta comes from adaptation, none from accounting.
+    for value in [1u32, 2, 3, 7, 16, 31, 1_000, 65_535, (1 << 20) + 12_345] {
+        let mut tree = ResidualTree::new(lz::OFFSET_BUCKETS);
+        let raw = f64::from(bucket_bits(lz::bucket(value)));
+        let cost = tree.ideal_cost_bits(value);
+        assert!((cost - raw).abs() < 1e-12, "value {value}: {cost} vs {raw}");
+    }
+}
+
+#[test]
+fn residual_tree_learns_only_its_modeled_bits() {
+    // 1_000 sits in bucket 9: four modeled residual bits, five raw. A
+    // repeated value drives the modeled four toward free, never the raw
+    // five, so the cost converges to just above 5 and never below it.
+    let mut tree = ResidualTree::new(lz::OFFSET_BUCKETS);
+    let mut last = f64::INFINITY;
+    for _ in 0..50 {
+        last = tree.ideal_cost_bits(1_000);
+    }
+    assert!(last > 5.0 && last < 5.5, "converged cost {last}");
+}
+
+#[test]
+fn residual_tree_buckets_do_not_share_nodes() {
+    // Training bucket 9 must leave bucket 10's walk at its fresh price.
+    let mut tree = ResidualTree::new(lz::OFFSET_BUCKETS);
+    for _ in 0..50 {
+        let _ = tree.ideal_cost_bits(1_000);
+    }
+    let cost = tree.ideal_cost_bits(2_000);
+    assert!((cost - 10.0).abs() < 1e-12, "bucket 10 cost {cost}");
+}
+
+#[test]
+fn residual_tree_baseline_half_is_ideal_cost_bits() {
+    let data: &[u8] = include_bytes!("../../research/imports/session-1/mothergod.rs");
+    let (baseline, candidate) = residual_tree_paired_cost(data);
+    let shipped = ideal_cost_bits(data);
+    assert!(
+        (baseline - shipped).abs() < 1e-6,
+        "baseline {baseline} vs ideal_cost_bits {shipped}"
+    );
+    assert!(candidate.is_finite() && candidate > 0.0, "{candidate}");
+}
+
+#[test]
+fn ideal_cost_bits_residual_tree_experiment_is_zero_on_empty_input() {
+    let (baseline, candidate) = ideal_cost_bits_residual_tree_experiment(b"");
+    assert!(baseline.abs() < 1e-9);
+    assert!(candidate.abs() < 1e-9);
+}
+
+#[test]
 fn ideal_cost_bits_ppm_expert_experiment_is_zero_on_empty_input() {
     let (baseline, with_ppm) = ideal_cost_bits_ppm_expert_experiment(b"");
     assert!(baseline.abs() < 1e-9);

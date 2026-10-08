@@ -8417,3 +8417,68 @@ record.
   1.879 to 1.338 and EPYC 7763 1.331 to 1.215. Slices record encode and
   decode MB/s deltas from now on (`research/README.md`).
   `research/progress.jsonl` it188.
+- S2-A114 | ACCEPTED, unwired | New literature idea, not tied to any
+  standing lead (ROADMAP M3: none open). `encode_bucketed` sends a
+  length's or distance's bits below its `lz::bucket` raw, so a value in
+  bucket `b` always pays exactly `b` flat bits however predictable it is.
+  LZMA (`lzma-specification.txt`) models those bits: every length bit
+  through per-`posState` trees, a distance's bits below its slot through
+  reverse trees (all of them under 128, the low four "align" bits above).
+  Nothing in this journal had tested modeling them. Hypothesis
+  (`RESIDUAL_MODELED_BITS` = 4 registered before measuring, never
+  swept): coding the top four residual bits of every bucketed length and
+  distance through an adaptive binary tree per (bucket model, bucket),
+  the rest raw, lowers whole-codec ideal cost on train, most on record
+  data whose copies repeat exact lengths and distances, with no sealed
+  regression. | Apparatus: `codec::ResidualTree` (one `Model::new(2)`
+  per tree node, `1 << RESIDUAL_MODELED_BITS` nodes per bucket), one
+  tree beside each shipped bucket model (`length_match`, `length_rep`,
+  the four `offset_len`), a paired `TokenSink` where each bucket symbol
+  updates the shipped model once and only the residual differs (raw on
+  the baseline half, tree on the candidate half), and
+  `ideal_cost_bits_residual_tree_experiment`. Unlike S2-A109/S2-A111, it
+  prices the token stream of the filter `encode` actually selects, not
+  the raw parse, closing the gap S2-A110 diagnosed. Its baseline half
+  equals `ideal_cost_bits` on the same bytes, and a fresh tree costs
+  exactly the raw bits, so the delta is pure adaptation. Throwaway
+  scratch binary over `bench::baseline`'s 11 train cases (`CASE_LEN`
+  50,000, `CASE_SEED` 0xBA5E11E5BA5E11E5) plus `access_log`/
+  `gradient_image` at `sealed_seed(CASE_SEED)`, same length, deltas
+  divided by `data.len()`. Ideal cost, not real bitstreams. Run twice,
+  identical to six decimals. | Train mean **-0.037736 b/B** (sum
+  -0.415096), 9 of 11 improved: `sqlite_like_records` **-0.109339**,
+  `json_records` -0.078592, `entropy_ladder_h4` -0.073490,
+  `base64_wrapped` -0.045768, `interleaved_audio16` -0.028212,
+  `markov_h8_2_trap` -0.026087, `entropy_ladder_h2` -0.025916,
+  `entropy_ladder_h6` -0.023852, `x86_dense_code` -0.005397; 2
+  regressed: `entropy_ladder_h1` +0.001519, `entropy_ladder_h8`
+  +0.000038. Sealed: both improved, `access_log` **-0.045087**,
+  `gradient_image` -0.015240. Corpus policy: train improvement, no
+  validation regression, **accepted**. The largest ideal-cost train
+  move of any slice since S1-P1's SSE. | Mechanism: a log2 bucket assumes
+  its values are uniform, and copy statistics are not. Fixed-width
+  records repeat exact field lengths and record-stride distances, so the
+  top residual bits of a recurring value become nearly free
+  (`sqlite_like_records`, `json_records`, `access_log`). Even iid data
+  gains (`entropy_ladder_h2` through `h6`): its incidental matches
+  cluster at the short end of each length bucket, a skew the uniform
+  assumption ignores. `entropy_ladder_h1` regresses because its long
+  runs spread lengths across many buckets, each tree visited too rarely
+  to beat its learning cost, which is S1-L4's richness tax.
+  Diagnostic, run once after the verdict, not a tuning input: pricing
+  offsets raw on both halves (length trees only) gave train mean
+  **-0.050104**, so the offset trees *cost* +0.012368 on train,
+  concentrated on `x86_dense_code` (-0.005397 with them, -0.043986
+  without), the ladder and `markov_h8_2_trap`, whose distances have no
+  structure within a bucket. They earned their place only on sealed
+  `access_log` (-0.045087 with, -0.035379 without), a number no variant
+  may be chosen on. Remaining scope: the wiring slice
+  (`encode_bucketed`/`decode_bucketed` gain the trees, `FORMAT_VERSION`
+  bump, ADR, golden fixture, real-bitstream and `decode_cost_delta`
+  measurement). It decides on train evidence alone whether the offset
+  half ships. A distance half shaped like LZMA's (low align bits instead
+  of the top ones) is a separate candidate. `lz`'s DP still prices
+  residuals at `extra_bits`, flat, so an encoder-only follow-up could
+  feed the trees' prices to the parse. Apparatus stays on `main` per the
+  `compression-experiment` skill; the scratch binary is deleted.
+  `research/progress.jsonl` it189.
