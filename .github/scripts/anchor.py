@@ -33,8 +33,8 @@ RUN_WALK = 60
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 
 # Hours past which an anchor is not a cadence. The BDFL cron fires every four
-# hours, so three days means an outage (the hollow-run walk above already
-# counts those, #525) or a runs page served stale: run 37152004054 anchored a
+# hours, so three days means a limit pause or an outage (the hollow-run walk
+# above already counts those, #525) or a runs page served stale: run 37152004054 anchored a
 # month back on one such page, read 166 sessions and printed a footer nobody
 # could tell was wrong (#902). Both cases get one loud line and no retry,
 # because re-reading a stale page returns the stale page; the line is what
@@ -132,8 +132,9 @@ def previous_run_start(repo, this_run, now=None):
         if (age := stale(stamp, now)) is not None:
             print(
                 f"{os.path.basename(sys.argv[0])}: anchor {stamp} (run {run['databaseId']}) "
-                f"is {age / 24:.1f} days old on a four-hour cron: an outage, or a runs page "
-                f"served stale (#902). Every window measured from it is that wide.",
+                f"is {age / 24:.1f} days old on a four-hour cron: a limit pause, an outage, "
+                f"or a runs page served stale (#902). Every window measured from it is that "
+                "wide.",
                 file=sys.stderr,
             )
         return stamp, run["databaseId"]
