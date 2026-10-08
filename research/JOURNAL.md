@@ -8387,3 +8387,33 @@ record.
   is well populated. Apparatus (sink, experiment entry point, its unit
   tests, scratch binary) deleted in the same PR; this entry is the only
   trace. `research/progress.jsonl` it187.
+- S2-A113 | ACCEPTED | Issue #907: the SPEED floor gets a check. Capability
+  patch, no codec change. `mothergod_bench::speed` measures single-thread
+  decode time over `baseline::cases()` (each case compressed once outside the
+  timer, decoded five times, minimum kept) and divides decode seconds per
+  byte by the seconds per step of a fixed dependent-load calibration kernel
+  run in the same process, so a CPU that is slower by some factor scales both
+  terms and the cost, calibration steps per decoded byte, stays put. The
+  curator's objection to a raw MB/s floor was this: the CI pool spans at
+  least 1.2 to 1.7 MB/s on near-identical code, so a fixed number measures
+  the runner lottery. `baseline_gate check` fails when the cost exceeds
+  `speed::BASELINE_DECODE_COST` by `speed::MAX_SLOWDOWN`, and prints the CPU
+  model beside every cost. Measured on `baseline::cases()`: five runs on an
+  Intel Xeon Platinum 8573C span cost 116.9 to 121.1 (raw decode 1.328 to
+  1.362 MB/s over eight rounds), eight runs on an AMD EPYC 7763 span 102.98
+  to 130.13, so the worst run on record is +8.4% over the baseline 120 and
+  the constant transfers across those two CPUs. **Not measured:** the
+  pool's other CPU models (EPYC 9V74, 9V45). The 25% margin is wide on
+  purpose and provisional; the CI logs now carry the CPU and cost of every
+  PR, and the margin tightens from that spread. **Not a Silesia floor:** the gate cases
+  decode at about 1.3 MB/s while Silesia's twelve files span 0.25 to 6.6
+  (`docs/benchmarks/silesia.md`), so no hermetic case maps to "1 MB/s on
+  Silesia" and none is claimed; the gate is a ratchet that makes every
+  slowdown past the margin an explicit, explained constant change. Silesia
+  encode is 0.02 to 0.1 MB/s, so a same-runner Silesia-versus-gate mapping
+  was not attempted in this run. Also corrected: ROADMAP M5 and #907 quote
+  Silesia decode falling 1.88 to 1.215 MB/s as one series, but the CPU
+  changed between those snapshots; the same-CPU pairs are EPYC 9V74
+  1.879 to 1.338 and EPYC 7763 1.331 to 1.215. Slices record encode and
+  decode MB/s deltas from now on (`research/README.md`).
+  `research/progress.jsonl` it188.

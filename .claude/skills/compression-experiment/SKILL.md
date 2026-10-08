@@ -52,6 +52,12 @@ When measurement is possible:
    and S2-A106 each rewrote that driver by hand and the third divided by
    the wrong byte count (PR #823).
 5. Apply the corpus policy's verdict and number-provenance rules unchanged.
+   A candidate that changes what `decode` does also records
+   `decode_cost_delta` (`research/README.md`), measured with
+   `baseline_gate -- speed` before and after.
+   Past the speed gate's margin the slice either moves
+   `speed::BASELINE_DECODE_COST` with the trade stated in the PR body, or
+   is rejected on that trade; the corpus verdict stays the policy's (#907).
 6. Record the mechanism and verdict in both research records, a slice in
    the shape the journal's header gives it: its own entry, one pointer
    sentence in the lead's bullet.

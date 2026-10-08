@@ -39,7 +39,7 @@ pub struct FileMeasurement {
     /// Wall-clock seconds `mothergod::decompress` took on the bytes
     /// `mothergod::compress` produced. Below-floor decode (ROADMAP.md:
     /// `>=1 MB/s`) is a finding this report surfaces, not a check it
-    /// enforces.
+    /// enforces; the speed gate (`crate::speed`) holds the hermetic cases.
     pub decode_secs: f64,
 }
 

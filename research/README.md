@@ -17,6 +17,7 @@ One JSON object per experiment, append-only:
   "train_delta_bpb": -0.12,
   "val_delta_bpb": -0.08,
   "corpus": "name@rev, slice size",
+  "decode_cost_delta": 0.4,
   "mechanism": "why it worked/failed, one sentence",
   "commit": "sha or PR number, if merged"
 }
@@ -33,6 +34,15 @@ For a `kind="patch"` whose sole purpose is enabling measurement and which has
 no comparable benchmark, `train_delta_bpb` and `val_delta_bpb` are `null`.
 Its verdict is `accepted` when the focused capability tests pass, otherwise
 `rejected`; null deltas are invalid for every other record.
+
+`decode_cost_delta` is required on a slice that changes what `decode` does
+(a wiring slice, a format bump) and absent otherwise: the change in
+`baseline_gate -- speed`'s decode cost, calibration steps per decoded byte,
+against the champion measured on the same machine in the same session
+(positive = slower). A slice whose cost lands past `speed::MAX_SLOWDOWN`
+of `speed::BASELINE_DECODE_COST` fails `baseline_gate check`, so the constant
+moves in that PR with the trade stated; ROADMAP's SPEED floor is defended
+there, not by the ratio alone (#907).
 
 Iterations it1–it41 happened in the founding session before this repo
 existed; the surviving record (it1–it31) is archived verbatim in
