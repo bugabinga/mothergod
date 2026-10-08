@@ -259,7 +259,7 @@
           Aggregate bits per byte on the two named corpora, lower is better.
           Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
           both are pinned by URL and SHA-256, fetched at measurement time and
-          never committed. Measured 2026-10-03 against <code>gzip 1.12</code>,
+          never committed. Measured 2026-10-08 against <code>gzip 1.12</code>,
           <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
           flags in the header row.
         </p>
@@ -285,14 +285,14 @@
             <tbody>
               <tr>
                 <th scope="row">Canterbury</th>
-                <td class="ours">1.366</td>
+                <td class="ours">1.351</td>
                 <td>2.081</td>
                 <td>1.470</td>
                 <td>1.403</td>
               </tr>
               <tr>
                 <th scope="row">Silesia</th>
-                <td class="ours">2.052</td>
+                <td class="ours">2.032</td>
                 <td>2.553</td>
                 <td>1.997</td>
                 <td>1.829</td>
@@ -304,7 +304,7 @@
           Read it honestly: mothergod beats both <code>zstd -19</code> and
           <code>xz -9e</code> in aggregate on Canterbury, and loses to both in
           aggregate on Silesia. Per file, against whichever of the two is
-          stronger on that file, it wins 6 of 11 on Canterbury and 1 of 12 on
+          stronger on that file, it wins 7 of 11 on Canterbury and 1 of 12 on
           Silesia. Closing Silesia is the current milestone. The per-file
           tables, the throughput columns, and the one command that regenerates
           each report are in
@@ -341,13 +341,13 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.126</td>
-              <td>3.016</td>
+              <td>0.130</td>
+              <td>2.924</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.055</td>
-              <td>1.215</td>
+              <td>0.061</td>
+              <td>1.420</td>
             </tr>
           </tbody>
         </table>

@@ -20,24 +20,24 @@ below. Every design decision traces to a recorded experiment in
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-10-03 against
+measurement time and never committed. Measured 2026-10-08 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
 |---|---|---|---|---|
-| Canterbury | **1.366** | 2.081 | 1.470 | 1.403 |
-| Silesia | **2.052** | 2.553 | 1.997 | 1.829 |
+| Canterbury | **1.351** | 2.081 | 1.470 | 1.403 |
+| Silesia | **2.032** | 2.553 | 1.997 | 1.829 |
 
 mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and
 loses to both in aggregate on Silesia. Per file, against whichever of the two
-is stronger on that file, it wins 6 of 11 on Canterbury and 1 of 12 on
+is stronger on that file, it wins 7 of 11 on Canterbury and 1 of 12 on
 Silesia. Closing Silesia is [`ROADMAP.md`](ROADMAP.md)'s current milestone.
 Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
-0.126 MB/s and decoded it at 3.016 MB/s; it encoded Silesia at 0.055 MB/s and
-decoded it at 1.215 MB/s. Methodology, per-file rates, and the regeneration
+0.130 MB/s and decoded it at 2.924 MB/s; it encoded Silesia at 0.061 MB/s and
+decoded it at 1.420 MB/s. Methodology, per-file rates, and the regeneration
 command: [`docs/benchmarks/`](docs/benchmarks/).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
