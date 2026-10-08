@@ -1,6 +1,6 @@
 # ADR-0049: The journal's next slice is one lock
 
-Status: accepted · Date: 2026-09-22 · Amends ADR-0014 (two seats share one concurrency group) · Prompted by issue #594
+Status: superseded by ADR-0062 · Date: 2026-09-22 · Amends ADR-0014 (two seats share one concurrency group) · Prompted by issue #594
 
 ## Context
 

@@ -291,11 +291,6 @@ const AGENTS = {
     name: "agent-review",
     dispatch: false,
   },
-  researcher: {
-    workflow: "agent-research.yml",
-    name: "agent-research",
-    dispatch: true,
-  },
   deslopper: {
     workflow: "agent-deslop.yml",
     name: "agent-deslop",
@@ -309,7 +304,7 @@ const HELP = [
   "/status: repository and fleet status",
   "/pause <hours>: pause all agents for 1–168 hours",
   "/resume: close the global pause",
-  "/run <agent>: run bdfl, maintainer, researcher, or deslopper",
+  "/run <agent>: run bdfl, maintainer, or deslopper",
   "/budget: allowance use, burn rate, and projection",
   "/runs [agent]: recent agent runs",
   "/blocked: blocked-on-human items",
@@ -569,7 +564,7 @@ async function resume(env, args) {
 async function runAgent(env, args) {
   const parts = args.split(/\s+/).filter(Boolean);
   if (parts.length !== 1 || !AGENTS[parts[0]]) {
-    return "Usage: /run <agent>\nAgents: bdfl, maintainer, researcher, deslopper";
+    return "Usage: /run <agent>\nAgents: bdfl, maintainer, deslopper";
   }
   const role = parts[0];
   const agent = AGENTS[role];
@@ -982,18 +977,8 @@ export const CLOCK = {
     // agent-herald, twice daily (ADR-0040), off the other seats'
     // minutes. `source: cron` marks the wake discretionary, so the
     // allowance governor may skip it (ADR-0039).
+    // The researcher shared this tick until ADR-0062 retired the seat.
     { workflow: "agent-herald.yml", inputs: { source: "cron" } },
-    // agent-research shares the tick (issue #541, operator request,
-    // Telegram, 2026-09-21): the account caps at five cron expressions,
-    // so a seat that no longer needs its own weekly slot joins an
-    // existing list rather than freeing a line nothing uses. Its own
-    // research-due claim check (agent-research.yml) turns most of these
-    // ticks into a cheap skip, so the real cadence is roughly twice
-    // weekly, not fourteen times. `source: cron` marks the wake
-    // discretionary (ADR-0039) on purpose: this is still the most
-    // expensive wake per tick that runs, so a tight week sheds it
-    // first, at the known price of one experiment.
-    { workflow: "agent-research.yml", inputs: { source: "cron" } },
   ],
 };
 

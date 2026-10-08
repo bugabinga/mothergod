@@ -25,7 +25,7 @@ name: agent-audit
 description: Publish an agent run's persona, prompt, metadata and final response as an artifact and a step summary; upsert the allowance ledger
 inputs:
   role:
-    description: Which agent produced this run (bdfl, maintainer, reviewer, researcher)
+    description: Which agent produced this run, the seat's role name as agents/models.json keys it
     required: true
   execution_file:
     description: claude-code-action's execution_file output

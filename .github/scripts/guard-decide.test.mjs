@@ -102,9 +102,9 @@ test("second gear: a discretionary wake under a missing projection (#375)", asyn
     // in wrangler.toml and moves with the allowance lever, so the invariant
     // is asserted against the real crons rather than against a fixture: a
     // lever pull that would starve a seat fails here instead of in silence.
-    // Governed seats without intra-day cadence (herald, researcher) sit
-    // outside this guarantee by design: their wakes carry no sweeps, and a
-    // floor week skipping them costs postponable work only.
+    // A governed seat without intra-day cadence (the herald) sits outside
+    // this guarantee by design: its wakes carry no sweeps, and a floor
+    // week skipping them costs postponable work only.
     const wrangler = readFileSync(
       new URL("../../infra/telegram-worker/wrangler.toml", import.meta.url),
       "utf8",

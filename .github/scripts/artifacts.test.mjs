@@ -61,8 +61,8 @@ test("each kind names its rule set, oldest first", () => {
   const result = run({
     anchor: ANCHOR,
     threads: [
-      thread(926, "2026-10-08T07:00:46Z", { role: "researcher" }),
-      thread(925, "2026-10-08T06:58:00Z", { pr: true, role: "researcher" }),
+      thread(926, "2026-10-08T07:00:46Z", { role: "herald" }),
+      thread(925, "2026-10-08T06:58:00Z", { pr: true, role: "herald" }),
       thread(3, "2026-08-20T19:00:00Z", { labels: ["ops-log", "ledger"] }),
     ],
     comments: [
@@ -74,8 +74,8 @@ test("each kind names its rule set, oldest first", () => {
   });
   assert.deepEqual(result.labels, [
     "2026-10-08T06:23:46Z maintainer digest on #3 [S]",
-    "2026-10-08T06:58:00Z researcher PR #925 [T,P]",
-    "2026-10-08T07:00:46Z researcher issue #926 [I]",
+    "2026-10-08T06:58:00Z herald PR #925 [T,P]",
+    "2026-10-08T07:00:46Z herald issue #926 [I]",
     "2026-10-08T07:03:04Z reviewer review on #925 [R]",
     "2026-10-08T07:10:00Z maintainer reply on #925 [Q]",
     "2026-10-08T07:30:00Z curator reply on #926 [Q]",
@@ -143,12 +143,12 @@ test("rendering: header, url, body without its footer, cut at the cap", () => {
   const long = "x".repeat(2000);
   const result = run({
     anchor: ANCHOR,
-    threads: [thread(926, "2026-10-08T07:00:46Z", { role: "researcher", body: long })],
+    threads: [thread(926, "2026-10-08T07:00:46Z", { role: "herald", body: long })],
     comments: [],
   });
   const lines = result.rendered.split("\n");
   assert.match(result.rendered, /rule ids in CLAUDE.md "Voice"/);
-  assert.ok(lines.includes("2026-10-08T07:00:46Z  researcher  issue #926 [I]  title 926"), lines.join("|"));
+  assert.ok(lines.includes("2026-10-08T07:00:46Z  herald  issue #926 [I]  title 926"), lines.join("|"));
   assert.ok(lines.includes("    https://github.com/o/r/issues/926"));
   assert.ok(!result.rendered.includes("Claude Code](https://claude.ai/code)_"), "footer must come off");
   assert.ok(lines.includes("    [cut, 200 more characters]"), lines.slice(-3).join("|"));

@@ -89,8 +89,8 @@ The system is inert until these are done:
   BDFL run detects it, stores your chat id as repo variable
   `OPERATOR_TELEGRAM_CHAT_ID`, and confirms. From then on: automatic pause
   alerts on usage limits, dire escalations, the weekly digest summary, a
-  status line per BDFL run, a mechanical notice per heartbeat, herald,
-  and researcher run — and
+  status line per BDFL run, a mechanical notice per heartbeat, curator
+  and herald run — and
   an **operator inbox**: text the bot instructions from your phone and the
   BDFL reads and acts on them at each wake-up (≤3 h latency). Messages from
   anyone but you are ignored. **This bot and its chat are permanently
@@ -108,8 +108,8 @@ The system is inert until these are done:
   you're the operator).
 - **Change agent behavior**: edit `CLAUDE.md` or the prompts in
   `.github/workflows/agent-*.yml`.
-- **Trigger a session manually**: Actions tab → agent-heartbeat /
-  agent-research → Run workflow.
+- **Trigger a session manually**: Actions tab → the seat's agent-*.yml →
+  Run workflow, or `/run <agent>` on the Telegram bot.
 
 ## Pausing and resuming (ADR-0004)
 

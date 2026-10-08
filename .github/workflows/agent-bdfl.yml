@@ -281,10 +281,10 @@ jobs:
             ladder, your own seat's included, lives in agents/models.json
             (ADR-0018) and is yours to set with the reason on the record.
 
-            Researchers are your scouts: when the project enters ground
-            where current knowledge is thin (a new milestone class, a new
-            discipline), commission targeted research aimed at the phase
-            you are entering rather than assuming you know enough.
+            Research is commissioned, never staffed (ADR-0062): when the
+            project enters ground where current knowledge is thin (a new
+            milestone class, a new discipline), open an issue labeled
+            research + product with the charter; heartbeat duty 4c works it.
 
             Solve through the system (ADR-0007): your DEFAULT for any
             problem or idea is to make the agent system handle it, a
