@@ -85,7 +85,12 @@
 //! it, the distance codes through one of four independent models instead,
 //! selected by a coarse bucket of that match's length
 //! (`docs/adr/0058-wire-the-offset-length-state-split.md`, `research/JOURNAL.md`
-//! S2-A111/S2-A112). `slot` is unaffected and coded identically at every
+//! S2-A111/S2-A112). A length's residual bits, those below its
+//! `lz::bucket`, are raw below `LENGTH_RESIDUAL_MIN_VERSION` (10); at or
+//! above it the top few code through an adaptive tree per length model and
+//! bucket (`docs/adr/0061-wire-the-length-residual-trees.md`,
+//! `research/JOURNAL.md` S2-A114/S2-A115), and a distance's stay raw at
+//! every version. `slot` is unaffected and coded identically at every
 //! version `LZ_MIN_VERSION` or above, regardless of candidate.
 //!
 //! The declared output length is [`decode`]'s allocation bound
@@ -214,6 +219,17 @@ const LENGTH_SPLIT_MIN_VERSION: u8 = 8;
 /// since `offset` sits outside the literal sub-stream those constants
 /// gate. Every candidate at a lower version is unaffected.
 const OFFSET_LEN_SPLIT_MIN_VERSION: u8 = 9;
+
+/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes the top
+/// [`RESIDUAL_MODELED_BITS`] bits below a copy length's [`lz::bucket`]
+/// through [`ResidualTree`]s (`Models::length_match_residual`/
+/// `length_rep_residual`) instead of sending them raw (`research/JOURNAL.md`
+/// S2-A114/S2-A115, `docs/adr/0061-wire-the-length-residual-trees.md`).
+/// A distance's residual stays raw at every version. Like
+/// `LENGTH_SPLIT_MIN_VERSION`, this gate is not candidate-dependent, and
+/// it implies `LENGTH_SPLIT_MIN_VERSION`: the trees sit beside the split
+/// length models. Every candidate at a lower version is unaffected.
+const LENGTH_RESIDUAL_MIN_VERSION: u8 = 10;
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -378,6 +394,11 @@ struct Models {
     /// `length_match`: the real coding path at `LENGTH_SPLIT_MIN_VERSION`
     /// and above, same lifetime and gate as `length_match`.
     length_rep: Model,
+    /// [`ResidualTree`] beside `length_match`: codes the bits below a
+    /// match length's bucket at `LENGTH_RESIDUAL_MIN_VERSION` and above.
+    length_match_residual: ResidualTree,
+    /// [`ResidualTree`] beside `length_rep`, same gate and lifetime.
+    length_rep_residual: ResidualTree,
     /// Shared match-distance [`Model`], regardless of the triggering
     /// match's own length: the real coding path at versions below
     /// `OFFSET_LEN_SPLIT_MIN_VERSION`, kept only for decoding those older
@@ -406,6 +427,8 @@ impl Models {
             length: Model::new(lz::LENGTH_BUCKETS),
             length_match: Model::new(lz::LENGTH_BUCKETS),
             length_rep: Model::new(lz::LENGTH_BUCKETS),
+            length_match_residual: ResidualTree::new(lz::LENGTH_BUCKETS),
+            length_rep_residual: ResidualTree::new(lz::LENGTH_BUCKETS),
             offset: Model::new(lz::OFFSET_BUCKETS),
             offset_len: std::array::from_fn(|_| Model::new(lz::OFFSET_BUCKETS)),
             slot: Model::new(lz::REP_SLOTS),
@@ -432,6 +455,8 @@ impl Models {
             length: Model::try_new(lz::LENGTH_BUCKETS)?,
             length_match: Model::try_new(lz::LENGTH_BUCKETS)?,
             length_rep: Model::try_new(lz::LENGTH_BUCKETS)?,
+            length_match_residual: ResidualTree::try_new(lz::LENGTH_BUCKETS)?,
+            length_rep_residual: ResidualTree::try_new(lz::LENGTH_BUCKETS)?,
             offset: Model::try_new(lz::OFFSET_BUCKETS)?,
             // One `Model::try_new` call per `OFFSET_LEN_STATES` entry
             // (`std::array::try_from_fn` is not yet stable): the array
@@ -511,6 +536,23 @@ fn split_length_model(models: &mut Models, kind: FlagKind) -> &mut Model {
     }
 }
 
+/// Picks [`Models::length_match_residual`]/`length_rep_residual` by `kind`,
+/// the [`ResidualTree`] beside [`split_length_model`]'s bucket model.
+///
+/// # Panics
+///
+/// Panics if `kind` is [`FlagKind::Literal`], same as
+/// [`split_length_model`].
+fn split_length_residual(models: &mut Models, kind: FlagKind) -> &mut ResidualTree {
+    match kind {
+        FlagKind::Match => &mut models.length_match_residual,
+        FlagKind::Rep => &mut models.length_rep_residual,
+        FlagKind::Literal => {
+            unreachable!("walk_tokens never calls length for a Token::Literal")
+        }
+    }
+}
+
 /// `-log2(p)` cost of a flag symbol under the shared `models.flag` tables:
 /// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`])
 /// must price `flag` this same way, since neither varies its coding.
@@ -527,11 +569,14 @@ fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
         .ideal_cost_bits_logistic_surprise_logit_sse(context, byte, &mut models.logit_sse)
 }
 
-/// `-log2(p)` cost of a copy token's length symbol, through whichever of
-/// [`Models::length_match`]/`length_rep` [`split_length_model`] selects:
-/// [`CostSink`]'s and [`PairedTokenSink`]'s shared `length` pricing.
+/// `-log2(p)` cost of a copy token's length, bucket symbol through
+/// whichever of [`Models::length_match`]/`length_rep`
+/// [`split_length_model`] selects, residual bits through the
+/// [`ResidualTree`] beside it: [`CostSink`]'s and [`PairedTokenSink`]'s
+/// shared `length` pricing, matching [`EncodeSink::length`].
 fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
-    ideal_cost_bucketed(split_length_model(models, kind), value)
+    let symbol = split_length_model(models, kind).ideal_cost_bits(lz::bucket(value));
+    symbol + split_length_residual(models, kind).ideal_cost_bits(value)
 }
 
 /// `-log2(p)` cost of a match's distance, through whichever of
@@ -691,10 +736,12 @@ impl TokenSink for EncodeSink<'_> {
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
         // Compression always targets the newest format version, so
-        // encoding always takes the split models (LENGTH_SPLIT_MIN_VERSION);
-        // `decode` is the one that must still read older frames through
-        // the shared `models.length`.
-        encode_bucketed(split_length_model(models, kind), self.ac, value);
+        // encoding always takes the split models (LENGTH_SPLIT_MIN_VERSION)
+        // and their residual trees (LENGTH_RESIDUAL_MIN_VERSION); `decode`
+        // is the one that must still read older frames, through the shared
+        // `models.length` and raw residuals.
+        split_length_model(models, kind).encode(self.ac, lz::bucket(value));
+        split_length_residual(models, kind).encode(self.ac, value);
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
@@ -737,7 +784,7 @@ impl TokenSink for CostSink {
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        // Matches EncodeSink::length (the split models): ideal_cost_bits
+        // Matches EncodeSink::length (split models, residual trees): ideal_cost_bits
         // stays a true estimate of what encode_tokens's real Encoder pays.
         self.bits += price_length(models, kind, value);
     }
@@ -1035,19 +1082,19 @@ fn offset_len_state(len: u32) -> usize {
     (len.saturating_sub(min) as usize).min(OFFSET_LEN_STATES - 1)
 }
 
-/// How many of a bucketed value's residual bits, counted from the most
+/// How many of a bucketed length's residual bits, counted from the most
 /// significant, [`ResidualTree`] models instead of sending raw: registered
 /// before measuring (`research/JOURNAL.md` S2-A114), never tuned.
 const RESIDUAL_MODELED_BITS: u32 = 4;
 
 /// One adaptive binary tree per [`lz::bucket`] over the top
-/// [`RESIDUAL_MODELED_BITS`] residual bits [`encode_bucketed`] currently
-/// sends raw, LZMA-style (`lzma-specification.txt` models a distance's
-/// bits below its slot and every length bit). Invariant: bucket `b`'s
-/// nodes are `nodes[b << RESIDUAL_MODELED_BITS..][1..1 <<
-/// RESIDUAL_MODELED_BITS]`; a walk of `k <= RESIDUAL_MODELED_BITS` bits
+/// [`RESIDUAL_MODELED_BITS`] residual bits of a bucketed value, the rest
+/// raw, LZMA-style (`lzma-specification.txt` models every length bit).
+/// Invariant: bucket `b`'s nodes are `nodes[b << RESIDUAL_MODELED_BITS..][1..1
+/// << RESIDUAL_MODELED_BITS]`; a walk of `k <= RESIDUAL_MODELED_BITS` bits
 /// starts at node 1 and visits nodes below `1 << k`, so it never leaves
-/// its own bucket's slice.
+/// its own bucket's slice, and a `b` below the `buckets` the tree was
+/// built for stays inside `nodes`.
 struct ResidualTree {
     nodes: Vec<Model>,
 }
@@ -1059,121 +1106,75 @@ impl ResidualTree {
         }
     }
 
-    /// Ideal cost of `value`'s residual bits below its bucket: the top
-    /// `min(b, RESIDUAL_MODELED_BITS)` through this tree, the rest raw.
-    fn ideal_cost_bits(&mut self, value: u32) -> f64 {
-        let b = lz::bucket(value);
+    /// Fallible counterpart to [`Self::new`], for [`Models::try_new`]'s
+    /// decode path (hard rule 2).
+    fn try_new(buckets: usize) -> Result<Self, std::collections::TryReserveError> {
+        let count = buckets << RESIDUAL_MODELED_BITS;
+        let mut nodes = Vec::new();
+        nodes.try_reserve_exact(count)?;
+        for _ in 0..count {
+            nodes.push(Model::try_new(2)?);
+        }
+        Ok(Self { nodes })
+    }
+
+    /// Residual bit count of bucket `b`, split into `(modeled, raw)`: the
+    /// top part through the tree, the rest sent raw.
+    fn split(b: usize) -> (u32, u32) {
         let residual = bucket_bits(b);
         let modeled = residual.min(RESIDUAL_MODELED_BITS);
+        (modeled, residual - modeled)
+    }
+
+    /// Codes `value`'s residual bits below its [`lz::bucket`]: the top
+    /// `min(b, RESIDUAL_MODELED_BITS)` through this tree, most significant
+    /// first, then the rest raw.
+    fn encode(&mut self, ac: &mut Encoder, value: u32) {
+        let b = lz::bucket(value);
+        let (modeled, raw) = Self::split(b);
         let base = b << RESIDUAL_MODELED_BITS;
         let mut node = 1usize;
-        let mut cost = f64::from(residual - modeled);
-        for shift in (residual - modeled..residual).rev() {
+        for shift in (raw..raw + modeled).rev() {
+            let bit = ((value >> shift) & 1) as usize;
+            self.nodes[base + node].encode(ac, bit);
+            node = node * 2 + bit;
+        }
+        ac.encode_bits(value, raw);
+    }
+
+    /// Inverse of [`Self::encode`] for the decoded bucket `b`: returns the
+    /// whole value, `(1 << b) | residual`. Never panics on adversarial `ac`
+    /// state: `b` is a decoded bucket symbol, always below the `buckets`
+    /// this tree was built for, and [`Model::decode`] and
+    /// [`Decoder::decode_bits`] are panic-free on any input.
+    fn decode(&mut self, ac: &mut Decoder, b: usize) -> u32 {
+        let (modeled, raw) = Self::split(b);
+        let base = b << RESIDUAL_MODELED_BITS;
+        let mut node = 1usize;
+        for _ in 0..modeled {
+            node = node * 2 + self.nodes[base + node].decode(ac);
+        }
+        // `node` is a leading 1 over the `modeled` decoded bits, so
+        // shifting it left by `raw` already places the bucket's own bit.
+        let top = u32::try_from(node).expect("node stays below 1 << (RESIDUAL_MODELED_BITS + 1)");
+        (top << raw) | ac.decode_bits(raw)
+    }
+
+    /// Ideal cost of `value`'s residual bits below its bucket, priced
+    /// exactly as [`Self::encode`] codes them.
+    fn ideal_cost_bits(&mut self, value: u32) -> f64 {
+        let b = lz::bucket(value);
+        let (modeled, raw) = Self::split(b);
+        let base = b << RESIDUAL_MODELED_BITS;
+        let mut node = 1usize;
+        let mut cost = f64::from(raw);
+        for shift in (raw..raw + modeled).rev() {
             let bit = ((value >> shift) & 1) as usize;
             cost += self.nodes[base + node].ideal_cost_bits(bit);
             node = node * 2 + bit;
         }
         cost
     }
-}
-
-/// [`ideal_cost_bits_residual_tree_experiment`]'s candidate state: one
-/// [`ResidualTree`] beside each bucket [`Model`] the shipped coder uses.
-struct ResidualTreeState {
-    length_match: ResidualTree,
-    length_rep: ResidualTree,
-    offset_len: [ResidualTree; OFFSET_LEN_STATES],
-}
-
-/// Paired [`TokenSink`] for [`ideal_cost_bits_residual_tree_experiment`]:
-/// every bucket symbol updates the shipped model once and adds its cost to
-/// both halves; only the residual differs, raw bits on the baseline half,
-/// [`ResidualTree`] on the candidate half.
-struct ResidualTreeSink {
-    cost: PairedCost,
-    state: ResidualTreeState,
-}
-
-impl TokenSink for ResidualTreeSink {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.cost.add_same(price_flag(models, flag_table, kind));
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        self.cost.add_same(price_literal(models, context, byte));
-    }
-
-    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        let b = lz::bucket(value);
-        let symbol = split_length_model(models, kind).ideal_cost_bits(b);
-        let tree = match kind {
-            FlagKind::Rep => &mut self.state.length_rep,
-            FlagKind::Match | FlagKind::Literal => &mut self.state.length_match,
-        };
-        self.cost.add(
-            symbol + f64::from(bucket_bits(b)),
-            symbol + tree.ideal_cost_bits(value),
-        );
-    }
-
-    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        let b = lz::bucket(value);
-        let state = offset_len_state(len);
-        let symbol = models.offset_len[state].ideal_cost_bits(b);
-        self.cost.add(
-            symbol + f64::from(bucket_bits(b)),
-            symbol + self.state.offset_len[state].ideal_cost_bits(value),
-        );
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(price_slot(models, symbol));
-    }
-}
-
-/// `research/JOURNAL.md` S2-A114's before-wiring measurement: prices the
-/// token stream of the filter [`encode`] actually selects for `data`
-/// (S2-A110 found the raw parse can differ from it), returning
-/// `(baseline_bits, candidate_bits)` where the candidate models residual
-/// bits through a per-bucket adaptive binary tree. Not reachable from [`encode`]/[`decode`].
-#[must_use]
-pub fn ideal_cost_bits_residual_tree_experiment(data: &[u8]) -> (f64, f64) {
-    let mut best: Option<(usize, Vec<u8>)> = None;
-    for candidate in filters::select::pick(data) {
-        let filtered = apply_filter(candidate, data);
-        let columns = match candidate {
-            Candidate::Transpose(columns) => Some(columns),
-            Candidate::Identity | Candidate::Delta(_) | Candidate::Bcj => None,
-        };
-        let len = encode_tokens(&filtered, columns).len();
-        if best
-            .as_ref()
-            .is_none_or(|(existing, _)| crate::candidate_beats_incumbent(len, *existing))
-        {
-            best = Some((len, filtered));
-        }
-    }
-    let (_, filtered) = best.expect("filters::select::pick always returns at least Identity");
-    residual_tree_paired_cost(&filtered)
-}
-
-/// [`ideal_cost_bits_residual_tree_experiment`]'s pairing over
-/// already-filtered `data`: its baseline half is [`ideal_cost_bits`]
-/// exactly, since every [`ResidualTreeSink`] field prices the shipped
-/// model the way [`CostSink`] does.
-fn residual_tree_paired_cost(data: &[u8]) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut sink = ResidualTreeSink {
-        cost: PairedCost::default(),
-        state: ResidualTreeState {
-            length_match: ResidualTree::new(lz::LENGTH_BUCKETS),
-            length_rep: ResidualTree::new(lz::LENGTH_BUCKETS),
-            offset_len: std::array::from_fn(|_| ResidualTree::new(lz::OFFSET_BUCKETS)),
-        },
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.cost.baseline, sink.cost.candidate)
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
@@ -1361,11 +1362,14 @@ trait DecodeSink {
     ) -> Result<Context, Self::Err>;
 }
 
-/// Decodes a copy token's length symbol: through [`Models::length_match`]/
-/// `length_rep` (selected by `kind`) when `length_split` is set
+/// Decodes a copy token's length: through [`Models::length_match`]/
+/// `length_rep` (selected by `kind`) when `gates.length_split` is set
 /// (`LENGTH_SPLIT_MIN_VERSION` and above), or through the shared
-/// [`Models::length`] otherwise. `EncodeSink::length` always takes the
-/// split branch unconditionally (compression always targets the newest
+/// [`Models::length`] otherwise; the residual bits below its bucket come
+/// from the [`ResidualTree`] beside the split model when
+/// `gates.length_residual` is set (`LENGTH_RESIDUAL_MIN_VERSION` and
+/// above), raw otherwise. `EncodeSink::length` always takes the newest
+/// branch unconditionally (compression always targets the newest
 /// version); this function is the one that must still read older frames.
 ///
 /// # Panics
@@ -1373,8 +1377,11 @@ trait DecodeSink {
 /// Panics if `kind` is [`FlagKind::Literal`]: both of [`decode_tokens`]'s
 /// call sites already have a [`FlagKind::Match`] or [`FlagKind::Rep`] in
 /// hand.
-fn decode_length(models: &mut Models, ac: &mut Decoder, length_split: bool, kind: FlagKind) -> u32 {
-    if length_split {
+fn decode_length(models: &mut Models, ac: &mut Decoder, gates: DecodeGates, kind: FlagKind) -> u32 {
+    if gates.length_residual {
+        let b = split_length_model(models, kind).decode(ac);
+        split_length_residual(models, kind).decode(ac, b)
+    } else if gates.length_split {
         decode_bucketed(split_length_model(models, kind), ac)
     } else {
         decode_bucketed(&mut models.length, ac)
@@ -1396,8 +1403,8 @@ fn decode_offset(models: &mut Models, ac: &mut Decoder, offset_split: bool, len:
     }
 }
 
-/// The two real-path version gates [`decode_tokens`] must check once per
-/// frame, bundled into one parameter so a third gate never pushes that
+/// The three real-path version gates [`decode_tokens`] must check once per
+/// frame, bundled into one parameter so a fourth gate never pushes that
 /// function's own argument count over `clippy::too_many_arguments`
 /// (mirroring how [`LiteralPath`] bundles the literal sub-stream's own
 /// three thresholds into one enum instead of three independent bools).
@@ -1405,6 +1412,9 @@ fn decode_offset(models: &mut Models, ac: &mut Decoder, offset_split: bool, len:
 struct DecodeGates {
     /// `version >= LENGTH_SPLIT_MIN_VERSION`.
     length_split: bool,
+    /// `version >= LENGTH_RESIDUAL_MIN_VERSION`; implies `length_split`,
+    /// since the constants ascend.
+    length_residual: bool,
     /// `version >= OFFSET_LEN_SPLIT_MIN_VERSION`.
     offset_split: bool,
 }
@@ -1435,7 +1445,7 @@ fn decode_tokens<S: DecodeSink>(
                 context = context.after_literal(byte);
             }
             FlagKind::Match => {
-                let len = decode_length(models, ac, gates.length_split, FlagKind::Match);
+                let len = decode_length(models, ac, gates, FlagKind::Match);
                 let distance = decode_offset(models, ac, gates.offset_split, len);
                 // decode_bucketed always ORs in `1 << bits`, which is >= 1
                 // regardless of the residual bits: never zero.
@@ -1450,7 +1460,7 @@ fn decode_tokens<S: DecodeSink>(
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
                 let slot = RepSlot::from_index(models.slot.decode(ac));
-                let len = decode_length(models, ac, gates.length_split, FlagKind::Rep);
+                let len = decode_length(models, ac, gates, FlagKind::Rep);
                 let distance = reps.get(slot);
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
@@ -1645,7 +1655,10 @@ impl DecodeSink for VecSink<'_> {
 /// `LENGTH_SPLIT_MIN_VERSION` (8) and through `Models::length_match`/
 /// `length_rep` at or above it; `offset` decodes through the shared
 /// `Models::offset` below `OFFSET_LEN_SPLIT_MIN_VERSION` (9) and through
-/// `Models::offset_len` at or above it; neither is candidate-gated (see the
+/// `Models::offset_len` at or above it; a length's residual bits are raw
+/// below `LENGTH_RESIDUAL_MIN_VERSION` (10) and coded through
+/// `Models::length_match_residual`/`length_rep_residual` at or above it;
+/// none of these is candidate-gated (see the
 /// module docs' "Payload layout" section).
 ///
 /// # Panics
@@ -1700,6 +1713,7 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
         declared_len,
         DecodeGates {
             length_split: version >= LENGTH_SPLIT_MIN_VERSION,
+            length_residual: version >= LENGTH_RESIDUAL_MIN_VERSION,
             offset_split: version >= OFFSET_LEN_SPLIT_MIN_VERSION,
         },
         &mut models,
@@ -1915,6 +1929,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
         declared_len,
         DecodeGates {
             length_split: version >= LENGTH_SPLIT_MIN_VERSION,
+            length_residual: version >= LENGTH_RESIDUAL_MIN_VERSION,
             offset_split: version >= OFFSET_LEN_SPLIT_MIN_VERSION,
         },
         &mut models,

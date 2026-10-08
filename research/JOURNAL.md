@@ -8482,3 +8482,59 @@ record.
   feed the trees' prices to the parse. Apparatus stays on `main` per the
   `compression-experiment` skill; the scratch binary is deleted.
   `research/progress.jsonl` it189.
+- S2-A115 | ACCEPTED | S2-A114's real-wiring slice, length half only
+  (`FORMAT_VERSION` 10, ADR-0061). S2-A114 left one decision to this
+  slice, taken on train evidence alone: whether the offset trees ship.
+  Its own diagnostic priced them at +0.012368 b/B on train, so they do
+  not: the distance's residual bits stay raw, and `ResidualTree` serves
+  `Models::length_match` and `length_rep` only. The wiring adds
+  `length_match_residual`/`length_rep_residual` to `codec::Models`
+  (fallible `try_new` on the decode path), codes each copy length's
+  residual through them in `EncodeSink`, prices it the same way in
+  `CostSink`/`PairedTokenSink`, and gates decode on
+  `LENGTH_RESIDUAL_MIN_VERSION` (10) through `DecodeGates`, version alone,
+  every candidate. `RESIDUAL_MODELED_BITS` stays 4, never swept. | Measured,
+  real bitstreams (`mothergod::compress`, `bench::baseline` 11 train
+  cases at `CASE_LEN` 50,000 / `CASE_SEED`, plus `access_log`/
+  `gradient_image` at `sealed_seed(CASE_SEED)`, before and after in one
+  session): `base64_wrapped` 0.576960 -> 0.530560 (-0.046400),
+  `entropy_ladder_h1` 1.262080 -> 1.251200 (-0.010880),
+  `entropy_ladder_h2` 2.423680 -> 2.370560 (-0.053120),
+  `entropy_ladder_h4` 4.466400 -> 4.363200 (-0.103200),
+  `entropy_ladder_h6` 6.178080 -> 6.144000 (-0.034080),
+  `entropy_ladder_h8` 8.000960 unchanged, `interleaved_audio16` 5.785600
+  -> 5.755520 (-0.030080), `json_records` 0.592320 -> 0.517440
+  (-0.074880), `markov_h8_2_trap` 2.424000 -> 2.370720 (-0.053280),
+  `sqlite_like_records` 3.438560 -> 3.336320 (-0.102240),
+  `x86_dense_code` 2.693920 -> 2.649920 (-0.044000); train mean
+  **-0.050196 b/B**, 10 of 11 improved, **none regressed**. Sealed:
+  `access_log` 0.893760 -> 0.858400 (**-0.035360**), `gradient_image`
+  5.870080 -> 5.853120 (**-0.016960**), both improved. Decode cost,
+  `baseline_gate -- speed` on the same AMD EPYC 7763, two runs each:
+  102.83 and 103.79 before, 102.03 and 106.92 after, +1.17 calibration
+  steps/byte on the means, inside the run-to-run spread (about 1.5%),
+  far inside `speed::MAX_SLOWDOWN`. | Mechanism: the real bitstream
+  tracked S2-A114's length-only ideal-cost reading (-0.050104) to within
+  0.0001 b/B, unlike S2-A110's length split, which mostly evaporated.
+  S2-A114 priced the token stream of the filter `encode` selects, closing
+  the raw-parse gap S2-A110 diagnosed, and a fresh tree costs exactly the
+  raw bits, so the delta is pure adaptation. The sealed `access_log` gain
+  is the same record-shaped repeat-length effect S2-A114 described, and
+  the iid ladder cases gain through short matches clustering at the low
+  end of each bucket. `entropy_ladder_h1`, which regressed under S2-A114's
+  offset trees, improves here: the tax was the offset half's. New golden
+  fixture `tests/golden/v10-lz-length-residuals`: its plaintext repeats
+  words at varying lengths so the trees adapt, and the same bytes decode
+  wrongly under version 9, which a copy of `v9-lz-repeated-text` could not
+  pin (its few repeating tokens leave the trees at their fresh price).
+  Every version-3 through version-9 fixture stays committed, decode-only.
+  Apparatus deleted in this PR per the `compression-experiment` skill:
+  the paired sink, its state, the experiment entry point, and their
+  tests. Remaining scope: a distance half shaped like LZMA's (low align
+  bits instead of the top ones) stays a separate candidate, and `lz`'s DP
+  still prices residuals at `extra_bits`, flat, so an encoder-only
+  follow-up could feed the trees' prices to the parse.
+  `bench/baseline.json` and `docs/benchmarks/{canterbury,silesia}.md` are
+  not regenerated here: `baseline_gate check` passes against the unchanged
+  baseline, and a new baseline retires both finals reports' fingerprint,
+  which needs their network fetches. `research/progress.jsonl` it190.
