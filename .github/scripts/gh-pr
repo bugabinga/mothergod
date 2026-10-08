@@ -33,6 +33,14 @@ name in git history, the PR-body half of #485.
 Never draft (CLAUDE.md rule 11), so there is no flag for it. Base is the
 repository's default branch; nothing here targets another.
 
+The title is checked here too, because it becomes the squash subject on
+`main` (#928): T1 caps it at TITLE_MAX characters with no trailing period,
+and 15 of the 40 PRs merged in the first week of 2026-10 broke the cap, so
+`git log --oneline` wrapped and the release-notes line T2 asks for did not
+exist. A refusal at open costs one retry; a warning costs nothing and
+changes nothing. The squash appends ` (#N)`, which the cap deliberately
+ignores: 72 on the title is the rule as written.
+
 The app token expires about an hour into a session (issue #81), and this
 script cannot outlive it: a run whose work outlasts the token pushes its
 branch and dies here, which `stalled-prs` reports as `branch-orphaned` and
@@ -51,6 +59,10 @@ import sys
 from footer import attribute
 from secret_scrub import scrub
 
+# CLAUDE.md Voice T1: the PR title is the squash subject on `main`, at most
+# 72 characters, no period. Counted in code points, the count a reader sees.
+TITLE_MAX = 72
+
 
 def die(*lines):
     for line in lines:
@@ -66,8 +78,16 @@ def main() -> int:
                         help="label to apply, repeatable")
     args = parser.parse_args()
 
-    if not args.title.strip():
+    title = args.title.strip()
+    if not title:
         die("a PR needs a title; one nobody can scan is nobody's review")
+    if len(title) > TITLE_MAX:
+        die(f"title is {len(title)} characters; T1 caps the squash subject at "
+            f"{TITLE_MAX} (CLAUDE.md Voice, #928)",
+            "say the effect, not the mechanism; the body carries the rest")
+    if title.endswith("."):
+        die("title ends with a period; T1 is `area: effect`, no period "
+            "(CLAUDE.md Voice, #928)")
     role = os.environ.get("ROLE", "")
     if not role:
         die("ROLE is not set; the calling workflow must export it")
@@ -105,7 +125,7 @@ def main() -> int:
             "open it on the session's app token, which gh-comment never holds")
     env["GH_TOKEN"] = token
 
-    call = ["pr", "create", "--head", args.head, "--title", args.title, "--body", full_body]
+    call = ["pr", "create", "--head", args.head, "--title", title, "--body", full_body]
     for label in args.label:
         call += ["--label", label]
     result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)

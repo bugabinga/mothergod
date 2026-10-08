@@ -104,3 +104,18 @@ test("refuses without ROLE, without a body, and with an empty title, before gh i
   assert.equal(empty.called, null);
   assert.match(empty.stderr, /needs a title/);
 });
+
+test("refuses a title over 72 characters or ending in a period: it is the squash subject (#928)", () => {
+  const long = run(["claude/x", "x".repeat(73)]);
+  assert.equal(long.called, null);
+  assert.match(long.stderr, /73 characters/);
+  assert.match(long.stderr, /T1/);
+  assert.match(long.stderr, /#928/);
+  const period = run(["claude/x", "footer: assemble it."]);
+  assert.equal(period.called, null);
+  assert.match(period.stderr, /period/);
+  // Exactly 72 is the rule as written; the squash's ` (#N)` is not counted.
+  const edge = run(["claude/x", "y".repeat(72)]);
+  assert.equal(edge.status, 0);
+  assert.equal(edge.called.argv[5], "y".repeat(72));
+});
