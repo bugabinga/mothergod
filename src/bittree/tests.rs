@@ -373,34 +373,6 @@ fn sse_calibration_wins_when_the_raw_table_is_systematically_biased() {
     );
 }
 
-/// `walk_nodes` is `walk_steps`'s own traversal, not a copy: for every
-/// symbol, both visit the same `(depth, prefix, mid)` sequence, the
-/// `[lo, hi)` `walk_nodes` reports yields exactly the probability
-/// `walk_steps` handed out, and both land on the symbol.
-#[test]
-fn walk_nodes_visits_the_same_nodes_walk_steps_prices() {
-    let cum = skewed_table();
-    for symbol in 0..=u8::MAX {
-        let target = usize::from(symbol);
-        let mut via_steps = Vec::new();
-        let landed_steps = walk_steps(&cum, |depth, prefix, mid, p| {
-            via_steps.push((depth, prefix, mid, p.to_bits()));
-            target >= mid
-        });
-        let mut via_nodes = Vec::new();
-        let landed_nodes = walk_nodes(|depth, prefix, lo, mid, hi| {
-            assert_eq!(mid, lo + (hi - lo) / 2);
-            let p = upper_half_probability(&cum, lo, hi);
-            via_nodes.push((depth, prefix, mid, p.to_bits()));
-            target >= mid
-        });
-        assert_eq!(via_steps, via_nodes, "symbol {symbol}");
-        assert_eq!(via_nodes.len(), LEVELS as usize);
-        assert_eq!(landed_steps, symbol);
-        assert_eq!(landed_nodes, symbol);
-    }
-}
-
 #[test]
 fn boundary_symbols_zero_and_max_round_trip() {
     let cum = skewed_table();

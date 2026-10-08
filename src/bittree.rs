@@ -137,36 +137,16 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
     }
 }
 
-/// Shared halving loop behind [`walk`] and [`walk_sse`]: the `LEVELS`-level
-/// binary-tree decomposition of `[0, ALPHABET)`, computing each level's
-/// `depth`, `prefix` (`lo / width`, [`sse_context`]'s own argument), midpoint,
-/// and raw `upper_half_probability` before handing them to `step`, which
-/// returns the bit that level resolved to. [`walk`] ignores `depth`/`prefix`;
-/// [`walk_sse`] uses them to key its `Sse` context — the only difference
-/// between the two, so this is the one place that difference lives.
+/// The tree traversal under [`walk`] and [`walk_sse`], with no cumulative
+/// table: hands `node` each level's `depth`, `prefix` (`lo / width`,
+/// [`sse_context`]'s own argument), and the `[lo, mid, hi)` split it decides,
+/// and follows the bit `node` returns. A caller pricing the same decisions
+/// from its own probabilities ([`crate::literal::LogisticMix`],
+/// `research/JOURNAL.md` S2-A101) walks the identical tree the shipped coder
+/// does, never a copy of it.
 ///
 /// Returns the final `lo`, which after `LEVELS` halvings of `[0, ALPHABET)`
-/// is exactly the coded symbol.
-///
-/// # Panics
-///
-/// Panics if `cum` is not shaped like a 257-entry cumulative table over
-/// `ALPHABET` symbols; see `check_table_shape`.
-fn walk_steps(cum: &[u64], mut step: impl FnMut(u32, usize, usize, f64) -> bool) -> u8 {
-    check_table_shape(cum);
-    walk_nodes(|depth, prefix, lo, mid, hi| {
-        step(depth, prefix, mid, upper_half_probability(cum, lo, hi))
-    })
-}
-
-/// The pure tree traversal under [`walk_steps`], with no cumulative table:
-/// hands `node` each level's `depth`, `prefix`, and the `[lo, mid, hi)`
-/// split it decides, and follows the bit `node` returns. Factored out so a
-/// caller pricing the same decisions from its own probabilities
-/// ([`crate::literal::LogisticMix`], `research/JOURNAL.md` S2-A101) walks
-/// the identical tree the shipped coder does, never a copy of it.
-///
-/// Returns the final `lo`, the symbol the `LEVELS` decisions resolved to.
+/// is exactly the symbol the decisions resolved to.
 pub(crate) fn walk_nodes(mut node: impl FnMut(u32, usize, usize, usize, usize) -> bool) -> u8 {
     let mut lo = 0usize;
     let mut hi = ALPHABET;
@@ -192,20 +172,18 @@ pub(crate) fn walk_nodes(mut node: impl FnMut(u32, usize, usize, usize, usize) -
 }
 
 /// Shared skeleton behind [`encode_symbol`], [`decode_symbol`], and
-/// [`ideal_cost_bits`]: walks [`walk_steps`], keying on nothing beyond each
-/// level's midpoint and raw probability. `code_bit` receives those two and
-/// returns the bit that level resolved to — already known from a caller's
-/// own `symbol` for [`encode_symbol`] and [`ideal_cost_bits`], decoded from
+/// [`ideal_cost_bits`]: walks [`walk_nodes`] over `cum`. `code_bit` receives
+/// each level's midpoint and raw `upper_half_probability` and returns the bit
+/// that level resolved to — already known from a caller's own `symbol` for
+/// [`encode_symbol`] and [`ideal_cost_bits`], decoded from
 /// [`Decoder::decode_bit`] for [`decode_symbol`] — so the three callers
 /// differ only in what they do with that bit and probability, never in the
 /// walk itself. Mirrors [`walk_sse`] for this module's non-SSE trio.
 ///
-/// # Panics
-///
-/// Panics if `cum` is not shaped like a 257-entry cumulative table over
-/// `ALPHABET` symbols; see `check_table_shape`.
+/// Panics if `cum` fails `check_table_shape`.
 fn walk(cum: &[u64], mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
-    walk_steps(cum, |_depth, _prefix, mid, p| code_bit(mid, p))
+    check_table_shape(cum);
+    walk_nodes(|_depth, _prefix, lo, mid, hi| code_bit(mid, upper_half_probability(cum, lo, hi)))
 }
 
 /// Codes `symbol` through `encoder` as `LEVELS` chained binary
@@ -248,47 +226,30 @@ pub fn decode_symbol(decoder: &mut Decoder, cum: &[u64]) -> u8 {
     walk(cum, |_mid, p| decoder.decode_bit(p))
 }
 
-/// Shared skeleton behind [`walk_sse`]: walks [`walk_steps`], computing
-/// each level's SSE context via caller-supplied `context_of`, refining and
-/// updating `sse` on the raw probability. [`walk_sse`] below keys on
-/// exactly [`sse_context`].
+/// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
+/// [`ideal_cost_bits_sse`]: [`walk`] with each level's raw probability
+/// refined through `sse` (keyed by [`sse_context`]) before `code_bit` sees
+/// it, and `sse` updated on the raw probability afterward. `code_bit`
+/// receives the level's midpoint and refined probability and returns the bit
+/// that level resolved to — already known from a caller's own `symbol` for
+/// [`encode_symbol_sse`] and [`ideal_cost_bits_sse`], decoded from
+/// [`Decoder::decode_bit`] for [`decode_symbol_sse`] — so the three callers
+/// differ only in what they do with that bit and probability, never in the
+/// SSE walk itself. Matches [`crate::codec::walk_tokens`]'s reasoning:
+/// keeping the walk in one place is what stops the encode, decode, and
+/// cost-pricing paths from silently drifting apart.
 ///
-/// # Panics
-///
-/// Panics if `cum` is not shaped like a 257-entry cumulative table over
-/// `ALPHABET` symbols; see `check_table_shape`.
-fn walk_sse_keyed(
-    cum: &[u64],
-    sse: &mut Sse,
-    mut context_of: impl FnMut(u32, usize) -> usize,
-    mut code_bit: impl FnMut(usize, f64) -> bool,
-) -> u8 {
-    walk_steps(cum, |depth, prefix, mid, raw_p| {
-        let context = context_of(depth, prefix);
+/// Panics if `cum` fails `check_table_shape`.
+fn walk_sse(cum: &[u64], sse: &mut Sse, mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
+    check_table_shape(cum);
+    walk_nodes(|depth, prefix, lo, mid, hi| {
+        let raw_p = upper_half_probability(cum, lo, hi);
+        let context = sse_context(depth, prefix);
         let refined_p = sse.refine(context, raw_p);
         let bit = code_bit(mid, refined_p);
         sse.update(context, raw_p, bit);
         bit
     })
-}
-
-/// Shared skeleton behind [`encode_symbol_sse`], [`decode_symbol_sse`], and
-/// [`ideal_cost_bits_sse`]: [`walk_sse_keyed`] keyed on plain [`sse_context`].
-/// `code_bit` receives the level's midpoint and refined probability and
-/// returns the bit that level resolved to — already known from a caller's
-/// own `symbol` for [`encode_symbol_sse`] and [`ideal_cost_bits_sse`],
-/// decoded from [`Decoder::decode_bit`] for [`decode_symbol_sse`] — so the
-/// three callers differ only in what they do with that bit and probability,
-/// never in the SSE walk itself. Matches [`crate::codec::walk_tokens`]'s
-/// reasoning: keeping the walk in one place is what stops the encode,
-/// decode, and cost-pricing paths from silently drifting apart.
-///
-/// # Panics
-///
-/// Panics if `cum` is not shaped like a 257-entry cumulative table over
-/// `ALPHABET` symbols; see `check_table_shape`.
-fn walk_sse(cum: &[u64], sse: &mut Sse, code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
-    walk_sse_keyed(cum, sse, sse_context, code_bit)
 }
 
 /// Codes `symbol` through `encoder` as `LEVELS` chained binary decisions
