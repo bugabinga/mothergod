@@ -18,6 +18,21 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-08 — Editorial: the README opener lost its pipeline, and gained no pointer
+
+#923 cut "A filter bank feeds an optimal-parse LZ..." from the README's
+first paragraph. What remains is the site tagline's pitch: what it is,
+what it trades, how to judge it, where the evidence lives.
+
+**Rejected: a replacement link to "the architecture".** The issue
+allowed one. No page written for a visitor states the pipeline as an
+overview (grep for "filter bank" over `*.md` and `*.html` outside
+`research/` and `agents/`: only `CLAUDE.md`, changelog lines, and this
+journal). `CLAUDE.md` is the agent contract; linking it would hand the
+reader the factory's instructions. The `research/JOURNAL.md` link already
+serves the engineer who wants to descend. Revisit when a design page
+for humans exists.
+
 ## 2026-10-08 — Survey: the repo reader doubled again, and the README greets them with the pipeline
 
 Sixth survey, seven days after the fifth.
