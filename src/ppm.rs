@@ -1,165 +1,23 @@
-//! PPM-style escape table: [`Ppm`], a standalone adaptive frequency
-//! primitive for ROADMAP M3's third standing lead (`JOURNAL` S1-P3, "PPM
-//! escape for literal contexts"). Not a port: the founding session never
-//! implemented PPM-style escape coding (grepped
-//! `research/imports/session-1/mothergod.rs` clean of any escape/PPM code),
-//! so there is no archive behavior to carry forward, same situation
-//! [`crate::sse`] documented for S1-P1 (ADR-0006).
+//! PPM-style escape table: [`Ppm`], an adaptive frequency primitive in which
+//! a symbol never observed is a distinct, separately priced event rather
+//! than a Laplace floor of 1 (`JOURNAL` S1-P3, "PPM escape for literal
+//! contexts"). Not a port: the founding session never implemented escape
+//! coding, so there is no archive behavior to carry forward (ADR-0006).
 //!
-//! **The gap this closes.** [`crate::model::Model`] and
-//! [`crate::literal::Literal`]'s six expert banks all Laplace-smooth every
-//! symbol to a starting frequency of 1, so "this symbol has never occurred
-//! in this exact context" and "this symbol occurred once, long enough ago
-//! to decay back near the floor" are indistinguishable from the table's own
-//! state — there is no representable "unseen" signal for a caller to act
-//! on. `JOURNAL` S1-R4's near-miss diagnosis named the fix directly: a
-//! context should be able to say "I have never seen this symbol; escape to
-//! a lower-order model" as its own explicit, separately-priced event,
-//! classic PPM Method C: an escape's frequency is the number of *distinct*
-//! symbols already observed at this order, so contexts with a longer track
-//! record of adding new symbols escape more readily than contexts that keep
-//! recoding the same few. Untried territory, and different from `JOURNAL`
-//! S1-R5 (rejected): S1-R5 blended every context unconditionally toward
-//! order-0, damaging exactly the well-trained contexts that most need to
-//! stay confident; this primitive escapes only a genuinely never-seen
-//! symbol; a well-trained context essentially never pays the escape cost.
+//! Classic PPM Method C: an escape's frequency is the number of *distinct*
+//! symbols already observed, so a context with a longer record of adding new
+//! symbols escapes more readily than one that keeps recoding the same few.
 //!
-//! **Remaining scope.** This module is standalone and not yet reachable
-//! from [`crate::literal`] or [`crate::codec`]. "Order-0?" — one of this
-//! doc's three named fallback candidates — was tried and rejected
-//! (`JOURNAL` S2-R6): an expert's own frequency for a symbol it has never
-//! observed (`freq == 1`, [`crate::literal::Literal`]'s banks never reaching this
-//! struct's true-zero "unseen" signal) substituted with the order-0
-//! catch-all bank's own frequency for that symbol, measured as an ideal-
-//! cost pairing (never wired to the real bitstream). Net regression
-//! (+0.0458 b/B average over `bench::baseline`'s 11 train cases, S1-P3's
-//! own named target `sqlite_like_records` among the six that got worse,
-//! plus a severe sealed-validation regression on `gradient_image`,
-//! +0.541 b/B) — this doc's own S1-R5 distinction ("a well-trained
-//! context essentially never pays the escape cost") holds in principle
-//! but does not save this data: a context-specific bank stays sparse for
-//! a long time in exactly the structured formats this project targets
-//! (each individual order-2/align/word key recurs rarely), so the
-//! fallback fires often enough to matter, and order-0's *global* marginal
-//! is frequently the *wrong local* answer whenever a byte's likelihood
-//! depends on where it sits (`markov_h8_2_trap`, purpose-built to
-//! separate context modelers from histogram coders, was the single
-//! worst regression, +0.128 b/B). "One of [`crate::literal::Literal`]'s other five
-//! experts?" was not tried (a context-specific bank is exactly as likely
-//! to be sparse as whichever is escaping, per this doc's own reasoning
-//! above); "a fresh dedicated table?" was tried next and rejected too
-//! (`JOURNAL` S2-R16): a coarse order-1 table keyed only by the previous
-//! byte's high nibble (16 contexts, distinct from every one of `Literal`'s
-//! six banks), substituted the same way order-0 was but rescaled onto
-//! each sparse expert's own bank total instead of assumed to sum to 1. Net
-//! train regression (+0.0348 b/B average over `bench::baseline`'s 11
-//! cases, S1-P3's own named target `sqlite_like_records` moving the wrong
-//! direction again, +0.0952 b/B, worse than order-0's own +0.0397) despite
-//! both sealed-only kinds improving this time (`gradient_image` −0.1517,
-//! the same case order-0 hurt worst) — a genuinely different failure
-//! shape than S2-R6's (train regressed instead of a sealed case), so the
-//! corpus policy's binary accept rule failed on the other side of the
-//! "AND" this time. Mechanism: this fallback target does fix exactly
-//! order-0's own failure mode (context-free blindness on
-//! `markov_h8_2_trap`/`gradient_image`, both flipped from S2-R6's worst
-//! regressions to this candidate's best improvements) but its own
-//! rescaling step, needed because a coarse table's total and a sparse
-//! expert's own bank total diverge over time (the fast-rate expert's
-//! `FAST_INCREMENT` (32) grows its own total roughly 2.7x faster than the
-//! fallback table's `DEFAULT_INCREMENT` (12)-driven one), silently
-//! inflates the "unobserved" floor away from a true 1 count on exactly
-//! the fixed-record/short-period data (`interleaved_audio16`,
-//! `sqlite_like_records`, `x86_dense_code`) this project's structured
-//! generators exist to probe — full record and numbers, `JOURNAL` S2-R16.
-//! Remaining S1-P3 scope, at the time: all three of this doc's own named
-//! fallback candidates were tried and rejected; what was left was either
-//! a substitution rule that does not need cross-table rescaling (so it
-//! cannot reintroduce this mechanism) or accepting that this lead's
-//! ceiling, absent one, sits where S1-P2's own repeated-rejection shape
-//! already landed. `JOURNAL` S2-R17 tried exactly that rescale-free
-//! substitution rule (reviving S2-R16's own dedicated table with a
-//! mechanism that plugs a foreign probability directly into the mixer's
-//! own fixed-point units, never converting it into a frequency against
-//! any bank's own total) and it failed on nearly the same data, nearly
-//! the same way, even with the diagnosed rounding bug provably absent:
-//! evidence the real driver is the six-expert mixer's own weight
-//! calibration, not any one substitution formula's arithmetic. Remaining
-//! scope, at the time: an escape signal that never enters a real
-//! expert's own floor at all (a separate, additive eighth-expert-style
-//! blend, S1-P5's own architectural shape), or accepting the ceiling.
+//! The only live consumer is [`crate::literal::PpmExpertState`], which blends
+//! one table per bank into [`crate::literal`]'s mix as an additive term and
+//! reads `Ppm::probability`; escape coding ([`Ppm::encode_escape`],
+//! [`Ppm::decode`]) has no bitstream caller. [`Ppm::distinct`] only ever
+//! grows: [`Ppm::observe`] has no decrement or reset path, so "has this
+//! table seen anything" never goes back to `false`.
 //!
-//! Fifth slice, `JOURNAL` S2-A100: built that additive shape —
-//! [`crate::literal::PpmExpertState`] wraps one [`Ppm`] table per bank
-//! (16, keyed the same coarse way the rejected `NibbleFallback` was, the
-//! previous byte's high nibble) plus its own mixing weight, blended into
-//! [`crate::literal::Literal`]'s mix as a genuinely additive term via
-//! `Literal::mix_ppm`, never written into any of the six real experts'
-//! own banks or totals. **Accepted**: train net -0.005530 b/B (8 of 11
-//! `bench::baseline` cases improved; `entropy_ladder_h8`, `base64_wrapped`,
-//! and `sqlite_like_records` regressed, each an order of magnitude or
-//! more smaller than any regression in prior S1-P3 slices), sealed
-//! `access_log` -0.006145 and `gradient_image` -0.176711 (both improved,
-//! the widest sealed margin any S1-P3 slice has measured). Mechanism: a
-//! `Ppm` bank starts every symbol at frequency 0, so it contributes
-//! nothing where its context carries no signal rather than a confidently
-//! wrong value the way a Laplace-smoothed or rescaled substitute could,
-//! and — unlike every rejected substitution above — this slice never
-//! writes into an existing expert's own reported estimate at all, so the
-//! six-expert
-//! mixer's weights keep calibrating against the same honest numbers they
-//! always have; only the new expert's own weight has to learn whether it
-//! is useful. Full record: `JOURNAL` S2-A100.
-//!
-//! Sixth slice, `JOURNAL` S2-R18: asked the SSE-interaction question
-//! S2-A100 left open (does this win survive `Literal::encode_sse`'s
-//! calibration stage) and got the opposite answer S2-A76 found for
-//! S1-P5's column expert — train flips to a net regression
-//! (+0.002604 b/B) once the additive contribution is calibrated through
-//! a tree-position-only SSE key, even though both sealed-only cases
-//! still improve, at a fraction of S2-A100's own pre-SSE margin.
-//! **Rejected**: SSE's tree-position key cannot distinguish "PPM bank
-//! silent" from "PPM bank active," so it blends two very different mixed
-//! distributions into one calibration trajectory per node, diluting
-//! exactly the sparse, intermittent signal this expert relies on (unlike
-//! the column expert's dense, systematic one, which that same coarse key
-//! could partially reconstruct). Every candidate artifact this slice
-//! added was reverted in full, per the `compression-experiment` skill;
-//! [`crate::literal::PpmExpertState`]/`Literal::mix_ppm`/
-//! `Literal::ideal_cost_bits_ppm_expert_pair` (S2-A100) are unaffected.
-//! Full record: `JOURNAL` S2-R18.
-//!
-//! Seventh slice, `JOURNAL` S2-R19: built the real wiring slice S2-R18 left
-//! as remaining scope (`Literal::encode_ppm`/`decode_ppm`, `FORMAT_VERSION`
-//! 5) and found the prediction wrong by two orders of magnitude:
-//! real-bitstream train net **+0.140771 b/B**, driven by the loss of
-//! `encode_sse`'s own SSE calibration on the six real experts themselves
-//! (S2-A100's "baseline" side never modeled this, since it used a direct
-//! 256-way division no real coding path this format's decoder ever
-//! drives). **Rejected**, every candidate artifact reverted; full record
-//! `JOURNAL` S2-R19.
-//!
-//! Eighth slice, `JOURNAL` S2-R21: tried the coding mechanism `JOURNAL`
-//! S2-L1 itself named as this lead's remaining scope — two independent
-//! `Sse` tables (`PpmExpertSseState`'s `warm`/`cold`), selected per byte by
-//! whether the coded byte's PPM bank has observed anything yet
-//! (`Ppm::distinct() > 0`), giving SSE the "is this expert active" axis a
-//! single tree-position-only key cannot express. **Rejected**, on the same
-//! train-side failure S2-R18 hit (`interleaved_audio16` +0.026322 b/B,
-//! train net +0.002608 b/B, both matching S2-R18's own numbers to within
-//! measurement noise): [`Ppm::distinct`] has no decrement or reset path
-//! anywhere in the crate, so it is monotonically non-decreasing and a
-//! bank's "warm" flag never goes cold — with only 16 banks, every one
-//! warms up within the first few dozen bytes of any real file and stays
-//! warm for the rest of it, so `cold` prices a vanishing prefix and `warm`
-//! carries essentially the whole stream, structurally almost the single
-//! table S2-R18 already rejected. Full mechanism and record: `JOURNAL`
-//! S2-R21. Remaining S1-P3 scope: a decoder-visible activity signal is
-//! necessarily bank-level and near-permanent under this architecture, not
-//! the per-symbol one that actually varies; closing this lead needs either
-//! a bank scheme with enough contexts that "warm" stays meaningfully rare
-//! (untried, and in tension with S2-R16/S2-R17's own finding that a coarse
-//! key is what let the additive shape work at all) or a coding mechanism
-//! this lead has not yet named.
+//! Every fallback, wiring and calibration slice tried on this lead, with its
+//! numbers and mechanism, is in `JOURNAL` S2-R6, S2-R16, S2-R17, S2-A100,
+//! S2-R18, S2-R19 and S2-R21.
 
 use crate::coder::{Decoder, Encoder};
 
