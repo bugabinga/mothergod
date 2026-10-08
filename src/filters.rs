@@ -274,6 +274,32 @@ pub mod bcj {
         Ok(out)
     }
 
+    /// Rewrites the rel32 operand of the [`INSTRUCTION_LEN`]-byte
+    /// `instruction` that starts at stream index `position`, through
+    /// `rewrite_operand(operand, post_addr)`. The one place the operand's
+    /// layout and its post-instruction address are computed, shared by the
+    /// batch scan and [`Undo::apply`] so the two cannot disagree on either.
+    fn rewrite_instruction(
+        instruction: &mut [u8],
+        position: usize,
+        rewrite_operand: impl Fn(u32, u32) -> u32,
+    ) {
+        let operand = u32::from_le_bytes([
+            instruction[1],
+            instruction[2],
+            instruction[3],
+            instruction[4],
+        ]);
+        // x86 rel32 addressing itself wraps at 2^32; truncating the
+        // position to u32 before adding matches that hardware semantic
+        // rather than losing information, so a stream past 4 GiB still
+        // round-trips the same address a batch decode would compute.
+        #[allow(clippy::cast_possible_truncation)]
+        let post_addr = (position as u32).wrapping_add(INSTRUCTION_LEN as u32);
+        instruction[1..INSTRUCTION_LEN]
+            .copy_from_slice(&rewrite_operand(operand, post_addr).to_le_bytes());
+    }
+
     /// Shared scan [`rewrite`]/[`try_rewrite`] both drive over an
     /// already-allocated `out`, so the two only ever differ in how `out`
     /// was built, never in what happens to it.
@@ -282,14 +308,7 @@ pub mod bcj {
         let mut i = 0usize;
         while i + INSTRUCTION_LEN <= n {
             if is_opcode(out[i]) {
-                let operand = u32::from_le_bytes([out[i + 1], out[i + 2], out[i + 3], out[i + 4]]);
-                // x86 rel32 addressing itself wraps at 2^32; truncating
-                // the position to u32 before adding matches that hardware
-                // semantic rather than losing information.
-                #[allow(clippy::cast_possible_truncation)]
-                let post_addr = (i as u32).wrapping_add(INSTRUCTION_LEN as u32);
-                let new_operand = rewrite_operand(operand, post_addr);
-                out[i + 1..i + INSTRUCTION_LEN].copy_from_slice(&new_operand.to_le_bytes());
+                rewrite_instruction(&mut out[i..i + INSTRUCTION_LEN], i, &rewrite_operand);
                 i += INSTRUCTION_LEN;
             } else {
                 i += 1;
@@ -419,20 +438,7 @@ pub mod bcj {
             if self.pending.len() < INSTRUCTION_LEN {
                 return Resolved::NONE;
             }
-            // rewrite's own truncating cast: post_addr matches encode's
-            // (i as u32).wrapping_add(INSTRUCTION_LEN as u32) exactly, so a
-            // stream past 4 GiB still round-trips the same address a batch
-            // decode would compute.
-            #[allow(clippy::cast_possible_truncation)]
-            let post_addr = (self.position as u32).wrapping_add(INSTRUCTION_LEN as u32);
-            let operand = u32::from_le_bytes([
-                self.pending[1],
-                self.pending[2],
-                self.pending[3],
-                self.pending[4],
-            ]);
-            let new_operand = operand.wrapping_sub(post_addr);
-            self.pending[1..].copy_from_slice(&new_operand.to_le_bytes());
+            rewrite_instruction(&mut self.pending, self.position, u32::wrapping_sub);
             self.position += INSTRUCTION_LEN;
             let resolved = Resolved::from_slice(&self.pending);
             self.pending.clear();
