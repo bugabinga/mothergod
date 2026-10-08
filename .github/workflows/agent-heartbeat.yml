@@ -140,8 +140,8 @@ jobs:
                   lacks an issue link, filing that issue is the first
                   step (#165),
                c. the top unblocked ROADMAP item, an open issue labeled
-                  research (a commissioned charter, ADR-0062), or the
-                  journal's top standing lead, the last two worked
+                  research + product (a commissioned charter, ADR-0062),
+                  or the journal's top standing lead, the last two worked
                   through `compression-experiment`,
                d. the oldest enhancement issue that is not
                   blocked-on-human.

@@ -9,7 +9,7 @@ ADR-0049 found a second seat on the same source: heartbeat duty 4c falls through
 The two mandates were one mandate: the researcher's prompt and duty 4c name the same skill, `compression-experiment`, against the same journal; the "wild swing" GOVERNANCE credited the researcher with existed in no prompt (curator, #682, 2026-09-23).
 
 The product queue is empty by construction: M3 and M5 are programs, not milestones (`ROADMAP.md`), so the fall-through is where the codec program executes.
-Of the eleven journal slices merged 2026-09-24 to 2026-10-08 (S2-R30 to R34, S2-A109 to A115), ten shipped from heartbeat branches and one from `claude/research-*` (`gh pr list --state merged`, by branch prefix; #682).
+Of the eleven journal-slice PRs merged 2026-09-24 to 2026-10-08, ten shipped from heartbeat branches and one from `claude/research-*` (#925; `gh pr list --state merged`, by branch prefix; #682).
 The researcher's three-day claim window (`research-due`, #541) existed to bound one seat's spend; the seven-day allowance read 5% used on 2026-10-08, so the budget did not need the throttle, only the roster did.
 
 The cost of the second seat: a workflow, a persona, a ladder, a claim-check script with its test, one interlock, one tick shared on the Telegram clock, and a cadence document that did not describe the cadence the journal received.
