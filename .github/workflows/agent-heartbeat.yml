@@ -29,12 +29,12 @@ on:
 
 permissions: {}
 
-# Shared with agent-research (ADR-0049): the two seats that take the
-# journal's next slice run one at a time, so the claim check at session
-# start sees the other's PR (#594). Never blocks an operator-priority
-# BDFL wake, which keeps its own group (ADR-0014).
+# One seat, one group (ADR-0014). ADR-0049's shared `journal-slice`
+# lock had two parties until ADR-0062 retired the researcher; the
+# heartbeat is now the only seat that takes the journal's next slice.
+# Never blocks an operator-priority BDFL wake, which keeps its own group.
 concurrency:
-  group: journal-slice
+  group: agent-heartbeat
   cancel-in-progress: false
 
 jobs:
@@ -139,8 +139,10 @@ jobs:
                   blocking the current milestone counts, and if it
                   lacks an issue link, filing that issue is the first
                   step (#165),
-               c. the top unblocked ROADMAP item, or the journal's top
-                  standing lead, worked through `compression-experiment`,
+               c. the top unblocked ROADMAP item, an open issue labeled
+                  research + product (a commissioned charter, ADR-0062),
+                  or the journal's top standing lead, the last two worked
+                  through `compression-experiment`,
                d. the oldest enhancement issue that is not
                   blocked-on-human.
                Claim check first, because agents run concurrently

@@ -37,7 +37,6 @@ on:
       - agent-bdfl
       - agent-heartbeat
       - agent-review
-      - agent-research
       - agent-deslop
       - agent-model-intel
       # Curator and herald are absent on purpose (BDFL ruling,

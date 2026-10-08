@@ -54,9 +54,9 @@ KEEP_FLOOR = 0.25
 # guaranteed to land in at least once. The sweep-carrying seats (BDFL,
 # heartbeat) tick far faster than that, and `guard-decide.test.mjs` asserts
 # it against the real crons in wrangler.toml so moving the cadence lever
-# cannot silently starve them. The herald and the researcher are governed
-# without that guarantee, by design: their wakes carry no sweeps, and a
-# floor week skipping them costs postponable work only.
+# cannot silently starve them. The herald is governed without that
+# guarantee, by design: its wakes carry no sweeps, and a floor week
+# skipping them costs postponable work only.
 WINDOW = 86400
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")

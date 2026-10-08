@@ -80,20 +80,6 @@
       ],
       "effort": "high"
     },
-    "researcher": {
-      "$comment": "Opus first: each research session is the fleet's judgment-densest (agents/SOURCES.md adoption log, 2026-09-01), about twice weekly since research-due's claim check (#541). Effort medium: same provenance and same revisit tell as the herald's.",
-      "ladder": [
-        "opus",
-        "sonnet"
-      ],
-      "effort": "medium",
-      "thrift": {
-        "ladder": [
-          "sonnet"
-        ],
-        "effort": "high"
-      }
-    },
     "reviewer": {
       "$comment": "Sonnet held deliberately: highest session count in the fleet and the cheapest seat per run (22.9% of fleet cost at a $0.71 median, run-telemetry 2026-09-19). The opus raise is pricable and is not taken while the governor reads SLOW DOWN.",
       "ladder": [

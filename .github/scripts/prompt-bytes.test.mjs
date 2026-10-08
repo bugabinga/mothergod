@@ -128,5 +128,5 @@ test("every seat's prompt on this branch matches its pin", () => {
   // the script's own output below says which seat and what to do.
   const run = spawnSync(`${scriptsDir}/prompt-bytes`, [], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  assert.match(run.stdout, /prompt-bytes: seats 7 \| total [\d,]+ bytes \| pins 7 \| findings 0/);
+  assert.match(run.stdout, /prompt-bytes: seats 6 \| total [\d,]+ bytes \| pins 6 \| findings 0/);
 });

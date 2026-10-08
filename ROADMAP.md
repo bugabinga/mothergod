@@ -208,8 +208,8 @@ decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 
 Numbered by creation order, placed here by priority: correctness debt
 compounds worse than a late release, so the heartbeat works these ahead
-of M5 and M6's open items. M3 stays
-the researcher's program, unaffected. Strategy in `docs/TESTING.md`;
+of M5 and M6's open items. M3 stays the journal's program, worked by the
+heartbeat (ADR-0062), unaffected. Strategy in `docs/TESTING.md`;
 mechanisms in the issues.
 
 Items, in [milestone M7](https://github.com/bugabinga/mothergod/milestone/2):
@@ -220,7 +220,7 @@ shrinking properties and decode-API differential agreement (#452); the
 allocation torture sweep (#453); weekly region coverage, published never
 gated (#454); the monthly whole-crate mutation score (#455); the Miri lane
 in monster (#456); and the test-craft skill for the agents (#457).
-Exploratory, the researcher's option and no item: Kani proof harnesses on
+Exploratory, a journal slice's option and no item: Kani proof harnesses on
 the coder's renormalization/update math, adopted only if it proves an
 invariant fuzzing cannot, journal rules apply.
 

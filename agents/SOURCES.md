@@ -39,7 +39,7 @@ it is new; never skip something solely because it is work.
 
 Scope note: the sections above are agent-craft. This one is the craft the
 agents are *practising*, which the file did not previously cover. The
-researcher and the deslopper are its readers, not just the BDFL.
+maintainer and the deslopper are its readers, not just the BDFL.
 
 Selection rule applied: prolific, and doing work whose constraints match
 ours (byte-oriented, allocation-conscious, adversarial input, benchmark

@@ -215,10 +215,10 @@ test("Telegram command and prose routes", async (t) => {
         return json({ workflow_runs: [run()] });
       }
       if (url.pathname.includes("/actions/workflows/")) {
-        const active = url.pathname.includes("agent-research.yml");
+        const active = url.pathname.includes("agent-deslop.yml");
         return json({
           workflow_runs: active
-            ? [run({ name: "agent-research", status: "in_progress", conclusion: null })]
+            ? [run({ name: "agent-deslop", status: "in_progress", conclusion: null })]
             : [],
         });
       }
@@ -229,13 +229,13 @@ test("Telegram command and prose routes", async (t) => {
     assert.match(body, /Agents paused by .*#22/);
     assert.match(body, /CI: ✅ green/);
     assert.match(body, /Open: 1 issues, 2 PRs/);
-    assert.match(body, /Running: agent-research/);
-    assert.equal(githubPaths(result.calls).length, 9);
+    assert.match(body, /Running: agent-deslop/);
+    assert.equal(githubPaths(result.calls).length, 8);
     assert.equal(
       githubPaths(result.calls).filter(
         (path) => path.includes("/actions/workflows/") && !path.includes("/ci.yml/"),
       ).length,
-      5,
+      4,
     );
   });
 
@@ -437,10 +437,6 @@ test("Telegram command and prose routes", async (t) => {
             created_at: "2026-08-24T11:00:00Z",
           }),
           "agent-review.yml": run({ name: "agent-review", created_at: "2026-08-24T10:00:00Z" }),
-          "agent-research.yml": run({
-            name: "agent-research",
-            created_at: "2026-08-24T14:00:00Z",
-          }),
           "agent-deslop.yml": run({ name: "agent-deslop", created_at: "2026-08-24T13:00:00Z" }),
         };
         const workflow = url.pathname.split("/").at(-2);
@@ -449,12 +445,11 @@ test("Telegram command and prose routes", async (t) => {
     );
     const allBody = sent(all.calls).text;
     assert.match(allBody, /Recent agent runs/);
-    assert.ok(allBody.indexOf("researcher") < allBody.indexOf("deslopper"));
+    assert.ok(allBody.indexOf("deslopper") < allBody.indexOf("bdfl"));
     assert.deepEqual(githubPaths(all.calls), [
       "/repos/owner/repo/actions/workflows/agent-bdfl.yml/runs?per_page=5",
       "/repos/owner/repo/actions/workflows/agent-heartbeat.yml/runs?per_page=5",
       "/repos/owner/repo/actions/workflows/agent-review.yml/runs?per_page=5",
-      "/repos/owner/repo/actions/workflows/agent-research.yml/runs?per_page=5",
       "/repos/owner/repo/actions/workflows/agent-deslop.yml/runs?per_page=5",
     ]);
 
@@ -522,19 +517,18 @@ test("Telegram command and prose routes", async (t) => {
           "agent-bdfl.yml": run(),
           "agent-heartbeat.yml": run({ name: "agent-heartbeat", run_number: 13 }),
           "agent-review.yml": run({ name: "agent-review", run_number: 14, conclusion: "failure" }),
-          "agent-research.yml": run({ name: "agent-research", run_number: 15 }),
           "agent-deslop.yml": run({ name: "agent-deslop", run_number: 16 }),
         };
         return json({ workflow_runs: [observations[url.pathname.split("/").at(-2)]] });
       }),
     );
     const body = sent(result.calls).text;
-    for (const role of ["bdfl", "maintainer", "reviewer", "researcher", "deslopper"]) {
+    for (const role of ["bdfl", "maintainer", "reviewer", "deslopper"]) {
       assert.match(body, new RegExp(`^${role} run \\d+:`, "m"));
     }
     assert.doesNotMatch(body, /no run found/);
     assert.ok(githubPaths(result.calls).every((path) => path.endsWith("/runs?per_page=1")));
-    assert.equal(githubPaths(result.calls).length, 5);
+    assert.equal(githubPaths(result.calls).length, 4);
   });
 
   await t.test("models resolves each role's ladder with no ledgers open", async () => {
@@ -740,9 +734,9 @@ test("Clock ticks (ADR-0035)", async (t) => {
     // TRIGGER_EVENT=schedule downstream, and agent-guard reads it to decide
     // whether the allowance governor may skip this wake (ADR-0039). Both
     // seats the governor throttles must carry it, or the second gear is
-    // wired to a lever nothing pulls. agent-herald.yml and
-    // agent-research.yml are governed too, but they share a tick, so
-    // their own dispatch shape is pinned by the shared-tick test below.
+    // wired to a lever nothing pulls. The herald, the deslopper and the
+    // curator are governed too; their dispatch shape is pinned by the
+    // wakes-alone test below.
     for (const workflow of ["agent-bdfl.yml", "agent-heartbeat.yml"]) {
       const setup = harness(() => new Response(null, { status: 204 }));
       const cron = cronFor(workflow);
@@ -759,31 +753,16 @@ test("Clock ticks (ADR-0035)", async (t) => {
     }
   });
 
-  await t.test("the shared herald/research tick wakes both, both governed", async () => {
-    // One expression, two seats (Workers Free caps crons at 5, issue #541
-    // moved research off its own weekly line onto this one). Both carry
-    // `source: cron`: research's own research-due claim check, not the
-    // allowance governor alone, keeps most of these ticks cheap.
-    const setup = harness(() => new Response(null, { status: 204 }));
-    const cron = cronFor("agent-herald.yml");
-    assert.equal(cron, cronFor("agent-research.yml"), "herald and research must share one expression");
-    await tick(setup, cron);
-    const dispatches = setup.calls.filter((call) => call.url.includes("/dispatches"));
-    const bodyFor = (workflow) => JSON.parse(dispatches.find((call) => call.url.includes(workflow)).init.body);
-    const cronInputs = { ref: "main", inputs: { source: "cron" } };
-    assert.deepEqual(bodyFor("agent-herald.yml"), cronInputs);
-    assert.deepEqual(bodyFor("agent-research.yml"), cronInputs);
-    assert.deepEqual(clocklog(setup)[0].woke, ["agent-herald.yml", "agent-research.yml"]);
-  });
-
-  await t.test("the deslopper and the curator each wake alone, both governed", async () => {
+  await t.test("the deslopper, the curator and the herald each wake alone, all governed", async () => {
     // The deslopper left the curator's tick on 2026-09-24 for one six
     // times a day, and became governed with the move: at that cadence
     // it is a real share of the allowance, not the rounding error
-    // ADR-0039 left ungoverned. A wake that carries `source: cron` to a
-    // workflow with no such input is rejected outright (ADR-0039), so
-    // the dispatch shape is pinned here beside agent-deslop.yml's input.
-    for (const workflow of ["agent-deslop.yml", "agent-curator.yml"]) {
+    // ADR-0039 left ungoverned. The herald's tick carried the researcher
+    // too, until ADR-0062 retired that seat. A wake that carries
+    // `source: cron` to a workflow with no such input is rejected
+    // outright (ADR-0039), so the dispatch shape is pinned here beside
+    // each workflow's input.
+    for (const workflow of ["agent-deslop.yml", "agent-curator.yml", "agent-herald.yml"]) {
       const setup = harness(() => new Response(null, { status: 204 }));
       const cron = cronFor(workflow);
       await tick(setup, cron);

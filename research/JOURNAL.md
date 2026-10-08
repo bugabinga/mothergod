@@ -437,7 +437,7 @@ record.
   SPEED territory, not this lead's own scope) — neither designed nor
   measured here.
 
-## Standing leads (ordered; heartbeat/researcher pick from the top)
+## Standing leads (ordered; the heartbeat picks from the top)
 
 - S1-D1 | RESOLVED 2026-08-20 | Founding artifacts fully imported to
   `research/imports/session-1/` (codec, complete harness, state, progress

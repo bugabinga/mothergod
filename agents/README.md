@@ -16,7 +16,7 @@ here — kept strictly apart from the classical software project (ADR-0010).
 Two agent-system pieces cannot live here, by platform requirement:
 
 - **`/.github/workflows/` and `/.github/actions/`** — the executable agent
-  processes (heartbeat, reviewer, researcher, BDFL, deslopper, herald,
+  processes (heartbeat, reviewer, BDFL, deslopper, herald,
   curator, pause machinery), plus `agent-model-intel`, which is a plain script rather
   than an agent (ADR-0019) and reports model capability alongside our own
   run economics (ADR-0023). GitHub only runs workflows from `.github/`.
@@ -29,7 +29,7 @@ Two agent-system pieces cannot live here, by platform requirement:
   `adr` governs creating, superseding, correcting, and reviewing architecture decisions (ADR-0030).
   `information-placement` routes guidance, procedures, decisions, history, and work by lifetime (ADR-0030).
   `agent-skill-craft` governs creating, moving, and reviewing conditional agent procedures (ADR-0025).
-  `compression-experiment` runs and records one researcher experiment or prerequisite capability patch.
+  `compression-experiment` runs and records one compression experiment or prerequisite capability patch.
   `web-ui` governs layout, styling, interaction, and accessibility under `site/`.
   The Claude Code harness only discovers skills there.
 

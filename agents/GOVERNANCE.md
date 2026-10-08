@@ -44,9 +44,9 @@ is fully autonomous by design (ADR-0003).
   `agent-system` is the BDFL's (CLAUDE.md, realm labels). Cadence rides
   the worker clock (ADR-0035), like every
   seat's. On an empty product queue it works the journal's top standing
-  lead, the researcher's source too, so the two seats share one
-  concurrency group and never build one slice twice (ADR-0049); which
-  seat should own the journal is #682.
+  lead, or a commissioned charter labeled `research`, through
+  `compression-experiment`: the one seat on the journal since ADR-0062
+  retired the researcher, so no slice is built twice.
 - *Curator*, daily: stewards the issue tracker (ADR-0044). Triages
   every new issue to a realm and a fate, grooms open ones for
   staleness, duplicates, and scope, and critiques substance
@@ -61,10 +61,6 @@ is fully autonomous by design (ADR-0003).
 - *Deslopper*, six times daily: removes slop from `src/` without changing
   observable behaviour, one scope per PR (ADR-0016). Never merges; the
   reviewer approves. Its operating manual is the `deslop` skill.
-- *Researcher*, about twice weekly as `research-due` realizes it (#541):
-  runs one experiment from the journal's standing leads (or a wild
-  swing), records verdicts in `research/`.
-
 (No `@claude` mention agent, per ADR-0003's amendment: questions go in
 issues, which the curator triages daily.)
 

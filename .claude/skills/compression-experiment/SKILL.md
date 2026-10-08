@@ -87,4 +87,4 @@ When measurement is possible:
 ## Environmental failure
 
 Return the exact blocker without inventing a verdict or measurement.
-The researcher prompt owns where that operational result is posted.
+The calling seat's prompt owns where that operational result is posted.

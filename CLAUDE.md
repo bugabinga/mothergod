@@ -1,6 +1,6 @@
 # CLAUDE.md — agent contract for mothergod
 
-Audience: Claude agents (CI sessions, heartbeat, reviewer, researcher, BDFL).
+Audience: Claude agents, every seat in `agents/GOVERNANCE.md` "Roles".
 Humans: read README.md and CONTRIBUTING.md instead.
 
 The harness injects this file into every agent session as project

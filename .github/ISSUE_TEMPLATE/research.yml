@@ -1,5 +1,5 @@
 name: 🔬 Research proposal
-description: An idea to improve compression — becomes a candidate for a research session
+description: An idea to improve compression; once triaged, a journal slice for the heartbeat (ADR-0062)
 labels: [research, triage]
 body:
   - type: markdown

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """File the mutants that outlived their pull request, so a red that lands after the merge still has a reader.
 
-Extensionless and executable, like research-due and stalled-prs: a decision
+Extensionless and executable, like survey-due and stalled-prs: a decision
 nobody was making gets made here, every run, by the workflow itself.
 
 mutants-check is advisory (docs/TESTING.md, tier "Advisory"), and the reviewer

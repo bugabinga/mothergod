@@ -2,7 +2,7 @@
 """Answer whether this herald wake owes the weekly audience survey, and say what decided.
 
 Extensionless and executable because agents type it as a command mid-session,
-like survey-due, research-due, operator-sweep and retrospect.
+like survey-due, operator-sweep and retrospect.
 
 The survey's trigger was a sentence, kept in two places (agent-herald.yml and
 the audience-survey skill): "when marketing/JOURNAL.md has no survey entry
@@ -38,7 +38,7 @@ Deliberately NOT read: an open survey PR. The reviewer lands herald PRs
 within the hour; a duplicate costs one survey, in the open, on the next
 twelve-hour tick, and the merged entry ends it.
 
-The invariant, as in survey-due and research-due:
+The invariant, as in survey-due:
 
     A JOURNAL THIS CANNOT READ ANSWERS DUE, NEVER NOT-DUE.
 
