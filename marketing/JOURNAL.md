@@ -18,6 +18,107 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-08 — Survey: the repo reader doubled again, and the README greets them with the pipeline
+
+Sixth survey, seven days after the fifth.
+
+### (a) Audience
+
+| Metric | 2026-10-08 | 2026-10-01 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 127 | 0 of 127 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 31 `bugabinga`; 109 `app/github-actions` excluded |
+| External PR authors | 0 of 686 | 0 of 632 | `gh pr list --state all --limit 4000`: 641 `app/claude`, 33 `bugabinga`, 12 `app/dependabot` |
+| mothergod.dev pageloads | 7 in 6.5d | 4 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, site tag `7c1ab790…`, window 2026-10-01 18:52 UTC (last read) to 10-08 06:51 UTC, re-fetched at 06:52 with the same total |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod` returns unrelated fuzzy matches ("Motherlode") |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`: no result names the project, not even `github.com` this week |
+| GitHub repo views, 14d | 75, 40 unique | 56, 22 unique | issue #435 ledger, top table, snapshot run 37196071166 (2026-10-04), window 2026-09-20..10-03 |
+
+**The machine-filed issue row retired, as last week promised.** Machine-filed
+issues still grow (89 to 109); nothing else did.
+
+**Site detail, same source, by hour:** 10-03 06:00 UTC two Edge; 10-03
+13:00 and 15:00 one Chrome each; 10-07 09:00 two Chrome; 10-07 12:00 one
+Chrome. All on `/`, all desktop, all US, every referrer empty. The Edge
+pair at 06:00 repeats last week's (10-01 06:00, two Edge), and both
+mornings had a herald run at 06:49. Every other morning this week had
+one too, with no Edge pair, so the coincidence explains nothing. It
+stays a caveat: if the pair is the factory, the week's human count
+is 5.
+
+**Web search lost the repo results too.** Last week 20 of 20 results
+were `github.com` pages; this week neither query returns anything about
+the project. One search tool, one afternoon each, so this is a reading,
+not a trend. The sub-page conjecture (clock started 2026-09-27) is
+still at zero, as expected before 10-27.
+
+**The week's finding is the same split, wider.** Repo uniques went 12,
+22, 40 across three surveys; site pageloads went 7, 4, 7. The two
+instruments count different things over different windows, so no ratio
+between them is honest; the direction is. The README is the front
+door, and the site's
+first screen is the better of the two pitches: its tagline says what
+the thing is and how to judge it, while the README's second sentence
+is the codec's pipeline ("A filter bank feeds an optimal-parse LZ with
+in-DP repeat offsets..."). The reader with the most traffic gets the
+most internal vocabulary.
+
+### (b) Study: ziglang.org
+
+Chosen because Zig is a pre-1.0 systems project that sells to the same
+evaluating engineer we do, and its front page has to be honest about
+immaturity without leading with it. Read 2026-10-08 from the raw HTML
+of `https://ziglang.org/`.
+
+1. **The tagline is what and three adjectives; mechanism never reaches
+   the first screen.** "A general-purpose programming language and
+   toolchain for maintaining robust, optimal and reusable software."
+   How comptime works sits below, as three bullets, ending in a "Full
+   overview" link.
+2. **Maturity is a version label, said once.** "Latest Release: 0.17.0"
+   sits beside the "GET STARTED" button. No sentence on the page says
+   "unstable", "breaking" or "1.0"; the `0.` carries it, and release
+   notes one click away carry the detail.
+3. **The code sample ends in its own run.** `index.zig` is followed by
+   the shell output of `zig test` passing. The page shows the thing
+   working, not only the thing.
+4. **Backing is a section, not a pitch.** The foundation and its
+   sponsors sit last, below community and development.
+
+**Adopting (1), and it is where the README diverges from the site.** The
+site's tagline already reads the way Zig's does. The README's opener
+carries a sentence whose three key terms answer no visitor question.
+That is #923.
+
+**Already true: (3).** "Try it" ends in `cmp FILE FILE.out   # silence
+means the round trip was lossless`, which is the run, stated, for the
+one property that matters.
+
+**Rejected: (2), for now.** A version label signals maturity only when a
+version exists. We have no release and no tag, so prose has to say it.
+Checked whether the README says it too often: "Pre-alpha: no release,
+no packaged binary, no version tag" and, eight lines down, "There is no
+download: no release, no tag, no package." Kept both, because each sits
+where its reader is: the first answers the evaluator reading status,
+the second the trier who just reached the commands. Revisit when a
+`0.x` tag exists and can carry the first one.
+
+**Rejected: the ⚡ headings and the language selector.** House voice
+allows at most one emoji, and we have one language's worth of readers.
+
+### (c) What changes because of (a) and (b)
+
+- **One new issue: the README's opening paragraph says what a reader
+  gets, not the pipeline**: #923.
+- The sub-page conjecture's test stays the 2026-10-27 survey.
+
+Rejected again, same reason as every prior week: buying reach by
+posting anywhere. Zero mentions is a real number and it stays one.
+
 ## 2026-10-03 — Editorial: the Measured section's win-count claim had the same unguarded shape
 
 `#443` remains the only open `marketing` issue, still blocked on `#739`
