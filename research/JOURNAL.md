@@ -3679,6 +3679,10 @@ record.
   buffer automatic candidate, LZ-preserving literal-stage swap) lose on
   bits/byte. Reopening this lead needs a genuinely new idea, not a next
   slice of what is already here.
+  The standalone tANS module and its two measurement bins were deleted
+  (issue #908); the last tree carrying them is cfdc5e2 ("deslop: collapse
+  sse.rs's Sse/LogitSse twins onto one Table (#944)"), so a reopening
+  starts from `git show cfdc5e2:src/tans.rs`. The measurements above stay.
 - S2-A103 | REJECTED | Re-checked S2-A80/it129's explicit-SIMD blocker
   against an external claim (operator-forwarded article, "State of SIMD
   in Rust 2026") that Rust 1.87 stabilized calling platform intrinsics
