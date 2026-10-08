@@ -1035,6 +1035,147 @@ fn offset_len_state(len: u32) -> usize {
     (len.saturating_sub(min) as usize).min(OFFSET_LEN_STATES - 1)
 }
 
+/// How many of a bucketed value's residual bits, counted from the most
+/// significant, [`ResidualTree`] models instead of sending raw: registered
+/// before measuring (`research/JOURNAL.md` S2-A114), never tuned.
+const RESIDUAL_MODELED_BITS: u32 = 4;
+
+/// One adaptive binary tree per [`lz::bucket`] over the top
+/// [`RESIDUAL_MODELED_BITS`] residual bits [`encode_bucketed`] currently
+/// sends raw, LZMA-style (`lzma-specification.txt` models a distance's
+/// bits below its slot and every length bit). Invariant: bucket `b`'s
+/// nodes are `nodes[b << RESIDUAL_MODELED_BITS..][1..1 <<
+/// RESIDUAL_MODELED_BITS]`; a walk of `k <= RESIDUAL_MODELED_BITS` bits
+/// starts at node 1 and visits nodes below `1 << k`, so it never leaves
+/// its own bucket's slice.
+struct ResidualTree {
+    nodes: Vec<Model>,
+}
+
+impl ResidualTree {
+    fn new(buckets: usize) -> Self {
+        Self {
+            nodes: vec![Model::new(2); buckets << RESIDUAL_MODELED_BITS],
+        }
+    }
+
+    /// Ideal cost of `value`'s residual bits below its bucket: the top
+    /// `min(b, RESIDUAL_MODELED_BITS)` through this tree, the rest raw.
+    fn ideal_cost_bits(&mut self, value: u32) -> f64 {
+        let b = lz::bucket(value);
+        let residual = bucket_bits(b);
+        let modeled = residual.min(RESIDUAL_MODELED_BITS);
+        let base = b << RESIDUAL_MODELED_BITS;
+        let mut node = 1usize;
+        let mut cost = f64::from(residual - modeled);
+        for shift in (residual - modeled..residual).rev() {
+            let bit = ((value >> shift) & 1) as usize;
+            cost += self.nodes[base + node].ideal_cost_bits(bit);
+            node = node * 2 + bit;
+        }
+        cost
+    }
+}
+
+/// [`ideal_cost_bits_residual_tree_experiment`]'s candidate state: one
+/// [`ResidualTree`] beside each bucket [`Model`] the shipped coder uses.
+struct ResidualTreeState {
+    length_match: ResidualTree,
+    length_rep: ResidualTree,
+    offset_len: [ResidualTree; OFFSET_LEN_STATES],
+}
+
+/// Paired [`TokenSink`] for [`ideal_cost_bits_residual_tree_experiment`]:
+/// every bucket symbol updates the shipped model once and adds its cost to
+/// both halves; only the residual differs, raw bits on the baseline half,
+/// [`ResidualTree`] on the candidate half.
+struct ResidualTreeSink {
+    cost: PairedCost,
+    state: ResidualTreeState,
+}
+
+impl TokenSink for ResidualTreeSink {
+    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
+        self.cost.add_same(price_flag(models, flag_table, kind));
+    }
+
+    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
+        self.cost.add_same(price_literal(models, context, byte));
+    }
+
+    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+        let b = lz::bucket(value);
+        let symbol = split_length_model(models, kind).ideal_cost_bits(b);
+        let tree = match kind {
+            FlagKind::Rep => &mut self.state.length_rep,
+            FlagKind::Match | FlagKind::Literal => &mut self.state.length_match,
+        };
+        self.cost.add(
+            symbol + f64::from(bucket_bits(b)),
+            symbol + tree.ideal_cost_bits(value),
+        );
+    }
+
+    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
+        let b = lz::bucket(value);
+        let state = offset_len_state(len);
+        let symbol = models.offset_len[state].ideal_cost_bits(b);
+        self.cost.add(
+            symbol + f64::from(bucket_bits(b)),
+            symbol + self.state.offset_len[state].ideal_cost_bits(value),
+        );
+    }
+
+    fn slot(&mut self, models: &mut Models, symbol: usize) {
+        self.cost.add_same(price_slot(models, symbol));
+    }
+}
+
+/// `research/JOURNAL.md` S2-A114's before-wiring measurement: prices the
+/// token stream of the filter [`encode`] actually selects for `data`
+/// (S2-A110 found the raw parse can differ from it), returning
+/// `(baseline_bits, candidate_bits)` where the candidate models residual
+/// bits through a per-bucket adaptive binary tree. Not reachable from [`encode`]/[`decode`].
+#[must_use]
+pub fn ideal_cost_bits_residual_tree_experiment(data: &[u8]) -> (f64, f64) {
+    let mut best: Option<(usize, Vec<u8>)> = None;
+    for candidate in filters::select::pick(data) {
+        let filtered = apply_filter(candidate, data);
+        let columns = match candidate {
+            Candidate::Transpose(columns) => Some(columns),
+            Candidate::Identity | Candidate::Delta(_) | Candidate::Bcj => None,
+        };
+        let len = encode_tokens(&filtered, columns).len();
+        if best
+            .as_ref()
+            .is_none_or(|(existing, _)| crate::candidate_beats_incumbent(len, *existing))
+        {
+            best = Some((len, filtered));
+        }
+    }
+    let (_, filtered) = best.expect("filters::select::pick always returns at least Identity");
+    residual_tree_paired_cost(&filtered)
+}
+
+/// [`ideal_cost_bits_residual_tree_experiment`]'s pairing over
+/// already-filtered `data`: its baseline half is [`ideal_cost_bits`]
+/// exactly, since every [`ResidualTreeSink`] field prices the shipped
+/// model the way [`CostSink`] does.
+fn residual_tree_paired_cost(data: &[u8]) -> (f64, f64) {
+    let tokens = lz::parse_optimal(data);
+    let mut models = Models::new();
+    let mut sink = ResidualTreeSink {
+        cost: PairedCost::default(),
+        state: ResidualTreeState {
+            length_match: ResidualTree::new(lz::LENGTH_BUCKETS),
+            length_rep: ResidualTree::new(lz::LENGTH_BUCKETS),
+            offset_len: std::array::from_fn(|_| ResidualTree::new(lz::OFFSET_BUCKETS)),
+        },
+    };
+    walk_tokens(&tokens, data, &mut models, &mut sink);
+    (sink.cost.baseline, sink.cost.candidate)
+}
+
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
 /// filter [`filters::select::pick`] shortlists, keeps whichever produces
 /// the smallest `encode_tokens` body, and prefixes that body with the
