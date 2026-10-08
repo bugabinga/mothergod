@@ -164,7 +164,7 @@ def render(pr, missed, outside, generated, decided, run_url):
     if outside:
         lines += [
             "",
-            f"{outside} more survivor{'s' if outside != 1 else ''} sit outside decode-safety territory:",
+            f"{outside} more {'survivors sit' if outside != 1 else 'survivor sits'} outside decode-safety territory:",
             "scaffold, not debt (ADR-0056), left on the PR's annotations.",
         ]
     if generated is not None and decided is not None and generated > decided:
