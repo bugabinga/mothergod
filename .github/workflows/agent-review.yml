@@ -3,10 +3,17 @@
 # Fork PRs and dependabot PRs are excluded — neither event carries repo
 # secrets, so the Claude step cannot authenticate; the heartbeat handles
 # both kinds instead. The reviewer deliberately gets NO Edit/Write tools:
-# it judges and merges, it does not modify code. Read-only file tools
-# (Read, Grep, Glob) are granted: a reviewer that cannot open files
-# detours through git-show and burned 11-13 permission denials per run
-# (audit telemetry, runs 32615950907..32628126725). Bash is granted
+# it judges and merges, it does not modify code. `--tools` is the flag
+# that hides and `--allowedTools` the one that pre-approves (#725): with
+# the Write family merely unapproved the model still saw it and spent up
+# to four denied turns a review learning the wall (run 37841864625). Bash
+# is the one built-in offered: the five reviews measured after #946, a
+# codec-and-tests PR among them, used Bash and nothing else. Read, Grep
+# and Glob were granted when Bash was restricted and the reviewer
+# detoured through git-show (11-13 denials a run, runs
+# 32615950907..32628126725); unrestricted Bash made them dead weight. The
+# retrospect's `offered` line under each session is the proof the trim
+# took, since a misspelled name here is a tool silently gone. Bash is
 # unrestricted: the prompt orders "verify claims by executing them",
 # and `cargo test` on the PR branch already executes arbitrary PR code,
 # so an allowlist of binary names was friction without a boundary — it
@@ -253,7 +260,8 @@ jobs:
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 300
-            --allowedTools "Read,Grep,Glob,Bash"
+            --tools "Bash"
+            --allowedTools "Bash"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause

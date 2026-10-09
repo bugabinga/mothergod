@@ -116,15 +116,19 @@ jobs:
             End of run: if you acted (closed, filed, labeled,
             critiqued), post a summary on the ops-log issue; a run
             that changed nothing posts nothing there.
-          # No Edit/Write: the curator judges and routes, never
-          # modifies the tree (GOVERNANCE.md "Tool envelopes", the
-          # reviewer precedent). Bash unrestricted, same section.
+          # Bash is the one built-in offered: `--tools` hides, where
+          # `--allowedTools` only pre-approves (#725). The curator judges
+          # and routes, never modifies the tree (GOVERNANCE.md "Tool
+          # envelopes", the reviewer precedent), and its one run measured
+          # since #946 (37865759900, 33 calls) used Bash alone. Bash
+          # unrestricted, same section.
           claude_args: |
             --append-system-prompt-file agents/personas/curator.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 200
-            --allowedTools "Read,Grep,Glob,Bash"
+            --tools "Bash"
+            --allowedTools "Bash"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause
