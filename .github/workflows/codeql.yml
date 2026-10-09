@@ -9,9 +9,8 @@
 # and it puts the config in the repo where it evolves by PR like everything
 # else (ADR-0010).
 #
-# Not a required check. The `gate` ruleset requires exactly `fmt`, `clippy`,
-# `test`, `doc` and `ratio` (live ruleset, read 2026-09-22), so nothing
-# here can deadlock a merge.
+# Not a required check: every name the `gate` ruleset requires is a ci.yml
+# job (its header lists them), so nothing here can deadlock a merge.
 #
 # On a pull request the filter below narrows, GitHub's aggregate `CodeQL`
 # check-run concludes `neutral`, titled "N configurations not found". The

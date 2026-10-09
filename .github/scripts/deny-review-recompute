@@ -2,7 +2,7 @@
 r"""Deny full-gate recomputes inside pull_request CI sessions (PreToolUse hook).
 
 A pull_request-triggered session sits on a commit that already carries
-the required checks: fmt, clippy, test, doc, ratio (ci.yml). That is
+the required checks (ci.yml's header names them). That is
 the reviewer on every PR, and also the BDFL's opened/reopened wakes
 (agent-bdfl.yml); binding both is decided, not incidental, because the
 no-signal argument keys on the commit's checks, not on the seat

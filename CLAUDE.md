@@ -32,8 +32,10 @@ Invoke an underlying tool directly only to repair x when x cannot build.
 CI enforces the same gate as the required checks `fmt`, `clippy`, `test`,
 `doc`, plus `ratio`, the bits/byte regression gate vs `bench/baseline.json`
 (CI-only; run it locally with `cargo run -p mothergod-bench --release --bin
-baseline_gate -- check` before pushing a codec change). A push that fails
-them wastes a cycle.
+baseline_gate -- check` before pushing a codec change), and `worker`, the
+node tests under `infra/` and `.github/`, prompt pins included: a prompt
+edit moves its pin in `.github/scripts/prompt-bytes` in the same diff. A
+push that fails them wastes a cycle.
 
 ## Hard rules
 

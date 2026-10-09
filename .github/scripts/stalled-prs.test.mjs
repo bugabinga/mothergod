@@ -59,7 +59,7 @@ function check(name, conclusion, extra = {}) {
   };
 }
 
-const GREEN_GATES = ["fmt", "clippy", "test", "doc", "ratio"].map((n) => check(n, "SUCCESS"));
+const GREEN_GATES = ["fmt", "clippy", "test", "doc", "ratio", "worker"].map((n) => check(n, "SUCCESS"));
 
 function review(conclusion, extra = {}) {
   return check("review", conclusion, {
