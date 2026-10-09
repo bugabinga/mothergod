@@ -38,8 +38,8 @@ skill and not a checklist somebody remembers.
 3. **What is its output?** A check name, an artifact, a comment, a branch. Name
    it now. A required check's _name_ is the contract with the ruleset, so
    renaming a job wedges every merge until the rule is renamed with it. This
-   repository requires exactly `fmt`, `clippy`, `test`, `doc` and `ratio`
-   (CLAUDE.md "Commands"); `stalled-prs` hardcodes the same list, and a gate
+   repository's required names are the list in ci.yml's header (CLAUDE.md
+   "Commands" repeats it); `stalled-prs` hardcodes the same list, and a gate
    renamed in one place reads as `never-fired` on every PR.
 4. **What does it cost?** See _Minutes_. The operator's standing directive is
    that a workflow minute is subscription and contributor wait, both budget.

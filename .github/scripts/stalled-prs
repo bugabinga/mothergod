@@ -141,7 +141,7 @@ from anchor import STAMP, gh, iso, stamp_to_dt
 # The required checks, from CLAUDE.md "Commands (run before any push)". A gate
 # renamed in branch protection and not here reads as `never-fired` on every
 # PR, which is loud on the first run rather than silent forever.
-REQUIRED_GATES = ("fmt", "clippy", "test", "doc", "ratio")
+REQUIRED_GATES = ("fmt", "clippy", "test", "doc", "ratio", "worker")
 
 # The reviewer's own check, addressed by workflow AND job name because `changes`
 # proves a bare job name is not unique across workflows in this repository.

@@ -85,8 +85,9 @@ all Cargo targets, doctests,
 and warning-clean rustdoc output. `ratio` is the benchmark regression gate
 (layer 7): it runs the `baseline_gate` binary directly, because it is not a
 stage of x's quality gate. PRs touching no gate input receive successful
-skips through the path filter. Those five names are the repository ruleset
-contract.
+skips through the path filter. `worker` runs the node tests under `infra/`
+and `.github/`, the prompt pins among them (`prompt-bytes`). Those six
+names, listed in ci.yml's header, are the repository ruleset contract.
 
 The advisory `fuzz-check` workflow runs nightly at 02:13 UTC and on
 manual dispatch: three `fuzz/` targets, 10 minutes each, Linux x64 only,
