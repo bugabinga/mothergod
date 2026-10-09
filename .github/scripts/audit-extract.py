@@ -196,6 +196,42 @@ if reasons:
     })
     summary_block["reasons"] = reasons
 
+# Tools (issue #725): what the harness offered and what the model used,
+# names and counts only, never inputs, the same keys-only rule the denial
+# record follows. `--allowedTools` pre-approves and does not hide, so the
+# offered set is the one record that can show an envelope flag doing what
+# it says; `system/init`'s `tools` is that set, API-authored, present in
+# the first entry of every run. Use counts are the other half (#486's
+# per-seat trims want them) and come from the assistant turns' tool_use
+# blocks, deduplicated by block id because stream-json may emit one
+# assistant entry per content block. An artifact with no init entry
+# records `offered: null`, the visible unknown, never an empty list.
+tools_offered = None
+for e in entries:
+    if isinstance(e, dict) and e.get("type") == "system" and e.get("subtype") == "init":
+        raw_tools = e.get("tools")
+        if isinstance(raw_tools, list):
+            tools_offered = sorted({
+                str(t.get("name", "?")) if isinstance(t, dict) else str(t)
+                for t in raw_tools
+            })
+        break
+tool_uses, seen_blocks = {}, set()
+for e in entries:
+    if not (isinstance(e, dict) and e.get("type") == "assistant"):
+        continue
+    msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+    for block in msg.get("content") or []:
+        if not (isinstance(block, dict) and block.get("type") == "tool_use"):
+            continue
+        block_id = block.get("id")
+        if block_id in seen_blocks:
+            continue
+        seen_blocks.add(block_id)
+        name = str(block.get("name") or "?")
+        tool_uses[name] = tool_uses.get(name, 0) + 1
+telemetry["tools"] = {"offered": tools_offered, "used": dict(sorted(tool_uses.items()))}
+
 # Rate-limit state (issue #63): the typed rate_limit_event payload is
 # API-authored metadata, published verbatim so its semantics can be
 # decided from evidence. Presence alone is NOT a pause signal: it
@@ -312,6 +348,7 @@ if summary_path:
         f"trigger {trigger}, is_error={is_error}, "
         f"turns={telemetry.get('num_turns', '?')}, "
         f"denials={telemetry.get('permission_denials', {}).get('count', 0)}, "
+        f"tools_offered={len(tools_offered) if tools_offered is not None else '?'}, "
         f"persona={persona_meta['bytes']}B",
         "",
         "### Response",

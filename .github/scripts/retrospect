@@ -63,6 +63,14 @@ side could reproduce; the curator's hand count of reviewer posts per merged
 PR was the first. `rounds.py` prints that histogram for the window on one
 footer line, tail PRs named, so the next argument starts from the number.
 
+TOOLS is the seventh. `--allowedTools` pre-approves and does not hide, so
+the reviewer was offered Write and Edit it may not use and spent turns
+learning that wall (#725), and nothing recorded what any seat was offered
+or used. The audit now keeps both, names and counts only; this prints
+them under the session, so an envelope flag is verified by the next run's
+line rather than trusted, and a per-seat trim (#486) starts from counts.
+Older artifacts carry no record and print none.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -296,6 +304,18 @@ def describe(run, meta, response):
     raw = telemetry.get("permission_denials")
     for wall in (raw.get("reasons") or []) if isinstance(raw, dict) else []:
         print(f"    denied {wall.get('tool', '?')}: {wall.get('type', '?')}: {wall.get('reason', '')}")
+    tools = telemetry.get("tools")
+    if isinstance(tools, dict):
+        used = tools.get("used") or {}
+        offered = tools.get("offered")
+        used_text = ", ".join(
+            f"{name} {n}" for name, n in sorted(used.items(), key=lambda kv: (-kv[1], kv[0]))
+        ) or "none"
+        offered_text = (
+            f"offered {len(offered)} ({', '.join(offered)})" if isinstance(offered, list)
+            else "offered unknown"
+        )
+        print(f"    tools used {used_text}; {offered_text}")
     body = response.strip() or "(posted nothing)"
     if len(body) > RESPONSE_CAP:
         body = f"{body[:RESPONSE_CAP]}\n[cut, {len(response) - RESPONSE_CAP} more characters]"
