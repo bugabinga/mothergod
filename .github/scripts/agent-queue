@@ -34,8 +34,15 @@ Four things decide an item's place, in this order:
                    surfaced in its own section rather than ranked.
     excluded       a ledger, a blocked-on-human latch, or an issue another
                    session already claims.
-    urgency        bug, then blocker, then plain, then enhancement, exactly
-                   the prompt's ladder.
+    urgency        ready-to-ship, then bug, then blocker, then plain, then
+                   enhancement. The last four are the prompt's ladder, how
+                   bad the gap is. The first is the other axis, what
+                   shipping costs: a complete, verified diff waiting in an
+                   issue thread on a credential or a review wall costs one
+                   push and a PR, and #454's sat 18 days at `enhancement`
+                   behind every fresh bug (#840). The label is the
+                   applier's claim; a wrong one costs one look at the
+                   thread, in the open.
     age            oldest first within a rank, because the queue's failure
                    mode is an old item that nothing ever surfaces.
 
@@ -91,9 +98,11 @@ LEDGER = "ledger"
 REALM = "agent-system"
 REALMS = ("product", "agent-system", "marketing")
 
-# Urgency ladder, lowest sorts first, straight from the prompt's sentence.
-# `blocker` is not a label: it is computed from cross-references below.
-RANKS = {"bug": 0, "blocker": 1, "plain": 2, "enhancement": 3}
+# Rank ladder, lowest sorts first: the ready tier (#840), then the prompt's
+# urgency sentence. `blocker` is not a label: it is computed from
+# cross-references below.
+READY = "ready-to-ship"
+RANKS = {"ready": 0, "bug": 1, "blocker": 2, "plain": 3, "enhancement": 4}
 RANK_NAME = {value: key for key, value in RANKS.items()}
 
 # The exclusion buckets, named once so the footer and the empty case cannot
@@ -175,8 +184,10 @@ def labels_of(row):
 
 
 def rank_of(row, blocking):
-    """The urgency rank, by the prompt's ladder. Lower sorts first."""
+    """The rank: ready-to-ship, then the prompt's urgency ladder. Lower sorts first."""
     names = labels_of(row)
+    if READY in names:
+        return RANKS["ready"]
     if "bug" in names:
         return RANKS["bug"]
     if row["number"] in blocking:

@@ -77,16 +77,17 @@ product file reads in one pass and test lines count by file name.
 
 ## Current automated cadence
 
-Every PR retains the required job names `fmt`, `clippy`, `test`, `doc`, and
-`ratio`. Rust-input PRs run the first four on Linux x64 stable through
+Every PR retains the required job names ci.yml's header lists. Rust-input
+PRs run `fmt`, `clippy`, `test` and `doc` on Linux x64 stable through
 `.github/actions/rust-ci`, each job delegating to its `cargo x` stage so CI
 and the local gate share one command list (ADR-0029): formatting, Clippy,
 all Cargo targets, doctests,
 and warning-clean rustdoc output. `ratio` is the benchmark regression gate
 (layer 7): it runs the `baseline_gate` binary directly, because it is not a
 stage of x's quality gate. PRs touching no gate input receive successful
-skips through the path filter. Those five names are the repository ruleset
-contract.
+skips through the path filter. `worker` runs the node tests under `infra/`
+and `.github/`, the prompt pins among them (`prompt-bytes`). Those six
+names, listed in ci.yml's header, are the repository ruleset contract.
 
 The advisory `fuzz-check` workflow runs nightly at 02:13 UTC and on
 manual dispatch: three `fuzz/` targets, 10 minutes each, Linux x64 only,
@@ -197,8 +198,10 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   boundary, bit-flips, declared-size lies (bombs), wrong magic/version,
   unknown methods, fuzz-found crashers (each promoted to a regression test
   with a comment naming the bug it caught).
-- Tests assert graceful `Err`, never a panic; allocation stays bounded by a
-  stated multiple of the declared output size.
+- Tests assert graceful `Err`, never a panic, and each seed is pinned to
+  the `Error` variant it must reach (`PINS` in `tests/adversarial.rs`), so a
+  seed an earlier check rejects cannot pass for the check it is named for;
+  allocation stays bounded by a stated multiple of the declared output size.
 - **Allocation-failure torture (#453).** The bound above stops decode from
   asking for too much; it does not prove decode survives the allocator
   actually refusing a request. `tests/torture.rs` (`cargo test --test

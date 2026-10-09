@@ -1,5 +1,5 @@
-# Advisory depth sweep. Pull requests never trigger this workflow, and the
-# repository ruleset requires only ci.yml's fmt, clippy, test and doc jobs.
+# Advisory depth sweep. Pull requests never trigger this workflow, and it is
+# not a required check, so nothing here can deadlock a merge.
 name: monster
 
 on:

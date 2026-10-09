@@ -16,7 +16,9 @@ This procedure turns it into a fix plus a permanent regression seed.
    (`bad-magic-bitflip`, `lz-declared-size-bomb`; never
    `crash-<hash>`). Prefix with the area (`lz-`) when the case is
    frame-specific. The harness `tests/adversarial.rs` sweeps the
-   whole directory; there is no per-seed test to write.
+   whole directory; the one thing to write is the seed's row in its
+   `PINS` table, the `Error` variant the seed must reach. A seed with
+   no row fails the sweep.
 5. **Name the bug where the filename cannot**: the seed's name
    carries the failure mode, the PR body carries the mechanism. If
    the name cannot carry it alone, add one line to

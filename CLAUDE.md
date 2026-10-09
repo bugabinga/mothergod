@@ -32,8 +32,10 @@ Invoke an underlying tool directly only to repair x when x cannot build.
 CI enforces the same gate as the required checks `fmt`, `clippy`, `test`,
 `doc`, plus `ratio`, the bits/byte regression gate vs `bench/baseline.json`
 (CI-only; run it locally with `cargo run -p mothergod-bench --release --bin
-baseline_gate -- check` before pushing a codec change). A push that fails
-them wastes a cycle.
+baseline_gate -- check` before pushing a codec change), and `worker`, the
+node tests under `infra/` and `.github/`, prompt pins included: a prompt
+edit moves its pin in `.github/scripts/prompt-bytes` in the same diff. A
+push that fails them wastes a cycle.
 
 ## Hard rules
 
@@ -241,13 +243,17 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 - Branches: `claude/<short-slug>`. Conventional-ish commit subjects, imperative.
 - Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
   `marketing`, `blocked-on-human`, `agents-paused`, `ops-log`, `ledger`,
-  `agent-approved`, `changes-requested`. The last two are the reviewer's
+  `ready-to-ship`, `agent-approved`, `changes-requested`. The last two are the reviewer's
   verdict, typed: exactly one of them, never both, and the maintainer
   filters on them rather than reading prose. `ledger` marks an issue the
   machinery writes and no session ships, so queues can exclude it: six
   such issues carried no common marker until 2026-09-18, and each one
   sorted into the BDFL's work queue where the only correct action is to
-  leave it alone.
+  leave it alone. `ready-to-ship` marks an issue whose thread holds a
+  complete, verified diff with nothing left to build, waiting on a
+  credential or a review alone: whoever leaves the diff applies it,
+  `agent-queue` ranks it ahead of every urgency tier, and it leaves with
+  the ship (#454 sat built for 18 days behind fresh bugs, #840).
 - Every issue carries exactly one realm label, and whoever opens it applies
   it: `product` for what a user of the compressor gets (codec, docs, site,
   releases), `agent-system` for the factory (agents, workflows, prompts,

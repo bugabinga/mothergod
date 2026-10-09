@@ -11,6 +11,7 @@ Two launches in ten days reached the ladders only after the operator named them 
 The Claude Code CLI accepts a family alias for `--model`: `fable`, `opus`, `sonnet`, `haiku`, each meaning that family's newest model (`claude --help`, v2.1.288; the cli-reference page `docs-watch` follows says the same).
 On the fleet's CLI the aliases resolved to the exact ids the ladders carried, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`, read from the session init event on 2026-10-03.
 The action the workflows run, `claude-code-action@v1`, installs a CLI version it pins per release, and the floating `v1` tag advances with those releases, so the alias table advances without an edit here.
+(Correction, #898: the action is pinned to a commit SHA since 2026-10-09, so the alias table advances with dependabot's weekly grouped bump of that pin, a lag of at most a week that this premise survives because family launches are rare.)
 
 Two parts of the machinery assumed a rung is a runtime id.
 `agent-pause` keys the `model-limits` ledger by `system/init.model`, the resolved id, and `agent-guard` compares rungs against ledger keys by exact string, so an alias rung would never be blocked by its own 429.

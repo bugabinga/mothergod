@@ -9,9 +9,8 @@
 # and it puts the config in the repo where it evolves by PR like everything
 # else (ADR-0010).
 #
-# Not a required check. The `gate` ruleset requires exactly `fmt`, `clippy`,
-# `test`, `doc` and `ratio` (live ruleset, read 2026-09-22), so nothing
-# here can deadlock a merge.
+# Not a required check: every name the `gate` ruleset requires is a ci.yml
+# job (its header lists them), so nothing here can deadlock a merge.
 #
 # On a pull request the filter below narrows, GitHub's aggregate `CodeQL`
 # check-run concludes `neutral`, titled "N configurations not found". The
@@ -189,16 +188,16 @@ jobs:
         # `fromJSON('')`, which is an expression error.
         language: ${{ fromJSON(needs.changes.outputs.languages || '["actions","javascript-typescript","python","rust"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # No `queries:` override. Default setup ran the `default` suite, so this
       # move changes when the analysis runs and nothing about which queries
       # execute. Changing the suite is a separate decision with its own
       # evidence.
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           languages: ${{ matrix.language }}
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           category: /language:${{ matrix.language }}

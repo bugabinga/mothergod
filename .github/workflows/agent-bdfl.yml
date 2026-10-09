@@ -146,7 +146,7 @@ jobs:
       # concurrency lane has already queued behind it.
       - run: echo "TYPING_SINCE=$(date +%s)000" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -161,14 +161,15 @@ jobs:
           # lever. Same predicate as TRIGGER_EVENT below, for the same reason.
           discretionary: ${{ github.event_name == 'workflow_dispatch' && inputs.source == 'cron' }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         if: steps.guard.outputs.paused != 'true'
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - id: claude
         if: steps.guard.outputs.paused != 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
         env:
           # Operator-issued admin PAT (ADR-0009). gh keeps using the app
           # token by default; admin/settings calls opt in explicitly with
@@ -404,9 +405,10 @@ jobs:
             every must is fixed or overridden with written reasons
             (agents/GOVERNANCE.md "Merging"). A PR touching
             .github/workflows/ is yours alone to land:
-            `.github/scripts/merge-pr <pr>` once the verdict and the
-            gates are in, this run in the foreground under a timeout,
-            or the next wake's rescue. One that edits agent-review.yml
+            `.github/scripts/merge-pr <pr> --wait --sha <head>`, this
+            run in the foreground, your shell timeout above its own,
+            its exit code read from it and never from a pipe, or the
+            next wake's rescue. One that edits agent-review.yml
             gets no review at all: read its file list and name it when
             you land it (#114). CODE decisions (src/, tests, bench
             logic) are also yours (ADR-0011) but ship through the

@@ -1,8 +1,8 @@
 # Quality gate for every change. This is the ground truth all other
 # automation (including agent-driven workflows) trusts: nothing merges red.
-# The required job names (fmt, clippy, test, doc, ratio) are load-bearing:
-# the main ruleset requires exactly these check names. Rename only together
-# with the ruleset — a mismatch blocks every merge.
+# The required job names (fmt, clippy, test, doc, ratio, worker) are
+# load-bearing: the main ruleset requires exactly these check names. Rename
+# only together with the ruleset: a mismatch blocks every merge.
 name: ci
 
 on:
@@ -171,8 +171,10 @@ jobs:
   # (issue #505): gh-comment's test reads every workflow's env block and takes
   # the seat names from the persona files, so a PR adding seat seven is
   # precisely the one that must run this job, and it touches no script.
-  # Not a required check: it gates nothing on a red day for the crate, and
-  # the ruleset's required names stay exactly as they are.
+  # A required check since 2026-10-09: it holds the prompt pins
+  # (prompt-bytes), and #957 landed red here because merge-pr reads the
+  # ruleset alone and a workflow PR gets no reviewer (#114). Skipped
+  # satisfies the ruleset, so a crate-only PR pays nothing for it.
   worker:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -186,8 +188,8 @@ jobs:
   # ADRs are numbered by listing the directory at branch-cut time (#195):
   # two PRs open at once can pick the same number and neither CI job
   # notices, because nothing else reads the whole directory at once. Not
-  # a required check (the ruleset's required names stay exactly as they
-  # are); it still turns a silent collision into a red run on every PR.
+  # a required check; it still turns a silent collision into a red run on
+  # every PR.
   adr-numbers:
     runs-on: ubuntu-24.04
     timeout-minutes: 2

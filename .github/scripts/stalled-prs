@@ -136,12 +136,14 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
+from verdict import approved_at
+
 from anchor import STAMP, gh, iso, stamp_to_dt
 
 # The required checks, from CLAUDE.md "Commands (run before any push)". A gate
 # renamed in branch protection and not here reads as `never-fired` on every
 # PR, which is loud on the first run rather than silent forever.
-REQUIRED_GATES = ("fmt", "clippy", "test", "doc", "ratio")
+REQUIRED_GATES = ("fmt", "clippy", "test", "doc", "ratio", "worker")
 
 # The reviewer's own check, addressed by workflow AND job name because `changes`
 # proves a bare job name is not unique across workflows in this repository.
@@ -427,39 +429,6 @@ def plan(pr, found, now, files=None, approved_at=None):
         return {"argv": [[MERGE_PR, number, "--sha", pr["headRefOid"]]]}
 
     return None
-
-
-def approved_at(number):
-    """When `agent-approved` was last applied to this PR, or None if never.
-
-    The timeline, not the label list: a label says the PR is approved, the
-    event says WHEN, and when is what decides whether the approval postdates
-    the head. `--slurp` for the same reason orphans() uses it: one document
-    per page otherwise.
-
-    Fails soft, like changed_files(): None when the read fails, never a
-    death, because this runs inside the per-PR sweep and one 502 on one
-    timeline must not take the report and the footer down with it
-    (reviewer's must on PR #572). plan() holds the merge on None.
-    """
-    proc = subprocess.run(
-        ["gh", "api", f"repos/{{owner}}/{{repo}}/issues/{number}/timeline?per_page=100",
-         "--paginate", "--slurp"],
-        capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        return None
-    try:
-        stamps = [
-            event["created_at"]
-            for page in json.loads(proc.stdout)
-            for event in page
-            if event.get("event") == "labeled"
-            and (event.get("label") or {}).get("name") == "agent-approved"
-        ]
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return None
-    return max(stamps) if stamps else None
 
 
 def green_main():
