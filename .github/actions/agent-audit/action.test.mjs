@@ -261,6 +261,85 @@ test("a denial's typed reason reaches metadata.json, distinct and capped", () =>
   }
 });
 
+// Issue #725: `--allowedTools` pre-approves and does not hide, so a seat is
+// offered Write and Edit it may not use, and the record that could prove a
+// `--tools` trim did what it says did not exist. The init entry's `tools`
+// is the offered set; tool_use blocks are the uses, counted once per block
+// id because stream-json may repeat an assistant message per block. Names
+// and counts only, never inputs.
+test("offered tools and tool-use counts reach metadata.json, names only", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
+  try {
+    const out = join(directory, "agent-audit");
+    mkdirSync(out);
+    const execution = join(directory, "execution.json");
+    const use = (id, name) => ({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id, name, input: { command: "secret-looking input" } }] },
+    });
+    writeFileSync(
+      execution,
+      JSON.stringify([
+        { type: "system", subtype: "init", tools: ["Write", "Bash", "Read", "Bash"] },
+        use("toolu_1", "Bash"),
+        use("toolu_1", "Bash"),
+        use("toolu_2", "Bash"),
+        { type: "assistant", message: { content: [{ type: "text", text: "reading" }] } },
+        { ...use("toolu_3", "Read"), parent_tool_use_id: "toolu_2" },
+        { type: "result", result: "done" },
+      ]),
+    );
+    const result = spawnSync("python3", [script, out], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EXEC_FILE: execution,
+        GITHUB_OUTPUT: join(directory, "github-output"),
+        GITHUB_WORKSPACE: new URL("../../../", import.meta.url).pathname,
+        RUNNER_TEMP: directory,
+        ROLE: "reviewer",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const metadata = readFileSync(join(out, "metadata.json"), "utf8");
+    assert.deepEqual(JSON.parse(metadata).telemetry.tools, {
+      offered: ["Bash", "Read", "Write"],
+      used: { Bash: 2, Read: 1 },
+    });
+    assert.ok(!metadata.includes("secret-looking"), "a tool input leaked into the record");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("an execution log without an init entry records the offered set as unknown", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
+  try {
+    const out = join(directory, "agent-audit");
+    mkdirSync(out);
+    const execution = join(directory, "execution.json");
+    writeFileSync(execution, JSON.stringify([{ type: "result", result: "done" }]));
+    const result = spawnSync("python3", [script, out], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EXEC_FILE: execution,
+        GITHUB_OUTPUT: join(directory, "github-output"),
+        GITHUB_WORKSPACE: new URL("../../../", import.meta.url).pathname,
+        RUNNER_TEMP: directory,
+        ROLE: "reviewer",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")).telemetry.tools, {
+      offered: null,
+      used: {},
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("agent-audit allowance index fixtures", async (t) => {
   for (const fixture of fixtures) {
     await t.test(fixture.name, () => {

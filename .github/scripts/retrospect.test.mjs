@@ -335,3 +335,31 @@ test("an artifact without reasons prints the flag alone", () => {
   assert.match(out, /\[denied 1 \(Edit\)\]/);
   assert.doesNotMatch(out, /^    denied Edit:/m);
 });
+
+// Issue #725: the offered set is the proof an envelope flag did what it
+// says, and the use counts are what a per-seat trim starts from. Both
+// print under the session; an artifact from before the record prints
+// nothing, no crash, no empty line.
+function describeWithTools(tools) {
+  const meta = { role: "reviewer", telemetry: { num_turns: 14, tools } };
+  const proc = spawnSync("python3", ["-c", describeDriver, scriptsDir, JSON.stringify(meta)], {
+    encoding: "utf8",
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  return proc.stdout;
+}
+
+test("offered tools and use counts print under the session line", () => {
+  const out = describeWithTools({ offered: ["Bash", "Read", "Write"], used: { Read: 3, Bash: 9 } });
+  assert.match(out, /^    tools used Bash 9, Read 3; offered 3 \(Bash, Read, Write\)$/m);
+});
+
+test("an unknown offered set says so, and no uses say none", () => {
+  const out = describeWithTools({ offered: null, used: {} });
+  assert.match(out, /^    tools used none; offered unknown$/m);
+});
+
+test("an artifact without a tools record prints no tools line", () => {
+  const out = describeWith({ count: 0, tools: [] });
+  assert.doesNotMatch(out, /^    tools /m);
+});
