@@ -265,3 +265,56 @@ fn encode_bit_at_a_skewed_probability_costs_far_fewer_bits_than_fixed_50_50() {
         fixed_bytes.len()
     );
 }
+
+/// Codes each `(cum_low, cum_high, total)` range, then checks the decoder's
+/// `target` lands inside the range it was coded from.
+fn roundtrip_ranges(ranges: &[(u64, u64, u64)]) {
+    let mut enc = Encoder::new();
+    for &(lo, hi, tot) in ranges {
+        enc.encode(lo, hi, tot);
+    }
+    let bytes = enc.finish();
+
+    let mut dec = Decoder::new(&bytes);
+    for &(lo, hi, tot) in ranges {
+        let target = dec.target(tot);
+        assert!((lo..hi).contains(&target), "{target} outside {lo}..{hi}");
+        dec.decode(lo, hi, tot);
+    }
+}
+
+/// A binary tail after the boundary symbol: it reads the interval the
+/// boundary symbol left behind, so a coder that renormalized it wrongly
+/// desyncs here.
+const BINARY_TAIL: [(u64, u64, u64); 6] = [
+    (0, 1, 2),
+    (1, 2, 2),
+    (1, 2, 2),
+    (0, 1, 2),
+    (0, 1, 2),
+    (1, 2, 2),
+];
+
+fn roundtrip_boundary_then_tail(boundary: (u64, u64, u64)) {
+    let mut ranges = vec![boundary];
+    ranges.extend_from_slice(&BINARY_TAIL);
+    roundtrip_ranges(&ranges);
+}
+
+/// The first symbol narrows `[0, MASK]` to `[0, HALF]`: `high` equals
+/// `HALF` exactly, so the interval still straddles the midpoint and no
+/// leading bit is fixed. Renormalizing it as "top half empty"
+/// (`high <= HALF`) emits a 0 that `HALF` itself contradicts.
+#[test]
+fn interval_ending_exactly_at_half_is_not_renormalized() {
+    roundtrip_boundary_then_tail((0, HALF + 1, MASK));
+}
+
+/// The first symbol narrows `[0, MASK]` to `[QUARTER, THREE_QUARTERS]`:
+/// `high` equals `THREE_QUARTERS` exactly, one past the middle-straddle
+/// test's range, so the underflow shift must not fire. The mutated
+/// comparison (`<=`) shifts, and the decoder desyncs from the encoder.
+#[test]
+fn interval_ending_exactly_at_three_quarters_is_not_shifted() {
+    roundtrip_boundary_then_tail((QUARTER, THREE_QUARTERS + 1, MASK));
+}
