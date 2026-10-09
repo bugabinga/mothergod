@@ -198,8 +198,10 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   boundary, bit-flips, declared-size lies (bombs), wrong magic/version,
   unknown methods, fuzz-found crashers (each promoted to a regression test
   with a comment naming the bug it caught).
-- Tests assert graceful `Err`, never a panic; allocation stays bounded by a
-  stated multiple of the declared output size.
+- Tests assert graceful `Err`, never a panic, and each seed is pinned to
+  the `Error` variant it must reach (`PINS` in `tests/adversarial.rs`), so a
+  seed an earlier check rejects cannot pass for the check it is named for;
+  allocation stays bounded by a stated multiple of the declared output size.
 - **Allocation-failure torture (#453).** The bound above stops decode from
   asking for too much; it does not prove decode survives the allocator
   actually refusing a request. `tests/torture.rs` (`cargo test --test
