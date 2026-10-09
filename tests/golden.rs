@@ -9,8 +9,8 @@
 //!   integer-only (`JOURNAL` S1-A5, `docs/adr/0024-no-libm-on-the-decode-path.md`
 //!   decision 1), so this fixture must decode identically on every target
 //!   in `docs/TESTING.md`'s runtime matrix, not just the runner these
-//!   fixtures were generated on. Every fixture ever committed, current or
-//!   superseded, carries this claim forever.
+//!   fixtures were generated on. Every fixture in `tests/golden/`, current or
+//!   superseded, carries this claim.
 //! - **Re-encoding is pinned per libm as a regression check, not
 //!   guaranteed across platforms.** `compress(plaintext) == golden` holds
 //!   only as far as `f64::log2` agrees between libms: `lz.rs`'s match
@@ -33,9 +33,13 @@
 //!
 //! - **Decode-visible** (frame layout, method byte, model semantics —
 //!   CLAUDE.md hard rule 5): bump `FORMAT_VERSION`, write an ADR, add a new
-//!   `v<new-version>-...` pair here. The old pair stays in `tests/golden/`
-//!   unchanged forever, since its `declared_version` no longer equals
-//!   `FORMAT_VERSION` and it drops out of the re-encode check on its own.
+//!   `v<new-version>-...` pair here. Until the first release, the same PR
+//!   retires the predecessor and deletes its pairs
+//!   (`docs/adr/0063-retire-format-versions-1-through-9.md`), re-recording
+//!   each data class it alone covered under the new version. From the first
+//!   release, the old pair stays in `tests/golden/` unchanged forever, since
+//!   its `declared_version` no longer equals `FORMAT_VERSION` and it drops
+//!   out of the re-encode check on its own.
 //! - **Encoder-only** (a parse or pricing heuristic changes which valid
 //!   token sequence `compress()` picks, with `decode` byte-for-byte
 //!   unchanged): move the current pair into `tests/golden/superseded/`
