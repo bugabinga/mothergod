@@ -18,6 +18,28 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-09 — Editorial: the site's Status box explained the pipeline twice
+
+Queue empty (no open `marketing` issue, no `claude/*` branch), so this is
+a defect found on the surface. #923 took the pipeline out of the README's
+opener; the site carried the same shape one screen down. Its Status box
+named the method enum (`Stored`, `Lz`), then described the LZ stage and
+the arithmetic coder, and the very next section, "What this is", described
+both again. Then it inlined the post-release retirement procedure, a rule
+for releases that do not exist yet.
+
+**Cut the box from 158 words to 81, to what a visitor deciding whether
+to try it needs:** pre-alpha, the format is versioned but not frozen, a
+file compressed today carries no promise a later build reads it, nothing
+is retired from 1.0 on, and the spec owns the rules in between. The
+"no promise" clause stays because it is the one fact that changes a
+trier's action, and it matches the status page's own wording. Counts:
+`awk '/<div class="status">/,/<\/div>/' site/index.html`, tags stripped,
+`wc -w`, before and after.
+
+The README already reads this way since #849; the two surfaces now say
+the same thing at the same length.
+
 ## 2026-10-08 — Editorial: the README opener lost its pipeline, and gained no pointer
 
 #923 cut "A filter bank feeds an optimal-parse LZ..." from the README's
