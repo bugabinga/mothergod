@@ -192,8 +192,10 @@ validation. The refusal exits 0, so the job would go green having
 reviewed nothing. Two ways in, both observed on 2026-08-22:
 
 - The PR edits `agent-review.yml` itself (PR #69). No agent review is
-  possible, now or on any future push; the PR lands by BDFL discretion
-  once the required quality gates are green, the envelope authority
+  possible, now or on any future push, so `merge-pr --wait` exits 4
+  there; the PR lands by BDFL discretion once the required quality
+  gates are green (`gh pr checks <pr> --required --watch` is that wait,
+  then `merge-pr <pr> --sha <head>`; PR #972), the envelope authority
   (ADR-0008) acting as reviewer of last resort for its own machinery.
   That discretion reads the PR's file list and names it in the merge:
   #114 carried a second workflow and an ADR onto main unreviewed under
