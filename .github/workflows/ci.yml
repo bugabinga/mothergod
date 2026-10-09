@@ -171,8 +171,10 @@ jobs:
   # (issue #505): gh-comment's test reads every workflow's env block and takes
   # the seat names from the persona files, so a PR adding seat seven is
   # precisely the one that must run this job, and it touches no script.
-  # Not a required check: it gates nothing on a red day for the crate, and
-  # the ruleset's required names stay exactly as they are.
+  # A required check since 2026-10-09: it holds the prompt pins
+  # (prompt-bytes), and #957 landed red here because merge-pr reads the
+  # ruleset alone and a workflow PR gets no reviewer (#114). Skipped
+  # satisfies the ruleset, so a crate-only PR pays nothing for it.
   worker:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
