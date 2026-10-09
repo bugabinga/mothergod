@@ -5,9 +5,10 @@ use libfuzzer_sys::fuzz_target;
 // CLAUDE.md hard rule 1 as an executable: `decompress(compress(x)) == x`
 // for arbitrary `x`, always. `compress` never fails, so an `expect` here
 // on `decompress` is a genuine bug report, not a false positive. The
-// writer leg lives here, not in its own target, because this is the one
-// target that holds a valid frame and its input together, and a fourth
-// target would split the daily fuzz budget four ways.
+// writer leg lives here, not in its own target, because a leg adds no
+// target and so takes no share of the daily fuzz budget, which
+// `fuzz-check.yml` divides by the target count; and this target feeds
+// raw arbitrary bytes where `frame_recipe` feeds structured recipes.
 fuzz_target!(|data: &[u8]| {
     let compressed = mothergod::compress(data);
     let decompressed = mothergod::decompress(&compressed).expect("compress output must decode");
