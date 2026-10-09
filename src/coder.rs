@@ -115,6 +115,17 @@ impl Encoder {
         }
     }
 
+    /// Emits `bit`, then the `pending` deferred bits it resolves, each its
+    /// opposite: the carry-resolution step of both renormalization and
+    /// [`Self::finish`].
+    fn emit_resolved(&mut self, bit: u8) {
+        self.emit(bit);
+        for _ in 0..self.pending {
+            self.emit(bit ^ 1);
+        }
+        self.pending = 0;
+    }
+
     /// Narrows the coder's interval to the sub-range `[cum_low, cum_high)`
     /// out of `total`, then renormalizes, emitting whichever leading bits
     /// of the interval are now fixed (deferring bits made ambiguous by a
@@ -132,17 +143,9 @@ impl Encoder {
         (self.low, self.high) = narrow(self.low, self.high, cum_low, cum_high, total);
         loop {
             if self.high < HALF {
-                self.emit(0);
-                for _ in 0..self.pending {
-                    self.emit(1);
-                }
-                self.pending = 0;
+                self.emit_resolved(0);
             } else if self.low >= HALF {
-                self.emit(1);
-                for _ in 0..self.pending {
-                    self.emit(0);
-                }
-                self.pending = 0;
+                self.emit_resolved(1);
                 self.low -= HALF;
                 self.high -= HALF;
             } else if self.low >= QUARTER && self.high < THREE_QUARTERS {
@@ -187,17 +190,7 @@ impl Encoder {
     #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         self.pending += 1;
-        if self.low < QUARTER {
-            self.emit(0);
-            for _ in 0..self.pending {
-                self.emit(1);
-            }
-        } else {
-            self.emit(1);
-            for _ in 0..self.pending {
-                self.emit(0);
-            }
-        }
+        self.emit_resolved(u8::from(self.low >= QUARTER));
         while self.bit_count != 0 {
             self.emit(0);
         }
@@ -280,23 +273,17 @@ impl<'a> Decoder<'a> {
     pub fn decode(&mut self, cum_low: u64, cum_high: u64, total: u64) {
         (self.low, self.high) = narrow(self.low, self.high, cum_low, cum_high, total);
         loop {
-            let shift = if self.high < HALF {
-                true
-            } else if self.low >= HALF {
-                self.low -= HALF;
-                self.high -= HALF;
-                self.value -= HALF;
-                true
-            } else if self.low >= QUARTER && self.high < THREE_QUARTERS {
-                self.low -= QUARTER;
-                self.high -= QUARTER;
-                self.value -= QUARTER;
-                true
-            } else {
-                false
-            };
-            if !shift {
-                break;
+            if self.high >= HALF {
+                let offset = if self.low >= HALF {
+                    HALF
+                } else if self.low >= QUARTER && self.high < THREE_QUARTERS {
+                    QUARTER
+                } else {
+                    break;
+                };
+                self.low -= offset;
+                self.high -= offset;
+                self.value -= offset;
             }
             self.low = (self.low << 1) & MASK;
             self.high = ((self.high << 1) | 1) & MASK;
