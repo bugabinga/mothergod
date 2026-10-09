@@ -77,8 +77,8 @@ product file reads in one pass and test lines count by file name.
 
 ## Current automated cadence
 
-Every PR retains the required job names `fmt`, `clippy`, `test`, `doc`, and
-`ratio`. Rust-input PRs run the first four on Linux x64 stable through
+Every PR retains the required job names ci.yml's header lists. Rust-input
+PRs run `fmt`, `clippy`, `test` and `doc` on Linux x64 stable through
 `.github/actions/rust-ci`, each job delegating to its `cargo x` stage so CI
 and the local gate share one command list (ADR-0029): formatting, Clippy,
 all Cargo targets, doctests,
