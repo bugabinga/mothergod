@@ -136,7 +136,7 @@ test("ledgers are excluded, so a permanent issue never sorts to the top", () => 
   assert.match(call("render", { rows }), /excluded .*ledger 1/);
 });
 
-test("the prompt's ladder orders bug, blocker, plain, enhancement", () => {
+test("the ladder orders ready, bug, blocker, plain, enhancement", () => {
   const rows = [
     issue(10, { labels: ["agent-system", "enhancement"] }),
     issue(20),
@@ -144,9 +144,27 @@ test("the prompt's ladder orders bug, blocker, plain, enhancement", () => {
     // #40 is named as a blocker by #20's body, not by any label.
     issue(40),
     issue(21, { body: "this is blocked by #40 until that lands" }),
+    issue(50, { labels: ["agent-system", "enhancement", "ready-to-ship"] }),
   ];
   const { ranked } = call("classify", { rows });
-  assert.deepEqual(ranked, [30, 40, 20, 21, 10]);
+  assert.deepEqual(ranked, [50, 30, 40, 20, 21, 10]);
+});
+
+test("ready-to-ship preempts urgency: a built diff outranks a fresh bug", () => {
+  // #454 carried a maintainer-verified, curator-re-verified diff in its
+  // thread for 18 days at `enhancement` while fresh bugs sorted above it
+  // (#840). Cost-to-ship is a second axis; the label is how it reaches the
+  // ranking, and it sits in front of the whole urgency ladder.
+  const rows = [
+    issue(1, { title: "a fresh bug", labels: ["agent-system", "bug"] }),
+    issue(2, {
+      title: "built, waiting on the BDFL's token",
+      createdAt: "2026-09-01T00:00:00Z",
+      labels: ["agent-system", "enhancement", "ready-to-ship"],
+    }),
+  ];
+  assert.deepEqual(call("classify", { rows }).ranked, [2, 1]);
+  assert.match(call("render", { rows }), /agent-queue: top is #2 \(ready, 17d old\)/);
 });
 
 test("age breaks ties in the older item's favour", () => {
