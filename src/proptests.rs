@@ -21,12 +21,11 @@ proptest! {
     // that keeps this property's slice of the required gate under 10s
     // (measured locally) while still sweeping both frame shapes above.
     // `ProptestConfig::with_cases` would pin the literal regardless of
-    // `PROPTEST_CASES`, foreclosing #452's planned weekly-tier
-    // scale-up (unbuilt today: no workflow sets `PROPTEST_CASES`, so
-    // every property, this one and its `filters.rs` siblings alike,
-    // currently runs at `ProptestConfig::default()`'s case count in
-    // every CI leg). Read the env var ourselves instead so the
-    // fast-profile default stays 64 but a future scaled-up run wins.
+    // `PROPTEST_CASES`, which a local heavier run sets (no workflow
+    // does, so every CI leg runs `ProptestConfig::default()`'s case
+    // count for the `filters.rs` siblings and 64 here). Read the env var
+    // ourselves instead so the fast-profile default stays 64 but a
+    // local override wins.
     #![proptest_config(ProptestConfig {
         cases: std::env::var("PROPTEST_CASES")
             .ok()
