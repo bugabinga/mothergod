@@ -50,9 +50,10 @@ const down = generate("down");
 const status = Object.fromEntries((up.milestones ?? []).map((m) => [m.id, m.status]));
 
 test("a section linking a milestone takes the tracker's counts", () => {
-  // ROADMAP.md links M6 to milestone 1 and M7 to milestone 2.
+  // ROADMAP.md links M6 to milestone 1, M7 to milestone 2, M8 to milestone 3.
   assert.equal(status.M6, "active");
   assert.equal(status.M7, "done");
+  assert.equal(status.M8, "pending");
   assert.ok(
     !up.problems.some((p) => p.startsWith("milestones:")),
     up.problems.join("\n"),
@@ -67,7 +68,7 @@ test("✅ is delivered history and a section with neither is a program", () => {
 test("order is ROADMAP.md's section order, which is rank", () => {
   assert.deepEqual(
     up.milestones.map((m) => m.id),
-    ["M0", "M1", "M2", "M3", "M4", "M7", "M5", "M6"],
+    ["M0", "M1", "M2", "M3", "M4", "M7", "M8", "M5", "M6"],
   );
 });
 

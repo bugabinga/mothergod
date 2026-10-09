@@ -40,6 +40,15 @@ Outcome metrics (the product):
   Dependency count stays zero (ADR-0002). Deletions are celebrated in the
   digest. Published: line counts on /status; the API surface has no
   publisher yet (#651).
+- **FIT**: the share of the genre's behaviors the CLI and the library
+  hold (ADR-0064): one row per behavior gzip, bzip2, xz, zstd, brotli
+  and lz4 share (CLI) or flate2, zstd, xz2, brotli and lz4_flex share
+  (library), each a test recording `holds` or `gap`, ratcheted both
+  ways; a declined row stays in the denominator with its reason. A row
+  holds only where it holds on every runtime lane that can run the
+  suite. Published: holds over total with trend on /status, from a
+  committed count the gate keeps honest, like the API surface.
+  Unmeasured until M8's first slice lands (#981, #982).
 
 Process metrics (the team, the BDFL's machinery gauge):
 
@@ -66,7 +75,7 @@ to call this project's most-worked area "pending" (operator report,
 
 A **milestone** is a deliverable with a definition of done. Its items are
 issues in a GitHub Milestone of the same name, linked from its section
-below, and an item is done when its issue closes (ADR-0047): M6 and M7
+below, and an item is done when its issue closes (ADR-0047): M6, M7 and M8
 today. A **program** is continuous work with a target but no finish line,
 so it has no tracker milestone and nothing to count: M3 (ratio) and M5
 (speed). Milestones delivered before the tracker held items (M0, M1, M2,
@@ -92,12 +101,12 @@ means one CLI that both compresses and decompresses, and a first-class
 library crate; both are table stakes, not stretch goals. Beyond that shape, innovation is open: anything
 goes as long as it is useful to humans.
 
-## M0 — Scaffolding ✅
+## M0: Scaffolding ✅
 
 Crate skeleton, v0 frame format (Stored), quality-gate CI, governance and
 agent processes. Done 2026-08-20.
 
-## M1 — Port the founding-session codec ✅
+## M1: Port the founding-session codec ✅
 
 The founding artifacts imported to `research/imports/session-1/` and
 import-verified lossless; the archive codec ported into `src/` as
@@ -107,7 +116,7 @@ panics, docs, strict lints, invariants written down, JOURNAL S1-A*); the
 Python harness verified against the it31 champion's sealed validation,
 then retired to git history (commit `1a3b1c8`, ADR-0006). Done 2026-08-28.
 
-## M2 — Honest benchmarking (JOURNAL S1-D2) ✅
+## M2: Honest benchmarking (JOURNAL S1-D2) ✅
 
 The Rust `bench/` harness (ADR-0006) pinning Silesia and Canterbury by
 URL and SHA-256 with the train/sealed/finals split of
@@ -118,7 +127,7 @@ inside the codec of record; the required `ratio` check against
 `docs/benchmarks/`, which no scheduled job regenerates yet. Done
 2026-08-28.
 
-## M3 — Close the gaps (research program)
+## M3: Close the gaps (research program)
 
 A program, not a milestone: no checklist, because there is no state in which
 beating the field is finished. Progress reads off the Scorecard's RATIO ladder
@@ -192,7 +201,7 @@ No standing lead is open: the next candidate is a literature idea or a
 cheap wild swing per the `compression-experiment` skill. Target: beat zstd -19 per-file on all of
 Silesia/Canterbury with real bitstreams; then xz -9e.
 
-## M4 — Production hardening ✅
+## M4: Production hardening ✅
 
 Fuzzing and mutation testing in CI (`fuzz-check` weekly, `mutants-check`
 on a PR's own changed lines; `docs/TESTING.md` layers 3 and 4);
@@ -204,7 +213,7 @@ whole-buffer decode by design, JOURNAL S2-D4, and encode still takes a
 whole buffer); and the format spec made normative by ADR-0041 (its
 decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 
-## M7 — Trust engineering (ADR-0043)
+## M7: Trust engineering (ADR-0043)
 
 Numbered by creation order, placed here by priority: correctness debt
 compounds worse than a late release, so the heartbeat works these ahead
@@ -224,7 +233,24 @@ Exploratory, a journal slice's option and no item: Kani proof harnesses on
 the coder's renormalization/update math, adopted only if it proves an
 invariant fuzzing cannot, journal rules apply.
 
-## M5 — Speed tiers
+## M8: Genre fit (ADR-0064)
+
+Numbered by creation order, placed after M7 because correctness debt
+compounds, and ahead of the programs because it has a finish line: the
+genre is finite. The scorecard's FIT line is what it moves.
+
+Items, in [milestone M8](https://github.com/bugabinga/mothergod/milestone/3):
+the CLI genre matrix, its conformance suite and the FIT publisher (#981);
+the library idiom matrix (#982); and the gaps known before any matrix
+existed, measured on 2026-10-09: a broken pipe reported as an error
+(#976), no `--version` (#977), concatenated frames dropped in silence and
+a whole-input encode (#978), no `Read`/`Write` adapter (#979), the genre's
+flag grammar absent (#983), and no BSD lane to measure the BSD third of
+"unix, bsd, win32" (#980). The matrix comes first: a gap closed before its
+row exists is a FIT number nobody can reproduce. The matrix files the
+rest, one issue per gap cluster.
+
+## M5: Speed tiers
 
 A program, not a milestone, on the same terms as M3: it is the Scorecard's
 SPEED line, worked continuously.
@@ -250,7 +276,7 @@ case maps to Silesia's 1 MB/s (its files span 0.25 to 6.6), so
 what is held is "no unexplained slowdown", and the aggregate on the finals
 reports is still read at each regeneration.
 
-## M6 — Release 0.1
+## M6: Release 0.1
 
 Items, in [milestone M6](https://github.com/bugabinga/mothergod/milestone/1):
 the `mothergod` CLI with file arguments and the `.mgdc` suffix (#359); the
