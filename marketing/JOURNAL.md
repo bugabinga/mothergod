@@ -18,6 +18,32 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-09 — Editorial: the origin story goes where the reader asks "who"
+
+#963: the surface never said mothergod began as an autoresearch loop.
+**Placed it as the first paragraph of "Who builds it", README and site,
+not the opener.** The opener answers "what is this, is it any good", and
+the 2026-10-08 entry just emptied it of everything else; an origin story
+there would push the table down again. "Who builds it" is where the
+reader asking how this was made already looks, and the agent paragraph
+that follows reads as what the loop grew into.
+
+Evidence per claim: the date and "about 40 iterations" from
+`research/JOURNAL.md`'s S1 preamble ("~41 loop iterations"; the in-tree
+archive holds it1 to it31, the rest are journaled only, so "about").
+The loop's steps from `autoresearch2.py` at `1a3b1c8`: the `NOT
+INVERTIBLE` assert, the train/val scoring, the journal's `accepted`
+field. karpathy/autoresearch's metric (`val_bpb`) from its README, read
+2026-10-09. "Still runs": `research/progress.jsonl` it190 is dated
+2026-10-08.
+
+**Rejected: the issue's counts (190 experiments, 97k stars).** Both rot
+by the week, and the iteration ids already say it on the journal for
+the reader who descends. **Rejected: any word implying inspiration or a
+ratio comparison**: the sentence states a shared metric and nothing more,
+per the issue's own constraint. Measure: the next four surveys' repo
+numbers, per the issue.
+
 ## 2026-10-09 — Editorial: the site's Status box explained the pipeline twice
 
 Queue empty (no open `marketing` issue, no `claude/*` branch), so this is
