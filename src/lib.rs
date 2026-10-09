@@ -62,78 +62,18 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 
 /// Container format version written into frames produced by this crate.
 ///
-/// Bumped to 1 when [`Method::Lz`] was added
-/// (`docs/adr/0026-wire-the-lz-context-mixing-method.md`), to 2 when
-/// filter selection was wired into its payload
-/// (`docs/adr/0028-wire-filter-selection.md`; that version was later retired
-/// outright, below), to 3 when the literal sub-stream switched to
-/// SSE-calibrated binary-tree coding
-/// (`docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
-/// S1-P1), to 4 when a `Candidate::Transpose` frame's literal sub-stream
-/// gained a column-keyed seventh expert
-/// (`docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
-/// `research/JOURNAL.md` S1-P5), to 5 when every other candidate's
-/// literal sub-stream switched from SSE-calibrated coding to a logit-domain
-/// mixer over the same six experts
-/// (`docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`,
-/// `research/JOURNAL.md` S1-P8), to 6 when that same set of candidates
-/// switched to a second rate schedule over the identical logit-domain mix,
-/// a learned baseline instead of an annealed step count
-/// (`docs/adr/0054-wire-the-surprise-rate-schedule-into-the-literal-model.md`,
-/// `research/JOURNAL.md` S2-A104/S2-A105), to 7 when that same set of
-/// candidates switched its SSE calibration stage from a linear table to a
-/// stretch-domain one
-/// (`docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`,
-/// `research/JOURNAL.md` S2-A106/S2-A108), and to 8 when a copy token's
-/// length symbol switched from one shared model for every
-/// [`lz::Token::Match`]/[`lz::Token::Rep`] to two independent ones,
-/// selected by which kind produced it, regardless of candidate
-/// (`docs/adr/0057-wire-the-match-rep-length-model-split.md`,
-/// `research/JOURNAL.md` S2-A109/S2-A110), and to 9 when a match's
-/// distance symbol switched from one shared model regardless of that
-/// match's own length to four independent ones selected by a coarse bucket
-/// of it
-/// (`docs/adr/0058-wire-the-offset-length-state-split.md`,
-/// `research/JOURNAL.md` S2-A111/S2-A112), and to 10 when the bits below a
-/// copy length's bucket switched from raw to an adaptive tree per length
-/// model and bucket
-/// (`docs/adr/0061-wire-the-length-residual-trees.md`,
-/// `research/JOURNAL.md` S2-A114/S2-A115): all ten are bitstream format
-/// changes (CLAUDE.md hard rule 5). A version-0 frame only ever contains
-/// [`Method::Stored`], which decodes identically under this build, so no
-/// separate version-0 decode path is needed. A version-1 or version-2 frame
-/// is rejected as `UnsupportedVersion` before [`codec::decode`] is ever
-/// called (`codec::LZ_MIN_VERSION`, 3): version 1 named a `Method::Lz`
-/// payload in a layout this build no longer parses (see [`codec`]'s module
-/// docs), and version 2 named the current outer layout but coded its
-/// literal sub-stream through a direct 256-way mix instead of
-/// [`literal::Literal::decode_sse`] — retired outright, no release having
-/// ever written it
-/// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`). A
-/// version-4 frame whose filter selector names `Candidate::Transpose` codes
-/// its literals through [`literal::Literal::decode_column`] instead of
-/// `decode_sse`, every other candidate unchanged; a version-5 frame codes
-/// every candidate except that same `Candidate::Transpose` case through
-/// [`literal::Literal::decode_logistic`] instead; a version-6 frame codes
-/// that same set of candidates through [`literal::Literal::decode_logistic_surprise`]
-/// instead; a version-7 frame codes that same set of candidates through
-/// [`literal::Literal::decode_logit_sse`] instead. Separately from any of
-/// that, regardless of candidate, a version-8 frame decodes a copy token's
-/// length through [`lz::Token::Match`]/[`lz::Token::Rep`]'s own independent
-/// model instead of one shared between them
-/// (`codec::LENGTH_SPLIT_MIN_VERSION`), and a version-9 frame decodes a
-/// `Token::Match`'s distance through one of four models keyed on that
-/// match's own length (`codec::OFFSET_LEN_SPLIT_MIN_VERSION`) instead of
-/// one shared regardless of length. [`codec::decode`] takes the
-/// frame's declared version (and, for `Candidate::Transpose`, its
-/// already-parsed candidate) and picks between them, so hard rule 5's
-/// "decode support for every version the spec still covers" is satisfied
-/// by dispatch, not by dropping an old path (`tests/golden/v3-*.mgdc`,
-/// `tests/golden/v4-*.mgdc`, `tests/golden/v5-*.mgdc`,
-/// `tests/golden/v6-*.mgdc`, `tests/golden/v7-*.mgdc`,
-/// `tests/golden/v8-*.mgdc`, `tests/golden/v9-*.mgdc`, and
-/// `tests/golden/v10-*.mgdc` pin that
-/// forever).
+/// Every bump is a bitstream format change (CLAUDE.md hard rule 5); the
+/// history of what each version changed lives in `docs/format/SPEC.md` and
+/// the ADRs it cites. This build decodes exactly this version for
+/// [`Method::Lz`]: versions 1 through 9 were retired outright, no release
+/// having written any of them
+/// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
+/// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a
+/// [`Method::Lz`] frame naming any other version is rejected as
+/// `UnsupportedVersion` before [`codec::decode`] is ever called. A
+/// [`Method::Stored`] frame carries its payload verbatim, so it decodes
+/// identically under every version up to this one and needs no separate
+/// path (`tests/golden/v10-*.mgdc` pins the current version's frames).
 pub const FORMAT_VERSION: u8 = 10;
 
 /// Payload encoding methods.
@@ -294,12 +234,14 @@ const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
-/// Splits `input` into its declared version, [`Method`], and the payload
-/// past the header, checked against [`MAGIC`] and [`FORMAT_VERSION`] but
-/// nothing past that: shared by every function that dispatches on a
-/// frame's method before deciding how much of the payload it actually
-/// needs, so the two never drift on what counts as a well-formed header.
-fn parse_header(input: &[u8]) -> Result<(u8, Method, &[u8]), Error> {
+/// Splits `input` into its [`Method`] and the payload past the header,
+/// checked against [`MAGIC`] and [`FORMAT_VERSION`] but nothing past that:
+/// shared by every function that dispatches on a frame's method before
+/// deciding how much of the payload it actually needs, so they never drift
+/// on what counts as a well-formed header. A [`Method::Stored`] frame may
+/// name any version up to [`FORMAT_VERSION`]; a [`Method::Lz`] frame must
+/// name exactly it, the one version [`codec::decode`] reads.
+fn parse_header(input: &[u8]) -> Result<(Method, &[u8]), Error> {
     let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
     if header[..MAGIC.len()] != MAGIC {
         return Err(Error::BadMagic);
@@ -309,7 +251,10 @@ fn parse_header(input: &[u8]) -> Result<(u8, Method, &[u8]), Error> {
         return Err(Error::UnsupportedVersion(version));
     }
     let method = Method::try_from(header[METHOD_OFFSET])?;
-    Ok((version, method, payload))
+    if method == Method::Lz && version != FORMAT_VERSION {
+        return Err(Error::UnsupportedVersion(version));
+    }
+    Ok((method, payload))
 }
 
 /// A parsed frame header plus the two bounds [`decompress_bounded`] and
@@ -321,7 +266,6 @@ struct BoundedHeader<'a> {
     /// one never rejects a [`Method::Stored`] frame on size alone.
     stored_bound: Option<u32>,
     max_len: u32,
-    version: u8,
     method: Method,
     payload: &'a [u8],
 }
@@ -342,11 +286,10 @@ fn bounded_header(input: &[u8], max_len: u32) -> Result<BoundedHeader<'_>, Error
     // was, so incompressible input at or past 256 MiB keeps round-tripping.
     let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
     let max_len = max_len.min(codec::MAX_DECODED_LEN);
-    let (version, method, payload) = parse_header(input)?;
+    let (method, payload) = parse_header(input)?;
     Ok(BoundedHeader {
         stored_bound,
         max_len,
-        version,
         method,
         payload,
     })
@@ -576,7 +519,6 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     let BoundedHeader {
         stored_bound,
         max_len,
-        version,
         method,
         payload,
     } = bounded_header(input, max_len)?;
@@ -585,8 +527,7 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
             check_stored_bound(payload, stored_bound)?;
             Ok(payload.to_vec())
         }
-        Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
-        Method::Lz => codec::decode(payload, version, max_len),
+        Method::Lz => codec::decode(payload, max_len),
     }
 }
 
@@ -699,7 +640,6 @@ pub fn decompress_to_writer<W: std::io::Write>(
     let BoundedHeader {
         stored_bound,
         max_len,
-        version,
         method,
         payload,
     } = bounded_header(input, max_len)?;
@@ -709,10 +649,7 @@ pub fn decompress_to_writer<W: std::io::Write>(
             check_stored_bound(payload, stored_bound)?;
             writer.write_all(payload)?;
         }
-        Method::Lz if version < codec::LZ_MIN_VERSION => {
-            return Err(Error::UnsupportedVersion(version).into());
-        }
-        Method::Lz => codec::decode_to_writer(payload, version, max_len, &mut writer)?,
+        Method::Lz => codec::decode_to_writer(payload, max_len, &mut writer)?,
     }
     writer.flush()?;
     Ok(())
@@ -747,10 +684,9 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// frame's filter selector does not name a real [`filters::select::Candidate`]
 /// — everything short of actually decoding the payload.
 pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
-    let (version, method, payload) = parse_header(input)?;
+    let (method, payload) = parse_header(input)?;
     match method {
         Method::Stored => Ok(true),
-        Method::Lz if version < codec::LZ_MIN_VERSION => Err(Error::UnsupportedVersion(version)),
         Method::Lz => {
             let filter_bytes = payload.get(0..2).ok_or(Error::Truncated)?;
             let candidate =

@@ -4,13 +4,9 @@ use crate::test_support::as_codec_error;
 /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
 /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
 /// compare its output byte for byte against [`decode`]'s.
-fn decode_streaming(
-    payload: &[u8],
-    version: u8,
-    max_len: u32,
-) -> Result<Vec<u8>, crate::WriteError> {
+fn decode_streaming(payload: &[u8], max_len: u32) -> Result<Vec<u8>, crate::WriteError> {
     let mut out = Vec::new();
-    decode_to_writer(payload, version, max_len, &mut out)?;
+    decode_to_writer(payload, max_len, &mut out)?;
     Ok(out)
 }
 
@@ -21,12 +17,12 @@ fn decode_streaming(
 /// coverage). `context` names the fixture in the failure message.
 fn assert_decode_matches(encoded: &[u8], expected: &[u8], context: &str) {
     assert_eq!(
-        decode(encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
+        decode(encoded, MAX_DECODED_LEN).as_deref(),
         Ok(expected),
         "decode mismatch: {context}"
     );
     assert_eq!(
-        decode_streaming(encoded, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+        decode_streaming(encoded, MAX_DECODED_LEN)
             .expect("decode_to_writer must succeed whenever decode does, same payload"),
         expected,
         "streaming roundtrip mismatch: {context}"
@@ -213,7 +209,7 @@ fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
 
 /// Fixed-width records whose columns each cycle through their own
 /// period (`research/JOURNAL.md` S1-P5's target shape, same
-/// construction as `tests/golden/v4-tabular-columns`), with a fraction
+/// construction as `tests/golden/v10-tabular-columns`), with a fraction
 /// of bytes jittered off the clean pattern so the literal model, not
 /// just `lz::parse_optimal`'s LZ matches, carries real weight — the
 /// data this ADR-0046 slice's own real-bitstream measurement used.
@@ -269,114 +265,15 @@ fn roundtrip_tabular_columns_data_selects_transpose_and_streams_it() {
 }
 
 #[test]
-fn column_expert_path_is_gated_on_both_version_and_candidate() {
-    // A Candidate::Transpose frame declared at a version below
-    // COLUMN_EXPERT_MIN_VERSION must decode through the plain SSE path
-    // (Literal::decode_sse), never decode_column: encoding a payload
-    // the column-expert path actually produced and then decoding it as
-    // version 3 must NOT reproduce the original data (the two paths
-    // code different bits for the same bytes), proving the version
-    // gate, not just the candidate check, controls dispatch.
-    let data = tabular_columns_data(8, 2000, 1);
-    let encoded = encode(&data);
-    assert_eq!(encoded[0], 3, "fixture must select Transpose");
-    assert_ne!(
-        decode(&encoded, LZ_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding a COLUMN_EXPERT_MIN_VERSION frame as version 3 must not \
-         silently reproduce the original data"
-    );
-}
-
-#[test]
-fn logistic_path_is_gated_on_version_alone() {
-    // Same shape as column_expert_path_is_gated_on_both_version_and_
-    // candidate, for a version-gated literal path: a non-Transpose
-    // frame the real encoder built (always through encode_logistic_
-    // surprise, the newest mixer) must decode through the plain SSE
-    // path (Literal::decode_sse) when declared at a version below
-    // LOGISTIC_MIN_VERSION, never decode_logistic or decode_logistic_
-    // surprise. Decoding it at COLUMN_EXPERT_MIN_VERSION (4, still
-    // below LOGISTIC_MIN_VERSION) must NOT reproduce the original
-    // data, proving the `version >= LOGISTIC_MIN_VERSION` check is
-    // live dispatch, not dead code a future refactor could drop
-    // unnoticed.
-    let data = columnar_drift_data();
-    let encoded = encode(&data);
-    assert_eq!(encoded[0], 1, "fixture must select Delta, not Transpose");
-    assert_ne!(
-        decode(&encoded, COLUMN_EXPERT_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding a LOGISTIC_MIN_VERSION frame as version 4 must not \
-         silently reproduce the original data"
-    );
-}
-
-#[test]
-fn logistic_surprise_path_is_gated_on_version_alone() {
-    // Same shape as logistic_path_is_gated_on_version_alone, one
-    // threshold up: a non-Transpose frame the real encoder built
-    // (through encode_logistic_surprise, SURPRISE_MIN_VERSION and up)
-    // must decode through the older LogisticMix path
-    // (Literal::decode_logistic) when declared at LOGISTIC_MIN_VERSION,
-    // still below SURPRISE_MIN_VERSION, never decode_logistic_surprise.
-    // Decoding it there must NOT reproduce the original data, proving
-    // the `version >= SURPRISE_MIN_VERSION` check is live dispatch, not
-    // dead code a future refactor could drop unnoticed.
-    let data = columnar_drift_data();
-    let encoded = encode(&data);
-    assert_eq!(encoded[0], 1, "fixture must select Delta, not Transpose");
-    assert_ne!(
-        decode(&encoded, LOGISTIC_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding a SURPRISE_MIN_VERSION frame as LOGISTIC_MIN_VERSION must not \
-         silently reproduce the original data"
-    );
-}
-
-#[test]
-fn logit_sse_path_is_gated_on_version_alone() {
-    // Same shape as logistic_surprise_path_is_gated_on_version_alone,
-    // one threshold up: a non-Transpose frame the real encoder built
-    // (through encode_logit_sse, LOGIT_SSE_MIN_VERSION and up) must
-    // decode through the older SurpriseLogisticMix path
-    // (Literal::decode_logistic_surprise) when declared at
-    // SURPRISE_MIN_VERSION, still below LOGIT_SSE_MIN_VERSION, never
-    // decode_logit_sse. Decoding it there must NOT reproduce the
-    // original data, proving the `version >= LOGIT_SSE_MIN_VERSION`
-    // check is live dispatch, not dead code a future refactor could
-    // drop unnoticed.
-    let data = columnar_drift_data();
-    let encoded = encode(&data);
-    assert_eq!(encoded[0], 1, "fixture must select Delta, not Transpose");
-    assert_ne!(
-        decode(&encoded, SURPRISE_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding a LOGIT_SSE_MIN_VERSION frame as SURPRISE_MIN_VERSION must not \
-         silently reproduce the original data"
-    );
-}
-
-#[test]
-fn length_split_is_gated_on_version_alone() {
-    // Same shape as logit_sse_path_is_gated_on_version_alone, but for the
-    // length-model split (not the literal sub-stream). A hand-built token
-    // stream over all-zero data (so any distance validly replays, no real
-    // repeat structure needed): 4 literals, then 30 Token::Match tokens of
-    // length 50 at distance 1 (training length_match on 50 alone, under
-    // the split the real encoder takes), then 30 Token::Rep tokens of
-    // length 5 reusing the cached distance (training length_rep on 5
-    // alone). Decoded at LENGTH_SPLIT_MIN_VERSION, length_rep starts
-    // fresh when the first Rep arrives, matching the real encoder's state;
-    // decoded one version below, decode_tokens's shared models.length has
-    // already adapted to 30 observations of 50 by then, so the first Rep
-    // length symbol decodes under the wrong distribution and desyncs the
-    // rest of the stream. The literal sub-stream is unaffected at that
-    // version (LOGIT_SSE_MIN_VERSION already selects decode_logit_sse,
-    // same as the real encoder used), so any mismatch isolates to the
-    // length gate alone. Must NOT reproduce the original data, proving
-    // `length_split` is live dispatch, not dead code a future refactor
-    // could drop unnoticed.
+fn length_streams_through_both_split_models_roundtrip() {
+    // A hand-built token stream over all-zero data (so any distance validly
+    // replays, no real repeat structure needed): 4 literals, then 30
+    // Token::Match tokens of length 50 at distance 1 (training length_match
+    // on 50 alone), then 30 Token::Rep tokens of length 5 reusing the cached
+    // distance (training length_rep on 5 alone). Pins that decode selects
+    // the same model per kind as the encoder: a decode that read a Rep's
+    // length through length_match would meet 30 observations of 50 and
+    // desync the rest of the stream.
     let distance = NonZeroU32::new(1).expect("1 is not zero");
     let mut tokens = vec![
         Token::Literal(0),
@@ -397,17 +294,7 @@ fn length_split_is_gated_on_version_alone() {
     let mut frame = Candidate::Identity.to_header_bytes().to_vec();
     frame.extend(encode_tokens_with(&data, None, &tokens));
 
-    assert_eq!(
-        decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "fixture must round-trip at the real FORMAT_VERSION first"
-    );
-    assert_ne!(
-        decode(&frame, LOGIT_SSE_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding a LENGTH_SPLIT_MIN_VERSION frame as LOGIT_SSE_MIN_VERSION must not \
-         silently reproduce the original data"
-    );
+    assert_decode_matches(&frame, &data, "match and rep lengths, split models");
 }
 
 #[test]
@@ -415,8 +302,8 @@ fn length_match_and_rep_models_adapt_independently() {
     // Guards against a future refactor collapsing Models::length_match/
     // length_rep back onto one shared Model (which would still round-trip
     // correctly, since encode and decode would agree either way, so
-    // length_split_is_gated_on_version_alone's own frame-level test
-    // can't catch it): trains length_match on value 10 many times through
+    // length_streams_through_both_split_models_roundtrip can't catch it):
+    // trains length_match on value 10 many times through
     // the real EncodeSink path, then checks that a fresh models.length_rep
     // (never trained) still prices 10 at its untrained, higher cost —
     // proving the two fields are genuinely independent state, not aliases.
@@ -439,27 +326,18 @@ fn length_match_and_rep_models_adapt_independently() {
 }
 
 #[test]
-fn offset_length_split_is_gated_on_version_alone() {
-    // Same shape as length_split_is_gated_on_version_alone, but for the
-    // offset-model split (not the length symbol). A hand-built token
-    // stream over all-zero data (so any distance validly replays, no real
-    // repeat structure needed): 4 literals, then 30 Token::Match tokens of
-    // length MIN_MATCH_LEN (offset_len_state 0) at distance 1 (training
-    // offset_len[0] on distance 1 alone, under the split the real encoder
-    // takes), then 30 Token::Match tokens of a far longer length
-    // (offset_len_state OFFSET_LEN_STATES - 1, saturated) at distance 2
-    // (training offset_len[3] on distance 2 alone, starting fresh). Decoded
-    // at OFFSET_LEN_SPLIT_MIN_VERSION, offset_len[3] starts fresh when the
-    // first long match arrives, matching the real encoder's state; decoded
-    // one version below, decode_tokens's shared models.offset has already
-    // adapted to 30 observations of distance 1 by then, so the first long
-    // match's offset symbol decodes under the wrong distribution and
-    // desyncs the rest of the stream. The length sub-stream is unaffected
-    // at that version (LENGTH_SPLIT_MIN_VERSION already selects
-    // length_match/length_rep, same as the real encoder used), so any
-    // mismatch isolates to the offset gate alone. Must NOT reproduce the
-    // original data, proving `offset_split` is live dispatch, not dead code
-    // a future refactor could drop unnoticed.
+fn offsets_through_length_keyed_models_roundtrip() {
+    // A hand-built token stream over all-zero data (so any distance validly
+    // replays, no real repeat structure needed): 4 literals, then 30
+    // Token::Match tokens of length MIN_MATCH_LEN (offset_len_state 0) at
+    // distance 1 (training offset_len[0] on distance 1 alone), then 30
+    // Token::Match tokens of a far longer length (offset_len_state
+    // OFFSET_LEN_STATES - 1, saturated) at distance 2 (training
+    // offset_len[3] on distance 2 alone, starting fresh). Pins that decode
+    // keys the offset model on the already-decoded length exactly as the
+    // encoder does: a decode that shared one model across lengths would
+    // meet 30 observations of distance 1 at the first long match and
+    // desync the rest of the stream.
     let short_len = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN fits u32");
     let long_len = short_len + u32::try_from(OFFSET_LEN_STATES).expect("tiny constant fits u32");
     let distance1 = NonZeroU32::new(1).expect("1 is not zero");
@@ -489,17 +367,7 @@ fn offset_length_split_is_gated_on_version_alone() {
     let mut frame = Candidate::Identity.to_header_bytes().to_vec();
     frame.extend(encode_tokens_with(&data, None, &tokens));
 
-    assert_eq!(
-        decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "fixture must round-trip at the real FORMAT_VERSION first"
-    );
-    assert_ne!(
-        decode(&frame, LENGTH_SPLIT_MIN_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding an OFFSET_LEN_SPLIT_MIN_VERSION frame as LENGTH_SPLIT_MIN_VERSION must not \
-         silently reproduce the original data"
-    );
+    assert_decode_matches(&frame, &data, "offsets keyed on match length");
 }
 
 #[test]
@@ -507,8 +375,7 @@ fn offset_models_adapt_independently_by_length_state() {
     // Guards against a future refactor collapsing Models::offset_len's
     // four entries back onto fewer states (which would still round-trip
     // correctly, since encode and decode would agree either way, so
-    // offset_length_split_is_gated_on_version_alone's own frame-level test
-    // can't catch it): trains offset_len[0] (a length-MIN_MATCH_LEN match)
+    // offsets_through_length_keyed_models_roundtrip can't catch it): trains offset_len[0] (a length-MIN_MATCH_LEN match)
     // on distance 10 many times through the real EncodeSink path, then
     // checks that a fresh offset_len[OFFSET_LEN_STATES - 1] (never
     // trained, a far longer match's own state) still prices 10 at its
@@ -592,14 +459,8 @@ fn decode_undoable_streaming_bcj_path_flushes_a_trailing_opcode_on_finish() {
 
 #[test]
 fn truncated_header_is_rejected() {
-    assert_eq!(
-        decode(&[0u8; 4], crate::FORMAT_VERSION, MAX_DECODED_LEN),
-        Err(Error::Truncated)
-    );
-    assert_eq!(
-        decode(&[], crate::FORMAT_VERSION, MAX_DECODED_LEN),
-        Err(Error::Truncated)
-    );
+    assert_eq!(decode(&[0u8; 4], MAX_DECODED_LEN), Err(Error::Truncated));
+    assert_eq!(decode(&[], MAX_DECODED_LEN), Err(Error::Truncated));
 }
 
 #[test]
@@ -610,10 +471,7 @@ fn unknown_filter_selector_is_rejected_not_panicking() {
     let mut payload = vec![5u8, 0u8];
     payload.extend_from_slice(&1u32.to_le_bytes());
     payload.extend_from_slice(&0u32.to_le_bytes());
-    assert_eq!(
-        decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
-        Err(Error::Corrupt)
-    );
+    assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Corrupt));
 }
 
 #[test]
@@ -630,7 +488,7 @@ fn declared_length_lie_is_rejected_not_overallocated() {
     payload.extend_from_slice(&u32::MAX.to_le_bytes());
     payload.extend_from_slice(&0u32.to_le_bytes());
     assert_eq!(
-        decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
+        decode(&payload, MAX_DECODED_LEN),
         Err(Error::TooLarge {
             len: u32::MAX,
             max: MAX_DECODED_LEN
@@ -651,7 +509,7 @@ fn declared_length_over_the_max_is_rejected_before_any_work() {
     payload.extend_from_slice(&over.to_le_bytes());
     payload.extend_from_slice(&over.to_le_bytes());
     assert_eq!(
-        decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
+        decode(&payload, MAX_DECODED_LEN),
         Err(Error::TooLarge {
             len: over,
             max: MAX_DECODED_LEN
@@ -672,12 +530,35 @@ fn decode_clamps_a_max_len_above_max_decoded_len() {
     payload.extend_from_slice(&over.to_le_bytes());
     payload.extend_from_slice(&over.to_le_bytes());
     assert_eq!(
-        decode(&payload, crate::FORMAT_VERSION, u32::MAX),
+        decode(&payload, u32::MAX),
         Err(Error::TooLarge {
             len: over,
             max: MAX_DECODED_LEN
         })
     );
+}
+
+/// A `Method::Lz` payload (filter selector, header, range-coded stream) of
+/// one [`Token::Match`] of length 4 at `distance` and nothing before it,
+/// coded through the real [`EncodeSink`] so the bit-level framing is what
+/// [`decode`] reads: the decoder meets exactly the distance named, never
+/// garbage from a mismatched model. `declared_len` is 4, one match's worth.
+fn single_match_payload(distance: u32) -> Vec<u8> {
+    let mut models = Models::new();
+    let mut ac = Encoder::new();
+    models.flag[0].encode(&mut ac, FlagKind::Match.index());
+    let mut sink = EncodeSink {
+        ac: &mut ac,
+        column: None,
+    };
+    sink.length(&mut models, FlagKind::Match, 4);
+    sink.offset(&mut models, 4, distance);
+
+    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+    payload.extend_from_slice(&4u32.to_le_bytes()); // declared_len
+    payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
+    payload.extend(ac.finish());
+    payload
 }
 
 #[test]
@@ -686,24 +567,9 @@ fn bad_match_distance_is_rejected_not_panicking() {
     // Encoder so the bit-level framing is real, at a position where no
     // output exists yet — the distance necessarily reaches before the
     // start of decoded output.
-    let mut models = Models::new();
-    let mut ac = Encoder::new();
-    let context = Context::default();
-    models.flag[0].encode(&mut ac, FlagKind::Match.index());
-    encode_bucketed(&mut models.length, &mut ac, 4);
-    encode_bucketed(&mut models.offset, &mut ac, 1);
-    let _ = context;
-    let ac_bytes = ac.finish();
+    let payload = single_match_payload(1);
 
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&4u32.to_le_bytes()); // declared_len
-    payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
-    payload.extend(ac_bytes);
-
-    assert_eq!(
-        decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
-        Err(Error::Corrupt)
-    );
+    assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Corrupt));
 }
 
 #[test]
@@ -731,22 +597,9 @@ fn match_distance_beyond_window_is_rejected() {
     // one past the window must be rejected on its own, before
     // ensure_room or copy_checked's own bounds checks even run.
     let over_window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32") + 1;
-    let mut models = Models::new();
-    let mut ac = Encoder::new();
-    models.flag[0].encode(&mut ac, FlagKind::Match.index());
-    encode_bucketed(&mut models.length, &mut ac, 4);
-    encode_bucketed(&mut models.offset, &mut ac, over_window);
-    let ac_bytes = ac.finish();
+    let payload = single_match_payload(over_window);
 
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&4u32.to_le_bytes()); // declared_len
-    payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
-    payload.extend(ac_bytes);
-
-    assert_eq!(
-        decode(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN),
-        Err(Error::Corrupt)
-    );
+    assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Corrupt));
 }
 
 #[test]
@@ -781,14 +634,14 @@ fn caller_supplied_max_len_below_max_decoded_len_is_honored() {
     let encoded = encode(data);
     let declared_len = u32::try_from(data.len()).unwrap();
     assert_eq!(
-        decode(&encoded, crate::FORMAT_VERSION, declared_len - 1),
+        decode(&encoded, declared_len - 1),
         Err(Error::TooLarge {
             len: declared_len,
             max: declared_len - 1
         })
     );
     assert_eq!(
-        decode(&encoded, crate::FORMAT_VERSION, declared_len).as_deref(),
+        decode(&encoded, declared_len).as_deref(),
         Ok(data.as_slice())
     );
 }
@@ -982,13 +835,11 @@ fn residual_tree_price_matches_what_it_codes() {
 }
 
 #[test]
-fn length_residual_trees_are_gated_on_version_alone() {
-    // Same shape as length_split_is_gated_on_version_alone: 30 matches of
-    // length 50 (bucket 5, five residual bits, the top four modeled) over
-    // all-zero data. Decoded at the real FORMAT_VERSION the trees line up
-    // with the encoder; decoded one version below, the decoder reads raw
-    // bits where the encoder wrote tree-coded ones and desyncs, proving
-    // `length_residual` is live dispatch, not dead code.
+fn length_residual_trees_roundtrip_through_a_frame() {
+    // 30 matches of length 50 (bucket 5, five residual bits, the top four
+    // modeled) over all-zero data: pins that decode reads the residual bits
+    // through the same trees the encoder wrote them with, where a decoder
+    // reading them raw would desync.
     let distance = NonZeroU32::new(1).expect("1 is not zero");
     let mut tokens = vec![Token::Literal(0); 4];
     tokens.extend(std::iter::repeat_n(Token::Match { len: 50, distance }, 30));
@@ -997,17 +848,7 @@ fn length_residual_trees_are_gated_on_version_alone() {
     let mut frame = Candidate::Identity.to_header_bytes().to_vec();
     frame.extend(encode_tokens_with(&data, None, &tokens));
 
-    assert_eq!(
-        decode(&frame, crate::FORMAT_VERSION, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "fixture must round-trip at the real FORMAT_VERSION first"
-    );
-    assert_ne!(
-        decode(&frame, LENGTH_RESIDUAL_MIN_VERSION - 1, MAX_DECODED_LEN).as_deref(),
-        Ok(data.as_slice()),
-        "decoding a LENGTH_RESIDUAL_MIN_VERSION frame one version below must not \
-         silently reproduce the original data"
-    );
+    assert_decode_matches(&frame, &data, "residual bits through trees");
 }
 
 #[test]
@@ -1246,19 +1087,9 @@ fn streaming_rejects_bad_match_distance_not_panicking() {
     // decode_to_writer's own loop instead of decode's: the two loops
     // are separate code, so this checks the new one's wiring directly
     // rather than trusting decode's coverage to also prove it.
-    let mut models = Models::new();
-    let mut ac = Encoder::new();
-    models.flag[0].encode(&mut ac, FlagKind::Match.index());
-    encode_bucketed(&mut models.length, &mut ac, 4);
-    encode_bucketed(&mut models.offset, &mut ac, 1);
-    let ac_bytes = ac.finish();
+    let payload = single_match_payload(1);
 
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&4u32.to_le_bytes());
-    payload.extend_from_slice(&1u32.to_le_bytes());
-    payload.extend(ac_bytes);
-
-    let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+    let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("distance reaching before the start of output must be rejected");
     assert_eq!(as_codec_error(&err), Some(&Error::Corrupt));
 }
@@ -1266,19 +1097,9 @@ fn streaming_rejects_bad_match_distance_not_panicking() {
 #[test]
 fn streaming_rejects_match_distance_beyond_window() {
     let over_window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32") + 1;
-    let mut models = Models::new();
-    let mut ac = Encoder::new();
-    models.flag[0].encode(&mut ac, FlagKind::Match.index());
-    encode_bucketed(&mut models.length, &mut ac, 4);
-    encode_bucketed(&mut models.offset, &mut ac, over_window);
-    let ac_bytes = ac.finish();
+    let payload = single_match_payload(over_window);
 
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&4u32.to_le_bytes());
-    payload.extend_from_slice(&1u32.to_le_bytes());
-    payload.extend(ac_bytes);
-
-    let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+    let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("a distance past lz::WINDOW must be rejected");
     assert_eq!(as_codec_error(&err), Some(&Error::Corrupt));
 }
@@ -1289,7 +1110,7 @@ fn streaming_rejects_declared_length_over_the_max_before_any_work() {
     let mut payload = Candidate::Identity.to_header_bytes().to_vec();
     payload.extend_from_slice(&over.to_le_bytes());
     payload.extend_from_slice(&over.to_le_bytes());
-    let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+    let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("declared length past MAX_DECODED_LEN must be rejected");
     assert_eq!(
         as_codec_error(&err),
@@ -1313,7 +1134,7 @@ fn streaming_falls_back_to_decode_for_transpose_declared_length_over_the_max() {
         .to_vec();
     payload.extend_from_slice(&over.to_le_bytes());
     payload.extend_from_slice(&over.to_le_bytes());
-    let err = decode_streaming(&payload, crate::FORMAT_VERSION, MAX_DECODED_LEN)
+    let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("declared length past MAX_DECODED_LEN must be rejected");
     assert_eq!(
         as_codec_error(&err),
@@ -1348,13 +1169,8 @@ fn streaming_propagates_the_writer_error_unwrapped() {
         "expected Candidate::Identity for this fixture"
     );
     let mut writer = FailingWriter;
-    let err = decode_to_writer(
-        &encoded,
-        crate::FORMAT_VERSION,
-        MAX_DECODED_LEN,
-        &mut writer,
-    )
-    .expect_err("a writer that always fails must surface its error");
+    let err = decode_to_writer(&encoded, MAX_DECODED_LEN, &mut writer)
+        .expect_err("a writer that always fails must surface its error");
     assert!(
         as_codec_error(&err).is_none(),
         "a writer failure is not a decode Error and must not downcast to one"

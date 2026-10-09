@@ -90,19 +90,47 @@ fn candidate_beats_incumbent_keeps_the_strictly_smaller_candidate_only() {
 }
 
 #[test]
-fn old_version_lz_frame_is_rejected_not_misparsed() {
-    // A frame naming FORMAT_VERSION 1 with Method::Lz predates the
-    // 2-byte filter selector codec.rs's payload now starts with
-    // (docs/adr/0028-wire-filter-selection.md). Decoding its payload
-    // under the new layout would misread those bytes as part of the
-    // declared length rather than a filter selector; decompress must
-    // reject the version/method combination outright instead
-    // (codec::LZ_MIN_VERSION).
+fn retired_version_lz_frame_is_rejected_by_every_entry_point() {
+    // `Method::Lz` frames of any version below FORMAT_VERSION were retired
+    // (docs/adr/0063-retire-format-versions-1-through-9.md): their payloads
+    // code under models this build no longer holds, so decoding one under
+    // the current models would produce garbage or a misleading Corrupt.
+    // Every entry point must name the version instead, never reach
+    // codec::decode.
     let input = b"the quick brown fox jumps over the lazy dog".repeat(100);
     let mut frame = compress(&input);
     assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+    for version in 0..FORMAT_VERSION {
+        frame[MAGIC.len()] = version;
+        assert_eq!(
+            decompress(&frame),
+            Err(Error::UnsupportedVersion(version)),
+            "decompress, version {version}"
+        );
+        assert_eq!(
+            decodes_incrementally(&frame),
+            Err(Error::UnsupportedVersion(version)),
+            "decodes_incrementally, version {version}"
+        );
+        let mut out = Vec::new();
+        let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out)
+            .expect_err("a retired version must be rejected");
+        assert_eq!(
+            test_support::as_codec_error(&err),
+            Some(&Error::UnsupportedVersion(version)),
+            "decompress_to_writer, version {version}"
+        );
+    }
+}
+
+#[test]
+fn stored_frame_of_an_earlier_version_still_decodes() {
+    // A Stored payload is the data verbatim, so no retired model touches
+    // it: only Method::Lz frames are version-exact.
+    let mut frame = compress(b"hi");
+    assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
     frame[MAGIC.len()] = 1;
-    assert_eq!(decompress(&frame), Err(Error::UnsupportedVersion(1)));
+    assert_eq!(decompress(&frame), Ok(b"hi".to_vec()));
 }
 
 #[test]
@@ -290,19 +318,19 @@ fn transpose_candidate_does_not_decode_incrementally() {
 }
 
 #[test]
-fn decodes_incrementally_pins_the_lz_min_version_boundary() {
-    // #388: three mutants survived on this guard (`< false`, `<` -> `==`,
-    // `<` -> `<=`) because no test distinguished it from a version-blind
-    // one. Both sides of the boundary, on the same frame shape so only
-    // the version byte differs.
+fn decodes_incrementally_pins_the_lz_version_boundary() {
+    // #388: three mutants survived on the version guard (`< false`, `<` ->
+    // `==`, `<` -> `<=`) because no test distinguished it from a
+    // version-blind one. Both sides of the boundary, on the same frame
+    // shape so only the version byte differs.
     let mut frame = lz_frame_header();
     frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
-    frame[MAGIC.len()] = codec::LZ_MIN_VERSION - 1;
+    frame[MAGIC.len()] = FORMAT_VERSION - 1;
     assert_eq!(
         decodes_incrementally(&frame),
-        Err(Error::UnsupportedVersion(codec::LZ_MIN_VERSION - 1))
+        Err(Error::UnsupportedVersion(FORMAT_VERSION - 1))
     );
-    frame[MAGIC.len()] = codec::LZ_MIN_VERSION;
+    frame[MAGIC.len()] = FORMAT_VERSION;
     assert_eq!(decodes_incrementally(&frame), Ok(true));
 }
 

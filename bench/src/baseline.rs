@@ -157,18 +157,39 @@ pub fn measure_all() -> BTreeMap<String, f64> {
 
 /// Writes `measurements` as the `bench/baseline.json` this module reads
 /// back with [`parse_baseline`]: a flat JSON object, keys sorted (`measurements`
-/// is a [`BTreeMap`]), six decimal digits per value. Not a general JSON
-/// writer — it only needs to round-trip its own output, the same scope
-/// the `corpus` module's manual TOML reader (behind the `corpus-fetch`
-/// feature) takes for `bench/corpus.toml`.
+/// is a [`BTreeMap`]), each value rounded to six decimal places with the
+/// trailing zeros trimmed (`8.0` prints `8`). That is the form `cargo x fmt`
+/// leaves a number in, so a freshly written file already passes
+/// `cargo x fmt --check` (issue #943). Not a general JSON writer: it only
+/// needs to round-trip its own output, the same scope the `corpus` module's
+/// manual TOML reader (behind the `corpus-fetch` feature) takes for
+/// `bench/corpus.toml`.
 #[must_use]
 pub fn format_baseline(measurements: &BTreeMap<String, f64>) -> String {
+    render(measurements, |bpb| {
+        let fixed = format!("{bpb:.6}");
+        if fixed.contains('.') {
+            fixed
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
+        } else {
+            fixed
+        }
+    })
+}
+
+/// The one object layout, with each value rendered by `value`:
+/// [`format_baseline`] writes the trimmed form, [`fingerprint`] hashes the
+/// fixed six-decimal one.
+fn render(measurements: &BTreeMap<String, f64>, value: fn(f64) -> String) -> String {
     let mut out = String::from("{\n");
     let mut remaining = measurements.len();
-    for (name, bpb) in measurements {
+    for (name, &bpb) in measurements {
         remaining -= 1;
         let comma = if remaining == 0 { "" } else { "," };
-        writeln!(out, "  \"{name}\": {bpb:.6}{comma}").expect("writing to a String never fails");
+        writeln!(out, "  \"{name}\": {}{comma}", value(bpb))
+            .expect("writing to a String never fails");
     }
     out.push_str("}\n");
     out
@@ -251,12 +272,16 @@ impl Regression {
     }
 }
 
-/// Short, stable fingerprint of a baseline measurement map: [`format_baseline`]'s
-/// canonical text (sorted keys, six-decimal values) run through a 64-bit
-/// FNV-1a hash, printed as 16 lowercase hex digits. Two maps with the same
-/// values fingerprint identically regardless of the source file's exact
-/// bytes (key order, whitespace), since both go through the same canonical
-/// formatter first.
+/// Short, stable fingerprint of a baseline measurement map: the canonical
+/// text (sorted keys, fixed six-decimal values, `1.500000`) run through a
+/// 64-bit FNV-1a hash, printed as 16 lowercase hex digits. Two maps with the
+/// same values fingerprint identically regardless of the source file's exact
+/// bytes (key order, whitespace), since both go through the same layout
+/// first.
+///
+/// The hash input is frozen at the fixed six-decimal form, not
+/// [`format_baseline`]'s trimmed one: the committed finals reports embed
+/// this digest, and a different input moves it without the baseline moving.
 ///
 /// The held-out-final reports (`bench::finals::format_report`) embed this
 /// for the `bench/baseline.json` they were generated against, so
@@ -274,7 +299,7 @@ impl Regression {
 pub fn fingerprint(measurements: &BTreeMap<String, f64>) -> String {
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
-    let canonical = format_baseline(measurements);
+    let canonical = render(measurements, |bpb| format!("{bpb:.6}"));
     let mut hash = FNV_OFFSET_BASIS;
     for byte in canonical.bytes() {
         hash ^= u64::from(byte);
@@ -397,6 +422,30 @@ mod tests {
     }
 
     #[test]
+    fn committed_baseline_is_what_format_baseline_writes() {
+        let committed = include_str!("../baseline.json");
+        let parsed = parse_baseline(committed).expect("committed baseline must parse");
+        assert_eq!(
+            format_baseline(&parsed),
+            committed,
+            "bench/baseline.json must be byte-identical to what `baseline_gate write` emits"
+        );
+    }
+
+    #[test]
+    fn format_baseline_trims_zeros_and_rounds_to_six_places() {
+        let mut measurements = BTreeMap::new();
+        measurements.insert("a".to_string(), 0.530_56);
+        measurements.insert("b".to_string(), 8.0);
+        measurements.insert("c".to_string(), 10.0);
+        measurements.insert("d".to_string(), 2.370_564_9);
+        assert_eq!(
+            format_baseline(&measurements),
+            "{\n  \"a\": 0.53056,\n  \"b\": 8,\n  \"c\": 10,\n  \"d\": 2.370565\n}\n"
+        );
+    }
+
+    #[test]
     fn format_baseline_sorts_keys() {
         let mut measurements = BTreeMap::new();
         measurements.insert("zebra".to_string(), 1.0);
@@ -482,6 +531,16 @@ mod tests {
         measurements.insert("a".to_string(), 1.5);
         measurements.insert("b".to_string(), 7.999_999);
         assert_eq!(fingerprint(&measurements), fingerprint(&measurements));
+    }
+
+    #[test]
+    fn fingerprint_input_is_frozen_at_six_fixed_decimals() {
+        // Computed from `{\n  "a": 1.500000,\n  "b": 8.000000\n}\n` before
+        // issue #943 trimmed the written form; the finals reports embed it.
+        let mut measurements = BTreeMap::new();
+        measurements.insert("a".to_string(), 1.5);
+        measurements.insert("b".to_string(), 8.0);
+        assert_eq!(fingerprint(&measurements), "2939a726f123b9c0");
     }
 
     #[test]
