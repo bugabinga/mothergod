@@ -15,7 +15,7 @@ blocking PRs.
 | Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
 | Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
 | Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451) |
-| Weekly | schedule | no, alarmed | monster matrix, large property profile (#452), coverage, Miri (#456) |
+| Weekly | schedule | no, alarmed | monster matrix, coverage, Miri (#456) |
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
 
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
@@ -184,8 +184,10 @@ the rest of a module's inline tests are scaffold ("Two classes" above).
   (`#452`): porting any of these properties to the corpus policy's
   generator classes, currently only in the `bench` crate (`bench` depends
   on `mothergod`, so pulling them in as a root dev-dependency would be a
-  cycle — a bigger, separate design question), and a `PROPTEST_CASES`
-  weekly-scale-up profile, which no workflow sets yet.
+  cycle — a bigger, separate design question). The weekly
+  `PROPTEST_CASES` scale-up is declined (#495): the daily fuzzer sweeps
+  the same legs, `roundtrip` including the writer. `PROPTEST_CASES`
+  stays for a local heavier run.
 
 ## 2. Adversarial decode suite (Rust-input PRs)
 
