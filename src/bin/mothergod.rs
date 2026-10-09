@@ -129,7 +129,7 @@ fn decompress_into<W: Write>(input: &[u8], writer: &mut W, dest_name: &str) -> E
     match mothergod::decompress_to_writer(input, u32::MAX, writer) {
         Ok(()) => ExitCode::SUCCESS,
         Err(mothergod::WriteError::Decode(decode_err)) => fail(&decode_err.to_string()),
-        Err(mothergod::WriteError::Io(err)) => fail(&format!("writing {dest_name}: {err}")),
+        Err(mothergod::WriteError::Io(err)) => write_fail(dest_name, &err),
     }
 }
 
@@ -174,7 +174,7 @@ fn read_stdin() -> Result<Vec<u8>, String> {
 fn write_stdout(bytes: &[u8]) -> ExitCode {
     match io::stdout().lock().write_all(bytes) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => fail(&format!("writing stdout: {err}")),
+        Err(err) => write_fail("stdout", &err),
     }
 }
 
@@ -207,6 +207,25 @@ fn write_new_file_with(path: &Path, write: impl FnOnce(&mut File) -> ExitCode) -
         let _ = fs::remove_file(path);
     }
     code
+}
+
+/// Exit status of a process killed by SIGPIPE: 128 + 13. Rust starts with
+/// SIGPIPE ignored, so the CLI reproduces gzip's status by hand rather than
+/// restoring the signal's default disposition (that takes `libc` or unsafe,
+/// both barred from the crate).
+const SIGPIPE_STATUS: u8 = 141;
+
+/// Reports a failed write to `dest_name`. A [`io::ErrorKind::BrokenPipe`] is
+/// the reader going away (`| head`, `| less` quit early), not a fault of this
+/// run: it exits silently with [`SIGPIPE_STATUS`], as gzip does. The kind
+/// also covers Windows' `ERROR_BROKEN_PIPE` and `ERROR_NO_DATA`. Only a
+/// pipe raises it, so a file destination never takes this arm and
+/// [`write_new_file_with`]'s cleanup is not skipped by it.
+fn write_fail(dest_name: &str, err: &io::Error) -> ExitCode {
+    if err.kind() == io::ErrorKind::BrokenPipe {
+        return ExitCode::from(SIGPIPE_STATUS);
+    }
+    fail(&format!("writing {dest_name}: {err}"))
 }
 
 fn fail(message: &str) -> ExitCode {
