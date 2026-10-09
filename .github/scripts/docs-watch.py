@@ -21,9 +21,10 @@ changes; a watcher that always fires is one nobody reads. Every CLI change
 that can reach this fleet lands in one of the reference pages below, which
 is why reference pages are the right watchlist and the metronome is not.
 
-State is the body of the ledger issue labeled `docs-intel`: read as
-<prior-body>, rewritten as <out-body> only when something moved. Nothing
-moved, nothing written.
+State is the body of the ledger issue labeled `docs-intel`, read as
+<prior-body>. The candidate body is written to <out-body> on every run,
+and `changed=true|false` goes to $GITHUB_OUTPUT; the workflow edits the
+ledger only on `true`, so nothing moved means nothing posted.
 
 Review is not tracked here. `agents/SOURCES.md`'s adoption log already
 carries the date of the last review, so the survey reads "changes newer
