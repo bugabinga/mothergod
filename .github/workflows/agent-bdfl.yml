@@ -409,8 +409,10 @@ jobs:
             run in the foreground, your shell timeout above its own,
             its exit code read from it and never from a pipe, or the
             next wake's rescue. One that edits agent-review.yml
-            gets no review at all: read its file list and name it when
-            you land it (#114). CODE decisions (src/, tests, bench
+            gets no review at all, so --wait exits 4 there: wait on
+            the gates alone, `timeout 1500 gh pr checks <pr> --required
+            --watch`, then `merge-pr <pr> --sha <head>`, its file list
+            named on the thread (#114). CODE decisions (src/, tests, bench
             logic) are also yours (ADR-0011) but ship through the
             maintainer/reviewer pipeline, because independent review is
             how "trustworthy" survives your own speed: direct the work
