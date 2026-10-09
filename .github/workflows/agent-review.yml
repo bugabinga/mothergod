@@ -248,11 +248,14 @@ jobs:
               One carve-out: a diff touching `.github/workflows/` is the BDFL's
               to merge (GOVERNANCE.md "Merging"). Post the verdict and the
               label, say the merge is the BDFL's, and stop.
-              A [nit] on a PASS is work this run defers: before the merge,
-              file it (`.github/scripts/gh-comment --new "<symptom>" --label
+              A [nit] on a PASS, or a defect you observed that the PR did
+              not cause, is work this run defers: before the merge, file it
+              (`.github/scripts/gh-comment --new "<symptom>" --label
               <realm>`) or drop it, because nobody reads a merged PR's
               thread. #949 named a seed pin twice and #951 a stale hint;
-              neither existed as an issue until a retrospect filed #954.
+              neither existed as an issue until a retrospect filed #954;
+              #987's review saw a truncated Stored frame decode clean and
+              left it unfiled until a retrospect filed #988.
             - FAIL: add `changes-requested`, remove `agent-approved` if it is
               there, and deliver the items with `.github/scripts/gh-comment
               $PR_NUMBER`, each tagged [must] or [nit], specific and
