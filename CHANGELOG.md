@@ -12,7 +12,8 @@ All notable changes to this project are documented here. Format follows
   file argument writing/reading the `.mgdc` suffix; neither subcommand
   overwrites an existing output or deletes its input. Decompression streams
   its output instead of buffering the whole file. `mothergod --help` is the
-  whole interface: no flags, no compression levels.
+  whole interface: no flags, no compression levels. A reader that closes
+  stdout early (`| head`) ends it silently with status 141, as gzip does.
 - Library crate (`mothergod::compress`/`decompress`, plus
   `decompress_bounded`, `decompress_to_writer`, `decodes_incrementally`, and
   the `filters` module): a documented public API with a crate-root doctest;

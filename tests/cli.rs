@@ -190,3 +190,60 @@ fn decompress_of_a_file_without_the_mgdc_suffix_fails_cleanly() {
 
     std::fs::remove_dir_all(&dir).expect("clean up temp dir");
 }
+
+/// Spawns `mothergod <command>` on `stdin`, reads one byte of its stdout,
+/// drops the pipe (a reader that quit early, `| head -c 1`), and returns
+/// `(stderr, exit code)`. Reading before the drop makes the child's later
+/// writes hit a closed pipe, not an unread one.
+fn run_with_early_closing_reader(command: &str, stdin: &[u8]) -> (Vec<u8>, i32) {
+    use std::io::Read as _;
+
+    let mut child = bin()
+        .arg(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("mothergod binary should spawn");
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(stdin)
+        .expect("write to child stdin");
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    stdout
+        .read_exact(&mut [0u8; 1])
+        .expect("child should emit a byte before the pipe closes");
+    drop(stdout);
+    let output = child.wait_with_output().expect("mothergod should exit");
+    (output.stderr, output.status.code().expect("no signal"))
+}
+
+#[test]
+fn decompress_exits_quietly_when_the_stdout_reader_goes_away() {
+    // A Stored frame (method byte 0): 300 000 payload bytes exceed any pipe
+    // buffer, so the write after the reader closes cannot be absorbed.
+    let mut frame = b"MGDC\x0a\x00".to_vec();
+    frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
+
+    let (stderr, code) = run_with_early_closing_reader("decompress", &frame);
+    assert_eq!(String::from_utf8_lossy(&stderr), "");
+    assert_eq!(code, 141);
+}
+
+#[test]
+fn compress_exits_quietly_when_the_stdout_reader_goes_away() {
+    // Incompressible input stays near its own size, past a 64 KiB pipe buffer.
+    let mut state = 0x9e37_79b9_u32;
+    let input: Vec<u8> = (0..100_000)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        })
+        .collect();
+
+    let (stderr, code) = run_with_early_closing_reader("compress", &input);
+    assert_eq!(String::from_utf8_lossy(&stderr), "");
+    assert_eq!(code, 141);
+}
