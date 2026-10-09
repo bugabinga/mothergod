@@ -6,8 +6,10 @@ version via a `FORMAT_VERSION` bump. A version is retired only by its own
 ADR: one no release has written goes at once, decode path and fixture
 included; one a release has written goes only after a later release that
 still reads it and writes its successor has shipped and `CHANGELOG.md`
-has named the retirement, so a user can re-compress first. From the first
-version a 1.0 build writes, no version is ever retired.
+has named the retirement, so a user can re-compress first. Until the
+first release, a `FORMAT_VERSION` bump retires its predecessor in the
+same PR, so the decoder reads exactly one version (ADR-0063). From the
+first version a 1.0 build writes, no version is ever retired.
 
 ## Frame layout
 
@@ -21,20 +23,21 @@ offset  size  field
 
 A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
 (`BadMagic`), version greater than it supports (`UnsupportedVersion`),
-unknown method (`UnknownMethod`). A `Method::Lz` payload additionally
-requires format version >= 3 (`codec::LZ_MIN_VERSION`): version 1 named a
-different, incompatible `Lz` payload layout (ADR-0026, superseded by
-ADR-0028), so a version-1 `Lz` frame is rejected as `UnsupportedVersion`
-rather than parsed under the current layout; version 2 named this same
-outer layout but coded its literal sub-stream through a direct 256-way
-range division, and was retired outright under ADR-0050, no release ever
-having written it. Versions 3 through 10 `Lz` frames share the same outer
-payload layout below; only the literal sub-stream's internal shape and
-the length/offset symbols' model selection differ between them (see "Lz"
-below, ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055, ADR-0057,
-ADR-0058, ADR-0061) — a decoder dispatches on the declared version (and, at version
-4 and above, the
-frame's own filter selector) rather than rejecting any of them.
+unknown method (`UnknownMethod`). A `Method::Lz` frame additionally
+requires exactly the current format version: every earlier version was
+retired outright under ADR-0050, no release ever having written one
+(ADR-0063), so a decoder rejects an `Lz` frame naming any other version as
+`UnsupportedVersion` before it reads the payload. A `Method::Stored`
+payload is the data verbatim and carries no model, so a `Stored` frame
+decodes under any version up to the current one. Version history: 1 named
+a different `Lz` payload layout (ADR-0026, superseded by ADR-0028); 2
+added the 2-byte filter selector; 3 coded each literal as SSE-calibrated
+binary decisions (ADR-0038); 4 added the column expert for `Transpose`
+frames (ADR-0046); 5 through 7 moved other candidates to a logit-domain
+mixer, a learned-baseline rate schedule and stretch-domain SSE bins
+(ADR-0052, ADR-0054, ADR-0055); 8 split the length model by token kind
+(ADR-0057); 9 split the offset model by match length (ADR-0058); 10 added
+the length residual trees (ADR-0061).
 
 ## Methods
 
@@ -61,92 +64,52 @@ offset  size  field
 10      ...   range-coded stream, of the FILTERED bytes
 ```
 
-**Literal sub-stream shape is version- (and, at version 4 and above,
-candidate-) gated (ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055).** At format version 3
-(`codec::LZ_MIN_VERSION`) and above, each literal byte is 8 chained binary
-decisions over the six-expert mixer's cumulative table
-(`bittree::encode_symbol`/`decode_symbol`'s chain-rule decomposition),
-each calibrated by a secondary symbol estimation (SSE) stage keyed on
-tree position (`bittree::sse_context`, 255 contexts) before it drives the
-range coder (`literal::Literal::encode_sse`/`decode_sse`). At format
-version 4 and above (`codec::COLUMN_EXPERT_MIN_VERSION`), a frame whose
-filter selector names `Candidate::Transpose` codes its literals one step
-further still: a column-keyed seventh expert (`column::column_of`/
-`column_bank`, keyed on the byte's position among the transposed stream's
-columns) is blended into the six-expert mix before the same
-SSE-calibrated binary-tree coding (`literal::Literal::encode_column`/
-`decode_column`). At format version 5 and above
-(`codec::LOGISTIC_MIN_VERSION`), every *other* candidate (every candidate
-except `Candidate::Transpose`) codes its literals through a second mixer
-instead of the plain six-expert one: each of the same six experts'
-per-node probability is mapped to the logit domain, blended under its own
-annealed-rate weight vector, mapped back, and calibrated through its own
-SSE table, independent of the plain mixer's
-(`literal::Literal::encode_logistic`/`decode_logistic`); a version-5
-`Candidate::Transpose` frame still codes through `encode_column`/
-`decode_column` exactly as version 4 does. At format version 6 and above
-(`codec::SURPRISE_MIN_VERSION`), the same *other* candidates code their
-literals through the identical logit-domain mix again, but under a
-different per-key rate schedule: a learned baseline (a fast EMA of each
-key's own squared prediction error read against a slower EMA of the
-identical signal) instead of version 5's annealed step count
-(`literal::Literal::encode_logistic_surprise`/`decode_logistic_surprise`);
-a version-6 `Candidate::Transpose` frame still codes through
-`encode_column`/`decode_column` exactly as versions 4 and 5 do. At format
-version 7 and above (`codec::LOGIT_SSE_MIN_VERSION`), the same *other*
-candidates code their literals through the identical logit-domain mix and
-rate schedule again, but calibrated through a stretch-domain SSE table
-(evenly spaced bins in logit space, concentrating resolution near 0/1)
-instead of version 6's linear-domain one
-(`literal::Literal::encode_logit_sse`/`decode_logit_sse`); a version-7
-`Candidate::Transpose` frame still codes through `encode_column`/
-`decode_column` exactly as versions 4 through 6 do. Every candidate at a
-version below its own gate codes its literals exactly as the next lower
-version does. `flag` and `slot` are coded identically regardless of
-version or candidate; a decoder dispatches the literal sub-stream on the
-frame's declared version and (at version 4 and above) its own
-already-parsed filter selector.
+**Literal sub-stream (ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055).**
+Each literal byte is 8 chained binary decisions over the symbol alphabet
+(`bittree`'s chain-rule decomposition). A frame whose filter selector does
+not name `Candidate::Transpose` codes them through a logit-domain mixer:
+each of the six experts' per-node probability is mapped to the logit
+domain, blended under a weight vector whose per-key rate is a learned
+baseline (a fast EMA of each key's own squared prediction error read
+against a slower EMA of the identical signal), mapped back, and calibrated
+through a stretch-domain SSE table (evenly spaced bins in logit space,
+concentrating resolution near 0/1) keyed on tree position
+(`literal::Literal::encode_logit_sse`/`decode_logit_sse`). A frame whose
+selector names `Candidate::Transpose` codes its literals one step further
+still: a column-keyed seventh expert (`column::column_of`/`column_bank`,
+keyed on the byte's position among the transposed stream's columns) is
+blended into the six-expert mix before a linear-domain SSE-calibrated
+binary-tree coding (`literal::Literal::encode_column`/`decode_column`).
+`flag` and `slot` are coded identically regardless of candidate; a decoder
+dispatches the literal sub-stream on the frame's already-parsed filter
+selector.
 
-**The `length` symbol's model selection is version-gated too, but not
-candidate-gated (ADR-0057).** Below format version 8
-(`codec::LENGTH_SPLIT_MIN_VERSION`), a `Token::Match`'s length and a
-`Token::Rep`'s length are coded through one shared adaptive model
-regardless of which kind produced it. At format version 8 and above, they
-are coded through two independent models instead, selected by kind: a
-rep token's length tends to come from a different distribution than a
-freshly found match's (`research/JOURNAL.md` S2-A109/S2-A110). Unlike the
-literal sub-stream's gates above, this applies to every candidate,
-`Candidate::Transpose` included, since the length symbol sits outside the
-literal sub-stream those gates cover.
+**The `length` symbol (ADR-0057).** A `Token::Match`'s length and a
+`Token::Rep`'s length are coded through two independent adaptive models,
+selected by kind: a rep token's length tends to come from a different
+distribution than a freshly found match's (`research/JOURNAL.md`
+S2-A109/S2-A110). This applies to every candidate, `Candidate::Transpose`
+included, since the length symbol sits outside the literal sub-stream.
 
-**A `Token::Match`'s `offset` symbol's model selection is version-gated
-the same way (ADR-0058).** Below format version 9
-(`codec::OFFSET_LEN_SPLIT_MIN_VERSION`), every match's distance is coded
-through one shared adaptive model regardless of that match's own length.
-At format version 9 and above, it is coded through one of four
-independent models instead, selected by a coarse, saturating bucket of
-the match's own length: a short match's distance tends to come from a
-different distribution than a long match's
-(`research/JOURNAL.md` S2-A111/S2-A112). Same as the `length` gate above,
-this applies to every candidate, `Candidate::Transpose` included, and
-`Token::Rep` never reaches `offset` at all (a repeat prices through
-`slot` instead, choosing which cached distance to reuse, never a fresh
-one).
+**A `Token::Match`'s `offset` symbol (ADR-0058).** A match's distance is
+coded through one of four independent adaptive models, selected by a
+coarse, saturating bucket of the match's own length: a short match's
+distance tends to come from a different distribution than a long match's
+(`research/JOURNAL.md` S2-A111/S2-A112). This applies to every candidate,
+`Candidate::Transpose` included, and `Token::Rep` never reaches `offset`
+at all (a repeat prices through `slot` instead, choosing which cached
+distance to reuse, never a fresh one).
 
-**A copy length's residual bits are version-gated the same way
-(ADR-0061).** A length is a bucket symbol (`lz::bucket`) plus the
-residual bits below that bucket. Below format version 10
-(`codec::LENGTH_RESIDUAL_MIN_VERSION`), the residual is sent as raw
-50/50 bits. At format version 10 and above, its top four bits (all of
-them in buckets 0 through 4), most significant first, are each coded
-through an adaptive binary model chosen by the bits already coded in
-that value and by the bucket: one tree per bucket for `Token::Match`
-lengths and an independent one per bucket for `Token::Rep` lengths. Any
-bits below those four stay raw. A fresh tree prices a bit at exactly one
-bit, so the gain is adaptation alone: record-shaped data repeats exact
-lengths (`research/JOURNAL.md` S2-A114/S2-A115). A distance's residual
-bits stay raw at every version. Same as the gates above, this applies to
-every candidate.
+**A copy length's residual bits (ADR-0061).** A length is a bucket symbol
+(`lz::bucket`) plus the residual bits below that bucket. Its top four
+residual bits (all of them in buckets 0 through 4), most significant
+first, are each coded through an adaptive binary model chosen by the bits
+already coded in that value and by the bucket: one tree per bucket for
+`Token::Match` lengths and an independent one per bucket for `Token::Rep`
+lengths. Any bits below those four are raw 50/50 bits. A fresh tree prices
+a bit at exactly one bit, so the gain is adaptation alone: record-shaped
+data repeats exact lengths (`research/JOURNAL.md` S2-A114/S2-A115). A
+distance's residual bits are raw.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
 `param` is the delta stride or transpose column count, `1..=255`; zero for

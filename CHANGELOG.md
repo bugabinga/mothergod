@@ -27,6 +27,10 @@ All notable changes to this project are documented here. Format follows
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
+- Format versions below 10 no longer decode: no release ever wrote them, and
+  before the first release each version bump retires its predecessor
+  (ADR-0063). Frames from a source build older than this one must be
+  re-compressed.
 - Ratio, on the held-out finals ([`bench/corpus.toml`](bench/corpus.toml),
   pinned by URL and SHA-256): beats both `zstd -19` and `xz -9e` in
   aggregate on Canterbury (1.351 bits/byte vs 1.470 and 1.403); trails both

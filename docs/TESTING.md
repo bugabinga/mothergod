@@ -65,7 +65,7 @@ the reviewer checks this table, not the test count.
 | Codec behavior: filter, parse, model, coder | round-trip on the change's target data class (hard rule 1), a property or example at layer 1 |
 | Decode-path fix: panic, bound, hang, abort | the failing input as a `tests/adversarial/` seed named for the bug, or a torture case for an allocation (layer 2) |
 | Encoder-only output change | the regenerated current-version golden pair, declared with its measurement (layer 5, #290) |
-| Format change | `FORMAT_VERSION` bump, a new golden pair, every old pair kept (layer 5, hard rule 5) |
+| Format change | `FORMAT_VERSION` bump, a new golden pair; before the first release the predecessor and its pairs are retired in the same PR, after it every old pair is kept (layer 5, hard rule 5, ADR-0063) |
 | New or changed decode API | the decode-API agreement property covers it (layer 1) |
 | Published number, version, date or recipe in README, site or CHANGELOG | `tests/claims.rs` reads it from its source |
 | Experiment apparatus, measurement sinks, pre-wiring candidates | nothing: scaffold only, deleted by the wiring or rejection slice |
@@ -311,9 +311,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   mingw, Darwin) agrees on the committed fixtures; a re-encode failure on
   one platform only is that platform's libm disagreeing, a finding to
   record against ADR-0024's boundary, not a decode regression.
-- Old-version frames stay decodable (CLAUDE.md rule 5): every historical
+- Old-version frames stay decodable once a release has written them
+  (CLAUDE.md rule 5, ADR-0050): from then on every historical
   `FORMAT_VERSION`'s golden pair is kept, never replaced, so this is a
-  running test rather than a claim in a doc comment.
+  running test rather than a claim in a doc comment. Before the first
+  release no version outside the current one is read, and a bump deletes
+  its predecessor's pairs in the same PR (ADR-0063).
 - An encoder-only change (no decode difference) is not a `FORMAT_VERSION`
   bump; it moves the current-version pair to `tests/golden/superseded/`
   (decode-only from then on) and regenerates the pair in `tests/golden/`,

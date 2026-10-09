@@ -20,78 +20,30 @@
 //! ```
 //!
 //! `docs/adr/0028-wire-filter-selection.md` added the 2-byte filter
-//! selector ahead of the layout ADR-0026 shipped; decoding a frame that
-//! named `FORMAT_VERSION` 1 under this layout would misread those two
-//! bytes as part of the declared length, so [`crate::decompress`] rejects
-//! any `Method::Lz` frame naming a version below `LZ_MIN_VERSION`
-//! before calling [`decode`] at all, rather than relying on this parser's
-//! own adversarial-input defenses to fail safely by coincidence.
-//! `FORMAT_VERSION` 2 named this same outer layout but coded its literal
-//! sub-stream through a direct 256-way range division instead of the
-//! SSE-calibrated coding below; no release ever wrote it, so it was
-//! retired outright rather than kept forever
-//! (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`), and
-//! `LZ_MIN_VERSION` moved from 2 to 3 with it.
+//! selector ahead of the layout ADR-0026 shipped.
 //!
-//! The outer layout above is unchanged across every version this build
-//! decodes (`LZ_MIN_VERSION` and up). Versions 3 and 4 code each literal
-//! byte as 8 SSE-calibrated binary decisions
-//! ([`crate::literal::Literal::encode_sse`]/`decode_sse`,
-//! `docs/adr/0038-wire-sse-into-the-literal-mixer.md`, `research/JOURNAL.md`
-//! S1-P1), except a version-4 frame whose filter selector names
-//! [`Candidate::Transpose`], which goes one step further still: each
-//! literal byte blends a column-keyed seventh expert into the mix before
-//! the same SSE-calibrated coding
+//! [`decode`] reads exactly one wire version, `FORMAT_VERSION`: every
+//! earlier version was retired outright, no release ever having written
+//! one (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
+//! `docs/adr/0063-retire-format-versions-1-through-9.md`), so
+//! [`crate::decompress`] rejects any `Method::Lz` frame naming another
+//! version before calling [`decode`] at all. Each literal byte codes
+//! through [`crate::literal::Literal::encode_logit_sse`]/`decode_logit_sse`
+//! (`docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`),
+//! except in a frame whose filter selector names [`Candidate::Transpose`],
+//! which goes one step further: each literal byte blends a column-keyed
+//! seventh expert into the mix before the same SSE-calibrated coding
 //! ([`crate::literal::Literal::encode_column`]/`decode_column`,
 //! `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
-//! `research/JOURNAL.md` S1-P5). Version `LOGISTIC_MIN_VERSION` (5) and
-//! above codes every other candidate's literals through a second mixer
-//! instead, blending the same six experts in the logit domain under its
-//! own annealed-rate weights and its own SSE table
-//! ([`crate::literal::Literal::encode_logistic`]/`decode_logistic`,
-//! `docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`,
-//! `research/JOURNAL.md` S1-P8); a version-5 `Candidate::Transpose` frame
-//! still codes through `encode_column`/`decode_column` exactly as version 4
-//! does — the logit-domain mix does not yet reach the seventh expert.
-//! Version `SURPRISE_MIN_VERSION` (6) and above codes every other
-//! candidate's literals through the same logit-domain mix again, but under
-//! a different per-key rate schedule: a learned baseline instead of an
-//! annealed step count
-//! ([`crate::literal::Literal::encode_logistic_surprise`]/`decode_logistic_surprise`,
-//! `docs/adr/0054-wire-the-surprise-rate-schedule-into-the-literal-model.md`,
-//! `research/JOURNAL.md` S2-A104/S2-A105); a version-6 `Candidate::Transpose`
-//! frame is unaffected, same carve-out as version 5. Version
-//! `LOGIT_SSE_MIN_VERSION` (7) and above codes every other candidate's
-//! literals through the same logit-domain mix and rate schedule again, but
-//! calibrated through a stretch-domain SSE table instead of a linear one
-//! ([`crate::literal::Literal::encode_logit_sse`]/`decode_logit_sse`,
-//! `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`,
-//! `research/JOURNAL.md` S2-A106/S2-A108); a version-7 `Candidate::Transpose`
-//! frame is unaffected, same carve-out as versions 5 and 6. [`decode`]
-//! takes the frame's declared `version` and its already-parsed `candidate`
-//! and picks the matching literal path. The `length` symbol (a
-//! [`Token::Match`] or [`Token::Rep`]'s copy length) is coded identically
-//! regardless of candidate at every version, but is itself version-gated
-//! starting at `LENGTH_SPLIT_MIN_VERSION` (8): below it, every length
-//! shares one [`Model`] regardless of which token kind produced it; at or
-//! above it, a match's length and a rep's length code through two
-//! independent models instead
-//! (`docs/adr/0057-wire-the-match-rep-length-model-split.md`,
-//! `research/JOURNAL.md` S2-A109/S2-A110). A [`Token::Match`]'s `offset`
-//! (its distance) is coded identically regardless of candidate at every
-//! version, but is itself version-gated starting at
-//! `OFFSET_LEN_SPLIT_MIN_VERSION` (9): below it, every distance shares one
-//! [`Model`] regardless of the triggering match's own length; at or above
-//! it, the distance codes through one of four independent models instead,
-//! selected by a coarse bucket of that match's length
-//! (`docs/adr/0058-wire-the-offset-length-state-split.md`, `research/JOURNAL.md`
-//! S2-A111/S2-A112). A length's residual bits, those below its
-//! `lz::bucket`, are raw below `LENGTH_RESIDUAL_MIN_VERSION` (10); at or
-//! above it the top few code through an adaptive tree per length model and
-//! bucket (`docs/adr/0061-wire-the-length-residual-trees.md`,
-//! `research/JOURNAL.md` S2-A114/S2-A115), and a distance's stay raw at
-//! every version. `slot` is unaffected and coded identically at every
-//! version `LZ_MIN_VERSION` or above, regardless of candidate.
+//! `research/JOURNAL.md` S1-P5). A [`Token::Match`]'s and a [`Token::Rep`]'s
+//! length code through two independent [`Model`]s
+//! (`docs/adr/0057-wire-the-match-rep-length-model-split.md`), the bits
+//! below a length's `lz::bucket` through an adaptive tree per model and
+//! bucket (`docs/adr/0061-wire-the-length-residual-trees.md`), and a
+//! [`Token::Match`]'s `offset` (its distance) through one of four
+//! independent models selected by a coarse bucket of that match's length
+//! (`docs/adr/0058-wire-the-offset-length-state-split.md`); a distance's
+//! residual bits stay raw. `slot` codes through one model.
 //!
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
@@ -115,121 +67,10 @@ use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
 use crate::literal::{
-    ColumnExpertState, Context, Literal, LogisticMix, PpmExpertState, SurpriseLogisticMix,
-    SurpriseLogisticMixLogitSse,
+    ColumnExpertState, Context, Literal, PpmExpertState, SurpriseLogisticMixLogitSse,
 };
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload this build can
-/// decode: see the module docs' "Payload layout" section for the layout
-/// change that moved this from 1 to 2, and for version 2's own retirement
-/// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`) that moved
-/// it from 2 to 3. Every version this constant admits codes its literal
-/// sub-stream through [`crate::literal::Literal::encode_sse`]/`decode_sse`
-/// below `LOGISTIC_MIN_VERSION`, `encode_logistic`/`decode_logistic` at
-/// `LOGISTIC_MIN_VERSION` and above but below `SURPRISE_MIN_VERSION`,
-/// `encode_logistic_surprise`/`decode_logistic_surprise` at
-/// `SURPRISE_MIN_VERSION` and above but below `LOGIT_SSE_MIN_VERSION`,
-/// `encode_logit_sse`/`decode_logit_sse` at `LOGIT_SSE_MIN_VERSION` and
-/// above (or, at version 4 on a `Candidate::Transpose` frame,
-/// [`crate::literal::Literal::encode_column`]/`decode_column` regardless of
-/// any of those three gates); no version this build decodes still needs a
-/// separate literal-coding floor.
-pub(crate) const LZ_MIN_VERSION: u8 = 3;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
-/// [`Candidate::Transpose`] frame's literal sub-stream through
-/// [`crate::literal::Literal::encode_column`]/`decode_column` (a seventh,
-/// column-keyed expert blended into the mix, `research/JOURNAL.md` S1-P5,
-/// `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`)
-/// instead of [`crate::literal::Literal::encode_sse`]/`decode_sse`. Every
-/// other candidate's literal sub-stream, and every candidate at a lower
-/// version, is unaffected — see the module docs' "Payload layout" section.
-const COLUMN_EXPERT_MIN_VERSION: u8 = 4;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a literal
-/// sub-stream through [`crate::literal::Literal::encode_logistic`]/
-/// `decode_logistic` (a logit-domain mix over the six real experts,
-/// `research/JOURNAL.md` S1-P8, S2-A101,
-/// `docs/adr/0052-wire-the-logistic-mixer-into-the-literal-model.md`)
-/// instead of [`crate::literal::Literal::encode_sse`]/`decode_sse`. Applies
-/// to every candidate except [`Candidate::Transpose`] at
-/// `COLUMN_EXPERT_MIN_VERSION` and above, which keeps coding through
-/// [`crate::literal::Literal::encode_column`]/`decode_column` regardless of
-/// this constant — the logit-domain mix does not yet reach the seventh,
-/// column-keyed expert (a separate lead, not this one's scope). Every
-/// candidate at a lower version is unaffected — see the module docs'
-/// "Payload layout" section.
-const LOGISTIC_MIN_VERSION: u8 = 5;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a literal
-/// sub-stream through [`crate::literal::Literal::encode_logistic_surprise`]/
-/// `decode_logistic_surprise` (the same logit-domain mix as
-/// `LOGISTIC_MIN_VERSION`, but [`crate::literal::SurpriseLogisticMix`]'s
-/// learned-baseline rate schedule in place of [`crate::literal::LogisticMix`]'s
-/// step-count-derived one, `research/JOURNAL.md` S2-A104/S2-A105,
-/// `docs/adr/0054-wire-the-surprise-rate-schedule-into-the-literal-model.md`)
-/// instead of [`crate::literal::Literal::encode_logistic`]/`decode_logistic`.
-/// Applies to every candidate except [`Candidate::Transpose`] at
-/// `COLUMN_EXPERT_MIN_VERSION` and above, which keeps coding through
-/// [`crate::literal::Literal::encode_column`]/`decode_column` regardless of
-/// this constant, same carve-out as `LOGISTIC_MIN_VERSION`'s own docs give.
-/// Every candidate at a lower version is unaffected — see the module docs'
-/// "Payload layout" section.
-const SURPRISE_MIN_VERSION: u8 = 6;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a literal
-/// sub-stream through [`crate::literal::Literal::encode_logit_sse`]/
-/// `decode_logit_sse` (the same logit-domain mix and learned-baseline rate
-/// schedule as `SURPRISE_MIN_VERSION`, but
-/// [`crate::literal::SurpriseLogisticMixLogitSse`]'s stretch-domain SSE
-/// bin spacing in place of [`crate::literal::SurpriseLogisticMix`]'s
-/// linear one, `research/JOURNAL.md` S2-A106/S2-A108,
-/// `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`)
-/// instead of [`crate::literal::Literal::encode_logistic_surprise`]/
-/// `decode_logistic_surprise`. Applies to every candidate except
-/// [`Candidate::Transpose`] at `COLUMN_EXPERT_MIN_VERSION` and above, which
-/// keeps coding through [`crate::literal::Literal::encode_column`]/
-/// `decode_column` regardless of this constant, same carve-out as
-/// `SURPRISE_MIN_VERSION`'s own docs give. Every candidate at a lower
-/// version is unaffected — see the module docs' "Payload layout" section.
-const LOGIT_SSE_MIN_VERSION: u8 = 7;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
-/// [`Token::Match`]'s length and a [`Token::Rep`]'s length through two
-/// independent [`Model`]s (`Models::length_match`/`length_rep`) instead of
-/// one shared [`Model`] (`Models::length`) regardless of which kind
-/// produced it (`research/JOURNAL.md` S2-A109/S2-A110,
-/// `docs/adr/0057-wire-the-match-rep-length-model-split.md`). Unlike every
-/// `*_MIN_VERSION` constant above, this gate is not candidate-dependent:
-/// it applies to every [`Candidate`], `Candidate::Transpose` included,
-/// since the length symbol sits outside the literal sub-stream those
-/// constants gate. Every candidate at a lower version is unaffected.
-const LENGTH_SPLIT_MIN_VERSION: u8 = 8;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes a
-/// [`Token::Match`]'s distance (`offset`) through one of four independent
-/// [`Model`]s (`Models::offset_len`, selected by [`offset_len_state`] of
-/// that match's own length) instead of one shared [`Model`]
-/// (`Models::offset`) regardless of length (`research/JOURNAL.md`
-/// S2-A111/S2-A112, `docs/adr/0058-wire-the-offset-length-state-split.md`).
-/// Like `LENGTH_SPLIT_MIN_VERSION`, this gate is not candidate-dependent:
-/// it applies to every [`Candidate`], `Candidate::Transpose` included,
-/// since `offset` sits outside the literal sub-stream those constants
-/// gate. Every candidate at a lower version is unaffected.
-const OFFSET_LEN_SPLIT_MIN_VERSION: u8 = 9;
-
-/// Lowest `FORMAT_VERSION` whose `Method::Lz` payload codes the top
-/// [`RESIDUAL_MODELED_BITS`] bits below a copy length's [`lz::bucket`]
-/// through [`ResidualTree`]s (`Models::length_match_residual`/
-/// `length_rep_residual`) instead of sending them raw (`research/JOURNAL.md`
-/// S2-A114/S2-A115, `docs/adr/0061-wire-the-length-residual-trees.md`).
-/// A distance's residual stays raw at every version. Like
-/// `LENGTH_SPLIT_MIN_VERSION`, this gate is not candidate-dependent, and
-/// it implies `LENGTH_SPLIT_MIN_VERSION`: the trees sit beside the split
-/// length models. Every candidate at a lower version is unaffected.
-const LENGTH_RESIDUAL_MIN_VERSION: u8 = 10;
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -266,56 +107,28 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// corpus (Silesia's `mozilla`, ~51 MB) with headroom, while keeping a
 /// worst-case adversarial decode bounded rather than unbounded. That
 /// worst case is an all-literal stream (`research/JOURNAL.md` S2-A27):
-/// every literal byte pays [`crate::literal::Literal::decode_sse`]'s full
-/// six-expert mix plus the 8-chained-binary-decision SSE-calibrated coding
-/// path (`FORMAT_VERSION` 3, ADR-0038) over the 256-symbol alphabet, the
-/// most expensive of the three token kinds per output byte (a match or
-/// rep byte, by contrast, is a single unmodeled array copy in this
-/// module's `copy_checked`) — the opposite of "cheapest branch" an
-/// earlier version of this comment claimed.
-/// A pre-ADR-0038 measurement (release build, this project's CI runner
-/// class) found a declared length of 256 MiB decoding in ~314s at a
-/// steady ~1170 ns/byte through the old direct-division
-/// `Literal::decode`, linear in declared length with no polynomial or
-/// worse blowup found from 1 MiB to 256 MiB. `decode_sse`'s own per-byte
-/// cost is a bounded constant more (8 `Sse::refine`/`Decoder::decode_bit`
-/// calls instead of one direct cumulative-table scan), not a new
-/// asymptotic shape: a smaller-scale check after this change (8 MiB of
-/// incompressible data, forced through `Method::Lz` so every byte hits
-/// `decode_sse`) measured ~1780 ns/byte, consistent with that bound.
+/// every literal byte pays [`crate::literal::Literal::decode_logit_sse`]'s
+/// full six-expert logit-domain mix plus 8 chained binary decisions over
+/// the 256-symbol alphabet, the most expensive of the three token kinds
+/// per output byte (a match or rep byte, by contrast, is a single
+/// unmodeled array copy in this module's `copy_checked`).
+/// Measured on the retired direct-division literal path (release build,
+/// this project's CI runner class): a declared length of 256 MiB decoded
+/// in ~314s at a steady ~1170 ns/byte, linear in declared length with no
+/// polynomial or worse blowup found from 1 MiB to 256 MiB; the retired
+/// SSE-calibrated path measured ~1780 ns/byte on 8 MiB of incompressible
+/// data. `decode_logit_sse`'s own per-node cost is a bounded constant
+/// more (six `stretch` calls, a dot product, two EMA updates and one
+/// stretch-domain `LogitSse` lookup per node), with no new loop or
+/// allocation, so the bound stays linear in `declared_len`; not
+/// separately remeasured. The length and distance model selection costs
+/// a cheap `FlagKind` branch or array index per copy token, strictly
+/// cheaper than the per-byte literal cost this bound is measured against.
 /// Provisional either way: `ROADMAP.md` M4's streaming/block API is the
 /// real fix (bounded-memory decode without a single hardcoded file-size
 /// ceiling), and should widen or remove this once it lands; the constant
-/// itself is a `research/JOURNAL.md` S1-P6 speed-tier target
-/// (`Literal::mix` rebuilds all 256 cumulative entries from scratch every
-/// byte instead of an incremental structure), not something to chase down
-/// here. ADR-0052's `decode_logistic` is now the worst-case literal path at
-/// `LOGISTIC_MIN_VERSION` and above (a bounded constant more per node than
-/// `decode_sse`'s own bound above: six `stretch` calls and a dot product
-/// against `expert_prefix_sums` instead of one `mix` lookup, still linear
-/// in `declared_len`, no new loop or allocation); not separately
-/// remeasured, the same provisional-ceiling argument covers it. ADR-0054's
-/// `decode_logistic_surprise` replaces `decode_logistic`'s per-node step
-/// count with two EMA updates at `SURPRISE_MIN_VERSION` and above, still a
-/// bounded constant more, no new loop or allocation; the same argument
-/// covers it too. ADR-0055's `decode_logit_sse` replaces `decode_logistic_
-/// surprise`'s linear-domain `Sse` lookup with `LogitSse`'s own (one extra
-/// `stretch` call per node) at `LOGIT_SSE_MIN_VERSION` and above, still a
-/// bounded constant more, no new loop or allocation; the same argument
-/// covers it too. `LENGTH_SPLIT_MIN_VERSION`'s length-model split touches a
-/// different symbol (the length coded with every `Token::Match`/`Token::Rep`,
-/// not the per-byte literal loop this argument is about) and replaces one
-/// `Model::decode` call on `models.length` with the same call on whichever
-/// of `models.length_match`/`length_rep` a cheap `FlagKind` branch selects:
-/// no new loop or allocation, and strictly cheaper per token than the
-/// per-byte literal cost this bound is already measured against.
-/// `OFFSET_LEN_SPLIT_MIN_VERSION`'s offset-model split is the same shape
-/// again, one level over: it replaces one `Model::decode` call on
-/// `models.offset` with the same call on whichever of `models.offset_len`'s
-/// four entries `offset_len_state` of the already-decoded match length
-/// selects, a cheap array index, not a new loop or allocation, and only
-/// reached for a `Token::Match` (never a `Token::Rep`, which has no
-/// `offset` symbol at all).
+/// itself is a `research/JOURNAL.md` S1-P6 speed-tier target, not
+/// something to chase down here.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Which of the three kinds a token codes as: the flag symbol coded
@@ -356,60 +169,31 @@ const FLAG_ALPHABET: usize = 3;
 /// construct and thread them identically.
 struct Models {
     literal: Literal,
-    /// The logit-domain mixer [`crate::literal::Literal::encode_logistic`]/
-    /// `decode_logistic` code every non-`Candidate::Transpose` literal
-    /// through at `LOGISTIC_MIN_VERSION` and above, below `SURPRISE_MIN_VERSION`:
-    /// its own weights, step counts and `Sse` table, one per frame/trial,
-    /// the same lifetime as `literal`'s six real banks.
-    logistic: LogisticMix,
-    /// [`crate::literal::Literal::encode_logistic_surprise`]/
-    /// `decode_logistic_surprise` code every non-`Candidate::Transpose`
-    /// literal through at `SURPRISE_MIN_VERSION` and above, below
-    /// `LOGIT_SSE_MIN_VERSION`: its own weights, error EMAs and `Sse`
-    /// table, independent of `logistic`'s own, same lifetime.
-    surprise: SurpriseLogisticMix,
     /// [`crate::literal::Literal::encode_logit_sse`]/`decode_logit_sse`
-    /// code every non-`Candidate::Transpose` literal through at
-    /// `LOGIT_SSE_MIN_VERSION` and above: its own weights, error EMAs and
-    /// `LogitSse` table, independent of `surprise`'s own, same lifetime.
+    /// code every non-`Candidate::Transpose` literal through this mixer:
+    /// its own weights, error EMAs and `LogitSse` table, one per
+    /// frame/trial, the same lifetime as `literal`'s six real banks.
     logit_sse: SurpriseLogisticMixLogitSse,
     /// One flag table per "was the previous token a copy" state (the
     /// archive's `flag[2]`): a literal run and a post-copy position have
     /// different flag distributions worth modeling separately. Indexed by
     /// [`Context::after_copy`].
     flag: [Model; 2],
-    /// Shared copy-length [`Model`], regardless of [`Token::Match`]/
-    /// [`Token::Rep`]: the real coding path at versions below
-    /// `LENGTH_SPLIT_MIN_VERSION`, kept only for decoding those older
-    /// frames (`length_match`/`length_rep` below replace it at
-    /// `LENGTH_SPLIT_MIN_VERSION` and above, same role `literal` keeps for
-    /// `decode_sse` below `LOGISTIC_MIN_VERSION`).
-    length: Model,
     /// [`Token::Match`]'s own copy-length [`Model`], independent of
-    /// `length_rep`: the real coding path at `LENGTH_SPLIT_MIN_VERSION`
-    /// and above (`research/JOURNAL.md` S2-A109/S2-A110,
+    /// `length_rep` (`research/JOURNAL.md` S2-A109/S2-A110,
     /// `docs/adr/0057-wire-the-match-rep-length-model-split.md`).
     length_match: Model,
     /// [`Token::Rep`]'s own copy-length [`Model`], independent of
-    /// `length_match`: the real coding path at `LENGTH_SPLIT_MIN_VERSION`
-    /// and above, same lifetime and gate as `length_match`.
+    /// `length_match`, same lifetime.
     length_rep: Model,
     /// [`ResidualTree`] beside `length_match`: codes the bits below a
-    /// match length's bucket at `LENGTH_RESIDUAL_MIN_VERSION` and above.
+    /// match length's bucket.
     length_match_residual: ResidualTree,
-    /// [`ResidualTree`] beside `length_rep`, same gate and lifetime.
+    /// [`ResidualTree`] beside `length_rep`, same lifetime.
     length_rep_residual: ResidualTree,
-    /// Shared match-distance [`Model`], regardless of the triggering
-    /// match's own length: the real coding path at versions below
-    /// `OFFSET_LEN_SPLIT_MIN_VERSION`, kept only for decoding those older
-    /// frames (`offset_len` below replaces it at
-    /// `OFFSET_LEN_SPLIT_MIN_VERSION` and above, same role `length` keeps
-    /// for `length_match`/`length_rep`).
-    offset: Model,
     /// [`OFFSET_LEN_STATES`] independent match-distance [`Model`]s, indexed
     /// by [`offset_len_state`] of the triggering [`Token::Match`]'s own
-    /// length: the real coding path at `OFFSET_LEN_SPLIT_MIN_VERSION` and
-    /// above (`research/JOURNAL.md` S2-A111/S2-A112,
+    /// length (`research/JOURNAL.md` S2-A111/S2-A112,
     /// `docs/adr/0058-wire-the-offset-length-state-split.md`). Never
     /// consulted for a [`Token::Rep`], which has no `offset` symbol at all.
     offset_len: [Model; OFFSET_LEN_STATES],
@@ -420,16 +204,12 @@ impl Models {
     fn new() -> Self {
         Self {
             literal: Literal::new(),
-            logistic: LogisticMix::new(),
-            surprise: SurpriseLogisticMix::new(),
             logit_sse: SurpriseLogisticMixLogitSse::new(),
             flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
-            length: Model::new(lz::LENGTH_BUCKETS),
             length_match: Model::new(lz::LENGTH_BUCKETS),
             length_rep: Model::new(lz::LENGTH_BUCKETS),
             length_match_residual: ResidualTree::new(lz::LENGTH_BUCKETS),
             length_rep_residual: ResidualTree::new(lz::LENGTH_BUCKETS),
-            offset: Model::new(lz::OFFSET_BUCKETS),
             offset_len: std::array::from_fn(|_| Model::new(lz::OFFSET_BUCKETS)),
             slot: Model::new(lz::REP_SLOTS),
         }
@@ -445,19 +225,15 @@ impl Models {
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             literal: Literal::try_new()?,
-            logistic: LogisticMix::try_new()?,
-            surprise: SurpriseLogisticMix::try_new()?,
             logit_sse: SurpriseLogisticMixLogitSse::try_new()?,
             flag: [
                 Model::try_new(FLAG_ALPHABET)?,
                 Model::try_new(FLAG_ALPHABET)?,
             ],
-            length: Model::try_new(lz::LENGTH_BUCKETS)?,
             length_match: Model::try_new(lz::LENGTH_BUCKETS)?,
             length_rep: Model::try_new(lz::LENGTH_BUCKETS)?,
             length_match_residual: ResidualTree::try_new(lz::LENGTH_BUCKETS)?,
             length_rep_residual: ResidualTree::try_new(lz::LENGTH_BUCKETS)?,
-            offset: Model::try_new(lz::OFFSET_BUCKETS)?,
             // One `Model::try_new` call per `OFFSET_LEN_STATES` entry
             // (`std::array::try_from_fn` is not yet stable): the array
             // literal's length is checked against `[Model;
@@ -516,10 +292,10 @@ fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
     cost + f64::from(bucket_bits(b))
 }
 
-/// Picks [`Models::length_match`]/`length_rep` by `kind`, the
-/// `LENGTH_SPLIT_MIN_VERSION` split every real-path [`TokenSink`] (and the
-/// `ideal_cost_bits` pricer that must price what they code) selects a copy
-/// token's length model through.
+/// Picks [`Models::length_match`]/`length_rep` by `kind`, the split every
+/// real-path [`TokenSink`] and [`DecodeSink`] (and the `ideal_cost_bits`
+/// pricer that must price what they code) selects a copy token's length
+/// model through.
 ///
 /// # Panics
 ///
@@ -698,7 +474,7 @@ struct ColumnCoding<'a> {
 /// trial is [`Candidate::Transpose`] (`encode`'s caller), selecting
 /// [`crate::literal::Literal::encode_column`] over
 /// [`crate::literal::Literal::encode_logit_sse`] for every literal in this
-/// trial (`research/JOURNAL.md` S1-P5, `COLUMN_EXPERT_MIN_VERSION`).
+/// trial (`research/JOURNAL.md` S1-P5).
 struct EncodeSink<'a> {
     ac: &'a mut Encoder,
     column: Option<ColumnCoding<'a>>,
@@ -710,10 +486,6 @@ impl TokenSink for EncodeSink<'_> {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        // Compression always targets the newest format version
-        // (`FORMAT_VERSION`), so encoding always takes the logit-domain
-        // mixer (with or without the column expert); `decode` is the one
-        // that must still read older frames.
         match &mut self.column {
             Some(col) => {
                 let bank = column::bank_of(
@@ -735,20 +507,11 @@ impl TokenSink for EncodeSink<'_> {
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        // Compression always targets the newest format version, so
-        // encoding always takes the split models (LENGTH_SPLIT_MIN_VERSION)
-        // and their residual trees (LENGTH_RESIDUAL_MIN_VERSION); `decode`
-        // is the one that must still read older frames, through the shared
-        // `models.length` and raw residuals.
         split_length_model(models, kind).encode(self.ac, lz::bucket(value));
         split_length_residual(models, kind).encode(self.ac, value);
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        // Compression always targets the newest format version, so
-        // encoding always takes the length-keyed models
-        // (OFFSET_LEN_SPLIT_MIN_VERSION); `decode` is the one that must
-        // still read older frames through the shared `models.offset`.
         encode_bucketed(
             &mut models.offset_len[offset_len_state(len)],
             self.ac,
@@ -1362,74 +1125,36 @@ trait DecodeSink {
     ) -> Result<Context, Self::Err>;
 }
 
-/// Decodes a copy token's length: through [`Models::length_match`]/
-/// `length_rep` (selected by `kind`) when `gates.length_split` is set
-/// (`LENGTH_SPLIT_MIN_VERSION` and above), or through the shared
-/// [`Models::length`] otherwise; the residual bits below its bucket come
-/// from the [`ResidualTree`] beside the split model when
-/// `gates.length_residual` is set (`LENGTH_RESIDUAL_MIN_VERSION` and
-/// above), raw otherwise. `EncodeSink::length` always takes the newest
-/// branch unconditionally (compression always targets the newest
-/// version); this function is the one that must still read older frames.
+/// Decodes a copy token's length: the bucket symbol through
+/// [`Models::length_match`]/`length_rep` (selected by `kind`), the residual
+/// bits below it through the [`ResidualTree`] beside that model. Mirrors
+/// [`EncodeSink::length`].
 ///
 /// # Panics
 ///
 /// Panics if `kind` is [`FlagKind::Literal`]: both of [`decode_tokens`]'s
 /// call sites already have a [`FlagKind::Match`] or [`FlagKind::Rep`] in
 /// hand.
-fn decode_length(models: &mut Models, ac: &mut Decoder, gates: DecodeGates, kind: FlagKind) -> u32 {
-    if gates.length_residual {
-        let b = split_length_model(models, kind).decode(ac);
-        split_length_residual(models, kind).decode(ac, b)
-    } else if gates.length_split {
-        decode_bucketed(split_length_model(models, kind), ac)
-    } else {
-        decode_bucketed(&mut models.length, ac)
-    }
+fn decode_length(models: &mut Models, ac: &mut Decoder, kind: FlagKind) -> u32 {
+    let b = split_length_model(models, kind).decode(ac);
+    split_length_residual(models, kind).decode(ac, b)
 }
 
-/// Decodes a match's distance symbol: through whichever of
+/// Decodes a match's distance symbol through whichever of
 /// [`Models::offset_len`]'s [`OFFSET_LEN_STATES`] models [`offset_len_state`]
-/// of the already-decoded `len` selects, when `offset_split` is set
-/// (`OFFSET_LEN_SPLIT_MIN_VERSION` and above), or through the shared
-/// [`Models::offset`] otherwise. `EncodeSink::offset` always takes the
-/// split branch unconditionally (compression always targets the newest
-/// version); this function is the one that must still read older frames.
-fn decode_offset(models: &mut Models, ac: &mut Decoder, offset_split: bool, len: u32) -> u32 {
-    if offset_split {
-        decode_bucketed(&mut models.offset_len[offset_len_state(len)], ac)
-    } else {
-        decode_bucketed(&mut models.offset, ac)
-    }
-}
-
-/// The three real-path version gates [`decode_tokens`] must check once per
-/// frame, bundled into one parameter so a fourth gate never pushes that
-/// function's own argument count over `clippy::too_many_arguments`
-/// (mirroring how [`LiteralPath`] bundles the literal sub-stream's own
-/// three thresholds into one enum instead of three independent bools).
-#[derive(Clone, Copy)]
-struct DecodeGates {
-    /// `version >= LENGTH_SPLIT_MIN_VERSION`.
-    length_split: bool,
-    /// `version >= LENGTH_RESIDUAL_MIN_VERSION`; implies `length_split`,
-    /// since the constants ascend.
-    length_residual: bool,
-    /// `version >= OFFSET_LEN_SPLIT_MIN_VERSION`.
-    offset_split: bool,
+/// of the already-decoded `len` selects. Mirrors [`EncodeSink::offset`].
+fn decode_offset(models: &mut Models, ac: &mut Decoder, len: u32) -> u32 {
+    decode_bucketed(&mut models.offset_len[offset_len_state(len)], ac)
 }
 
 /// The shared skeleton behind [`decode`] and [`decode_undoable_streaming`]:
 /// decodes `token_count` tokens off `ac` in coding order, routing every
 /// literal byte and copy through `sink`, and advancing the literal-model
 /// context and `reps` exactly as [`decode`] and [`decode_undoable_streaming`]
-/// both require. See [`DecodeSink`]'s docs for why this exists. `gates` is
-/// computed once, up front, by both callers (mirroring
-/// [`LiteralPath::for_version`]'s own once-per-frame version read).
+/// both require. See [`DecodeSink`]'s docs for why this exists.
 fn decode_tokens<S: DecodeSink>(
     token_count: u32,
     declared_len: usize,
-    gates: DecodeGates,
     models: &mut Models,
     ac: &mut Decoder,
     reps: &mut RepCache,
@@ -1445,8 +1170,8 @@ fn decode_tokens<S: DecodeSink>(
                 context = context.after_literal(byte);
             }
             FlagKind::Match => {
-                let len = decode_length(models, ac, gates, FlagKind::Match);
-                let distance = decode_offset(models, ac, gates.offset_split, len);
+                let len = decode_length(models, ac, FlagKind::Match);
+                let distance = decode_offset(models, ac, len);
                 // decode_bucketed always ORs in `1 << bits`, which is >= 1
                 // regardless of the residual bits: never zero.
                 let distance =
@@ -1460,7 +1185,7 @@ fn decode_tokens<S: DecodeSink>(
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
                 let slot = RepSlot::from_index(models.slot.decode(ac));
-                let len = decode_length(models, ac, gates, FlagKind::Rep);
+                let len = decode_length(models, ac, FlagKind::Rep);
                 let distance = reps.get(slot);
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
@@ -1471,82 +1196,17 @@ fn decode_tokens<S: DecodeSink>(
     Ok(())
 }
 
-/// Which mixer a decoded frame's non-`Candidate::Transpose` literal
-/// sub-stream codes through, selected once from the frame's declared
-/// `version`: four mutually exclusive states derived from three
-/// thresholds (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`,
-/// `LOGIT_SSE_MIN_VERSION`) rather than carried as independent bools, so a
-/// version cannot read as selecting more than one mixer at once (CLAUDE.md's
-/// precision value, illegal states unrepresentable). `Candidate::Transpose`
-/// never consults this: its own `COLUMN_EXPERT_MIN_VERSION` gate picks
-/// `encode_column`/`decode_column` regardless.
-#[derive(Clone, Copy)]
-enum LiteralPath {
-    Sse,
-    Logistic,
-    LogisticSurprise,
-    LogitSse,
-}
-
-impl LiteralPath {
-    /// Picks the path a frame declaring `version` codes its literals
-    /// through, mirroring [`decode`]'s own version gates
-    /// (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`,
-    /// `LOGIT_SSE_MIN_VERSION`).
-    const fn for_version(version: u8) -> Self {
-        if version >= LOGIT_SSE_MIN_VERSION {
-            Self::LogitSse
-        } else if version >= SURPRISE_MIN_VERSION {
-            Self::LogisticSurprise
-        } else if version >= LOGISTIC_MIN_VERSION {
-            Self::Logistic
-        } else {
-            Self::Sse
-        }
-    }
-}
-
-/// Decodes one non-column literal through `path`'s mixer: [`VecSink`] and
-/// [`StreamingSink`] both need exactly this dispatch, named once so the two
-/// sinks' version gates cannot drift apart from each other.
-fn decode_literal_path(
-    path: LiteralPath,
-    models: &mut Models,
-    ac: &mut Decoder,
-    context: Context,
-) -> u8 {
-    match path {
-        LiteralPath::LogitSse => {
-            models
-                .literal
-                .decode_logit_sse(ac, context, &mut models.logit_sse)
-        }
-        LiteralPath::LogisticSurprise => {
-            models
-                .literal
-                .decode_logistic_surprise(ac, context, &mut models.surprise)
-        }
-        LiteralPath::Logistic => models
-            .literal
-            .decode_logistic(ac, context, &mut models.logistic),
-        LiteralPath::Sse => models.literal.decode_sse(ac, context),
-    }
-}
-
 /// [`DecodeSink`] for [`decode`]'s whole-buffer path: a literal byte is
 /// pushed onto `output`, and a copy replays [`copy_checked`] over what
 /// `output` already holds. `column` mirrors [`encode_tokens`]'s
 /// `ColumnCoding`, but owned here rather than borrowed (there is no
 /// per-candidate trial to share it across): `Some` exactly when this
-/// frame's candidate is [`Candidate::Transpose`] and its declared version
-/// selects the column-keyed literal expert (`COLUMN_EXPERT_MIN_VERSION`).
-/// `literal_path` selects the mixer for every other candidate, consulted
-/// only when `column` is `None`.
+/// frame's candidate is [`Candidate::Transpose`], selecting the
+/// column-keyed literal expert over [`crate::literal::Literal::decode_logit_sse`].
 struct VecSink<'a> {
     output: &'a mut Vec<u8>,
     declared_len: usize,
     column: Option<(NonZeroUsize, &'a mut ColumnExpertState)>,
-    literal_path: LiteralPath,
 }
 
 impl DecodeSink for VecSink<'_> {
@@ -1572,7 +1232,9 @@ impl DecodeSink for VecSink<'_> {
                 );
                 models.literal.decode_column(ac, context, bank, state)
             }
-            None => decode_literal_path(self.literal_path, models, ac, context),
+            None => models
+                .literal
+                .decode_logit_sse(ac, context, &mut models.logit_sse),
         };
         self.output.push(byte);
         Ok(byte)
@@ -1634,32 +1296,13 @@ impl DecodeSink for VecSink<'_> {
 /// malformed input, never a bug in this decoder (`rust-craft` skill,
 /// panic-discipline).
 ///
-/// `version` is the frame's declared `FORMAT_VERSION` byte
-/// (`crate::decompress` already has it in scope at its one call site,
-/// guaranteed at least `LZ_MIN_VERSION` (3) before this function is ever
-/// called): versions 3 and below `LOGISTIC_MIN_VERSION` decode the literal
-/// sub-stream through [`crate::literal::Literal::decode_sse`]; versions
-/// `LOGISTIC_MIN_VERSION` (5) and above but below `SURPRISE_MIN_VERSION`
-/// decode it through [`crate::literal::Literal::decode_logistic`] instead;
-/// versions `SURPRISE_MIN_VERSION` (6) and above but below
-/// `LOGIT_SSE_MIN_VERSION` decode it through
-/// [`crate::literal::Literal::decode_logistic_surprise`] instead; versions
-/// `LOGIT_SSE_MIN_VERSION` (7) and above decode it through
-/// [`crate::literal::Literal::decode_logit_sse`] instead — except, at every
-/// one of those versions, for a [`Candidate::Transpose`] frame, version
-/// `COLUMN_EXPERT_MIN_VERSION` (4) and above, which decodes through
-/// [`crate::literal::Literal::decode_column`] regardless, blending a
-/// column-keyed seventh expert into the mix (see the module docs' "Payload
-/// layout" section). `slot` decodes identically regardless of `version` or
-/// candidate; `length` decodes through the shared `Models::length` below
-/// `LENGTH_SPLIT_MIN_VERSION` (8) and through `Models::length_match`/
-/// `length_rep` at or above it; `offset` decodes through the shared
-/// `Models::offset` below `OFFSET_LEN_SPLIT_MIN_VERSION` (9) and through
-/// `Models::offset_len` at or above it; a length's residual bits are raw
-/// below `LENGTH_RESIDUAL_MIN_VERSION` (10) and coded through
-/// `Models::length_match_residual`/`length_rep_residual` at or above it;
-/// none of these is candidate-gated (see the
-/// module docs' "Payload layout" section).
+/// `payload` is a `Method::Lz` payload of the current `FORMAT_VERSION`:
+/// [`crate::decompress`] rejects any other version before calling this.
+/// A [`Candidate::Transpose`] frame decodes its literals through
+/// [`crate::literal::Literal::decode_column`], blending a column-keyed
+/// seventh expert into the mix; every other candidate through
+/// [`crate::literal::Literal::decode_logit_sse`] (see the module docs'
+/// "Payload layout" section).
 ///
 /// # Panics
 ///
@@ -1669,7 +1312,7 @@ impl DecodeSink for VecSink<'_> {
 /// (a mathematical invariant of `decode_bucketed`, see that function's
 /// docs), and casting a declared length already found `<= max_len` (a
 /// `u32`) back down from the `usize` `read_header` widened it to.
-pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Error> {
+pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let max_len = max_len.min(MAX_DECODED_LEN);
     let (filter_bytes, payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
     let candidate =
@@ -1680,12 +1323,11 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new()?;
     let mut reps = RepCache::initial();
-    // Some exactly when this frame's candidate is Candidate::Transpose and
-    // its declared version codes the column-expert path (COLUMN_EXPERT_MIN_VERSION):
+    // Some exactly when this frame's candidate is Candidate::Transpose:
     // mirrors encode_tokens's ColumnCoding, but `state` is owned here
     // (there is no per-candidate trial to share it across).
     let mut column_state: Option<(NonZeroUsize, ColumnExpertState)> = match candidate {
-        Candidate::Transpose(columns) if version >= COLUMN_EXPERT_MIN_VERSION => {
+        Candidate::Transpose(columns) => {
             Some((columns, ColumnExpertState::try_new(MAX_COLUMN_BANKS)?))
         }
         _ => None,
@@ -1706,16 +1348,10 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
         column: column_state
             .as_mut()
             .map(|(columns, state)| (*columns, state)),
-        literal_path: LiteralPath::for_version(version),
     };
     decode_tokens(
         token_count,
         declared_len,
-        DecodeGates {
-            length_split: version >= LENGTH_SPLIT_MIN_VERSION,
-            length_residual: version >= LENGTH_RESIDUAL_MIN_VERSION,
-            offset_split: version >= OFFSET_LEN_SPLIT_MIN_VERSION,
-        },
         &mut models,
         &mut ac,
         &mut reps,
@@ -1754,7 +1390,6 @@ pub fn decode(payload: &[u8], version: u8, max_len: u32) -> Result<Vec<u8>, Erro
 /// construction.
 pub(crate) fn decode_to_writer<W: std::io::Write>(
     payload: &[u8],
-    version: u8,
     max_len: u32,
     writer: &mut W,
 ) -> Result<(), crate::WriteError> {
@@ -1762,18 +1397,13 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     let candidate =
         Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
     match candidate {
-        Candidate::Identity => decode_undoable_streaming(
-            filtered_payload,
-            version,
-            max_len,
-            writer,
-            &mut StreamUndo::Identity,
-        ),
+        Candidate::Identity => {
+            decode_undoable_streaming(filtered_payload, max_len, writer, &mut StreamUndo::Identity)
+        }
         Candidate::Delta(stride) => {
             let undo = filters::delta::Undo::try_new(stride).map_err(Error::from)?;
             decode_undoable_streaming(
                 filtered_payload,
-                version,
                 max_len,
                 writer,
                 &mut StreamUndo::Delta(undo),
@@ -1783,14 +1413,13 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             let undo = filters::bcj::Undo::try_new().map_err(Error::from)?;
             decode_undoable_streaming(
                 filtered_payload,
-                version,
                 max_len,
                 writer,
                 &mut StreamUndo::Bcj(undo),
             )
         }
         Candidate::Transpose(_) => {
-            let decoded = decode(payload, version, max_len)?;
+            let decoded = decode(payload, max_len)?;
             writer.write_all(&decoded)?;
             Ok(())
         }
@@ -1848,13 +1477,11 @@ impl StreamUndo {
 /// `undo` and written to `writer` immediately. Never carries column-expert
 /// state: [`decode_to_writer`] never builds this sink for
 /// [`Candidate::Transpose`], which falls back to [`decode`]'s whole-buffer
-/// path instead (see that function's docs). `literal_path` mirrors
-/// [`VecSink`]'s own version gate.
+/// path instead (see that function's docs).
 struct StreamingSink<'a, W: std::io::Write> {
     window: &'a mut lz::Window,
     undo: &'a mut StreamUndo,
     writer: &'a mut W,
-    literal_path: LiteralPath,
 }
 
 impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
@@ -1870,7 +1497,9 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
         ac: &mut Decoder,
         context: Context,
     ) -> Result<u8, crate::WriteError> {
-        let byte = decode_literal_path(self.literal_path, models, ac, context);
+        let byte = models
+            .literal
+            .decode_logit_sse(ac, context, &mut models.logit_sse);
         self.window.push(byte);
         self.undo.apply(byte, self.writer)?;
         Ok(byte)
@@ -1897,14 +1526,9 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
 /// only the byte handed to `writer` differs per candidate, never what goes
 /// into `window` or `context`. `payload` here has already had its 2-byte
 /// filter selector stripped by [`decode_to_writer`], matching
-/// [`read_header`]'s expected input. `version` is the frame's declared
-/// `FORMAT_VERSION` byte, [`decode_to_writer`]'s own parameter passed
-/// through unchanged, gating the literal sub-stream exactly as [`decode`]'s
-/// own `version` does (`LOGISTIC_MIN_VERSION`, `SURPRISE_MIN_VERSION`,
-/// `LOGIT_SSE_MIN_VERSION`).
+/// [`read_header`]'s expected input.
 fn decode_undoable_streaming<W: std::io::Write>(
     payload: &[u8],
-    version: u8,
     max_len: u32,
     writer: &mut W,
     undo: &mut StreamUndo,
@@ -1922,16 +1546,10 @@ fn decode_undoable_streaming<W: std::io::Write>(
         window: &mut window,
         undo: &mut *undo,
         writer: &mut *writer,
-        literal_path: LiteralPath::for_version(version),
     };
     decode_tokens(
         token_count,
         declared_len,
-        DecodeGates {
-            length_split: version >= LENGTH_SPLIT_MIN_VERSION,
-            length_residual: version >= LENGTH_RESIDUAL_MIN_VERSION,
-            offset_split: version >= OFFSET_LEN_SPLIT_MIN_VERSION,
-        },
         &mut models,
         &mut ac,
         &mut reps,

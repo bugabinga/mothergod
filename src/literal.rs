@@ -23,7 +23,7 @@
 //! driving [`crate::coder::Encoder`].
 //!
 //! **SSE-calibrated coding (`JOURNAL` S1-P1, S2-A58, S2-A59, `FORMAT_VERSION`
-//! 3).** [`Literal::encode_sse`]/[`Literal::decode_sse`] code the six-expert
+//! 3, retired wire path).** [`Literal::encode_sse`]/[`Literal::decode_sse`] code the six-expert
 //! mixer's blended `cum` table through
 //! [`crate::bittree::encode_symbol_sse`]/[`crate::bittree::decode_symbol_sse`]:
 //! 8 chained binary decisions, each refined by [`Literal`]'s own [`Sse`]
@@ -33,12 +33,12 @@
 //! binary-tree node, a compound estimate — unlike `JOURNAL` S2-R1's
 //! rejected attempt, which SSE-calibrated an already order-0-adaptive lone
 //! frequency counter (the flag model's `is_copy` bit) and found nothing to
-//! correct. Every `FORMAT_VERSION` this build decodes (`codec::LZ_MIN_VERSION`
-//! (3) and up) codes through this path; the older direct 256-way range
-//! division that coded `FORMAT_VERSION` 2's literal sub-stream was deleted
-//! with that version
-//! (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`, no release
-//! having ever written it).
+//! correct. No `FORMAT_VERSION` this build decodes codes a literal through
+//! this path any more: versions 3 and 4 did, and were retired with the rest
+//! below 10 (`docs/adr/0063-retire-format-versions-1-through-9.md`, no
+//! release having ever written them). It stays as the ideal-cost
+//! measurement baseline and the calibration [`Literal::encode_column`]
+//! reuses.
 //!
 //! **Decode-path determinism (`JOURNAL` S2-D3, resolved by ADR-0024).**
 //! The exponentiated-gradient weight update runs on both the encode and
@@ -53,8 +53,8 @@
 //! demotes it to an M5 speed lead, since its speed claim is unmeasured
 //! in this codebase.
 //!
-//! **Logit-domain mixing (`JOURNAL` S1-P8, S2-A101, `FORMAT_VERSION`
-//! `codec::LOGISTIC_MIN_VERSION` (5), ADR-0052).**
+//! **Logit-domain mixing (`JOURNAL` S1-P8, S2-A101, `FORMAT_VERSION` 5,
+//! ADR-0052, retired wire path).**
 //! [`Literal::encode_logistic`]/[`Literal::decode_logistic`] replace the
 //! SSE-calibrated path above with a second mixer, [`LogisticMix`]: the six
 //! real experts' own probability estimates are [`crate::logistic::stretch`]ed
@@ -71,7 +71,7 @@
 //! (`crate::logistic`'s own module docs).
 //!
 //! **Learned-baseline rate schedule (`JOURNAL` S2-A104/S2-A105,
-//! `FORMAT_VERSION` `codec::SURPRISE_MIN_VERSION` (6), ADR-0054).**
+//! `FORMAT_VERSION` 6, ADR-0054, retired wire path).**
 //! [`Literal::encode_logistic_surprise`]/[`Literal::decode_logistic_surprise`]
 //! replace [`Literal::encode_logistic`]/`decode_logistic` for every
 //! candidate except `Candidate::Transpose`: the same six-expert
@@ -83,7 +83,7 @@
 //! still raises the rate.
 //!
 //! **Logit-domain SSE bins (`JOURNAL` S2-A106/S2-A108, `FORMAT_VERSION`
-//! `codec::LOGIT_SSE_MIN_VERSION` (7), ADR-0055).**
+//! 7, ADR-0055; the wire path of every version this build decodes).**
 //! [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`] replace
 //! [`Literal::encode_logistic_surprise`]/`decode_logistic_surprise` for
 //! every candidate except `Candidate::Transpose`: the identical walk,
@@ -630,8 +630,7 @@ fn fresh_logistic_weights() -> Vec<[f64; EXPERTS]> {
 
 /// Fallible counterpart to [`fresh_logistic_weights`], the same relationship
 /// [`crate::try_filled_vec`] bears to a plain `vec![]` everywhere else in
-/// this crate: [`LogisticMix::try_new`] and [`SurpriseLogisticMix::try_new`]
-/// both start from this.
+/// this crate: [`SurpriseLogisticMix::try_new`] starts from this.
 fn try_fresh_logistic_weights() -> Result<Vec<[f64; EXPERTS]>, std::collections::TryReserveError> {
     crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])
 }
@@ -644,7 +643,8 @@ fn try_fresh_logistic_weights() -> Result<Vec<[f64; EXPERTS]>, std::collections:
 /// [`squash`]ed back, then refined through this mixer's own [`Sse`] over
 /// the same [`bittree::SSE_CONTEXTS`] contexts the shipped coder uses.
 /// Reads [`Literal`]'s banks, never writes them: [`Literal::encode_logistic`]/
-/// `decode_logistic` are the real coding path (`codec::LOGISTIC_MIN_VERSION`).
+/// `decode_logistic` were the `FORMAT_VERSION` 5 coding path, retired
+/// (ADR-0063).
 #[derive(Debug, Clone)]
 pub struct LogisticMix {
     /// One weight vector per [`WEIGHT_CONTEXTS`] key.
@@ -667,20 +667,6 @@ impl LogisticMix {
             update_count: vec![0; WEIGHT_CONTEXTS],
             sse: Sse::new(bittree::SSE_CONTEXTS),
         }
-    }
-
-    /// Fallible counterpart to [`Self::new`], the same shape
-    /// [`ColumnExpertState::try_new`] gives the seventh expert:
-    /// [`crate::codec::decode`]'s real decode path constructs a
-    /// `LogisticMix` per frame now that [`Literal::decode_logistic`] reaches
-    /// it, and the allocation can still fail, so hard rule 2 requires
-    /// `Error::OutOfMemory` there instead of an abort.
-    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
-        Ok(Self {
-            weights: try_fresh_logistic_weights()?,
-            update_count: crate::try_filled_vec(WEIGHT_CONTEXTS, 0)?,
-            sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
-        })
     }
 }
 
@@ -746,9 +732,10 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 /// prediction error (`recent_sq_error`) against a slow EMA of the
 /// identical signal (`baseline_sq_error`, that key's own learned floor),
 /// through `surprise_rate`, rather than reading magnitude against one
-/// shared constant the way S2-R26's own rejected mechanism did. The real
-/// coding path (`codec::SURPRISE_MIN_VERSION`):
-/// [`Literal::encode_logistic_surprise`]/`decode_logistic_surprise`.
+/// shared constant the way S2-R26's own rejected mechanism did. With
+/// `C = `[`Sse`], [`Literal::encode_logistic_surprise`]/
+/// `decode_logistic_surprise` were the `FORMAT_VERSION` 6 coding path,
+/// retired (ADR-0063).
 ///
 /// Generic over its own calibration table `C` ([`Calibrate`]): the mixing
 /// weights, error EMAs and rate schedule never depend on which table
@@ -757,10 +744,8 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 /// [`crate::sse::LogitSse`] in `C`'s place (`research/JOURNAL.md` S2-A106):
 /// isolates the bin-spacing change that type measures without a second
 /// struct and a second walk that would differ from this one in exactly one
-/// line. The real coding path for `C = Sse`
-/// (`codec::SURPRISE_MIN_VERSION`): [`Literal::encode_logistic_surprise`]/
-/// `decode_logistic_surprise`; for `C = `[`crate::sse::LogitSse`]
-/// (`codec::LOGIT_SSE_MIN_VERSION`, `research/JOURNAL.md` S2-A108,
+/// line. With `C = `[`crate::sse::LogitSse`] it is the real coding path
+/// (`research/JOURNAL.md` S2-A108,
 /// `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`):
 /// [`Literal::encode_logit_sse`]/`decode_logit_sse`.
 #[derive(Debug, Clone)]
@@ -798,12 +783,11 @@ impl<C: Calibrate> SurpriseLogisticMix<C> {
     }
 
     /// Fallible counterpart to [`Self::new`], the same shape
-    /// [`LogisticMix::try_new`] gives its own mixer:
+    /// [`ColumnExpertState::try_new`] gives the seventh expert:
     /// [`crate::codec::decode`]'s real decode path constructs a
-    /// `SurpriseLogisticMix` per frame now that
-    /// [`Literal::decode_logistic_surprise`]/[`Literal::decode_logit_sse`]
-    /// reach it, and the allocation can still fail, so hard rule 2
-    /// requires `Error::OutOfMemory` there instead of an abort.
+    /// `SurpriseLogisticMix` per frame, and the allocation can still fail,
+    /// so hard rule 2 requires `Error::OutOfMemory` there instead of an
+    /// abort.
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             weights: try_fresh_logistic_weights()?,
@@ -1647,7 +1631,7 @@ impl Literal {
     /// model's six expert banks through `mixer`'s logit-domain mix under
     /// [`SurpriseLogisticMix`]'s learned-baseline rate schedule instead of
     /// [`Self::encode_logistic`]'s step-count-derived one
-    /// (`research/JOURNAL.md` S2-A104, `codec::SURPRISE_MIN_VERSION`), then
+    /// (`research/JOURNAL.md` S2-A104), then
     /// updates every expert bank exactly as [`Self::encode_sse`] does. The
     /// six real experts' own linear weights adapt unperturbed
     /// ([`Self::update`] still runs on the same six-way `mixed` estimate it
@@ -1686,7 +1670,7 @@ impl Literal {
     /// model's six expert banks through `mixer`'s logit-domain mix under
     /// [`SurpriseLogisticMix`]'s own rate schedule, refined through
     /// [`crate::sse::LogitSse`] instead of [`Sse`]
-    /// (`research/JOURNAL.md` S2-A106/S2-A108, `codec::LOGIT_SSE_MIN_VERSION`),
+    /// (`research/JOURNAL.md` S2-A106/S2-A108),
     /// then updates every expert bank exactly as
     /// [`Self::encode_logistic_surprise`] does. The six real experts' own
     /// linear weights adapt unperturbed, the same layering every other
@@ -1723,7 +1707,7 @@ impl Literal {
     /// Codes `byte` through `encoder` under `context`, blending this
     /// model's six expert banks through `logistic`'s logit-domain mix
     /// instead of [`Self::mix`]'s linear blend
-    /// (`research/JOURNAL.md` S1-P8, S2-A101, `codec::LOGISTIC_MIN_VERSION`),
+    /// (`research/JOURNAL.md` S1-P8, S2-A101),
     /// then updates every expert bank exactly as [`Self::encode_sse`]
     /// does. The six real experts' own linear weights adapt unperturbed
     /// ([`Self::update`] still runs on the same six-way `mixed` estimate it
