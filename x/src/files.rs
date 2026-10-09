@@ -195,6 +195,7 @@ fn supports(path: &Path, task: TaskKind) -> bool {
         TaskKind::Lint => {
             matches!(kind, FileKind::Rust | FileKind::Markdown)
                 && !(kind == FileKind::Rust && path.starts_with("fuzz"))
+                || kind == FileKind::Yaml && path.starts_with(".github")
         }
     })
 }
@@ -259,5 +260,14 @@ mod tests {
             TaskKind::Lint
         ));
         assert!(!supports(Path::new("site/index.html"), TaskKind::Lint));
+        assert!(supports(
+            Path::new(".github/workflows/ci.yml"),
+            TaskKind::Lint
+        ));
+        assert!(supports(
+            Path::new(".github/actions/rust-ci/action.yml"),
+            TaskKind::Lint
+        ));
+        assert!(!supports(Path::new("infra/wrangler.yml"), TaskKind::Lint));
     }
 }

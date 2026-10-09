@@ -56,18 +56,13 @@ readable, so keep it true when you bump. Dependabot maintains these and
 rewrites the comment, but it has no ecosystem for pinned _tool_ versions, so
 those need their own sweep.
 
-This repository is half-converted, and knowing which half you are in matters.
-Measure it; no count written here stays true (issue #559 watched one rot in
-four days):
-
-```
-grep -rhoE 'uses: [^@ ]+@[0-9a-f]{40}' .github/workflows | wc -l       # SHA-pinned
-grep -rhoE 'uses: [^@ ]+@v[0-9][^ ]*' .github/workflows | sort | uniq -c   # still tags
-```
-
-Whichever list `anthropics/claude-code-action` is on is the one that matters
-most, because that action holds the session credential. Convert the file you
-are touching; do not open a sweep PR that nobody can review.
+`cargo x lint` is the measure: every external `uses:` under `.github/` is a
+40-hex commit SHA followed by a version comment, or lint is red one turn after
+the edit. Same-repo `./` paths are the one exemption. Resolve a tag with
+`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, following an annotated tag's
+`.object.sha` through `git/tags/<sha>` to the commit. An action whose ref was a
+branch (`dtolnay/rust-toolchain@stable`) carries no version, so it is pinned on
+its release tag with the version moved into an input (`toolchain: stable`).
 
 ## Keep the logic out of the YAML
 

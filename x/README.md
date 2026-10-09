@@ -53,11 +53,11 @@ Every other operation remains file-scoped.
 | JSON | serde_json canonical formatting | |
 | JSONL | serde_json syntax plus final-newline normalization | |
 | TOML | Taplo | |
-| YAML | pretty_yaml | |
+| YAML | pretty_yaml | action-pin rule, under `.github/` only |
 | JavaScript and TypeScript | dprint TypeScript | |
 | HTML and SVG | markup_fmt | |
 
-Python, shell, and GitHub Actions semantics have no reliable embedded Rust linter in this tool.
+Python, shell, YAML outside `.github/`, and GitHub Actions semantics beyond the pin rule have no embedded linter in this tool.
 Use explicit paths to receive a concrete unsupported-file error rather than assuming coverage.
 
 ## Agent contract
