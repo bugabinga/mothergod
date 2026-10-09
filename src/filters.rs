@@ -7,6 +7,15 @@
 //! transform itself, [`select`] shortlists which candidates are worth a
 //! full trial encode, and `crate::codec` (`JOURNAL` S2-D2, ADR-0028) trials
 //! them against real [`crate::Method::Lz`] output and keeps the smallest.
+//!
+//! `delta`, `transpose` and `bcj`, the three `crate::codec` selects, each
+//! invert in two forms. The public `decode` aborts if the allocator cannot
+//! satisfy its output buffer and is what the tests drive. The `pub(crate)`
+//! `try_decode`, and each streaming `Undo::try_new`, return `Err` instead:
+//! `crate::codec`'s real decode paths use them, because hard rule 2 forbids
+//! an abort on untrusted input (`rust-craft` skill's allocation-discipline,
+//! `tests/torture.rs`, #453). A pair differs only in how the buffer is
+//! built, never in the scan run over it.
 
 /// Fixed-stride delta filter.
 ///
@@ -44,12 +53,7 @@ pub mod delta {
         out
     }
 
-    /// Fallible counterpart to [`decode`]: the same inverted bytes, but
-    /// returns `Err` instead of aborting if the allocator cannot satisfy a
-    /// copy of `data`. `crate::codec::decode`'s real decode path uses this
-    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
-    /// every test uses.
+    /// Fallible [`decode`] (module docs).
     pub(crate) fn try_decode(
         data: &[u8],
         stride: NonZeroUsize,
@@ -59,10 +63,8 @@ pub mod delta {
         Ok(out)
     }
 
-    /// Shared scan [`decode`]/[`try_decode`] both drive over an
-    /// already-allocated `out` (initialized to a copy of the filtered
-    /// bytes), so the two only ever differ in how `out` was built, never in
-    /// what happens to it.
+    /// Scan shared by [`decode`] and [`try_decode`] over `out`, a copy of
+    /// the filtered bytes.
     fn undo_in_place(out: &mut [u8], stride: usize) {
         for i in stride..out.len() {
             out[i] = out[i].wrapping_add(out[i - stride]);
@@ -89,13 +91,8 @@ pub mod delta {
     }
 
     impl Undo {
-        /// An undo state ready to accept the first filtered byte. Returns
-        /// `Err` instead of aborting if the allocator cannot satisfy
-        /// `stride` bytes of history (hard rule 2, `rust-craft` skill's
-        /// allocation-discipline, `tests/torture.rs`, #453):
-        /// `crate::codec::decode_to_writer`'s real streaming decode path is
-        /// the only caller outside this module's own tests, and it is
-        /// reachable from untrusted input.
+        /// An undo state ready to accept the first filtered byte, holding
+        /// `stride` bytes of history (module docs on why it is fallible).
         pub(crate) fn try_new(
             stride: NonZeroUsize,
         ) -> Result<Self, std::collections::TryReserveError> {
@@ -180,12 +177,7 @@ pub mod transpose {
         out
     }
 
-    /// Fallible counterpart to [`decode`]: the same reassembled bytes, but
-    /// returns `Err` instead of aborting if the allocator cannot satisfy an
-    /// `n`-byte output buffer. `crate::codec::decode`'s real decode path
-    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
-    /// every test uses.
+    /// Fallible [`decode`] (module docs).
     pub(crate) fn try_decode(
         data: &[u8],
         columns: NonZeroUsize,
@@ -195,9 +187,7 @@ pub mod transpose {
         Ok(out)
     }
 
-    /// Shared scan [`decode`]/[`try_decode`] both drive over an
-    /// already-allocated, zero-filled `out`, so the two only ever differ in
-    /// how `out` was built, never in what happens to it.
+    /// Scan shared by [`decode`] and [`try_decode`] over a zero-filled `out`.
     fn decode_into(out: &mut [u8], data: &[u8], columns: usize) {
         let n = out.len();
         let mut pos = 0usize;
@@ -262,18 +252,6 @@ pub mod bcj {
         out
     }
 
-    /// Fallible counterpart to [`rewrite`]: the same in-place rewrite, but
-    /// starting from a copy of `data` that returns `Err` instead of
-    /// aborting if the allocator cannot satisfy it.
-    fn try_rewrite(
-        data: &[u8],
-        rewrite_operand: impl Fn(u32, u32) -> u32,
-    ) -> Result<Vec<u8>, std::collections::TryReserveError> {
-        let mut out = crate::try_vec_from_slice(data)?;
-        rewrite_in_place(&mut out, rewrite_operand);
-        Ok(out)
-    }
-
     /// Rewrites the rel32 operand of the [`INSTRUCTION_LEN`]-byte
     /// `instruction` that starts at stream index `position`, through
     /// `rewrite_operand(operand, post_addr)`. The one place the operand's
@@ -300,9 +278,8 @@ pub mod bcj {
             .copy_from_slice(&rewrite_operand(operand, post_addr).to_le_bytes());
     }
 
-    /// Shared scan [`rewrite`]/[`try_rewrite`] both drive over an
-    /// already-allocated `out`, so the two only ever differ in how `out`
-    /// was built, never in what happens to it.
+    /// Scan shared by [`rewrite`] and [`try_decode`] over `out`, a copy of
+    /// the input.
     fn rewrite_in_place(out: &mut [u8], rewrite_operand: impl Fn(u32, u32) -> u32) {
         let n = out.len();
         let mut i = 0usize;
@@ -335,14 +312,11 @@ pub mod bcj {
         rewrite(data, u32::wrapping_sub)
     }
 
-    /// Fallible counterpart to [`decode`]: the same rewritten bytes, but
-    /// returns `Err` instead of aborting if the allocator cannot satisfy a
-    /// copy of `data`. `crate::codec::decode`'s real decode path uses this
-    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); [`decode`] stays the panicking version
-    /// every test uses.
+    /// Fallible [`decode`] (module docs).
     pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
-        try_rewrite(data, u32::wrapping_sub)
+        let mut out = crate::try_vec_from_slice(data)?;
+        rewrite_in_place(&mut out, u32::wrapping_sub);
+        Ok(out)
     }
 
     /// Bytes [`Undo::apply`]/[`Undo::finish`] resolved from stream data so
@@ -403,13 +377,9 @@ pub mod bcj {
     }
 
     impl Undo {
-        /// A fresh undo state, ready to accept the first filtered byte.
-        /// Returns `Err` instead of aborting if the allocator cannot
-        /// satisfy [`INSTRUCTION_LEN`] bytes of pending-buffer capacity
-        /// (hard rule 2, `rust-craft` skill's allocation-discipline,
-        /// `tests/torture.rs`, #453): `crate::codec::decode_to_writer`'s
-        /// real streaming decode path is the only caller outside this
-        /// module's own tests, and it is reachable from untrusted input.
+        /// A fresh undo state, ready to accept the first filtered byte, with
+        /// [`INSTRUCTION_LEN`] bytes of pending-buffer capacity (module docs
+        /// on why it is fallible).
         pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
             let mut pending = Vec::new();
             pending.try_reserve_exact(INSTRUCTION_LEN)?;
@@ -600,18 +570,17 @@ pub mod base64_unwrap {
             && data[..data.len().min(SCAN_LIMIT)]
                 .iter()
                 .all(|&b| is_base64_byte(b));
-        if looks_like_base64
-            && let Some(decoded) = try_decode(data)
-            && b64_encode(&decoded) == data
-        {
-            let mut out = Vec::with_capacity(1 + decoded.len());
-            out.push(1);
-            out.extend_from_slice(&decoded);
-            return out;
-        }
-        let mut out = Vec::with_capacity(1 + data.len());
-        out.push(0);
-        out.extend_from_slice(data);
+        let unwrapped = looks_like_base64
+            .then(|| try_decode(data))
+            .flatten()
+            .filter(|decoded| b64_encode(decoded) == data);
+        let (flag, body) = match &unwrapped {
+            Some(decoded) => (1, decoded.as_slice()),
+            None => (0, data),
+        };
+        let mut out = Vec::with_capacity(1 + body.len());
+        out.push(flag);
+        out.extend_from_slice(body);
         out
     }
 
