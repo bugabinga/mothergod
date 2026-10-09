@@ -188,16 +188,16 @@ jobs:
         # `fromJSON('')`, which is an expression error.
         language: ${{ fromJSON(needs.changes.outputs.languages || '["actions","javascript-typescript","python","rust"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # No `queries:` override. Default setup ran the `default` suite, so this
       # move changes when the analysis runs and nothing about which queries
       # execute. Changing the suite is a separate decision with its own
       # evidence.
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           languages: ${{ matrix.language }}
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
           category: /language:${{ matrix.language }}

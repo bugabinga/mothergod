@@ -33,7 +33,7 @@ jobs:
       # credentials (same as deploy-site.yml).
       CLOUDFLARE_ACCOUNT_ID: c9526445475a4d62fd6e330810573ef0
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: npx wrangler@4 deploy
       - name: Push worker secrets
         run: |

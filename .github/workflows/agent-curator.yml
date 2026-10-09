@@ -40,7 +40,7 @@ jobs:
       id-token: write
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -53,7 +53,7 @@ jobs:
 
       - id: claude
         if: steps.guard.outputs.paused != 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
         env:
           # Job-scoped token for gh writes; outlives the claude app
           # token, which expires ~1h into a session (issue #81).
