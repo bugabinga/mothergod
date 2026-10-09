@@ -222,7 +222,11 @@ fn check_changelog(relative: &Path, source: &str) -> ChangelogCheck {
 /// `./` path, pinned by the commit it rides in. `docker://` is red until a
 /// digest form is admitted; none exists today. `statuses:` ends in the same
 /// six letters, so the match is anchored at the key, and a commented-out
-/// `uses:` is a comment, not a pin.
+/// `uses:` is a comment, not a pin. The comment must follow whitespace, as
+/// YAML requires: `@<sha>#v1` is one scalar GitHub rejects at run time.
+/// Line-based, not a YAML parse: a flow mapping (`- { uses: a/b@v1 }`) is
+/// not seen, and no workflow here writes one; parsing is the fix the day
+/// one does.
 fn check_action_pins(relative: &Path, source: &str) -> Vec<String> {
     let mut findings = Vec::new();
     for (index, line) in source.lines().enumerate() {
@@ -235,11 +239,10 @@ fn check_action_pins(relative: &Path, source: &str) -> Vec<String> {
         if reference.starts_with("./") {
             continue;
         }
-        let (target, comment) = reference
-            .split_once('#')
-            .map_or((reference, ""), |(target, comment)| {
-                (target.trim_end(), comment.trim())
-            });
+        let (target, rest) = reference
+            .split_once(char::is_whitespace)
+            .unwrap_or((reference, ""));
+        let comment = rest.trim_start().strip_prefix('#').map_or("", str::trim);
         let pinned = target
             .rsplit_once('@')
             .is_some_and(|(_, sha)| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -395,9 +398,10 @@ mod tests {
             - uses: dtolnay/rust-toolchain@stable\n\
             - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9\n\
             - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c5 # v6\n\
-            - uses: docker://alpine:3.20\n";
+            - uses: docker://alpine:3.20\n\
+            - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9#v6\n";
         let findings = check_action_pins(Path::new("w.yml"), source);
-        assert_eq!(findings.len(), 5);
+        assert_eq!(findings.len(), 6);
         assert!(findings[0].starts_with("w.yml:1: `uses: actions/checkout@v7` is not pinned"));
         assert!(findings[2].contains("w.yml:3:"));
         assert!(
