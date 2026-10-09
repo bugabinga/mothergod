@@ -264,7 +264,11 @@ const keys = (pairs) => d1(pairs.map(([run_id, attempt]) => ({ run_id, attempt }
 test("backfill writes the rows the archive has and the table lacks, and names the gap", async () => {
   const gh = stubGh(listing, zips);
   await withStub([keys([[100, 1]]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
-    const r = await run(["backfill"], { D1_API_BASE: base, GITHUB_REPOSITORY: "o/r", PATH: `${gh}:${process.env.PATH}` });
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
     assert.equal(r.code, 1, r.out + r.err);
     assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
     assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
@@ -286,11 +290,18 @@ test("backfill writes the rows the archive has and the table lacks, and names th
 test("backfill on a table equal to the archive downloads nothing and exits 0", async () => {
   const gh = stubGh(listing.slice(0, 1), {});
   await withStub([keys([[100, 1]]), keys([[100, 1]])], async (base, seen) => {
-    const r = await run(["backfill"], { D1_API_BASE: base, GITHUB_REPOSITORY: "o/r", PATH: `${gh}:${process.env.PATH}` });
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
     assert.equal(r.code, 0, r.out + r.err);
     assert.equal(seen.length, 2);
     assert.deepEqual(downloads(gh), []);
-    assert.match(r.out, /artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 0 \| unreadable 0 \| missing 0$/m);
+    assert.match(
+      r.out,
+      /artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 0 \| unreadable 0 \| missing 0$/m,
+    );
   });
 });
 
@@ -304,14 +315,21 @@ test("backfill --since keeps the artifacts created from that instant", async () 
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(downloads(gh), ["2"]);
     assert.equal(seen[1].body.params[0], 200);
-    assert.match(r.out, /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m);
+    assert.match(
+      r.out,
+      /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+    );
   });
 });
 
 test("backfill on an unreadable table stops before any download", async () => {
   const gh = stubGh(listing, zips);
   await withStub({ status: 500, payload: { success: false, errors: [{ message: "edge down" }] } }, async (base) => {
-    const r = await run(["backfill"], { D1_API_BASE: base, GITHUB_REPOSITORY: "o/r", PATH: `${gh}:${process.env.PATH}` });
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
     assert.notEqual(r.code, 0);
     assert.match(r.out, /UNREADABLE: HTTP 500/);
     assert.deepEqual(downloads(gh), []);
