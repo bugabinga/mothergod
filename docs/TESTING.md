@@ -384,3 +384,14 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   allocation-bound suites through the C surface itself, in CI —
   proving no panic crosses the FFI boundary, not just that the Rust
   API behaves.
+
+## 12. Genre conformance (planned, #981, #982)
+
+- The FIT matrix (ADR-0064): one test per behavior the compressor genre
+  shares (gzip, bzip2, xz, zstd, brotli, lz4 for the CLI; flate2, zstd,
+  xz2, brotli, lz4_flex for the library), each row carrying its citation
+  and a recorded state, `holds` or `gap`. A `holds` row that fails is a
+  regression; a `gap` row that passes fails until the record flips; a
+  declined row keeps its place in the denominator with its reason. The
+  count is a committed file the gate keeps honest and `/status` reads.
+  The CLI half spawns the binary, so it runs on no Miri or Android lane.

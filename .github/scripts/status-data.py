@@ -103,7 +103,7 @@ def tracker_counts(owner, repo, number):
 
 @field("milestones")
 def _milestones():
-    """ROADMAP.md `## M<n> — Title` sections in file order; state from the tracker.
+    """ROADMAP.md `## M<n>: Title` sections in file order; state from the tracker.
 
     Four statuses, because three could not tell a program from unstarted
     work (operator report, 2026-09-18, #601). ADR-0047 moved item state out
@@ -120,7 +120,7 @@ def _milestones():
     sections = re.split(r"^## (?=M\d)", text, flags=re.M)[1:]
     for section in sections:
         header, _, body = section.partition("\n")
-        match = re.match(r"(M\d+)\s*[—-]+\s*(.*)", header)
+        match = re.match(r"(M\d+)\s*[:-]+\s*(.*)", header)
         if not match:
             continue
         mid, title = match.group(1), match.group(2).strip()
