@@ -38,8 +38,8 @@ Outcome metrics (the product):
 - **SIMPLICITY**: total `src/` SLOC and public API surface, with weekly
   delta; growth must be justified by wins elsewhere on this scorecard.
   Dependency count stays zero (ADR-0002). Deletions are celebrated in the
-  digest. Published: line counts on /status; the API surface has no
-  publisher yet (#651).
+  digest. Published: line counts, and the public API item count with
+  its change since the previous reading, on /status.
 - **FIT**: the share of the genre's behaviors the CLI and the library
   hold (ADR-0064): one row per behavior gzip, bzip2, xz, zstd, brotli
   and lz4 share (CLI) or flate2, zstd, xz2, brotli and lz4_flex share
