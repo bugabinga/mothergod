@@ -130,9 +130,11 @@ arming `gh pr merge <n> --squash --auto` and stopping is right (the
 BDFL sweep rescues an armed merge that never fires). `--wait` is the
 foreground wait for a head whose verdict has not come yet: it blocks
 until the `review` check run concludes on the pinned head and the
-required gates are green, merges on `agent-approved`, exits 3 on
-`changes-requested` and 4 when no verdict can come, so no seat
-hand-rolls a poll (issue #842, three polls each wrong its own way).
+required gates are green, merges on an `agent-approved` whose label
+event postdates that run (the sweep's own test, shared through
+`verdict.py`), exits 3 on `changes-requested` and 4 when no verdict
+can come, so no seat hand-rolls a poll (issue #842, three polls each
+wrong its own way).
 It decides nothing: verdicts, carve-outs, and discretion stay with
 the caller.
 An unsigned branch commit is never, by itself, a reason to stop or to

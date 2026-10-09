@@ -57,13 +57,17 @@ moves:
   concluded green, `changes-requested` exits 3, and a review that concluded
   without a verdict (failure: the reviewer never ran, the thread says why;
   success with no label: paused) exits 4 with the state seen, as does the
-  deadline. The check run is what ties the label to this head: an
-  `agent-approved` left by an earlier round is on the PR before the new
-  round's run concludes, and the wait reads no label until it has. A red
+  deadline. A green run proves nothing by itself: a paused guard leaves the
+  job green and the labels untouched, and nothing strips `agent-approved`
+  on a push, so an approval counts only when its label event postdates the
+  review run's start on this head, the test stalled-prs applies before its
+  rescue merge, shared through verdict.py (PR #966's review). A red
   required gate exits 2 at once, because waiting on red is the cap this
-  replaces. The caller's shell timeout must exceed `--timeout`, and the
-  exit code is this process's, never a pipe's: `merge-pr | tail` reports
-  tail's.
+  replaces. One failed read inside the deadline is retried at the next
+  poll, never a death: a 502 at minute twelve of a wait must not send the
+  caller back to a hand-rolled poll. The caller's shell timeout must exceed
+  `--timeout`, and the exit code is this process's, never a pipe's:
+  `merge-pr | tail` reports tail's.
 
 What this does NOT do, deliberately: decide. Reading the thread for a
 request-changes verdict, the workflow carve-out, and the file-list read
@@ -90,6 +94,8 @@ import re
 import subprocess
 import sys
 import time
+
+from verdict import approved_at
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 # The reviewer's typed verdict (CLAUDE.md "Issue/PR conventions"): exactly
@@ -141,16 +147,25 @@ def api_message(proc):
         return proc.stderr.strip()
 
 
+class ApiError(Exception):
+    """A read GitHub refused or that gh could not make; carries GitHub's words.
+    Raised, not died on, so the wait loop can retry inside its deadline while
+    every other caller dies with the reason."""
+
+
+def gh_json(args):
+    proc, _ = gh_api(args)
+    if proc.returncode != 0:
+        raise ApiError(api_message(proc))
+    return json.loads(proc.stdout)
+
+
 def required_contexts():
     """The gate names `main` actually enforces, from the ruleset, so this list
     cannot drift from the one the server uses."""
-    proc, _ = gh_api((f"repos/{REPO}/rules/branches/main",))
-    if proc.returncode != 0:
-        die(f"cannot read main's ruleset ({api_message(proc)}); "
-            "refusing to escalate without proof the gates are green")
     contexts = [
         check["context"]
-        for rule in json.loads(proc.stdout)
+        for rule in gh_json((f"repos/{REPO}/rules/branches/main",))
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]
     ]
@@ -165,12 +180,9 @@ def latest_runs(sha):
     """Newest check run per name on this SHA. A re-run leaves its predecessor
     in the rollup (PR #377 carried two `review` runs), so the latest start
     wins."""
-    proc, _ = gh_api((f"repos/{REPO}/commits/{sha}/check-runs?per_page=100",))
-    if proc.returncode != 0:
-        die(f"cannot read check runs on {sha[:12]} ({api_message(proc)}); "
-            "nothing is proven green")
     latest = {}
-    for run in json.loads(proc.stdout).get("check_runs", []):
+    runs = gh_json((f"repos/{REPO}/commits/{sha}/check-runs?per_page=100",))
+    for run in runs.get("check_runs", []):
         seen = latest.get(run["name"])
         if seen is None or (run["started_at"] or "") > (seen["started_at"] or ""):
             latest[run["name"]] = run
@@ -198,10 +210,7 @@ def red_gates(latest, contexts):
 
 
 def read_pr(pr):
-    proc, _ = gh_api((f"repos/{REPO}/pulls/{pr}",))
-    if proc.returncode != 0:
-        die(f"reading PR #{pr} failed: {api_message(proc)}")
-    return json.loads(proc.stdout)
+    return gh_json((f"repos/{REPO}/pulls/{pr}",))
 
 
 def exit_if_landed(pr, info):
@@ -221,34 +230,63 @@ def describe(run):
 
 def wait_for_verdict(pr, sha, timeout, interval):
     """Block until `sha` carries an approving verdict and every required gate
-    is green, then return; every other outcome exits here with its code.
-    The deadline is checked after each poll, so `--timeout 0` polls once."""
-    contexts = required_contexts()
+    is green, then return it; every other outcome exits here with its code.
+    `sha` None pins the head of the first read, so the wait owns every read
+    and one failed read is a retry wherever it falls. The deadline is checked
+    after each poll, so `--timeout 0` polls once."""
     deadline = time.monotonic() + timeout
+    contexts = None
+    review = "unread"
+    labels = []
+    pending = []
     while True:
-        info = read_pr(pr)
-        exit_if_landed(pr, info)
-        head = info["head"]["sha"]
-        if head != sha:
-            die(f"head moved past the pinned {sha[:12]} to {head[:12]}; "
-                "re-read the PR before deciding again")
-        latest = latest_runs(sha)
-        review = describe(latest.get(REVIEW_CHECK))
-        labels = sorted(
-            label["name"] for label in info.get("labels", [])
-            if label["name"] in VERDICT_LABELS
-        )
-        red = red_gates(latest, contexts)
-        pending = unmet_gates(latest, contexts)
-        if red:
-            die(f"required gates red on {sha[:12]}: {', '.join(red)}; "
-                "fix the head, there is nothing to wait for", 2)
-        if review == "success":
+        try:
+            contexts = contexts or required_contexts()
+            info = read_pr(pr)
+            exit_if_landed(pr, info)
+            head = info["head"]["sha"]
+            sha = sha or head
+            if head != sha:
+                die(f"head moved past the pinned {sha[:12]} to {head[:12]}; "
+                    "re-read the PR before deciding again")
+            latest = latest_runs(sha)
+        except ApiError as err:
+            note(f"read failed ({err}); retrying at the next poll")
+            info = latest = None
+        if info is not None:
+            run = latest.get(REVIEW_CHECK)
+            review = describe(run)
+            labels = sorted(
+                label["name"] for label in info.get("labels", [])
+                if label["name"] in VERDICT_LABELS
+            )
+            red = red_gates(latest, contexts)
+            pending = unmet_gates(latest, contexts)
+            if red:
+                die(f"required gates red on {sha[:12]}: {', '.join(red)}; "
+                    "fix the head, there is nothing to wait for", 2)
+        if info is not None and review == "success":
             if labels == ["agent-approved"]:
                 if not pending:
-                    note(f"#{pr} approved at {sha[:12]}, every required gate "
-                         "green; merging")
-                    return
+                    # Both stamps are GitHub's ISO-8601 UTC strings, so the
+                    # string order is the time order (stalled-prs holds the
+                    # same comparison). None is an unread timeline, retried.
+                    labeled = approved_at(pr)
+                    started = run.get("started_at") or ""
+                    if labeled is None:
+                        note("the agent-approved label event did not read; "
+                             "retrying at the next poll")
+                    elif labeled < started:
+                        die(f"agent-approved on #{pr} was applied at {labeled}, "
+                            f"before this head's review run started at {started}: "
+                            "the label survived a push and a paused or empty round "
+                            "left it (stalled-prs holds on the same test); read the "
+                            "round, then merge without --wait", 4)
+                    else:
+                        note(f"#{pr} approved at {sha[:12]} ({labeled}, after the "
+                             f"review started {started}), every required gate "
+                             "green; merging")
+                        return sha
             elif labels == ["changes-requested"]:
                 die(f"changes requested on #{pr} at {sha[:12]}: read "
                     f"{info['html_url']}, fix every [must], push, wait again", 3)
@@ -256,13 +294,13 @@ def wait_for_verdict(pr, sha, timeout, interval):
                 die(f"review concluded on {sha[:12]} with verdict labels "
                     f"{', '.join(labels) or 'none'}: a paused guard or an "
                     "unlabeled verdict, either is for a reader, not a merge", 4)
-        elif review not in ("not started", "queued", "in_progress", "waiting",
-                            "requested", "pending"):
+        elif info is not None and review not in (
+                "not started", "queued", "in_progress", "waiting", "requested", "pending"):
             die(f"review {review} on {sha[:12]}: no verdict will come from this "
                 "run; the thread says whether the reviewer never ran (#114) or "
                 "its run died, and `stalled-prs --rescue` names the recipe", 4)
         if time.monotonic() >= deadline:
-            die(f"waited {timeout}s on {sha[:12]}: review {review}, verdict labels "
+            die(f"waited {timeout}s on {(sha or 'an unread head')[:12]}: review {review}, verdict labels "
                 f"{', '.join(labels) or 'none'}, gates pending "
                 f"{', '.join(pending) or 'none'}", 4)
         time.sleep(interval)
@@ -335,11 +373,15 @@ def main():
             "environment; a review session merges only the PR it was "
             "scoped to (issue #771)")
 
-    info = read_pr(pr)
-    exit_if_landed(pr, info)
-    sha = sha or info["head"]["sha"]
     if wait:
-        wait_for_verdict(pr, sha, timeout, interval)
+        sha = wait_for_verdict(pr, sha, timeout, interval)
+    else:
+        try:
+            info = read_pr(pr)
+        except ApiError as err:
+            die(f"reading PR #{pr} failed: {err}")
+        exit_if_landed(pr, info)
+        sha = sha or info["head"]["sha"]
 
     proc, status = attempt(pr, sha)
     if proc.returncode == 0:
@@ -364,7 +406,11 @@ def main():
         die(f"session token refused #{pr} (403: {api_message(proc)}); "
             "this merge is the BDFL's, on the admin PAT "
             "(agents/GOVERNANCE.md, Merging)")
-    pending = unmet_gates(latest_runs(sha), required_contexts())
+    try:
+        pending = unmet_gates(latest_runs(sha), required_contexts())
+    except ApiError as err:
+        die(f"cannot read the gates on {sha[:12]} ({err}); refusing to escalate "
+            "without proof they are green")
     if pending:
         die(f"refusing to escalate #{pr}: required gates not green on "
             f"{sha[:12]}: {', '.join(pending)}", 2)

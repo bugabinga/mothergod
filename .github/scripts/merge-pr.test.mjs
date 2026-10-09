@@ -5,7 +5,8 @@
 // that must see "in progress, then concluded" has something to see. With no
 // script every call fails loudly, so the guard tests prove only that the
 // guard did or did not let the call through. The unscripted merge paths
-// (403 escalation, 405, 409) still have no coverage here.
+// (403 escalation, 405, 409) still have no coverage here. The timeline read
+// in verdict.py is covered through the wait's stale-approval tests only.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -115,6 +116,15 @@ const runs = (...entries) => ({
     })),
   },
 });
+// The review run in every fixture started at 08:00:00Z; the label event
+// either postdates it (a verdict on this head) or predates it (a label that
+// survived a push, PR #966's review).
+const labeled = (at) => ({
+  match: "issues/42/timeline",
+  responses: [{ stdout: [[{ event: "labeled", label: { name: "agent-approved" }, created_at: at }]] }],
+});
+const APPROVED_NOW = labeled("2026-10-09T08:01:30Z");
+const APPROVED_EARLIER = labeled("2026-10-09T07:30:00Z");
 const GREEN_GATES = [["fmt", "completed", "success"], ["test", "completed", "success"]];
 const merge = { match: "PUT repos/o/r/pulls/42/merge", responses: [{ stdout: { sha: "squash1" } }] };
 const WAIT = ["42", "--wait", "--interval", "0", "--timeout", "60"];
@@ -131,11 +141,15 @@ test("--wait: an approving verdict on the pinned head with green gates merges", 
           runs(["review", "completed", "success"], ...GREEN_GATES),
         ],
       },
+      APPROVED_NOW,
       merge,
     ],
   });
   assert.equal(status, 0, stdout);
-  assert.match(stdout, /approved at abc123456789, every required gate green/);
+  assert.match(
+    stdout,
+    /approved at abc123456789 \(2026-10-09T08:01:30Z, after the review started 2026-10-09T08:00:00Z\), every required gate green/,
+  );
   assert.match(stdout, /merged #42 at abc123456789 as squash1/);
   assert.equal(merges.length, 1);
   assert.match(merges[0].join(" "), /PUT repos\/o\/r\/pulls\/42\/merge/);
@@ -155,6 +169,48 @@ test("--wait: a stale agent-approved is not read until this head's review conclu
   assert.equal(status, 4);
   assert.match(stderr, /waited 0.*review in_progress, verdict labels agent-approved/);
   assert.deepEqual(merges, []);
+});
+
+test("--wait: an agent-approved applied before this head's review run started is held", () => {
+  // Round 1 approved, the author pushed, the guard was paused, round 2 ended
+  // green having run nothing: the label is on the PR, the run is success, and
+  // the head is unreviewed. The label event, not the label, is the evidence.
+  const { status, stderr, merges } = run(WAIT, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "success"], ...GREEN_GATES)] },
+      APPROVED_EARLIER,
+      merge,
+    ],
+  });
+  assert.equal(status, 4);
+  assert.match(
+    stderr,
+    /applied at 2026-10-09T07:30:00Z, before this head's review run started at 2026-10-09T08:00:00Z/,
+  );
+  assert.deepEqual(merges, []);
+});
+
+test("--wait: one failed read inside the deadline is retried, not fatal", () => {
+  const { status, stdout, merges } = run(WAIT, {
+    responses: [
+      {
+        match: "^api repos/o/r/pulls/42$",
+        responses: [
+          { status: 1, stderr: "gh: Server Error (HTTP 502)", stdout: { message: "Server Error" } },
+          pr(["agent-approved"]),
+        ],
+      },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "success"], ...GREEN_GATES)] },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout);
+  assert.match(stdout, /read failed \(Server Error\); retrying at the next poll/);
+  assert.equal(merges.length, 1);
 });
 
 test("--wait: changes-requested exits 3 and merges nothing", () => {
@@ -238,17 +294,26 @@ test("--wait: a review that concluded green without a verdict label exits 4", ()
   assert.deepEqual(merges, []);
 });
 
-test("--wait: the head moving past the pinned SHA exits 1 before any merge", () => {
-  const { status, stderr, merges } = run([...WAIT, "--sha", "0000000000000000"], {
+test("--wait: a head that moves between polls exits 1 before any merge", () => {
+  const { status, stderr, merges, calls } = run(WAIT, {
     responses: [
-      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      {
+        match: "^api repos/o/r/pulls/42$",
+        responses: [pr([]), pr([], { head: { sha: "def4567890abcdef1234" } })],
+      },
       ruleset,
+      { match: "check-runs", responses: [runs(["review", "in_progress", null], ...GREEN_GATES)] },
       merge,
     ],
   });
   assert.equal(status, 1);
-  assert.match(stderr, /head moved past the pinned 000000000000 to abc123456789/);
+  assert.match(stderr, /head moved past the pinned abc123456789 to def4567890ab/);
   assert.deepEqual(merges, []);
+  assert.equal(
+    calls.filter((c) => c.join(" ").includes("check-runs")).length,
+    1,
+    "the first poll saw the old head; the second never read its runs",
+  );
 });
 
 test("--wait: a PR merged by the reviewer during the wait is success", () => {
