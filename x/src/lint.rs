@@ -35,6 +35,11 @@ pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
         .iter()
         .filter(|path| kind(path) == Some(FileKind::Markdown))
         .collect::<Vec<_>>();
+    let workflow_files = selection
+        .files
+        .iter()
+        .filter(|path| kind(path) == Some(FileKind::Yaml))
+        .collect::<Vec<_>>();
     let rules = if markdown_files.is_empty() {
         Vec::new()
     } else {
@@ -75,6 +80,17 @@ pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
             if let Some(warning) = &check.unreleased_size_warning {
                 eprintln!("{warning}");
             }
+        }
+    }
+
+    for relative in workflow_files {
+        let path = selection.root.join(relative);
+        let source = fs::read_to_string(&path)
+            .map_err(|error| format!("{}: cannot read UTF-8 text: {error}", relative.display()))?;
+        let unpinned = check_action_pins(relative, &source);
+        findings += unpinned.len();
+        for finding in &unpinned {
+            eprintln!("{finding}");
         }
     }
 
@@ -199,6 +215,47 @@ fn check_changelog(relative: &Path, source: &str) -> ChangelogCheck {
     }
 }
 
+/// Rejects a `uses:` naming an action by anything but a 40-hex commit SHA
+/// followed by a version comment (issue #898). A tag is a pointer a
+/// compromised account can move; the comment is what keeps the pin readable,
+/// and dependabot rewrites it on each bump. The one exemption is a same-repo
+/// `./` path, pinned by the commit it rides in. `docker://` is red until a
+/// digest form is admitted; none exists today. `statuses:` ends in the same
+/// six letters, so the match is anchored at the key, and a commented-out
+/// `uses:` is a comment, not a pin.
+fn check_action_pins(relative: &Path, source: &str) -> Vec<String> {
+    let mut findings = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        let item = line.trim_start();
+        let item = item.strip_prefix("- ").map_or(item, str::trim_start);
+        let Some(reference) = item.strip_prefix("uses:") else {
+            continue;
+        };
+        let reference = reference.trim();
+        if reference.starts_with("./") {
+            continue;
+        }
+        let (target, comment) = reference
+            .split_once('#')
+            .map_or((reference, ""), |(target, comment)| {
+                (target.trim_end(), comment.trim())
+            });
+        let pinned = target
+            .rsplit_once('@')
+            .is_some_and(|(_, sha)| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()));
+        if !pinned || comment.is_empty() {
+            findings.push(format!(
+                "{}:{}: `uses: {reference}` is not pinned: an external action is \
+                 `owner/repo@<40-hex commit sha> # <version>` (resolve the tag with \
+                 `gh api repos/<owner>/<repo>/git/ref/tags/<version>`); only `./` paths are exempt",
+                relative.display(),
+                index + 1,
+            ));
+        }
+    }
+    findings
+}
+
 fn run_clippy(root: &Path, files: &[PathBuf]) -> Result<bool, String> {
     let mut core = false;
     let mut bench = false;
@@ -313,6 +370,40 @@ mod tests {
                 .is_some_and(
                     |warning| warning.contains("over the") && warning.contains("warning ceiling")
                 )
+        );
+    }
+
+    #[test]
+    fn action_pins_accept_a_sha_with_a_version_comment_and_same_repo_paths() {
+        let source = "steps:\n\
+            \x20 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n\
+            \x20   with:\n\
+            \x20     fetch-depth: 0\n\
+            \x20 - uses: ./.github/actions/rust-ci\n\
+            \x20 - id: claude\n\
+            \x20   uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1\n\
+            permissions:\n\
+            \x20 statuses: write\n\
+            # - uses: actions/cache@v6\n";
+        let findings = check_action_pins(Path::new("a.yml"), source);
+        assert_eq!(findings, [] as [String; 0]);
+    }
+
+    #[test]
+    fn action_pins_reject_tags_branches_bare_shas_and_docker() {
+        let source = "- uses: actions/checkout@v7\n\
+            - uses: dtolnay/rust-toolchain@stable\n\
+            - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9\n\
+            - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c5 # v6\n\
+            - uses: docker://alpine:3.20\n";
+        let findings = check_action_pins(Path::new("w.yml"), source);
+        assert_eq!(findings.len(), 5);
+        assert!(findings[0].starts_with("w.yml:1: `uses: actions/checkout@v7` is not pinned"));
+        assert!(findings[2].contains("w.yml:3:"));
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.contains("git/ref/tags"))
         );
     }
 

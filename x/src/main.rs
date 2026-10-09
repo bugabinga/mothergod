@@ -37,7 +37,7 @@ enum Task {
     Check,
     /// Format supported files, or verify formatting with --check
     Fmt(FormatArgs),
-    /// Run Rust and Markdown linters, optionally applying safe Markdown fixes
+    /// Run Rust, Markdown and workflow-pin linters, optionally applying safe Markdown fixes
     Lint(LintArgs),
     /// Run the fixed test plan: core, x, then doc
     #[command(
@@ -67,7 +67,7 @@ struct FormatArgs {
 
 #[derive(Args)]
 #[command(
-    after_help = "Runs Clippy for selected Rust package scopes and rumdl for selected Markdown files.\n\nWithout PATH arguments, every supported tracked file is selected. Markdown files are checked exactly; Rust files select their containing Cargo package because Clippy works at package scope.\n\nThe repository Markdown profile is documented in x/README.md. --fix applies only fixes rumdl marks safe, then checks the result again.\n\nExamples:\n  cargo x lint\n  cargo x lint -- src\n  cargo x lint -- README.md\n  cargo x lint --fix -- README.md"
+    after_help = "Runs Clippy for selected Rust package scopes, rumdl for selected Markdown files, and the action-pin rule for YAML under .github/: every external `uses:` is a 40-hex commit SHA with a version comment.\n\nWithout PATH arguments, every supported tracked file is selected. Markdown files are checked exactly; Rust files select their containing Cargo package because Clippy works at package scope.\n\nThe repository Markdown profile is documented in x/README.md. --fix applies only fixes rumdl marks safe, then checks the result again.\n\nExamples:\n  cargo x lint\n  cargo x lint -- src\n  cargo x lint -- README.md\n  cargo x lint --fix -- README.md"
 )]
 struct LintArgs {
     /// Apply safe Markdown fixes before reporting remaining findings
