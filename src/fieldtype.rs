@@ -10,7 +10,7 @@
 //! Not yet wired into [`crate::literal`] or [`crate::codec`].
 //!
 //! **Why not [`crate::column`]'s own approach.** S1-P5's per-column expert
-//! (`column::column_of`/`column_bank`, `ADR-0046`) keys a context on a
+//! (`column::column_of`/`bank_of`, `ADR-0046`) keys a context on a
 //! byte's position modulo a fixed stride, real *after*
 //! [`crate::filters::transpose::encode`] has already regrouped a
 //! fixed-width record format into column-major order. JSON, JSONL, and a
@@ -139,7 +139,7 @@ impl FieldState {
 /// four variants, times whether the state that produced them was inside a
 /// quoted string, so a caller keying a context bank on this state always
 /// sizes its storage from this constant, never from anything unbounded
-/// (`crate::column::column_bank`'s own convention, CLAUDE.md hard rule 2 —
+/// (`crate::column::bank_of`'s own convention, CLAUDE.md hard rule 2 —
 /// moot here since every input to [`field_bank`] is already bounded by
 /// construction, but kept as the one named constant a future bank-sizing
 /// caller reads instead of re-deriving `4 * 2`).

@@ -1,4 +1,4 @@
-use super::{bank_of, column_bank, column_of};
+use super::{bank_of, column_of};
 use crate::test_support::nz;
 
 /// Ground truth independent of [`column_of`]'s closed form: replays
@@ -83,51 +83,24 @@ fn position_at_len_panics() {
 }
 
 #[test]
-fn column_bank_is_identity_when_columns_fit_within_max_banks() {
-    for column in 0..8 {
-        assert_eq!(column_bank(column, nz(8)), column);
-    }
-}
-
-#[test]
-fn column_bank_wraps_columns_beyond_max_banks() {
-    // 10 columns, 4 banks: columns 4-9 alias onto banks 0-1-2-3-0-1,
-    // the same wraparound `% max_banks.get()` computes directly.
-    let max_banks = nz(4);
-    for column in 0..10 {
-        assert_eq!(column_bank(column, max_banks), column % 4);
-    }
-}
-
-#[test]
-fn column_bank_never_exceeds_max_banks() {
-    let max_banks = nz(3);
-    for column in 0..100 {
-        assert!(column_bank(column, max_banks) < max_banks.get());
-    }
-}
-
-#[test]
-fn column_bank_of_a_real_column_of_result_stays_bounded() {
-    // End-to-end: every position's real column (from column_of) maps
-    // into a fixed 5-bank space, regardless of how many columns the
-    // filter actually chose.
-    let columns = nz(37);
-    let len = 200;
-    let max_banks = nz(5);
+fn bank_is_column_when_columns_fit_within_max_banks() {
+    let (columns, len, max_banks) = (nz(8), 200, nz(8));
     for position in 0..len {
-        let column = column_of(position, columns, len);
-        assert!(column_bank(column, max_banks) < max_banks.get());
+        assert_eq!(
+            bank_of(position, columns, len, max_banks),
+            column_of(position, columns, len)
+        );
     }
 }
 
 #[test]
-fn bank_of_matches_column_of_then_column_bank() {
-    let columns = nz(37);
-    let len = 200;
-    let max_banks = nz(5);
+fn bank_wraps_columns_beyond_max_banks() {
+    // 37 columns, 5 banks: every position's bank is its column mod 5,
+    // however many columns the filter actually chose.
+    let (columns, len, max_banks) = (nz(37), 200, nz(5));
     for position in 0..len {
-        let expected = column_bank(column_of(position, columns, len), max_banks);
-        assert_eq!(bank_of(position, columns, len, max_banks), expected);
+        let bank = bank_of(position, columns, len, max_banks);
+        assert_eq!(bank, column_of(position, columns, len) % 5);
+        assert!(bank < max_banks.get());
     }
 }

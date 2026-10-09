@@ -76,7 +76,7 @@ through a stretch-domain SSE table (evenly spaced bins in logit space,
 concentrating resolution near 0/1) keyed on tree position
 (`literal::Literal::encode_logit_sse`/`decode_logit_sse`). A frame whose
 selector names `Candidate::Transpose` codes its literals one step further
-still: a column-keyed seventh expert (`column::column_of`/`column_bank`,
+still: a column-keyed seventh expert (`column::column_of`/`bank_of`,
 keyed on the byte's position among the transposed stream's columns) is
 blended into the six-expert mix before a linear-domain SSE-calibrated
 binary-tree coding (`literal::Literal::encode_column`/`decode_column`).
