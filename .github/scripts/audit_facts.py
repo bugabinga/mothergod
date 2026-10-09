@@ -1,17 +1,31 @@
-"""The whitelist read of one audit artifact's metadata.json, stated once.
+"""The whitelist read of one audit artifact, stated once: the parse, the row, the walk.
 
-Two consumers: `run-telemetry.py` aggregates it into the model-intel report
+Three consumers: `run-telemetry.py` aggregates it into the model-intel report
 and the site feed (ADR-0023), `session-row.py` writes it as one row of the
-session table (ADR-0060). Both read API-authored numbers and identifiers and
-nothing else, so a summarizing agent's injection surface does not exist here
-(ADR-0019). A second copy of this function would be the one parse drifting
-into two, which is why it moved out of run-telemetry.py the day a second
-reader appeared.
+session table the moment a run ends, and `sessions backfill` writes the same
+row from the archive (ADR-0060, issue #891). All read API-authored numbers
+and identifiers and nothing else, so a summarizing agent's injection surface
+does not exist here (ADR-0019). A second copy of `facts` would be the one
+parse drifting into two, which is why it moved out of run-telemetry.py the
+day a second reader appeared; the archive walk and the row followed it the
+day the backfill became a third.
 
 `meta` is the parsed metadata.json with `_at` set by the caller to the
 instant the row describes: the artifact's creation time when walking the
 archive, now when the run itself is writing.
 """
+
+import collections
+import io
+import json
+import subprocess
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+
+class Unreadable(Exception):
+    """The archive could not be listed, or one artifact could not be read."""
 
 
 def facts(meta):
@@ -77,3 +91,129 @@ def facts(meta):
         # persona changed" questions, a hash so no prose travels.
         "persona_sha": persona.get("sha256") or "",
     }
+
+
+# The session table's row, in the column order infra/sessions/schema.sql
+# declares. Both writers bind it to INSERT; a new column is one line here
+# and one ALTER line in the schema, in the same diff.
+COLUMNS = (
+    "run_id", "attempt", "at", "role", "event", "actor", "number",
+    "commit_sha", "measured", "model", "out_tokens", "think_pct", "cost_usd",
+    "turns", "duration_ms", "denials", "error", "stop_reason", "persona_sha",
+    "prompt_bytes", "response_bytes",
+)
+INSERT = (f"INSERT OR REPLACE INTO sessions ({', '.join(COLUMNS)}) "
+          f"VALUES ({', '.join('?' * len(COLUMNS))})")
+
+
+def as_int(value):
+    """An id or count as an integer, or None: '' and junk are absent, not 0."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def row(meta, size):
+    """One table row from the artifact's metadata, in COLUMNS order.
+
+    `size(name)` is the byte count of a published text, `input-prompt.md` or
+    `output-response.md`, or None. It is asked only when the extractor
+    flagged the text as extracted: where the text was missing it wrote a
+    placeholder line, whose byte count would read as a tiny prompt.
+    """
+    f = facts(meta)
+    return (
+        as_int(f["run_id"]), as_int(f["attempt"]) or 1, f["at"], f["role"],
+        f["event"] or None, f["actor"] or None, as_int(f["number"]),
+        f["commit"] or None, int(f["measured"]), f["model"] or None,
+        f["out"] if f["measured"] else None, f["think"], f["cost"],
+        f["turns"], f["duration_ms"], f["denials"], int(f["error"]),
+        f["stop_reason"] or None, f["persona_sha"] or None,
+        size("input-prompt.md") if meta.get("prompt_extracted") else None,
+        size("output-response.md") if meta.get("response_extracted") else None,
+    )
+
+
+# One unexpired audit artifact as the listing names it. `made` is its
+# creation instant, the `at` of a row written from the archive.
+Artifact = collections.namedtuple("Artifact", "id name made")
+
+# What one walk hands back per artifact: `error` is None and `meta` carries
+# `_at` when the artifact was read; otherwise `error` says why it was not.
+Read = collections.namedtuple("Read", "artifact meta sizes error")
+
+# Downloads in flight at once. Each zip call is a redirect to blob storage
+# at under half a second, and the archive held 1,773 artifacts on
+# 2026-10-09, 13 minutes serial; eight in flight is two, and well inside
+# the token's hourly rate limit and GitHub's concurrency limits.
+WORKERS = 8
+
+
+def gh(*args):
+    """Run gh and return its stdout as bytes; a non-zero exit is Unreadable.
+
+    gh carries the token; nothing here sees one, and the failure text is
+    gh's own, which never prints it.
+    """
+    proc = subprocess.run(["gh", *args], capture_output=True)
+    if proc.returncode != 0:
+        raise Unreadable(proc.stderr.decode("utf-8", "replace").strip()[:400])
+    return proc.stdout
+
+
+def archive(repo, since=None):
+    """Every unexpired audit artifact of `repo`, oldest first.
+
+    `since`, a datetime, keeps the artifacts created at or after it. Oldest
+    first because the archive expires from the front: a walk that dies
+    midway has written what was about to be lost. The listing is GitHub's,
+    so an expired artifact is gone from here the day it is gone from the
+    archive.
+    """
+    try:
+        pages = json.loads(gh("api", "--paginate", "--slurp",
+                              f"repos/{repo}/actions/artifacts?per_page=100"))
+    except ValueError as error:
+        raise Unreadable(f"artifact listing is not JSON: {error}") from None
+    found = []
+    for page in pages:
+        for art in page.get("artifacts", []):
+            if not art.get("name", "").startswith("audit-") or art.get("expired"):
+                continue
+            try:
+                made = datetime.fromisoformat(art["created_at"].replace("Z", "+00:00"))
+            except (KeyError, ValueError):
+                continue
+            if since is None or made >= since:
+                found.append(Artifact(art["id"], art["name"], made))
+    found.sort(key=lambda a: a.made)
+    return found
+
+
+def fetch(repo, artifact):
+    """One artifact's metadata with `_at` set, and the byte size of every file in it."""
+    blob = gh("api", f"repos/{repo}/actions/artifacts/{artifact.id}/zip")
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            sizes = {info.filename: info.file_size for info in zf.infolist()}
+            meta = json.loads(zf.read("metadata.json"))
+    except (KeyError, ValueError, zipfile.BadZipFile) as error:
+        raise Unreadable(str(error)) from None
+    if not isinstance(meta, dict):
+        raise Unreadable("metadata.json is not an object")
+    meta["_at"] = artifact.made
+    return meta, sizes
+
+
+def walk(repo, artifacts):
+    """Yield one Read per artifact, in listing order, WORKERS downloads at a time."""
+    def one(artifact):
+        try:
+            meta, sizes = fetch(repo, artifact)
+        except Unreadable as error:
+            return Read(artifact, None, None, str(error))
+        return Read(artifact, meta, sizes, None)
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        yield from pool.map(one, artifacts)

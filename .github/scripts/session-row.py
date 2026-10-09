@@ -4,8 +4,9 @@
 Called by `.github/actions/agent-audit` once the artifact is extracted, with
 the audit output directory as argv[1]: the row is derived from the same
 scrubbed files the artifact publishes and nothing more. Numbers and
-identifiers only, through audit_facts.facts(), the whitelist run-telemetry.py
-reads; no prose reaches the table (ADR-0019).
+identifiers only, through audit_facts.row(), the one whitelist every reader
+of an artifact shares; no prose reaches the table (ADR-0019). The same row
+written from the archive is `sessions backfill`.
 
 Never fails the run: exit 0 on every path, because observability does not
 get to break the thing it observes (ADR-0023). A row that could not be
@@ -22,54 +23,17 @@ import sys
 from datetime import datetime, timezone
 
 import d1
-from audit_facts import facts
-
-COLUMNS = (
-    "run_id", "attempt", "at", "role", "event", "actor", "number",
-    "commit_sha", "measured", "model", "out_tokens", "think_pct", "cost_usd",
-    "turns", "duration_ms", "denials", "error", "stop_reason", "persona_sha",
-    "prompt_bytes", "response_bytes",
-)
-INSERT = (f"INSERT OR REPLACE INTO sessions ({', '.join(COLUMNS)}) "
-          f"VALUES ({', '.join('?' * len(COLUMNS))})")
+from audit_facts import INSERT, row
 
 
-def as_int(value):
-    """An id or count as an integer, or None: '' and junk are absent, not 0."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def size_of(audit_dir, name, extracted):
-    """Bytes of one published text, None when the extractor found nothing.
-
-    The extractor writes a placeholder line where the text was missing; its
-    byte count would read as a tiny prompt, so the extracted flag decides.
-    """
-    if not extracted:
-        return None
-    try:
-        return os.path.getsize(os.path.join(audit_dir, name))
-    except OSError:
-        return None
-
-
-def row_of(meta, audit_dir, now):
-    """One table row from the artifact's metadata, in COLUMNS order."""
-    meta["_at"] = now
-    f = facts(meta)
-    return (
-        as_int(f["run_id"]), as_int(f["attempt"]) or 1, f["at"], f["role"],
-        f["event"] or None, f["actor"] or None, as_int(f["number"]),
-        f["commit"] or None, int(f["measured"]), f["model"] or None,
-        f["out"] if f["measured"] else None, f["think"], f["cost"],
-        f["turns"], f["duration_ms"], f["denials"], int(f["error"]),
-        f["stop_reason"] or None, f["persona_sha"] or None,
-        size_of(audit_dir, "input-prompt.md", meta.get("prompt_extracted")),
-        size_of(audit_dir, "output-response.md", meta.get("response_extracted")),
-    )
+def size_in(audit_dir):
+    """The byte count of one published text in the directory, None when absent."""
+    def size(name):
+        try:
+            return os.path.getsize(os.path.join(audit_dir, name))
+        except OSError:
+            return None
+    return size
 
 
 def main(argv):
@@ -88,16 +52,17 @@ def main(argv):
     except (OSError, ValueError) as error:
         print(f"::warning::session-row: not written: {error}")
         return 0
-    row = row_of(meta, audit_dir, datetime.now(timezone.utc))
-    if row[0] is None:
+    meta["_at"] = datetime.now(timezone.utc)
+    values = row(meta, size_in(audit_dir))
+    if values[0] is None:
         print("::warning::session-row: not written: metadata carries no run_id")
         return 0
     try:
-        d1.query(INSERT, row)
+        d1.query(INSERT, values)
     except d1.Unreadable as error:
         print(f"::warning::session-row: not written: {error}")
         return 0
-    print(f"session-row: wrote run {row[0]} attempt {row[1]} for {row[3]}")
+    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}")
     return 0
 
 

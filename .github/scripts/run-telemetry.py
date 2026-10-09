@@ -51,16 +51,14 @@ Usage: run-telemetry.py <out.md|out.json> [window_days]
 """
 
 import collections
-import io
 import json
 import os
 import statistics
 import subprocess
 import sys
-import zipfile
 from datetime import datetime, timedelta, timezone
 
-from audit_facts import facts
+from audit_facts import Unreadable, archive, facts, walk
 
 out_path = sys.argv[1]
 WINDOW = int(sys.argv[2]) if len(sys.argv) > 2 else 7
@@ -92,11 +90,11 @@ def bail(reason):
     sys.exit(0)
 
 
-def gh(*args, binary=False):
-    proc = subprocess.run(["gh", *args], capture_output=True)
+def gh(*args):
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.decode("utf-8", "replace")[:400])
-    return proc.stdout if binary else proc.stdout.decode("utf-8", "replace")
+        raise RuntimeError(proc.stderr[:400])
+    return proc.stdout
 
 
 if not REPO:
@@ -107,45 +105,25 @@ recent_from = now - timedelta(days=WINDOW)
 prior_from = now - timedelta(days=2 * WINDOW)
 
 try:
-    pages = json.loads(gh("api", "--paginate", "--slurp",
-                          f"repos/{REPO}/actions/artifacts?per_page=100"))
-except (RuntimeError, ValueError) as exc:
+    wanted = archive(REPO, since=prior_from)
+except Unreadable as exc:
     bail(f"Could not list artifacts ({exc}).")
-
-wanted = []
-for page in pages:
-    for art in page.get("artifacts", []):
-        if not art.get("name", "").startswith("audit-") or art.get("expired"):
-            continue
-        try:
-            made = datetime.fromisoformat(art["created_at"].replace("Z", "+00:00"))
-        except (KeyError, ValueError):
-            continue
-        if made >= prior_from:
-            wanted.append((art["id"], made))
 
 if not wanted:
     bail(f"No unexpired audit artifacts in the last {2 * WINDOW} days.")
 
 truncated = 0
 if len(wanted) > MAX_DOWNLOADS:
-    wanted.sort(key=lambda p: p[1], reverse=True)
+    # The listing is oldest first; the cap keeps the newest.
     truncated = len(wanted) - MAX_DOWNLOADS
-    wanted = wanted[:MAX_DOWNLOADS]
+    wanted = wanted[-MAX_DOWNLOADS:]
 
 runs, unreadable = [], 0
-for art_id, made in wanted:
-    try:
-        blob = gh("api", f"repos/{REPO}/actions/artifacts/{art_id}/zip", binary=True)
-        meta = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("metadata.json"))
-    except (RuntimeError, ValueError, KeyError, zipfile.BadZipFile):
+for read in walk(REPO, wanted):
+    if read.error:
         unreadable += 1
         continue
-    if not isinstance(meta, dict):
-        unreadable += 1
-        continue
-    meta["_at"] = made
-    runs.append(meta)
+    runs.append(read.meta)
 
 if not runs:
     bail(f"Found {len(wanted)} audit artifacts, none readable.")

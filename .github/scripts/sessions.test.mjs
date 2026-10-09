@@ -6,22 +6,28 @@
 // seam inbox.test.mjs uses for KV; nothing in production sets it.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
 const script = `${scriptsDir}/sessions`;
 
-// Serve one programmed D1 answer, record what the script sent, run `fn`.
+// Serve programmed D1 answers, one per request in order with the last
+// repeating, record what the script sent, run `fn`.
 async function withStub(answer, fn) {
+  const answers = Array.isArray(answer) ? answer : [answer];
   const seen = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
+      const a = answers[Math.min(seen.length, answers.length - 1)];
       seen.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(body || "{}") });
-      res.writeHead(answer.status ?? 200, { "content-type": "application/json" });
-      res.end(JSON.stringify(answer.payload ?? {}));
+      res.writeHead(a.status ?? 200, { "content-type": "application/json" });
+      res.end(JSON.stringify(a.payload ?? {}));
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -166,4 +172,154 @@ test("an unknown verb prints the usage line and exits 2", async () => {
   const r = await run(["list"], {});
   assert.equal(r.code, 2);
   assert.match(r.out, /^Usage: sessions sql/);
+});
+
+// The archive, for `backfill`: a stub gh answers the listing with `artifacts`
+// and a zip download with the files `zips` holds for that id, or junk bytes
+// for an id mapped to null. Every call lands in calls.log, so a test can say
+// which artifacts were downloaded and which were skipped on their name.
+function stubGh(artifacts, zips) {
+  const dir = mkdtempSync(join(tmpdir(), "sessions-"));
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/usr/bin/env python3
+import io, json, sys, zipfile
+artifacts = json.loads(${JSON.stringify(JSON.stringify(artifacts))})
+zips = json.loads(${JSON.stringify(JSON.stringify(zips))})
+args = sys.argv[1:]
+with open(${JSON.stringify(join(dir, "calls.log"))}, "a") as fh:
+    fh.write(" ".join(args) + "\\n")
+if args[:3] == ["api", "--paginate", "--slurp"] and args[3].startswith("repos/o/r/actions/artifacts?"):
+    print(json.dumps([{"artifacts": artifacts}]))
+elif args[0] == "api" and args[1].startswith("repos/o/r/actions/artifacts/") and args[1].endswith("/zip"):
+    files = zips.get(args[1].split("/")[-2])
+    if files is None:
+        sys.stdout.buffer.write(b"not a zip")
+        sys.exit(0)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, text in files.items():
+            zf.writestr(name, text)
+    sys.stdout.buffer.write(buf.getvalue())
+else:
+    sys.exit("stub gh: unexpected call " + " ".join(args))
+`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  return dir;
+}
+
+function downloads(dir) {
+  let log = "";
+  try {
+    log = readFileSync(join(dir, "calls.log"), "utf8");
+  } catch {
+    return [];
+  }
+  return log
+    .split("\n")
+    .filter((l) => l.endsWith("/zip"))
+    .map((l) => l.split("/").at(-2));
+}
+
+const metadata = (run_id, role) => ({
+  role,
+  trigger: { event: "pull_request", actor: "claude[bot]", number: "893" },
+  commit: "1ef993a0000000000000000000000000000000000",
+  run_id: String(run_id),
+  run_attempt: "1",
+  is_error: false,
+  telemetry: {
+    num_turns: 23,
+    duration_ms: 420000,
+    stop_reason: "end_turn",
+    usage: { output_tokens: 5000, output_tokens_details: { thinking_tokens: 1000 } },
+    modelUsage: { "claude-sonnet-5-5": { outputTokens: 5000, costUSD: 0.42, costBasis: "list" } },
+    permission_denials: { count: 2, tools: ["Edit", "Write"] },
+  },
+  persona: { sha256: "abc123" },
+  prompt_extracted: true,
+  response_extracted: true,
+});
+
+const artifact = (id, name, created_at, expired = false) => ({ id, name, created_at, expired });
+
+const listing = [
+  artifact(1, "audit-bdfl-100-1", "2026-08-22T08:14:32Z"),
+  artifact(2, "audit-reviewer-200-1-u2400-r1792029600", "2026-09-01T00:00:00Z"),
+  artifact(3, "audit-herald-300-2", "2026-09-02T00:00:00Z"),
+  artifact(4, "audit-curator-50-1", "2026-07-01T00:00:00Z", true),
+  artifact(5, "site-shots-1", "2026-09-03T00:00:00Z"),
+];
+const zips = {
+  2: {
+    "metadata.json": JSON.stringify(metadata(200, "reviewer")),
+    "input-prompt.md": "p".repeat(1234),
+    "output-response.md": "r".repeat(567),
+  },
+  3: null,
+};
+const keys = (pairs) => d1(pairs.map(([run_id, attempt]) => ({ run_id, attempt })));
+
+test("backfill writes the rows the archive has and the table lacks, and names the gap", async () => {
+  const gh = stubGh(listing, zips);
+  await withStub([keys([[100, 1]]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], { D1_API_BASE: base, GITHUB_REPOSITORY: "o/r", PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
+    const p = seen[1].body.params;
+    assert.equal(p.length, 21);
+    assert.deepEqual(p.slice(0, 4), [200, 1, "2026-09-01T00:00:00Z", "reviewer"]); // at is the artifact's creation
+    assert.deepEqual(p.slice(19), [1234, 567]); // sizes read from the zip
+    assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.equal(seen.length, 3);
+    assert.deepEqual(downloads(gh), ["2", "3"]); // the present row cost no download; the expired and the non-audit never listed
+    assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
+    assert.match(
+      r.out,
+      /^sessions backfill: artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 1 \| missing 1$/m,
+    );
+  });
+});
+
+test("backfill on a table equal to the archive downloads nothing and exits 0", async () => {
+  const gh = stubGh(listing.slice(0, 1), {});
+  await withStub([keys([[100, 1]]), keys([[100, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], { D1_API_BASE: base, GITHUB_REPOSITORY: "o/r", PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 2);
+    assert.deepEqual(downloads(gh), []);
+    assert.match(r.out, /artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 0 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+test("backfill --since keeps the artifacts created from that instant", async () => {
+  const gh = stubGh(listing.slice(0, 2), zips);
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--since", "2026-09-01", "--repo", "o/r"], {
+      D1_API_BASE: base,
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual(downloads(gh), ["2"]);
+    assert.equal(seen[1].body.params[0], 200);
+    assert.match(r.out, /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+test("backfill on an unreadable table stops before any download", async () => {
+  const gh = stubGh(listing, zips);
+  await withStub({ status: 500, payload: { success: false, errors: [{ message: "edge down" }] } }, async (base) => {
+    const r = await run(["backfill"], { D1_API_BASE: base, GITHUB_REPOSITORY: "o/r", PATH: `${gh}:${process.env.PATH}` });
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /UNREADABLE: HTTP 500/);
+    assert.deepEqual(downloads(gh), []);
+  });
+});
+
+test("backfill without a repository says what it needs and exits 2", async () => {
+  const r = await run(["backfill"], { GITHUB_REPOSITORY: "", D1_API_BASE: "http://127.0.0.1:9" });
+  assert.equal(r.code, 2);
+  assert.match(r.out, /backfill needs GITHUB_REPOSITORY or --repo/);
 });
