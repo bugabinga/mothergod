@@ -101,7 +101,10 @@ jobs:
                an enhancement without a beneficiary, a number without
                a corpus; ask for exactly what is missing, nothing
                more. Labels and milestones are yours to correct
-               silently. A title that no longer says what the issue
+               silently; a thread holding a complete, verified diff
+               with nothing left to build, waiting on a credential
+               or a review alone, gets ready-to-ship (CLAUDE.md,
+               labels). A title that no longer says what the issue
                asks is yours to sharpen, noting the old title in a
                comment. Another author's body text is never yours to
                edit.
