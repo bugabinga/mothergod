@@ -31,9 +31,13 @@ that follows reads as what the loop grew into.
 Evidence per claim: the date and "about 40 iterations" from
 `research/JOURNAL.md`'s S1 preamble ("~41 loop iterations"; the in-tree
 archive holds it1 to it31, the rest are journaled only, so "about").
-The loop's steps from `autoresearch2.py` at `1a3b1c8`: the `NOT
-INVERTIBLE` assert, the train/val scoring, the journal's `accepted`
-field. karpathy/autoresearch's metric (`val_bpb`) from its README, read
+The loop's steps from `autoresearch2.py` at `1a3b1c8`: the train/val
+scoring, the journal's `accepted` field, and the `NOT INVERTIBLE` assert,
+which covers `kind == 'filter'` only (`param` has no check, `context`
+checks an index range, `corpus` a regret threshold), so the sentence
+says "a proposed filter", never "the change". Acceptance also takes
+`dv<-0.05` ("rule v2"), so VAL steers it: "validation data", not
+"held-out" in `research/corpus/POLICY.md`'s sealed sense. karpathy/autoresearch's metric (`val_bpb`) from its README, read
 2026-10-09. "Still runs": `research/progress.jsonl` it190 is dated
 2026-10-08.
 

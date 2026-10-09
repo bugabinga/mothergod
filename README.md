@@ -83,10 +83,11 @@ assert_eq!(mothergod::decompress(&frame).unwrap(), b"hello");
 ## Who builds it
 
 mothergod began as an autoresearch loop. On 2026-08-19 one Claude session ran
-about 40 iterations of propose, check the change is lossless, score bits per
-byte on held-out data, keep or reject, record. Bits per byte is also the
-metric [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
-minimizes, on language models instead of files. That harness is preserved at
+about 40 iterations of propose, score bits per byte on validation data, keep
+or reject, record; a proposed filter had to invert first. Bits per byte is
+also the metric
+[karpathy/autoresearch](https://github.com/karpathy/autoresearch) minimizes,
+on language models instead of files. That harness is preserved at
 commit [`1a3b1c8`](https://github.com/bugabinga/mothergod/tree/1a3b1c8/research/imports/session-1),
 and its findings open the research journal. The loop still runs; around it
 grew a versioned format, a decoder fuzzed against hostile input, and review

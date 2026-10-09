@@ -401,9 +401,9 @@ cmp FILE FILE.out</pre>
         <h2>Who builds it</h2>
         <p>
           mothergod began as an autoresearch loop. On 2026-08-19 one Claude
-          session ran about 40 iterations of propose, check the change is
-          lossless, score bits per byte on held-out data, keep or reject,
-          record. Bits per byte is also the metric
+          session ran about 40 iterations of propose, score bits per byte on
+          validation data, keep or reject, record; a proposed filter had to
+          invert first. Bits per byte is also the metric
           <a href="https://github.com/karpathy/autoresearch"
           >karpathy/autoresearch</a> minimizes, on language models instead of
           files. That harness is preserved at commit
