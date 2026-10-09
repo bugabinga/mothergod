@@ -450,8 +450,8 @@ is preserved in git history with the full incident in its header.
 
 ## Tool envelopes
 
-The BDFL sets every agent's `--allowedTools` (ADR-0008). One rule, learned
-twice from telemetry:
+The BDFL sets every agent's `--tools` and `--allowedTools` (ADR-0008). One
+rule, learned twice from telemetry:
 
 **A Bash allowlist of binary names is not the security boundary.** The real
 boundary is the trigger surface, and it does not move: these jobs run only
