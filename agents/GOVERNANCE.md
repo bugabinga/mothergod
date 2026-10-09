@@ -127,8 +127,14 @@ used to hand out: REST instead of the porcelain (PRs #25, #84), the
 touches workflow files and only with the required gates proven green
 first, and a distinct exit (2) for gates-unmet, the one outcome where
 arming `gh pr merge <n> --squash --auto` and stopping is right (the
-BDFL sweep rescues an armed merge that never fires). It decides
-nothing: verdicts, carve-outs, and discretion stay with the caller.
+BDFL sweep rescues an armed merge that never fires). `--wait` is the
+foreground wait for a head whose verdict has not come yet: it blocks
+until the `review` check run concludes on the pinned head and the
+required gates are green, merges on `agent-approved`, exits 3 on
+`changes-requested` and 4 when no verdict can come, so no seat
+hand-rolls a poll (issue #842, three polls each wrong its own way).
+It decides nothing: verdicts, carve-outs, and discretion stay with
+the caller.
 An unsigned branch commit is never, by itself, a reason to stop or to
 label `blocked-on-human`: GitHub creates and signs the squash commit
 server-side (committer `GitHub <noreply@github.com>`), satisfying
