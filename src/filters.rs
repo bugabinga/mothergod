@@ -8,13 +8,14 @@
 //! full trial encode, and `crate::codec` (`JOURNAL` S2-D2, ADR-0028) trials
 //! them against real [`crate::Method::Lz`] output and keeps the smallest.
 //!
-//! Every inverse comes in two forms. The public `decode` aborts if the
-//! allocator cannot satisfy its output buffer and is what the tests drive.
-//! The `pub(crate)` `try_decode`, and each streaming `Undo::try_new`,
-//! return `Err` instead: `crate::codec`'s real decode paths use them,
-//! because hard rule 2 forbids an abort on untrusted input (`rust-craft`
-//! skill's allocation-discipline, `tests/torture.rs`, #453). A pair differs
-//! only in how the buffer is built, never in the scan run over it.
+//! `delta`, `transpose` and `bcj`, the three `crate::codec` selects, each
+//! invert in two forms. The public `decode` aborts if the allocator cannot
+//! satisfy its output buffer and is what the tests drive. The `pub(crate)`
+//! `try_decode`, and each streaming `Undo::try_new`, return `Err` instead:
+//! `crate::codec`'s real decode paths use them, because hard rule 2 forbids
+//! an abort on untrusted input (`rust-craft` skill's allocation-discipline,
+//! `tests/torture.rs`, #453). A pair differs only in how the buffer is
+//! built, never in the scan run over it.
 
 /// Fixed-stride delta filter.
 ///
