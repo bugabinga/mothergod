@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
 """Watch the Claude Code docs and report what moved since last week.
 
-Deliberately NOT an agent: no Claude step, no tokens, no context window
-(ADR-0019, ADR-0023). Diffing two fetches is arithmetic, a script does it
-deterministically and for free, and third-party prose never enters an
-agent's context, so there is no injection surface here at all.
-
-Why this exists. `agents/SOURCES.md` has listed https://code.claude.com/docs
-since 2026-08-20, and the deep survey's duty said "review SOURCES.md". That
-reviews the *list*, not the *sources*: nothing ever fetched anything. On
-2026-09-17 the operator read the env-vars page himself and sent it over,
-which is the machinery doing the operator's reading (ADR-0007). A listed
-source nobody fetches is a bookmark, not a watch.
+Why this exists, and why it is a script and not an agent, is the header
+of docs-watch.yml; this file is the mechanics.
 
 What is watched, and why these:
 
@@ -21,8 +12,8 @@ What is watched, and why these:
     the pages     the reference pages that govern this fleet's own substrate.
                   A page-level digest is the load-bearing half: the index
                   line for env-vars.md does not change when the page gains a
-                  variable, so index-only watching would have missed the
-                  exact thing the operator sent.
+                  variable, so index-only watching misses exactly the change
+                  that started this watch (agents/SOURCES.md, 2026-09-17).
 
 The watchlist is reference pages, and the changelog is deliberately NOT on
 it. A file that changes every release carries no information when it
@@ -30,13 +21,10 @@ changes; a watcher that always fires is one nobody reads. Every CLI change
 that can reach this fleet lands in one of the reference pages below, which
 is why reference pages are the right watchlist and the metronome is not.
 
-State lives in a ledger issue labeled `docs-intel`, not a committed file,
-for the reason traffic-snapshot.yml records: a machinery commit to main
-wakes the BDFL, and a ledger refresh must never cost a wake (issue #50,
-#417). The issue's edit history is the audit trail.
-
-Delta-only (ADR-0007 run economy): nothing moved, nothing posted. The
-steady state costs one HTTP round of about 1 MB and zero tokens.
+State is the body of the ledger issue labeled `docs-intel`, read as
+<prior-body>. The candidate body is written to <out-body> on every run,
+and `changed=true|false` goes to $GITHUB_OUTPUT; the workflow edits the
+ledger only on `true`, so nothing moved means nothing posted.
 
 Review is not tracked here. `agents/SOURCES.md`'s adoption log already
 carries the date of the last review, so the survey reads "changes newer
