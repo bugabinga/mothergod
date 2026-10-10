@@ -376,6 +376,34 @@ test("an artifact with more windows than D1 binds in one statement costs rows, n
   });
 });
 
+test("backfill counts present by name before the walk rewrites keys from metadata", async () => {
+  // Name says attempt 1, metadata says attempt 2, and the table holds (100, 2):
+  // not present by name, so walked and written, and the census must say so.
+  // Unreachable from a real artifact today, whose name and metadata agree (#1016).
+  const gh = stubGh(listing.slice(0, 1), {
+    1: {
+      "metadata.json": JSON.stringify({ ...metadata(100, "bdfl"), run_attempt: "2" }),
+      "input-prompt.md": "p",
+      "output-response.md": "r",
+    },
+  });
+  await withStub([keys([[100, 2]]), d1([]), keys([[100, 2]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual(downloads(gh), ["1"]);
+    assert.equal(seen.length, 3);
+    assert.deepEqual(seen[1].body.params.slice(0, 2), [100, 2]); // written under the metadata key
+    assert.match(
+      r.out,
+      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+    );
+  });
+});
+
 test("backfill on a table equal to the archive downloads nothing and exits 0", async () => {
   const gh = stubGh(listing.slice(0, 1), {});
   await withStub([keys([[100, 1]]), keys([[100, 1]])], async (base, seen) => {

@@ -160,6 +160,10 @@ def backfill(repo, since, rebuild=False):
     artifacts = audit_facts.archive(repo, since)
     keys = {a.name: key_of(a.name) for a in artifacts}
     todo = artifacts if rebuild else [a for a in artifacts if keys[a.name] not in present]
+    # Counted here, before the walk rewrites `keys` from each artifact's
+    # metadata: the census answers what the table held when the walk began,
+    # keyed by name like `todo` (#1016).
+    held = sum(key in present for key in keys.values())
     written, unreadable = 0, []
     for read in audit_facts.walk(repo, todo):
         if read.error:
@@ -190,7 +194,7 @@ def backfill(repo, since, rebuild=False):
         print(f"  unreadable {line}")
     floor = stamp(artifacts[0].made) if artifacts else "none"
     print(f"sessions backfill: artifacts {len(artifacts)} since {floor}"
-          f" | present {sum(key in present for key in keys.values())} | written {written}"
+          f" | present {held} | written {written}"
           f" | unreadable {len(unreadable)} | missing {len(missing)}")
     return 1 if missing else 0
 
