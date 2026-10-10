@@ -54,3 +54,9 @@ All notable changes to this project are documented here. Format follows
   now, carrying the same site nav as every other page so a broken or
   mistyped link still offers a way to the three real pages instead of a
   silent copy of the homepage.
+
+### Changed
+
+- crate: the published package holds only `src/`, `tests/` (minus the
+  repository-only `claims.rs`), the README, LICENSE and CHANGELOG, 91 files
+  instead of 374, and its own `cargo test` passes (#1021).

@@ -15,6 +15,20 @@ repository = "https://github.com/bugabinga/mothergod"
 readme = "README.md"
 keywords = ["compression", "decompression", "codec"]
 categories = ["compression"]
+# An allowlist, so a new top-level directory stays out of the crate by
+# default. The agent realm (ADR-0010) never ships. tests/claims.rs reads
+# site/, docs/benchmarks/ and research/progress.jsonl, none packaged, so
+# it stays out and the shipped `cargo test` stays green. The one research
+# file is include_bytes!'d by the unit tests under src/.
+include = [
+  "/src",
+  "/tests",
+  "!/tests/claims.rs",
+  "/research/imports/session-1/mothergod.rs",
+  "/README.md",
+  "/LICENSE",
+  "/CHANGELOG.md",
+]
 
 [dependencies]
 
