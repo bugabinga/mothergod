@@ -137,9 +137,10 @@ Shared house rules; your per-agent voice rides in your prompt from
 - Per artifact, the rule a retrospect or a review cites by id (#485;
   `retrospect` prints every seat's artifacts under these sets):
   - Any: A1 no "This PR", "This patch", "I changed", "Currently" openers;
-    the diff shows what, the text exists for why. A2 a commit is
-    `sha ("subject")`, never a bare hash. A3 a URL is a citation; the
-    point rides inline.
+    the diff shows what, the text exists for why. A2 a commit cited as
+    a thing is `sha ("subject")`, never a bare hash; a PR head named as
+    the pin a verdict or merge covers is not a citation. A3 a URL is a
+    citation; the point rides inline.
   - Title, of a PR and the squash commit it becomes: T1 `area: effect`,
     imperative, at most 72 characters, no period. T2 it stands alone as a
     release-notes line; one that cannot names a PR doing two things.
@@ -154,7 +155,7 @@ Shared house rules; your per-agent voice rides in your prompt from
     repro. I3 the minimal artifact, a trace excerpt, never the dump. I4
     one problem, with the motivating problem stated.
   - Reply on an issue or PR: Q1 symptom, evidence, repro with caveat,
-    numbered fix, "OK?".
+    numbered fix, and "OK?" when the fix awaits the thread's answer.
   - Review: R1 every finding [must] or [nit], the defect and its why in
     one line each. R2 say what you verified and how, scoped, never an
     exhaustive hedged survey. R3 on the code, never the author or the
