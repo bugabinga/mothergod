@@ -91,6 +91,30 @@ fn help_flag_succeeds() {
     assert_ne!(stdout, [] as [u8; 0]);
 }
 
+/// The line `--version` and `-V` print: the crate version and the one frame
+/// version this build reads, both from the constants so neither can drift.
+fn version_line() -> String {
+    format!(
+        "mothergod {} (format {})\n",
+        env!("CARGO_PKG_VERSION"),
+        mothergod::FORMAT_VERSION
+    )
+}
+
+#[test]
+fn version_flag_prints_crate_and_format_version() {
+    let (stdout, code) = run(bin().arg("--version"), b"");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, version_line().as_bytes());
+}
+
+#[test]
+fn short_version_flag_prints_crate_and_format_version() {
+    let (stdout, code) = run(bin().arg("-V"), b"");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, version_line().as_bytes());
+}
+
 #[test]
 fn compress_then_decompress_roundtrips_a_file_argument() {
     let dir = std::env::temp_dir().join(format!("mothergod-cli-test-{}", std::process::id()));
