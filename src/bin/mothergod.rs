@@ -64,6 +64,14 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Some("-V" | "--version") => {
+            println!(
+                "mothergod {} (format {})",
+                env!("CARGO_PKG_VERSION"),
+                mothergod::FORMAT_VERSION
+            );
+            ExitCode::SUCCESS
+        }
         Some(other) => usage_fail(&format!("unknown command {other:?}")),
         None => {
             eprintln!("{USAGE}");
