@@ -747,58 +747,6 @@ fn price_counts_observe_matches_tally_for_the_same_sequence() {
     assert_eq!(via_tally.rep, via_observe.rep);
 }
 
-#[test]
-fn best_active_rep_len_none_when_no_cached_distance_reaches_back() {
-    // i = 0: every cached distance is necessarily larger than i, so
-    // match_len returns 0 for all three slots regardless of content.
-    let data = b"abcdefgh";
-    let mut carry = [None; REP_SLOTS];
-    assert_eq!(
-        best_active_rep_len(data, 0, RepCache::initial(), &mut carry),
-        None
-    );
-}
-
-#[test]
-fn best_active_rep_len_returns_the_one_matching_distance() {
-    let data = b"abcdeabcde";
-    let mut reps = RepCache::initial();
-    reps.push_front(NonZeroU32::new(5).unwrap());
-    let mut carry = [None; REP_SLOTS];
-    // At i = 5, distance 5 replays "abcde" in full (bounded by the data
-    // remaining, not by a mismatch); the other two cached slots (1, 4)
-    // both fail their very first byte.
-    assert_eq!(best_active_rep_len(data, 5, reps, &mut carry), Some(5));
-}
-
-#[test]
-fn best_active_rep_len_picks_the_longest_across_slots() {
-    let data = b"ABABABABXYABABABAB";
-    let mut reps = RepCache::initial();
-    reps.push_front(NonZeroU32::new(8).unwrap());
-    reps.push_front(NonZeroU32::new(10).unwrap());
-    let mut carry = [None; REP_SLOTS];
-    // At i = 10 (the second "ABABABAB" run): distance 8 replays 6 bytes
-    // before its source crosses the "XY" break ('X' vs 'A' mismatches);
-    // distance 10 replays the full 8 bytes remaining, never reaching a
-    // mismatch. The winner is the longer one, not whichever slot is
-    // checked first.
-    assert_eq!(best_active_rep_len(data, 10, reps, &mut carry), Some(8));
-}
-
-#[test]
-fn best_active_rep_len_filters_out_a_match_shorter_than_min_rep_len() {
-    let data = b"AabAxy";
-    let mut reps = RepCache::initial();
-    reps.push_front(NonZeroU32::new(3).unwrap());
-    let mut carry = [None; REP_SLOTS];
-    // At i = 3, distance 3 matches only the first byte ('A'; the second
-    // byte diverges 'a' vs 'x'), a length-1 candidate below
-    // MIN_REP_LEN. The other two cached slots (1, 4) miss immediately
-    // (4 exceeds i, 1 hits 'b' vs 'A').
-    assert_eq!(best_active_rep_len(data, 3, reps, &mut carry), None);
-}
-
 /// Finds an [`DETECTOR_ANCHOR_LEN`]-byte value whose own window
 /// satisfies [`is_content_defined_anchor`] at position 0, so tests can
 /// plant a repeat that the content-defined detector is actually able to

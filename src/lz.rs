@@ -1445,43 +1445,6 @@ fn rep_match_len(
     len
 }
 
-/// Longest continuation any of `reps`' three cached distances could deliver
-/// at `i` right now, reusing [`rep_match_len`]'s carry the same way
-/// [`DpState::relax_rep_candidates`] does, so a repeated call across
-/// consecutive positions on the same run stays O(1) rather than re-scanning
-/// it (issue #179's hazard, `best_rep`'s plain [`match_len`] loop is unsafe
-/// to call from a per-position hot path for this reason). `None` when no
-/// cached distance reaches even [`MIN_REP_LEN`].
-///
-/// Standalone: exists so [`relax_match_candidate`] can eventually weigh a
-/// far match's fixed distance-bucket tax against the rep continuation it
-/// would displace (`research/JOURNAL.md` S1-P4's remaining scope after
-/// S2-R12: "a pricing or gating change that accounts for what a far match
-/// displaces"); not called from [`dp_round`] yet, so `compress`/`decompress`
-/// behavior is unchanged.
-// Standalone, not yet called from `dp_round` (see the doc comment above):
-// `RepCache` is `pub(crate)`, so this can't dodge `dead_code` the way
-// `lib.rs`'s doc-hidden-but-`pub` modules do for whole standalone research
-// primitives (`src/lib.rs`'s comment on that pattern). Narrows to a real
-// caller, or gets deleted, together with `relax_match_candidate`'s wiring
-// slice, not as an unrelated side effect.
-#[allow(dead_code)]
-#[must_use]
-fn best_active_rep_len(
-    data: &[u8],
-    i: usize,
-    reps: RepCache,
-    rep_carry: &mut [Option<(Distance, usize, usize)>; REP_SLOTS],
-) -> Option<u32> {
-    RepSlot::ALL
-        .into_iter()
-        .filter_map(|slot| {
-            let len = rep_match_len(data, i, reps.get(slot), rep_carry, slot.index());
-            (len >= MIN_REP_LEN).then(|| match_len_as_u32(len))
-        })
-        .max()
-}
-
 /// Walks `parent` backward from `data.len()` to `0`, matching the archive's
 /// reconstruction loop: at each step, the recorded move's length says how
 /// far back its start was, and (for a literal) `data` at that start says
