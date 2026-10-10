@@ -40,6 +40,15 @@ commits as `claude[bot]`, admin PAT commits as the operator. Nothing to
 configure, and `git commit` never runs, so the runner's missing git ident
 cannot fail the step.
 
+A push CI's `fmt` job would turn red is refused before any credential is
+picked (issue #938): CLAUDE.md says `cargo x check` before any push, and the
+seat that types the push is the one that skips it, six red `fmt` jobs on
+`claude/bdfl-*` branches between 2026-09-24 and 2026-10-09, each costing a
+maintainer run and a reviewer re-run. `guard_formatted` asks x per path and
+dies with x's own fix line. It is the cheaper copy of the gate in front of
+it, never its replacement: without cargo, or when x cannot run, it says so
+once and the push proceeds, and CI decides.
+
 What this does NOT do, deliberately: open the PR. That is `gh-pr`, on the app
 token whatever the commits rode: a PAT-opened PR is operator-attributed and
 wakes a full BDFL run on its own PR (issue #141), and a workflow-token PR is
@@ -81,6 +90,7 @@ file.
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -319,6 +329,77 @@ def guard_pr_scope(target):
             "scoped to (issue #771)")
 
 
+def formattable(path):
+    """Whether x might format `path`, decided without building x.
+
+    A cold x build costs about two minutes (121 s, measured in the 2026-10-08
+    16:11Z BDFL session), and the director's pushes are mostly Markdown and
+    extensionless Python scripts. Two kinds are therefore skipped here by
+    construction rather than by asking: Markdown is linted, never formatted
+    (`cargo x fmt -- README.md` refuses), and x keys a file's kind on its
+    extension, so an extensionless file is never one. Every other kind is
+    x's call, so this never duplicates its table; a miss here costs a build
+    that answers "unsupported", never a wrong answer."""
+    name = os.path.basename(path)
+    return "." in name and not name.endswith(".md")
+
+
+def guard_formatted(paths):
+    """Refuse a push that CI's `fmt` job would turn red (issue #938).
+
+    One `cargo x fmt --check` call per path, from the repository root because
+    the `x` alias names its manifest relative to the working directory. Per
+    path rather than one call for all, because x refuses an unsupported named
+    path with exit 2 before looking at the paths beside it, and a refusal
+    must not hide a finding. Warm, a call is about 150 ms.
+
+    Fail-open by design, said once on stderr: without cargo, or when x cannot
+    run, the push proceeds and CI's gate decides. Only a finding (exit 1)
+    dies, carrying x's own fix line."""
+    candidates = [p for p in paths if formattable(p)]
+    if not candidates:
+        return
+    if shutil.which("cargo") is None:
+        note("cargo is not on PATH, so this push is not format-checked here; CI's fmt job is the gate")
+        return
+    root = git("rev-parse", "--show-toplevel").stdout.strip() or None
+    findings = []
+    for p in candidates:
+        proc = subprocess.run(
+            ("cargo", "x", "fmt", "--check", "--", p), capture_output=True, text=True, cwd=root
+        )
+        err = proc.stderr.strip()
+        if proc.returncode == 0:
+            continue
+        if proc.returncode == 1:
+            findings.extend(line for line in err.splitlines() if not line.startswith("fmt:"))
+            continue
+        # x's cause is its `error:` line; the `help:` line after it is the
+        # same on every refusal.
+        cause = next((line for line in err.splitlines() if line.startswith("error:")), None)
+        cause = cause or (err.splitlines()[-1] if err else f"exit {proc.returncode}")
+        if proc.returncode == 2 and ("not supported by x" in err or "linted, not formatted" in err):
+            continue  # x does not format this kind, so CI's fmt job does not check it either
+        if proc.returncode == 2:
+            # x refused this one path (a symlink, a file it cannot read); its
+            # neighbours are still x's to answer.
+            note(f"{p} is not format-checked here ({cause}); CI's fmt job is the gate for it")
+            continue
+        # cargo or x itself could not run. Say so once and stop asking: every
+        # further call would fail the same way, a failed build each time.
+        note(f"cargo x fmt --check could not run ({cause});")
+        note("the paths not yet checked are not format-checked here; CI's fmt job is the gate")
+        break
+    # A finding found before x stopped answering is still a finding (#997
+    # round 1): the push it would have refused is the one this guard exists for.
+    if findings:
+        die(
+            "CI's fmt job would be red on this push (issue #938):",
+            *("  " + line for line in findings),
+            "format, then push again; nothing was pushed.",
+        )
+
+
 def guard_not_stale(branch, base_sha, paths):
     """Refuse a push that would silently revert someone else's commit.
 
@@ -389,6 +470,11 @@ def main() -> int:
                 "git rm it first; the checkout is the source of truth "
                 "this push mirrors.",
             )
+
+    # Merge mode mirrors HEAD's objects, not the working tree, and is a
+    # rescue of a branch whose files already passed or failed CI on their own.
+    if not merge_sha:
+        guard_formatted(paths)
 
     message = sys.stdin.read().strip()
     if not message:
