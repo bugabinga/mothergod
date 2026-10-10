@@ -9,7 +9,7 @@
 CREATE TABLE IF NOT EXISTS sessions (
   run_id         INTEGER NOT NULL,   -- GitHub Actions run id
   attempt        INTEGER NOT NULL,   -- run attempt, 1 unless re-run
-  at             TEXT    NOT NULL,   -- ISO-8601 UTC, when the row was written
+  at             TEXT    NOT NULL,   -- ISO-8601 UTC, when the run ended; a backfilled row's is its artifact's creation
   role           TEXT    NOT NULL,   -- bdfl, maintainer, reviewer, ...
   event          TEXT,               -- github.event_name
   actor          TEXT,               -- github.actor

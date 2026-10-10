@@ -84,6 +84,20 @@ def render_show(rows, run_id):
     return [f"{k.ljust(width)}  {cell(v)}" for k, v in rows[0].items()]
 
 
+class Usage(Exception):
+    """A flag without its value: the usage line and exit 2, like an unknown verb."""
+
+
+def flag(args, name):
+    """The value after `name` in `args`, or None when the flag is absent."""
+    if name not in args:
+        return None
+    at = args.index(name) + 1
+    if at == len(args):
+        raise Usage(name)
+    return args[at]
+
+
 def stamp(when):
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -137,7 +151,13 @@ def backfill(repo, since):
         if read.error:
             unreadable.append(f"{read.artifact.name}: {read.error}")
             continue
-        values = audit_facts.row(read.meta, read.sizes.get)
+        try:
+            values = audit_facts.row(read.meta, read.sizes.get)
+        except (AttributeError, TypeError) as error:
+            # A metadata field of the wrong shape: oldest first would make one
+            # such artifact end every rerun at the same place.
+            unreadable.append(f"{read.artifact.name}: metadata has a malformed field ({error})")
+            continue
         if values[0] is None:
             unreadable.append(f"{read.artifact.name}: metadata carries no run_id")
             continue
@@ -205,7 +225,7 @@ def main(argv):
             rows = d1.query(args[0], args[1:])
             print("\n".join(render(rows)))
         elif verb == "roles":
-            spec = args[args.index("--since") + 1] if "--since" in args else "7d"
+            spec = flag(args, "--since") or "7d"
             since = stamp(since_of(spec, datetime.now(timezone.utc)))
             rows = d1.query("SELECT role, measured, turns, out_tokens, denials, error, cost_usd "
                             "FROM sessions WHERE at >= ?", [since])
@@ -220,10 +240,9 @@ def main(argv):
                 d1.query(fh.read())
             print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}")
         elif verb == "backfill":
-            spec = args[args.index("--since") + 1] if "--since" in args else None
+            spec = flag(args, "--since")
             since = since_of(spec, datetime.now(timezone.utc)) if spec else None
-            repo = (args[args.index("--repo") + 1] if "--repo" in args
-                    else os.environ.get("GITHUB_REPOSITORY"))
+            repo = flag(args, "--repo") or os.environ.get("GITHUB_REPOSITORY")
             if not repo:
                 print("sessions: backfill needs GITHUB_REPOSITORY or --repo owner/name")
                 return 2
@@ -231,6 +250,10 @@ def main(argv):
         else:
             print(__doc__.strip().splitlines()[-1])
             return 2
+    except Usage as error:
+        print(f"sessions: {error} takes a value")
+        print(__doc__.strip().splitlines()[-1])
+        return 2
     except (d1.Unreadable, audit_facts.Unreadable) as error:
         return unreadable(error)
     except OSError as error:

@@ -343,3 +343,38 @@ test("backfill without a repository says what it needs and exits 2", async () =>
   assert.equal(r.code, 2);
   assert.match(r.out, /backfill needs GITHUB_REPOSITORY or --repo/);
 });
+
+// One bad artifact must cost one `unreadable`, not the walk: oldest first, a
+// poison artifact that aborted the verb would abort every rerun at the same
+// place and starve the rows after it.
+test("backfill counts a malformed or hostile artifact unreadable and writes the rest", async () => {
+  const gh = stubGh(listing.slice(0, 3), {
+    1: { "metadata.json": JSON.stringify({ ...metadata(100, "bdfl"), telemetry: "x" }) },
+    2: zips[2],
+    3: { "metadata.json": "[".repeat(100000) },
+  });
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(seen[1].body.params[0], 200);
+    assert.match(r.out, /^  unreadable audit-bdfl-100-1: metadata has a malformed field/m);
+    assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
+    assert.match(
+      r.out,
+      /artifacts 3 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
+    );
+  });
+});
+
+test("a flag without its value prints the usage line and exits 2", async () => {
+  for (const args of [["backfill", "--since"], ["backfill", "--repo"], ["roles", "--since"]]) {
+    const r = await run(args, { GITHUB_REPOSITORY: "o/r", D1_API_BASE: "http://127.0.0.1:9" });
+    assert.equal(r.code, 2, `${args}: ${r.out}${r.err}`);
+    assert.match(r.out, new RegExp(`${args.at(-1)} takes a value`));
+    assert.match(r.out, /^Usage: sessions /m);
+  }
+});

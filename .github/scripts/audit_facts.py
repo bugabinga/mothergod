@@ -198,7 +198,9 @@ def fetch(repo, artifact):
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
             sizes = {info.filename: info.file_size for info in zf.infolist()}
             meta = json.loads(zf.read("metadata.json"))
-    except (KeyError, ValueError, zipfile.BadZipFile) as error:
+    # RecursionError: a metadata.json of nested brackets is a hostile artifact,
+    # one unreadable, never the end of the walk.
+    except (KeyError, ValueError, RecursionError, zipfile.BadZipFile) as error:
         raise Unreadable(str(error)) from None
     if not isinstance(meta, dict):
         raise Unreadable("metadata.json is not an object")
