@@ -43,6 +43,8 @@ docstring is the factory's; `docs/TESTING.md` is the human page about
 the same portfolio, and the script stays one click further for whoever
 reads the strategy.
 
+## 2026-10-10 — Editorial: "can be retired" undersold a rule that now always fires
+
 Queue empty, so this is a defect found on the surface. ADR-0063 (#949)
 made it a rule: until the first release, a `FORMAT_VERSION` bump retires
 its predecessor in the same PR, and `decode` reads exactly one version.
