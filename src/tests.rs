@@ -282,8 +282,7 @@ fn decompress_bounded_rejects_an_lz_frame_over_its_own_tighter_bound() {
 
 #[test]
 fn decompress_bounded_rejects_a_stored_frame_over_its_own_tighter_bound() {
-    // Method::Stored has no declared-length field to check against;
-    // decompress_bounded must still bound it by the payload's own
+    // decompress_bounded must bound Method::Stored by its declared
     // length rather than only ever bounding Method::Lz.
     let input = b"hi";
     let frame = compress(input);

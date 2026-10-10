@@ -78,7 +78,8 @@ pub const FORMAT_VERSION: u8 = 11;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Method {
-    /// Payload is stored verbatim, no compression.
+    /// Payload is a `u64` declared length, then the data verbatim, no
+    /// compression.
     Stored = 0,
     /// Optimal-parse LZ tokens, entropy-coded by adaptive flag/length/
     /// offset/rep-slot models and a six-expert context-mixing literal
