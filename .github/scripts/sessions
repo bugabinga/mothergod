@@ -94,9 +94,14 @@ def since_of(spec, now):
     if match:
         return now - timedelta(days=int(match.group(1)))
     try:
-        return datetime.fromisoformat(spec.replace("Z", "+00:00")).astimezone(timezone.utc)
+        when = datetime.fromisoformat(spec.replace("Z", "+00:00"))
     except ValueError:
         raise SystemExit(f"sessions: --since takes Nd or an ISO date, not {spec!r}")
+    # A date with no zone is UTC midnight: the table and the archive are stamped
+    # in UTC, and `astimezone` on a naive value would read the machine's clock.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc)
 
 
 # An artifact's name as agent-audit builds it, `audit-<role>-<run id>-<attempt>`,

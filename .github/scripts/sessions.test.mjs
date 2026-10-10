@@ -278,7 +278,8 @@ test("backfill writes the rows the archive has and the table lacks, and names th
     assert.deepEqual(p.slice(19), [1234, 567]); // sizes read from the zip
     assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
     assert.equal(seen.length, 3);
-    assert.deepEqual(downloads(gh), ["2", "3"]); // the present row cost no download; the expired and the non-audit never listed
+    // Sorted: eight workers download concurrently, so the stub's log holds no order.
+    assert.deepEqual(downloads(gh).sort(), ["2", "3"]); // the present row cost no download; the expired and the non-audit never listed
     assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
     assert.match(
       r.out,
@@ -311,6 +312,7 @@ test("backfill --since keeps the artifacts created from that instant", async () 
     const r = await run(["backfill", "--since", "2026-09-01", "--repo", "o/r"], {
       D1_API_BASE: base,
       PATH: `${gh}:${process.env.PATH}`,
+      TZ: "America/New_York", // a date-only --since is UTC midnight, never the machine's
     });
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(downloads(gh), ["2"]);
