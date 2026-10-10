@@ -41,7 +41,7 @@ case, and the exception does not change what a trier should do.
 
 **Rejected: a bump rate ("about weekly").** It rots with the next quiet
 week, and the certainty, not the frequency, is what changes the action.
-Status box: 81 words to 94, same count method as the 2026-10-09 entry.
+Status box: 81 words to 92, same count method as the 2026-10-09 entry.
 
 ## 2026-10-09 — Editorial: the origin story goes where the reader asks "who"
 
