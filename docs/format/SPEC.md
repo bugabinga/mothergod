@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 10)
+# mothergod bitstream format (FORMAT_VERSION 11)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,20 +16,18 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 10)
+4       1     format version (currently 11)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
 
 A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
 (`BadMagic`), version greater than it supports (`UnsupportedVersion`),
-unknown method (`UnknownMethod`). A `Method::Lz` frame additionally
+unknown method (`UnknownMethod`). A frame of either method additionally
 requires exactly the current format version: every earlier version was
 retired outright under ADR-0050, no release ever having written one
-(ADR-0063), so a decoder rejects an `Lz` frame naming any other version as
-`UnsupportedVersion` before it reads the payload. A `Method::Stored`
-payload is the data verbatim and carries no model, so a `Stored` frame
-decodes under any version up to the current one. Version history: 1 named
+(ADR-0063), so a decoder rejects a frame naming any other version as
+`UnsupportedVersion` before it reads the payload. Version history: 1 named
 a different `Lz` payload layout (ADR-0026, superseded by ADR-0028); 2
 added the 2-byte filter selector; 3 coded each literal as SSE-calibrated
 binary decisions (ADR-0038); 4 added the column expert for `Transpose`
@@ -37,14 +35,30 @@ frames (ADR-0046); 5 through 7 moved other candidates to a logit-domain
 mixer, a learned-baseline rate schedule and stretch-domain SSE bins
 (ADR-0052, ADR-0054, ADR-0055); 8 split the length model by token kind
 (ADR-0057); 9 split the offset model by match length (ADR-0058); 10 added
-the length residual trees (ADR-0061).
+the length residual trees (ADR-0061); 11 gave the `Stored` payload a
+declared length (ADR-0065).
 
 ## Methods
 
 | byte | name   | payload |
 |------|--------|---------|
-| 0x00 | Stored | the original data, verbatim |
+| 0x00 | Stored | declared length, then the original data, verbatim |
 | 0x01 | Lz     | see below |
+
+### `Stored` (ADR-0065)
+
+```
+offset  size  field
+0       8     declared data length, u64 LE
+8       ...   the original data, verbatim
+```
+
+A decoder MUST reject a payload shorter than 8 bytes, or holding fewer
+data bytes than the field declares, as `Truncated`, and one holding more
+as `Corrupt`. The field is never an allocation size: it is compared with
+the bytes present. It is a `u64` because an encoder stores inputs longer
+than `u32::MAX` bytes. There is no check value: a bit flip inside the data
+is not detected (ADR-0065).
 
 ### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028, ADR-0038)
 
@@ -133,7 +147,8 @@ founding port bug this section's invariant exists to rule out.
 
 - Lossless: decode(encode(x)) == x for all x.
 - Stored floor: an encoder MUST NOT emit a frame larger than
-  `header + len(x)` — fall back to Stored (JOURNAL S1-L1).
+  `header + 8 + len(x)` (the header and the `Stored` length field) — fall
+  back to Stored (JOURNAL S1-L1).
 - Decoders never panic and allocate at most a bounded multiple of the
   declared output size for any input. For `Lz`, "declared output size" is
   the payload's own length field: the decoder never preallocates from it,

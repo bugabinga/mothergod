@@ -23,7 +23,7 @@ fn error_display_names_each_variant() {
     // whole-body replacement before this test existed).
     assert_eq!(
         Error::Truncated.to_string(),
-        "input ended before the frame header was complete"
+        "input ended before the frame was complete"
     );
     assert_eq!(
         Error::BadMagic.to_string(),
@@ -124,13 +124,60 @@ fn retired_version_lz_frame_is_rejected_by_every_entry_point() {
 }
 
 #[test]
-fn stored_frame_of_an_earlier_version_still_decodes() {
-    // A Stored payload is the data verbatim, so no retired model touches
-    // it: only Method::Lz frames are version-exact.
+fn stored_frame_of_any_other_version_is_unsupported() {
+    // Version 10 wrote a Stored payload with no declared length: the same
+    // bytes now read as a length and a body, so it must not decode.
     let mut frame = compress(b"hi");
     assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
-    frame[MAGIC.len()] = 1;
-    assert_eq!(decompress(&frame), Ok(b"hi".to_vec()));
+    for version in [0, FORMAT_VERSION - 1] {
+        frame[MAGIC.len()] = version;
+        assert_eq!(
+            decompress(&frame),
+            Err(Error::UnsupportedVersion(version)),
+            "version {version}"
+        );
+    }
+}
+
+#[test]
+fn every_prefix_of_a_stored_frame_is_rejected() {
+    // #988: a Stored frame cut short once decoded to the bytes that
+    // arrived, exit 0. Every strict prefix must fail, as an Lz one does.
+    let input = b"hi there";
+    let frame = compress(input);
+    assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+    for cut in 0..frame.len() {
+        let err = decompress(&frame[..cut]).expect_err("a strict prefix must not decode");
+        assert_eq!(err, Error::Truncated, "cut at {cut}");
+    }
+    assert_eq!(decompress(&frame), Ok(input.to_vec()));
+}
+
+#[test]
+fn stored_frame_with_bytes_past_its_declared_length_is_corrupt() {
+    let mut frame = compress(b"hi there");
+    assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+    frame.push(0);
+    assert_eq!(decompress(&frame), Err(Error::Corrupt));
+}
+
+#[test]
+fn stored_frame_declaring_u64_max_is_truncated_not_allocated() {
+    // The declared length is never an allocation size: a hostile one is
+    // compared against the bytes actually present.
+    let mut frame = compress(b"hi");
+    assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+    frame[HEADER_LEN..HEADER_LEN + STORED_LEN_BYTES].copy_from_slice(&u64::MAX.to_le_bytes());
+    assert_eq!(decompress(&frame), Err(Error::Truncated));
+}
+
+#[test]
+fn stored_frame_is_never_larger_than_header_length_field_and_input() {
+    // The Stored floor (docs/format/SPEC.md): every frame is at most this.
+    for len in [0, 1, 2, 100] {
+        let input = vec![0xA5u8; len];
+        assert!(compress(&input).len() <= HEADER_LEN + STORED_LEN_BYTES + len);
+    }
 }
 
 #[test]
@@ -282,7 +329,7 @@ fn decompress_roundtrips_a_stored_payload_past_max_decoded_len() {
     // the full LZ encoder over 256+ MiB just to hit the Stored
     // fallback; this test's target is decompress, not compress.
     let payload = vec![0xA5u8; (codec::MAX_DECODED_LEN + 1) as usize];
-    let frame = build_frame(Method::Stored, &payload);
+    let frame = build_stored_frame(&payload);
     assert_eq!(decompress(&frame), Ok(payload));
 }
 
