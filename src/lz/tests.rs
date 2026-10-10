@@ -932,3 +932,36 @@ fn adaptive_window_roundtrips_a_confirmed_repeat_past_window() {
         "expected at least one match reaching past WINDOW, proving the grown window was searched"
     );
 }
+
+#[test]
+fn find_best_stops_after_max_chain_tries() {
+    // Chain order is newest first: MAX_CHAIN_TRIES short candidates, then the
+    // one long match, which the bound must leave unvisited.
+    let long = b"abcLONGTAIL";
+    let mut data = long.to_vec();
+    for _ in 0..MAX_CHAIN_TRIES {
+        data.extend_from_slice(b"abcZ|");
+    }
+    let query = data.len();
+    data.extend_from_slice(long);
+
+    let mut finder = MatchFinder::new(&data, data.len());
+    for i in 0..query {
+        finder.insert(i);
+    }
+    let (len, _) = finder.find_best(query).expect("the short candidates match");
+    assert_eq!(len, 3);
+}
+
+#[test]
+fn parse_greedy_defers_a_short_match_to_a_longer_one_a_byte_later() {
+    // At the final `a` the best match is 4 bytes (`abcd`); one byte later it
+    // is 10 (`bcdefghijk`), so the parse emits `a` as a literal first.
+    let data = b"abcdQRSTUVbcdefghijkabcdefghijk";
+    let tokens = parse_greedy(data);
+    let [.., a, tail] = tokens.as_slice() else {
+        panic!("too few tokens: {tokens:?}");
+    };
+    assert_eq!(*a, Token::Literal(b'a'), "{tokens:?}");
+    assert!(matches!(tail, Token::Match { len: 10, .. }), "{tokens:?}");
+}

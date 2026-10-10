@@ -472,9 +472,9 @@ fn to_u32(i: usize) -> u32 {
 /// A shallow walk mutates. Cutting it at `max_depth` unlinks every
 /// candidate past the last visited node (the tail-cutting at the end of
 /// [`Self::insert_and_find`]), so one shallow call degrades every later
-/// query into that bucket, where [`MatchFinder::find_best`]'s `max_tries`
-/// bounds only its own read-only call. `max_depth` is therefore a
-/// per-pass constant, never varied call to call.
+/// query into that bucket, where [`MatchFinder::find_best`]'s
+/// [`MAX_CHAIN_TRIES`] bound covers only its own read-only call.
+/// `max_depth` is therefore a per-pass constant, never varied call to call.
 ///
 /// Eviction rests on one fact: a node's `left`/`right` are set once, at its
 /// own insertion, from the tree as it stood then, so every position a
