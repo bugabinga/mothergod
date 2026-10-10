@@ -1,3 +1,13 @@
+# Every text file checks out with LF on every platform. Tests read committed
+# files byte for byte and compare them with what the code writes:
+# bench/src/baseline.rs include_str!s bench/baseline.json and asserts it is
+# what format_baseline emits. Git on Windows defaults core.autocrlf to true,
+# which rewrites LF to CRLF at checkout, so that assertion failed on all six
+# Windows lanes of the monster matrix (#1013) while the file on main was
+# correct. The rule is global, so the next byte-exact test needs no line
+# here: a checkout artifact is never a test's concern.
+* text=auto eol=lf
+
 # tests/golden/ and tests/adversarial/ pin exact bytes: golden.rs decodes a
 # committed frame and asserts it equals the committed plaintext byte for
 # byte, and torture.rs/adversarial.rs feed committed bytes straight to the
@@ -6,5 +16,8 @@
 # like text (issue #518: Windows checkout rewrote a golden .plaintext
 # fixture's LF line endings to CRLF, so the decoded frame no longer matched
 # the pinned plaintext -- a checkout artifact, not a decode regression).
+# `-text` is stronger than the global rule above: it also keeps a seed that
+# happens to carry a CR (tests/adversarial/random-garbage) out of checkin
+# normalization.
 tests/golden/** -text
 tests/adversarial/** -text
