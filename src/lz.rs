@@ -483,119 +483,34 @@ fn to_u32(i: usize) -> u32 {
     u32::try_from(i).expect("bounded by data.len() or the finder's window, both under u32::MAX")
 }
 
-/// Binary-tree match finder (`JOURNAL` S1-P2, "btultra2-class parse"'s
-/// first slice): unlike [`MatchFinder`]'s hash chain, which walks
-/// candidates in pure recency order and gives up after a fixed number of
-/// tries, insertion here keeps each hash bucket as a binary search tree
-/// ordered by the candidate's suffix bytes. [`Self::insert_and_find`]
-/// both inserts the new position and returns the single longest match,
-/// found by one downward walk that visits only the nodes on the
-/// insertion path: for data whose match distribution keeps that path
-/// shallow, far fewer comparisons than a hash chain has to make to
-/// consider every same-bucket candidate.
+/// Binary-tree match finder (`JOURNAL` S1-P2): each hash bucket is a binary
+/// search tree ordered by the candidates' suffix bytes, and
+/// [`Self::insert_and_find`] inserts a position and returns the longest
+/// match on the one downward walk the insertion needs. [`MatchFinder`]'s
+/// chain visits every same-bucket candidate; this visits only the
+/// insertion path.
 ///
-/// With `max_depth` at least the bucket's true tree height, the match
-/// returned is length-exact: it equals a brute-force scan of every
-/// candidate in the bucket, proved by
-/// `tests::binary_tree_matches_brute_force`. A shallower `max_depth` is
-/// *not* the same trade [`MatchFinder`] makes via `max_tries`:
-/// [`MatchFinder::find_best`] is read-only, so a low `max_tries` bounds
-/// only that one call. [`Self::insert_and_find`] mutates the tree on
-/// every call — cutting the walk short at `max_depth` permanently
-/// unlinks every candidate past the last visited node from the bucket
-/// (see the tail-cutting in [`Self::insert_and_find`]), so a single
-/// shallow call degrades every later, even full-depth, query into that
-/// same bucket, and repeated shallow calls compound the loss. Treat
-/// `max_depth` as a constant per-pass setting (LZMA/zstd's `cutValue`
-/// shape), never a value varied call-to-call for speed.
+/// With `max_depth` at least the bucket's tree height the match is
+/// length-exact, equal to a brute-force scan of the bucket
+/// (`tests::binary_tree_matches_brute_force`).
 ///
-/// Wired into `dp_round`'s once-per-position normal-match search
-/// (`research/JOURNAL.md` S1-P2/S2-A48), not [`parse_greedy`]'s
-/// once-per-token search, which still uses the hash-chain [`MatchFinder`]
-/// unchanged.
+/// A shallow walk mutates. Cutting it at `max_depth` unlinks every
+/// candidate past the last visited node (the tail-cutting at the end of
+/// [`Self::insert_and_find`]), so one shallow call degrades every later
+/// query into that bucket, where [`MatchFinder::find_best`]'s `max_tries`
+/// bounds only its own read-only call. `max_depth` is therefore a
+/// per-pass constant, never varied call to call.
 ///
-/// [`Self::insert_and_find`] evicts positions older than [`WINDOW`]
-/// from the tree instead of only filtering them at report time
-/// (`research/JOURNAL.md` S2-A49, closing that half of the open S1-P2
-/// scope): a node's `left`/`right` fields are set exactly once, at its
-/// own insertion, from whatever the bucket's tree contained at that
-/// moment — every position they can ever reference was therefore
-/// already inserted earlier, so a node's whole subtree holds positions
-/// no younger than the node itself. The first out-of-window node the
-/// walk reaches is thus a safe cut point: it and everything beneath it
-/// are *all* out of window (distance from any future `i` only grows),
-/// so ending the walk there both drops the dead weight permanently
-/// (nothing re-links it, so it becomes unreachable from `head[h]`) and
-/// never discards a candidate that could have been reported. Remaining
-/// S1-P2 scope: per-position adaptive prices, still untouched from
-/// S2-A42.
+/// Eviction rests on one fact: a node's `left`/`right` are set once, at its
+/// own insertion, from the tree as it stood then, so every position a
+/// subtree holds is no younger than its root. The first out-of-window node
+/// the walk reaches is a safe cut point: it and everything beneath it are
+/// out of window for every future `i`, so ending the walk there drops them
+/// for good and never discards a reportable candidate
+/// (`research/JOURNAL.md` S2-A49).
 ///
-/// A straight swap into `dp_round` in [`Self::insert_and_find`]'s place of
-/// [`MatchFinder::insert`] + [`MatchFinder::find_best`] was tried and rejected twice before
-/// landing on the third attempt (`research/JOURNAL.md` S2-R2, then S2-A47
-/// blocked on process, not ratio; S2-A48 lands the identical wiring once
-/// issue #290's ruling unblocked it). All three attempts won on ratio
-/// outright; S2-R2 broke the issue #179 speed guard, whose fixture is
-/// 200,000 bytes of one repeated value: `insert_and_find` fuses insertion
-/// with search, so `dp_round`'s `carry` reuse can no longer skip the walk
-/// on a long run — only skip *using* a fresher result — and without
-/// length-prefix reuse, every visited candidate cost close to
-/// `MAX_MATCH_LEN` instead of the tree height.
-///
-/// [`Self::insert_and_find`] now carries that reuse (`len0`/`len1` in the
-/// LZMA reference implementation): each comparison starts from the
-/// shorter of the two common lengths already proven against the nearest
-/// node linked so far on the "less" and "greater" chains, rather than
-/// byte 0, via [`suffix_common_len`]'s `start` parameter. That bound is
-/// sound because both chains stay sorted relative to `i`: any node still
-/// to be visited lies between the last-linked "less" node and the
-/// last-linked "greater" node in suffix order, so it shares at least
-/// their common prefix with `i` (whichever of the two is shorter) before
-/// a single byte of it is compared. **This does not fix the issue #179
-/// fixture itself** (measured, `research/JOURNAL.md` S2-A43): a run of one
-/// repeated byte makes every candidate compare equal up to the shorter
-/// suffix's end, so every one ties to the *same* side (see
-/// [`Self::insert_and_find`]'s ordering rule) and the untouched side's
-/// bound never leaves 0 — length-prefix reuse only pays off when the walk
-/// actually alternates sides, which near-duplicate-but-not-identical data
-/// does and a single repeated byte does not. Measured on 300 near-duplicate
-/// 200-byte blocks (`tests::binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse`),
-/// a shape closer to S1-P2's sqlite/json/jsonl target: real ~3.5x.
-///
-/// [`Self::insert_and_find`] now also takes `nice_len` (`research/JOURNAL.md`
-/// S2-A44), originally only a candidate-count bound: the walk stopped
-/// visiting further candidates as soon as the best match found so far was
-/// at least `nice_len` long, cut off the same way an exhausted `max_depth`
-/// already is, but each candidate's own [`suffix_common_len`] scan still ran
-/// uncapped. **That left a gap, measured against the issue #179 fixture
-/// (200,000 bytes of one repeated value) rather than assumed**: the very
-/// first candidate visited already cost a full `MAX_MATCH_LEN`-length
-/// scan before `nice_len` was ever consulted between candidates, so a low
-/// `nice_len` cut the fixture's cost by roughly `max_depth`-fold (fewer
-/// candidates) but not enough — still `O(MAX_MATCH_LEN)` per position,
-/// `O(n * MAX_MATCH_LEN)` overall, well past the issue #179 speed guard's
-/// bound. `research/JOURNAL.md` S2-A46 closed that gap: `nice_len` now
-/// also bounds [`suffix_common_len`]'s own scan (its `limit` parameter), so
-/// a single candidate can never cost more than `O(nice_len)` regardless of
-/// how long the true common run is — on a repeated-byte run the very first
-/// candidate's capped scan already reaches `nice_len`, so the walk stops
-/// there instead of paying for a second `MAX_MATCH_LEN`-length scan that
-/// would only confirm what the cap already reports. The trade this makes
-/// is real, not free: a candidate whose true match exceeds `nice_len` is
-/// now reported as exactly `nice_len` long, not its true length, the same
-/// "good enough, stop paying to confirm more" trade a small `max_depth`
-/// already makes over candidate *count* — `nice_len` at or above
-/// `MAX_MATCH_LEN` still disables both the count bound and the scan cap
-/// and searches exactly as before ([`suffix_common_len`] never reports a
-/// longer match than `MAX_MATCH_LEN` regardless). `dp_round` calls
-/// [`Self::insert_and_find`] with `MAX_TREE_DEPTH_OPTIMAL` (640) and
-/// `NICE_LEN_OPTIMAL` (128): the same combination S2-A47 measured, which
-/// passes the issue #179 guard at ~0.1s release / ~1s debug, well inside
-/// its 15s budget.
-///
-/// Private to this module: `dp_round` is its only caller, matching
-/// [`MatchFinder`]'s own visibility for the same once-per-parse-position
-/// role in [`parse_greedy`].
+/// Private to this module: `dp_round` is its only caller, once per
+/// position.
 struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// Largest backward distance [`Self::insert_and_find`] ever reports
@@ -630,39 +545,24 @@ impl<'d> BinaryTreeMatchFinder<'d> {
     }
 
     /// Inserts `i` into its hash bucket's tree and returns the longest
-    /// match found among the candidates visited on the way down, bounded
-    /// to at most `max_depth` of them (see the struct docs for what
-    /// `max_depth` trades off — notably, unlike a hash chain's
-    /// `max_tries`, a shallow `max_depth` here permanently prunes the
-    /// bucket for every later call, not just this one). The match's
-    /// distance is always within the finder's configured window; a
-    /// candidate farther than that still participates in the tree's
-    /// structure (it may still separate other candidates) but is never
-    /// reported as a match.
+    /// match among the at most `max_depth` candidates visited on the way
+    /// down, always within the finder's window (see the struct docs for the
+    /// cost of a shallow `max_depth`).
     ///
-    /// Each position must be inserted at most once, in increasing order
-    /// — an LZ parse's own shape, not checked here: this type is
-    /// encode-only, so its caller is this crate's own parser, never
-    /// adversarial input.
+    /// Each position must be inserted at most once, in increasing order:
+    /// an LZ parse's own shape, unchecked because this type is encode-only
+    /// and its caller is this crate's parser, never adversarial input.
     ///
-    /// `nice_len` also stops the walk early, as soon as the best match
-    /// found so far reaches that length — cut off the same way an
-    /// exhausted `max_depth` already is — and separately bounds the cost of
-    /// scanning each individual candidate (`research/JOURNAL.md` S2-A46):
-    /// a candidate's own suffix comparison never runs past `nice_len`
-    /// bytes, so a single candidate can never cost more than `O(nice_len)`
-    /// regardless of how long its true common run is. A match whose true
-    /// length exceeds `nice_len` is therefore reported as exactly
-    /// `nice_len`, not its true length. Pass `MAX_MATCH_LEN` to disable
-    /// both effects and search exactly as before: no match can ever be
-    /// reported longer than that ([`suffix_common_len`]'s own cap), so a
-    /// `nice_len` at or above it never truncates a scan or fires early.
+    /// `nice_len` ends the walk as soon as the best match reaches it, and
+    /// caps each candidate's suffix comparison (`research/JOURNAL.md`
+    /// S2-A46), so one candidate costs `O(nice_len)` however long its true
+    /// common run is. A longer true match is therefore reported as exactly
+    /// `nice_len`. At or above [`MAX_MATCH_LEN`] it never fires.
     ///
     /// # Panics
     ///
-    /// Panics if `i >= data.len()` (`data` from [`Self::new`]): reading
-    /// past the end would be a caller bug, never something adversarial
-    /// input can trigger.
+    /// Panics if `i >= data.len()` (`data` from [`Self::new`]): a caller
+    /// bug, never something adversarial input can trigger.
     #[must_use]
     fn insert_and_find(
         &mut self,
@@ -747,11 +647,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         // Whatever remains unlinked on either chain (the walk exhausted
         // max_depth, or ended naturally) is cut off rather than left
         // dangling: those deeper candidates are permanently dropped from
-        // the tree, unreachable by any later insert_and_find call into
-        // this bucket. Unlike MatchFinder's max_tries, which bounds only
-        // the one read-only call it is passed to, this is a mutation: a
-        // shallow max_depth here degrades every future query, not just
-        // this one.
+        // the bucket (struct docs, "A shallow walk mutates").
         if let Some(t) = less_tail {
             self.right[t] = NO_POSITION;
         }
