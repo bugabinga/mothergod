@@ -25,7 +25,18 @@ async function withStub(answer, fn) {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       const a = answers[Math.min(seen.length, answers.length - 1)];
-      seen.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(body || "{}") });
+      // Strict, as Cloudflare's parser is: a body that is not JSON (Python's
+      // `Infinity`) is a 400 and a null body in `seen`, never a lenient read.
+      let parsed = null;
+      try {
+        parsed = JSON.parse(body || "{}");
+      } catch {
+        seen.push({ url: req.url, auth: req.headers.authorization, body: null });
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end("{}");
+        return;
+      }
+      seen.push({ url: req.url, auth: req.headers.authorization, body: parsed });
       res.writeHead(a.status ?? 200, { "content-type": "application/json" });
       res.end(JSON.stringify(a.payload ?? {}));
     });
@@ -365,6 +376,38 @@ test("one artifact costs one unreadable line whatever broke it, never the walk",
       r.out,
       /artifacts 3 since 2026-08-28T00:00:00Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
     );
+  });
+});
+
+// Round 6 (#995): a field `facts` passes through raw can be a value D1 cannot
+// bind. `costUSD: 1e999` is inf, which json.dumps writes as the non-JSON
+// constant Infinity; the strict stub rejects it with 400 as Cloudflare's
+// parser would, and one rejected INSERT used to kill the walk at that
+// artifact with the valid one after it never written. A role that is an
+// object, and a turn count past 64 bits, ride the same artifact.
+test("a value D1 cannot bind becomes null in its row, never a dead walk", async () => {
+  const poisoned = JSON.parse(JSON.stringify(metadata(800, "herald")));
+  poisoned.role = { not: "text" };
+  const text = JSON.stringify(poisoned)
+    .replace("\"costUSD\":0.42", "\"costUSD\":1e999")
+    .replace("\"num_turns\":23", "\"num_turns\":100000000000000000000000000000");
+  assert.match(text, /"costUSD":1e999/);
+  assert.match(text, /"num_turns":1000000000000000000000000000/);
+  const gh = stubGh(
+    [artifact(8, "audit-herald-800-1", "2026-08-28T00:00:00Z"), listing[1]],
+    { 8: { "metadata.json": text }, 2: zips[2] },
+  );
+  await withStub([keys([]), d1([]), d1([]), keys([[800, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 4, "both artifacts reached the INSERT");
+    const [id, , , role, , , , , , , , , cost, turns] = seen[1].body.params;
+    assert.equal(id, 800);
+    assert.equal(role, "?");
+    assert.equal(cost, null);
+    assert.equal(turns, null);
+    assert.equal(seen[2].body.params[0], 200, "the valid artifact after it is written");
+    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
   });
 });
 

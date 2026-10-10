@@ -18,6 +18,7 @@ archive, now when the run itself is writing.
 import collections
 import io
 import json
+import math
 import subprocess
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -114,8 +115,28 @@ def as_int(value):
         return None
 
 
+def bindable(value):
+    """The value if D1 can bind it, else None.
+
+    `facts` passes some artifact fields through raw, so a hostile one can be
+    a dict, a list, `inf` (`costUSD: 1e999`, which `json.dumps` writes as the
+    non-JSON constant `Infinity`) or an integer past SQLite's 64 bits. Any of
+    them makes the INSERT fail, and one failed INSERT is not one artifact's
+    loss: it kills the backfill at that artifact, and oldest first makes the
+    death permanent (#995 round 6).
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, int):
+        return value if -2**63 <= value < 2**63 else None
+    return value if isinstance(value, str) else None
+
+
 def row(meta, size):
     """One table row from the artifact's metadata, in COLUMNS order.
+
+    Every value is one D1 can bind (`bindable`); a `role` that is not text
+    becomes "?", the column being NOT NULL.
 
     `size(name)` is the byte count of a published text, `input-prompt.md` or
     `output-response.md`, or None. It is asked only when the extractor
@@ -123,7 +144,7 @@ def row(meta, size):
     placeholder line, whose byte count would read as a tiny prompt.
     """
     f = facts(meta)
-    return (
+    values = (
         as_int(f["run_id"]), as_int(f["attempt"]) or 1, f["at"], f["role"],
         f["event"] or None, f["actor"] or None, as_int(f["number"]),
         f["commit"] or None, int(f["measured"]), f["model"] or None,
@@ -133,6 +154,8 @@ def row(meta, size):
         size("input-prompt.md") if meta.get("prompt_extracted") else None,
         size("output-response.md") if meta.get("response_extracted") else None,
     )
+    values = tuple(bindable(v) for v in values)
+    return values[:3] + (values[3] or "?",) + values[4:]
 
 
 # One unexpired audit artifact as the listing names it. `made` is its
