@@ -27,6 +27,10 @@
 #
 # The judgement stays the BDFL's (ADR-0031). This job puts evidence on the
 # table and never edits agents/models.json itself.
+#
+# One reconciliation rides along: the session table's weekly backfill
+# (ADR-0060, #891), here because this is the run that already lists the
+# audit archive on the Sunday clock, ahead of the survey that queries it.
 name: agent-model-intel
 
 on:
@@ -47,7 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     # Headroom for the telemetry collector, which downloads one small zip
     # per audit artifact in its two windows: 129 artifacts took 56 seconds
-    # on 2026-08-23, and its own cap allows 600.
+    # on 2026-08-23, and its own cap allows 600. The backfill below adds
+    # the listing alone while the live writer keeps up, and a nine-minute
+    # walk (1,773 artifacts, 2026-10-09) only after a wiped table.
     timeout-minutes: 20
     permissions:
       contents: read
@@ -98,6 +104,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          FETCH_OK: ${{ steps.fetch.outputs.ok }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/out"
@@ -109,7 +116,7 @@ jobs:
           # evidence is a new fingerprint.
           prior="$(gh issue list --repo "$GITHUB_REPOSITORY" --label model-intel --state all --json number,state,body --limit 1)"
           verdict=unchanged
-          if [ "${{ steps.fetch.outputs.ok }}" = true ]; then
+          if [ "$FETCH_OK" = true ]; then
             PRIOR="$prior" python3 .github/scripts/model-intel.py "$RUNNER_TEMP/aa.json" "$out"
             verdict="$(cat "$out/verdict")"
           else
@@ -163,6 +170,25 @@ jobs:
             --label model-intel --label triage \
             --body-file "$out/body.md"
           echo "Opened a new model-intel issue."
+
+      # Session table reconciliation (ADR-0060, #891 slice 1b). The live
+      # row is written as each run ends, and a write that failed is one
+      # `::warning::` nobody reads (agent-audit), so the rows the table
+      # lacks are written here from the archive every Sunday. After the
+      # report and not cancelled(), never always(): a gap costs the report
+      # nothing, and a cancelled run owes no walk. Red on a gap, by the
+      # verb's own exit code: it exits 1 naming every artifact without a
+      # row, agent-alarm wakes the fixer on the first red of a streak, and
+      # a transient miss heals the next Sunday because the walk writes
+      # only what is absent. Steady state is the listing: 1,791 artifacts,
+      # 0 downloads, 9 s on 2026-10-10.
+      - id: backfill
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: .github/scripts/sessions backfill
 
       # Independent of the fetch: the telemetry half produces a report even
       # when Artificial Analysis does not.
