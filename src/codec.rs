@@ -292,37 +292,21 @@ fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
     cost + f64::from(bucket_bits(b))
 }
 
-/// Picks [`Models::length_match`]/`length_rep` by `kind`, the split every
-/// real-path [`TokenSink`] and [`DecodeSink`] (and the `ideal_cost_bits`
-/// pricer that must price what they code) selects a copy token's length
-/// model through.
+/// A copy token's length models, bucket [`Model`] and the [`ResidualTree`]
+/// beside it: [`Models::length_match`] and its residual for
+/// [`FlagKind::Match`], `length_rep` and its residual for [`FlagKind::Rep`].
+/// Every real-path [`TokenSink`] and [`DecodeSink`], and the pricer that must
+/// price what they code, selects through here.
 ///
 /// # Panics
 ///
 /// Panics if `kind` is [`FlagKind::Literal`]: [`walk_tokens`] never calls
 /// [`TokenSink::length`] for a [`Token::Literal`], so every real caller
-/// here already has a [`FlagKind::Match`] or [`FlagKind::Rep`] in hand.
-fn split_length_model(models: &mut Models, kind: FlagKind) -> &mut Model {
+/// already has a [`FlagKind::Match`] or [`FlagKind::Rep`] in hand.
+fn length_models(models: &mut Models, kind: FlagKind) -> (&mut Model, &mut ResidualTree) {
     match kind {
-        FlagKind::Match => &mut models.length_match,
-        FlagKind::Rep => &mut models.length_rep,
-        FlagKind::Literal => {
-            unreachable!("walk_tokens never calls length for a Token::Literal")
-        }
-    }
-}
-
-/// Picks [`Models::length_match_residual`]/`length_rep_residual` by `kind`,
-/// the [`ResidualTree`] beside [`split_length_model`]'s bucket model.
-///
-/// # Panics
-///
-/// Panics if `kind` is [`FlagKind::Literal`], same as
-/// [`split_length_model`].
-fn split_length_residual(models: &mut Models, kind: FlagKind) -> &mut ResidualTree {
-    match kind {
-        FlagKind::Match => &mut models.length_match_residual,
-        FlagKind::Rep => &mut models.length_rep_residual,
+        FlagKind::Match => (&mut models.length_match, &mut models.length_match_residual),
+        FlagKind::Rep => (&mut models.length_rep, &mut models.length_rep_residual),
         FlagKind::Literal => {
             unreachable!("walk_tokens never calls length for a Token::Literal")
         }
@@ -346,13 +330,12 @@ fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
 }
 
 /// `-log2(p)` cost of a copy token's length, bucket symbol through
-/// whichever of [`Models::length_match`]/`length_rep`
-/// [`split_length_model`] selects, residual bits through the
+/// whichever bucket model [`length_models`] selects, residual bits through the
 /// [`ResidualTree`] beside it: [`CostSink`]'s and [`PairedTokenSink`]'s
 /// shared `length` pricing, matching [`EncodeSink::length`].
 fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
-    let symbol = split_length_model(models, kind).ideal_cost_bits(lz::bucket(value));
-    symbol + split_length_residual(models, kind).ideal_cost_bits(value)
+    let (bucket, residual) = length_models(models, kind);
+    bucket.ideal_cost_bits(lz::bucket(value)) + residual.ideal_cost_bits(value)
 }
 
 /// `-log2(p)` cost of a match's distance, through whichever of
@@ -507,8 +490,9 @@ impl TokenSink for EncodeSink<'_> {
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        split_length_model(models, kind).encode(self.ac, lz::bucket(value));
-        split_length_residual(models, kind).encode(self.ac, value);
+        let (bucket, residual) = length_models(models, kind);
+        bucket.encode(self.ac, lz::bucket(value));
+        residual.encode(self.ac, value);
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
@@ -1126,8 +1110,8 @@ trait DecodeSink {
 }
 
 /// Decodes a copy token's length: the bucket symbol through
-/// [`Models::length_match`]/`length_rep` (selected by `kind`), the residual
-/// bits below it through the [`ResidualTree`] beside that model. Mirrors
+/// the model [`length_models`] selects by `kind`, the residual bits below it
+/// through the [`ResidualTree`] beside that model. Mirrors
 /// [`EncodeSink::length`].
 ///
 /// # Panics
@@ -1136,8 +1120,9 @@ trait DecodeSink {
 /// call sites already have a [`FlagKind::Match`] or [`FlagKind::Rep`] in
 /// hand.
 fn decode_length(models: &mut Models, ac: &mut Decoder, kind: FlagKind) -> u32 {
-    let b = split_length_model(models, kind).decode(ac);
-    split_length_residual(models, kind).decode(ac, b)
+    let (bucket, residual) = length_models(models, kind);
+    let b = bucket.decode(ac);
+    residual.decode(ac, b)
 }
 
 /// Decodes a match's distance symbol through whichever of
