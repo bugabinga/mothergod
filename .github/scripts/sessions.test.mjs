@@ -159,6 +159,17 @@ test("roles rejects a window it cannot parse", async () => {
   assert.match(r.err, /--since takes Nd or an ISO date/);
 });
 
+// 99999999999d overflows timedelta's C int; 1000000d constructs, then the
+// subtraction lands before year 1. Both are the usage line, never a traceback (#1003).
+test("roles rejects a window past the calendar with the usage line, not a traceback", async () => {
+  for (const spec of ["99999999999d", "1000000d"]) {
+    const r = await run(["roles", "--since", spec], { D1_API_BASE: "http://127.0.0.1:9" });
+    assert.notEqual(r.code, 0, spec);
+    assert.match(r.err, /--since takes Nd or an ISO date/, spec);
+    assert.doesNotMatch(r.err, /Traceback|OverflowError/, spec);
+  }
+});
+
 test("show prints one run vertically, or says which run is missing", async () => {
   await withStub(d1([{ run_id: 42, attempt: 1, role: "herald", turns: 9 }]), async (base, seen) => {
     const r = await run(["show", "42"], { D1_API_BASE: base });
