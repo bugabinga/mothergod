@@ -175,7 +175,7 @@ test("a failed allowance write is its own warning after the session row, exit 0"
         const r = await run([dir], { D1_API_BASE: base });
         assert.equal(r.code, 0, r.err);
         assert.equal(seen.length, 2);
-        assert.match(r.out, /^::warning::session-row: allowance not written: HTTP 500/m);
+        assert.match(r.out, /^::warning::session-row: allowance not written: Unreadable: HTTP 500/m);
         assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer$/m);
       },
     );
@@ -207,7 +207,7 @@ test("a failed write is a warning and exit 0, never a failed run", async () => {
     await withStub({ status: 503, payload: { success: false, errors: [{ message: "unavailable" }] } }, async (base) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0);
-      assert.match(r.out, /^::warning::session-row: not written: HTTP 503/m);
+      assert.match(r.out, /^::warning::session-row: not written: Unreadable: HTTP 503/m);
       assert.doesNotMatch(r.out + r.err, /test-token/);
     });
   } finally {
@@ -235,7 +235,34 @@ test("a missing or malformed metadata.json is a warning, not a crash", async () 
     writeFileSync(join(dir, "metadata.json"), "[]");
     r = await run([dir], { D1_API_BASE: "http://127.0.0.1:9" });
     assert.equal(r.code, 0);
-    assert.match(r.out, /not written: metadata.json is not an object/);
+    assert.match(r.out, /not written: ValueError: metadata.json is not an object/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #1002: the live writer called row() bare, so a field the whitelist cannot
+// turn into a number escaped as a traceback and exit 1 through the audit
+// action, whose comment promises the step cannot redden a run.
+test("a field row() cannot price is a warning and exit 0, no write attempted", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "audit-"));
+  const meta = {
+    ...metadata,
+    telemetry: {
+      ...metadata.telemetry,
+      usage: { output_tokens: 5, output_tokens_details: { thinking_tokens: "BIG" } },
+    },
+  };
+  // JSON.stringify has no 10**400; splice the literal in after serialising.
+  writeFileSync(join(dir, "metadata.json"), JSON.stringify(meta).replace("\"BIG\"", "1" + "0".repeat(400)));
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.match(r.out, /^::warning::session-row: not written: OverflowError: /m);
+      assert.doesNotMatch(r.out + r.err, /Traceback/);
+      assert.equal(seen.length, 0);
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
