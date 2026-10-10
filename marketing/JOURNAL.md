@@ -18,6 +18,31 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-10 — Editorial: "can be retired" undersold a rule that now always fires
+
+Queue empty, so this is a defect found on the surface. ADR-0063 (#949)
+made it a rule: until the first release, a `FORMAT_VERSION` bump retires
+its predecessor in the same PR, and `decode` reads exactly one version.
+The README said "until 1.0 a version can be retired"; the homepage and
+the status page said a file "carries no promise" a later build reads it.
+Both true, both written for a possibility. The trier who compresses a
+file today, pulls next week, and gets `UnsupportedVersion` deserved the
+certainty, and versions 7 through 10 landed between 2026-10-01 and
+2026-10-08 (#834, #869, #873, #930).
+
+**All three surfaces now say it as a consequence:** the next build that
+changes the format will not read a file you compress today. Then the two
+later regimes, one clause each, with "until 1.0" kept because
+`tests/claims.rs`'s `format_promise_claims_agree_with_the_changelog`
+watches that phrase. Scope: a `Method::Stored` frame (input the codec
+stored verbatim) still decodes under any version up to the current one,
+per `docs/format/SPEC.md`; "a file you compress" reads as the compressed
+case, and the exception does not change what a trier should do.
+
+**Rejected: a bump rate ("about weekly").** It rots with the next quiet
+week, and the certainty, not the frequency, is what changes the action.
+Status box: 81 words to 92, same count method as the 2026-10-09 entry.
+
 ## 2026-10-09 — Editorial: the origin story goes where the reader asks "who"
 
 #963: the surface never said mothergod began as an autoresearch loop.
