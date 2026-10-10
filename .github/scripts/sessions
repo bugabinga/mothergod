@@ -28,11 +28,12 @@ Verbs:
 The table holds identifiers and API-authored numbers only (schema.sql names
 each column); a run's prose stays in its audit artifact for 90 days, linked
 by run id. The live row is written by session-row.py as each run ends;
-`backfill` writes the rows the archive holds and the table does not, keyed
-from the artifact's name so a present row costs no download, and then
-counts: every artifact the listing returned must have a row, or the verb
-names the ones without and exits 1. A partial backfill that reads as done
-is the same lie an empty table is.
+`backfill`, which agent-model-intel.yml runs every Sunday, writes the rows
+the archive holds and the table does not, keyed from the artifact's name so
+a present row costs no download, and then counts: every artifact the
+listing returned must have a row, or the verb names the ones without and
+exits 1. A partial backfill that reads as done is the same lie an empty
+table is.
 
 Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py. `backfill`
 also reads GITHUB_REPOSITORY, or `--repo owner/name`.
