@@ -309,31 +309,21 @@ fn check_stored_bound(payload: &[u8], stored_bound: Option<u32>) -> Result<(), E
     Ok(())
 }
 
-/// Frequency increment and rescale ceiling shared by every adaptive
-/// frequency table in the crate that runs at the archive's original rate:
-/// [`model::Model`], [`ppm::Ppm`], and every [`literal::Literal`] bank
-/// except its fast-rate bank 0 (which tunes its own, faster-forgetting
-/// `FAST_INCREMENT`/`FAST_LIMIT`). Ported unchanged from the archive's
-/// `INC`/`LIM` (`research/imports/session-1/mothergod.rs`): before this
-/// pair was pulled out from under them, each of the three had
-/// independently declared the same two values, the same duplication
-/// [`rescale_bank`] itself already closed for the arithmetic that consumes
-/// them.
+/// Frequency increment and rescale ceiling of every adaptive frequency table
+/// at the archive's original rate (`INC`/`LIM` in
+/// `research/imports/session-1/mothergod.rs`). [`literal::Literal`]'s
+/// fast-rate bank 0 is the one table that tunes its own
+/// `FAST_INCREMENT`/`FAST_LIMIT`.
 pub(crate) const DEFAULT_RESCALE_INCREMENT: u32 = 12;
 /// See [`DEFAULT_RESCALE_INCREMENT`].
 pub(crate) const DEFAULT_RESCALE_LIMIT: u32 = 65536;
 
 /// Increments `freq[symbol]`/`*total` by `increment`, then halves every
-/// entry of `freq` (`(f+1) >> 1`, so a bank with any real evidence never
-/// rescales down to an impossible-to-code symbol) once `*total` exceeds
-/// `limit`, recomputing `*total` from the halved counts.
+/// entry of `freq` once `*total` exceeds `limit`, recomputing `*total` from
+/// the halved counts.
 ///
-/// Shared by every adaptive frequency table in the crate —
-/// [`model::Model`], [`ppm::Ppm`], and [`literal::Literal`]'s six banks
-/// plus its `ColumnExpertState` experiment bank — so none of them can
-/// drift on what "one observation" does to a bank; each had independently
-/// ported the archive's identical `INC`/`LIM` update rule before this was
-/// pulled out from under them.
+/// The halving is `(f+1) >> 1`, so a symbol with any evidence keeps
+/// frequency at least 1 and stays codable.
 pub(crate) fn rescale_bank(
     freq: &mut [u32],
     total: &mut u32,
@@ -354,13 +344,8 @@ pub(crate) fn rescale_bank(
 }
 
 /// Codes `symbol` through `encoder` at the sub-range `freq[..symbol].sum()..
-/// +freq[symbol]` out of `denom`, the cumulative-frequency range every
-/// symbol coder in the crate hands [`coder::Encoder::encode`].
-///
-/// Shared by [`model::Model::encode`] and [`ppm::Ppm::encode`], which pass
-/// their own table and `denom` (`total`, or `total + distinct` under PPM
-/// Method C's escape band) around this one scan, so the two can't drift on
-/// how a symbol's range is carved out of a frequency table.
+/// +freq[symbol]` out of `denom`. `denom` is the caller's: `total`, or
+/// `total + distinct` under [`ppm::Ppm`]'s escape band.
 pub(crate) fn encode_symbol(encoder: &mut coder::Encoder, freq: &[u32], symbol: usize, denom: u64) {
     let low: u32 = freq[..symbol].iter().sum();
     let high = low + freq[symbol];
@@ -368,17 +353,13 @@ pub(crate) fn encode_symbol(encoder: &mut coder::Encoder, freq: &[u32], symbol: 
 }
 
 /// Finds the symbol whose cumulative-frequency range in `freq` contains
-/// `target` (as returned by [`coder::Decoder::target`]), returning the
-/// symbol and the `[low, high)` range [`coder::Decoder::decode`] must
-/// consume to stay in lockstep with [`encode_symbol`].
+/// `target` (from [`coder::Decoder::target`]), returning it with the
+/// `[low, high)` range [`coder::Decoder::decode`] must consume: the inverse
+/// of [`encode_symbol`].
 ///
 /// Never runs past the end of `freq`: callers bound `target` to
-/// `freq.iter().sum()` (plus, for [`ppm::Ppm`], a reserved escape share
-/// handled before calling this), so the scan always finds a symbol
-/// regardless of what bytes produced `target`.
-///
-/// Shared by [`model::Model::decode`] and [`ppm::Ppm::decode`], the decode
-/// side of [`encode_symbol`]'s split.
+/// `freq.iter().sum()` (for [`ppm::Ppm`], after peeling off its escape
+/// share), so the scan finds a symbol whatever bytes produced `target`.
 pub(crate) fn scan_for_target(freq: &[u32], target: u64) -> (usize, u64, u64) {
     let mut symbol = 0;
     let mut low = 0u64;
@@ -390,17 +371,10 @@ pub(crate) fn scan_for_target(freq: &[u32], target: u64) -> (usize, u64, u64) {
     (symbol, low, high)
 }
 
-/// Builds a `Vec<T>` of `n` clones of `value`, failing gracefully instead
-/// of aborting if the allocator cannot satisfy `n` (hard rule 2,
-/// `rust-craft` skill's allocation-discipline): `try_reserve_exact` first,
-/// then `resize`, which never asks the allocator for more than that
-/// already-reserved capacity, mirroring [`codec::decode`]'s own
-/// `output.try_reserve_exact` shape (#453).
-///
-/// Shared by every fixed-size adaptive table on the real decode path
-/// ([`model::Model::try_new`], [`sse::Sse::try_new`],
-/// [`literal::Literal::try_new`]) so none of them can drift on how a
-/// fallible fill is built.
+/// Builds a `Vec<T>` of `n` clones of `value`, returning `Err` instead of
+/// aborting if the allocator cannot satisfy `n` (hard rule 2, `rust-craft`
+/// skill's allocation-discipline, #453). `resize` after `try_reserve_exact`
+/// never asks the allocator for more than was reserved.
 pub(crate) fn try_filled_vec<T: Clone>(
     n: usize,
     value: T,
@@ -411,11 +385,8 @@ pub(crate) fn try_filled_vec<T: Clone>(
     Ok(v)
 }
 
-/// Fallible counterpart to `data.to_vec()`: same bytes, but returns `Err`
-/// instead of aborting if the allocator cannot satisfy `data.len()`
-/// bytes. Shared by the filter undo buffers on the real decode path
-/// ([`filters::delta::try_decode`], [`filters::bcj::try_decode`]) that
-/// start from a copy of their input (#453).
+/// Fallible `data.to_vec()`: `Err` instead of an abort if the allocator
+/// cannot satisfy `data.len()` bytes (#453).
 pub(crate) fn try_vec_from_slice(
     data: &[u8],
 ) -> Result<Vec<u8>, std::collections::TryReserveError> {
@@ -437,21 +408,15 @@ fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
 
 /// Whether a `candidate_len`-byte encoding beats an `incumbent_len`-byte
 /// incumbent in a shortest-wins search. Strict: a tie keeps the
-/// incumbent, so search order is a stable tie-break, not an accident of
-/// iteration. Shared by [`compress`]'s [`Method::Lz`]-vs-[`Method::Stored`]
-/// choice and [`codec::encode`]'s filter-candidate search (where it keeps
-/// [`filters::select::pick`]'s candidate order a stable tie-break) —
-/// both are this same convention, not something `docs/format/SPEC.md`
-/// requires (the spec only bounds the frame from above, which either
-/// choice satisfies on a tie).
+/// incumbent, so search order is a stable tie-break. Shared by
+/// [`compress`]'s [`Method::Lz`]-vs-[`Method::Stored`] choice and
+/// [`codec::encode`]'s filter-candidate search. The convention is ours;
+/// `docs/format/SPEC.md` only bounds the frame from above, which either
+/// choice satisfies on a tie.
 ///
-/// #390's mutation sweep found `<` survive as both `<=` and `==` at this
-/// function's two call sites, before they were merged here: neither
-/// `compress`'s nor `encode`'s own round-trip and selection tests ever
-/// observe which candidate was chosen on a tie, since every candidate
-/// they compare is already a valid, lossless encoding. The unit test
-/// below is the only place that pins "strictly smaller, not tied or
-/// larger" directly.
+/// Its own unit test is the only one that pins "strictly smaller": every
+/// candidate is a valid lossless encoding, so no round-trip or selection
+/// test observes which one a tie picks (#390's mutation sweep).
 pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usize) -> bool {
     candidate_len < incumbent_len
 }
