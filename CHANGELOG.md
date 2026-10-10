@@ -57,6 +57,7 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
-- crate: the published package holds only `src/`, `tests/` (minus the
-  repository-only `claims.rs`), the README, LICENSE and CHANGELOG, 91 files
-  instead of 374, and its own `cargo test` passes (#1021).
+- crate: the published package holds `src/`, `tests/` (minus the
+  repository-only `claims.rs` and `mutants.toml`), the one research file
+  the unit tests embed, the README, LICENSE and CHANGELOG, 90 files
+  instead of 374, and its own `cargo test` passes (#1021, #1024).

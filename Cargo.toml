@@ -19,11 +19,13 @@ categories = ["compression"]
 # default. The agent realm (ADR-0010) never ships. tests/claims.rs reads
 # site/, docs/benchmarks/ and research/progress.jsonl, none packaged, so
 # it stays out and the shipped `cargo test` stays green. The one research
-# file is include_bytes!'d by the unit tests under src/.
+# file is include_bytes!'d by the unit tests under src/. tests/mutants.toml
+# configures mutants-check.yml, so it stays out with the workflow.
 include = [
   "/src",
   "/tests",
   "!/tests/claims.rs",
+  "!/tests/mutants.toml",
   "/research/imports/session-1/mothergod.rs",
   "/README.md",
   "/LICENSE",
