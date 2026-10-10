@@ -13,6 +13,9 @@ day the backfill became a third.
 `meta` is the parsed metadata.json with `_at` set by the caller to the
 instant the row describes: the artifact's creation time when walking the
 archive, now when the run itself is writing.
+
+The allowance table's rows (#891 slice 2) come from the same metadata by
+`allowance_rows`, so the two writers that share `row` share them too.
 """
 
 import collections
@@ -23,6 +26,8 @@ import subprocess
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+
+from allowance import valid_fraction, valid_reset, window_readings
 
 
 class Unreadable(Exception):
@@ -105,6 +110,58 @@ COLUMNS = (
 )
 INSERT = (f"INSERT OR REPLACE INTO sessions ({', '.join(COLUMNS)}) "
           f"VALUES ({', '.join('?' * len(COLUMNS))})")
+
+
+# The allowance table's row: the last valid reading of one window one run
+# reported. `at` and `role` are the session's, joined on (run_id, attempt),
+# never repeated here.
+ALLOWANCE_COLUMNS = ("run_id", "attempt", "window", "utilization", "resets_at", "overage")
+
+# D1 binds at most 100 parameters per statement and `allowance_insert` binds
+# one row's worth per window, so a hostile artifact with many window keys
+# would fail the statement, and oldest first makes that failure permanent
+# (#995 round 6). The cap lives here, where the rows are made, so both
+# writers inherit it; the API reports a handful of windows, never near it.
+MAX_BOUND_PARAMETERS = 100
+MAX_WINDOWS = MAX_BOUND_PARAMETERS // len(ALLOWANCE_COLUMNS)
+
+
+def allowance_insert(rows):
+    """One INSERT OR REPLACE for every row in `rows`: one round trip per artifact."""
+    values = f"({', '.join('?' * len(ALLOWANCE_COLUMNS))})"
+    return (f"INSERT OR REPLACE INTO allowance ({', '.join(ALLOWANCE_COLUMNS)}) "
+            f"VALUES {', '.join([values] * len(rows))}")
+
+
+def allowance_rows(meta):
+    """The last valid reading per window in the run's rate_limit_events, as rows.
+
+    The shape rule is `allowance.window_readings`; the validation is the
+    consumers' union: a reading exists at all on `valid_fraction` alone
+    (retrospect's footer informs on the fraction), and keeps its reset only
+    when `valid_reset` (the artifact-name index demanded both). Last wins,
+    in event order, because the API reports the window's current state each
+    time. No run_id, no events, or none readable is an empty list, never a
+    row of nulls: a run that reported nothing is absent, which is what a
+    census can tell apart. At most `MAX_WINDOWS` rows, the first by name.
+    """
+    run_id = as_int(meta.get("run_id"))
+    events = meta.get("rate_limit_events")
+    if run_id is None or not isinstance(events, list):
+        return []
+    attempt = as_int(meta.get("run_attempt")) or 1
+    last = {}
+    for info in events:
+        for kind, window in window_readings(info):
+            utilization = window.get("utilization")
+            if not isinstance(kind, str) or not valid_fraction(utilization):
+                continue
+            reset = window.get("resetsAt")
+            overage = window.get("isUsingOverage")
+            last[kind] = (run_id, attempt, kind, float(utilization),
+                          bindable(reset) if valid_reset(reset) else None,
+                          int(overage) if isinstance(overage, bool) else None)
+    return [last[kind] for kind in sorted(last)[:MAX_WINDOWS]]
 
 
 def as_int(value):

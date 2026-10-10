@@ -44,15 +44,19 @@ function auditDir(meta, files = {}) {
   return dir;
 }
 
+// Serve programmed D1 answers, one per request in order with the last
+// repeating, and record what the script sent.
 async function withStub(answer, fn) {
+  const answers = Array.isArray(answer) ? answer : [answer];
   const seen = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
+      const a = answers[Math.min(seen.length, answers.length - 1)];
       seen.push(JSON.parse(body));
-      res.writeHead(answer.status ?? 200, { "content-type": "application/json" });
-      res.end(JSON.stringify(answer.payload ?? { success: true, result: [{ success: true, results: [] }] }));
+      res.writeHead(a.status ?? 200, { "content-type": "application/json" });
+      res.end(JSON.stringify(a.payload ?? { success: true, result: [{ success: true, results: [] }] }));
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -99,6 +103,82 @@ test("writes the whitelist as one INSERT OR REPLACE, in column order", async () 
       assert.deepEqual(p.slice(13, 19), [23, 420000, 2, 0, "end_turn", "abc123"]);
       assert.deepEqual(p.slice(19), [1234, 567]);
     });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Both payload shapes allowance.py names, in the order the API moved through
+// them: one flat window, then both windows nested. Last wins per window.
+const readings = [
+  { rateLimitType: "five_hour", utilization: 0.03, resetsAt: 1791990000 },
+  {
+    rateLimitType: "seven_day",
+    unifiedWindows: {
+      five_hour: { utilization: 0.07, resetsAt: "soon" }, // valid fraction, junk reset: a row with no reset
+      seven_day: { utilization: 0.28, resetsAt: 1792029600, isUsingOverage: false },
+      seven_day_overage_included: { utilization: 0.36, resetsAt: 1792029600, isUsingOverage: true },
+    },
+  },
+  { unifiedWindows: { seven_day: { utilization: 1.5, resetsAt: 1792029600 } } }, // no valid fraction: not a reading
+];
+
+test("the last valid reading per allowance window follows the session row, one statement", async () => {
+  const dir = auditDir({ ...metadata, rate_limit_events: readings });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.match(
+        r.out,
+        /^session-row: wrote run 37148994173 attempt 2 for reviewer, allowance five_hour seven_day seven_day_overage_included$/m,
+      );
+      assert.equal(seen.length, 2);
+      assert.match(seen[0].sql, /^INSERT OR REPLACE INTO sessions /);
+      assert.equal(
+        seen[1].sql,
+        "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) "
+          + "VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)",
+      );
+      assert.deepEqual(seen[1].params, [
+        37148994173,
+        2,
+        "five_hour",
+        0.07,
+        null,
+        null, // the nested reading replaced the flat one
+        37148994173,
+        2,
+        "seven_day",
+        0.28,
+        1792029600,
+        0,
+        37148994173,
+        2,
+        "seven_day_overage_included",
+        0.36,
+        1792029600,
+        1,
+      ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed allowance write is its own warning after the session row, exit 0", async () => {
+  const dir = auditDir({ ...metadata, rate_limit_events: readings });
+  try {
+    await withStub(
+      [{}, { status: 500, payload: { success: false, errors: [{ message: "D1 is down" }] } }],
+      async (base, seen) => {
+        const r = await run([dir], { D1_API_BASE: base });
+        assert.equal(r.code, 0, r.err);
+        assert.equal(seen.length, 2);
+        assert.match(r.out, /^::warning::session-row: allowance not written: HTTP 500/m);
+        assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer$/m);
+      },
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

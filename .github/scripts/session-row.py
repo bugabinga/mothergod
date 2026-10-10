@@ -8,6 +8,10 @@ identifiers only, through audit_facts.row(), the one whitelist every reader
 of an artifact shares; no prose reaches the table (ADR-0019). The same row
 written from the archive is `sessions backfill`.
 
+The run's allowance readings follow as rows of the allowance table (#891
+slice 2), through audit_facts.allowance_rows, the same function `sessions
+backfill` writes them with from the archive.
+
 Never fails the run: exit 0 on every path, because observability does not
 get to break the thing it observes (ADR-0023). A row that could not be
 written is a `::warning::` annotation, and the artifact remains that run's
@@ -23,7 +27,7 @@ import sys
 from datetime import datetime, timezone
 
 import d1
-from audit_facts import INSERT, row
+from audit_facts import INSERT, allowance_insert, allowance_rows, row
 
 
 def size_in(audit_dir):
@@ -62,7 +66,15 @@ def main(argv):
     except d1.Unreadable as error:
         print(f"::warning::session-row: not written: {error}")
         return 0
-    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}")
+    windows = ""
+    readings = allowance_rows(meta)
+    if readings:
+        try:
+            d1.query(allowance_insert(readings), [v for r in readings for v in r])
+            windows = ", allowance " + " ".join(r[2] for r in readings)
+        except d1.Unreadable as error:
+            print(f"::warning::session-row: allowance not written: {error}")
+    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{windows}")
     return 0
 
 

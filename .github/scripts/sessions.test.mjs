@@ -37,6 +37,12 @@ async function withStub(answer, fn) {
         return;
       }
       seen.push({ url: req.url, auth: req.headers.authorization, body: parsed });
+      // D1's documented limit: a statement binding more than 100 parameters fails.
+      if ((parsed.params ?? []).length > 100) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ success: false, errors: [{ message: "too many SQL variables" }] }));
+        return;
+      }
       res.writeHead(a.status ?? 200, { "content-type": "application/json" });
       res.end(JSON.stringify(a.payload ?? {}));
     });
@@ -306,6 +312,65 @@ test("backfill writes the rows the archive has and the table lacks, and names th
       r.out,
       /^sessions backfill: artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 1 \| missing 1$/m,
     );
+  });
+});
+
+test("backfill writes an artifact's allowance readings beside its row; --rebuild reads present rows too", async () => {
+  const meta = {
+    ...metadata(100, "bdfl"),
+    rate_limit_events: [
+      { unifiedWindows: { seven_day: { utilization: 0.24, resetsAt: 1792029600, isUsingOverage: false } } },
+    ],
+  };
+  const gh = stubGh(listing.slice(0, 1), {
+    1: { "metadata.json": JSON.stringify(meta), "input-prompt.md": "p", "output-response.md": "r" },
+  });
+  // No present-rows read under --rebuild: the first call is the row itself.
+  await withStub([d1([]), d1([]), keys([[100, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--rebuild"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual(downloads(gh), ["1"]); // the row the table already holds, read again
+    assert.equal(seen.length, 3);
+    assert.match(seen[0].body.sql, /^INSERT OR REPLACE INTO sessions /);
+    assert.equal(
+      seen[1].body.sql,
+      "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    assert.deepEqual(seen[1].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
+    assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.match(
+      r.out,
+      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+    );
+  });
+});
+
+test("an artifact with more windows than D1 binds in one statement costs rows, never the walk", async () => {
+  const windows = Object.fromEntries(
+    Array.from({ length: 20 }, (_, i) => [`w${String(i).padStart(2, "0")}`, { utilization: 0.1 }]),
+  );
+  const hostile = { ...metadata(100, "bdfl"), rate_limit_events: [{ unifiedWindows: windows }] };
+  const files = (meta) => ({
+    "metadata.json": JSON.stringify(meta),
+    "input-prompt.md": "p",
+    "output-response.md": "r",
+  });
+  const gh = stubGh(listing.slice(0, 2), { 1: files(hostile), 2: files(metadata(200, "reviewer")) });
+  await withStub([keys([]), d1([]), d1([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    const allowance = seen.find((q) => q.body.sql.startsWith("INSERT OR REPLACE INTO allowance"));
+    assert.equal(allowance.body.params.length, 96); // 16 windows of 6: the most a statement may bind
+    assert.equal(seen.filter((q) => q.body.sql.startsWith("INSERT OR REPLACE INTO sessions")).length, 2); // the next artifact was still written
+    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
   });
 });
 
