@@ -18,7 +18,30 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
-## 2026-10-10 — Editorial: "can be retired" undersold a rule that now always fires
+## 2026-10-10 — Editorial: the homepage's trust link landed on factory vocabulary
+
+Queue empty, so this is a defect found on the surface. `/`'s panic
+principle sends the reader to `/status` for the live fuzz time and crash
+count (2026-09-18 entry). The card it lands on opened with an issue
+number, a script path, "artifact window" and "the weekly digest", a
+record no visitor can find. It answered "how is this number produced"
+for the factory before "is it tested" for the reader.
+
+**The card now says what runs and how often, in the reader's words,**
+then what the numbers cover, then links `docs/TESTING.md` for the
+engineer who descends. Evidence: `fuzz-check.yml` runs nightly
+(`cron: "13 2 * * *"`) at `FUZZ_BUDGET_S: 1800`, and the live ledger's
+fuzz entries record 1812 to 1986 CPU-seconds each, so "half an hour";
+`fuzz/fuzz_targets/roundtrip.rs` asserts `decompressed == data`, so "a
+round trip that comes back different"; `coverage-check.yml` is weekly
+(`cron: "51 4 * * 0"`); both upload with `retention-days: 90`. The two
+pending stat labels lost their issue numbers; #454 (coverage) has closed
+and the live ledger shows 97.38%.
+
+**Rejected: keeping `trust-telemetry.py` linked in the card.** Its
+docstring is the factory's; `docs/TESTING.md` is the human page about
+the same portfolio, and the script stays one click further for whoever
+reads the strategy.
 
 Queue empty, so this is a defect found on the surface. ADR-0063 (#949)
 made it a rule: until the first release, a `FORMAT_VERSION` bump retires

@@ -217,11 +217,16 @@
       <section id="trust-section">
         <h2>Is it tested?</h2>
         <p>
-          The trust ledger (issue #449): numbers written by the scheduled test
-          workflows themselves, aggregated from their run artifacts by
-          <code>.github/scripts/trust-telemetry.py</code> on every deploy.
-          Cumulative figures cover the trailing 90-day artifact window; the
-          weekly digest is the durable record past that horizon.
+          Every night, fuzzers spend half an hour throwing random and corrupted
+          input at the codec, hunting for a crash or a round trip that comes
+          back different. Every week, a coverage run measures how much of the
+          code the tests reach. The numbers below are what those runs recorded
+          themselves: fuzz time and crashes totalled over the last 90 days,
+          which is as long as their records are kept, and the latest coverage.
+          What runs when, and why:
+          <a
+            href="https://github.com/bugabinga/mothergod/blob/main/docs/TESTING.md"
+          >the testing strategy</a>.
         </p>
         <div class="stats" id="trust-grid" data-loading>Loading…</div>
         <p class="asof" id="trust-asof"></p>
@@ -487,9 +492,9 @@
         stat(hours == null ? null : hours.toFixed(2), 'fuzz CPU-hours, 90d'),
         stat(data.crashers_total, 'crashers found, 90d'),
         stat(data.trend?.mutation_score?.latest, 'mutation score',
-          'mutation score, not yet measured (#455)'),
+          'mutation score, not yet measured'),
         stat(data.trend?.coverage_region_pct?.latest, 'region coverage %',
-          'region coverage %, not yet measured (#454)'),
+          'region coverage %, not yet measured'),
       ];
       grid.innerHTML = cells.map(([n, label]) => `
         <div class="stat"><span class="n">${escapeHtml(n)}</span><span class="label">${escapeHtml(label)}</span></div>
