@@ -21,15 +21,23 @@ Verbs:
                                   denials, errors, projected cost
     show <run-id>                 one run's row, one field per line
     migrate                       apply infra/sessions/schema.sql, idempotent
+    backfill [--since 7d|DATE]    one row per archived audit artifact the table
+                                  lacks, `at` the artifact's creation; prints
+                                  the census and exits non-zero on a gap
 
 The table holds identifiers and API-authored numbers only (schema.sql names
 each column); a run's prose stays in its audit artifact for 90 days, linked
-by run id. Rows exist from 2026-10-03; earlier sessions arrive with the
-backfill chartered in issue #891.
+by run id. The live row is written by session-row.py as each run ends;
+`backfill` writes the rows the archive holds and the table does not, keyed
+from the artifact's name so a present row costs no download, and then
+counts: every artifact the listing returned must have a row, or the verb
+names the ones without and exits 1. A partial backfill that reads as done
+is the same lie an empty table is.
 
-Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py.
+Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py. `backfill`
+also reads GITHUB_REPOSITORY, or `--repo owner/name`.
 
-Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | migrate
+Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | migrate | backfill [--since W] [--repo R]
 """
 
 import os
@@ -38,6 +46,7 @@ import statistics
 import sys
 from datetime import datetime, timedelta, timezone
 
+import audit_facts
 import d1
 
 SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -75,15 +84,98 @@ def render_show(rows, run_id):
     return [f"{k.ljust(width)}  {cell(v)}" for k, v in rows[0].items()]
 
 
+class Usage(Exception):
+    """A flag without its value: the usage line and exit 2, like an unknown verb."""
+
+
+def flag(args, name):
+    """The value after `name` in `args`, or None when the flag is absent."""
+    if name not in args:
+        return None
+    at = args.index(name) + 1
+    if at == len(args):
+        raise Usage(name)
+    return args[at]
+
+
+def stamp(when):
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def since_of(spec, now):
-    """`7d` style windows and ISO dates both become an ISO instant."""
+    """`7d` style windows and ISO dates both become a UTC instant."""
     match = re.fullmatch(r"(\d+)d", spec)
     if match:
-        return (now - timedelta(days=int(match.group(1)))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return now - timedelta(days=int(match.group(1)))
     try:
-        return datetime.fromisoformat(spec.replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        when = datetime.fromisoformat(spec.replace("Z", "+00:00"))
     except ValueError:
         raise SystemExit(f"sessions: --since takes Nd or an ISO date, not {spec!r}")
+    # A date with no zone is UTC midnight: the table and the archive are stamped
+    # in UTC, and `astimezone` on a naive value would read the machine's clock.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc)
+
+
+# An artifact's name as agent-audit builds it, `audit-<role>-<run id>-<attempt>`,
+# then the allowance suffix audit-extract.py appends when it read one. The
+# table's key is (run_id, attempt), so the listing alone says which rows are
+# present and the walk downloads only the rest.
+NAME = re.compile(r"^audit-[a-z-]+-(\d+)-(\d+)(?:-u\d+-r\d+)?$")
+
+
+def key_of(name):
+    match = NAME.match(name)
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def keys_in_table():
+    return {(r["run_id"], r["attempt"])
+            for r in d1.query("SELECT run_id, attempt FROM sessions")}
+
+
+def backfill(repo, since):
+    """Write the archive's rows the table lacks; print the census; 1 on a gap.
+
+    Oldest first, as `archive` lists them, so a walk that dies midway has
+    written what the 90-day expiry was about to take. Idempotent: a second
+    run finds every row present and downloads nothing.
+    """
+    present = keys_in_table()
+    artifacts = audit_facts.archive(repo, since)
+    keys = {a.name: key_of(a.name) for a in artifacts}
+    todo = [a for a in artifacts if keys[a.name] not in present]
+    written, unreadable = 0, []
+    for read in audit_facts.walk(repo, todo):
+        if read.error:
+            unreadable.append(f"{read.artifact.name}: {read.error}")
+            continue
+        # One artifact costs one unreadable line, never the walk (the
+        # invariant on audit_facts.walk): a field of the wrong shape raises
+        # inside row(), and naming the exception types one hostile shape at a
+        # time missed three times (#995 rounds 3 to 5).
+        try:
+            values = audit_facts.row(read.meta, read.sizes.get)
+        except Exception as error:  # noqa: BLE001, the invariant above
+            unreadable.append(f"{read.artifact.name}: metadata has a malformed field "
+                              f"({type(error).__name__}: {error})")
+            continue
+        if values[0] is None:
+            unreadable.append(f"{read.artifact.name}: metadata carries no run_id")
+            continue
+        d1.query(audit_facts.INSERT, values)
+        keys[read.artifact.name] = (values[0], values[1])
+        written += 1
+    have = keys_in_table()
+    missing = [name for name, key in keys.items() if key not in have]
+    for line in unreadable:
+        print(f"  unreadable {line}")
+    floor = stamp(artifacts[0].made) if artifacts else "none"
+    print(f"sessions backfill: artifacts {len(artifacts)} since {floor}"
+          f" | present {len(artifacts) - len(todo)} | written {written}"
+          f" | unreadable {len(unreadable)} | missing {len(missing)}")
+    return 1 if missing else 0
 
 
 def med(values):
@@ -136,8 +228,8 @@ def main(argv):
             rows = d1.query(args[0], args[1:])
             print("\n".join(render(rows)))
         elif verb == "roles":
-            spec = args[args.index("--since") + 1] if "--since" in args else "7d"
-            since = since_of(spec, datetime.now(timezone.utc))
+            spec = flag(args, "--since") or "7d"
+            since = stamp(since_of(spec, datetime.now(timezone.utc)))
             rows = d1.query("SELECT role, measured, turns, out_tokens, denials, error, cost_usd "
                             "FROM sessions WHERE at >= ?", [since])
             print(f"sessions since {since}: {len(rows)}")
@@ -150,10 +242,22 @@ def main(argv):
             with open(SCHEMA, encoding="utf-8") as fh:
                 d1.query(fh.read())
             print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}")
+        elif verb == "backfill":
+            spec = flag(args, "--since")
+            since = since_of(spec, datetime.now(timezone.utc)) if spec else None
+            repo = flag(args, "--repo") or os.environ.get("GITHUB_REPOSITORY")
+            if not repo:
+                print("sessions: backfill needs GITHUB_REPOSITORY or --repo owner/name")
+                return 2
+            return backfill(repo, since)
         else:
             print(__doc__.strip().splitlines()[-1])
             return 2
-    except d1.Unreadable as error:
+    except Usage as error:
+        print(f"sessions: {error} takes a value")
+        print(__doc__.strip().splitlines()[-1])
+        return 2
+    except (d1.Unreadable, audit_facts.Unreadable) as error:
         return unreadable(error)
     except OSError as error:
         return unreadable(error)

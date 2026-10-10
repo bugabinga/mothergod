@@ -6,22 +6,39 @@
 // seam inbox.test.mjs uses for KV; nothing in production sets it.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
 const script = `${scriptsDir}/sessions`;
 
-// Serve one programmed D1 answer, record what the script sent, run `fn`.
+// Serve programmed D1 answers, one per request in order with the last
+// repeating, record what the script sent, run `fn`.
 async function withStub(answer, fn) {
+  const answers = Array.isArray(answer) ? answer : [answer];
   const seen = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
-      seen.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(body || "{}") });
-      res.writeHead(answer.status ?? 200, { "content-type": "application/json" });
-      res.end(JSON.stringify(answer.payload ?? {}));
+      const a = answers[Math.min(seen.length, answers.length - 1)];
+      // Strict, as Cloudflare's parser is: a body that is not JSON (Python's
+      // `Infinity`) is a 400 and a null body in `seen`, never a lenient read.
+      let parsed = null;
+      try {
+        parsed = JSON.parse(body || "{}");
+      } catch {
+        seen.push({ url: req.url, auth: req.headers.authorization, body: null });
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end("{}");
+        return;
+      }
+      seen.push({ url: req.url, auth: req.headers.authorization, body: parsed });
+      res.writeHead(a.status ?? 200, { "content-type": "application/json" });
+      res.end(JSON.stringify(a.payload ?? {}));
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -166,4 +183,285 @@ test("an unknown verb prints the usage line and exits 2", async () => {
   const r = await run(["list"], {});
   assert.equal(r.code, 2);
   assert.match(r.out, /^Usage: sessions sql/);
+});
+
+// The archive, for `backfill`: a stub gh answers the listing with `artifacts`
+// and a zip download with the files `zips` holds for that id, or junk bytes
+// for an id mapped to null. Every call lands in calls.log, so a test can say
+// which artifacts were downloaded and which were skipped on their name.
+function stubGh(artifacts, zips) {
+  const dir = mkdtempSync(join(tmpdir(), "sessions-"));
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/usr/bin/env python3
+import io, json, sys, zipfile
+artifacts = json.loads(${JSON.stringify(JSON.stringify(artifacts))})
+zips = json.loads(${JSON.stringify(JSON.stringify(zips))})
+args = sys.argv[1:]
+with open(${JSON.stringify(join(dir, "calls.log"))}, "a") as fh:
+    fh.write(" ".join(args) + "\\n")
+if args[:3] == ["api", "--paginate", "--slurp"] and args[3].startswith("repos/o/r/actions/artifacts?"):
+    print(json.dumps([{"artifacts": artifacts}]))
+elif args[0] == "api" and args[1].startswith("repos/o/r/actions/artifacts/") and args[1].endswith("/zip"):
+    files = zips.get(args[1].split("/")[-2])
+    if files is None:
+        sys.stdout.buffer.write(b"not a zip")
+        sys.exit(0)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, text in files.items():
+            if name != "__encrypted__":
+                zf.writestr(name, text)
+    data = bytearray(buf.getvalue())
+    if "__encrypted__" in files:
+        # Bit 0 of the general-purpose flag, in every local and central
+        # header: zipfile then raises RuntimeError on read, no password.
+        for sig, off in ((b"PK\\x03\\x04", 6), (b"PK\\x01\\x02", 8)):
+            i = data.find(sig)
+            while i != -1:
+                data[i + off] |= 1
+                i = data.find(sig, i + 4)
+    sys.stdout.buffer.write(bytes(data))
+else:
+    sys.exit("stub gh: unexpected call " + " ".join(args))
+`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  return dir;
+}
+
+function downloads(dir) {
+  let log = "";
+  try {
+    log = readFileSync(join(dir, "calls.log"), "utf8");
+  } catch {
+    return [];
+  }
+  return log
+    .split("\n")
+    .filter((l) => l.endsWith("/zip"))
+    .map((l) => l.split("/").at(-2));
+}
+
+const metadata = (run_id, role) => ({
+  role,
+  trigger: { event: "pull_request", actor: "claude[bot]", number: "893" },
+  commit: "1ef993a0000000000000000000000000000000000",
+  run_id: String(run_id),
+  run_attempt: "1",
+  is_error: false,
+  telemetry: {
+    num_turns: 23,
+    duration_ms: 420000,
+    stop_reason: "end_turn",
+    usage: { output_tokens: 5000, output_tokens_details: { thinking_tokens: 1000 } },
+    modelUsage: { "claude-sonnet-5-5": { outputTokens: 5000, costUSD: 0.42, costBasis: "list" } },
+    permission_denials: { count: 2, tools: ["Edit", "Write"] },
+  },
+  persona: { sha256: "abc123" },
+  prompt_extracted: true,
+  response_extracted: true,
+});
+
+const artifact = (id, name, created_at, expired = false) => ({ id, name, created_at, expired });
+
+const listing = [
+  artifact(1, "audit-bdfl-100-1", "2026-08-22T08:14:32Z"),
+  artifact(2, "audit-reviewer-200-1-u2400-r1792029600", "2026-09-01T00:00:00Z"),
+  artifact(3, "audit-herald-300-2", "2026-09-02T00:00:00Z"),
+  artifact(4, "audit-curator-50-1", "2026-07-01T00:00:00Z", true),
+  artifact(5, "site-shots-1", "2026-09-03T00:00:00Z"),
+];
+const zips = {
+  2: {
+    "metadata.json": JSON.stringify(metadata(200, "reviewer")),
+    "input-prompt.md": "p".repeat(1234),
+    "output-response.md": "r".repeat(567),
+  },
+  3: null,
+};
+const keys = (pairs) => d1(pairs.map(([run_id, attempt]) => ({ run_id, attempt })));
+
+test("backfill writes the rows the archive has and the table lacks, and names the gap", async () => {
+  const gh = stubGh(listing, zips);
+  await withStub([keys([[100, 1]]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
+    const p = seen[1].body.params;
+    assert.equal(p.length, 21);
+    assert.deepEqual(p.slice(0, 4), [200, 1, "2026-09-01T00:00:00Z", "reviewer"]); // at is the artifact's creation
+    assert.deepEqual(p.slice(19), [1234, 567]); // sizes read from the zip
+    assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.equal(seen.length, 3);
+    // Sorted: eight workers download concurrently, so the stub's log holds no order.
+    assert.deepEqual(downloads(gh).sort(), ["2", "3"]); // the present row cost no download; the expired and the non-audit never listed
+    assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
+    assert.match(
+      r.out,
+      /^sessions backfill: artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 1 \| missing 1$/m,
+    );
+  });
+});
+
+test("backfill on a table equal to the archive downloads nothing and exits 0", async () => {
+  const gh = stubGh(listing.slice(0, 1), {});
+  await withStub([keys([[100, 1]]), keys([[100, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 2);
+    assert.deepEqual(downloads(gh), []);
+    assert.match(
+      r.out,
+      /artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 0 \| unreadable 0 \| missing 0$/m,
+    );
+  });
+});
+
+test("backfill --since keeps the artifacts created from that instant", async () => {
+  const gh = stubGh(listing.slice(0, 2), zips);
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--since", "2026-09-01", "--repo", "o/r"], {
+      D1_API_BASE: base,
+      PATH: `${gh}:${process.env.PATH}`,
+      TZ: "America/New_York", // a date-only --since is UTC midnight, never the machine's
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual(downloads(gh), ["2"]);
+    assert.equal(seen[1].body.params[0], 200);
+    assert.match(
+      r.out,
+      /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+    );
+  });
+});
+
+// Round 5 (#995): the contract is one unreadable line per artifact, whatever
+// broke it, not a list of exception types. An encrypted member raises
+// zipfile's RuntimeError inside fetch; `run_id: 1e999` parses to inf and
+// int(inf) raises OverflowError inside row(). Both sit before the valid
+// artifact, oldest first, where uncontained either ends every rerun.
+test("one artifact costs one unreadable line whatever broke it, never the walk", async () => {
+  const inf = JSON.stringify(metadata(800, "herald")).replace("\"run_id\":\"800\"", "\"run_id\":1e999");
+  assert.match(inf, /"run_id":1e999/);
+  const gh = stubGh(
+    [
+      artifact(8, "audit-herald-800-1", "2026-08-28T00:00:00Z"),
+      artifact(9, "audit-curator-900-1", "2026-08-29T00:00:00Z"),
+      listing[1],
+    ],
+    {
+      8: { "metadata.json": inf },
+      9: { "metadata.json": JSON.stringify(metadata(900, "curator")), __encrypted__: true },
+      2: zips[2],
+    },
+  );
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.doesNotMatch(r.err, /Traceback/);
+    assert.equal(seen[1].body.params[0], 200, "the valid artifact after both poisons is written");
+    assert.match(r.out, /^  unreadable audit-herald-800-1: metadata carries no run_id$/m);
+    assert.match(r.out, /^  unreadable audit-curator-900-1: RuntimeError: .*encrypted/m);
+    assert.match(
+      r.out,
+      /artifacts 3 since 2026-08-28T00:00:00Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
+    );
+  });
+});
+
+// Round 6 (#995): a field `facts` passes through raw can be a value D1 cannot
+// bind. `costUSD: 1e999` is inf, which json.dumps writes as the non-JSON
+// constant Infinity; the strict stub rejects it with 400 as Cloudflare's
+// parser would, and one rejected INSERT used to kill the walk at that
+// artifact with the valid one after it never written. A role that is an
+// object, and a turn count past 64 bits, ride the same artifact.
+test("a value D1 cannot bind becomes null in its row, never a dead walk", async () => {
+  const poisoned = JSON.parse(JSON.stringify(metadata(800, "herald")));
+  poisoned.role = { not: "text" };
+  const text = JSON.stringify(poisoned)
+    .replace("\"costUSD\":0.42", "\"costUSD\":1e999")
+    .replace("\"num_turns\":23", "\"num_turns\":100000000000000000000000000000");
+  assert.match(text, /"costUSD":1e999/);
+  assert.match(text, /"num_turns":1000000000000000000000000000/);
+  const gh = stubGh(
+    [artifact(8, "audit-herald-800-1", "2026-08-28T00:00:00Z"), listing[1]],
+    { 8: { "metadata.json": text }, 2: zips[2] },
+  );
+  await withStub([keys([]), d1([]), d1([]), keys([[800, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 4, "both artifacts reached the INSERT");
+    const [id, , , role, , , , , , , , , cost, turns] = seen[1].body.params;
+    assert.equal(id, 800);
+    assert.equal(role, "?");
+    assert.equal(cost, null);
+    assert.equal(turns, null);
+    assert.equal(seen[2].body.params[0], 200, "the valid artifact after it is written");
+    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+test("backfill on an unreadable table stops before any download", async () => {
+  const gh = stubGh(listing, zips);
+  await withStub({ status: 500, payload: { success: false, errors: [{ message: "edge down" }] } }, async (base) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /UNREADABLE: HTTP 500/);
+    assert.deepEqual(downloads(gh), []);
+  });
+});
+
+test("backfill without a repository says what it needs and exits 2", async () => {
+  const r = await run(["backfill"], { GITHUB_REPOSITORY: "", D1_API_BASE: "http://127.0.0.1:9" });
+  assert.equal(r.code, 2);
+  assert.match(r.out, /backfill needs GITHUB_REPOSITORY or --repo/);
+});
+
+// One bad artifact must cost one `unreadable`, not the walk: oldest first, a
+// poison artifact that aborted the verb would abort every rerun at the same
+// place and starve the rows after it.
+test("backfill counts a malformed or hostile artifact unreadable and writes the rest", async () => {
+  const gh = stubGh(listing.slice(0, 3), {
+    1: { "metadata.json": JSON.stringify({ ...metadata(100, "bdfl"), telemetry: "x" }) },
+    2: zips[2],
+    3: { "metadata.json": "[".repeat(100000) },
+  });
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(seen[1].body.params[0], 200);
+    assert.match(r.out, /^  unreadable audit-bdfl-100-1: metadata has a malformed field/m);
+    assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
+    assert.match(
+      r.out,
+      /artifacts 3 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
+    );
+  });
+});
+
+test("a flag without its value prints the usage line and exits 2", async () => {
+  for (const args of [["backfill", "--since"], ["backfill", "--repo"], ["roles", "--since"]]) {
+    const r = await run(args, { GITHUB_REPOSITORY: "o/r", D1_API_BASE: "http://127.0.0.1:9" });
+    assert.equal(r.code, 2, `${args}: ${r.out}${r.err}`);
+    assert.match(r.out, new RegExp(`${args.at(-1)} takes a value`));
+    assert.match(r.out, /^Usage: sessions /m);
+  }
 });
