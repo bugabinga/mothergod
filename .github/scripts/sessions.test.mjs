@@ -325,8 +325,8 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
   const gh = stubGh(listing.slice(0, 1), {
     1: { "metadata.json": JSON.stringify(meta), "input-prompt.md": "p", "output-response.md": "r" },
   });
-  // No present-rows read under --rebuild: the first call is the row itself.
-  await withStub([d1([]), d1([]), keys([[100, 1]])], async (base, seen) => {
+  // The table is read under --rebuild too, so the census can count what it held (#1012).
+  await withStub([keys([[100, 1]]), d1([]), d1([]), keys([[100, 1]])], async (base, seen) => {
     const r = await run(["backfill", "--rebuild"], {
       D1_API_BASE: base,
       GITHUB_REPOSITORY: "o/r",
@@ -334,17 +334,19 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
     });
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(downloads(gh), ["1"]); // the row the table already holds, read again
-    assert.equal(seen.length, 3);
-    assert.match(seen[0].body.sql, /^INSERT OR REPLACE INTO sessions /);
+    assert.equal(seen.length, 4);
+    assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions /);
     assert.equal(
-      seen[1].body.sql,
+      seen[2].body.sql,
       "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    assert.deepEqual(seen[1].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
-    assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.deepEqual(seen[2].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
+    assert.equal(seen[3].body.sql, "SELECT run_id, attempt FROM sessions");
+    // present 1, not 0: the row the table held before the walk counts, rewritten or not.
     assert.match(
       r.out,
-      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 0 \| missing 0$/m,
     );
   });
 });

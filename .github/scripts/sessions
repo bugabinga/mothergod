@@ -149,14 +149,17 @@ def backfill(repo, since, rebuild=False):
     download; the census stays on sessions, because a run that reported no
     reading has no allowance row to count.
 
-    `rebuild` treats no row as present, so every artifact is read again:
-    the way a table added after the archive began gets its history, once,
-    after `migrate`. The allowance table got its 2026-08-22 floor this way.
+    `rebuild` walks every artifact, present rows included: the way a table
+    added after the archive began gets its history, once, after `migrate`.
+    The allowance table got its 2026-08-22 floor this way. The table is
+    read once either way, so the census's `present` counts the rows it held
+    before the walk; deriving it from the walk printed `present 0` over a
+    full table on that very rebuild (#1012).
     """
-    present = set() if rebuild else keys_in_table()
+    present = keys_in_table()
     artifacts = audit_facts.archive(repo, since)
     keys = {a.name: key_of(a.name) for a in artifacts}
-    todo = [a for a in artifacts if keys[a.name] not in present]
+    todo = artifacts if rebuild else [a for a in artifacts if keys[a.name] not in present]
     written, unreadable = 0, []
     for read in audit_facts.walk(repo, todo):
         if read.error:
@@ -187,7 +190,7 @@ def backfill(repo, since, rebuild=False):
         print(f"  unreadable {line}")
     floor = stamp(artifacts[0].made) if artifacts else "none"
     print(f"sessions backfill: artifacts {len(artifacts)} since {floor}"
-          f" | present {len(artifacts) - len(todo)} | written {written}"
+          f" | present {sum(key in present for key in keys.values())} | written {written}"
           f" | unreadable {len(unreadable)} | missing {len(missing)}")
     return 1 if missing else 0
 
