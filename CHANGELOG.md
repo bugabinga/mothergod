@@ -37,10 +37,9 @@ All notable changes to this project are documented here. Format follows
   aggregate on Canterbury (1.351 bits/byte vs 1.470 and 1.403); trails both
   in aggregate on Silesia (2.032 vs 1.997 and 1.829). Per-file tables and
   the reproduction command: [`docs/benchmarks/`](docs/benchmarks/).
-- Trust: a frame of incompressible data cut short is now an error naming
-  truncation, as every compressed frame already was, instead of a silent
-  prefix with exit status 0; the price is 8 bytes on such a frame
-  (#1019).
+- Trust: a frame of incompressible data cut short is now an error with
+  exit status 1 instead of a silent prefix with exit status 0; the price
+  is 8 bytes on such a frame (#1019).
 - Trust: the decoder answers truncation, corruption, and any other
   adversarial input with an `Err`, never a panic or unbounded allocation,
   verified by a fuzzed, mutation-tested, and allocation-torture-swept test
