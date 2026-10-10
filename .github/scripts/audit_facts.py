@@ -117,6 +117,14 @@ INSERT = (f"INSERT OR REPLACE INTO sessions ({', '.join(COLUMNS)}) "
 # never repeated here.
 ALLOWANCE_COLUMNS = ("run_id", "attempt", "window", "utilization", "resets_at", "overage")
 
+# D1 binds at most 100 parameters per statement and `allowance_insert` binds
+# one row's worth per window, so a hostile artifact with many window keys
+# would fail the statement, and oldest first makes that failure permanent
+# (#995 round 6). The cap lives here, where the rows are made, so both
+# writers inherit it; the API reports a handful of windows, never near it.
+MAX_BOUND_PARAMETERS = 100
+MAX_WINDOWS = MAX_BOUND_PARAMETERS // len(ALLOWANCE_COLUMNS)
+
 
 def allowance_insert(rows):
     """One INSERT OR REPLACE for every row in `rows`: one round trip per artifact."""
@@ -135,7 +143,7 @@ def allowance_rows(meta):
     in event order, because the API reports the window's current state each
     time. No run_id, no events, or none readable is an empty list, never a
     row of nulls: a run that reported nothing is absent, which is what a
-    census can tell apart.
+    census can tell apart. At most `MAX_WINDOWS` rows, the first by name.
     """
     run_id = as_int(meta.get("run_id"))
     events = meta.get("rate_limit_events")
@@ -153,7 +161,7 @@ def allowance_rows(meta):
             last[kind] = (run_id, attempt, kind, float(utilization),
                           bindable(reset) if valid_reset(reset) else None,
                           int(overage) if isinstance(overage, bool) else None)
-    return [last[kind] for kind in sorted(last)]
+    return [last[kind] for kind in sorted(last)[:MAX_WINDOWS]]
 
 
 def as_int(value):
