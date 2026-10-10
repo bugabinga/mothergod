@@ -222,9 +222,10 @@ fn run_with_early_closing_reader(command: &str, stdin: &[u8]) -> (Vec<u8>, i32) 
 
 #[test]
 fn decompress_exits_quietly_when_the_stdout_reader_goes_away() {
-    // A Stored frame (method byte 0): 300 000 payload bytes exceed any pipe
+    // A Stored frame (method byte 0): 300 000 data bytes exceed any pipe
     // buffer, so the write after the reader closes cannot be absorbed.
-    let mut frame = b"MGDC\x0a\x00".to_vec();
+    let mut frame = b"MGDC\x0b\x00".to_vec();
+    frame.extend(300_000u64.to_le_bytes());
     frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
 
     let (stderr, code) = run_with_early_closing_reader("decompress", &frame);

@@ -23,12 +23,12 @@ All notable changes to this project are documented here. Format follows
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 10, specified in
+- Bitstream format at `FORMAT_VERSION` 11, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 10 no longer decode: no release ever wrote them, and
+- Format versions below 11 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.
@@ -37,6 +37,9 @@ All notable changes to this project are documented here. Format follows
   aggregate on Canterbury (1.351 bits/byte vs 1.470 and 1.403); trails both
   in aggregate on Silesia (2.032 vs 1.997 and 1.829). Per-file tables and
   the reproduction command: [`docs/benchmarks/`](docs/benchmarks/).
+- Trust: a frame of incompressible data cut short is now an error with
+  exit status 1 instead of a silent prefix with exit status 0; the price
+  is 8 bytes on such a frame (#1019).
 - Trust: the decoder answers truncation, corruption, and any other
   adversarial input with an `Err`, never a panic or unbounded allocation,
   verified by a fuzzed, mutation-tested, and allocation-torture-swept test

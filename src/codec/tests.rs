@@ -209,7 +209,7 @@ fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
 
 /// Fixed-width records whose columns each cycle through their own
 /// period (`research/JOURNAL.md` S1-P5's target shape, same
-/// construction as `tests/golden/v10-tabular-columns`), with a fraction
+/// construction as `tests/golden/v11-tabular-columns`), with a fraction
 /// of bytes jittered off the clean pattern so the literal model, not
 /// just `lz::parse_optimal`'s LZ matches, carries real weight — the
 /// data this ADR-0046 slice's own real-bitstream measurement used.

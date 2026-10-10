@@ -154,8 +154,8 @@ fn structured_repeats_varying_distances() -> Vec<u8> {
 }
 
 /// Uniform pseudo-random bytes: no filter or match/rep structure to
-/// exploit, so `encode` should pick `Method::Stored` (a plain header plus
-/// raw bytes beats every encoding once nothing compresses).
+/// exploit, so `encode` should pick `Method::Stored` (the header, a length
+/// field, and raw bytes beat every encoding once nothing compresses).
 fn pseudo_random(mut seed: u32, len: usize) -> Vec<u8> {
     let mut data = Vec::with_capacity(len);
     for _ in 0..len {

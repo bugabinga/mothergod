@@ -64,23 +64,22 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 ///
 /// Every bump is a bitstream format change (CLAUDE.md hard rule 5); the
 /// history of what each version changed lives in `docs/format/SPEC.md` and
-/// the ADRs it cites. This build decodes exactly this version for
-/// [`Method::Lz`]: versions 1 through 9 were retired outright, no release
-/// having written any of them
+/// the ADRs it cites. This build decodes exactly this version for both
+/// methods: versions 1 through 10 were retired outright, no release having
+/// written any of them
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
-/// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a
-/// [`Method::Lz`] frame naming any other version is rejected as
-/// `UnsupportedVersion` before [`codec::decode`] is ever called. A
-/// [`Method::Stored`] frame carries its payload verbatim, so it decodes
-/// identically under every version up to this one and needs no separate
-/// path (`tests/golden/v10-*.mgdc` pins the current version's frames).
-pub const FORMAT_VERSION: u8 = 10;
+/// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a frame
+/// naming any other version is rejected as `UnsupportedVersion` before its
+/// payload is read (`tests/golden/v11-*.mgdc` pins the current version's
+/// frames).
+pub const FORMAT_VERSION: u8 = 11;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Method {
-    /// Payload is stored verbatim, no compression.
+    /// Payload is a `u64` declared length, then the data verbatim, no
+    /// compression.
     Stored = 0,
     /// Optimal-parse LZ tokens, entropy-coded by adaptive flag/length/
     /// offset/rep-slot models and a six-expert context-mixing literal
@@ -105,7 +104,8 @@ impl TryFrom<u8> for Method {
 /// Errors produced when decoding a frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// Input ended before the frame header was complete.
+    /// Input ended before the frame was complete: inside the header, or
+    /// short of the length a [`Method::Stored`] payload declares.
     Truncated,
     /// Input does not start with [`MAGIC`].
     BadMagic,
@@ -114,7 +114,8 @@ pub enum Error {
     /// Method byte does not name a known [`Method`].
     UnknownMethod(u8),
     /// Payload does not decode to a value consistent with itself (a
-    /// declared length its content does not match, a match/rep distance
+    /// declared length its content does not match, as with bytes past a
+    /// [`Method::Stored`] payload's declared length, a match/rep distance
     /// reaching before the start of decoded output, or similar):
     /// adversarial or corrupted input, never a bug in this decoder.
     Corrupt,
@@ -151,7 +152,7 @@ pub enum Error {
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Truncated => write!(f, "input ended before the frame header was complete"),
+            Self::Truncated => write!(f, "input ended before the frame was complete"),
             Self::BadMagic => write!(f, "input is not a mothergod frame (bad magic)"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported format version {v}"),
             Self::UnknownMethod(m) => write!(f, "unknown compression method {m}"),
@@ -238,9 +239,10 @@ const HEADER_LEN: usize = METHOD_OFFSET + 1;
 /// checked against [`MAGIC`] and [`FORMAT_VERSION`] but nothing past that:
 /// shared by every function that dispatches on a frame's method before
 /// deciding how much of the payload it actually needs, so they never drift
-/// on what counts as a well-formed header. A [`Method::Stored`] frame may
-/// name any version up to [`FORMAT_VERSION`]; a [`Method::Lz`] frame must
-/// name exactly it, the one version [`codec::decode`] reads.
+/// on what counts as a well-formed header. A frame of either method must
+/// name exactly [`FORMAT_VERSION`], the one version this build decodes.
+/// A version above it is reported before an unknown method, so a newer
+/// build's frame says "unsupported version", not "unknown method".
 fn parse_header(input: &[u8]) -> Result<(Method, &[u8]), Error> {
     let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
     if header[..MAGIC.len()] != MAGIC {
@@ -251,7 +253,7 @@ fn parse_header(input: &[u8]) -> Result<(Method, &[u8]), Error> {
         return Err(Error::UnsupportedVersion(version));
     }
     let method = Method::try_from(header[METHOD_OFFSET])?;
-    if method == Method::Lz && version != FORMAT_VERSION {
+    if version != FORMAT_VERSION {
         return Err(Error::UnsupportedVersion(version));
     }
     Ok((method, payload))
@@ -295,14 +297,14 @@ fn bounded_header(input: &[u8], max_len: u32) -> Result<BoundedHeader<'_>, Error
     })
 }
 
-/// Rejects a [`Method::Stored`] frame whose payload exceeds `stored_bound`
+/// Rejects a [`Method::Stored`] frame whose data exceeds `stored_bound`
 /// (see [`bounded_header`] for when that bound is `None`).
-fn check_stored_bound(payload: &[u8], stored_bound: Option<u32>) -> Result<(), Error> {
+fn check_stored_bound(data: &[u8], stored_bound: Option<u32>) -> Result<(), Error> {
     if let Some(bound) = stored_bound
-        && payload.len() > bound as usize
+        && data.len() > bound as usize
     {
         return Err(Error::TooLarge {
-            len: u32::try_from(payload.len()).unwrap_or(u32::MAX),
+            len: u32::try_from(data.len()).unwrap_or(u32::MAX),
             max: bound,
         });
     }
@@ -396,14 +398,46 @@ pub(crate) fn try_vec_from_slice(
     Ok(v)
 }
 
-/// Assembles a complete frame from `method` and its `payload`.
-fn build_frame(method: Method, payload: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(HEADER_LEN + payload.len());
+/// Assembles a complete frame from `method` and its payload, the
+/// concatenation of `parts`, so a large payload is copied once.
+fn build_frame(method: Method, parts: &[&[u8]]) -> Vec<u8> {
+    let payload_len: usize = parts.iter().map(|part| part.len()).sum();
+    let mut frame = Vec::with_capacity(HEADER_LEN + payload_len);
     frame.extend_from_slice(&MAGIC);
     frame.push(FORMAT_VERSION);
     frame.push(method as u8);
-    frame.extend_from_slice(payload);
+    for part in parts {
+        frame.extend_from_slice(part);
+    }
     frame
+}
+
+/// Width of the declared-length field that opens a [`Method::Stored`]
+/// payload: `u64`, not the `u32` an `Lz` payload declares, because
+/// [`compress`] stores inputs longer than `u32::MAX` bytes.
+const STORED_LEN_BYTES: usize = size_of::<u64>();
+
+/// A complete [`Method::Stored`] frame: the payload is `data`'s length as a
+/// little-endian `u64`, then `data` verbatim.
+fn build_stored_frame(data: &[u8]) -> Vec<u8> {
+    let declared = u64::try_from(data.len()).expect("usize is at most 64 bits");
+    build_frame(Method::Stored, &[&declared.to_le_bytes(), data])
+}
+
+/// The data of a [`Method::Stored`] `payload`: exactly the bytes its
+/// declared length names. A payload too short for its length is
+/// [`Error::Truncated`], the cut a gzip user gets "unexpected end of file"
+/// for; one with bytes past it is [`Error::Corrupt`].
+fn stored_data(payload: &[u8]) -> Result<&[u8], Error> {
+    let (declared, data) = payload
+        .split_first_chunk::<STORED_LEN_BYTES>()
+        .ok_or(Error::Truncated)?;
+    let declared = u64::from_le_bytes(*declared);
+    match u64::try_from(data.len()).map(|len| len.cmp(&declared)) {
+        Ok(std::cmp::Ordering::Less) => Err(Error::Truncated),
+        Ok(std::cmp::Ordering::Equal) => Ok(data),
+        _ => Err(Error::Corrupt),
+    }
 }
 
 /// Whether a `candidate_len`-byte encoding beats an `incumbent_len`-byte
@@ -433,10 +467,10 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
     if u32::try_from(input.len()).is_ok() {
         let body = codec::encode(input);
         if candidate_beats_incumbent(body.len(), input.len()) {
-            return build_frame(Method::Lz, &body);
+            return build_frame(Method::Lz, &[&body]);
         }
     }
-    build_frame(Method::Stored, input)
+    build_stored_frame(input)
 }
 
 /// Decodes a frame produced by [`compress`] back into the original bytes.
@@ -489,8 +523,9 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     } = bounded_header(input, max_len)?;
     match method {
         Method::Stored => {
-            check_stored_bound(payload, stored_bound)?;
-            Ok(payload.to_vec())
+            let data = stored_data(payload)?;
+            check_stored_bound(data, stored_bound)?;
+            Ok(data.to_vec())
         }
         Method::Lz => codec::decode(payload, max_len),
     }
@@ -611,8 +646,9 @@ pub fn decompress_to_writer<W: std::io::Write>(
     let mut writer = TryBufWriter::try_new(writer).map_err(Error::from)?;
     match method {
         Method::Stored => {
-            check_stored_bound(payload, stored_bound)?;
-            writer.write_all(payload)?;
+            let data = stored_data(payload)?;
+            check_stored_bound(data, stored_bound)?;
+            writer.write_all(data)?;
         }
         Method::Lz => codec::decode_to_writer(payload, max_len, &mut writer)?,
     }
