@@ -33,6 +33,14 @@ jobs:
   # file types, never tree paths: globs like *.rs and Cargo.toml stay correct
   # when directories move, so the list drifts only when a toolchain changes.
   # Sync rule: a new x input class extends the quality regex in the same diff.
+  # The one path list is the test suite's own inputs: everything under
+  # tests/ (adversarial seeds carry no extension) and the published surface
+  # tests/claims.rs reads (README, CHANGELOG, CLAUDE.md, site/,
+  # docs/benchmarks/, bench/corpus.toml, research/progress.jsonl,
+  # fuzz/fuzz_targets/). Without them a site-only PR skipped the one suite
+  # that checks the site, and the reviewer ran it by hand (#1007, both
+  # rounds). A file claims.rs starts reading joins that regex in the same
+  # diff; a miss turns main red on the next push, where everything runs.
   # Non-PR events always run everything, so main's green is never vacuous.
   #
   # Fail-safe by inversion (review on #79, two rounds): each gate skips
@@ -78,7 +86,7 @@ jobs:
           # .mgdc/.plaintext: golden fixture pairs, discovered by extension
           # scan in tests/golden.rs, so the test binary is their only
           # consumer; they gate `rust` (test/doc), not quality/ratio (#407).
-          if echo "$files" | grep -qE '\.(rs|mgdc|plaintext)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
+          if echo "$files" | grep -qE '\.(rs|mgdc|plaintext)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/|^tests/|^(README|CHANGELOG|CLAUDE)\.md$|^site/|^docs/benchmarks/|^bench/corpus\.toml$|^research/progress\.jsonl$|^fuzz/fuzz_targets/'; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
