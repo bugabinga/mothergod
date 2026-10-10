@@ -362,7 +362,8 @@ keeps moving (issue #57).
 <branch|pr-number> <path>...`, commit message on stdin.** It derives the
 credential from the paths, goes through the git data API so no ambient
 credential can win the push silently, keeps the executable bit, reads
-the ref back, and refuses a push that would revert the base. A number
+the ref back, refuses a push that would revert the base, and refuses one
+CI's `fmt` job would turn red, with x's fix line (issue #938). A number
 resolves to that PR's head ref, so a session pushing to a PR it did not
 open never names the branch. `--merge <sha>` pushes the merge commit at
 local HEAD as a two-parent commit, the rescue a CONFLICTING PR needs

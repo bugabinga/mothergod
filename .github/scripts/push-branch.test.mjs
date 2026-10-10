@@ -5,7 +5,7 @@
 // module's own `api` against a fake `gh`, so no network and no real token.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -321,4 +321,105 @@ test("own_pushes stores sha and a confirmed bit, not a bare sha", () => {
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+// The format refusal (issue #938): six red `fmt` jobs on bdfl branches in
+// sixteen days, each a maintainer run and a reviewer re-run, because the
+// seat typing the push skipped `cargo x check`. `guard_formatted` asks x per
+// path and dies on a finding with x's fix line. A stub `cargo` on PATH plays
+// x's three answers (0 clean, 1 finding, 2 unsupported) by file name and
+// logs every call, so the test also sees which paths were never asked.
+const fmtDriver = `
+import importlib.machinery, importlib.util, json, os, sys
+
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+os.environ["PATH"] = sys.argv[2]
+try:
+    pb.guard_formatted(sys.argv[3:])
+    died = False
+except SystemExit:
+    died = True
+print(json.dumps({"died": died}))
+`;
+
+const stubCargo = `#!/bin/sh
+echo "$*" >> "$STUB_LOG"
+case "$5" in
+  *unformatted*) echo "$5: needs formatting" >&2; echo "  fix: cargo x fmt -- $5" >&2; echo "fmt: 1 finding(s)" >&2; exit 1 ;;
+  *.xyz) echo "error: $5: this file type is not supported by x" >&2; exit 2 ;;
+  *broken*) echo "error: could not compile x" >&2; exit 101 ;;
+  *) echo "fmt: 1 files checked"; exit 0 ;;
+esac
+`;
+
+function guardFormatted(paths, { cargo = true } = {}) {
+  const bin = mkdtempSync(join(tmpdir(), "push-branch-cargo-"));
+  const log = join(bin, "calls.log");
+  try {
+    if (cargo) {
+      writeFileSync(join(bin, "cargo"), stubCargo, { mode: 0o755 });
+    }
+    // git must stay reachable for rev-parse, so the stub dir goes first, PATH after.
+    const path = `${bin}:${process.env.PATH}`;
+    const proc = spawnSync("python3", ["-c", fmtDriver, scriptsDir, cargo ? path : bin, ...paths], {
+      encoding: "utf8",
+      env: { ...process.env, STUB_LOG: log },
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+    const asked = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+    return { ...JSON.parse(proc.stdout), stderr: proc.stderr, asked };
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
+}
+
+test("an unformatted file dies with x's fix line, naming #938, and nothing is pushed", () => {
+  const r = guardFormatted(["bench/unformatted.json", "src/ok.rs"]);
+  assert.equal(r.died, true);
+  assert.match(r.stderr, /#938/);
+  assert.match(r.stderr, /fix: cargo x fmt -- bench\/unformatted\.json/);
+  assert.match(r.stderr, /nothing was pushed/);
+  assert.doesNotMatch(r.stderr, /finding\(s\)/, "x's summary line is noise beside its fix line");
+  assert.deepEqual(r.asked, ["x fmt --check -- bench/unformatted.json", "x fmt --check -- src/ok.rs"]);
+});
+
+test("Markdown and extensionless paths never ask x, so a docs push never builds it", () => {
+  const r = guardFormatted(["ROADMAP.md", ".github/scripts/sessions", "docs/adr/0001-x.md"]);
+  assert.equal(r.died, false);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(r.asked, []);
+});
+
+test("a kind x refuses is skipped and the path beside it is still checked", () => {
+  const r = guardFormatted(["assets/exotic.xyz", "bench/unformatted.json"]);
+  assert.equal(r.died, true);
+  assert.match(r.stderr, /bench\/unformatted\.json: needs formatting/);
+  assert.deepEqual(r.asked, ["x fmt --check -- assets/exotic.xyz", "x fmt --check -- bench/unformatted.json"]);
+});
+
+test("formatted files pass silently", () => {
+  const r = guardFormatted(["src/ok.rs", "bench/ok.json"]);
+  assert.equal(r.died, false);
+  assert.equal(r.stderr, "");
+  assert.equal(r.asked.length, 2);
+});
+
+test("no cargo on PATH says so once and lets the push proceed, CI's gate decides", () => {
+  const r = guardFormatted(["bench/unformatted.json"], { cargo: false });
+  assert.equal(r.died, false);
+  assert.match(r.stderr, /cargo is not on PATH/);
+  assert.match(r.stderr, /CI's fmt job is the gate/);
+  assert.deepEqual(r.asked, []);
+});
+
+test("an x that cannot run says so once and lets the push proceed", () => {
+  const r = guardFormatted(["x/broken.rs", "bench/unformatted.json"]);
+  assert.equal(r.died, false);
+  assert.match(r.stderr, /could not run on x\/broken\.rs \(error: could not compile x\)/);
+  assert.match(r.stderr, /CI's fmt job is the gate/);
+  assert.deepEqual(r.asked, ["x fmt --check -- x/broken.rs"], "one note, then stop asking");
 });
