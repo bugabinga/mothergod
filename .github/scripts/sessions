@@ -151,12 +151,15 @@ def backfill(repo, since):
         if read.error:
             unreadable.append(f"{read.artifact.name}: {read.error}")
             continue
+        # One artifact costs one unreadable line, never the walk (the
+        # invariant on audit_facts.walk): a field of the wrong shape raises
+        # inside row(), and naming the exception types one hostile shape at a
+        # time missed three times (#995 rounds 3 to 5).
         try:
             values = audit_facts.row(read.meta, read.sizes.get)
-        except (AttributeError, TypeError) as error:
-            # A metadata field of the wrong shape: oldest first would make one
-            # such artifact end every rerun at the same place.
-            unreadable.append(f"{read.artifact.name}: metadata has a malformed field ({error})")
+        except Exception as error:  # noqa: BLE001, the invariant above
+            unreadable.append(f"{read.artifact.name}: metadata has a malformed field "
+                              f"({type(error).__name__}: {error})")
             continue
         if values[0] is None:
             unreadable.append(f"{read.artifact.name}: metadata carries no run_id")

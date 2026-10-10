@@ -110,7 +110,7 @@ def as_int(value):
     """An id or count as an integer, or None: '' and junk are absent, not 0."""
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # 1e999 parses to inf
         return None
 
 
@@ -198,9 +198,7 @@ def fetch(repo, artifact):
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
             sizes = {info.filename: info.file_size for info in zf.infolist()}
             meta = json.loads(zf.read("metadata.json"))
-    # RecursionError: a metadata.json of nested brackets is a hostile artifact,
-    # one unreadable, never the end of the walk.
-    except (KeyError, ValueError, RecursionError, zipfile.BadZipFile) as error:
+    except (KeyError, ValueError, zipfile.BadZipFile) as error:
         raise Unreadable(str(error)) from None
     if not isinstance(meta, dict):
         raise Unreadable("metadata.json is not an object")
@@ -209,12 +207,24 @@ def fetch(repo, artifact):
 
 
 def walk(repo, artifacts):
-    """Yield one Read per artifact, in listing order, WORKERS downloads at a time."""
+    """Yield one Read per artifact, in listing order, WORKERS downloads at a time.
+
+    ONE ARTIFACT COSTS ONE UNREADABLE READ, NEVER THE WALK. The archive is
+    hostile by assumption (ADR-0019) and oldest first makes any uncaught
+    error permanent: the artifact that raised never gets a row, so every
+    rerun dies at the same place with nothing after it written. `fetch`
+    names the shapes it can explain; everything else (zipfile's RuntimeError
+    on an encrypted member, NotImplementedError on method 99, RecursionError
+    on nested brackets, the next one) is caught here as the type and the
+    message. Naming them one at a time missed three times (#995 rounds 3 to 5).
+    """
     def one(artifact):
         try:
             meta, sizes = fetch(repo, artifact)
         except Unreadable as error:
             return Read(artifact, None, None, str(error))
+        except Exception as error:  # noqa: BLE001, the invariant above
+            return Read(artifact, None, None, f"{type(error).__name__}: {str(error)[:200]}")
         return Read(artifact, meta, sizes, None)
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:

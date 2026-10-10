@@ -199,8 +199,18 @@ elif args[0] == "api" and args[1].startswith("repos/o/r/actions/artifacts/") and
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, text in files.items():
-            zf.writestr(name, text)
-    sys.stdout.buffer.write(buf.getvalue())
+            if name != "__encrypted__":
+                zf.writestr(name, text)
+    data = bytearray(buf.getvalue())
+    if "__encrypted__" in files:
+        # Bit 0 of the general-purpose flag, in every local and central
+        # header: zipfile then raises RuntimeError on read, no password.
+        for sig, off in ((b"PK\\x03\\x04", 6), (b"PK\\x01\\x02", 8)):
+            i = data.find(sig)
+            while i != -1:
+                data[i + off] |= 1
+                i = data.find(sig, i + 4)
+    sys.stdout.buffer.write(bytes(data))
 else:
     sys.exit("stub gh: unexpected call " + " ".join(args))
 `,
@@ -320,6 +330,40 @@ test("backfill --since keeps the artifacts created from that instant", async () 
     assert.match(
       r.out,
       /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+    );
+  });
+});
+
+// Round 5 (#995): the contract is one unreadable line per artifact, whatever
+// broke it, not a list of exception types. An encrypted member raises
+// zipfile's RuntimeError inside fetch; `run_id: 1e999` parses to inf and
+// int(inf) raises OverflowError inside row(). Both sit before the valid
+// artifact, oldest first, where uncontained either ends every rerun.
+test("one artifact costs one unreadable line whatever broke it, never the walk", async () => {
+  const inf = JSON.stringify(metadata(800, "herald")).replace("\"run_id\":\"800\"", "\"run_id\":1e999");
+  assert.match(inf, /"run_id":1e999/);
+  const gh = stubGh(
+    [
+      artifact(8, "audit-herald-800-1", "2026-08-28T00:00:00Z"),
+      artifact(9, "audit-curator-900-1", "2026-08-29T00:00:00Z"),
+      listing[1],
+    ],
+    {
+      8: { "metadata.json": inf },
+      9: { "metadata.json": JSON.stringify(metadata(900, "curator")), __encrypted__: true },
+      2: zips[2],
+    },
+  );
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.doesNotMatch(r.err, /Traceback/);
+    assert.equal(seen[1].body.params[0], 200, "the valid artifact after both poisons is written");
+    assert.match(r.out, /^  unreadable audit-herald-800-1: metadata carries no run_id$/m);
+    assert.match(r.out, /^  unreadable audit-curator-900-1: RuntimeError: .*encrypted/m);
+    assert.match(
+      r.out,
+      /artifacts 3 since 2026-08-28T00:00:00Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
     );
   });
 });
