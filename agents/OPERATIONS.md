@@ -62,6 +62,12 @@ The system is inert until these are done:
   fine-grained PAT scoped to **this repository only** (an account-wide rw
   token works but exposes your other repos to any bug here); set an expiry —
   the BDFL will nag via `blocked-on-human` when it starts failing.
+- Workflow dispatch is the PAT's too: the app token and the workflow token
+  answer 403 to `actions/workflows/<id>/dispatches`, so proving a fix on
+  lanes CI lacks (`GH_TOKEN="$GH_ADMIN_TOKEN" gh workflow run monster --ref
+  <branch>`, #1014's Windows evidence) rides it. A dispatched run wakes no
+  seat: only issue and PR events do, and the monster report posts as
+  `github-actions[bot]`.
 - All agent commits are made with `use_commit_signing: true`: they go
   through the GitHub API and carry GitHub's verified signature. Squash
   merges into `main` are GitHub-created and therefore always signed
