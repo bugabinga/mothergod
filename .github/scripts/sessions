@@ -108,13 +108,19 @@ def stamp(when):
 
 def since_of(spec, now):
     """`7d` style windows and ISO dates both become a UTC instant."""
+    usage = f"sessions: --since takes Nd or an ISO date, not {spec!r}"
     match = re.fullmatch(r"(\d+)d", spec)
     if match:
-        return now - timedelta(days=int(match.group(1)))
+        # Two overflows, one answer: `timedelta` refuses a day count past a C
+        # int, and the subtraction refuses a result before year 1 (#1003).
+        try:
+            return now - timedelta(days=int(match.group(1)))
+        except OverflowError:
+            raise SystemExit(usage)
     try:
         when = datetime.fromisoformat(spec.replace("Z", "+00:00"))
     except ValueError:
-        raise SystemExit(f"sessions: --since takes Nd or an ISO date, not {spec!r}")
+        raise SystemExit(usage)
     # A date with no zone is UTC midnight: the table and the archive are stamped
     # in UTC, and `astimezone` on a naive value would read the machine's clock.
     if when.tzinfo is None:
