@@ -346,11 +346,15 @@ except SystemExit:
 print(json.dumps({"died": died}))
 `;
 
+// x's refusals are two lines, the cause then a `help:` line, so the stub
+// prints both: a note that quotes the last line quotes the help (#997 round 1).
 const stubCargo = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
+help='help: run \`cargo x help\` or \`cargo x help <COMMAND>\`'
 case "$5" in
   *unformatted*) echo "$5: needs formatting" >&2; echo "  fix: cargo x fmt -- $5" >&2; echo "fmt: 1 finding(s)" >&2; exit 1 ;;
-  *.xyz) echo "error: $5: this file type is not supported by x" >&2; exit 2 ;;
+  *.xyz) echo "error: $5: this file type is not supported by x" >&2; echo "$help" >&2; exit 2 ;;
+  *link*) echo "error: $5: symbolic links are not rewritten by x" >&2; echo "$help" >&2; exit 2 ;;
   *broken*) echo "error: could not compile x" >&2; exit 101 ;;
   *) echo "fmt: 1 files checked"; exit 0 ;;
 esac
@@ -416,10 +420,33 @@ test("no cargo on PATH says so once and lets the push proceed, CI's gate decides
   assert.deepEqual(r.asked, []);
 });
 
-test("an x that cannot run says so once and lets the push proceed", () => {
+test("an x that cannot run says so once, stops asking, and lets the push proceed", () => {
   const r = guardFormatted(["x/broken.rs", "bench/unformatted.json"]);
   assert.equal(r.died, false);
-  assert.match(r.stderr, /could not run on x\/broken\.rs \(error: could not compile x\)/);
+  assert.match(r.stderr, /could not run \(error: could not compile x\)/);
   assert.match(r.stderr, /CI's fmt job is the gate/);
   assert.deepEqual(r.asked, ["x fmt --check -- x/broken.rs"], "one note, then stop asking");
+});
+
+// #997 round 1, the reviewer's repro: a finding already held when x stops
+// answering was dropped and the push proceeded, the silent loss this guard
+// exists to remove.
+test("a finding found before x stopped answering still refuses the push", () => {
+  const r = guardFormatted(["bench/unformatted.json", "x/broken.rs"]);
+  assert.equal(r.died, true);
+  assert.match(r.stderr, /could not run \(error: could not compile x\)/);
+  assert.match(r.stderr, /fix: cargo x fmt -- bench\/unformatted\.json/);
+  assert.match(r.stderr, /nothing was pushed/);
+});
+
+test("a path x refuses on its own account is noted with x's cause, and its neighbours still answer", () => {
+  const r = guardFormatted(["assets/link.svg", "bench/unformatted.json"]);
+  assert.equal(r.died, true);
+  assert.match(
+    r.stderr,
+    /assets\/link\.svg is not format-checked here \(error: assets\/link\.svg: symbolic links are not rewritten by x\)/,
+  );
+  assert.doesNotMatch(r.stderr, /help: run/, "the cause is x's error line, never its help line");
+  assert.match(r.stderr, /bench\/unformatted\.json: needs formatting/);
+  assert.deepEqual(r.asked, ["x fmt --check -- assets/link.svg", "x fmt --check -- bench/unformatted.json"]);
 });

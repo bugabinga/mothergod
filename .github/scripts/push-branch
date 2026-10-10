@@ -374,12 +374,24 @@ def guard_formatted(paths):
         if proc.returncode == 1:
             findings.extend(line for line in err.splitlines() if not line.startswith("fmt:"))
             continue
+        # x's cause is its `error:` line; the `help:` line after it is the
+        # same on every refusal.
+        cause = next((line for line in err.splitlines() if line.startswith("error:")), None)
+        cause = cause or (err.splitlines()[-1] if err else f"exit {proc.returncode}")
         if proc.returncode == 2 and ("not supported by x" in err or "linted, not formatted" in err):
             continue  # x does not format this kind, so CI's fmt job does not check it either
-        last = err.splitlines()[-1] if err else f"exit {proc.returncode}"
-        note(f"cargo x fmt --check could not run on {p} ({last});")
-        note("this push is not format-checked here; CI's fmt job is the gate")
-        return
+        if proc.returncode == 2:
+            # x refused this one path (a symlink, a file it cannot read); its
+            # neighbours are still x's to answer.
+            note(f"{p} is not format-checked here ({cause}); CI's fmt job is the gate for it")
+            continue
+        # cargo or x itself could not run. Say so once and stop asking: every
+        # further call would fail the same way, a failed build each time.
+        note(f"cargo x fmt --check could not run ({cause});")
+        note("the paths not yet checked are not format-checked here; CI's fmt job is the gate")
+        break
+    # A finding found before x stopped answering is still a finding (#997
+    # round 1): the push it would have refused is the one this guard exists for.
     if findings:
         die(
             "CI's fmt job would be red on this push (issue #938):",
