@@ -309,6 +309,40 @@ test("backfill writes the rows the archive has and the table lacks, and names th
   });
 });
 
+test("backfill writes an artifact's allowance readings beside its row; --rebuild reads present rows too", async () => {
+  const meta = {
+    ...metadata(100, "bdfl"),
+    rate_limit_events: [
+      { unifiedWindows: { seven_day: { utilization: 0.24, resetsAt: 1792029600, isUsingOverage: false } } },
+    ],
+  };
+  const gh = stubGh(listing.slice(0, 1), {
+    1: { "metadata.json": JSON.stringify(meta), "input-prompt.md": "p", "output-response.md": "r" },
+  });
+  // No present-rows read under --rebuild: the first call is the row itself.
+  await withStub([d1([]), d1([]), keys([[100, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--rebuild"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual(downloads(gh), ["1"]); // the row the table already holds, read again
+    assert.equal(seen.length, 3);
+    assert.match(seen[0].body.sql, /^INSERT OR REPLACE INTO sessions /);
+    assert.equal(
+      seen[1].body.sql,
+      "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    assert.deepEqual(seen[1].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
+    assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
+    assert.match(
+      r.out,
+      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+    );
+  });
+});
+
 test("backfill on a table equal to the archive downloads nothing and exits 0", async () => {
   const gh = stubGh(listing.slice(0, 1), {});
   await withStub([keys([[100, 1]]), keys([[100, 1]])], async (base, seen) => {

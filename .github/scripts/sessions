@@ -22,8 +22,11 @@ Verbs:
     show <run-id>                 one run's row, one field per line
     migrate                       apply infra/sessions/schema.sql, idempotent
     backfill [--since 7d|DATE]    one row per archived audit artifact the table
-                                  lacks, `at` the artifact's creation; prints
-                                  the census and exits non-zero on a gap
+             [--rebuild]          lacks, `at` the artifact's creation, and its
+                                  allowance readings beside it; prints the
+                                  census and exits non-zero on a gap.
+                                  --rebuild walks the present rows too: how a
+                                  new derived table gets its history, once
 
 The table holds identifiers and API-authored numbers only (schema.sql names
 each column); a run's prose stays in its audit artifact for 90 days, linked
@@ -38,7 +41,7 @@ table is.
 Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py. `backfill`
 also reads GITHUB_REPOSITORY, or `--repo owner/name`.
 
-Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | migrate | backfill [--since W] [--repo R]
+Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | migrate | backfill [--since W] [--rebuild] [--repo R]
 """
 
 import os
@@ -136,14 +139,21 @@ def keys_in_table():
             for r in d1.query("SELECT run_id, attempt FROM sessions")}
 
 
-def backfill(repo, since):
+def backfill(repo, since, rebuild=False):
     """Write the archive's rows the table lacks; print the census; 1 on a gap.
 
     Oldest first, as `archive` lists them, so a walk that dies midway has
     written what the 90-day expiry was about to take. Idempotent: a second
-    run finds every row present and downloads nothing.
+    run finds every row present and downloads nothing. Each artifact's
+    allowance readings are written beside its session row, from the same
+    download; the census stays on sessions, because a run that reported no
+    reading has no allowance row to count.
+
+    `rebuild` treats no row as present, so every artifact is read again:
+    the way a table added after the archive began gets its history, once,
+    after `migrate`. The allowance table got its 2026-08-22 floor this way.
     """
-    present = keys_in_table()
+    present = set() if rebuild else keys_in_table()
     artifacts = audit_facts.archive(repo, since)
     keys = {a.name: key_of(a.name) for a in artifacts}
     todo = [a for a in artifacts if keys[a.name] not in present]
@@ -158,6 +168,7 @@ def backfill(repo, since):
         # time missed three times (#995 rounds 3 to 5).
         try:
             values = audit_facts.row(read.meta, read.sizes.get)
+            readings = audit_facts.allowance_rows(read.meta)
         except Exception as error:  # noqa: BLE001, the invariant above
             unreadable.append(f"{read.artifact.name}: metadata has a malformed field "
                               f"({type(error).__name__}: {error})")
@@ -166,6 +177,8 @@ def backfill(repo, since):
             unreadable.append(f"{read.artifact.name}: metadata carries no run_id")
             continue
         d1.query(audit_facts.INSERT, values)
+        if readings:
+            d1.query(audit_facts.allowance_insert(readings), [v for r in readings for v in r])
         keys[read.artifact.name] = (values[0], values[1])
         written += 1
     have = keys_in_table()
@@ -250,7 +263,7 @@ def main(argv):
             if not repo:
                 print("sessions: backfill needs GITHUB_REPOSITORY or --repo owner/name")
                 return 2
-            return backfill(repo, since)
+            return backfill(repo, since, rebuild="--rebuild" in args)
         else:
             print(__doc__.strip().splitlines()[-1])
             return 2
