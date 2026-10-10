@@ -40,41 +40,49 @@ def size_in(audit_dir):
     return size
 
 
+def write(audit_dir):
+    """Write the run's row, then its allowance readings; print the status line.
+
+    Raises on anything that stops the row: a missing or malformed
+    metadata.json, a field row() cannot turn into a number, a database that
+    refuses the write. main() turns the raise into the warning.
+    """
+    with open(os.path.join(audit_dir, "metadata.json"), encoding="utf-8") as fh:
+        meta = json.load(fh)
+    if not isinstance(meta, dict):
+        raise ValueError("metadata.json is not an object")
+    meta["_at"] = datetime.now(timezone.utc)
+    values = row(meta, size_in(audit_dir))
+    if values[0] is None:
+        raise ValueError("metadata carries no run_id")
+    d1.query(INSERT, values)
+    # The session row is in by here, so an allowance miss is its own
+    # warning and the status line still reports the row.
+    windows = ""
+    try:
+        readings = allowance_rows(meta)
+        if readings:
+            d1.query(allowance_insert(readings), [v for r in readings for v in r])
+            windows = ", allowance " + " ".join(r[2] for r in readings)
+    except Exception as error:  # noqa: BLE001, the docstring's exit-0 invariant
+        print(f"::warning::session-row: allowance not written: {type(error).__name__}: {error}")
+    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{windows}")
+
+
 def main(argv):
     if len(argv) != 2:
         print("::warning::session-row: usage: session-row.py <audit-dir>")
         return 0
-    audit_dir = argv[1]
     if not os.environ.get("CLOUDFLARE_API_TOKEN"):
         print("session-row: skipped, no CLOUDFLARE_API_TOKEN")
         return 0
+    # One guard over every read of the untrusted metadata and every write:
+    # the live writer called row() bare and a thinking_tokens past 1e308
+    # exited 1 through the audit action (#1002).
     try:
-        with open(os.path.join(audit_dir, "metadata.json"), encoding="utf-8") as fh:
-            meta = json.load(fh)
-        if not isinstance(meta, dict):
-            raise ValueError("metadata.json is not an object")
-    except (OSError, ValueError) as error:
-        print(f"::warning::session-row: not written: {error}")
-        return 0
-    meta["_at"] = datetime.now(timezone.utc)
-    values = row(meta, size_in(audit_dir))
-    if values[0] is None:
-        print("::warning::session-row: not written: metadata carries no run_id")
-        return 0
-    try:
-        d1.query(INSERT, values)
-    except d1.Unreadable as error:
-        print(f"::warning::session-row: not written: {error}")
-        return 0
-    windows = ""
-    readings = allowance_rows(meta)
-    if readings:
-        try:
-            d1.query(allowance_insert(readings), [v for r in readings for v in r])
-            windows = ", allowance " + " ".join(r[2] for r in readings)
-        except d1.Unreadable as error:
-            print(f"::warning::session-row: allowance not written: {error}")
-    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{windows}")
+        write(argv[1])
+    except Exception as error:  # noqa: BLE001, the docstring's exit-0 invariant
+        print(f"::warning::session-row: not written: {type(error).__name__}: {error}")
     return 0
 
 
