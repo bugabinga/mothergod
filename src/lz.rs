@@ -354,22 +354,13 @@ fn prefix_hash(data: &[u8], i: usize) -> usize {
     h & ((1 << HASH_BITS) - 1)
 }
 
-/// Hash-chain match finder over a 3-byte prefix hash, one per [`parse_greedy`]
-/// call. Bounded to a fixed-size hash table plus one `u32` per input byte
-/// (`prev`); the `prev` allocation is proportional to the caller's own
-/// input, already held in full by the caller, not a hostile amplification
-/// (`rust-craft` skill, allocation-discipline: that hazard is about the
-/// *decoder* trusting an attacker-controlled length field, which this
-/// encode-only structure never reads).
+/// Hash-chain match finder over [`prefix_hash`], one per [`parse_greedy`]
+/// call. Its `prev` is proportional to the caller's own input, not to
+/// anything a decoder reads.
 struct MatchFinder<'d> {
     data: &'d [u8],
-    /// Largest backward distance [`Self::find_best`] ever reports
-    /// (`JOURNAL` S1-P4): a per-instance parameter, not the global
-    /// [`WINDOW`], mirroring [`BinaryTreeMatchFinder`]'s own
-    /// parameterization (S2-A61) so a larger window can be measured
-    /// through [`parse_greedy`]'s seed pass standalone, without touching
-    /// the wired parse. Must fit `u32` ([`to_u32`]'s obligation), same as
-    /// `WINDOW` itself.
+    /// Largest backward distance [`Self::find_best`] reports; must fit
+    /// `u32` ([`to_u32`]'s obligation).
     window: usize,
     /// `head[hash]` is the most recently inserted position with that
     /// hash, or [`NO_POSITION`].
@@ -381,9 +372,6 @@ struct MatchFinder<'d> {
 }
 
 impl<'d> MatchFinder<'d> {
-    /// A finder with no positions inserted yet, reporting no match past
-    /// `window`. The wired parse ([`parse_greedy`]) always passes
-    /// [`WINDOW`].
     fn new(data: &'d [u8], window: usize) -> Self {
         Self {
             data,
@@ -393,45 +381,32 @@ impl<'d> MatchFinder<'d> {
         }
     }
 
-    /// Hash of the 3-byte prefix at `i`. See [`prefix_hash`].
-    fn hash(&self, i: usize) -> usize {
-        prefix_hash(self.data, i)
-    }
-
     /// Records `i` as a match candidate for future positions sharing its
     /// 3-byte prefix hash.
     fn insert(&mut self, i: usize) {
-        let h = self.hash(i);
+        let h = prefix_hash(self.data, i);
         self.prev[i] = self.head[h];
-        // parse_greedy asserts data.len() fits u32 before constructing
-        // this finder; i < data.len() always.
-        self.head[h] = u32::try_from(i).expect("position fits in u32, checked by parse_greedy");
+        self.head[h] = to_u32(i);
     }
 
-    /// Best match ending at `i`, found by walking the hash chain for `i`'s
-    /// 3-byte prefix, bounded by [`WINDOW`] and `max_tries` (callers pass
-    /// [`MAX_CHAIN_TRIES`], its sole remaining caller since
-    /// [`dp_round`] moved to [`BinaryTreeMatchFinder`]). Does not
-    /// require `i` itself to have been [`insert`](Self::insert)ed;
+    /// Longest match at `i` among the first [`MAX_CHAIN_TRIES`] candidates
+    /// in `i`'s hash chain, within the window. Does not require `i` itself
+    /// to have been [`insert`](Self::insert)ed;
     /// [`parse_greedy`]'s one-step lazy-matching probe relies on that to
     /// look ahead without mutating the chain.
-    fn find_best(&self, i: usize, max_tries: usize) -> Option<(usize, Distance)> {
+    fn find_best(&self, i: usize) -> Option<(usize, Distance)> {
         let mut best_len = 0usize;
         let mut best_distance = None;
-        let mut j = self.head[self.hash(i)];
+        let mut j = self.head[prefix_hash(self.data, i)];
         let mut tries = 0;
-        while j != NO_POSITION && tries < max_tries {
+        while j != NO_POSITION && tries < MAX_CHAIN_TRIES {
             let j_pos = j as usize;
-            let offset = i - j_pos; // j was inserted at an earlier position: i > j_pos always.
+            let offset = i - j_pos; // j was inserted at an earlier position: i >= j_pos.
             if offset > self.window {
                 break;
             }
-            if offset > 0 {
-                // offset <= self.window here, always fits u32 (Self::window's obligation).
-                let offset_u32 =
-                    u32::try_from(offset).expect("offset <= self.window, checked above, fits u32");
-                let distance =
-                    NonZeroU32::new(offset_u32).expect("offset > 0, checked by the branch above");
+            // Zero when `i` itself is `insert`ed, so it heads its own chain.
+            if let Some(distance) = NonZeroU32::new(to_u32(offset)) {
                 let len = match_len(self.data, i, distance);
                 if len > best_len {
                     best_len = len;
@@ -706,16 +681,14 @@ pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
     while i < n {
         finder.insert(i);
         let (rep_len, rep_slot) = best_rep(data, reps, i);
-        let found = finder.find_best(i, MAX_CHAIN_TRIES);
+        let found = finder.find_best(i);
         let match_len = found.map_or(0, |(len, _)| len);
 
         if (MIN_MATCH_LEN..LAZY_MAX_LEN).contains(&match_len)
             && rep_len + 1 < match_len
             && i + 1 < n
         {
-            let next_len = finder
-                .find_best(i + 1, MAX_CHAIN_TRIES)
-                .map_or(0, |(len, _)| len);
+            let next_len = finder.find_best(i + 1).map_or(0, |(len, _)| len);
             if next_len > match_len {
                 tokens.push(Token::Literal(data[i]));
                 i += 1;
