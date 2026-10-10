@@ -219,14 +219,14 @@
         <p>
           <strong>Pre-alpha: no release, no packaged binary, no version
             tag.</strong> The container format (version 10) is specified and
-          versioned, not frozen: until 1.0 a version can be retired, and a file
-          this build compresses carries no promise that a later build still
-          reads it. From 1.0 on, no version is ever retired; the
+          versioned, not frozen. Before the first release, each format change
+          retires the version before it, so the next build that changes the
+          format will not read a file you compress today. After that, until 1.0
+          a version can still be retired; from 1.0 on, none ever is. The
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/format/SPEC.md"
-          >format spec</a> states the rules in between. The API, the CLI and the
-          ratio below still move too. Do not use this for data you care about
-          yet.
+          >format spec</a> states the rules. The API, the CLI and the ratio
+          below still move too. Do not use this for data you care about yet.
         </p>
       </div>
 
