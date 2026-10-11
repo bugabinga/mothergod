@@ -96,6 +96,63 @@ test("runs 14 against 10 are under the factor, so they stay quiet", () => {
   assert.match(out, /^trend: quiet, 1 roles/m);
 });
 
+test("runs at exactly 1.5x print: 6 against 4", () => {
+  const out = block(runs("reviewer", 6, 12), runs("reviewer", 4, 12));
+  assert.match(out, /^ {4}reviewer {4}runs 6 vs 4 .*moved: runs$/m);
+});
+
+test("a median moved by exactly a quarter prints: 20 against 15", () => {
+  const out = block(runs("reviewer", 10, 20), runs("reviewer", 10, 15));
+  assert.match(out, /turns p50 20\.0 vs 15\.0 .*moved: turns_p50$/m);
+});
+
+test("a median moved by exactly the floor prints: 12 against 9", () => {
+  const out = block(runs("reviewer", 10, 12), runs("reviewer", 10, 9));
+  assert.match(out, /turns p50 12\.0 vs 9\.0 .*moved: turns_p50$/m);
+});
+
+test("22 turns on a median of 100 is under a quarter, so it stays quiet", () => {
+  const out = block(runs("reviewer", 10, 100), runs("reviewer", 10, 78));
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("denials at exactly the floor print: 3 against none", () => {
+  const out = block([...runs("reviewer", 9, 12), run("reviewer", 12, { denials: 3 })], runs("reviewer", 10, 12));
+  assert.match(out, /denials 3 vs 0 .*moved: denials$/m);
+});
+
+test("denials at exactly the factor print: 20 against 10", () => {
+  const out = block(runs("reviewer", 10, 12, { denials: 2 }), runs("reviewer", 10, 12, { denials: 1 }));
+  assert.match(out, /denials 20 vs 10 .*moved: denials$/m);
+});
+
+test("the guard holding back one wake in five stays quiet", () => {
+  const gates = [...Array.from({ length: 4 }, () => ({ role: "bdfl", decision: "run" })), {
+    role: "bdfl",
+    decision: "skip",
+  }];
+  const out = block(runs("bdfl", 4, 50), runs("bdfl", 4, 50), gates);
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("a paused wake is held back: one in four prints", () => {
+  const gates = [...Array.from({ length: 3 }, () => ({ role: "bdfl", decision: "run" })), {
+    role: "bdfl",
+    decision: "paused",
+  }];
+  const out = block(runs("bdfl", 3, 50), runs("bdfl", 3, 50), gates);
+  assert.match(out, /^ {4}bdfl {8}runs 3 vs 3 .*skipped 1 of 4 {3}moved: skipped$/m);
+});
+
+test("an empty read is a finding, never a quiet one", () => {
+  const out = block([], []);
+  assert.equal(
+    out.trim(),
+    "trend: no sessions in the last 14d and no gate rows in the last 7d; the table answered and held nothing",
+  );
+  assert.doesNotMatch(out, /quiet/);
+});
+
 test("three runs against none stay under the floor", () => {
   const out = block([...runs("researcher", 3, 51), ...runs("bdfl", 4, 50)], runs("bdfl", 4, 50));
   assert.match(out, /^trend: quiet, 2 roles/m);

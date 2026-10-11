@@ -14,8 +14,9 @@ UNREADABLE and the retrospect goes on, never an empty trend read as a
 quiet one (the `sessions` contract).
 
 Thresholds: the constants below, one rule per measure in `moved`, each
-pinned by trend.test.mjs with a case on either side of it. Errors have no
-constant: any change prints.
+pinned by trend.test.mjs with a case on the threshold and one just under
+it, so a constant moved either way, or a `>=` made `>`, fails a test.
+Errors have no constant: any change prints.
 
 Medians, not means, because one 65-turn chat wake would otherwise paint
 every BDFL run as long (ADR-0023's lesson). Measured runs only feed the
@@ -40,9 +41,8 @@ TURNS_SHARE, FLOOR_TURNS = 0.25, 3
 # denials: the larger week is DENIALS_FACTOR times the smaller and at least FLOOR_DENIALS.
 DENIALS_FACTOR, FLOOR_DENIALS = 2, 3
 # skipped: the guard held back SKIP_SHARE of the role's wakes this week. HELD
-# is the guard's decisions that stop a wake for budget (schema.sql: skip is
-# second gear, exhausted no rung left, paused the pause machinery); `stale`
-# is a wake overtaken by a newer trigger, not a throttle, and does not count.
+# is the guard's decisions that stop a wake (schema.sql names them); `stale`
+# is a wake overtaken by a newer trigger, not a hold, and does not count.
 SKIP_SHARE = 0.25
 HELD = ("skip", "exhausted", "paused")
 
@@ -121,6 +121,10 @@ def lines(recent_rows, prior_rows, gate_rows):
             held[role] = held.get(role, 0) + 1
     roles = sorted(set(new) | set(old) | set(held),
                    key=lambda r: (-new.get(r, EMPTY)["runs"], r))
+    if not roles:
+        # The `sessions` contract: an empty table is a finding, never a quiet one.
+        return ["trend: no sessions in the last 14d and no gate rows in the last 7d; "
+                "the table answered and held nothing"]
     rows, quiet = [], []
     for role in roles:
         a, b = new.get(role, EMPTY), old.get(role, EMPTY)
