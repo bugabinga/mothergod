@@ -606,20 +606,21 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// same private header-parsing and bound-checking helpers), so the two
 /// can't drift.
 ///
-/// Only bounds resident memory better than [`decompress_bounded`] for a
-/// [`Method::Lz`] frame whose encoder picked
-/// [`filters::select::Candidate::Identity`], `Delta`, or `Bcj`: filters
-/// whose undo step runs sequentially with small fixed lookback or lookahead
-/// (a no-op, a stride, or a 5-byte call/jmp instruction), so the decoded LZ
-/// token stream needs no whole-buffer pass afterward, and
+/// A [`Method::Lz`] frame whose encoder picked
+/// [`filters::select::Candidate::Identity`], `Delta`, or `Bcj` streams:
+/// filters whose undo step runs sequentially with small fixed lookback or
+/// lookahead (a no-op, a stride, or a 5-byte call/jmp instruction), so the
+/// decoded LZ token stream needs no whole-buffer pass afterward, and
 /// `codec::decode_to_writer` bounds memory to [`lz::WINDOW`] (1 MiB) for any
 /// of them regardless of the frame's declared length (`research/JOURNAL.md`
 /// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee).
-/// [`Method::Stored`] and [`filters::select::Candidate::Transpose`] fall
-/// back to a whole-buffer decode followed by one bulk write: no worse than
-/// [`decompress_bounded`], just never streamed. [`decodes_incrementally`]
-/// tells a caller which case a frame is without decoding it, though this
-/// function does not require calling it first.
+/// [`Method::Stored`] writes its payload slice of `input` through the same
+/// bounded writer and allocates no decoded buffer, so resident memory is the
+/// input plus the write buffer. [`filters::select::Candidate::Transpose`]
+/// alone falls back to a whole-buffer decode followed by one bulk write: no
+/// worse than [`decompress_bounded`], just never streamed.
+/// [`decodes_incrementally`] tells a caller which case a frame is without
+/// decoding it, though this function does not require calling it first.
 ///
 /// # Errors
 ///
