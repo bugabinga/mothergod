@@ -71,6 +71,14 @@ them under the session, so an envelope flag is verified by the next run's
 line rather than trusted, and a per-seat trim (#486) starts from counts.
 Older artifacts carry no record and print none.
 
+TREND is the eighth, and it costs two D1 reads. Every reading above is
+one wake's, and seven consecutive wakes judged "all sane" session by
+session while the same week's queue did not move (#896). `trend.py`
+compares this week with the prior per role over the session and guard
+tables (ADR-0060) and prints only the rows that crossed a stated
+threshold, one quiet line otherwise, UNREADABLE when the table cannot be
+read, so the block is never empty and never mistaken for quiet.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -123,6 +131,7 @@ from attribution import comments_since
 from attribution import report as attribution_report
 from opener import trim
 from rounds import report as rounds_report
+from trend import report as trend_report
 
 # Only these produce a judgeable session. Everything else in the repository is
 # graded by exit code.
@@ -551,6 +560,7 @@ def main():
     print()
     rounds_report(repo, anchor)
     budget(samples, anchor)
+    trend_report()
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
         f"| no-artifact {len(orphans)} | phantom {len(phantoms)} | pending {len(pending)} "

@@ -35,8 +35,11 @@ The one run where the expensive reads are worth their tokens (ADR-0025).
 
 ## 2. Process health
 
-`gh run list`: which agent sessions succeeded, failed, stalled, or wasted
-turns? Read a failed run's story before judging it.
+`.github/scripts/sessions roles --since 7d`, read beside the retrospect's
+trend block (this week against the prior, per role, the rows that
+moved): whose median turns climbed, whose denials returned, whose runs
+errored, which seat the guard held back. `gh run list` is for one run's
+story, read before judging it, never for the census.
 
 ## 3. Scorecard
 
