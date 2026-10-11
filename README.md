@@ -59,23 +59,24 @@ cd mothergod
 cargo build --release --bin mothergod
 ```
 
-The CLI has the shape `gzip -c` and `zstd -c` already taught you: two
-subcommands, stdin to stdout when you name no file. Round-trip something of
-yours and check the result rather than taking our word for it.
+The CLI speaks the grammar `gzip`, `xz` and `zstd` already taught you: it
+compresses, `-d` decompresses, stdin to stdout when you name no file. Round-trip
+something of yours and check the result rather than taking our word for it.
 
 ```sh
-./target/release/mothergod compress   < FILE      > FILE.mgdc
-./target/release/mothergod decompress < FILE.mgdc > FILE.out
+./target/release/mothergod    < FILE      > FILE.mgdc
+./target/release/mothergod -d < FILE.mgdc > FILE.out
 cmp FILE FILE.out   # silence means the round trip was lossless
 ```
 
-Given a file argument instead, `compress` writes `<file>.mgdc` and
-`decompress` reads one back to the name with the suffix stripped. Neither
-deletes its input, and neither overwrites an existing file.
-That, `--help` and `--version` are the entire interface: no compression
-levels, no tuning knobs. `--version` also prints the format version the build
-reads; put it in a bug report. Expect the encode to take a while, at the rates
-above.
+Given file arguments instead, compression writes `<file>.mgdc` for each and
+`-d` reads one back to the name with the suffix stripped; `-c` writes to stdout
+and leaves files alone, and `-` names stdin. Nothing deletes its input or
+overwrites an existing file.
+That and `--help` and `--version` are the entire interface so far: no
+compression levels, no tuning knobs. `--version` also prints the format version
+the build reads; put it in a bug report. Expect the encode to take a while, at
+the rates above.
 
 Library API (subject to change until 1.0):
 
