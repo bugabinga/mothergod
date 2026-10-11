@@ -242,9 +242,9 @@ jobs:
               `.github/scripts/merge-pr $PR_NUMBER --sha <reviewed-head>`.
               Attempt it before predicting it will fail; an unsigned branch
               commit is not a reason to stop (GOVERNANCE.md "Merging"). Exit 2
-              means required gates are still pending: arm `gh pr merge
-              $PR_NUMBER --squash --auto` and stop. Any other failure: say so
-              on the thread; the BDFL sweep rescues an approved PR.
+              means required gates are still pending and the merge is armed
+              on your head: stop. Any other failure: say so on the thread;
+              the BDFL sweep rescues an approved PR.
               One carve-out: a diff touching `.github/workflows/` is the BDFL's
               to merge (GOVERNANCE.md "Merging"). Post the verdict and the
               label, say the merge is the BDFL's, and stop.
