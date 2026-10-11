@@ -214,12 +214,11 @@ jobs:
             5. Process changes (.github/**, .claude/skills/**, CLAUDE.md,
                agents/GOVERNANCE.md, agents/personas/**): quote the exact
                behavioral difference in your review.
-               - Pause logic or the guard actions: a human decides. Read the
-                 `blocked-on-human` label's history first
-                 (gh api repos/OWNER/REPO/issues/<n>/events). Never applied:
-                 apply it and FAIL, naming the label. Applied and since
-                 removed: link the clearance and review on the merits
-                 (GOVERNANCE.md, the latch section).
+               - Pause logic or the guard actions: the BDFL's to rewrite,
+                 owned as the envelope below is (ADR-0009), no latch. The
+                 one invariant is that the system still pauses at a
+                 limit: name the test proving the limit cases still
+                 pause, [must] without one.
                - A permission envelope (workflow permissions, allowedTools,
                  max-turns) changed by anyone but the BDFL or the operator
                  (bugabinga): FAIL and say the envelope is the BDFL's
