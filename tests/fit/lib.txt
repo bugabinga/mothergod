@@ -1,0 +1,44 @@
+# The library half of the FIT matrix (ADR-0064): one idiom the genre shares per
+# row, the genre being flate2, zstd, xz2, brotli and lz4_flex (snap and ruzstd
+# as pure-Rust references). tests/fit_lib.rs probes each row against the built
+# crate and fails when a recorded state disagrees with the observation, so a
+# flip is a diff to this file. .github/scripts/status-data.py reads the same
+# file: FIT's library half is the `holds` rows over all rows.
+#
+# Format: id | state | behavior | citation | note
+#   state     holds, gap, or declined. A declined row stays in the denominator
+#             and has no probe; its note is the reason.
+#   citation  crate version and item as read from the registry source of that
+#             version (`cargo add`, in a scratch crate outside this checkout),
+#             or the run that observed it. The page is
+#             https://docs.rs/<crate>/<version>/<crate>/<path>; it is where a
+#             reader goes, not where the evidence came from. Versions read on
+#             2026-10-11: flate2 1.1.10, zstd 0.14.2, xz2 0.1.7, brotli 9.0.0,
+#             lz4_flex 0.14.0, snap 1.1.2. A crate that lacks the idiom is not
+#             cited.
+#   note      optional; where the genre splits, the split and the choice.
+#
+# A row with a file tests/fit/lib/<id>.rs is probed by compiling that file
+# against the built crate: it is the idiom as a user writes it, and the row
+# holds when it compiles. The names in a gap row's file follow the genre's
+# (zstd's `write::Encoder`); the issue that closes the gap updates the file to
+# the names it picks in the same diff. A row without one is probed in
+# tests/fit_lib.rs by running the behavior.
+
+enc-writer | gap | a type wraps a `Write` and compresses what is written through it | flate2 write::GzEncoder, zstd stream::write::Encoder, xz2 write::XzEncoder, brotli CompressorWriter, lz4_flex frame::FrameEncoder | #979
+dec-reader | gap | a type wraps a `Read` and yields the decompressed bytes | flate2 read::GzDecoder, zstd stream::read::Decoder, xz2 read::XzDecoder, brotli Decompressor, lz4_flex frame::FrameDecoder | #979
+enc-reader | gap | a type wraps a `Read` and yields the compressed bytes | flate2 read::GzEncoder, zstd stream::read::Encoder, xz2 read::XzEncoder, brotli CompressorReader, snap read::FrameEncoder | #979; lz4_flex has none
+dec-writer | gap | a type wraps a `Write` and decompresses what is written through it | flate2 write::GzDecoder, zstd stream::write::Decoder, xz2 write::XzDecoder, brotli DecompressorWriter | #979; lz4_flex and snap have none
+finish-returns-writer | gap | ending an encoder hands the wrapped writer back | flate2 write::GzEncoder::finish, zstd stream::write::Encoder::finish, xz2 write::XzEncoder::finish, lz4_flex frame::FrameEncoder::finish, brotli CompressorWriter::into_inner | #979
+copy-encode | gap | one call compresses everything a `Read` yields into a `Write` | zstd stream::copy_encode, brotli BrotliCompress | #979
+one-shot-compress | holds | a byte slice compresses to a `Vec<u8>` in one call | zstd bulk::compress, lz4_flex block::compress_prepend_size, snap raw::Encoder::compress_vec |
+one-shot-decompress | holds | a compressed byte slice decompresses to a `Vec<u8>` in one call | zstd bulk::decompress, lz4_flex block::decompress_size_prepended, snap raw::Decoder::decompress_vec |
+output-bound | holds | the caller caps the decompressed size | zstd bulk::decompress `capacity`, lz4_flex block::decompress `min_uncompressed_size`, snap raw::decompress_len |
+decode-to-writer | holds | a frame decompresses into a caller-supplied `Write` | zstd stream::copy_decode, brotli BrotliDecompress, flate2 write::GzDecoder |
+level-argument | gap | compression takes a level | flate2 Compression, zstd bulk::compress `level`, xz2 write::XzEncoder::new `level`, brotli CompressorWriter::new `q` | one tier until M5; lz4_flex has no level
+empty-roundtrip | holds | empty input compresses and decompresses to empty | observed in a scratch crate: zstd bulk, lz4_flex block, snap raw each return an empty `Vec` |
+error-std | holds | the error type implements `std::error::Error`, `Display` and `Debug` | Rust API Guidelines C-GOOD-ERR, lz4_flex block::DecompressError, snap Error |
+error-into-io | gap | a decode failure converts into `std::io::Error` | lz4_flex frame::Error, snap Error implement `From<_> for io::Error`; flate2, zstd, xz2 and brotli return `io::Error` itself | #1081
+send-sync | holds | the public types are `Send + Sync` | Rust API Guidelines C-SEND-SYNC |
+concatenation | gap | concatenated compressed members decompress to the concatenated payloads | flate2 read::MultiGzDecoder, zstd stream::read::Decoder (keeps concatenating frames until EOF), xz2 read::XzDecoder::new_multi_decoder | #978
+integrity-check | gap | a corrupted compressed stream is an error, never wrong bytes | observed in a scratch crate on each crate's own frame of the 2000 bytes `(i * 37 % 251) as u8`, every single-bit flip decoded: gzip and xz never return wrong bytes with Ok, snap once in 2879; zstd, brotli and lz4_flex at their defaults do for 1669 to 2073 of about 2200 | #1020; the genre splits three to three on the default, the probe flips every bit of one Lz and one Stored frame

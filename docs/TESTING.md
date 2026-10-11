@@ -387,7 +387,7 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   proving no panic crosses the FFI boundary, not just that the Rust
   API behaves.
 
-## 12. Genre conformance (CLI landed #981, library planned #982)
+## 12. Genre conformance (CLI #981, library #982)
 
 - The FIT matrix (ADR-0064): one row per behavior the compressor genre
   shares (gzip, bzip2, xz, zstd, brotli, lz4 for the CLI; flate2, zstd,
@@ -403,4 +403,13 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   must pass its own pty control, the permission-bit row is Unix only) and the row is then unmeasured there.
   Citations are read from the runner's man pages, never from memory.
   The suite spawns the binary, so it runs on no Miri or Android lane.
-- Not yet built: the library half (#982).
+- The library half is `tests/fit/lib.txt` and `tests/fit_lib.rs`, the
+  same format and the same two checks (`tests/fit/matrix.rs`). A row
+  with a file in `tests/fit/lib/` is probed by compiling that file with
+  `rustc` against the `libmothergod` rlib beside the test binary, the
+  idiom as a user writes it; a control snippet must link first, or the
+  suite fails instead of reading every refusal as a gap. The other
+  rows run the behavior. Citations are read from the genre crates'
+  registry source in a scratch crate outside the checkout, never
+  fetched. The suite spawns `rustc`, so it runs on no Miri or Android
+  lane.
