@@ -46,12 +46,12 @@ Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> 
 
 import os
 import re
-import statistics
 import sys
 from datetime import datetime, timedelta, timezone
 
 import audit_facts
 import d1
+from trend import summarize_roles
 
 SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                       "..", "..", "infra", "sessions", "schema.sql")
@@ -204,43 +204,6 @@ def backfill(repo, since, rebuild=False):
           f" | present {held} | written {written}"
           f" | unreadable {len(unreadable)} | missing {len(missing)}")
     return 1 if missing else 0
-
-
-def med(values):
-    # Always a float: statistics.median returns the int itself for an odd
-    # count, and a column that prints 5 on one line and 20.00 on the next
-    # reads as two different measures.
-    clean = [v for v in values if v is not None]
-    return float(statistics.median(clean)) if clean else None
-
-
-def summarize_roles(rows):
-    """Per role, from per-run rows: the aggregates retrospect's reader asks first.
-
-    Medians, not means, because one 65-turn chat wake would otherwise paint
-    every BDFL run as long (ADR-0023's lesson). Measured runs only feed the
-    turn and token figures; unmeasured ones are counted, never zeroed in.
-    """
-    by_role = {}
-    for r in rows:
-        by_role.setdefault(r.get("role") or "?", []).append(r)
-    out = []
-    for role, runs in sorted(by_role.items(), key=lambda kv: -len(kv[1])):
-        measured = [r for r in runs if r.get("measured")]
-        turns = [r.get("turns") for r in measured]
-        costs = [r.get("cost_usd") for r in measured if r.get("cost_usd") is not None]
-        out.append({
-            "role": role,
-            "runs": len(runs),
-            "measured": len(measured),
-            "turns_p50": med(turns),
-            "turns_max": max((t for t in turns if t is not None), default=None),
-            "out_tokens": sum(r.get("out_tokens") or 0 for r in measured),
-            "denials": sum(r.get("denials") or 0 for r in runs),
-            "errors": sum(r.get("error") or 0 for r in runs),
-            "cost_usd": float(sum(costs)) if costs else None,
-        })
-    return out
 
 
 def unreadable(error):
