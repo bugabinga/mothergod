@@ -11,32 +11,9 @@
 // not a finding about the codec (issue #518).
 #![cfg(not(any(miri, target_os = "android")))]
 
-use std::io::Write as _;
-use std::process::{Command, Stdio};
+mod common;
 
-/// Path to the compiled `mothergod` binary, set by Cargo for integration
-/// tests (<https://doc.rust-lang.org/cargo/reference/environment-variables.html>).
-fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_mothergod"))
-}
-
-/// Runs `command` with `stdin` piped in, returns `(stdout, exit code)`.
-fn run(command: &mut Command, stdin: &[u8]) -> (Vec<u8>, i32) {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("mothergod binary should spawn");
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(stdin)
-        .expect("write to child stdin");
-    let output = child.wait_with_output().expect("mothergod should exit");
-    (output.stdout, output.status.code().expect("no signal"))
-}
+use common::{bin, run, run_with_early_closing_reader};
 
 #[test]
 fn compress_then_decompress_roundtrips_arbitrary_bytes() {
@@ -213,35 +190,6 @@ fn decompress_of_a_file_without_the_mgdc_suffix_fails_cleanly() {
     assert_ne!(code, 0);
 
     std::fs::remove_dir_all(&dir).expect("clean up temp dir");
-}
-
-/// Spawns `mothergod <command>` on `stdin`, reads one byte of its stdout,
-/// drops the pipe (a reader that quit early, `| head -c 1`), and returns
-/// `(stderr, exit code)`. Reading before the drop makes the child's later
-/// writes hit a closed pipe, not an unread one.
-fn run_with_early_closing_reader(command: &str, stdin: &[u8]) -> (Vec<u8>, i32) {
-    use std::io::Read as _;
-
-    let mut child = bin()
-        .arg(command)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("mothergod binary should spawn");
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(stdin)
-        .expect("write to child stdin");
-    let mut stdout = child.stdout.take().expect("piped stdout");
-    stdout
-        .read_exact(&mut [0u8; 1])
-        .expect("child should emit a byte before the pipe closes");
-    drop(stdout);
-    let output = child.wait_with_output().expect("mothergod should exit");
-    (output.stderr, output.status.code().expect("no signal"))
 }
 
 #[test]
