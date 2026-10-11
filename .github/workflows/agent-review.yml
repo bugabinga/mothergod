@@ -350,8 +350,9 @@ jobs:
           # (ADR-0016), so its branches wake nobody. A bdfl branch wakes
           # the maintainer like any other (#998): the director's seat is
           # the dearest and its clock four-hourly, and the maintainer's
-          # tick fixed five bdfl rounds in the two days to 2026-10-11
-          # (#995, #1037, #1043), once in a race with the live director.
+          # tick fixed four bdfl rounds in the two days to 2026-10-11
+          # (#995, #1037, #1043) and twice raced the live director to one
+          # must.
           # The 2026-09-12 exclusion answered a maintainer prompt that
           # skipped bdfl PRs; the prompt no longer does.
           case "$HEAD_REF" in
