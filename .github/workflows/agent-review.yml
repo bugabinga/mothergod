@@ -195,8 +195,10 @@ jobs:
                branch and run whatever the PR's specific claims rest on.
                Anything that executes PR code runs through
                `.github/scripts/probe <command>` (its header says why); gh
-               stays outside probe. A claim you did not execute is unverified:
-               say so in the review.
+               stays outside probe. A claim of the PR's you did not execute
+               is unverified: say so. The gates' own coverage is no such
+               claim: "fmt, clippy, test and doc unverified by me" is the
+               pending clause with another verb (PR #1056's review).
             3. Codec changes: round-trip the change's data class plus
                truncated and bit-flipped inputs; no test, guard, benchmark or
                corpus weakened to flatter a metric (JOURNAL S1-L5); journal and

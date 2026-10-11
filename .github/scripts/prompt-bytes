@@ -66,12 +66,12 @@ EM_DASH = "—"
 # Pinned UTF-8 bytes of each seat's prompt. Change a prompt, move its pin in
 # the same PR, and let the PR body say why the seat grew or how it shrank.
 PINNED = {
-    "bdfl": 10791,
+    "bdfl": 11124,
     "curator": 2634,
     "deslop": 1091,
     "heartbeat": 3552,
     "herald": 1903,
-    "review": 5046,
+    "review": 5198,
 }
 
 
