@@ -15,25 +15,15 @@
 //! mothergod decompress input.mgdc                    # writes input
 //! ```
 //!
-//! `compress` still builds the whole output [`Vec<u8>`] before writing it
-//! ([`mothergod::compress`]'s own whole-buffer signature; the optimal-parse
-//! encoder needs the full input regardless). `decompress` writes its output
-//! incrementally via [`mothergod::decompress_to_writer`] instead, bounding
-//! resident memory on the output side (ROADMAP M4's bounded-memory decode
-//! guarantee) even for a small frame that decodes to a much larger buffer.
-//! Input is still read whole into memory either way: the library has a
-//! streaming *writer*, not yet a streaming *reader*.
+//! `compress` builds its whole output before writing it: the optimal-parse
+//! encoder needs the full input. `decompress` streams through
+//! [`mothergod::decompress_to_writer`], bounding resident memory on the
+//! output side (ROADMAP M4) however large the frame decodes. Input is read
+//! whole either way.
 //!
-//! Streaming trades away the old all-or-nothing output guarantee for a
-//! corrupt frame. To stdout, a decode failure now surfaces after whatever
-//! prefix `decompress_to_writer` already emitted, so a pipeline consuming
-//! incrementally (`| tar x`) sees truncated bytes ahead of the nonzero exit
-//! code, where a whole-buffer decode used to guarantee zero bytes reached
-//! stdout before the error. To a file argument, the same failure instead
-//! removes the partial file `create_new` had to open before decoding could
-//! start, so the on-disk case still sees nothing survive a failed run.
-//! Stdout has no equivalent mitigation: bytes already written cannot be
-//! unwritten.
+//! A decode failure to stdout surfaces after whatever prefix was already
+//! written: `| tar x` sees truncated bytes ahead of the nonzero exit code.
+//! To a file argument, the partial file is removed instead.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -80,9 +70,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Reports `message` with [`USAGE`] appended, [`fail`]'s shape for a usage
-/// error specifically. Not shared with `main`'s `None` branch or `-h`/
-/// `--help`: those print a bare usage dump, with no error to prefix.
+/// [`fail`] with [`USAGE`] appended.
 fn usage_fail(message: &str) -> ExitCode {
     fail(&format!("{message}\n\n{USAGE}"))
 }
@@ -101,13 +89,8 @@ fn run_compress(path: Option<&OsString>) -> ExitCode {
     }
 }
 
-/// Like [`run_compress`], but streams the decoded bytes straight to the
-/// destination writer via [`mothergod::decompress_to_writer`] instead of
-/// collecting them into a `Vec<u8>` first, bounding resident memory on the
-/// output side even when a small frame decodes to a much larger buffer.
-/// Not built on [`run_compress`]'s shape: that function collects a whole
-/// `Vec<u8>` for its caller to write, which is exactly the buffering this
-/// function exists to avoid.
+/// Reads input, then streams the decoded bytes to stdout, or to `path` with
+/// [`SUFFIX`] stripped if given.
 fn run_decompress(path: Option<&OsString>) -> ExitCode {
     let input = match read_input(path) {
         Ok(input) => input,
@@ -128,11 +111,8 @@ fn run_decompress(path: Option<&OsString>) -> ExitCode {
     }
 }
 
-/// Runs [`mothergod::decompress_to_writer`] into `writer`, telling a write
-/// failure (reported with `dest_name`) apart from a decode failure (a
-/// corrupt or oversized frame, reported plainly): the two arrived through
-/// separate calls before streaming merged them into one `Result`, and
-/// callers still want the old distinction in the error message.
+/// Runs [`mothergod::decompress_to_writer`] into `writer`: a write failure
+/// is reported with `dest_name`, a decode failure plainly.
 fn decompress_into<W: Write>(input: &[u8], writer: &mut W, dest_name: &str) -> ExitCode {
     match mothergod::decompress_to_writer(input, u32::MAX, writer) {
         Ok(()) => ExitCode::SUCCESS,
@@ -159,24 +139,21 @@ fn strip_suffix(path: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{}: expected a {SUFFIX} file", path.display()))
 }
 
-/// Reads stdin, or `path` if given. Shared by both subcommands' entry
-/// points, which otherwise differ only in how they use the result.
+/// Reads stdin, or `path` if given.
 fn read_input(path: Option<&OsString>) -> Result<Vec<u8>, String> {
     match path {
-        None => read_stdin(),
+        None => {
+            let mut buf = Vec::new();
+            io::stdin()
+                .lock()
+                .read_to_end(&mut buf)
+                .map_err(|err| format!("reading stdin: {err}"))?;
+            Ok(buf)
+        }
         Some(path) => {
             fs::read(path).map_err(|err| format!("reading {}: {err}", Path::new(path).display()))
         }
     }
-}
-
-fn read_stdin() -> Result<Vec<u8>, String> {
-    let mut buf = Vec::new();
-    io::stdin()
-        .lock()
-        .read_to_end(&mut buf)
-        .map_err(|err| format!("reading stdin: {err}"))?;
-    Ok(buf)
 }
 
 fn write_stdout(bytes: &[u8]) -> ExitCode {
