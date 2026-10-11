@@ -81,3 +81,15 @@ test("an unreadable tracker nulls the field and says so, never guesses", () => {
     down.problems.join("\n"),
   );
 });
+
+test("fit_cli counts the matrix's holds rows over every row, declined included", () => {
+  const matrix = new URL("../../tests/fit/cli.txt", import.meta.url).pathname;
+  const states = readFileSync(matrix, "utf-8")
+    .split("\n")
+    .filter((line) => line.trim() && !line.startsWith("#"))
+    .map((line) => line.split(" | ")[1]);
+  assert.ok(states.includes("declined"), "the fixture should exercise a declined row");
+  assert.equal(up.fit_cli.holds, states.filter((s) => s === "holds").length);
+  assert.equal(up.fit_cli.total, states.length);
+  assert.ok(!up.problems.some((p) => p.startsWith("fit_cli:")), up.problems.join("\n"));
+});
