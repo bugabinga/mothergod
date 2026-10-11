@@ -8,15 +8,19 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
-- cli: `mothergod compress` and `mothergod decompress`, shaped like
-  `gzip -c`: stdin to stdout when you name no file, or `<file>` to
-  `<file>.mgdc` and back. Neither overwrites an existing file or deletes its
-  input, and a file output keeps its input's modification time and, on Unix,
-  its permission bits, as gzip, bzip2 and xz do (#1040). Decompression
-  streams instead of buffering the whole file. `compress` refuses to write
-  its frame to a terminal, so a forgotten redirect does not fill the screen
-  with binary (#1039). A reader that closes stdout early (`| head`) ends it
-  silently with status 141, as gzip does.
+- cli: `mothergod` takes the grammar gzip, xz and zstd share: it compresses,
+  `-d` (`--decompress`) decompresses, `-c` (`--stdout`) writes to stdout and
+  leaves the file alone, `-` names stdin, `--` ends options, and any number of
+  files are processed in turn, each failure reported without stopping the rest
+  (#983, ADR-0066). `mothergod -dc x.mgdc | tar x` works as it does with the
+  genre's tools. With no file it reads stdin and writes stdout; with a file it
+  writes `<file>.mgdc` and back. Nothing overwrites an existing file or deletes
+  its input, and a file output keeps its input's modification time and, on
+  Unix, its permission bits, as gzip, bzip2 and xz do (#1040). Decompression
+  streams instead of buffering the whole file. Compressing to stdout refuses a
+  terminal, so a forgotten redirect does not fill the screen with binary
+  (#1039). A reader that closes stdout early (`| head`) ends it silently with
+  status 141, as gzip does.
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
   interface, with no compression levels and no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact

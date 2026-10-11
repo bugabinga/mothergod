@@ -37,13 +37,13 @@ pub fn run(command: &mut Command, stdin: &[u8]) -> (Vec<u8>, i32) {
     (output.stdout, output.status.code().expect("no signal"))
 }
 
-/// Spawns `mothergod <command>` on `stdin`, reads one byte of its stdout,
+/// Spawns `mothergod <args>` on `stdin`, reads one byte of its stdout,
 /// drops the pipe (a reader that quit early, `| head -c 1`), and returns
 /// `(stderr, exit code)`. Reading before the drop makes the child's later
 /// writes hit a closed pipe, not an unread one.
-pub fn run_with_early_closing_reader(command: &str, stdin: &[u8]) -> (Vec<u8>, i32) {
+pub fn run_with_early_closing_reader(args: &[&str], stdin: &[u8]) -> (Vec<u8>, i32) {
     let mut child = bin()
-        .arg(command)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

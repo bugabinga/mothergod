@@ -70,19 +70,19 @@ fn other_sample() -> Vec<u8> {
     (0..1500u32).map(|i| (i * 11 % 241) as u8).collect()
 }
 
-/// The frame today's `compress` subcommand makes of `payload`.
+/// The frame the binary makes of `payload` on stdin.
 fn frame_of(payload: &[u8]) -> Vec<u8> {
-    let (frame, code) = run(bin().arg("compress"), payload);
+    let (frame, code) = run(&mut bin(), payload);
     assert_eq!(
         code, 0,
-        "compress must work for the probes to mean anything"
+        "compressing must work for the probes to mean anything"
     );
     frame
 }
 
 /// `true` when the file at `path` is a frame that decodes to `payload`.
 fn decodes_to(path: &Path, payload: &[u8]) -> bool {
-    fs::read(path).is_ok_and(|frame| run(bin().arg("decompress"), &frame) == (payload.to_vec(), 0))
+    fs::read(path).is_ok_and(|frame| run(bin().arg("-d"), &frame) == (payload.to_vec(), 0))
 }
 
 /// One probe per row that is not declined. The binary's grammar is spelled
@@ -116,15 +116,21 @@ const PROBES: &[(&str, Probe)] = &[
 ];
 
 fn mode_d() -> Seen {
-    let (out, code) = run(bin().arg("-d"), &frame_of(&sample()));
-    seen(code == 0 && out == sample())
+    let decodes = |flag: &str| {
+        let (out, code) = run(bin().arg(flag), &frame_of(&sample()));
+        code == 0 && out == sample()
+    };
+    seen(decodes("-d") && decodes("--decompress"))
 }
 
 fn stdout_c() -> Seen {
     let dir = Scratch::new("stdout-c");
     let source = dir.file("payload", &sample());
-    let (out, code) = run(bin().arg("-c").arg(&source), b"");
-    seen(code == 0 && out.starts_with(MAGIC) && !dir.path("payload.mgdc").exists())
+    let writes_stdout = |flag: &str| {
+        let (out, code) = run(bin().arg(flag).arg(&source), b"");
+        code == 0 && out.starts_with(MAGIC) && !dir.path("payload.mgdc").exists()
+    };
+    seen(writes_stdout("-c") && writes_stdout("--stdout"))
 }
 
 fn keep_k() -> Seen {
@@ -185,27 +191,18 @@ fn version() -> Seen {
 fn end_of_options() -> Seen {
     let dir = Scratch::new("end-of-options");
     dir.file("-payload", &sample());
-    let (_out, code) = run(
-        bin()
-            .current_dir(&dir.0)
-            .args(["compress", "--", "-payload"]),
-        b"",
-    );
+    let (_out, code) = run(bin().current_dir(&dir.0).args(["--", "-payload"]), b"");
     seen(code == 0 && dir.path("-payload.mgdc").exists())
 }
 
 fn stdin_dash() -> Seen {
-    let (out, code) = run(bin().args(["compress", "-"]), &sample());
+    let (out, code) = run(bin().arg("-"), &sample());
     seen(code == 0 && out.starts_with(MAGIC))
 }
 
 fn no_operand_stdio() -> Seen {
-    let (frame, code) = run(bin().arg("compress"), &sample());
-    seen(
-        code == 0
-            && frame.starts_with(MAGIC)
-            && run(bin().arg("decompress"), &frame) == (sample(), 0),
-    )
+    let (frame, code) = run(&mut bin(), &sample());
+    seen(code == 0 && frame.starts_with(MAGIC) && run(bin().arg("-d"), &frame) == (sample(), 0))
 }
 
 fn bare_compresses() -> Seen {
@@ -233,7 +230,7 @@ fn unknown_option() -> Seen {
 fn source_kept() -> Seen {
     let dir = Scratch::new("source-kept");
     let source = dir.file("payload", &sample());
-    let (_out, code) = run(bin().arg("compress").arg(&source), b"");
+    let (_out, code) = run(bin().arg(&source), b"");
     seen(code == 0 && fs::read(&source).is_ok_and(|bytes| bytes == sample()))
 }
 
@@ -241,25 +238,25 @@ fn no_clobber() -> Seen {
     let dir = Scratch::new("no-clobber");
     let source = dir.file("payload", &sample());
     let existing = dir.file("payload.mgdc", b"already here");
-    let (_out, code) = run(bin().arg("compress").arg(&source), b"");
+    let (_out, code) = run(bin().arg(&source), b"");
     seen(code != 0 && fs::read(&existing).is_ok_and(|bytes| bytes == b"already here"))
 }
 
 fn suffix_derive() -> Seen {
     let dir = Scratch::new("suffix-derive");
     let source = dir.file("payload", &sample());
-    let (_out, compress_code) = run(bin().arg("compress").arg(&source), b"");
+    let (_out, compress_code) = run(bin().arg(&source), b"");
     let compressed = dir.path("payload.mgdc");
     if compress_code != 0 || !compressed.exists() {
         return seen(false);
     }
     fs::remove_file(&source).expect("remove source");
-    let (_out, decompress_code) = run(bin().arg("decompress").arg(&compressed), b"");
+    let (_out, decompress_code) = run(bin().arg("-d").arg(&compressed), b"");
     seen(decompress_code == 0 && fs::read(&source).is_ok_and(|bytes| bytes == sample()))
 }
 
 fn corrupt_nonzero() -> Seen {
-    let (_out, code) = run(bin().arg("decompress"), b"text that is no frame");
+    let (_out, code) = run(bin().arg("-d"), b"text that is no frame");
     seen(code != 0)
 }
 
@@ -269,7 +266,7 @@ fn broken_pipe() -> Seen {
     let mut frame = b"MGDC\x0b\x00".to_vec();
     frame.extend(300_000u64.to_le_bytes());
     frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
-    let (stderr, code) = run_with_early_closing_reader("decompress", &frame);
+    let (stderr, code) = run_with_early_closing_reader(&["-d"], &frame);
     seen(stderr.is_empty() && code == 141)
 }
 
@@ -280,7 +277,7 @@ fn refuses_terminal() -> Seen {
     if !common::pty_works() {
         return Seen::Unmeasured;
     }
-    let shell = format!("'{}' compress < /dev/null", env!("CARGO_BIN_EXE_mothergod"));
+    let shell = format!("'{}' < /dev/null", env!("CARGO_BIN_EXE_mothergod"));
     match common::on_pty(&shell) {
         Some(output) => seen(
             !output.status.success() && !output.stdout.windows(MAGIC.len()).any(|w| w == MAGIC),
@@ -307,7 +304,7 @@ fn mtime_copied() -> Seen {
         .open(&source)
         .and_then(|file| file.set_modified(long_ago()))
         .expect("set source mtime");
-    let (_out, code) = run(bin().arg("compress").arg(&source), b"");
+    let (_out, code) = run(bin().arg(&source), b"");
     let modified = fs::metadata(dir.path("payload.mgdc")).and_then(|meta| meta.modified());
     seen(code == 0 && modified.is_ok_and(|time| time == long_ago()))
 }
@@ -320,7 +317,7 @@ fn mode_copied() -> Seen {
     let dir = Scratch::new("mode-copied");
     let source = dir.file("payload", &sample());
     fs::set_permissions(&source, fs::Permissions::from_mode(0o640)).expect("set source mode");
-    let (_out, code) = run(bin().arg("compress").arg(&source), b"");
+    let (_out, code) = run(bin().arg(&source), b"");
     let mode = fs::metadata(dir.path("payload.mgdc")).map(|meta| meta.permissions().mode());
     seen(code == 0 && mode.is_ok_and(|bits| bits & 0o777 == 0o640))
 }
@@ -333,7 +330,7 @@ fn mode_copied() -> Seen {
 fn concatenation() -> Seen {
     let mut frames = frame_of(&sample());
     frames.extend(frame_of(&other_sample()));
-    let (out, code) = run(bin().arg("decompress"), &frames);
+    let (out, code) = run(bin().arg("-d"), &frames);
     let mut both = sample();
     both.extend(other_sample());
     seen(code == 0 && out == both)

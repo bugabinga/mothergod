@@ -790,53 +790,52 @@ fn help_text() -> String {
     String::from_utf8(output.stdout).expect("usage text is UTF-8")
 }
 
-/// The subcommands the binary offers, from the `<compress|decompress>`
-/// alternation in the first line of its usage. Parsed rather than substring
-/// matched because `decompress` contains `compress`, so a plain `contains`
-/// would keep passing after `compress` alone was renamed.
-fn binary_subcommands(help: &str) -> Vec<&str> {
-    let open = help.find('<').expect("usage line brackets its subcommands");
-    let close = help[open..].find('>').expect("unterminated <...>") + open;
-    help[open + 1..close].split('|').collect()
-}
-
-/// The subcommands a surface tells the reader to type, taken as the word
-/// after each invocation of the built binary. Anchored on the path segment
-/// `release/mothergod ` so it picks up the copy-pasteable command lines
-/// (`./target/release/mothergod compress < FILE > FILE.mgdc`) and not the
-/// prose mentions of `mothergod --help`.
-fn published_subcommands(surface: &str) -> Vec<&str> {
+/// The options a surface tells the reader to type: the dash-led words after
+/// each invocation of the built binary on the same line. Anchored on the path
+/// segment `release/mothergod ` so it picks up the copy-pasteable command lines
+/// (`./target/release/mothergod -d < FILE.mgdc > FILE.out`) and not the prose
+/// mentions of `mothergod --help`. The count of invocations rides along: a
+/// recipe is a pair, so fewer than two means the anchor stopped matching.
+fn published_invocations(surface: &str) -> Vec<Vec<&str>> {
     surface
-        .match_indices("release/mothergod ")
+        .match_indices("release/mothergod")
         .map(|(index, marker)| {
             surface[index + marker.len()..]
-                .split_whitespace()
+                .lines()
                 .next()
-                .expect("a subcommand follows the binary path")
+                .expect("a line follows the binary path")
+                .split_whitespace()
+                .filter(|word| word.starts_with('-'))
+                .collect()
         })
         .collect()
 }
 
 #[test]
-fn published_cli_recipe_names_commands_the_binary_answers_to() {
+fn published_cli_recipe_names_options_the_binary_answers_to() {
     // `tests/cli.rs` proves the binary behaves; this proves the recipe on
     // the public surfaces still names what it answers to, which is the half
     // a stranger's terminal would otherwise discover for us.
     let help = help_text();
-    let offered = binary_subcommands(&help);
+    // Whole tokens, not substrings: `-d` is a substring of `--decompress`, so
+    // a `contains` would keep passing after the short option was renamed.
+    let help_words: Vec<&str> = help
+        .split(|c: char| c.is_whitespace() || "[](),;|<>".contains(c))
+        .filter(|word| !word.is_empty())
+        .collect();
 
     for surface_file in ["README.md", "site/index.html"] {
         let surface = read(surface_file);
-        let published = published_subcommands(&surface);
+        let invocations = published_invocations(&surface);
         assert!(
-            published.len() >= 2,
+            invocations.len() >= 2,
             "{surface_file} publishes {} runnable mothergod commands, expected the compress and decompress pair",
-            published.len()
+            invocations.len()
         );
-        for command in published {
+        for option in invocations.into_iter().flatten() {
             assert!(
-                offered.contains(&command),
-                "{surface_file} tells the reader to run `mothergod {command}`; the binary offers {offered:?}"
+                help_words.contains(&option),
+                "{surface_file} tells the reader to run `mothergod {option}`; `mothergod --help` does not mention it"
             );
         }
         // The suffix is restated in the recipe on both surfaces and derived
