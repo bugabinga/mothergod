@@ -183,12 +183,13 @@ jobs:
 
             Procedure:
             1. Read the full diff and the PR body.
-            2. fmt, clippy, test, doc and ratio already ran on this commit as
-               required checks, and a hook denies recomputing them. Read their
-               state with `gh pr checks $PR_NUMBER`, never with `--watch`,
-               which lists this review job and hangs on it. A red or pending
-               required check: say so, and treat what it would have verified
-               as unverified.
+            2. fmt, clippy, test, doc and ratio run on this commit as required
+               checks, and a hook denies recomputing them. Read their state
+               with `gh pr checks $PR_NUMBER`, never with `--watch`, which
+               lists this review job and hangs on it. A red one: say so, and
+               treat what it would have verified as unverified. A pending one
+               goes unmentioned: the ruleset and `merge-pr --sha` already hold
+               the merge on it, so naming it changes no reader's action.
                Spend your Bash budget on what CI does not check: check out the
                branch and run whatever the PR's specific claims rest on.
                Anything that executes PR code runs through
