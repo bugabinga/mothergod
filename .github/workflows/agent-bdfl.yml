@@ -342,11 +342,16 @@ jobs:
             2. Inbox drain: `.github/scripts/inbox drain`; a pending
                message makes the wake CHAT.
             3. State check: ops-log tail, gh run list, open PRs and
-               issues, recent commits. Then `.github/scripts/stalled-prs
-               --rescue`, which applies the single-command rescues and
-               names the recipe for the rest; a stall no recipe clears
-               gets blocked-on-human. Then
-               `.github/scripts/security-alerts`; triage each row.
+               issues, recent commits. A red scheduled check in the run
+               list (corpus-fetch, coverage, fuzz, monster, docs-watch,
+               deploy-site) is a bug issue this run, `product` when the
+               cause is in the crate or its tests: agent-alarm wakes this
+               seat on a streak's first red and no other seat reads
+               those runs (corpus-fetch-check sat red seven days, #1058).
+               Then `.github/scripts/stalled-prs --rescue`, which applies
+               the single-command rescues and names the recipe for the
+               rest; a stall no recipe clears gets blocked-on-human.
+               Then `.github/scripts/security-alerts`; triage each row.
                Any question about runs over time, the operator's or
                your own, is `.github/scripts/sessions` (ADR-0060):
                SQL over one row per run, never a hand-walked archive.
