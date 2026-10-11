@@ -61,6 +61,12 @@ description: >-
   The log line always says which reason fired. A model-scoped limit never
   stops the other agents: that is the whole point of the ledger and the
   reason a per-model limit is not a global pause.
+
+  Every evaluation, run or not, ends as one row of the guard table through
+  `.github/scripts/guard-row.py` (#891 slice 3), written last and fail-open:
+  a wake this gate stops never reaches agent-audit, so the row is the only
+  record it existed and why it did not run. A caller that passes no
+  `cloudflare_api_token` gets a log line, not a warning.
 inputs:
   token:
     description: GitHub token with issues read/write
@@ -79,6 +85,12 @@ inputs:
       that says nothing is on the responsive path.
     required: false
     default: "false"
+  cloudflare_api_token:
+    description: >-
+      Bearer for the D1 write of this evaluation's guard row. Empty skips
+      the write with one log line; the decision never waits on it.
+    required: false
+    default: ""
 outputs:
   paused:
     description: "'true' when this agent must not run: pause, stale wake, no model left, or throttled"
@@ -108,18 +120,27 @@ runs:
         EVENT_ACTION: ${{ github.event.action }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         DISCRETIONARY: ${{ inputs.discretionary }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare_api_token }}
       run: |
         set -euo pipefail
         paused=false
         model=''
         model_flag=''
+        effort=''
         effort_flag=''
+        # The guard row (#891 slice 3): which reason fired, in the gate's
+        # own log line, and the burn projection the ladder step read.
+        decision=run
+        reason=''
+        projection=''
 
         if [ "$EVENT_NAME" = issues ] && [ "$EVENT_ACTION" = opened ] && [ -n "$ISSUE_NUMBER" ]; then
           state="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
           if [ "$state" = CLOSED ]; then
             paused=true
-            echo "Issue #$ISSUE_NUMBER was already closed before this queued run started; skipping."
+            decision=stale
+            reason="Issue #$ISSUE_NUMBER was already closed before this queued run started; skipping."
+            echo "$reason"
           fi
         fi
 
@@ -129,15 +150,21 @@ runs:
           resume_at="$(jq -r '.[0].body // ""' <<<"$issue_json" | sed -n 's/^RESUME-AT:[[:space:]]*//p' | head -n1 | tr -d '\r')"
           if [ -z "$resume_at" ]; then
             paused=true
-            echo "Paused indefinitely by issue #$number (no RESUME-AT line)."
+            decision=paused
+            reason="Paused indefinitely by issue #$number (no RESUME-AT line)."
+            echo "$reason"
           else
             resume_epoch="$(date -u -d "$resume_at" +%s 2>/dev/null || echo '')"
             if [ -z "$resume_epoch" ]; then
               paused=true
-              echo "Paused by issue #$number; RESUME-AT '$resume_at' is unparseable, staying paused. Fix or close the issue to resume."
+              decision=paused
+              reason="Paused by issue #$number; RESUME-AT '$resume_at' is unparseable, staying paused. Fix or close the issue to resume."
+              echo "$reason"
             elif [ "$(date -u +%s)" -lt "$resume_epoch" ]; then
               paused=true
-              echo "Paused until $resume_at by issue #$number."
+              decision=paused
+              reason="Paused until $resume_at by issue #$number."
+              echo "$reason"
             else
               gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
                 --comment "RESUME-AT ($resume_at) has passed, agent operations resume with this run." || true
@@ -154,14 +181,17 @@ runs:
           allowance_body="$(gh issue list --repo "$GITHUB_REPOSITORY" --label allowance-state --state open --json body --limit 1 --jq '.[0].body // ""')"
           resolved="$(ROLE="$ROLE" LEDGER="$ledger_body" ALLOWANCE="$allowance_body" \
             python3 .github/scripts/guard-decide.py)"
-          IFS='|' read -r status model effort note <<<"$resolved"
+          IFS='|' read -r status model effort note projection <<<"$resolved"
+          reason="$note"
           case "$status" in
             skip)
               paused=true
+              decision=skip
               echo "$note"
               ;;
             exhausted)
               paused=true
+              decision=exhausted
               echo "model: $note"
               ;;
             *)
@@ -177,3 +207,9 @@ runs:
         echo "model=$model" >> "$GITHUB_OUTPUT"
         echo "model_flag=$model_flag" >> "$GITHUB_OUTPUT"
         echo "effort_flag=$effort_flag" >> "$GITHUB_OUTPUT"
+
+        # Last, after the outputs: a write that fails is the script's
+        # warning, never this step's exit code (#891, writers never fail a run).
+        GUARD_DECISION="$decision" GUARD_REASON="$reason" GUARD_RUNG="$model" \
+          GUARD_EFFORT="$effort" GUARD_PROJECTION="$projection" \
+          python3 .github/scripts/guard-row.py

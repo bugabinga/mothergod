@@ -1,7 +1,7 @@
 """Where the session table lives: one Cloudflare D1 database (ADR-0060).
 
-`session-row.py` writes it and `sessions` reads it, the same split kv.py
-draws for the operator conversation. The database id is an identifier, not a
+`session-row.py` and `guard-row.py` write it and `sessions` reads it, the
+same split kv.py draws for the operator conversation. The database id is an identifier, not a
 secret, like the KV namespace id beside it; the bearer, CLOUDFLARE_API_TOKEN,
 stays a secret every caller passes. The worker's SESSIONS binding in
 infra/telegram-worker/wrangler.toml names the same id, pinned by worker.test.mjs.
