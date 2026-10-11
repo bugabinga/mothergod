@@ -68,9 +68,9 @@ The system is inert until these are done:
   run monster --ref <branch>`, #1014's Windows evidence) rides it. Safe for
   `monster` because a dispatch raises that one workflow and its red on a
   branch wakes nobody: `agent-alarm` names it under `workflow_run` since
-  #1060 but acts on main's reds and a PR's alone, so a branch dispatch is
-  the dispatcher's to read; its report job writes with `github.token`,
-  whose events start no workflow.
+  #1060 but ignores a `workflow_dispatch` red on any branch but `main`, so
+  a branch dispatch is the dispatcher's to read; its report job writes
+  with `github.token`, whose events start no workflow.
   Dispatching a seat workflow on the PAT is the operator-attributed wake the
   BDFL prompt calls a self-trigger loop (#50); never.
 - All agent commits are made with `use_commit_signing: true`: they go

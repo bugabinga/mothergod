@@ -89,16 +89,16 @@ concurrency:
 
 jobs:
   wake-fixer:
-    # A red on a branch that is neither main's nor a PR's is a dispatch
-    # somebody made by hand (`gh workflow run monster --ref <branch>`,
-    # OPERATIONS.md "Admin token & signing"), and its result is the
+    # A red hand dispatch on a branch (`gh workflow run monster --ref
+    # <branch>`, OPERATIONS.md "Admin token & signing") is the
     # dispatcher's to read: the dedup below keys on the branch, so
     # without this clause every such red would wake the BDFL once per
-    # branch.
+    # branch. Nothing else is excluded; an operator review event wakes
+    # agent-bdfl on the PR's head branch, and that red keeps its alert.
     if: contains(fromJSON('["failure", "timed_out", "startup_failure"]'),
       github.event.workflow_run.conclusion)
-      && (github.event.workflow_run.head_branch == 'main'
-      || github.event.workflow_run.event == 'pull_request')
+      && !(github.event.workflow_run.event == 'workflow_dispatch'
+      && github.event.workflow_run.head_branch != 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
