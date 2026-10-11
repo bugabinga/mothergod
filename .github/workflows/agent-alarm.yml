@@ -60,6 +60,21 @@ on:
       # the ledger write broke, and the API's 14-day retention turns a
       # quiet failure into permanent data loss (issue #417).
       - traffic-snapshot
+      # Not seats: the weekend checks whose red nobody else reads.
+      # corpus-fetch-check went red on 2026-10-04 on a clippy lint the
+      # PR gate cannot see (its module is feature-gated) and stayed red
+      # seven days (#1058); coverage-check's red the next Sunday cost
+      # the week's TRUST number (#1059). The ruleset gates none of them,
+      # no PR thread carries them, and the BDFL's state check scans a
+      # run list by eye, which missed the first. codeql stays out: it
+      # also runs per pull request, where a red is that thread's, and
+      # security-alerts already reads what it finds.
+      - corpus-fetch-check
+      - coverage-check
+      - fuzz-check
+      - monster
+      - docs-watch
+      - deploy-site
     types: [completed]
 
 permissions:
@@ -74,8 +89,16 @@ concurrency:
 
 jobs:
   wake-fixer:
+    # A red hand dispatch on a branch (`gh workflow run monster --ref
+    # <branch>`, OPERATIONS.md "Admin token & signing") is the
+    # dispatcher's to read: the dedup below keys on the branch, so
+    # without this clause every such red would wake the BDFL once per
+    # branch. Nothing else is excluded; an operator review event wakes
+    # agent-bdfl on the PR's head branch, and that red keeps its alert.
     if: contains(fromJSON('["failure", "timed_out", "startup_failure"]'),
       github.event.workflow_run.conclusion)
+      && !(github.event.workflow_run.event == 'workflow_dispatch'
+      && github.event.workflow_run.head_branch != 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

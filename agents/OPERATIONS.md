@@ -66,9 +66,11 @@ The system is inert until these are done:
   the workflow token answer 403 to `actions/workflows/<id>/dispatches`, so
   proving a fix on lanes CI lacks (`GH_TOKEN="$GH_ADMIN_TOKEN" gh workflow
   run monster --ref <branch>`, #1014's Windows evidence) rides it. Safe for
-  `monster` because a dispatch raises that one workflow and no seat listens
-  to it: `agent-alarm` does not name it under `workflow_run`, and its report
-  job writes with `github.token`, whose events start no workflow.
+  `monster` because a dispatch raises that one workflow and its red on a
+  branch wakes nobody: `agent-alarm` names it under `workflow_run` since
+  #1060 but ignores a `workflow_dispatch` red on any branch but `main`, so
+  a branch dispatch is the dispatcher's to read; its report job writes
+  with `github.token`, whose events start no workflow.
   Dispatching a seat workflow on the PAT is the operator-attributed wake the
   BDFL prompt calls a self-trigger loop (#50); never.
 - All agent commits are made with `use_commit_signing: true`: they go
