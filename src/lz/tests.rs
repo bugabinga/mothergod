@@ -463,11 +463,17 @@ fn binary_tree_nice_len_bounds_candidates_on_deep_correct_chains() {
     // candidate *count*, not per-candidate cost, dominates here. `nice_len`
     // 50 (below every block's true match length) stops each walk after
     // its first candidate instead of the up to `data.len()` candidates
-    // `max_depth` alone would allow. Measured by hand: ~69ms with
-    // `nice_len` 50 at this same (unbounded) `max_depth`, vs. ~228ms
-    // with `nice_len` set to `MAX_MATCH_LEN` (i.e. no early exit) — a
-    // real, if modest, ~3.3x on data shaped like this. The bound below
-    // leaves generous headroom for slower CI hardware.
+    // `max_depth` alone would allow.
+    //
+    // Bounds bytes compared by `suffix_common_len`, not wall-clock: a
+    // stopwatch failed sibling guards under `cargo llvm-cov` with no
+    // regression (issues #1059, #1064). With `nice_len` 50 the walks
+    // compare about 3.0e6 bytes here; with `nice_len` set to
+    // `MAX_MATCH_LEN` (no early exit) about 5.0e7, a 16x. The budget sits
+    // 3x above the first and 5x below the second. Removing only the
+    // walk's `best_len < nice_len` stop moves candidates visited 2% on
+    // this fixture, so no count here guards that line.
+    const SUFFIX_BYTE_BUDGET: u64 = 10_000_000;
     let template: Vec<u8> = (0..200u32)
         .map(|i| u8::try_from(i % 251).expect("i % 251 fits u8"))
         .collect();
@@ -478,16 +484,16 @@ fn binary_tree_nice_len_bounds_candidates_on_deep_correct_chains() {
         data.extend_from_slice(&block);
     }
     let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
-    let start = std::time::Instant::now();
+    work::Scan::SuffixCommonLen.reset();
     for i in 0..data.len() {
         let _ = finder.insert_and_find(i, data.len(), 50);
     }
-    let elapsed = start.elapsed();
+    let compared = work::Scan::SuffixCommonLen.count();
     assert!(
-        elapsed < std::time::Duration::from_secs(3),
-        "300 near-duplicate 200-byte blocks with nice_len 50 and unbounded max_depth took \
-         {elapsed:?}, expected well under 3s; likely a regression to nice_len no longer \
-         bounding candidates visited"
+        compared < SUFFIX_BYTE_BUDGET,
+        "300 near-duplicate 200-byte blocks with nice_len 50 and unbounded max_depth compared \
+         {compared} bytes in suffix_common_len, budget {SUFFIX_BYTE_BUDGET}; likely a \
+         regression to nice_len no longer bounding candidates visited"
     );
 }
 
@@ -521,18 +527,25 @@ fn binary_tree_nice_len_bounds_per_candidate_scan_cost_on_repeated_byte_run() {
     // so the first candidate here now costs O(nice_len) instead of
     // O(MAX_MATCH_LEN), and the walk stops immediately after (its
     // capped common length already reaches nice_len).
+    //
+    // Bounds bytes compared by `suffix_common_len`, not wall-clock
+    // (issues #1059, #1064). The capped walk compares about 2.6e7 bytes
+    // here (nice_len 128 at each of 200,000 positions); an uncapped first
+    // scan compares up to `MAX_MATCH_LEN` per position, over 1e10. The
+    // budget sits 4x above the first and 100x below the second.
+    const SUFFIX_BYTE_BUDGET: u64 = 100_000_000;
     let data = vec![b'z'; 200_000];
     let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
-    let start = std::time::Instant::now();
+    work::Scan::SuffixCommonLen.reset();
     for i in 0..data.len() {
         let _ = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL);
     }
-    let elapsed = start.elapsed();
+    let compared = work::Scan::SuffixCommonLen.count();
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "200,000 bytes of one repeated value with nice_len 128 took {elapsed:?}, expected \
-         well under 5s; likely a regression to nice_len no longer bounding per-candidate \
-         scan cost (research/JOURNAL.md S2-A46)"
+        compared < SUFFIX_BYTE_BUDGET,
+        "200,000 bytes of one repeated value with nice_len 128 compared {compared} bytes in \
+         suffix_common_len, budget {SUFFIX_BYTE_BUDGET}; likely a regression to nice_len no \
+         longer bounding per-candidate scan cost (research/JOURNAL.md S2-A46)"
     );
 }
 
