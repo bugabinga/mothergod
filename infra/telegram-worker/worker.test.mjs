@@ -826,3 +826,14 @@ test("/typing/draft carries a run's draft to the typing object on the worker sec
   assert.equal((await post("webhook-secret", JSON.stringify({ text: "bdfl, 3 min" }))).status, 204);
   assert.deepEqual(setup.typing, ["https://typing.invalid/draft", "https://typing.invalid/draft"]);
 });
+
+// The database id lives in two files by platform requirement: wrangler.toml
+// binds it for the worker, d1.py names it for the scripts. Drift would read
+// as an empty /budget, not an error, so the pair is pinned here.
+test("the SESSIONS binding names the database d1.py writes", () => {
+  const wrangler = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
+  const bound = wrangler.match(/database_id\s*=\s*"([0-9a-f-]{36})"/)[1];
+  const d1 = readFileSync(new URL("../../.github/scripts/d1.py", import.meta.url), "utf8");
+  const written = d1.match(/or "([0-9a-f-]{36})"/)[1];
+  assert.equal(bound, written);
+});

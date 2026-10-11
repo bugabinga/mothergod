@@ -13,7 +13,7 @@ const script = new URL("../../scripts/audit-extract.py", import.meta.url).pathna
 
 const fixtures = [
   {
-    name: "rounds an authoritative seven-day observation",
+    name: "writes an authoritative seven-day observation",
     input: [
       {
         type: "rate_limit_event",
@@ -340,7 +340,7 @@ test("an execution log without an init entry records the offered set as unknown"
   }
 });
 
-test("agent-audit allowance index fixtures", async (t) => {
+test("agent-audit ledger output fixtures", async (t) => {
   for (const fixture of fixtures) {
     await t.test(fixture.name, () => {
       const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
