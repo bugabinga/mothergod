@@ -116,15 +116,21 @@ const PROBES: &[(&str, Probe)] = &[
 ];
 
 fn mode_d() -> Seen {
-    let (out, code) = run(bin().arg("-d"), &frame_of(&sample()));
-    seen(code == 0 && out == sample())
+    let decodes = |flag: &str| {
+        let (out, code) = run(bin().arg(flag), &frame_of(&sample()));
+        code == 0 && out == sample()
+    };
+    seen(decodes("-d") && decodes("--decompress"))
 }
 
 fn stdout_c() -> Seen {
     let dir = Scratch::new("stdout-c");
     let source = dir.file("payload", &sample());
-    let (out, code) = run(bin().arg("-c").arg(&source), b"");
-    seen(code == 0 && out.starts_with(MAGIC) && !dir.path("payload.mgdc").exists())
+    let writes_stdout = |flag: &str| {
+        let (out, code) = run(bin().arg(flag).arg(&source), b"");
+        code == 0 && out.starts_with(MAGIC) && !dir.path("payload.mgdc").exists()
+    };
+    seen(writes_stdout("-c") && writes_stdout("--stdout"))
 }
 
 fn keep_k() -> Seen {

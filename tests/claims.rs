@@ -817,6 +817,12 @@ fn published_cli_recipe_names_options_the_binary_answers_to() {
     // the public surfaces still names what it answers to, which is the half
     // a stranger's terminal would otherwise discover for us.
     let help = help_text();
+    // Whole tokens, not substrings: `-d` is a substring of `--decompress`, so
+    // a `contains` would keep passing after the short option was renamed.
+    let help_words: Vec<&str> = help
+        .split(|c: char| c.is_whitespace() || "[](),;|<>".contains(c))
+        .filter(|word| !word.is_empty())
+        .collect();
 
     for surface_file in ["README.md", "site/index.html"] {
         let surface = read(surface_file);
@@ -828,7 +834,7 @@ fn published_cli_recipe_names_options_the_binary_answers_to() {
         );
         for option in invocations.into_iter().flatten() {
             assert!(
-                help.contains(option),
+                help_words.contains(&option),
                 "{surface_file} tells the reader to run `mothergod {option}`; `mothergod --help` does not mention it"
             );
         }
