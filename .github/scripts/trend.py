@@ -13,13 +13,9 @@ distinguishable from a broken one; an unreadable table prints
 UNREADABLE and the retrospect goes on, never an empty trend read as a
 quiet one (the `sessions` contract).
 
-Thresholds, each a stated rule and pinned by trend.test.mjs:
-
-    runs       the larger week is 1.5x the smaller, and at least FLOOR_RUNS
-    turns_p50  moved by a quarter of the larger, and by FLOOR_TURNS turns
-    denials    the larger week is 2x the smaller, and at least FLOOR_DENIALS
-    errors     any change
-    skipped    the guard held back SKIP_SHARE of the role's wakes this week
+Thresholds: the constants below, one rule per measure in `moved`, each
+pinned by trend.test.mjs with a case on either side of it. Errors have no
+constant: any change prints.
 
 Medians, not means, because one 65-turn chat wake would otherwise paint
 every BDFL run as long (ADR-0023's lesson). Measured runs only feed the
@@ -37,10 +33,18 @@ import d1
 
 WINDOW = timedelta(days=7)
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
-FLOOR_RUNS = 4
-FLOOR_TURNS = 3
-FLOOR_DENIALS = 3
+# runs: the larger week is RUNS_FACTOR times the smaller and at least FLOOR_RUNS.
+RUNS_FACTOR, FLOOR_RUNS = 1.5, 4
+# turns_p50: moved by TURNS_SHARE of the larger median and by FLOOR_TURNS turns.
+TURNS_SHARE, FLOOR_TURNS = 0.25, 3
+# denials: the larger week is DENIALS_FACTOR times the smaller and at least FLOOR_DENIALS.
+DENIALS_FACTOR, FLOOR_DENIALS = 2, 3
+# skipped: the guard held back SKIP_SHARE of the role's wakes this week. HELD
+# is the guard's decisions that stop a wake for budget (schema.sql: skip is
+# second gear, exhausted no rung left, paused the pause machinery); `stale`
+# is a wake overtaken by a newer trigger, not a throttle, and does not count.
 SKIP_SHARE = 0.25
+HELD = ("skip", "exhausted", "paused")
 
 EMPTY = {"runs": 0, "measured": 0, "turns_p50": None, "turns_max": None,
          "out_tokens": 0, "denials": 0, "errors": 0, "cost_usd": None}
@@ -87,13 +91,13 @@ def ratio_moved(new, old, factor, floor):
 def moved(new, old, skips, wakes):
     """The measures a role crossed a threshold on, by name; empty when none."""
     out = []
-    if ratio_moved(new["runs"], old["runs"], 1.5, FLOOR_RUNS):
+    if ratio_moved(new["runs"], old["runs"], RUNS_FACTOR, FLOOR_RUNS):
         out.append("runs")
     a, b = new["turns_p50"], old["turns_p50"]
     if a is not None and b is not None:
-        if abs(a - b) >= FLOOR_TURNS and abs(a - b) >= 0.25 * max(a, b):
+        if abs(a - b) >= FLOOR_TURNS and abs(a - b) >= TURNS_SHARE * max(a, b):
             out.append("turns_p50")
-    if ratio_moved(new["denials"], old["denials"], 2, FLOOR_DENIALS):
+    if ratio_moved(new["denials"], old["denials"], DENIALS_FACTOR, FLOOR_DENIALS):
         out.append("denials")
     if new["errors"] != old["errors"]:
         out.append("errors")
@@ -112,7 +116,7 @@ def lines(recent_rows, prior_rows, gate_rows):
     old = {s["role"]: s for s in summarize_roles(prior_rows)}
     held = {}
     for g in gate_rows:
-        if g.get("decision") != "run":
+        if g.get("decision") in HELD:
             role = g.get("role") or "?"
             held[role] = held.get(role, 0) + 1
     roles = sorted(set(new) | set(old) | set(held),

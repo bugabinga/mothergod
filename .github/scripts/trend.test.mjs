@@ -73,16 +73,40 @@ test("a new seat is news: runs against a prior of none, median against a dash", 
   assert.match(out, /^ {4}quiet: bdfl$/m);
 });
 
+test("a median that doubled from 2 to 4 stays quiet under the floor of 3 turns", () => {
+  const out = block(runs("reviewer", 10, 4), runs("reviewer", 10, 2));
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("three turns on a median of 23 is not a quarter, so it stays quiet", () => {
+  const out = block(runs("reviewer", 10, 23), runs("reviewer", 10, 20));
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("denials 15 against 10 are past the floor and under the factor, so they stay quiet", () => {
+  const out = block(
+    [...runs("reviewer", 5, 12, { denials: 3 })],
+    [...runs("reviewer", 5, 12, { denials: 2 })],
+  );
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("runs 14 against 10 are under the factor, so they stay quiet", () => {
+  const out = block(runs("reviewer", 14, 12), runs("reviewer", 10, 12));
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
 test("three runs against none stay under the floor", () => {
   const out = block([...runs("researcher", 3, 51), ...runs("bdfl", 4, 50)], runs("bdfl", 4, 50));
   assert.match(out, /^trend: quiet, 2 roles/m);
 });
 
-test("the guard holding back a quarter of a seat's wakes prints, this week's gate rows alone", () => {
+test("the guard holding back a quarter of a seat's wakes prints; a stale wake is not held back", () => {
   const gates = [
     ...Array.from({ length: 6 }, () => ({ role: "bdfl", decision: "run" })),
     { role: "bdfl", decision: "skip" },
     { role: "bdfl", decision: "exhausted" },
+    { role: "bdfl", decision: "stale" },
     { role: "reviewer", decision: "skip" },
   ];
   const out = block([...runs("bdfl", 6, 50), ...runs("reviewer", 10, 12)], [
