@@ -72,8 +72,10 @@ cmp FILE FILE.out   # silence means the round trip was lossless
 Given a file argument instead, `compress` writes `<file>.mgdc` and
 `decompress` reads one back to the name with the suffix stripped. Neither
 deletes its input, and neither overwrites an existing file.
-`mothergod --help` is the entire interface: no flags, no compression levels,
-no tuning knobs. Expect the encode to take a while, at the rates above.
+That, `--help` and `--version` are the entire interface: no compression
+levels, no tuning knobs. `--version` also prints the format version the build
+reads; put it in a bug report. Expect the encode to take a while, at the rates
+above.
 
 Library API (subject to change until 1.0):
 

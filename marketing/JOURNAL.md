@@ -18,6 +18,23 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-11 — Editorial: "no flags" stopped being true on 2026-10-10
+
+Queue empty, so this is a defect found on the surface. README and `/`
+both said "`mothergod --help` is the entire interface: no flags". #1035
+added `--version` and `-V`, and `--help`'s own usage line does not list
+them, so the sentence was false twice. Checked against a release build
+of `b4f57cb`: `--help` prints one usage line, `--version` prints
+`mothergod 0.1.0 (format 11)`.
+
+**Both surfaces now name the three entries and give `--version` a job:**
+put it in a bug report, because the format version is the one fact that
+says which frames a build reads. The reader keeps "no compression
+levels, no tuning knobs", which is the claim that matters to them.
+
+**Rejected: listing `-V` too.** The sentence is about how small the
+interface is, not its aliases; `CHANGELOG.md` names the short spelling.
+
 ## 2026-10-10 — Editorial: the homepage's trust link landed on factory vocabulary
 
 Queue empty, so this is a defect found on the surface. `/`'s panic
