@@ -5,7 +5,7 @@
 // that must see "in progress, then concluded" has something to see. With no
 // script every call fails loudly, so the guard tests prove only that the
 // guard did or did not let the call through. The unscripted merge paths
-// (403 escalation, 405, 409) still have no coverage here. The timeline read
+// (403 escalation, 409) still have no coverage here; 405 is covered below. The timeline read
 // in verdict.py is covered through the wait's stale-approval tests only.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -89,6 +89,7 @@ const pr = (labels, extra = {}) => ({
     merged: false,
     html_url: "https://example/pull/42",
     head: { sha: HEAD },
+    node_id: "PR_node42",
     labels: labels.map((name) => ({ name })),
     ...extra,
   },
@@ -338,4 +339,78 @@ test("--timeout without --wait is a usage error with exit 1, never exit 2", () =
   assert.equal(status, 1);
   assert.match(stderr, /usage: merge-pr/);
   assert.deepEqual(calls, []);
+});
+
+// Exit 2 arms the pinned auto-merge itself (#1026): thirteen of fourteen
+// landings on 2026-10-10 typed `gh pr merge --auto` by hand after it, and
+// the porcelain pins no head. The PUT's stderr carries the status, the way
+// gh reports it; the stub cannot speak HTTP.
+const unmet = {
+  match: "PUT repos/o/r/pulls/42/merge",
+  responses: [
+    {
+      status: 1,
+      stdout: { message: "Required status check \"test\" is expected." },
+      stderr: "gh: Required status check (HTTP 405)",
+    },
+  ],
+};
+const armed = {
+  match: "^api graphql",
+  responses: [
+    {
+      stdout: {
+        data: {
+          enablePullRequestAutoMerge: { pullRequest: { autoMergeRequest: { enabledAt: "2026-10-11T00:00:00Z" } } },
+        },
+      },
+    },
+  ],
+};
+
+test("a 405 arms auto-merge on the pinned head and exits 2", () => {
+  const { status, calls, stderr } = run(["42", "--sha", HEAD], {
+    responses: [{ match: "^api repos/o/r/pulls/42$", responses: [pr([])] }, unmet, armed],
+  });
+  assert.equal(status, 2, stderr);
+  const arm = calls.find((argv) => argv[1] === "graphql");
+  assert.ok(arm, "the mutation was sent");
+  assert.ok(arm.includes(`oid=${HEAD}`), "pinned to the reviewed head");
+  assert.ok(arm.includes("id=PR_node42"));
+  assert.match(stderr, /auto-merge armed on abc123456789 alone/);
+});
+
+test("a 405 whose arming GitHub refuses exits 1 and says nothing is armed", () => {
+  const refused = {
+    match: "^api graphql",
+    responses: [
+      {
+        status: 1,
+        stdout: { errors: [{ message: "Pull request is in clean status" }] },
+        stderr: "gh: Pull request is in clean status (enablePullRequestAutoMerge)",
+      },
+    ],
+  };
+  const { status, stderr } = run(["42", "--sha", HEAD], {
+    responses: [{ match: "^api repos/o/r/pulls/42$", responses: [pr([])] }, unmet, refused],
+  });
+  assert.equal(status, 1, stderr);
+  assert.match(stderr, /nothing is armed/);
+  assert.match(stderr, /Pull request is in clean status/);
+});
+
+test("--wait never arms: a 405 after green gates exits 2 with nothing armed", () => {
+  const { status, calls, stderr } = run(WAIT, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "success"], ...GREEN_GATES)] },
+      APPROVED_NOW,
+      unmet,
+      armed,
+    ],
+  });
+  assert.equal(status, 2, stderr);
+  assert.ok(!calls.some((argv) => argv[1] === "graphql"), "no mutation under --wait");
+  assert.match(stderr, /nothing armed/);
 });

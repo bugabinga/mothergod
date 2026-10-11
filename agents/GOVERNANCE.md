@@ -125,9 +125,10 @@ verdict actually covered. The script carries the recipe this section
 used to hand out: REST instead of the porcelain (PRs #25, #84), the
 403 escalation to the admin PAT, taken only for a PR that actually
 touches workflow files and only with the required gates proven green
-first, and a distinct exit (2) for gates-unmet, the one outcome where
-arming `gh pr merge <n> --squash --auto` and stopping is right (the
-BDFL sweep rescues an armed merge that never fires). `--wait` is the
+first, and a distinct exit (2) for gates-unmet, on which it arms
+GitHub's auto-merge itself, pinned to the reviewed head, and the caller
+stops (#1026; the BDFL sweep rescues an armed merge that never fires).
+`--wait` is the
 foreground wait for a head whose verdict has not come yet: it blocks
 until the `review` check run concludes on the pinned head and the
 required gates are green, merges on an `agent-approved` whose label
