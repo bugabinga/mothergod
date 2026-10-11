@@ -25,8 +25,8 @@ force-f | gap | -f and --force overwrite an existing output file | gzip(1), bzip
 test-t | gap | -t and --test check a compressed file and write nothing | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -t | #983
 verbose-v | gap | -v and --verbose are accepted and the data on stdout is unchanged | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -v | #983
 level-digit | gap | -1 selects a compression level | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -# | #983; mothergod has one tier until M5
-help | holds | -h and --help print usage to stdout and exit 0 | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -h |
-version | holds | -V and --version print the version to stdout and exit 0 | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -V | #977
+help | holds | -h and --help print usage and exit 0 | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -h | the genre splits three to three on the stream (gzip, xz, zstd to stdout; bzip2, brotli, lz4 to stderr), the man pages are silent on it; the probe accepts either
+version | holds | -V and --version print the version and exit 0 | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -V | #977; bzip2 alone writes it to stderr, the man pages are silent on the stream, the probe accepts either
 end-of-options | gap | -- ends options, so a file named -x is reachable | bzip2(1) OPTIONS --, brotli(1) DESCRIPTION, lz4(1) OPTIONS -- | #983
 stdin-dash | gap | the operand - names stdin | gzip(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, brotli(1) DESCRIPTION | #983
 no-operand-stdio | holds | with no file operand, stdin is read and stdout written | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, brotli(1) DESCRIPTION |
@@ -38,7 +38,7 @@ no-clobber | holds | an existing output file is not overwritten without -f | gzi
 suffix-derive | holds | the output name is the input name plus the format suffix, and minus it to decompress | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) DESCRIPTION | suffix is .mgdc
 corrupt-nonzero | holds | decompressing corrupt input exits nonzero | observed on the runner: `T -dc` on text that is no frame exits nonzero for all six; bzip2(1) Return values |
 broken-pipe | holds | a reader that quits early ends the run silently with status 141 | observed on the runner: decompressing and compressing into `head -c 1` exits 141 for all six |
-refuses-terminal | gap | compressed data is not written to a terminal | gzip(1) OPTIONS -f, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) OPTIONS -c | probed through script(1), so Linux only
+refuses-terminal | gap | compressed data is not written to a terminal | gzip(1) OPTIONS -f, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION implicit output | probed through script(1), so Linux only; a lane whose script(1) cannot show a pty leaves it unmeasured
 mtime-copied | gap | the output file carries the source's modification time | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, brotli(1) OPTIONS -n |
 mode-copied | gap | the output file carries the source's permission bits | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, brotli(1) OPTIONS -n | unix only
 concatenation | gap | concatenated compressed members decompress to the concatenated payloads | gzip(1) ADVANCED USAGE, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION | #978

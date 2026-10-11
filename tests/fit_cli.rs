@@ -217,17 +217,19 @@ fn level_digit() -> Seen {
     seen(code == 0 && out.starts_with(MAGIC))
 }
 
-fn prints_to_stdout(flag: &str) -> bool {
-    let (out, code) = run(bin().arg(flag), b"");
-    code == 0 && !out.is_empty()
+/// `true` when `flag` exits 0 having written something. The stream is not
+/// probed: the genre splits on it for usage and bzip2 alone for the version.
+fn prints_and_exits_zero(flag: &str) -> bool {
+    let output = run_output(bin().arg(flag), b"");
+    output.status.success() && !(output.stdout.is_empty() && output.stderr.is_empty())
 }
 
 fn help() -> Seen {
-    seen(prints_to_stdout("-h") && prints_to_stdout("--help"))
+    seen(prints_and_exits_zero("-h") && prints_and_exits_zero("--help"))
 }
 
 fn version() -> Seen {
-    seen(prints_to_stdout("-V") && prints_to_stdout("--version"))
+    seen(prints_and_exits_zero("-V") && prints_and_exits_zero("--version"))
 }
 
 fn end_of_options() -> Seen {
@@ -321,22 +323,36 @@ fn broken_pipe() -> Seen {
     seen(stderr.is_empty() && code == 141)
 }
 
-/// Runs `compress` with stdout on a pseudo-terminal, which `script(1)`
-/// allocates for its child. Linux only: BSD's `script` takes other
-/// arguments and Windows has none, and a lane without it leaves the row
-/// unmeasured (`Seen::Unmeasured`) rather than guessing.
+/// Runs `shell` with stdout on a pseudo-terminal, which `script(1)`
+/// allocates for its child; `None` where `script` cannot be spawned.
+#[cfg(target_os = "linux")]
+fn on_pty(shell: &str) -> Option<std::process::Output> {
+    std::process::Command::new("script")
+        .args(["-qec", shell, "/dev/null"])
+        .output()
+        .ok()
+}
+
+/// Linux only: BSD's `script` takes other arguments and Windows has none.
+/// A lane without a working pty leaves the row unmeasured
+/// (`Seen::Unmeasured`) rather than guessing, and "working" is measured, not
+/// assumed: a control that must show its marker through the pty comes first,
+/// because a `script` that fails to open one exits nonzero with no frame,
+/// which is what a refusal looks like.
 #[cfg(target_os = "linux")]
 fn refuses_terminal() -> Seen {
-    use std::process::Command;
+    let sees =
+        |output: &std::process::Output| output.stdout.windows(MAGIC.len()).any(|w| w == MAGIC);
 
-    let shell = format!("'{}' compress < /dev/null", env!("CARGO_BIN_EXE_mothergod"));
-    let Ok(output) = Command::new("script")
-        .args(["-qec", &shell, "/dev/null"])
-        .output()
-    else {
+    let control = on_pty(&format!("printf '{}'", String::from_utf8_lossy(MAGIC)));
+    if !control.is_some_and(|output| output.status.success() && sees(&output)) {
         return Seen::Unmeasured;
-    };
-    seen(!output.status.success() && !output.stdout.windows(MAGIC.len()).any(|w| w == MAGIC))
+    }
+    let shell = format!("'{}' compress < /dev/null", env!("CARGO_BIN_EXE_mothergod"));
+    match on_pty(&shell) {
+        Some(output) => seen(!output.status.success() && !sees(&output)),
+        None => Seen::Unmeasured,
+    }
 }
 
 #[cfg(not(target_os = "linux"))]

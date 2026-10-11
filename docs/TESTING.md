@@ -396,9 +396,9 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - The CLI half is `tests/fit/cli.txt` (the rows) and `tests/fit_cli.rs`
   (one probe per row, spawning the binary). The file is the committed
   count: `status-data.py` counts its `holds` rows over all rows, so no
-  second number exists to drift. A probe returns `None` on a lane that
-  cannot run it (`script(1)` for the terminal row is Linux only, the
-  permission-bit row is Unix only) and the row is then unmeasured there.
+  second number exists to drift. A probe returns `Seen::Unmeasured` on a lane
+  that cannot run it (`script(1)` for the terminal row is Linux only and
+  must pass its own pty control, the permission-bit row is Unix only) and the row is then unmeasured there.
   Citations are read from the runner's man pages, never from memory.
   The suite spawns the binary, so it runs on no Miri or Android lane.
 - Not yet built: the library half (#982).
