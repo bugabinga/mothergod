@@ -577,43 +577,56 @@ async function runAgent(env, args) {
   return `▶️ Dispatched ${role}.`;
 }
 
-function allowanceSamples(artifacts) {
+// The seven-day allowance, one reading per run, from the sessions database
+// (ADR-0060, #891 slice 2b): session-row.py writes the reading beside the
+// session row, the join gives it its instant, and the SESSIONS binding in
+// wrangler.toml reads it with no token. Newest first; burn and runway read
+// the newest pair inside one reset window, so a page is plenty.
+const BUDGET_SQL = `SELECT s.at, a.utilization, a.resets_at
+  FROM allowance a JOIN sessions s ON s.run_id = a.run_id AND s.attempt = a.attempt
+  WHERE a.window = 'seven_day' AND a.resets_at IS NOT NULL
+  ORDER BY s.at DESC LIMIT 100`;
+
+function allowanceSamples(rows) {
   const samples = [];
-  for (const artifact of array(artifacts)) {
-    if (!artifact || artifact.expired || typeof artifact.name !== "string") continue;
-    const match = artifact.name.match(/-u(\d{1,5})-r(\d{9,12})$/);
-    if (!match || !artifact.name.startsWith("audit-")) continue;
-    const used = Number(match[1]);
-    const reset = Number(match[2]);
-    const at = new Date(artifact.created_at).getTime();
-    if (used > 10000 || reset <= 0 || !Number.isFinite(at)) continue;
+  for (const row of array(rows)) {
+    const used = Number(row?.utilization);
+    const reset = Number(row?.resets_at);
+    const at = Date.parse(row?.at);
+    if (!(used >= 0 && used <= 1) || !(reset > 0) || !Number.isFinite(at)) continue;
     samples.push({ used, reset, at });
   }
   return samples.sort((a, b) => a.at - b.at);
 }
 
-function percent(basisPoints) {
-  return `${(basisPoints / 100).toFixed(2)}%`;
+function percent(fraction) {
+  return `${(fraction * 100).toFixed(2)}%`;
 }
 
 async function budget(env, args) {
   const usage = noArgs("budget", args);
   if (usage) return usage;
-  const { data } = await github(env, "/actions/artifacts?per_page=100");
-  if (!data || !Array.isArray(data.artifacts)) throw new UpstreamError();
-  const samples = allowanceSamples(data.artifacts);
-  if (!samples.length) return "Budget unavailable: no indexed allowance observations.";
+  if (!env.SESSIONS) return "Budget unavailable: no sessions database bound (wrangler.toml).";
+  let rows;
+  try {
+    ({ results: rows } = await env.SESSIONS.prepare(BUDGET_SQL).all());
+  } catch (error) {
+    return `Budget unavailable: sessions database unreadable: ${error?.message ?? error}`;
+  }
+  const samples = allowanceSamples(rows);
+  if (!samples.length) return "Budget unavailable: no allowance readings in the sessions table.";
 
   const latest = samples.at(-1);
   const previous = samples.findLast(
     (sample) => sample.reset === latest.reset && sample.at < latest.at && sample.used <= latest.used,
   );
   const lines = [
-    `Allowance: ${percent(latest.used)} used, ${percent(10000 - latest.used)} remaining`,
+    `Allowance: ${percent(latest.used)} used, ${percent(1 - latest.used)} remaining`,
+    `Observed: ${formatTime(new Date(latest.at).toISOString())}`,
     `Reset: ${formatTime(latest.reset)}`,
   ];
   if (!previous || latest.used === previous.used) {
-    lines.push("Recent burn: no measurable indexed movement");
+    lines.push("Recent burn: no measurable movement");
     lines.push("Projected exhaustion: unavailable");
     return lines.join("\n");
   }
@@ -625,7 +638,7 @@ async function budget(env, args) {
     lines.push("Projected exhaustion: unavailable");
     return lines.join("\n");
   }
-  const exhaustion = latest.at + ((10000 - latest.used) / burn) * 3_600_000;
+  const exhaustion = latest.at + ((1 - latest.used) / burn) * 3_600_000;
   lines.push(`Recent burn: ${percent(burn)}/h over ${elapsedHours.toFixed(1)}h`);
   lines.push(
     `Projected exhaustion: ${formatTime(new Date(exhaustion).toISOString())} (${

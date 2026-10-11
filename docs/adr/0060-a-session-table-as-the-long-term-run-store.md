@@ -24,7 +24,7 @@ Every agent run appends one row to a table `sessions` in a Cloudflare D1 databas
   The artifact remains the record of a run the table missed.
 - `.github/scripts/sessions` is the one reader: `sql` for any statement, `roles` and `show` as the two canned reports, `migrate` for the schema.
   It prints UNREADABLE and exits non-zero when the database cannot be read, never an empty table, the contract `inbox` and `security-alerts` already carry.
-- The schema is `infra/sessions/schema.sql`; the database id is named once in `d1.py`, as the KV namespace is in `kv.py`.
+- The schema is `infra/sessions/schema.sql`; the database id is named in `d1.py` for the scripts and in `infra/telegram-worker/wrangler.toml` for the worker's `SESSIONS` binding, and a worker test pins the two together because drift reads as an empty `/budget`, not an error.
 - The table is the long-term store.
   ADR-0023's weekly report keeps its role as notification channel and operator-readable digest; its edit history is no longer asked to be the archive.
 

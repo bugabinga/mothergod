@@ -1,11 +1,12 @@
 """One parse for the API's rate-limit payloads; every consumer imports this.
 
-Imported, not run, like `anchor.py`. Two consumers read the same
+Imported, not run, like `anchor.py`. Three consumers read the same
 `rate_limit_events` out of audit artifacts: `audit-extract.py` derives the
-allowance index that names each artifact, `retrospect` prints the budget
-footer the BDFL reads every wake. They used to carry twin copies of this
-parse kept aligned by comment, and both #308 defects lived in exactly that
-gap (issue #310), so the shape rule lives here once.
+one reading the guard's allowance ledger holds (#309), `audit_facts.py`
+the rows the allowance table holds (#891), and `retrospect` prints the
+budget footer the BDFL reads every wake. The first two used to carry twin
+copies of this parse kept aligned by comment, and both #308 defects lived
+in exactly that gap (issue #310), so the shape rule lives here once.
 
 Shape rule, two payloads on the record: until 2026-08-26 an event carried
 one window flat -- rateLimitType, utilization, resetsAt. Since then (run
@@ -16,9 +17,9 @@ the flat fields are ignored, because a payload carrying both describes the
 same windows twice.
 
 Validation stays with the consumers because they need different halves,
-stated here once so neither invents its own: the allowance index encodes
-utilization AND reset, so it demands `valid_fraction` and `valid_reset`
-both; the budget footer informs with the fraction alone, so it demands
+stated here once so none invents its own: the ledger reading and the
+table row carry utilization AND reset, so they demand `valid_fraction` and
+`valid_reset` both; the budget footer informs with the fraction alone, so it demands
 only `valid_fraction` and degrades a bad reset in display. `window_readings`
 itself filters on structure only, yielding invalid windows too, so a
 consumer can NAME the window kinds that fail its validation instead of

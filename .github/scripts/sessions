@@ -128,8 +128,9 @@ def since_of(spec, now):
     return when.astimezone(timezone.utc)
 
 
-# An artifact's name as agent-audit builds it, `audit-<role>-<run id>-<attempt>`,
-# then the allowance suffix audit-extract.py appends when it read one. The
+# An artifact's name as agent-audit builds it, `audit-<role>-<run id>-<attempt>`.
+# Artifacts named before #891 slice 2b carry an allowance suffix the worker's
+# /budget once read from the listing; it is tolerated until they expire. The
 # table's key is (run_id, attempt), so the listing alone says which rows are
 # present and the walk downloads only the rest.
 NAME = re.compile(r"^audit-[a-z-]+-(\d+)-(\d+)(?:-u\d+-r\d+)?$")

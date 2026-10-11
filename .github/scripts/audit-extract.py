@@ -240,19 +240,14 @@ rate_limits = [e.get("rate_limit_info") for e in entries
                if isinstance(e, dict) and e.get("type") == "rate_limit_event"
                and e.get("rate_limit_info") is not None]
 
-# Compact allowance observation for list-only consumers such as the
-# Telegram worker's /budget command. GitHub exposes artifact names and
-# creation times without downloading their ZIPs, so a suffix carrying
-# utilization basis points and reset epoch makes two observations
-# enough to derive burn and runway. The full rate_limit_events payload
-# below remains authoritative; this is a rounded, lossy index only.
-#
-# The payload shape rule and the validation asymmetry against
-# retrospect's budget footer live in allowance.py, stated once. The
-# index encodes both fields, so a reading with either half invalid is
-# skipped here; the footer's per-kind alarm is the loud signal when a
-# window stops parsing for this consumer too.
-allowance_index = ""
+# The last valid seven-day reading, as two plain outputs for the action's
+# ledger step (#202): the one-reading guard ledger (#309) is the only
+# consumer left on this path, since the worker's /budget reads the
+# allowance table session-row.py writes (#891 slice 2b). The payload shape
+# rule and the validation asymmetry against retrospect's budget footer
+# live in allowance.py, stated once; a reading with either half invalid
+# is skipped here, and the footer's per-kind alarm is the loud signal when
+# a window stops parsing for this consumer too.
 last_utilization, last_reset = "", ""
 for info in rate_limits:
     for kind, window in window_readings(info):
@@ -261,14 +256,8 @@ for info in rate_limits:
                 or not valid_fraction(utilization)
                 or not valid_reset(reset)):
             continue
-        basis_points = int(utilization * 10_000 + 0.5)
-        allowance_index = f"-u{basis_points}-r{reset}"
         last_utilization, last_reset = utilization, reset
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-    fh.write(f"allowance_index={allowance_index}\n")
-    # Plain (non-suffix) form for the ledger-write step in the action
-    # (#202): a shell step reads these instead of re-parsing
-    # allowance_index.
     fh.write(f"utilization={last_utilization}\n")
     fh.write(f"resets_at={last_reset}\n")
 
