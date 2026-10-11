@@ -172,6 +172,20 @@ fn file_outputs_take_the_input_files_mtime_and_mode_in_both_directions() {
     assert_eq!(code, 0);
     assert_eq!(seen(&dir.join("restored")), (long_ago(), 0o444));
 
+    // setuid, setgid and sticky stay behind: the output has another owner.
+    let setuid = dir.join("setuid");
+    std::fs::write(&setuid, b"payload payload payload").expect("write input file");
+    stamp(&setuid, 0o4755);
+    let (_stdout, code) = run(bin().arg("compress").arg(&setuid), b"");
+    assert_eq!(code, 0);
+    assert_eq!(seen(&dir.join("setuid.mgdc")).1, 0o755);
+    let special = dir.join("special.mgdc");
+    std::fs::rename(dir.join("setuid.mgdc"), &special).expect("rename for decompress input");
+    stamp(&special, 0o7755);
+    let (_stdout, code) = run(bin().arg("decompress").arg(&special), b"");
+    assert_eq!(code, 0);
+    assert_eq!(seen(&dir.join("special")).1, 0o755);
+
     std::fs::remove_dir_all(&dir).expect("clean up temp dir");
 }
 

@@ -222,14 +222,22 @@ fn write_new_file_with(
 }
 
 /// Gives `dest` the modification time of `source` and, on Unix, its
-/// permission bits. Called after the last write, so the stamp is not
-/// overwritten by it. The mode half is Unix only: Windows has a read-only
+/// permission bits `rwxrwxrwx`. Called after the last write, so the stamp is
+/// not overwritten by it. The mode half is Unix only: Windows has a read-only
 /// flag where Unix has bits, and copying that flag is not the genre's mode.
+///
+/// The setuid, setgid and sticky bits are not copied. The output is owned by
+/// the invoking user, not the source's owner, so carrying them would let
+/// `decompress` of a hostile `.mgdc` mint a setuid file owned by that user.
 fn copy_metadata(source: &Path, dest: &File) -> io::Result<()> {
     let meta = fs::metadata(source)?;
     dest.set_modified(meta.modified()?)?;
     #[cfg(unix)]
-    dest.set_permissions(meta.permissions())?;
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let rwx = meta.permissions().mode() & 0o777;
+        dest.set_permissions(fs::Permissions::from_mode(rwx))?;
+    }
     Ok(())
 }
 
