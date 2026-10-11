@@ -42,9 +42,10 @@ CREATE INDEX IF NOT EXISTS sessions_at ON sessions (at);
 -- allowance: the last valid reading of each allowance window a run
 -- reported (#891 slice 2). Same writers as sessions, from the same
 -- metadata; `at` and `role` live in sessions once, joined on
--- (run_id, attempt). Read by `sessions sql`; the worker's /budget and
--- retrospect's budget footer move onto it in slice 2b, and the allowance
--- suffix on artifact names dies with that move.
+-- (run_id, attempt). Read by `sessions sql` and by the Telegram worker's
+-- /budget through the SESSIONS binding in infra/telegram-worker/wrangler.toml
+-- (slice 2b). Retrospect's budget footer reads the same readings from the
+-- artifacts it already downloads to judge the sessions, so it stays there.
 CREATE TABLE IF NOT EXISTS allowance (
   run_id      INTEGER NOT NULL,
   attempt     INTEGER NOT NULL,

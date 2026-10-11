@@ -16,6 +16,14 @@ kv_namespaces = [
   { binding = "INBOX", id = "06ae14f739f14d55b5d3c72c6b7e815f" },
 ]
 
+# The sessions database (ADR-0060, #891): /budget reads the allowance
+# table through this binding, no token. The id is an identifier like the
+# KV namespace id above; .github/scripts/d1.py names the same database.
+[[d1_databases]]
+binding = "SESSIONS"
+database_name = "mothergod-sessions"
+database_id = "df8eba02-caf2-45ad-9c56-bcb1e1ebbc31"
+
 # The "typing..." indicator needs a timer that outlives the request that
 # starts it, and a Durable Object alarm is the only Workers primitive
 # that provides one. SQLite-backed, which is what the free plan offers.

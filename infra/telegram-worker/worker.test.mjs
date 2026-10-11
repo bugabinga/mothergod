@@ -21,11 +21,12 @@ const json = (body, status = 200, headers = {}) =>
     headers: { "content-type": "application/json", ...headers },
   });
 
-function harness(github = () => json({})) {
+function harness(github = () => json({}), sessions = []) {
   const calls = [];
   const kv = new Map();
   const typing = [];
   const objects = new Map();
+  const queries = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
     calls.push({ url, init });
@@ -44,6 +45,19 @@ function harness(github = () => json({})) {
       },
       async put(key, value) {
         kv.set(key, value);
+      },
+    },
+    // The D1 binding, answering every statement with `sessions`: rows as
+    // the real query orders them (newest first), or an Error to throw.
+    SESSIONS: {
+      prepare(sql) {
+        queries.push(sql);
+        return {
+          async all() {
+            if (sessions instanceof Error) throw sessions;
+            return { results: sessions, success: true };
+          },
+        };
       },
     },
     TYPING: {
@@ -85,7 +99,7 @@ function harness(github = () => json({})) {
       },
     },
   };
-  return { calls, env, kv, typing };
+  return { calls, env, kv, typing, queries };
 }
 
 async function invoke(text, setup = harness(), options = {}) {
@@ -367,63 +381,43 @@ test("Telegram command and prose routes", async (t) => {
     assert.equal(replies[0], replies[1]);
   });
 
-  await t.test("budget derives recent burn from the immediately preceding observation", async () => {
-    const artifacts = [
-      {
-        name: "audit-bdfl-1-1-u8300-r1800000000",
-        created_at: "2026-08-24T02:00:00Z",
-        expired: false,
-      },
-      {
-        name: "audit-reviewer-3-1-u8100-r1800000000",
-        created_at: "2026-08-24T01:00:00Z",
-        expired: false,
-      },
-      {
-        name: "audit-maintainer-2-1-u8000-r1800000000",
-        created_at: "2026-08-24T00:00:00Z",
-        expired: false,
-      },
-      { name: "audit-bad-u99999-r1800000000", created_at: "not-a-date" },
-      { name: "not-an-audit-u100-r1800000000", created_at: "2026-08-23T00:00:00Z" },
+  await t.test("budget derives recent burn from the immediately preceding reading", async () => {
+    const rows = [
+      { at: "2026-08-24T02:00:00Z", utilization: 0.83, resets_at: 1_800_000_000 },
+      { at: "2026-08-24T01:00:00Z", utilization: 0.81, resets_at: 1_800_000_000 },
+      { at: "2026-08-24T00:00:00Z", utilization: 0.8, resets_at: 1_800_000_000 },
+      { at: "not-a-date", utilization: 0.5, resets_at: 1_800_000_000 },
+      { at: "2026-08-23T00:00:00Z", utilization: 2, resets_at: 1_800_000_000 },
     ];
-    const result = await invoke(
-      "/budget",
-      harness((url) => {
-        assert.equal(url.pathname, "/repos/owner/repo/actions/artifacts");
-        assert.equal(url.searchParams.get("per_page"), "100");
-        return json({ artifacts });
-      }),
-    );
+    const result = await invoke("/budget", harness(() => json({}), rows));
     const body = sent(result.calls).text;
     assert.match(body, /83\.00% used, 17\.00% remaining/);
+    assert.match(body, /Observed: 2026-08-24 02:00 UTC/);
     assert.match(body, /Recent burn: 2\.00%\/h over 1\.0h/);
     assert.match(body, /Projected exhaustion: 2026-08-24 10:30 UTC \(before reset\)/);
-    assert.ok(githubPaths(result.calls).every((path) => !path.includes("/zip")));
+    assert.equal(result.queries.length, 1);
+    assert.match(result.queries[0], /FROM allowance a JOIN sessions s/);
+    assert.deepEqual(githubPaths(result.calls), [], "the table replaces the artifact listing");
   });
 
-  await t.test("budget reports missing observations and missing movement honestly", async () => {
-    const none = await invoke(
-      "/budget",
-      harness(() => json({ artifacts: [{ name: "audit-bdfl-1-1", created_at: "2026-08-24T00:00:00Z" }] })),
-    );
-    assert.match(sent(none.calls).text, /no indexed allowance observations/);
+  await t.test("budget reports an empty table, one reading, and a dead database honestly", async () => {
+    const none = await invoke("/budget", harness(() => json({}), []));
+    assert.match(sent(none.calls).text, /no allowance readings in the sessions table/);
 
     const one = await invoke(
       "/budget",
-      harness(() =>
-        json({
-          artifacts: [
-            {
-              name: "audit-bdfl-1-1-u5000-r1800000000",
-              created_at: "2026-08-24T00:00:00Z",
-            },
-          ],
-        })
-      ),
+      harness(() => json({}), [{ at: "2026-08-24T00:00:00Z", utilization: 0.5, resets_at: 1_800_000_000 }]),
     );
-    assert.match(sent(one.calls).text, /Recent burn: no measurable indexed movement/);
+    assert.match(sent(one.calls).text, /Recent burn: no measurable movement/);
     assert.match(sent(one.calls).text, /Projected exhaustion: unavailable/);
+
+    const dead = await invoke("/budget", harness(() => json({}), new Error("D1_ERROR: no such table")));
+    assert.match(sent(dead.calls).text, /sessions database unreadable: D1_ERROR: no such table/);
+
+    const unbound = harness();
+    delete unbound.env.SESSIONS;
+    const missing = await invoke("/budget", unbound);
+    assert.match(sent(missing.calls).text, /no sessions database bound/);
   });
 
   await t.test("runs merges per-workflow history or lists one role", async () => {
