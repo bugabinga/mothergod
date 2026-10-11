@@ -177,9 +177,11 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   the home of hooks and `env`, so ours stands.
   Ladders (`agents/models.json`): reviewed, unchanged. #164's 2026-10-04
   snapshot names no family the ladders lack; the reviewer's two
-  one-round returns this week were real musts, and the director's 28
-  runs at p50 54 turns each shipped, so no seat's retrospect read its
-  tier or effort as wrong.
+  one-round returns this week (#1030, #1032) were real musts, and the
+  director's 28 runs since 2026-10-04 (`sessions roles --since
+  2026-10-04`, read before the survey's own run landed) sat at p50 54
+  turns, 24 of them shipping and four dying in one turn at a usage
+  limit, so no seat's retrospect read its tier or effort as wrong.
 
 - 2026-10-04: deep survey. Docs-intel round 2026-09-27 (#578): some
   twenty new pages, all of them the plugin system (marketplaces,
