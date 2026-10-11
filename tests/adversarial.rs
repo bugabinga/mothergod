@@ -9,9 +9,11 @@
 //! A bare `is_err()` passes a seed that an earlier check rejects, so a
 //! seed named for the bound check can die to the version gate and nothing
 //! shows it. Each seed is therefore pinned to the [`Error`] variant it
-//! must reach, in [`PINS`], and a seed on disk without a row fails. Only
-//! the variant is pinned, never its payload.
+//! must reach, in [`PINS`]. A seed on disk without a row fails, and so does
+//! a row without a seed, so a retired seed takes its row with it. Only the
+//! variant is pinned, never its payload.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::mem::discriminant;
 use std::path::{Path, PathBuf};
@@ -55,7 +57,7 @@ fn seed_corpus_decodes_to_pinned_errors() {
         || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adversarial"),
         PathBuf::from,
     );
-    let mut checked = 0;
+    let mut seen = BTreeSet::new();
     for entry in fs::read_dir(&dir).expect("tests/adversarial must exist") {
         let path = entry.expect("readable dir entry").path();
         if !path.is_file() {
@@ -76,10 +78,19 @@ fn seed_corpus_decodes_to_pinned_errors() {
                 "seed {name:?} reached {got:?}, pinned to the {want:?} variant"
             ),
         }
-        checked += 1;
+        seen.insert(name.to_owned());
     }
     assert!(
-        checked > 0,
+        !seen.is_empty(),
         "seed corpus in tests/adversarial/ must not be empty"
+    );
+    let orphans: Vec<_> = PINS
+        .iter()
+        .map(|(pinned, _)| *pinned)
+        .filter(|pinned| !seen.contains(*pinned))
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "PINS rows with no seed in {dir:?}: {orphans:?}; delete the row with its seed"
     );
 }
