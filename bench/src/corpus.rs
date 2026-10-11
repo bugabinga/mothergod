@@ -342,7 +342,7 @@ mod tests {
         let entries = parse_manifest(include_str!("../corpus.toml"));
         assert_eq!(entries.len(), 13);
         for entry in &entries {
-            assert!(!entry.name.is_empty());
+            assert_ne!(entry.name, "");
             assert!(
                 entry.url.starts_with("https://"),
                 "{} url isn't https",
