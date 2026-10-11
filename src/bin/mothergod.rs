@@ -24,10 +24,14 @@
 //! A decode failure to stdout surfaces after whatever prefix was already
 //! written: `| tar x` sees truncated bytes ahead of the nonzero exit code.
 //! To a file argument, the partial file is removed instead.
+//!
+//! `compress` with no file argument refuses to write its frame to a
+//! terminal, as gzip, bzip2, xz and zstd do. `decompress` does not: its
+//! output is the user's own bytes, and `zcat` shows them.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -78,6 +82,9 @@ fn usage_fail(message: &str) -> ExitCode {
 /// Reads input (stdin, or `path` if given), compresses it, and writes the
 /// result (stdout, or `path` with [`SUFFIX`] appended if given).
 fn run_compress(path: Option<&OsString>) -> ExitCode {
+    if path.is_none() && io::stdout().is_terminal() {
+        return fail("compressed data not written to a terminal");
+    }
     let input = match read_input(path) {
         Ok(input) => input,
         Err(err) => return fail(&err),

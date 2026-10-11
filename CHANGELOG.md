@@ -59,6 +59,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- cli: `mothergod compress` with no file argument refuses to write its frame
+  to a terminal, as gzip, bzip2, xz and zstd do, so a forgotten redirect no
+  longer fills the screen with binary; `decompress` still writes to one
+  (#1039).
 - crate: the published package holds `src/`, `tests/` (minus the
   repository-only `claims.rs` and `mutants.toml`), the one research file
   the unit tests embed, the README, LICENSE and CHANGELOG, 90 files

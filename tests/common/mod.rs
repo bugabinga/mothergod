@@ -63,3 +63,25 @@ pub fn run_with_early_closing_reader(command: &str, stdin: &[u8]) -> (Vec<u8>, i
     let output = child.wait_with_output().expect("mothergod should exit");
     (output.stderr, output.status.code().expect("no signal"))
 }
+
+/// Runs `shell` with stdout on a pseudo-terminal, which `script(1)`
+/// allocates for its child; `None` where `script` cannot be spawned.
+/// Linux only: BSD's `script` takes other arguments and Windows has none.
+#[cfg(target_os = "linux")]
+pub fn on_pty(shell: &str) -> Option<Output> {
+    Command::new("script")
+        .args(["-qec", shell, "/dev/null"])
+        .output()
+        .ok()
+}
+
+/// Whether [`on_pty`] works here, measured, not assumed: a control that must
+/// show its marker through the pty, because a `script` that fails to open
+/// one exits nonzero with no output, which is what a refusal looks like.
+#[cfg(target_os = "linux")]
+pub fn pty_works() -> bool {
+    const MARKER: &[u8] = b"pty-works";
+    on_pty("printf pty-works").is_some_and(|output| {
+        output.status.success() && output.stdout.windows(MARKER.len()).any(|w| w == MARKER)
+    })
+}
