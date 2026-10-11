@@ -467,11 +467,12 @@ fn binary_tree_nice_len_bounds_candidates_on_deep_correct_chains() {
     //
     // Bounds bytes compared by `suffix_common_len`, not wall-clock: a
     // stopwatch failed sibling guards under `cargo llvm-cov` with no
-    // regression (issues #1059, #1064). Each visited candidate costs a
-    // scan, so bytes carry the candidate count. With `nice_len` 50 the
-    // walks compare about 3.0e6 bytes here; with `nice_len` set to
+    // regression (issues #1059, #1064). With `nice_len` 50 the walks
+    // compare about 3.0e6 bytes here; with `nice_len` set to
     // `MAX_MATCH_LEN` (no early exit) about 5.0e7, a 16x. The budget sits
-    // 3x above the first and 5x below the second.
+    // 3x above the first and 5x below the second. Removing only the
+    // walk's `best_len < nice_len` stop moves candidates visited 2% on
+    // this fixture, so no count here guards that line.
     const SUFFIX_BYTE_BUDGET: u64 = 10_000_000;
     let template: Vec<u8> = (0..200u32)
         .map(|i| u8::try_from(i % 251).expect("i % 251 fits u8"))
