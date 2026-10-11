@@ -303,6 +303,9 @@ impl Window {
 #[cfg(test)]
 mod window_tests;
 
+#[cfg(test)]
+mod work;
+
 /// Longest run starting at `i` that matches the window starting
 /// `distance` bytes earlier, capped at [`MAX_MATCH_LEN`] and by the data
 /// actually remaining. Zero when `distance` reaches before the start of
@@ -316,6 +319,8 @@ fn match_len(data: &[u8], i: usize, distance: Distance) -> usize {
     while len < MAX_MATCH_LEN && i + len < data.len() && data[i - distance + len] == data[i + len] {
         len += 1;
     }
+    #[cfg(test)]
+    work::Scan::MatchLen.add(len);
     len
 }
 
@@ -444,6 +449,8 @@ fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize, limit: usize
     while len < max_len && data[a + len] == data[b + len] {
         len += 1;
     }
+    #[cfg(test)]
+    work::Scan::SuffixCommonLen.add(len - start);
     len
 }
 
