@@ -220,3 +220,28 @@ fn compress_exits_quietly_when_the_stdout_reader_goes_away() {
     assert_eq!(String::from_utf8_lossy(&stderr), "");
     assert_eq!(code, 141);
 }
+
+/// Linux only, and only where `script(1)` shows a pty: see
+/// [`common::pty_works`]. The frame is binary noise on a terminal, so
+/// `compress` refuses; `decompress` writes the user's own bytes, as `zcat`
+/// does, so it does not.
+#[cfg(target_os = "linux")]
+#[test]
+fn compress_refuses_a_terminal_and_decompress_does_not() {
+    if !common::pty_works() {
+        return;
+    }
+    let exe = env!("CARGO_BIN_EXE_mothergod");
+
+    let refused = common::on_pty(&format!("'{exe}' compress < /dev/null")).expect("script spawns");
+    assert!(!refused.status.success());
+    assert!(!refused.stdout.windows(4).any(|w| w == b"MGDC"));
+    assert!(String::from_utf8_lossy(&refused.stdout).contains("not written to a terminal"));
+
+    let shown = common::on_pty(&format!(
+        "printf hello | '{exe}' compress | '{exe}' decompress"
+    ))
+    .expect("script spawns");
+    assert!(shown.status.success());
+    assert!(String::from_utf8_lossy(&shown.stdout).contains("hello"));
+}

@@ -38,7 +38,7 @@ no-clobber | holds | an existing output file is not overwritten without -f | gzi
 suffix-derive | holds | the output name is the input name plus the format suffix, and minus it to decompress | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) DESCRIPTION | suffix is .mgdc
 corrupt-nonzero | holds | decompressing corrupt input exits nonzero | observed on the runner: `T -dc` on text that is no frame exits nonzero for all six; bzip2(1) Return values |
 broken-pipe | holds | a reader that quits early ends the run silently with status 141 | observed on the runner: decompressing and compressing into `head -c 1` exits 141 for all six |
-refuses-terminal | gap | compressed data is not written to a terminal | gzip(1) OPTIONS -f, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION implicit output | probed through script(1), so Linux only; a lane whose script(1) cannot show a pty leaves it unmeasured
+refuses-terminal | holds | compressed data is not written to a terminal | gzip(1) OPTIONS -f, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION implicit output | probed through script(1), so Linux only; a lane whose script(1) cannot show a pty leaves it unmeasured
 mtime-copied | gap | the output file carries the source's modification time | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, brotli(1) OPTIONS -n |
 mode-copied | gap | the output file carries the source's permission bits | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, brotli(1) OPTIONS -n | unix only
 concatenation | gap | concatenated compressed members decompress to the concatenated payloads | gzip(1) ADVANCED USAGE, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION | #978
