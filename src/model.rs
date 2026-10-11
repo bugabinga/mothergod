@@ -1,23 +1,11 @@
-//! Order-0 adaptive frequency table: [`Model`], the piece that turns
-//! [`crate::coder`]'s range coder into an actual entropy coder by supplying
-//! data-derived cumulative-frequency ranges instead of the fixed ones
-//! `coder`'s own tests use as a stand-in (`JOURNAL` S2-A10, S2-D2).
+//! Order-0 adaptive frequency table: [`Model`], the data-derived
+//! cumulative-frequency source for [`crate::coder`]'s range coder. One
+//! instance per flag, length, offset and slot alphabet; the literal mixer
+//! in [`crate::literal`] is built on the coder directly, not on this type.
 //!
-//! Ported from the archive's `Model`
-//! (`research/imports/session-1/mothergod.rs`), not the code, per ADR-0006:
-//! same increment-then-halve update rule, same linear cumulative-frequency
-//! scan. This is the flag/length/offset stage of S2-D2 (each of those is one
-//! `Model` instance); the six-expert `Lit` literal mixer is a separate,
-//! larger slice built on top of the same coder, not on top of this type.
-//!
-//! [`Model::ideal_cost_bits`] is ROADMAP M2's ideal-cost accounting mode
-//! (first slice, `JOURNAL` S2-A30): sums `-log2(p)` against this table's
-//! adaptive state instead of driving [`crate::coder::Encoder`], so an
-//! experiment loop can price a distribution without paying for real
-//! arithmetic coding. [`crate::literal::Literal::ideal_cost_bits`]
-//! (`JOURNAL` S2-A31) is the same mode's counterpart for the six-expert
-//! mixer; [`crate::codec::ideal_cost_bits`] (`JOURNAL` S2-A38) sums both
-//! together into the whole-codec pass.
+//! [`Model::ideal_cost_bits`] prices a symbol as `-log2(p)` against the
+//! adaptive state without driving an [`crate::coder::Encoder`]
+//! (ROADMAP M2's ideal-cost accounting mode).
 
 use crate::coder::{Decoder, Encoder};
 
@@ -47,31 +35,24 @@ impl Model {
     /// something adversarial input can trigger.
     #[must_use]
     pub fn new(alphabet_len: usize) -> Self {
-        assert!(alphabet_len > 0, "Model alphabet must be non-empty");
-        Self {
-            freq: vec![1; alphabet_len],
-            total: u32::try_from(alphabet_len).expect("alphabet_len fits u32"),
-        }
+        Self::from_unit_freqs(vec![1; alphabet_len])
     }
 
-    /// Fallible counterpart to [`Self::new`]: the same fresh table, but
-    /// returns `Err` instead of aborting if the allocator cannot satisfy
-    /// `alphabet_len` entries. [`crate::codec::decode`]'s real decode path
-    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); [`Self::new`] stays the panicking
-    /// constructor the encoder and every test use, where `alphabet_len` is
-    /// always one of this crate's own small fixed constants.
-    ///
-    /// # Panics
-    ///
-    /// Same as [`Self::new`]: `alphabet_len` zero is a caller bug, never
-    /// something adversarial input can trigger.
+    /// [`Self::new`] returning `Err` instead of aborting if the allocator
+    /// cannot satisfy `alphabet_len` entries: the constructor
+    /// [`crate::codec::decode`] uses (hard rule 2, #453). Panics on zero
+    /// like [`Self::new`].
     pub(crate) fn try_new(alphabet_len: usize) -> Result<Self, std::collections::TryReserveError> {
-        assert!(alphabet_len > 0, "Model alphabet must be non-empty");
-        Ok(Self {
-            freq: crate::try_filled_vec(alphabet_len, 1u32)?,
-            total: u32::try_from(alphabet_len).expect("alphabet_len fits u32"),
-        })
+        Ok(Self::from_unit_freqs(crate::try_filled_vec(
+            alphabet_len,
+            1u32,
+        )?))
+    }
+
+    fn from_unit_freqs(freq: Vec<u32>) -> Self {
+        assert!(!freq.is_empty(), "Model alphabet must be non-empty");
+        let total = u32::try_from(freq.len()).expect("alphabet_len fits u32");
+        Self { freq, total }
     }
 
     fn update(&mut self, symbol: usize) {
@@ -99,13 +80,8 @@ impl Model {
     }
 
     /// Bits it would cost to code `symbol` under this table's current
-    /// distribution — `-log2(freq[symbol] / total)` — then updates the
-    /// table the same way [`Self::encode`] does. No [`Encoder`] involved:
-    /// this is the ideal-cost accounting mode ROADMAP M2 and ADR-0006 call
-    /// for, the Rust-native replacement for the archive's Python model-cost
-    /// proxy (`sum -log2(p)` instead of emitting bits), for experiment
-    /// loops that want a distribution's cost without paying for real
-    /// arithmetic coding.
+    /// distribution, `-log2(freq[symbol] / total)`, then updates the table
+    /// the same way [`Self::encode`] does.
     ///
     /// # Panics
     ///
@@ -143,15 +119,6 @@ impl Model {
 #[cfg(test)]
 mod tests;
 
-// `mod tests` above is a wall of `roundtrip*` examples that each vary one
-// dimension (alphabet size, symbol distribution, stream length): the
-// escalation ladder's rung-2 trigger (`test-craft`'s escalation-ladder
-// reference, #452 scope item 1). The examples stay as named anchors for
-// the specific edge cases they document (rescale crossing, interleaved
-// model instances); this property sweeps arbitrary alphabets and symbol
-// streams instead of one example per shape. `roundtrip_symbols` is
-// `mod tests`' own helper, reused here rather than duplicated
-// (single source of truth for the encode/decode/assert sequence).
 // Not under Miri: same rationale as `coder.rs`'s `mod proptests` header
 // comment (interpretation cost, issue #456).
 #[cfg(test)]
