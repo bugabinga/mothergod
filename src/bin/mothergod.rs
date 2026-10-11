@@ -38,7 +38,8 @@ use std::process::ExitCode;
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod <compress|decompress> [file]\n\n\
+const USAGE: &str = "usage: mothergod <compress|decompress> [file]\n       \
+mothergod <-h|--help|-V|--version>\n\n\
 With no file, reads stdin and writes stdout.\n\
 With a file, compress writes <file>.mgdc; decompress reads a .mgdc file and writes <file> \
 (the name with the suffix stripped). Never overwrites an existing output file.";

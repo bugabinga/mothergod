@@ -65,7 +65,10 @@ fn too_many_arguments_fails_with_usage() {
 fn help_flag_succeeds() {
     let (stdout, code) = run(bin().arg("--help"), b"");
     assert_eq!(code, 0);
-    assert_ne!(stdout, [] as [u8; 0]);
+    let text = String::from_utf8(stdout).expect("help is UTF-8");
+    for flag in ["-h", "--help", "-V", "--version"] {
+        assert!(text.contains(flag), "help omits {flag}: {text}");
+    }
 }
 
 /// The line `--version` and `-V` print: the crate version and the one frame
