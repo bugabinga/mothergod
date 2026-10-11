@@ -124,6 +124,57 @@ fn compress_then_decompress_roundtrips_a_file_argument() {
     std::fs::remove_dir_all(&dir).expect("clean up temp dir");
 }
 
+/// 2001-09-09T01:46:40Z: old enough that "now" cannot pass for it.
+#[cfg(unix)]
+fn long_ago() -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000)
+}
+
+/// The output of either direction takes its input file's mtime and mode
+/// (#1040); `decompress` has no frame field to read them from, so it reads
+/// the `.mgdc` file's own metadata.
+#[cfg(unix)]
+#[test]
+fn file_outputs_take_the_input_files_mtime_and_mode_in_both_directions() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = std::env::temp_dir().join(format!("mothergod-cli-meta-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let stamp = |path: &std::path::Path, mode: u32| {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|file| file.set_modified(long_ago()))
+            .expect("set mtime");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("set mode");
+    };
+    let seen = |path: &std::path::Path| {
+        let meta = std::fs::metadata(path).expect("stat output");
+        (
+            meta.modified().expect("mtime"),
+            meta.permissions().mode() & 0o7777,
+        )
+    };
+
+    let source = dir.join("payload");
+    std::fs::write(&source, b"payload payload payload").expect("write input file");
+    stamp(&source, 0o640);
+    let (_stdout, code) = run(bin().arg("compress").arg(&source), b"");
+    assert_eq!(code, 0);
+    let compressed = dir.join("payload.mgdc");
+    assert_eq!(seen(&compressed), (long_ago(), 0o640));
+
+    // A read-only input still yields an output that was writable while written.
+    let restored = dir.join("restored.mgdc");
+    std::fs::rename(&compressed, &restored).expect("rename for decompress input");
+    stamp(&restored, 0o444);
+    let (_stdout, code) = run(bin().arg("decompress").arg(&restored), b"");
+    assert_eq!(code, 0);
+    assert_eq!(seen(&dir.join("restored")), (long_ago(), 0o444));
+
+    std::fs::remove_dir_all(&dir).expect("clean up temp dir");
+}
+
 #[test]
 fn compress_refuses_to_overwrite_an_existing_output_file() {
     let dir =

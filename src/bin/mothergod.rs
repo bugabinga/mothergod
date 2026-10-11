@@ -25,6 +25,10 @@
 //! written: `| tar x` sees truncated bytes ahead of the nonzero exit code.
 //! To a file argument, the partial file is removed instead.
 //!
+//! A file output takes the input file's modification time and, on Unix,
+//! its permission bits, as gzip does; `decompress` reads them from the
+//! `.mgdc` file, the frame carries no timestamp.
+//!
 //! `compress` with no file argument refuses to write its frame to a
 //! terminal, as gzip, bzip2, xz and zstd do. `decompress` does not: its
 //! output is the user's own bytes, and `zcat` shows them.
@@ -93,7 +97,7 @@ fn run_compress(path: Option<&OsString>) -> ExitCode {
     let output = mothergod::compress(&input);
     match path {
         None => write_stdout(&output),
-        Some(path) => write_new_file(&add_suffix(Path::new(path)), &output),
+        Some(path) => write_new_file(&add_suffix(Path::new(path)), &output, Path::new(path)),
     }
 }
 
@@ -112,7 +116,7 @@ fn run_decompress(path: Option<&OsString>) -> ExitCode {
                 Ok(out_path) => out_path,
                 Err(err) => return fail(&err),
             };
-            write_new_file_with(&out_path, |file| {
+            write_new_file_with(&out_path, Path::new(path), |file| {
                 decompress_into(&input, file, &out_path.display().to_string())
             })
         }
@@ -174,8 +178,8 @@ fn write_stdout(bytes: &[u8]) -> ExitCode {
 /// Writes `bytes` to `path`, refusing to clobber an existing file (`compress`
 /// re-run over an already-compressed file, or a `decompress` target that
 /// already exists, must not silently destroy it).
-fn write_new_file(path: &Path, bytes: &[u8]) -> ExitCode {
-    write_new_file_with(path, |file| match file.write_all(bytes) {
+fn write_new_file(path: &Path, bytes: &[u8], source: &Path) -> ExitCode {
+    write_new_file_with(path, source, |file| match file.write_all(bytes) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => fail(&format!("writing {}: {err}", path.display())),
     })
@@ -190,7 +194,14 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> ExitCode {
 /// corrupt decode) removes the partial file: otherwise it survives as a
 /// corrupt file that `create_new` refuses to retry over, permanently
 /// blocking a re-run.
-fn write_new_file_with(path: &Path, write: impl FnOnce(&mut File) -> ExitCode) -> ExitCode {
+///
+/// After a successful write the file takes `source`'s modification time and
+/// permission bits ([`copy_metadata`]), as gzip, bzip2 and xz do.
+fn write_new_file_with(
+    path: &Path,
+    source: &Path,
+    write: impl FnOnce(&mut File) -> ExitCode,
+) -> ExitCode {
     let mut file = match File::options().write(true).create_new(true).open(path) {
         Ok(file) => file,
         Err(err) => return fail(&format!("writing {}: {err}", path.display())),
@@ -198,8 +209,28 @@ fn write_new_file_with(path: &Path, write: impl FnOnce(&mut File) -> ExitCode) -
     let code = write(&mut file);
     if code == ExitCode::FAILURE {
         let _ = fs::remove_file(path);
+    } else if let Err(err) = copy_metadata(source, &file) {
+        // The bytes are complete and correct; a stamp that did not take is
+        // not worth discarding them, and `create_new` would refuse a retry.
+        eprintln!(
+            "mothergod: warning: {}: copying metadata from {}: {err}",
+            path.display(),
+            source.display()
+        );
     }
     code
+}
+
+/// Gives `dest` the modification time of `source` and, on Unix, its
+/// permission bits. Called after the last write, so the stamp is not
+/// overwritten by it. The mode half is Unix only: Windows has a read-only
+/// flag where Unix has bits, and copying that flag is not the genre's mode.
+fn copy_metadata(source: &Path, dest: &File) -> io::Result<()> {
+    let meta = fs::metadata(source)?;
+    dest.set_modified(meta.modified()?)?;
+    #[cfg(unix)]
+    dest.set_permissions(meta.permissions())?;
+    Ok(())
 }
 
 /// Exit status of a process killed by SIGPIPE: 128 + 13. Rust starts with

@@ -16,6 +16,8 @@ All notable changes to this project are documented here. Format follows
   prints the crate version and the frame format version this build reads,
   so a bug report or packaging script can say which frames decode (#977). A reader that closes
   stdout early (`| head`) ends it silently with status 141, as gzip does.
+  A file output carries its input's modification time and, on Unix, its
+  permission bits, as gzip, bzip2 and xz do (#1040).
 - Library crate (`mothergod::compress`/`decompress`, plus
   `decompress_bounded`, `decompress_to_writer`, `decodes_incrementally`, and
   the `filters` module): a documented public API with a crate-root doctest;
