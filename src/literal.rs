@@ -477,16 +477,9 @@ impl Default for PpmExpertState {
     }
 }
 
-/// `table`'s own linear-space probability estimate for `symbol`
-/// ([`Ppm::probability`]). Shared by [`Literal::mix_ppm`] and
-/// [`Literal::update_ppm_expert`] so both price the identical number.
-fn ppm_probability(table: &Ppm, symbol: usize) -> f64 {
-    table.probability(symbol)
-}
-
 /// [`fixed_point_scale`]'s own shape, but for an expert like
 /// [`PpmExpertState`] whose own per-symbol estimate is already a
-/// probability in `[0, 1]` ([`ppm_probability`]), not a raw frequency over
+/// probability in `[0, 1]` ([`Ppm::probability`]), not a raw frequency over
 /// a bank total: an escaped symbol's probability is `0.0` by construction,
 /// so there is no bank total this could sensibly divide by.
 fn fixed_point_contribution_from_probability(
@@ -1219,8 +1212,7 @@ impl Literal {
 
     /// The six real experts' combined fixed-point contribution to
     /// `symbol` under `scale6`: the shared inner-loop term
-    /// [`Self::mix7`] and [`Self::mix_ppm`] each add their own
-    /// seventh/eighth term to.
+    /// [`Self::cum_with_extra`] adds the extra expert's own term to.
     fn six_expert_mixed(
         &self,
         bank_indices: &[usize; EXPERTS],
@@ -1233,6 +1225,27 @@ impl Literal {
             mixed += scale6[expert] * freq;
         }
         mixed
+    }
+
+    /// The cumulative-frequency table over the six real experts' blend
+    /// under `scale6` plus `extra(symbol)`: the shared body of
+    /// [`Self::mix7`] and [`Self::mix_ppm`], which differ only in what the
+    /// extra expert contributes. Every symbol gets the same `+1` Laplace
+    /// floor as [`Self::mix`].
+    fn cum_with_extra(
+        &self,
+        bank_indices: &[usize; EXPERTS],
+        scale6: &[u64; EXPERTS],
+        extra: impl Fn(usize) -> u64,
+    ) -> [u64; ALPHABET + 1] {
+        let mut cum = [0u64; ALPHABET + 1];
+        let mut acc = 0u64;
+        for symbol in 0..ALPHABET {
+            let mixed = self.six_expert_mixed(bank_indices, scale6, symbol) + extra(symbol);
+            acc += (mixed >> 16) + 1;
+            cum[symbol + 1] = acc;
+        }
+        cum
     }
 
     /// The extra expert's own weight, adapted toward how well
@@ -1279,16 +1292,9 @@ impl Literal {
         let column_total = f64::from(column_state.total[column_bank]);
         let scale7 = fixed_point_scale(w7, weight_sum, column_total);
 
-        let mut cum = [0u64; ALPHABET + 1];
-        let mut acc = 0u64;
-        for s in 0..ALPHABET {
-            let mut mixed = self.six_expert_mixed(bank_indices, &scale6, s);
-            let freq7 = u64::from(column_state.freq[column_bank * ALPHABET + s]);
-            mixed += scale7 * freq7;
-            acc += (mixed >> 16) + 1;
-            cum[s + 1] = acc;
-        }
-        cum
+        self.cum_with_extra(bank_indices, &scale6, |symbol| {
+            scale7 * u64::from(column_state.freq[column_bank * ALPHABET + symbol])
+        })
     }
 
     /// Adapts `column_state`'s own weight and bank toward `symbol`, the
@@ -1409,7 +1415,7 @@ impl Literal {
     /// a real expert's own floor at all"). Unlike [`Self::mix7`]'s
     /// `column_state` bank (a Laplace-smoothed frequency table, same
     /// shape as the six real experts), `ppm_state`'s own [`Ppm`] table
-    /// starts every symbol at frequency 0: [`ppm_probability`] reports
+    /// starts every symbol at frequency 0: [`Ppm::probability`] reports
     /// `0.0` for a symbol this bank has never observed, so this expert's
     /// own contribution is silent exactly where it has nothing to say,
     /// never a false floor competing with the six real experts' own
@@ -1427,19 +1433,9 @@ impl Literal {
 
         let table = &ppm_state.tables[ppm_bank];
 
-        let mut cum = [0u64; ALPHABET + 1];
-        let mut acc = 0u64;
-        for s in 0..ALPHABET {
-            let mut mixed = self.six_expert_mixed(bank_indices, &scale6, s);
-            mixed += fixed_point_contribution_from_probability(
-                w7,
-                weight_sum,
-                ppm_probability(table, s),
-            );
-            acc += (mixed >> 16) + 1;
-            cum[s + 1] = acc;
-        }
-        cum
+        self.cum_with_extra(bank_indices, &scale6, |symbol| {
+            fixed_point_contribution_from_probability(w7, weight_sum, table.probability(symbol))
+        })
     }
 
     /// Adapts `ppm_state`'s own weight and bank toward `symbol`, the
@@ -1459,7 +1455,7 @@ impl Literal {
     ) {
         let w7 = ppm_state.weight[weight_index];
         let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
-        let ppm_estimate = ppm_probability(&ppm_state.tables[ppm_bank], symbol);
+        let ppm_estimate = ppm_state.tables[ppm_bank].probability(symbol);
 
         ppm_state.weight[weight_index] = self.adapt_seventh_weight(
             bank_indices,

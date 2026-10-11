@@ -533,20 +533,6 @@ fn ppm_expert_pair_costs_stay_finite_and_positive() {
     }
 }
 
-/// #697: pins [`ppm_probability`] as a plain pass-through to
-/// [`Ppm::probability`], independent of either's own internals, so a
-/// swapped argument or an added transform in the wrapper is visible.
-#[test]
-fn ppm_probability_matches_the_table_probability_it_wraps() {
-    let mut table = Ppm::new(ALPHABET);
-    assert!((ppm_probability(&table, 0) - table.probability(0)).abs() < 1e-12);
-
-    table.observe(0);
-    let got = ppm_probability(&table, 0);
-    assert!(got > 0.0 && got < 1.0, "got={got}");
-    assert!((got - table.probability(0)).abs() < 1e-12);
-}
-
 /// #697: a concrete `(weight, weight_sum, probability)` triple whose
 /// expected fixed-point result distinguishes `/` from `%`/`*` in the
 /// normalization step and `*` from `+`/`/` in either multiplication,
@@ -590,7 +576,7 @@ fn mix_ppm_first_entry_matches_the_six_expert_mix_plus_ppm_contribution() {
     expected_mixed += fixed_point_contribution_from_probability(
         w7,
         weight_sum,
-        ppm_probability(&ppm_state.tables[ppm_bank], 0),
+        ppm_state.tables[ppm_bank].probability(0),
     );
     let expected_first_entry = (expected_mixed >> 16) + 1;
 
