@@ -21,13 +21,15 @@ blocking PRs.
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
 new crashers, mutation score, and region coverage, rendered on the
 status page and judged in the weekly digest. Mechanism: each scheduled
-test workflow is meant to upload its own small `entry.json` artifact
-(`trust-<role>-<run-id>-<attempt>`), never a committed file — the same
-stateless-artifact pipeline `run-telemetry.py` already uses for run
-economics, and for the same reason (a tracked file collects
-concurrent-append conflicts, PR #34). `.github/scripts/trust-telemetry.py`
-aggregates them into `site/trust-data.json` at deploy time, and
-`status.html` renders them under "Is it tested?". Writers landed:
+test workflow writes its own small `entry.json`, uploaded as the artifact
+`trust-<role>-<run-id>-<attempt>` for 90 days and written as one row of
+the `trust` table in D1 by `.github/scripts/trust-row.py` (ADR-0060,
+#891 slice 4), never a committed file (a tracked file collects
+concurrent-append conflicts, PR #34). The artifact is the record a human
+opens; the row is the series, reconciled from the artifacts every Sunday.
+`.github/scripts/trust-telemetry.py` aggregates the table into
+`site/trust-data.json` at deploy time, cumulative since the first row,
+and `status.html` renders it under "Is it tested?". Writers landed:
 `fuzz-check`, timed fuzz seconds and new-crasher count per run (#462);
 `coverage-check`, region coverage percent per run (#454).
 Writers pending: mutation score (#455), shown as not yet measured

@@ -190,6 +190,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: .github/scripts/sessions backfill
 
+      # The trust table's reconciliation (#891 slice 4), the same contract:
+      # the rows the unexpired trust-* artifacts hold and the table lacks,
+      # red on a gap by the verb's exit code.
+      - id: trust-backfill
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 .github/scripts/trust-row.py backfill
+
       # Independent of the fetch: the telemetry half produces a report even
       # when Artificial Analysis does not.
       - if: always()
