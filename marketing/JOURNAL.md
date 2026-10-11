@@ -18,6 +18,32 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-11 — Editorial: the changelog kept the sentence README and site lost
+
+Queue empty, so this is a defect found on the surface. The entry below
+fixed "`--help` is the entire interface" on README and `/`; `CHANGELOG.md`
+still said "`mothergod --help` is the whole interface", one sentence before
+naming `--version`. Release notes are the surface a first-release reader
+reads whole, so the CLI bullet had grown into five facts appended by four
+PRs, and two more CLI facts sat under "Changed", relative to a release
+that does not exist.
+
+**The CLI is now two Added bullets: what the two subcommands do, then the
+two flags and what `--version` is for.** The two "Changed" CLI bullets
+folded in, because a reader of the first release's notes had no earlier
+CLI for them to change. Every behavior checked against a release build of
+`62cd37f`: `--help` and `-h` print the usage; `--version` and `-V` print
+`mothergod 0.1.0 (format 11)`; `compress f` keeps `0640` and an mtime of
+2001-09-09 on `f.mgdc`, and `decompress f.mgdc` keeps both on `f`; a
+second `compress f` exits 1 on the existing `f.mgdc`; `decompress | head
+-1` exits 141; `compress` under `script(1)` prints "compressed data not
+written to a terminal", exit 1.
+
+**Rejected: restating the help text's grammar** (`<compress|decompress>
+[file]`). `--help` owns it, and `tests/claims.rs` already guards the
+README's recipe against it; a third copy in the changelog would be
+unguarded.
+
 ## 2026-10-11 — Editorial: "no flags" stopped being true on 2026-10-10
 
 Queue empty, so this is a defect found on the surface. README and `/`

@@ -8,16 +8,19 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
-- `mothergod` CLI (`compress`/`decompress`): stdin/stdout by default, or a
-  file argument writing/reading the `.mgdc` suffix; neither subcommand
-  overwrites an existing output or deletes its input. Decompression streams
-  its output instead of buffering the whole file. `mothergod --help` is the
-  whole interface: no compression levels. `mothergod --version` (or `-V`)
-  prints the crate version and the frame format version this build reads,
-  so a bug report or packaging script can say which frames decode (#977). A reader that closes
-  stdout early (`| head`) ends it silently with status 141, as gzip does.
-  A file output carries its input's modification time and, on Unix, its
-  permission bits, as gzip, bzip2 and xz do (#1040).
+- cli: `mothergod compress` and `mothergod decompress`, shaped like
+  `gzip -c`: stdin to stdout when you name no file, or `<file>` to
+  `<file>.mgdc` and back. Neither overwrites an existing file or deletes its
+  input, and a file output keeps its input's modification time and, on Unix,
+  its permission bits, as gzip, bzip2 and xz do (#1040). Decompression
+  streams instead of buffering the whole file. `compress` refuses to write
+  its frame to a terminal, so a forgotten redirect does not fill the screen
+  with binary (#1039). A reader that closes stdout early (`| head`) ends it
+  silently with status 141, as gzip does.
+- cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
+  interface, with no compression levels and no tuning knobs (#1036).
+  `--version` prints the frame format version the build reads, the one fact
+  a bug report or packaging script needs to say which files decode (#977).
 - Library crate (`mothergod::compress`/`decompress`, plus
   `decompress_bounded`, `decompress_to_writer`, `decodes_incrementally`, and
   the `filters` module): a documented public API with a crate-root doctest;
@@ -61,12 +64,6 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
-- cli: `mothergod compress` with no file argument refuses to write its frame
-  to a terminal, as gzip, bzip2, xz and zstd do, so a forgotten redirect no
-  longer fills the screen with binary; `decompress` still writes to one
-  (#1039).
-- cli: `mothergod --help` lists `-h`, `--help`, `-V` and `--version`, so the
-  usage text names every flag the binary accepts (#1036).
 - crate: the published package holds `src/`, `tests/` (minus the
   repository-only `claims.rs` and `mutants.toml`), the one research file
   the unit tests embed, the README, LICENSE and CHANGELOG, 90 files
