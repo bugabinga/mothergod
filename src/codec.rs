@@ -960,70 +960,53 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Byte width of one little-endian `u32` header field: [`read_u32_le`]'s
-/// own unit, and the stride from one [`read_header`] field to the next.
-const U32_LEN: usize = 4;
-
 /// Byte length of [`encode_tokens_with`]'s header (declared output length
-/// then token count, each a [`U32_LEN`]-byte `u32`): this module's own
+/// then token count, each a little-endian `u32`): this module's own
 /// "Payload layout" doc names it as the two 4-byte fields at relative
 /// offsets 0 and 4, right before the range-coded stream. [`read_header`]
 /// inverts it exactly, so a caller sizing a buffer around that header
 /// (encode's own capacity hint, a test computing coded-bits-past-header)
-/// reads this constant instead of re-deriving `2 * U32_LEN`.
-const TOKEN_HEADER_LEN: usize = 2 * U32_LEN;
+/// reads this constant instead of re-deriving `2 * 4`.
+const TOKEN_HEADER_LEN: usize = 2 * size_of::<u32>();
 
-/// Reads the [`U32_LEN`]-byte little-endian `u32` at `payload[start..start +
-/// U32_LEN]`.
+/// Splits a `Method::Lz` payload into the filter [`Candidate`] its 2-byte
+/// selector names and the rest, which [`read_header`] expects.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Truncated`] if `payload` is shorter than `start +
-/// U32_LEN`.
-fn read_u32_le(payload: &[u8], start: usize) -> Result<u32, Error> {
-    let field = payload
-        .get(start..start + U32_LEN)
-        .ok_or(Error::Truncated)?;
-    Ok(u32::from_le_bytes(
-        field
-            .try_into()
-            .expect("checked to be exactly U32_LEN bytes"),
-    ))
+/// Returns [`Error::Truncated`] if `payload` is shorter than the selector,
+/// [`Error::Corrupt`] if the selector names no [`Candidate`].
+fn split_candidate(payload: &[u8]) -> Result<(Candidate, &[u8]), Error> {
+    let (&selector, rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
+    let candidate = Candidate::from_header_bytes(selector).ok_or(Error::Corrupt)?;
+    Ok((candidate, rest))
 }
 
 /// Splits `payload` into its declared output length, token count, and the
-/// remaining range-coded bytes.
+/// remaining range-coded bytes, rejecting a declared length past `max_len`
+/// (clamped to [`MAX_DECODED_LEN`]) before any allocation or decode work.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the
-/// [`TOKEN_HEADER_LEN`]-byte header.
-fn read_header(payload: &[u8]) -> Result<(usize, u32, &[u8]), Error> {
-    let declared_len = read_u32_le(payload, 0)?;
-    let token_count = read_u32_le(payload, U32_LEN)?;
+/// [`TOKEN_HEADER_LEN`]-byte header, [`Error::TooLarge`] if the declared
+/// length exceeds the clamped `max_len`.
+fn read_header(payload: &[u8], max_len: u32) -> Result<(usize, u32, &[u8]), Error> {
+    let max_len = max_len.min(MAX_DECODED_LEN);
+    let (&declared_len, rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
+    let (&token_count, ac_bytes) = rest.split_first_chunk().ok_or(Error::Truncated)?;
+    let declared_len = u32::from_le_bytes(declared_len);
+    if declared_len > max_len {
+        return Err(Error::TooLarge {
+            len: declared_len,
+            max: max_len,
+        });
+    }
     Ok((
         declared_len as usize,
-        token_count,
-        &payload[TOKEN_HEADER_LEN..],
+        u32::from_le_bytes(token_count),
+        ac_bytes,
     ))
-}
-
-/// Rejects a declared output length past `max_len`, before any allocation
-/// or decode work: shared by [`decode`] and [`decode_undoable_streaming`],
-/// both of which read it straight out of [`read_header`].
-fn ensure_within_max_len(declared_len: usize, max_len: u32) -> Result<(), Error> {
-    if declared_len > max_len as usize {
-        // declared_len was cast up from the header's u32 field (read_header),
-        // so casting back down here is always exact.
-        Err(Error::TooLarge {
-            len: u32::try_from(declared_len).expect(
-                "declared_len came from a u32 header field, so it always fits back into one",
-            ),
-            max: max_len,
-        })
-    } else {
-        Ok(())
-    }
 }
 
 /// Rejects a token whose declared size would grow `output` past
@@ -1291,19 +1274,14 @@ impl DecodeSink for VecSink<'_> {
 ///
 /// # Panics
 ///
-/// Does not panic on adversarial `payload`. Two internal `.expect()`s
-/// guard invariants of this function's own math, never a property of
+/// Does not panic on adversarial `payload`. One internal `.expect()`
+/// guards an invariant of this function's own math, never a property of
 /// `payload`: turning a decoded match distance into a [`NonZeroU32`]
 /// (a mathematical invariant of `decode_bucketed`, see that function's
-/// docs), and casting a declared length already found `<= max_len` (a
-/// `u32`) back down from the `usize` `read_header` widened it to.
+/// docs).
 pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
-    let max_len = max_len.min(MAX_DECODED_LEN);
-    let (filter_bytes, payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
-    let candidate =
-        Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
-    let (declared_len, token_count, ac_bytes) = read_header(payload)?;
-    ensure_within_max_len(declared_len, max_len)?;
+    let (candidate, payload) = split_candidate(payload)?;
+    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len)?;
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new()?;
@@ -1378,37 +1356,19 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     max_len: u32,
     writer: &mut W,
 ) -> Result<(), crate::WriteError> {
-    let (filter_bytes, filtered_payload) = payload.split_at_checked(2).ok_or(Error::Truncated)?;
-    let candidate =
-        Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]]).ok_or(Error::Corrupt)?;
-    match candidate {
-        Candidate::Identity => {
-            decode_undoable_streaming(filtered_payload, max_len, writer, &mut StreamUndo::Identity)
-        }
+    let (candidate, filtered_payload) = split_candidate(payload)?;
+    let mut undo = match candidate {
+        Candidate::Identity => StreamUndo::Identity,
         Candidate::Delta(stride) => {
-            let undo = filters::delta::Undo::try_new(stride).map_err(Error::from)?;
-            decode_undoable_streaming(
-                filtered_payload,
-                max_len,
-                writer,
-                &mut StreamUndo::Delta(undo),
-            )
+            StreamUndo::Delta(filters::delta::Undo::try_new(stride).map_err(Error::from)?)
         }
-        Candidate::Bcj => {
-            let undo = filters::bcj::Undo::try_new().map_err(Error::from)?;
-            decode_undoable_streaming(
-                filtered_payload,
-                max_len,
-                writer,
-                &mut StreamUndo::Bcj(undo),
-            )
-        }
+        Candidate::Bcj => StreamUndo::Bcj(filters::bcj::Undo::try_new().map_err(Error::from)?),
         Candidate::Transpose(_) => {
-            let decoded = decode(payload, max_len)?;
-            writer.write_all(&decoded)?;
-            Ok(())
+            writer.write_all(&decode(payload, max_len)?)?;
+            return Ok(());
         }
-    }
+    };
+    decode_undoable_streaming(filtered_payload, max_len, writer, &mut undo)
 }
 
 /// Per-byte filter undo for [`decode_undoable_streaming`], one variant per
@@ -1518,9 +1478,7 @@ fn decode_undoable_streaming<W: std::io::Write>(
     writer: &mut W,
     undo: &mut StreamUndo,
 ) -> Result<(), crate::WriteError> {
-    let max_len = max_len.min(MAX_DECODED_LEN);
-    let (declared_len, token_count, ac_bytes) = read_header(payload)?;
-    ensure_within_max_len(declared_len, max_len)?;
+    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len)?;
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(Error::from)?;
