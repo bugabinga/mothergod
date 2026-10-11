@@ -18,8 +18,8 @@
 //! `compress` builds its whole output before writing it: the optimal-parse
 //! encoder needs the full input. `decompress` streams through
 //! [`mothergod::decompress_to_writer`], which bounds resident memory on the
-//! output side (ROADMAP M4) only for the frame kinds its doc lists; the rest
-//! decode whole first. Input is read whole either way.
+//! output side (ROADMAP M4) for every frame kind except a `Transpose`-filtered
+//! one, which decodes whole first. Input is read whole either way.
 //!
 //! A decode failure to stdout surfaces after whatever prefix was already
 //! written: `| tar x` sees truncated bytes ahead of the nonzero exit code.
