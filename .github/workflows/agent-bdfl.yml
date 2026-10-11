@@ -379,7 +379,9 @@ jobs:
             Then act. Typical BDFL moves, descending priority:
             1. Unblock: a PR ping-ponging between maintainer and
                reviewer, a stalled decision, contradictory docs: decide,
-               write the decision down, make it so.
+               write the decision down, make it so. A FAIL on your own
+               PR is the maintainer's, woken by the verdict (#998); you
+               fix it only when stalled-prs names it.
             2. Prune: close stale issues, PRs and branches with a
                courteous reason; delete roadmap items that no longer
                make sense; kill processes that produce no value.

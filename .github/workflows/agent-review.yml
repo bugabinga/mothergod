@@ -346,13 +346,17 @@ jobs:
         run: |
           set -euo pipefail
           # The deslopper fixes its own returned PRs on its next run
-          # (ADR-0016), and the BDFL reads stalled-prs and its own threads
-          # on every wake. Waking the maintainer for either buys a session
-          # that reads the PR, skips it, and goes hunting for other work:
-          # three such runs on 2026-09-12, off #536 twice and #538 once.
+          # (ADR-0016), so its branches wake nobody. A bdfl branch wakes
+          # the maintainer like any other (#998): the director's seat is
+          # the dearest and its clock four-hourly, and the maintainer's
+          # tick fixed four bdfl rounds in the two days to 2026-10-11
+          # (#995, #1037, #1043) and twice raced the live director to one
+          # must.
+          # The 2026-09-12 exclusion answered a maintainer prompt that
+          # skipped bdfl PRs; the prompt no longer does.
           case "$HEAD_REF" in
-            claude/deslop-*|claude/bdfl-*)
-              echo "$HEAD_REF: its owner's to fix, not the maintainer's"
+            claude/deslop-*)
+              echo "$HEAD_REF: the deslopper's to fix, not the maintainer's"
               exit 0 ;;
           esac
           labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
