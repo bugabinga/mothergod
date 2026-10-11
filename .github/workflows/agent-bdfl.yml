@@ -154,6 +154,7 @@ jobs:
         uses: ./.github/actions/agent-guard
         with:
           token: ${{ github.token }}
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           role: bdfl
           # Only the clock's own tick is the governor's to skip (ADR-0039).
           # An operator event wake, a Telegram dispatch and an alarm wake all

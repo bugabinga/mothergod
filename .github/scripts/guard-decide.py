@@ -212,20 +212,24 @@ def main():
     except (OSError, ValueError, KeyError) as exc:
         # A missing or broken file must not stop the fleet: fall back to the
         # action defaults, which is the pre-ADR-0018 behavior.
-        print(f"ok|||models.json unreadable ({exc}); using action defaults")
+        print(f"ok|||models.json unreadable ({exc}); using action defaults|")
         return
-    print(
-        "|".join(
-            decide(
-                role,
-                roles,
-                os.environ.get("LEDGER", ""),
-                os.environ.get("ALLOWANCE", ""),
-                time.time(),
-                os.environ.get("DISCRETIONARY", "") == "true",
-            )
-        )
+    allowance = os.environ.get("ALLOWANCE", "")
+    fields = decide(
+        role,
+        roles,
+        os.environ.get("LEDGER", ""),
+        allowance,
+        time.time(),
+        os.environ.get("DISCRETIONARY", "") == "true",
     )
+    # Fifth field, for the guard table (#891 slice 3): the week-average burn
+    # the decision read, as %/h, '' when the reading reaches the reset or
+    # there is none. The same project() decide() ran, so the row says what
+    # the gate saw.
+    projection = project(allowance)
+    rate = f"{projection['rate'] * 3600 * 100:.3f}" if projection else ""
+    print("|".join((*fields, rate)))
 
 
 if __name__ == "__main__":

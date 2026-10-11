@@ -56,6 +56,7 @@ jobs:
         uses: ./.github/actions/agent-guard
         with:
           token: ${{ github.token }}
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           role: maintainer
           discretionary: ${{ inputs.source == 'cron' }}
 

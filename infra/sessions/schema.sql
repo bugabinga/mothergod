@@ -55,3 +55,25 @@ CREATE TABLE IF NOT EXISTS allowance (
   overage     INTEGER,            -- 1 when the reading said isUsingOverage, 0 when it said not, NULL when silent
   PRIMARY KEY (run_id, attempt, window)
 );
+
+-- guard: one row per run gate evaluation (#891 slice 3). Written by
+-- .github/actions/agent-guard through guard-row.py as the gate decides,
+-- fail-open; read by `sessions sql`, where retrospect's "skipped N" and
+-- the survey's HEALTH line ask which wakes did not run and why (#896).
+-- A wake the gate stops never reaches agent-audit, so it has no sessions
+-- row to join: `at` and `role` live here too.
+CREATE TABLE IF NOT EXISTS guard (
+  run_id        INTEGER NOT NULL,
+  attempt       INTEGER NOT NULL,
+  at            TEXT    NOT NULL,   -- ISO-8601 UTC, when the gate decided
+  role          TEXT    NOT NULL,   -- the seat; '' when the caller named none
+  event         TEXT,               -- github.event_name
+  discretionary INTEGER NOT NULL,   -- 1 when only the clock asked for the wake (ADR-0039)
+  decision      TEXT    NOT NULL,   -- run, skip (second gear), exhausted (no rung left), paused, stale
+  reason        TEXT,               -- the gate's own log line for the decision, numbers included
+  rung          TEXT,               -- the model chosen; NULL when the wake does not run or the action default serves
+  effort        TEXT,               -- the --effort level chosen; NULL for the session default
+  projection    REAL,               -- week-average seven-day burn in %/h when it misses the reset; NULL when it reaches it or there is no reading
+  PRIMARY KEY (run_id, attempt)
+);
+CREATE INDEX IF NOT EXISTS guard_role_at ON guard (role, at);
