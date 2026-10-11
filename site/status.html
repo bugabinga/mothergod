@@ -438,14 +438,17 @@
         apiSurfaceLabel =
           `public API items on docs.rs (${sign}${delta} since ${data.api_surface.previous_computed_at})`;
       }
-      // FIT's CLI half (ADR-0064): rows held over all rows. Its trend rides
-      // the label for the same reason as the API surface's.
-      let fitCliLabel = 'genre behaviors the CLI holds, of those recorded';
-      if (data.fit_cli?.previous_holds != null) {
-        const delta = data.fit_cli.holds - data.fit_cli.previous_holds;
-        const sign = delta > 0 ? '+' : '';
-        fitCliLabel += ` (${sign}${delta} held since ${data.fit_cli.previous_computed_at})`;
-      }
+      // FIT (ADR-0064): rows held over all rows, per half. Each trend rides
+      // its label for the same reason as the API surface's.
+      const fitEntry = (fit, what) => {
+        let label = `genre behaviors the ${what} holds, of those recorded`;
+        if (fit?.previous_holds != null) {
+          const delta = fit.holds - fit.previous_holds;
+          const sign = delta > 0 ? '+' : '';
+          label += ` (${sign}${delta} held since ${fit.previous_computed_at})`;
+        }
+        return [fit ? `${fit.holds} of ${fit.total}` : null, label];
+      };
       const statEntries = [
         [data.experiments?.total, 'experiments recorded'],
         [data.experiments?.accepted, 'accepted'],
@@ -456,7 +459,8 @@
         [data.sloc_test_src, 'test lines in src/'],
         [data.test_functions_src, 'unit tests in src/'],
         [data.api_surface?.count, apiSurfaceLabel],
-        [data.fit_cli ? `${data.fit_cli.holds} of ${data.fit_cli.total}` : null, fitCliLabel],
+        fitEntry(data.fit_cli, 'CLI'),
+        fitEntry(data.fit_lib, 'library'),
       ];
       stats.innerHTML = statEntries.map(([n, label]) => `
         <div class="stat"><span class="n">${escapeHtml(n ?? 'n/a')}</span><span class="label">${escapeHtml(label)}</span></div>

@@ -25,8 +25,9 @@ else:
 - sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
 - api_surface            docs/api-surface.txt (SIMPLICITY's other half,
                          #651) + its git history for the trend
-- fit_cli                tests/fit/cli.txt (FIT's CLI half, ADR-0064) + its
-                         git history for the trend
+- fit_cli, fit_lib       tests/fit/cli.txt and tests/fit/lib.txt (FIT's CLI
+                         and library halves, ADR-0064) + their git history
+                         for the trend
 
 Self-diagnosing, per run-telemetry.py's rule that observability does not
 get to break the thing it observes: a field whose source cannot be read
@@ -416,24 +417,33 @@ def fit_counts(matrix):
     return states.count("holds"), len(states)
 
 
-@field("fit_cli")
-def _fit_cli():
-    """FIT, the CLI half: matrix rows held over all rows (ADR-0064, #981).
+def fit_half(matrix_path):
+    """One FIT half: matrix rows held over all rows, with its trend.
 
-    `tests/fit_cli.rs` probes the binary once per row and fails when
-    `tests/fit/cli.txt` disagrees with what it saw, so the record this
+    The suite that probes the matrix (`tests/fit_cli.rs`, `tests/fit_lib.rs`)
+    fails when the record disagrees with what it saw, so the record this
     script counts is the gate's, as `api_surface` is `cargo x doc`'s. Declined
-    rows count in the total. The library half joins as its own field with #982.
+    rows count in the total.
     """
-    text, computed_at, previous, previous_computed_at = committed_readings(
-        "tests/fit/cli.txt"
-    )
+    text, computed_at, previous, previous_computed_at = committed_readings(matrix_path)
     holds, total = fit_counts(text)
     result = {"holds": holds, "total": total, "computed_at": computed_at}
     if previous is not None:
         result["previous_holds"], result["previous_total"] = fit_counts(previous)
         result["previous_computed_at"] = previous_computed_at
     return result
+
+
+@field("fit_cli")
+def _fit_cli():
+    """FIT, the CLI half (ADR-0064, #981)."""
+    return fit_half("tests/fit/cli.txt")
+
+
+@field("fit_lib")
+def _fit_lib():
+    """FIT, the library half (ADR-0064, #982)."""
+    return fit_half("tests/fit/lib.txt")
 
 
 out_path = Path(sys.argv[1])

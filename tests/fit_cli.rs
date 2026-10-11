@@ -18,57 +18,21 @@
 #![cfg(not(any(miri, target_os = "android")))]
 
 mod common;
+#[path = "fit/matrix.rs"]
+mod matrix;
 
-use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{bin, run, run_output, run_with_early_closing_reader};
+use matrix::{Probe, Seen, seen};
 
 /// Every compressed frame starts with this magic (`docs/format/SPEC.md`).
 const MAGIC: &[u8] = b"MGDC";
 
 /// The matrix, compiled in so the packaged crate's own `cargo test` reads it.
 const MATRIX: &str = include_str!("fit/cli.txt");
-
-#[derive(Debug, PartialEq, Eq)]
-enum State {
-    Holds,
-    Gap,
-    Declined,
-}
-
-struct Row {
-    id: &'static str,
-    state: State,
-    note: &'static str,
-}
-
-fn rows() -> Vec<Row> {
-    MATRIX
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            let mut fields = line.splitn(5, " | ");
-            let id = fields.next().expect("row has an id");
-            let state = match fields.next().expect("row has a state") {
-                "holds" => State::Holds,
-                "gap" => State::Gap,
-                "declined" => State::Declined,
-                other => panic!("row {id}: state {other:?} is not holds, gap or declined"),
-            };
-            let _behavior = fields.next().expect("row has a behavior");
-            let citation = fields.next().expect("row has a citation");
-            assert!(!citation.trim().is_empty(), "row {id}: no citation");
-            Row {
-                id,
-                state,
-                note: fields.next().unwrap_or("").trim(),
-            }
-        })
-        .collect()
-}
 
 /// A directory removed on drop, so a failed probe leaves no litter.
 struct Scratch(PathBuf);
@@ -120,20 +84,6 @@ fn frame_of(payload: &[u8]) -> Vec<u8> {
 fn decodes_to(path: &Path, payload: &[u8]) -> bool {
     fs::read(path).is_ok_and(|frame| run(bin().arg("decompress"), &frame) == (payload.to_vec(), 0))
 }
-
-/// What a probe saw.
-enum Seen {
-    Holds,
-    Fails,
-    /// The lane cannot run the probe; the recorded state stands.
-    Unmeasured,
-}
-
-fn seen(held: bool) -> Seen {
-    if held { Seen::Holds } else { Seen::Fails }
-}
-
-type Probe = fn() -> Seen;
 
 /// One probe per row that is not declined. The binary's grammar is spelled
 /// as the genre does where the row is about the genre's grammar (`-c file`),
@@ -391,54 +341,10 @@ fn concatenation() -> Seen {
 
 #[test]
 fn every_row_is_probed_exactly_once_and_declined_rows_are_not() {
-    let rows = rows();
-    let ids: BTreeSet<_> = rows.iter().map(|row| row.id).collect();
-    assert_eq!(
-        ids.len(),
-        rows.len(),
-        "duplicate row id in tests/fit/cli.txt"
-    );
-
-    let probed: BTreeSet<_> = PROBES.iter().map(|(id, _)| *id).collect();
-    assert_eq!(probed.len(), PROBES.len(), "a row is probed twice");
-
-    let live: BTreeSet<_> = rows
-        .iter()
-        .filter(|row| row.state != State::Declined)
-        .map(|row| row.id)
-        .collect();
-    assert_eq!(
-        probed, live,
-        "probes and non-declined rows must be the same set"
-    );
-
-    for row in rows.iter().filter(|row| row.state == State::Declined) {
-        assert!(
-            !row.note.is_empty(),
-            "declined row {} has no reason",
-            row.id
-        );
-    }
+    matrix::check_probes_cover_rows("tests/fit/cli.txt", MATRIX, PROBES);
 }
 
 #[test]
 fn the_record_matches_the_binary() {
-    let recorded: Vec<Row> = rows();
-    let mut stale = Vec::new();
-    for (id, probe) in PROBES {
-        let row = recorded
-            .iter()
-            .find(|row| row.id == *id)
-            .unwrap_or_else(|| panic!("probe {id} has no row"));
-        match (&row.state, probe()) {
-            (State::Holds, Seen::Fails) => stale.push(format!(
-                "{id}: recorded holds, binary fails it (a regression)"
-            )),
-            (State::Gap, Seen::Holds) => stale.push(format!(
-                "{id}: recorded gap, binary holds it; flip the row to holds in tests/fit/cli.txt"
-            )),
-            _ => {}
-        }
-    }
-    assert!(stale.is_empty(), "\n{}", stale.join("\n"));
+    matrix::check_record("tests/fit/cli.txt", MATRIX, PROBES);
 }
