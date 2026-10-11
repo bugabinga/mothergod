@@ -145,6 +145,33 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-10-11: deep survey. Docs-intel round 2026-10-10 (#578): eleven
+  new pages, all of them mods (plugins whose JavaScript handlers run
+  inside Claude Code: panes, bands, tool-call rewrites, slash commands),
+  plus six changed reference pages. Mods rejected: their hooks do run
+  under `claude -p` but draw nothing there, and every guard this fleet
+  needs is a settings hook already, compiled, tested in node and loaded
+  from the repository with no install step; a mod would be the same
+  event surface rewritten in process, with a plugin install on every
+  runner and the right to approve what a settings hook denied. Revisit
+  when a guard must rewrite a tool call rather than deny it.
+  cli-reference re-read: the alias table (ADR-0059) and the effort set
+  (`low` to `max`, plus `ultracode`) stand; `--max-turns` has no
+  default, so each seat's explicit cap stays load-bearing;
+  `--max-budget-usd` rejected, it caps a client-side API estimate and
+  this fleet runs on a subscription allowance the estimate never sees.
+  hooks re-read: `PermissionDenied` fires for auto-mode denials only,
+  never for a PreToolUse exit 2, so #990's record of why a hook denied
+  stays the hooks' own job; `onFailure: block` (CLI 2.1.295 and later)
+  would close the fail-open on a timed-out deny hook, a watch item
+  until the action's CLI reaches it (2.1.288 on 2026-10-03).
+  github-actions and skills: no input or frontmatter this fleet lacks.
+  Ladders (`agents/models.json`): reviewed, unchanged. #164's 2026-10-04
+  snapshot names no family the ladders lack; the reviewer's two
+  one-round returns this week were real musts, and the director's 28
+  runs at p50 54 turns each shipped, so no seat's retrospect read its
+  tier or effort as wrong.
+
 - 2026-10-04: deep survey. Docs-intel round 2026-09-27 (#578): some
   twenty new pages, all of them the plugin system (marketplaces,
   manifests, loading, org management) plus two translated indexes.
