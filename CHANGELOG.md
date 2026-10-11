@@ -63,6 +63,8 @@ All notable changes to this project are documented here. Format follows
   to a terminal, as gzip, bzip2, xz and zstd do, so a forgotten redirect no
   longer fills the screen with binary; `decompress` still writes to one
   (#1039).
+- cli: `mothergod --help` lists `-h`, `--help`, `-V` and `--version`, so the
+  usage text names every flag the binary accepts (#1036).
 - crate: the published package holds `src/`, `tests/` (minus the
   repository-only `claims.rs` and `mutants.toml`), the one research file
   the unit tests embed, the README, LICENSE and CHANGELOG, 90 files
