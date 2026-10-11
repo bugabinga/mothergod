@@ -167,19 +167,25 @@ fn optimal_roundtrip_long_run_of_one_repeated_byte_stays_linear() {
     // in the run length once it passed MAX_MATCH_LEN. 200,000 bytes
     // matches the issue's own repro (mirroring parse_greedy's own
     // 200,000-byte same-byte-run test); before the fix this took over
-    // 60 seconds and was killed. The bound below is generous (the fixed
-    // version measures under 2s in an unoptimized debug build on
-    // ordinary hardware) so a slower CI runner doesn't flake, while
-    // still failing well before a regression to the old quadratic cost
-    // would let it run to completion.
+    // 60 seconds and was killed.
+    //
+    // Bounds bytes compared by `match_len`, not wall-clock: a stopwatch
+    // failed this guard under `cargo llvm-cov` with no regression
+    // (issue #1059). The fixed parse compares about 2e7 bytes here
+    // (greedy seed pass plus rep scans over three DP rounds); the
+    // carry-less scan compares over 1e10 (65,535 bytes at each of 200,000
+    // positions, per slot, per round). The budget sits 5x above the first
+    // and 100x below the second.
+    const MATCH_LEN_BYTE_BUDGET: u64 = 100_000_000;
     let data = vec![b'z'; 200_000];
-    let start = std::time::Instant::now();
+    work::Scan::MatchLen.reset();
     roundtrip_optimal(&data);
-    let elapsed = start.elapsed();
+    let compared = work::Scan::MatchLen.count();
     assert!(
-        elapsed < std::time::Duration::from_secs(15),
-        "parse_optimal on a 200,000-byte single-byte run took {elapsed:?}, expected well \
-         under 15s; likely a regression to issue #179's quadratic rep-candidate scan"
+        compared < MATCH_LEN_BYTE_BUDGET,
+        "parse_optimal on a 200,000-byte single-byte run compared {compared} bytes in \
+         match_len, budget {MATCH_LEN_BYTE_BUDGET}; likely a regression to issue #179's \
+         quadratic rep-candidate scan"
     );
 }
 
@@ -542,11 +548,12 @@ fn binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse() {
     // there, since the untouched side's bound never leaves 0). This
     // shape approximates S1-P2's named target (sqlite/json/jsonl-like
     // near-duplicate records), not a pathological single-byte run.
-    // Measured by hand before this guard existed: unoptimized (`start`
-    // forced to 0) took ~970ms here, this optimization ~280ms, a real
-    // ~3.5x. The bound below leaves generous headroom for slower CI
-    // hardware while still catching a regression back to the
-    // unoptimized cost.
+    // Bounds bytes compared by `suffix_common_len`, not wall-clock: a
+    // stopwatch failed this guard under `cargo llvm-cov` with no
+    // regression (issue #1059). With prefix reuse the walk compares about
+    // 5.0e7 bytes here; with `start` forced to 0 it compares about 2.5e8,
+    // a 5x. The budget sits 2x above the first and 2.5x below the second.
+    const SUFFIX_BYTE_BUDGET: u64 = 100_000_000;
     let template: Vec<u8> = (0..200u32)
         .map(|i| u8::try_from(i % 251).expect("i % 251 fits u8"))
         .collect();
@@ -557,15 +564,16 @@ fn binary_tree_near_duplicate_blocks_benefit_from_prefix_reuse() {
         data.extend_from_slice(&block);
     }
     let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
-    let start = std::time::Instant::now();
+    work::Scan::SuffixCommonLen.reset();
     for i in 0..data.len() {
         let _ = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, MAX_MATCH_LEN);
     }
-    let elapsed = start.elapsed();
+    let compared = work::Scan::SuffixCommonLen.count();
     assert!(
-        elapsed < std::time::Duration::from_secs(3),
-        "300 near-duplicate 200-byte blocks took {elapsed:?} to insert, expected well \
-         under 3s; likely a regression to length-prefix reuse always starting from 0"
+        compared < SUFFIX_BYTE_BUDGET,
+        "300 near-duplicate 200-byte blocks compared {compared} bytes in suffix_common_len, \
+         budget {SUFFIX_BYTE_BUDGET}; likely a regression to length-prefix reuse always \
+         starting from 0"
     );
 }
 
