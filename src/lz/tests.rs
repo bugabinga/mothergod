@@ -472,7 +472,8 @@ fn binary_tree_nice_len_bounds_candidates_on_deep_correct_chains() {
     // `MAX_MATCH_LEN` (no early exit) about 5.0e7, a 16x. The budget sits
     // 3x above the first and 5x below the second. Removing only the
     // walk's `best_len < nice_len` stop moves candidates visited 2% on
-    // this fixture, so no count here guards that line.
+    // this fixture; `binary_tree_nice_len_stops_the_walk_after_the_first_long_candidate`
+    // guards that line.
     const SUFFIX_BYTE_BUDGET: u64 = 10_000_000;
     let template: Vec<u8> = (0..200u32)
         .map(|i| u8::try_from(i % 251).expect("i % 251 fits u8"))
@@ -494,6 +495,53 @@ fn binary_tree_nice_len_bounds_candidates_on_deep_correct_chains() {
         "300 near-duplicate 200-byte blocks with nice_len 50 and unbounded max_depth compared \
          {compared} bytes in suffix_common_len, budget {SUFFIX_BYTE_BUDGET}; likely a \
          regression to nice_len no longer bounding candidates visited"
+    );
+}
+
+#[test]
+fn binary_tree_nice_len_stops_the_walk_after_the_first_long_candidate() {
+    // Counts candidates visited, because bytes cannot see this stop: past
+    // the first candidate every compare resumes from a proven common length
+    // at or above `nice_len` and costs nothing (issue #1068, found in
+    // #1067's review). 300 groups of two identical 60-byte records, every
+    // record opening with the same 3 bytes (one hash bucket) and then
+    // pseudo-random bytes, so the bucket's tree is a random BST ordered by
+    // those bytes. At a group's second record the first candidate is the
+    // first record, which matches 60 bytes, above `nice_len` 50: the walk
+    // stops there, one candidate. Without the `best_len < nice_len` stop it
+    // descends the tree to a leaf, about `2 ln(300)` candidates. Only the
+    // second records are counted; the first records walk the tree in full
+    // either way.
+    const NICE_LEN: usize = 50;
+    const GROUPS: u64 = 300;
+    let mut state = 1u32;
+    let mut next_byte = || {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        u8::try_from(state >> 24).expect("state >> 24 fits u8")
+    };
+    let mut data = Vec::new();
+    let mut second_records = Vec::new();
+    for _ in 0..GROUPS {
+        let mut record = vec![b'X', b'Y', b'Z'];
+        record.extend((0..57).map(|_| next_byte()));
+        data.extend_from_slice(&record);
+        second_records.push(data.len());
+        data.extend_from_slice(&record);
+    }
+    let mut finder = BinaryTreeMatchFinder::new(&data, WINDOW);
+    let mut visited = 0;
+    for i in 0..data.len() {
+        work::Scan::Candidates.reset();
+        let _ = finder.insert_and_find(i, data.len(), NICE_LEN);
+        if second_records.contains(&i) {
+            visited += work::Scan::Candidates.count();
+        }
+    }
+    assert_eq!(
+        visited, GROUPS,
+        "{GROUPS} second records matching a 60-byte first record visited {visited} candidates \
+         with nice_len {NICE_LEN}, expected one each; likely the walk no longer stops once \
+         best_len reaches nice_len"
     );
 }
 

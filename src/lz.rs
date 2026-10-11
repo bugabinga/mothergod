@@ -626,6 +626,8 @@ impl<'d> BinaryTreeMatchFinder<'d> {
             }
             depth += 1;
         }
+        #[cfg(test)]
+        work::Scan::Candidates.add(depth);
         // Whatever remains unlinked on either chain (the walk exhausted
         // max_depth, or ended naturally) is cut off rather than left
         // dangling: those deeper candidates are permanently dropped from
