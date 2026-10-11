@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate the testing portfolio's trust ledger from run artifacts (#449, ADR-0043).
+"""Aggregate the testing portfolio's trust ledger from the trust table (#449, ADR-0043).
 
 ADR-0043's audit-by-number half: cumulative fuzz CPU-hours, new crashers,
 mutation score, and region coverage, machine-written by the scheduled test
@@ -7,19 +7,16 @@ workflows themselves and rendered on the status page. Ledger numbers are
 maps, never gates (the Goodhart guard is binding); no required check reads
 this output.
 
-Same pipeline as run-telemetry.py's run economics: each writer uploads its
-own small `entry.json` artifact (`trust-<role>-<run-id>-<attempt>`, see
-fuzz-check.yml) instead of committing to a tracked file, which is what
-deploy-site.yml already avoids for status-data.json and agent-metrics.json
-(concurrent-append conflicts on a tracked file, PR #34). The cost this
-pattern buys: cumulative figures below cover the trailing artifact
-retention window (90 days), not all of project history. The weekly digest
-is the durable record past that horizon, the same trade run-telemetry.py's
-cost figures already make.
+The rows are the `trust` table in D1 (ADR-0060, #891 slice 4): one per
+entry a writer uploads as its `trust-<role>-<run-id>-<attempt>` artifact,
+written beside it by trust-row.py and reconciled from the artifacts every
+Sunday. Cumulative figures are cumulative since the table's first row,
+which the output names as `since`; the artifact walk this replaced summed
+the trailing 90-day retention window and the page said so.
 
 Each entry is `{date, run_id, role, fuzz_cpu_s, crashers_new,
-mutation_score, coverage_region_pct}`; a writer omits or nulls fields it
-does not measure (#450/#451 fuzzing, #454 coverage, #455 mutation own
+mutation_score, coverage_region_pct}`; a writer leaves the fields it does
+not measure null (#450/#451 fuzzing, #454 coverage, #455 mutation own
 theirs). `loc_code`/`loc_test` from the issue's schema are deliberately not
 carried per entry: the status page already publishes current source line
 counts from status-data.py, and stamping every writer with a duplicate
@@ -31,30 +28,17 @@ saying what was actually seen and exits 0.
 Usage: trust-telemetry.py <out.json>
 """
 
-import io
 import json
-import os
-import subprocess
 import sys
-import zipfile
 from datetime import datetime, timezone
 
-out_path = sys.argv[1]
-REPO = os.environ.get("GITHUB_REPOSITORY", "")
+import d1
 
-# Headroom, not a budget: weekly/monthly cadence writers keep this list
-# short for a long time. A breach is reported, never silently truncated.
-MAX_DOWNLOADS = 200
+out_path = sys.argv[1]
 
 FIELDS = ("fuzz_cpu_s", "crashers_new", "mutation_score", "coverage_region_pct")
-
-# Entries before this instant counted every file libFuzzer left under
-# fuzz/artifacts as a crasher, slow-unit-* files included, and eleven green
-# runs put 26 crashers on the status page (survey, 2026-09-13). They measured
-# nothing about crashers, so the field reads as unmeasured for them.
-# Retention is 90 days: after 2026-12-12 no such entry can exist, and this
-# constant, its one use below, and this comment are deletable.
-CRASHERS_MEASURED_SINCE = "2026-09-13T06:00:00Z"
+SELECT = ("SELECT run_id, at, role, fuzz_cpu_s, crashers_new, mutation_score, "
+          "coverage_region_pct FROM trust ORDER BY at, run_id, attempt")
 
 
 def write(obj):
@@ -73,59 +57,17 @@ def bail(reason):
     sys.exit(0)
 
 
-def gh(*args, binary=False):
-    proc = subprocess.run(["gh", *args], capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.decode("utf-8", "replace")[:400])
-    return proc.stdout if binary else proc.stdout.decode("utf-8", "replace")
-
-
-if not REPO:
-    bail("GITHUB_REPOSITORY is unset; nothing to query.")
-
 try:
-    pages = json.loads(gh("api", "--paginate", "--slurp",
-                          f"repos/{REPO}/actions/artifacts?per_page=100"))
-except (RuntimeError, ValueError) as exc:
-    bail(f"Could not list artifacts ({exc}).")
+    rows = d1.query(SELECT)
+except d1.Unreadable as exc:
+    bail(f"Could not read the trust table ({exc}).")
 
-wanted = []
-for page in pages:
-    for art in page.get("artifacts", []):
-        if not art.get("name", "").startswith("trust-") or art.get("expired"):
-            continue
-        wanted.append((art["id"], art.get("created_at") or ""))
+if not rows:
+    bail("The trust table is empty: no scheduled test workflow has written a "
+         "row since the table landed (#891 slice 4).")
 
-if not wanted:
-    bail("No unexpired trust-ledger artifacts yet: the scheduled test "
-         "workflows have not reported since this ledger landed (#449).")
-
-truncated = 0
-if len(wanted) > MAX_DOWNLOADS:
-    wanted.sort(key=lambda p: p[1])
-    truncated = len(wanted) - MAX_DOWNLOADS
-    wanted = wanted[truncated:]
-
-entries, unreadable = [], 0
-for art_id, _created in wanted:
-    try:
-        blob = gh("api", f"repos/{REPO}/actions/artifacts/{art_id}/zip", binary=True)
-        entry = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("entry.json"))
-    except (RuntimeError, ValueError, KeyError, zipfile.BadZipFile):
-        unreadable += 1
-        continue
-    if isinstance(entry, dict) and entry.get("date") and entry.get("run_id"):
-        entries.append(entry)
-    else:
-        unreadable += 1
-
-if not entries:
-    bail(f"Found {len(wanted)} trust-ledger artifacts, none readable.")
-
-entries.sort(key=lambda e: (e["date"], str(e["run_id"])))
-for entry in entries:
-    if entry["date"] < CRASHERS_MEASURED_SINCE:
-        entry["crashers_new"] = None
+entries = [{"date": r["at"], "run_id": str(r["run_id"]), "role": r["role"],
+            **{f: r.get(f) for f in FIELDS}} for r in rows]
 
 
 def latest_and_previous(field):
@@ -143,14 +85,10 @@ trend = {f: dict(zip(("latest", "previous"), latest_and_previous(f))) for f in F
 write({
     "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "count": len(entries),
-    "unreadable": unreadable,
-    "truncated": truncated,
-    # Sum over whatever is still in the retention window, not all-time
-    # (see module docstring); the label on the consuming page says so.
-    "cumulative_fuzz_cpu_hours": sum(e.get("fuzz_cpu_s") or 0 for e in entries) / 3600.0,
-    "crashers_total": sum(e.get("crashers_new") or 0 for e in entries),
+    "since": entries[0]["date"],
+    "cumulative_fuzz_cpu_hours": sum(e["fuzz_cpu_s"] or 0 for e in entries) / 3600.0,
+    "crashers_total": sum(e["crashers_new"] or 0 for e in entries),
     "trend": trend,
     "entries": entries[-25:],
 })
-print(f"trust-telemetry: {len(entries)} entries, {unreadable} unreadable, "
-      f"{truncated} over cap")
+print(f"trust-telemetry: {len(entries)} entries since {entries[0]['date']}")

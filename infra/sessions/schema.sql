@@ -77,3 +77,24 @@ CREATE TABLE IF NOT EXISTS guard (
   PRIMARY KEY (run_id, attempt)
 );
 CREATE INDEX IF NOT EXISTS guard_role_at ON guard (role, at);
+
+-- trust: one row per trust-ledger entry a scheduled test workflow wrote
+-- (#891 slice 4; the ledger is #449, ADR-0043). Written by fuzz-check.yml
+-- and coverage-check.yml through trust-row.py beside the entry.json
+-- artifact each uploads, and by `trust-row.py backfill` from the
+-- unexpired artifacts every Sunday (agent-model-intel.yml); read by
+-- trust-telemetry.py at site deploy, where "cumulative" means since the
+-- first row and no longer the artifact retention window. A writer leaves
+-- the fields it does not measure NULL, never 0.
+CREATE TABLE IF NOT EXISTS trust (
+  run_id              INTEGER NOT NULL,
+  attempt             INTEGER NOT NULL,
+  at                  TEXT    NOT NULL,   -- ISO-8601 UTC, the entry's own date
+  role                TEXT    NOT NULL,   -- the writer: fuzz, coverage; mutation when #455 lands
+  fuzz_cpu_s          REAL,               -- seconds the fuzz targets ran, timed around the run
+  crashers_new        INTEGER,            -- crash-, oom-, timeout-, leak- files libFuzzer left; NULL before 2026-09-13T06:00:00Z, when slow units counted too
+  mutation_score      REAL,
+  coverage_region_pct REAL,               -- cargo-llvm-cov region coverage of the crate
+  PRIMARY KEY (run_id, attempt)
+);
+CREATE INDEX IF NOT EXISTS trust_at ON trust (at);

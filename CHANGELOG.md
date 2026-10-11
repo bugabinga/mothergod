@@ -64,6 +64,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- Status page: the TRUST panel's fuzz CPU-hours and crasher count are
+  cumulative since the ledger's first entry (2026-09-02) instead of a
+  trailing 90-day window, because each entry is now a row of a table that
+  outlives the artifact retention (#1077).
 - crate: the published package holds `src/`, `tests/` (minus the
   repository-only `claims.rs` and `mutants.toml`), the one research file
   the unit tests embed, the README, LICENSE and CHANGELOG, 90 files

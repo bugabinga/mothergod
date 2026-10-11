@@ -182,3 +182,14 @@ jobs:
           name: trust-fuzz-${{ github.run_id }}-${{ github.run_attempt }}
           path: entry.json
           retention-days: 90
+
+      # The row beside the artifact (#891 slice 4, ADR-0060): the artifact
+      # is the record a human opens for 90 days, the row is the series the
+      # TRUST scorecard reads past that horizon. trust-row.py exits 0 on
+      # every path; a write that failed is a warning the Sunday backfill
+      # in agent-model-intel.yml repairs.
+      - name: write trust row
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 .github/scripts/trust-row.py entry.json

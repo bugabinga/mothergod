@@ -242,8 +242,8 @@ def gh(*args):
     return proc.stdout
 
 
-def archive(repo, since=None):
-    """Every unexpired audit artifact of `repo`, oldest first.
+def archive(repo, since=None, prefix="audit-"):
+    """Every unexpired artifact of `repo` whose name starts with `prefix`, oldest first.
 
     `since`, a datetime, keeps the artifacts created at or after it. Oldest
     first because the archive expires from the front: a walk that dies
@@ -259,7 +259,7 @@ def archive(repo, since=None):
     found = []
     for page in pages:
         for art in page.get("artifacts", []):
-            if not art.get("name", "").startswith("audit-") or art.get("expired"):
+            if not art.get("name", "").startswith(prefix) or art.get("expired"):
                 continue
             try:
                 made = datetime.fromisoformat(art["created_at"].replace("Z", "+00:00"))
