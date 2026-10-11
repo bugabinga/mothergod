@@ -391,9 +391,11 @@ cmp FILE FILE.out</pre>
           instead, <code>compress</code> writes
           <code>&lt;file&gt;.mgdc</code> and <code>decompress</code> reads one
           back to the name with the suffix stripped; neither deletes its input,
-          and neither overwrites an existing file. <code>mothergod --help</code>
-          is the entire interface: no flags, no compression levels, no tuning
-          knobs. Expect the encode to take a while, at the rates above.
+          and neither overwrites an existing file. That, <code>--help</code> and
+          <code>--version</code> are the entire interface: no compression
+          levels, no tuning knobs. <code>--version</code> also prints the format
+          version the build reads; put it in a bug report. Expect the encode to
+          take a while, at the rates above.
         </p>
       </section>
 
