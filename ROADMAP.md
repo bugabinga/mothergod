@@ -48,7 +48,8 @@ Outcome metrics (the product):
   holds only where it holds on every runtime lane that can run the
   suite. Published: holds over total with trend on /status, from a
   committed count the gate keeps honest, like the API surface.
-  Unmeasured until M8's first slice lands (#981, #982).
+  The CLI half is measured (`tests/fit/cli.txt`, #981); the library half
+  is unmeasured until #982.
 
 Process metrics (the team, the BDFL's machinery gauge):
 

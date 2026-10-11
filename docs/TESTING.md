@@ -385,13 +385,20 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   proving no panic crosses the FFI boundary, not just that the Rust
   API behaves.
 
-## 12. Genre conformance (planned, #981, #982)
+## 12. Genre conformance (CLI landed #981, library planned #982)
 
-- The FIT matrix (ADR-0064): one test per behavior the compressor genre
+- The FIT matrix (ADR-0064): one row per behavior the compressor genre
   shares (gzip, bzip2, xz, zstd, brotli, lz4 for the CLI; flate2, zstd,
   xz2, brotli, lz4_flex for the library), each row carrying its citation
   and a recorded state, `holds` or `gap`. A `holds` row that fails is a
   regression; a `gap` row that passes fails until the record flips; a
-  declined row keeps its place in the denominator with its reason. The
-  count is a committed file the gate keeps honest and `/status` reads.
-  The CLI half spawns the binary, so it runs on no Miri or Android lane.
+  declined row keeps its place in the denominator with its reason.
+- The CLI half is `tests/fit/cli.txt` (the rows) and `tests/fit_cli.rs`
+  (one probe per row, spawning the binary). The file is the committed
+  count: `status-data.py` counts its `holds` rows over all rows, so no
+  second number exists to drift. A probe returns `None` on a lane that
+  cannot run it (`script(1)` for the terminal row is Linux only, the
+  permission-bit row is Unix only) and the row is then unmeasured there.
+  Citations are read from the runner's man pages, never from memory.
+  The suite spawns the binary, so it runs on no Miri or Android lane.
+- Not yet built: the library half (#982).

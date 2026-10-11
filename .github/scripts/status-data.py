@@ -25,6 +25,8 @@ else:
 - sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
 - api_surface            docs/api-surface.txt (SIMPLICITY's other half,
                          #651) + its git history for the trend
+- fit_cli                tests/fit/cli.txt (FIT's CLI half, ADR-0064) + its
+                         git history for the trend
 
 Self-diagnosing, per run-telemetry.py's rule that observability does not
 get to break the thing it observes: a field whose source cannot be read
@@ -350,6 +352,38 @@ def _test_functions_src():
     )
 
 
+def committed_readings(rel_path):
+    """A committed file's current text and its previous version's, with dates.
+
+    The date is the file's own git history (deploy checks out full depth),
+    not a stored timestamp, so the two can never disagree; the previous
+    reading is the file's content as of the commit before that, giving a
+    trend once a second one exists with no separate ledger to retain.
+    Returns `(text, date, previous_text, previous_date)`, the last two None
+    until a second commit touches the file.
+    """
+    log = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-2", "--format=%H %cs", "--", rel_path],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip().splitlines()
+    if not log:
+        raise ValueError(f"no commit touches {rel_path}")
+    _newest_sha, computed_at = log[0].split(" ", 1)
+    text = (ROOT / rel_path).read_text(encoding="utf-8")
+    if len(log) == 1:
+        return text, computed_at, None, None
+    older_sha, previous_computed_at = log[1].split(" ", 1)
+    previous = subprocess.run(
+        ["git", "-C", str(ROOT), "show", f"{older_sha}:{rel_path}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return text, computed_at, previous, previous_computed_at
+
+
 @field("api_surface")
 def _api_surface():
     """SIMPLICITY's other half: public items visible on docs.rs (#651).
@@ -357,33 +391,47 @@ def _api_surface():
     `cargo x doc` keeps `docs/api-surface.txt` honest against what rustdoc
     actually built (x/src/doc.rs), the same way the `ratio` field above
     trusts `bench/baseline.json`: a committed number a gate can compute
-    verifies on every run, so this script only has to read it back. The
-    date is the file's own git history (deploy checks out full depth), not
-    a stored timestamp, so the two can never disagree; the previous
-    reading is the file's content as of the commit before that, giving a
-    trend once a second one exists with no separate ledger to retain.
+    verifies on every run, so this script only has to read it back.
     """
-    path = ROOT / "docs" / "api-surface.txt"
-    count = int(path.read_text(encoding="utf-8").strip())
-    log = subprocess.run(
-        ["git", "-C", str(ROOT), "log", "-2", "--format=%H %cs", "--", "docs/api-surface.txt"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip().splitlines()
-    if not log:
-        raise ValueError("no commit touches docs/api-surface.txt")
-    _newest_sha, computed_at = log[0].split(" ", 1)
-    result = {"count": count, "computed_at": computed_at}
-    if len(log) > 1:
-        older_sha, previous_computed_at = log[1].split(" ", 1)
-        previous = subprocess.run(
-            ["git", "-C", str(ROOT), "show", f"{older_sha}:docs/api-surface.txt"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        result["previous_count"] = int(previous)
+    text, computed_at, previous, previous_computed_at = committed_readings(
+        "docs/api-surface.txt"
+    )
+    result = {"count": int(text.strip()), "computed_at": computed_at}
+    if previous is not None:
+        result["previous_count"] = int(previous.strip())
+        result["previous_computed_at"] = previous_computed_at
+    return result
+
+
+def fit_counts(matrix):
+    """`(holds, total)` of a FIT matrix file: rows are `id | state | ...`."""
+    states = [
+        line.split(" | ", 2)[1]
+        for line in matrix.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    unknown = set(states) - {"holds", "gap", "declined"}
+    if unknown:
+        raise ValueError(f"unknown FIT state(s) {sorted(unknown)}")
+    return states.count("holds"), len(states)
+
+
+@field("fit_cli")
+def _fit_cli():
+    """FIT, the CLI half: matrix rows held over all rows (ADR-0064, #981).
+
+    `tests/fit_cli.rs` probes the binary once per row and fails when
+    `tests/fit/cli.txt` disagrees with what it saw, so the record this
+    script counts is the gate's, as `api_surface` is `cargo x doc`'s. Declined
+    rows count in the total. The library half joins as its own field with #982.
+    """
+    text, computed_at, previous, previous_computed_at = committed_readings(
+        "tests/fit/cli.txt"
+    )
+    holds, total = fit_counts(text)
+    result = {"holds": holds, "total": total, "computed_at": computed_at}
+    if previous is not None:
+        result["previous_holds"], result["previous_total"] = fit_counts(previous)
         result["previous_computed_at"] = previous_computed_at
     return result
 
