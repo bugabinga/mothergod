@@ -1,9 +1,11 @@
-"""Where the session table lives: one Cloudflare D1 database, named once (ADR-0060).
+"""Where the session table lives: one Cloudflare D1 database (ADR-0060).
 
 `session-row.py` writes it and `sessions` reads it, the same split kv.py
 draws for the operator conversation. The database id is an identifier, not a
 secret, like the KV namespace id beside it; the bearer, CLOUDFLARE_API_TOKEN,
-stays a secret every caller passes. The schema is infra/sessions/schema.sql.
+stays a secret every caller passes. The worker's SESSIONS binding in
+infra/telegram-worker/wrangler.toml names the same id, pinned by worker.test.mjs.
+The schema is infra/sessions/schema.sql.
 
 D1_API_BASE and D1_DATABASE in the environment override the endpoint and id
 for the test suites' stub server only; no workflow sets them.
