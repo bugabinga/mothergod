@@ -12,9 +12,9 @@
 //! concentrates resolution near 0 and 1.
 //!
 //! Every probability here feeds the coder, so it must be bit-exact between
-//! encoder and decoder: the arithmetic is `+ - * /`, [`f64::clamp`] and
-//! [`crate::logistic`]'s deterministic `stretch`/`squash`, never a libm
-//! transcendental (ADR-0024).
+//! encoder and decoder: the arithmetic is `+ - * /`, [`f64::clamp`],
+//! [`f64::floor`] and [`crate::logistic`]'s deterministic `stretch`/`squash`,
+//! never a libm transcendental (ADR-0024).
 //!
 //! Consumers: [`crate::bittree`]'s binary walk ([`Sse`]) and
 //! [`crate::literal::SurpriseLogisticMix`] ([`Sse`] and [`LogitSse`]).
@@ -119,7 +119,7 @@ fn stretch_bound() -> f64 {
 }
 
 /// Evenly spaced bins in [`stretch`]-space, concentrating resolution near
-/// 0 and 1 the way [`Sse`]'s own module doc says a production APM wants.
+/// 0 and 1.
 #[derive(Debug, Clone)]
 pub struct Logit;
 
