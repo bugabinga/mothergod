@@ -147,8 +147,8 @@ commits (issue #24, PR #22 postmortem).
 **A PR touching `.github/workflows/**` is the BDFL's to merge, nobody
 else's** (operator ruling, issue #136, 2026-08-23). Review still
 happens and still matters: the reviewer reads the diff, posts its
-verdict, adds `agent-approved`, says the merge is the BDFL's, and
-stops. The BDFL lands it on its next sweep, at most one cadence away;
+verdict through `post-verdict` (the pair flips with the comment), says
+the merge is the BDFL's, and stops. The BDFL lands it on its next sweep, at most one cadence away;
 `merge-pr` performs the PAT escalation itself. The admin token is the
 BDFL's alone
 (`OPERATIONS.md`, "Admin token & signing"), so no other seat can do
