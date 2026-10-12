@@ -18,9 +18,12 @@ Verbs:
     sql <statement> [param ...]   any statement; rows as one aligned table
     roles [--since 7d|DATE]       per role over the window: runs, measured,
                                   median and max turns, output tokens,
-                                  denials, errors, projected cost
+                                  denials, errors, no-op runs over the runs
+                                  with writes recorded, projected cost
     show <run-id>                 one run's row, one field per line
-    migrate                       apply infra/sessions/schema.sql, idempotent
+    migrate                       apply infra/sessions/schema.sql one statement
+                                  at a time; a column already present is
+                                  counted, not an error
     backfill [--since 7d|DATE]    one row per archived audit artifact the table
              [--rebuild]          lacks, `at` the artifact's creation, and its
                                   allowance readings beside it; prints the
@@ -136,6 +139,40 @@ def since_of(spec, now):
 NAME = re.compile(r"^audit-[a-z-]+-(\d+)-(\d+)(?:-u\d+-r\d+)?$")
 
 
+def statements(schema):
+    """The schema file's statements in file order, `--` comments stripped first.
+
+    Stripped first because a comment may hold a `;` (the header's does), and
+    the file has no string literal that holds `--`.
+    """
+    bare = "\n".join(line.split("--", 1)[0] for line in schema.splitlines())
+    return [s.strip() for s in bare.split(";") if s.strip()]
+
+
+def migrate(schema):
+    """Apply the schema one statement at a time; returns (applied, present).
+
+    One statement per call because an ALTER TABLE ADD COLUMN is not
+    idempotent in SQLite: its second run answers "duplicate column name",
+    which in a one-batch call would stop every statement after it. Here that
+    answer is the column being present, counted and skipped, so the file
+    replays on an existing database as its header promises. Any other
+    failure is Unreadable, the caller's exit.
+    """
+    applied = present = 0
+    for statement in statements(schema):
+        try:
+            d1.query(statement)
+            applied += 1
+        except d1.Unreadable as error:
+            if (statement.upper().startswith("ALTER TABLE")
+                    and "duplicate column" in str(error).lower()):
+                present += 1
+                continue
+            raise
+    return applied, present
+
+
 def key_of(name):
     match = NAME.match(name)
     return (int(match.group(1)), int(match.group(2))) if match else None
@@ -221,8 +258,8 @@ def main(argv):
         elif verb == "roles":
             spec = flag(args, "--since") or "7d"
             since = stamp(since_of(spec, datetime.now(timezone.utc)))
-            rows = d1.query("SELECT role, measured, turns, out_tokens, denials, error, cost_usd "
-                            "FROM sessions WHERE at >= ?", [since])
+            rows = d1.query("SELECT role, measured, turns, out_tokens, denials, error, "
+                            "cost_usd, writes FROM sessions WHERE at >= ?", [since])
             print(f"sessions since {since}: {len(rows)}")
             print("\n".join(render(summarize_roles(rows))))
         elif verb == "show" and len(args) == 1:
@@ -231,8 +268,9 @@ def main(argv):
             print("\n".join(render_show(rows, args[0])))
         elif verb == "migrate":
             with open(SCHEMA, encoding="utf-8") as fh:
-                d1.query(fh.read())
-            print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}")
+                applied, present = migrate(fh.read())
+            print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}: "
+                  f"{applied} statements, {present} columns already present")
         elif verb == "backfill":
             spec = flag(args, "--since")
             since = since_of(spec, datetime.now(timezone.utc)) if spec else None

@@ -18,6 +18,14 @@ pinned by trend.test.mjs with a case on the threshold and one just under
 it, so a constant moved either way, or a `>=` made `>`, fails a test.
 Errors have no constant: any change prints.
 
+The no-op share (#896 item 5, operator steer of 2026-10-03) is read from
+the `writes` column: a run with 0 changed nothing, a post, a PR, a merge,
+a commit or a label edit, and a seat past NOOP_SHARE of its recorded runs is a
+deletion candidate the survey names by name. Runs from before the column
+carry NULL and are neither no-ops nor counted; a seat prints on this
+week's share alone, like `skipped`, because changing nothing half the
+time is the finding whatever last week did.
+
 Medians, not means, because one 65-turn chat wake would otherwise paint
 every BDFL run as long (ADR-0023's lesson). Measured runs only feed the
 turn and token figures; unmeasured ones are counted, never zeroed in.
@@ -45,9 +53,13 @@ DENIALS_FACTOR, FLOOR_DENIALS = 2, 3
 # is a wake overtaken by a newer trigger, not a hold, and does not count.
 SKIP_SHARE = 0.25
 HELD = ("skip", "exhausted", "paused")
+# no-op: NOOP_SHARE of the role's runs with writes recorded changed nothing,
+# over at least FLOOR_NOOP such runs.
+NOOP_SHARE, FLOOR_NOOP = 0.5, 4
 
 EMPTY = {"runs": 0, "measured": 0, "turns_p50": None, "turns_max": None,
-         "out_tokens": 0, "denials": 0, "errors": 0, "cost_usd": None}
+         "out_tokens": 0, "denials": 0, "errors": 0, "noops": 0, "recorded": 0,
+         "cost_usd": None}
 
 
 def med(values):
@@ -68,6 +80,7 @@ def summarize_roles(rows):
         measured = [r for r in runs if r.get("measured")]
         turns = [r.get("turns") for r in measured]
         costs = [r.get("cost_usd") for r in measured if r.get("cost_usd") is not None]
+        recorded = [r for r in runs if r.get("writes") is not None]
         out.append({
             "role": role,
             "runs": len(runs),
@@ -77,6 +90,8 @@ def summarize_roles(rows):
             "out_tokens": sum(r.get("out_tokens") or 0 for r in measured),
             "denials": sum(r.get("denials") or 0 for r in runs),
             "errors": sum(r.get("error") or 0 for r in runs),
+            "noops": sum(1 for r in recorded if r.get("writes") == 0),
+            "recorded": len(recorded),
             "cost_usd": float(sum(costs)) if costs else None,
         })
     return out
@@ -103,6 +118,8 @@ def moved(new, old, skips, wakes):
         out.append("errors")
     if wakes and skips / wakes >= SKIP_SHARE:
         out.append("skipped")
+    if new["recorded"] >= FLOOR_NOOP and new["noops"] >= NOOP_SHARE * new["recorded"]:
+        out.append("no-op")
     return out
 
 
@@ -138,6 +155,7 @@ def lines(recent_rows, prior_rows, gate_rows):
             f"turns p50 {fmt(a['turns_p50'])} vs {fmt(b['turns_p50'])}   "
             f"denials {a['denials']} vs {b['denials']}   "
             f"errors {a['errors']} vs {b['errors']}   "
+            f"no-op {a['noops']} of {a['recorded']}   "
             f"skipped {skips} of {a['runs'] + skips}   "
             f"moved: {', '.join(tripped)}"
         )
@@ -156,8 +174,8 @@ def report(now=None, query=None):
     prior_from = (now - 2 * WINDOW).strftime(STAMP)
     print()
     try:
-        rows = query("SELECT role, at, measured, turns, out_tokens, denials, error, cost_usd "
-                     "FROM sessions WHERE at >= ?", [prior_from])
+        rows = query("SELECT role, at, measured, turns, out_tokens, denials, error, "
+                     "cost_usd, writes FROM sessions WHERE at >= ?", [prior_from])
         gates = query("SELECT role, decision FROM guard WHERE at >= ?", [recent_from])
     except d1.Unreadable as error:
         print(f"trend: UNREADABLE ({error}); the session table could not be read, "

@@ -59,6 +59,7 @@ def facts(meta):
              and v.get("costBasis") in (None, "list")]
     trigger = meta.get("trigger") if isinstance(meta.get("trigger"), dict) else {}
     persona = meta.get("persona") if isinstance(meta.get("persona"), dict) else {}
+    tools = tele.get("tools") if isinstance(tele.get("tools"), dict) else {}
     return {
         # Artifact creation instant and run id: identifiers, not numbers,
         # but API-authored like everything else here. They exist for the
@@ -96,6 +97,9 @@ def facts(meta):
         # Which persona text the run carried: the key for "since the
         # persona changed" questions, a hash so no prose travels.
         "persona_sha": persona.get("sha256") or "",
+        # Write-shaped tool calls that did not error (#896 item 5, the set is
+        # audit-extract.py's); None on an artifact from before the count.
+        "writes": as_int(tools.get("writes")),
     }
 
 
@@ -106,7 +110,7 @@ COLUMNS = (
     "run_id", "attempt", "at", "role", "event", "actor", "number",
     "commit_sha", "measured", "model", "out_tokens", "think_pct", "cost_usd",
     "turns", "duration_ms", "denials", "error", "stop_reason", "persona_sha",
-    "prompt_bytes", "response_bytes",
+    "prompt_bytes", "response_bytes", "writes",
 )
 INSERT = (f"INSERT OR REPLACE INTO sessions ({', '.join(COLUMNS)}) "
           f"VALUES ({', '.join('?' * len(COLUMNS))})")
@@ -210,6 +214,7 @@ def row(meta, size):
         f["stop_reason"] or None, f["persona_sha"] or None,
         size("input-prompt.md") if meta.get("prompt_extracted") else None,
         size("output-response.md") if meta.get("response_extracted") else None,
+        f["writes"],
     )
     values = tuple(bindable(v) for v in values)
     return values[:3] + (values[3] or "?",) + values[4:]

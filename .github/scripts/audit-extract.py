@@ -19,6 +19,7 @@ downgrades that to a warning.
 import hashlib
 import json
 import os
+import re
 import sys
 
 from allowance import valid_fraction, valid_reset, window_readings
@@ -216,7 +217,7 @@ for e in entries:
                 for t in raw_tools
             })
         break
-tool_uses, seen_blocks = {}, set()
+uses, seen_blocks = [], set()
 for e in entries:
     if not (isinstance(e, dict) and e.get("type") == "assistant"):
         continue
@@ -228,9 +229,70 @@ for e in entries:
         if block_id in seen_blocks:
             continue
         seen_blocks.add(block_id)
-        name = str(block.get("name") or "?")
-        tool_uses[name] = tool_uses.get(name, 0) + 1
-telemetry["tools"] = {"offered": tools_offered, "used": dict(sorted(tool_uses.items()))}
+        uses.append((block_id, str(block.get("name") or "?"), block.get("input")))
+tool_uses = {}
+for _, name, _ in uses:
+    tool_uses[name] = tool_uses.get(name, 0) + 1
+
+# Writes (#896 item 5): how many of the run's tool calls changed the
+# project's shared state, so "a wake that changed nothing" is a column of
+# the session row and a seat's no-op share is a query (trend.py), not a
+# posture. A write is a Bash call that runs one of the four posting and
+# shipping scripts, or `gh issue edit` or `gh pr edit` (a label, milestone
+# or title is how the curator and the reviewer act without a post), at
+# command position, or a github_file_ops commit or delete, whose result was
+# not an error: a hook denial and a script that exited non-zero both come
+# back as a tool_result with is_error. tg-send is not a write, because
+# every BDFL wake sends its status line, no-op included. The command text
+# is matched and never kept: the count is the whole record, the keys-only
+# rule above.
+WRITE_TOOLS = {"mcp__github_file_ops__commit_files", "mcp__github_file_ops__delete_files"}
+# Command position: the start, or after `;`, `&`, `|`, `(`, `{` or a newline,
+# then an optional `then`, `do`, `else` or `!`, then any run of `VAR=value`
+# assignments (a quoted value may hold spaces), `env`, `timeout` with its
+# options and duration, and `bash` or `sh` running a script file, then the
+# command by any path, followed by whitespace or the end. So
+# `sed -n 1,9p .github/scripts/gh-comment` reads the script and is not a
+# write, and `gh-comment.test.mjs` is a test file, not a post. Known
+# misses, undercounts both: `bash -c '...'` and a quoted command. Known
+# overcount: a heredoc or commit-message line that begins with a script
+# name, because matching text cannot tell it from a command.
+WRITE_SCRIPT = re.compile(
+    r"(?:^|[;&|({\n])\s*(?:(?:then|do|else|!)\s+)?"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|[^\s\"']*)|env|bash|sh"
+    r"|timeout(?:\s+-\S+(?:\s+\d\S*)?)*\s+\d\S*)\s+)*"
+    r"(?:(?:\S*/)?(?:gh-comment|gh-pr|merge-pr|push-branch)"
+    r"|gh\s+(?:issue|pr)\s+edit)(?=\s|$)")
+
+
+def is_write(name, tool_input):
+    if name in WRITE_TOOLS:
+        return True
+    if name != "Bash" or not isinstance(tool_input, dict):
+        return False
+    command = tool_input.get("command")
+    return isinstance(command, str) and WRITE_SCRIPT.search(command) is not None
+
+
+errored = set()
+for e in entries:
+    if not isinstance(e, dict):
+        continue
+    if e.get("type") == "system" and e.get("subtype") == "permission_denied":
+        if e.get("tool_use_id") is not None:
+            errored.add(e.get("tool_use_id"))
+        continue
+    if e.get("type") != "user":
+        continue
+    msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+    for block in msg.get("content") or []:
+        if (isinstance(block, dict) and block.get("type") == "tool_result"
+                and block.get("is_error") is True and block.get("tool_use_id") is not None):
+            errored.add(block.get("tool_use_id"))
+writes = sum(1 for block_id, name, tool_input in uses
+             if block_id not in errored and is_write(name, tool_input))
+telemetry["tools"] = {"offered": tools_offered, "used": dict(sorted(tool_uses.items())),
+                      "writes": writes}
 
 # Rate-limit state (issue #63): the typed rate_limit_event payload is
 # API-authored metadata, published verbatim so its semantics can be

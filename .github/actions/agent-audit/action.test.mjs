@@ -305,6 +305,7 @@ test("offered tools and tool-use counts reach metadata.json, names only", () => 
     assert.deepEqual(JSON.parse(metadata).telemetry.tools, {
       offered: ["Bash", "Read", "Write"],
       used: { Bash: 2, Read: 1 },
+      writes: 0,
     });
     assert.ok(!metadata.includes("secret-looking"), "a tool input leaked into the record");
   } finally {
@@ -334,7 +335,118 @@ test("an execution log without an init entry records the offered set as unknown"
     assert.deepEqual(JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")).telemetry.tools, {
       offered: null,
       used: {},
+      writes: 0,
     });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// Issue #896 item 5: a run that changed nothing is a count of zero, so a
+// seat's no-op share is a query over the session table and not a posture.
+// A write is one of the four posting and shipping scripts, or `gh issue
+// edit` or `gh pr edit` (the curator and the reviewer act by label and
+// milestone), at command position, or a github_file_ops commit or delete,
+// whose result was not an error. Reading a script, naming its test file, a
+// denied call and a non-zero exit are not writes; a call that never got a
+// result is counted, because it may have landed. The command text never
+// reaches the record.
+test("write-shaped tool calls are counted, errored and denied ones are not, inputs never leak", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
+  try {
+    const out = join(directory, "agent-audit");
+    mkdirSync(out);
+    const execution = join(directory, "execution.json");
+    const bash = (id, command) => ({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id, name: "Bash", input: { command } }] },
+    });
+    const result = (id, is_error) => ({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "secret-looking output", is_error }] },
+    });
+    writeFileSync(
+      execution,
+      JSON.stringify([
+        { type: "system", subtype: "init", tools: ["Bash", "mcp__github_file_ops__commit_files"] },
+        bash("w1", "cd /r && .github/scripts/gh-comment 3 <<'EOF'\nsecret-looking body\nEOF"),
+        result("w1", false),
+        bash("w2", "GH_TOKEN=\"$T\" timeout 1500 .github/scripts/merge-pr 12 --wait --sha abc"),
+        result("w2", false),
+        bash("w3", "git add -A\n.github/scripts/push-branch"),
+        result("w3", false),
+        bash("w4", "$(.github/scripts/gh-pr claude/x \"t\" <<EOF\nbody\nEOF\n)"),
+        {
+          type: "assistant",
+          message: {
+            content: [{
+              type: "tool_use",
+              id: "w5",
+              name: "mcp__github_file_ops__commit_files",
+              input: { message: "secret-looking message" },
+            }],
+          },
+        },
+        result("w5", false),
+        bash("e1", ".github/scripts/gh-comment 3 <<'EOF'\nx\nEOF"),
+        result("e1", true),
+        bash("d1", ".github/scripts/gh-pr claude/y \"t\""),
+        {
+          type: "system",
+          subtype: "permission_denied",
+          tool_name: "Bash",
+          tool_use_id: "d1",
+          decision_reason_type: "hook",
+          decision_reason: "deny-em-dash",
+        },
+        bash("r1", "sed -n '1,80p' .github/scripts/gh-comment"),
+        result("r1", false),
+        bash("r2", "node --test .github/scripts/gh-pr.test.mjs .github/scripts/merge-pr.test.mjs"),
+        result("r2", false),
+        bash("r3", ".github/scripts/tg-send <<'EOF'\nstatus\nEOF"),
+        result("r3", false),
+        bash("r4", "gh issue list --label ledger"),
+        result("r4", false),
+        bash("l1", "gh issue edit 3 --add-label ready-to-ship"),
+        result("l1", false),
+        bash("l2", "gh pr edit 4 --milestone M --title 'sharper'"),
+        result("l2", false),
+        bash("c1", "if true; then GH_TOKEN=\"a b\" .github/scripts/gh-comment 3; fi"),
+        result("c1", false),
+        bash("c2", "timeout -k 5 10 .github/scripts/merge-pr 1"),
+        result("c2", false),
+        bash("c3", "bash .github/scripts/push-branch"),
+        result("c3", false),
+        bash("c4", "env X=1 .github/scripts/gh-comment 3"),
+        result("c4", false),
+        bash("k1", ".github/scripts/push-branch"),
+        // A quoted-assignment run with no script after it backtracked
+        // exponentially; the spawn timeout below turns a regression into a failure.
+        bash("q1", `;${"A=\"x\" ".repeat(40)}notwrite`),
+        result("q1", false),
+        bash("q2", "A=\"x\" B='y m' .github/scripts/gh-comment 3"),
+        result("q2", false),
+        { type: "result", result: "done", permission_denials: [{ tool_name: "Bash" }] },
+      ]),
+    );
+    const r = spawnSync("python3", [script, out], {
+      encoding: "utf8",
+      timeout: 20000,
+      env: {
+        ...process.env,
+        EXEC_FILE: execution,
+        GITHUB_OUTPUT: join(directory, "github-output"),
+        GITHUB_WORKSPACE: new URL("../../../", import.meta.url).pathname,
+        RUNNER_TEMP: directory,
+        ROLE: "bdfl",
+      },
+    });
+    assert.equal(r.status, 0, r.stderr || r.stdout || String(r.error));
+    const metadata = readFileSync(join(out, "metadata.json"), "utf8");
+    const tools = JSON.parse(metadata).telemetry.tools;
+    assert.equal(tools.writes, 13, JSON.stringify(tools));
+    assert.deepEqual(tools.used, { Bash: 19, mcp__github_file_ops__commit_files: 1 });
+    assert.ok(!metadata.includes("secret-looking"), "a tool input or result leaked into the record");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

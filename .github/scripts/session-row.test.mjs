@@ -30,6 +30,7 @@ const metadata = {
       "claude-haiku-4-5-20251001": { outputTokens: 17, costUSD: 0.01, costBasis: "list" },
     },
     permission_denials: { count: 2, tools: ["Edit", "Write"] },
+    tools: { offered: ["Bash", "Edit", "Write"], used: { Bash: 20, Edit: 3 }, writes: 3 },
   },
   persona: { path: "agents/personas/reviewer.md", exists: true, bytes: 2000, sha256: "abc123" },
   prompt_extracted: true,
@@ -90,7 +91,7 @@ test("writes the whitelist as one INSERT OR REPLACE, in column order", async () 
       assert.equal(seen.length, 1);
       assert.match(seen[0].sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
       const p = seen[0].params;
-      assert.equal(p.length, 21);
+      assert.equal(p.length, 22);
       assert.equal(p[0], 37148994173);
       assert.equal(p[1], 2);
       assert.match(p[2], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
@@ -101,7 +102,25 @@ test("writes the whitelist as one INSERT OR REPLACE, in column order", async () 
       assert.equal(p[11], 20); // think_pct
       assert.equal(p[12], 0.43); // cost_usd, list-basis entries summed
       assert.deepEqual(p.slice(13, 19), [23, 420000, 2, 0, "end_turn", "abc123"]);
-      assert.deepEqual(p.slice(19), [1234, 567]);
+      assert.deepEqual(p.slice(19), [1234, 567, 3]); // sizes, then writes (#896 item 5)
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// An artifact from before audit-extract.py counted writes carries no key:
+// its row says null, the visible unknown, never 0, which would read as a
+// run that changed nothing.
+test("an artifact without a writes count writes null, not zero", async () => {
+  const { tools, ...telemetry } = metadata.telemetry;
+  const dir = auditDir({ ...metadata, telemetry });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.equal(seen[0].params.length, 22);
+      assert.equal(seen[0].params[21], null);
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -194,7 +213,7 @@ test("an unmeasured run keeps its numbers absent, not zero", async () => {
       const p = seen[0].params;
       assert.equal(p[8], 0); // measured
       assert.deepEqual(p.slice(9, 16), [null, null, null, null, null, null, 0]);
-      assert.deepEqual(p.slice(19), [null, null]); // placeholder texts are not sizes
+      assert.deepEqual(p.slice(19), [null, null, null]); // placeholder texts are not sizes; no count, no writes
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
