@@ -17,22 +17,17 @@
 //! assert_eq!(mothergod::decompress(&frame), Ok(original));
 //! ```
 
-// `bittree`/`codec`/`coder`/`column`/`fieldtype`/`literal`/`lz`/`model`/
-// `ppm`/`sse` are the compression engine's internals, not a surface
-// downstream crates are meant to call directly: `#[doc(hidden)]` keeps them
-// out of the published API a 0.1 consumer sees (ROADMAP M6). Only `lz` has a
-// real external call site today (`mothergod::lz::WINDOW`,
-// `bench/src/lib.rs`); the others are still `pub` rather than
-// `pub(crate)` because several of their items (`Ppm`, `Sse::contexts`,
-// `Model::ideal_cost_bits`, `fieldtype::field_bank`) are research surface
-// for standing leads not yet wired into the live codec path (S1-P1, S1-P2,
-// S1-P3) and have no
-// in-crate caller either — `pub(crate)` would turn them into `dead_code`
-// lint errors under this crate's `-D warnings` gate. Narrowing them stays
-// future work, done together with wiring or removing that research code,
-// not as a side effect of a docs-only pass. `filters` stays fully
-// documented: S2-A2 already judged it "a defensible standalone library
-// surface on their own merits" (`research/JOURNAL.md`).
+// Every module but `filters` is `#[doc(hidden)]`: the engine's internals, not
+// a surface downstream crates are meant to call (ROADMAP M6). They stay `pub`
+// for two reasons. `bench` and `fuzz` call into `lz`, `literal` and `codec`.
+// And the live codec path does not reach the research primitives (`Ppm`,
+// `Model::ideal_cost_bits`, `bittree`'s symbol and ideal-cost functions,
+// `codec`'s `compressed_len_*` and `ideal_cost_bits_*` experiment entry
+// points, `fieldtype`, `Sse::contexts`), whose callers are tests: under
+// `pub(crate)` they become `dead_code` errors with `-D warnings`. Narrowing
+// waits on wiring or removing those items. `filters` is documented: S2-A2
+// judged it "a defensible standalone library surface on their own merits"
+// (`research/JOURNAL.md`).
 #[doc(hidden)]
 pub mod bittree;
 #[doc(hidden)]
