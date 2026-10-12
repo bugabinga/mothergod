@@ -491,7 +491,10 @@ median after that fix, until Bash was granted unrestricted. The maintainer
 still sat at 11 median denials per run, on Bash, in 6 of its 6 most recent
 runs, when the first cross-role telemetry read was taken (2026-08-23, 129
 audit artifacts). A denial is a wasted turn plus a re-plan around a wall the
-agent cannot see the shape of.
+agent cannot see the shape of. From 2026-10-09 the measurement is the `tools`
+table (`infra/sessions/schema.sql`): `sessions sql` over it, joined to
+`sessions` for the seat, answers uses and denials by tool for any window,
+the query the deep survey's context audit opens with.
 
 So: grant Bash unrestricted to any agent that already holds `Edit`/`Write`.
 Withhold a tool only where withholding states a real role boundary — the

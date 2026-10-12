@@ -87,8 +87,8 @@ test("writes the whitelist as one INSERT OR REPLACE, in column order", async () 
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer$/m);
-      assert.equal(seen.length, 1);
+      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3$/m);
+      assert.equal(seen.length, 2); // the session row, then the tools rows
       assert.match(seen[0].sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
       const p = seen[0].params;
       assert.equal(p.length, 22);
@@ -150,9 +150,9 @@ test("the last valid reading per allowance window follows the session row, one s
       assert.equal(r.code, 0, r.err);
       assert.match(
         r.out,
-        /^session-row: wrote run 37148994173 attempt 2 for reviewer, allowance five_hour seven_day seven_day_overage_included$/m,
+        /^session-row: wrote run 37148994173 attempt 2 for reviewer, allowance five_hour seven_day seven_day_overage_included, tools 3$/m,
       );
-      assert.equal(seen.length, 2);
+      assert.equal(seen.length, 3);
       assert.match(seen[0].sql, /^INSERT OR REPLACE INTO sessions /);
       assert.equal(
         seen[1].sql,
@@ -189,15 +189,132 @@ test("a failed allowance write is its own warning after the session row, exit 0"
   const dir = auditDir({ ...metadata, rate_limit_events: readings });
   try {
     await withStub(
-      [{}, { status: 500, payload: { success: false, errors: [{ message: "D1 is down" }] } }],
+      [{}, { status: 500, payload: { success: false, errors: [{ message: "D1 is down" }] } }, {}],
       async (base, seen) => {
         const r = await run([dir], { D1_API_BASE: base });
         assert.equal(r.code, 0, r.err);
-        assert.equal(seen.length, 2);
+        assert.equal(seen.length, 3); // the tools write still follows the allowance miss
         assert.match(r.out, /^::warning::session-row: allowance not written: Unreadable: HTTP 500/m);
-        assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer$/m);
+        assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3$/m);
       },
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #891 slice 5: one row per tool the run called or was refused, counts
+// where the artifact has them. The fixture names Edit and Write refused
+// without a per-tool count (an artifact between #946 and that count), so
+// their denials are null, the visible unknown; Bash, never refused, is 0.
+test("one row per tool called or refused follows the session row", async () => {
+  const dir = auditDir(metadata);
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.equal(
+        seen[1].sql,
+        "INSERT OR REPLACE INTO tools (run_id, attempt, tool, uses, denials) "
+          + "VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+      );
+      assert.deepEqual(seen[1].params, [
+        37148994173,
+        2,
+        "Bash",
+        20,
+        0,
+        37148994173,
+        2,
+        "Edit",
+        3,
+        null,
+        37148994173,
+        2,
+        "Write",
+        0,
+        null,
+      ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a per-tool denial count fills the column where the artifact carries one", async () => {
+  const telemetry = {
+    ...metadata.telemetry,
+    permission_denials: { count: 2, tools: ["Edit", "Write"], by_tool: { Edit: 1, Write: 1 } },
+  };
+  const dir = auditDir({ ...metadata, telemetry });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.deepEqual(seen[1].params, [
+        37148994173,
+        2,
+        "Bash",
+        20,
+        0,
+        37148994173,
+        2,
+        "Edit",
+        3,
+        1,
+        37148994173,
+        2,
+        "Write",
+        0,
+        1,
+      ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The bind cap is 100 parameters a statement; a run's tools are written in
+// statements of 20 rows, capped at 100 names, so a real run never loses a
+// row to the cap and a hostile artifact costs at most five statements.
+test("tools rows are chunked under the bind cap and capped at 100 names", async () => {
+  const used = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`t${String(i).padStart(3, "0")}`, i]));
+  const telemetry = {
+    ...metadata.telemetry,
+    permission_denials: { count: 0, tools: [] },
+    tools: { offered: null, used, writes: 0 },
+  };
+  const dir = auditDir({ ...metadata, telemetry });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.match(r.out, /for reviewer, tools 100$/m);
+      const tools = seen.filter((q) => q.sql.startsWith("INSERT OR REPLACE INTO tools"));
+      assert.equal(tools.length, 5);
+      assert.ok(tools.every((q) => q.params.length === 100));
+      assert.equal(tools[0].params[2], "t000");
+      assert.equal(tools[4].params[97], "t099"); // the first 100 by name
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a use count that is not a count is a warning, the session row still written", async () => {
+  const telemetry = { ...metadata.telemetry, tools: { offered: null, used: { Bash: "lots" }, writes: 0 } };
+  const dir = auditDir({ ...metadata, telemetry });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.equal(seen.length, 1);
+      assert.match(
+        r.out,
+        /^::warning::session-row: tools not written: ValueError: tools.used\['Bash'\] is not a count$/m,
+      );
+      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer$/m);
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

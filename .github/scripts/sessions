@@ -26,8 +26,9 @@ Verbs:
                                   counted, not an error
     backfill [--since 7d|DATE]    one row per archived audit artifact the table
              [--rebuild]          lacks, `at` the artifact's creation, and its
-                                  allowance readings beside it; prints the
-                                  census and exits non-zero on a gap.
+                                  allowance readings and tool counts beside
+                                  it; prints the census and exits non-zero
+                                  on a gap.
                                   --rebuild walks the present rows too: how a
                                   new derived table gets its history, once
 
@@ -189,13 +190,14 @@ def backfill(repo, since, rebuild=False):
     Oldest first, as `archive` lists them, so a walk that dies midway has
     written what the 90-day expiry was about to take. Idempotent: a second
     run finds every row present and downloads nothing. Each artifact's
-    allowance readings are written beside its session row, from the same
-    download; the census stays on sessions, because a run that reported no
-    reading has no allowance row to count.
+    allowance readings and tool counts are written beside its session row,
+    from the same download; the census stays on sessions, because a run
+    that reported no reading has no allowance row to count.
 
     `rebuild` walks every artifact, present rows included: the way a table
     added after the archive began gets its history, once, after `migrate`.
-    The allowance table got its 2026-08-22 floor this way. The table is
+    The allowance table got its 2026-08-22 floor this way, the tools table
+    its 2026-10-09 one. The table is
     read once either way, so the census's `present` counts the rows it held
     before the walk; deriving it from the walk printed `present 0` over a
     full table on that very rebuild (#1012).
@@ -220,6 +222,7 @@ def backfill(repo, since, rebuild=False):
         try:
             values = audit_facts.row(read.meta, read.sizes.get)
             readings = audit_facts.allowance_rows(read.meta)
+            tool_rows = audit_facts.tools_rows(read.meta)
         except Exception as error:  # noqa: BLE001, the invariant above
             unreadable.append(f"{read.artifact.name}: metadata has a malformed field "
                               f"({type(error).__name__}: {error})")
@@ -230,6 +233,8 @@ def backfill(repo, since, rebuild=False):
         d1.query(audit_facts.INSERT, values)
         if readings:
             d1.query(audit_facts.allowance_insert(readings), [v for r in readings for v in r])
+        for sql, params in audit_facts.tools_statements(tool_rows):
+            d1.query(sql, params)
         keys[read.artifact.name] = (values[0], values[1])
         written += 1
     have = keys_in_table()

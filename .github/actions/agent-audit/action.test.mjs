@@ -252,6 +252,7 @@ test("a denial's typed reason reaches metadata.json, distinct and capped", () =>
     const denials = JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")).telemetry.permission_denials;
     assert.equal(denials.count, 3, "the result entry's count stays authoritative");
     assert.deepEqual(denials.tools, ["Edit"]);
+    assert.deepEqual(denials.by_tool, { Edit: 3 }, "the count per name, the tools table's column");
     assert.equal(denials.reasons.length, 2, "one wall hit twice is one line");
     assert.equal(denials.reasons[0].type, "protectedPath");
     assert.equal(denials.reasons[0].reason.length, 240, "capped");
