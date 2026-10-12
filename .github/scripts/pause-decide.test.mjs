@@ -52,6 +52,11 @@ test("transcript prose never pauses (#11): a turn about limits is not a limit", 
   assert.deepEqual(decide({ entries: [init, prose, unrelated], rung: RUNG }), ["none", "", "", ""]);
 });
 
+test("a success whose text names a limit still routes none (#11)", () => {
+  const limitText = { type: "result", is_error: false, result: "You've reached your weekly limit" };
+  assert.deepEqual(decide({ entries: [init, limitText], rung: RUNG }), ["none", "", "", ""]);
+});
+
 test("a 429 keys the ledger by the alias rung, the resolved id in the note", () => {
   const entries = [init, rejected(NOW + 1800), rejected(NOW + 5400), failed({ api_error_status: 429 })];
   assert.deepEqual(decide({ entries, rung: RUNG }), [
@@ -111,6 +116,18 @@ test("the text-marker fallback pauses on a limit with no model to pin it on", ()
   assert.deepEqual(decide({ entries: [rolling] }), ["pause", "rolling", "usage limit", "2026-10-13T09:00:00Z"]);
   const noReset = failed({ result: "out of extra usage" });
   assert.deepEqual(decide({ entries: [noReset] }), ["pause", "rolling", "out of extra usage", ""]);
+});
+
+test("a 429 with no rung and no resolved model falls through to the marker and pauses", () => {
+  const entry = failed({ api_error_status: 429, result: "Claude usage limit hit" });
+  assert.deepEqual(decide({ entries: [entry] }), ["pause", "rolling", "usage limit", ""]);
+});
+
+test("a reset named for the current minute means tomorrow, a later minute today", () => {
+  const now = failed({ result: "usage limit, resets 10:00am (UTC)" });
+  assert.equal(decide({ entries: [now] })[3], "2026-10-13T10:00:00Z");
+  const later = failed({ result: "usage limit, resets 10:01am (UTC)" });
+  assert.equal(decide({ entries: [later] })[3], "2026-10-12T10:01:00Z");
 });
 
 test("the marker never carries the field separator", () => {
