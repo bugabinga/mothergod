@@ -363,3 +363,194 @@ test("an artifact without a tools record prints no tools line", () => {
   const out = describeWith({ count: 0, tools: [] });
   assert.doesNotMatch(out, /^    tools /m);
 });
+
+// The fleet-share line (#896 item 6). SLOW DOWN says shed; this line says
+// whether shedding reaches the cause. The subscription is shared with the
+// operator's own sessions, so the window can move without a session row:
+// on 2026-10-04 a burst moved 31 points while the fleet spent a tenth of
+// the week's rate on them, and the shed that followed could not hold it.
+// The share is a bound, (interval cost / window cost) / (burned / used),
+// with no dollar price per point; usage outside the factory inflates only
+// the denominators. Every branch prints one line, UNREADABLE named.
+const shareDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+case = json.loads(sys.argv[2])
+def query(sql, params=()):
+    if case["window_usd"] == "unreadable":
+        raise mod.d1.Unreadable("HTTP 500: edge")
+    assert "SUM(cost_usd)" in sql and "sessions" in sql, sql
+    assert list(params) == [case["opened"]], params
+    return [{"usd": case["window_usd"]}]
+mod.share(case["opened"], case["burned"], case["used"], case["spent"], query)
+`;
+
+const WINDOW_OPENED = "2026-10-01T02:00:00Z";
+const shareCases = [
+  {
+    // The 2026-10-04 burst, the numbers of #896's comment of 2026-10-11:
+    // 31 of the week's 32 points, $21 of its $224.
+    name: "a burst the fleet did not make is at most a tenth the fleet's",
+    case: { opened: WINDOW_OPENED, burned: 0.31, used: 0.32, spent: [21.0], window_usd: 224.0 },
+    expect: [
+      /fleet share: at most 10% of the 31\.0% burned is the fleet's \(\$21\.00 of the window's \$224\.00 notional, 9\.4%, against 31\.0 of its 32 points, 96\.9%\); the rest is usage outside the factory, which shedding cannot reach\./,
+    ],
+  },
+  {
+    // The fleet's spend share exceeds the burn's share of the window: the
+    // bound passes one and says so, never a percentage over 100.
+    name: "a burn the fleet's own spend can account for is at most all the fleet's",
+    case: { opened: WINDOW_OPENED, burned: 0.005, used: 0.45, spent: [2.0, 2.5], window_usd: 224.0 },
+    expect: [
+      /fleet share: at most all of the 0\.5% burned is the fleet's \(\$4\.50 of the window's \$224\.00 notional, 2\.0%, against 0\.5 of its 45 points, 1\.1%\); the fleet cannot be ruled out as the cause, so shedding may reach it\./,
+    ],
+    reject: [/at most \d/, /1\d\d%/, /is all/],
+  },
+  {
+    // :.0% rounds 0.996 to 100%, a percentage the "all" branch exists to avoid.
+    name: "a bound that rounds to 100% reads as all, never as 100%",
+    case: { opened: WINDOW_OPENED, burned: 0.005, used: 0.5, spent: [0.996], window_usd: 100.0 },
+    expect: [/fleet share: at most all of the 0\.5% burned is the fleet's/],
+    reject: [/at most 100%/],
+  },
+  {
+    name: "a bound just under that prints its percentage",
+    case: { opened: WINDOW_OPENED, burned: 0.005, used: 0.5, spent: [0.99], window_usd: 100.0 },
+    expect: [/fleet share: at most 99% of the 0\.5% burned is the fleet's/],
+  },
+  {
+    name: "a window with no use since it opened spends no read",
+    case: { opened: WINDOW_OPENED, burned: 0.01, used: 0.0, spent: [1.0], window_usd: "unreadable" },
+    expect: [/fleet share: the window shows no use since it opened; nothing to compare against\./],
+    reject: [/UNREADABLE/],
+  },
+  {
+    name: "a table that cannot be read says UNREADABLE, never a share",
+    case: { opened: WINDOW_OPENED, burned: 0.31, used: 0.32, spent: [21.0], window_usd: "unreadable" },
+    expect: [/fleet share: UNREADABLE \(HTTP 500: edge\); the session table could not be read\./],
+    reject: [/at most/, /all of/],
+  },
+  {
+    name: "no priced session audited: nothing to apportion, no read spent",
+    case: { opened: WINDOW_OPENED, burned: 0.31, used: 0.32, spent: [], window_usd: "unreadable" },
+    expect: [/fleet share: no audited session carried a price; nothing to apportion\./],
+  },
+  {
+    name: "a window with no priced row yet has nothing to compare against",
+    case: { opened: WINDOW_OPENED, burned: 0.02, used: 0.02, spent: [1.0], window_usd: null },
+    expect: [
+      /fleet share: no priced session since the window opened \(2026-10-01T02:00:00Z\); nothing to compare against\./,
+    ],
+  },
+  {
+    name: "a window that did not move at reporting precision apportions nothing",
+    case: { opened: WINDOW_OPENED, burned: 0.0, used: 0.45, spent: [1.0], window_usd: 224.0 },
+    expect: [
+      /fleet share: the window did not move at reporting precision over the audited minutes; nothing to apportion\./,
+    ],
+  },
+];
+
+test("the fleet-share line", async (t) => {
+  for (const { name, case: c, expect, reject = [] } of shareCases) {
+    await t.test(name, () => {
+      const r = spawnSync("python3", ["-c", shareDriver, scriptsDir, JSON.stringify(c)], { encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr || r.stdout);
+      for (const pattern of expect) assert.match(r.stdout, pattern);
+      for (const pattern of reject) assert.doesNotMatch(r.stdout, pattern);
+    });
+  }
+});
+
+// Plumbing: the line rides the governed window's burn observation, under
+// its governor line and nowhere else, and the window it prices opened one
+// WEEK before the reset the reading carries. $9 of $224 is 4.0% of the
+// spend against 1.0 of 33 points, 3.0% of the movement: the bound passes one.
+const plumbingDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+samples = [(e["when"], e["info"]) for e in json.loads(sys.argv[2])]
+asked = []
+def query(sql, params=()):
+    asked.append(list(params))
+    return [{"usd": 224.0}]
+mod.budget(samples, None, mod.stamp_to_dt(sys.argv[3]), spent=[9.0], query=query)
+print("asked", json.dumps(asked))
+`;
+
+test("the fleet-share line rides the governed window's observation alone", () => {
+  const events = [
+    { when: "2026-09-12T19:00:00Z", info: windows(0.19, 0.32) },
+    { when: "2026-09-12T19:16:00Z", info: windows(0.3, 0.33) },
+  ];
+  const r = spawnSync(
+    "python3",
+    ["-c", plumbingDriver, scriptsDir, JSON.stringify(events), "2026-09-12T19:24:00Z"],
+    { encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  assert.match(
+    r.stdout,
+    /seven_day: 33% used[^\n]*burned 1\.0% over the 16 min audited\n\s+governor:[^\n]*\n\s+fleet share: at most all of the 1\.0% burned is the fleet's/,
+  );
+  assert.doesNotMatch(r.stdout, /five_hour[^\n]*\n\s+fleet share/);
+  // SEVEN_DAY_RESET is 2026-09-17T02:00:00Z; the window opened a WEEK before.
+  assert.match(r.stdout, /asked \[\["2026-09-10T02:00:00Z"\]\]/);
+});
+
+test("a budget with no spent sessions still prints the share line, degraded", () => {
+  const events = [
+    { when: "2026-09-12T19:00:00Z", info: windows(0.19, 0.32) },
+    { when: "2026-09-12T19:16:00Z", info: windows(0.3, 0.33) },
+  ];
+  const r = spawnSync(
+    "python3",
+    ["-c", driver, scriptsDir, JSON.stringify(events), "2026-09-12T19:24:00Z"],
+    { encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  assert.match(r.stdout, /fleet share: no audited session carried a price; nothing to apportion\./);
+});
+
+// The numerator's source: `spend` prices one artifact by the session table's
+// own rule, and an artifact in an older shape is unpriced, never fatal.
+const spendDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(json.dumps(mod.spend(json.loads(sys.argv[2]))))
+`;
+
+const spendOf = (meta) => {
+  const r = spawnSync("python3", ["-c", spendDriver, scriptsDir, JSON.stringify(meta)], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  return JSON.parse(r.stdout);
+};
+
+test("spend prices an artifact by the session table's rule", () => {
+  const usage = { a: { costUSD: 1.5 }, b: { costUSD: 2.0, costBasis: "list" }, c: { costUSD: 9.0, costBasis: "api" } };
+  assert.equal(spendOf({ telemetry: { modelUsage: usage } }), 3.5);
+});
+
+test("spend leaves an artifact in an older shape unpriced", async (t) => {
+  const legacy = [
+    ["no telemetry", {}],
+    ["telemetry null", { telemetry: null }],
+    ["list-shaped telemetry", { telemetry: [{ tool_name: "Bash" }] }],
+    ["list-shaped modelUsage", { telemetry: { modelUsage: [{ costUSD: 1.0 }] } }],
+    ["list-shaped denials beside a price", { telemetry: { permission_denials: [{ tool_name: "Bash" }] } }],
+    ["a non-list costBasis entry", { telemetry: { modelUsage: { a: "x", b: { costUSD: "1", costBasis: ["list"] } } } }],
+  ];
+  for (const [name, meta] of legacy) await t.test(name, () => assert.equal(spendOf(meta), null));
+});

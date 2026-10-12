@@ -79,6 +79,21 @@ tables (ADR-0060) and prints only the rows that crossed a stated
 threshold, one quiet line otherwise, UNREADABLE when the table cannot be
 read, so the block is never empty and never mistaken for quiet.
 
+SHARE is the ninth, one D1 read, under the governed window's line. SLOW
+DOWN says shed; it cannot say whether shedding reaches the cause, because
+the subscription is shared with the operator's own sessions. On 2026-10-04
+a burst moved 31 points in five hours while the fleet's sessions spent on
+them a tenth of the week's rate, so the shed that followed could not hold
+it (#896 item 6). The line prints the fleet's share of the window's
+movement over the audited minutes as a bound: the audited sessions'
+notional cost over the window's whole notional cost, divided by the burn
+over the points used since the window opened. Usage outside the factory
+moves points without a session row, so it inflates only the denominators;
+the true share is at most the bound, and no dollar price per point is
+needed. The bound assumes notional dollars are proportional to points
+between the interval and the window, which model and cache mix can break;
+a bound past one is printed as "at most all", never as "is all".
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -99,7 +114,8 @@ lacks:
   - non-agent workflows (ci, CodeQL, the worker tests). Those are graded by
     passing or failing, not by judgement.
   - dollars. `total_cost_usd_notional` is a subscription's shadow price, not
-    a bill, and is reported for comparison between roles only.
+    a bill; it is compared between roles and, as a ratio of the window's
+    own, in the fleet-share line, never reported as an amount owed.
 
 Windowing: sessions that COMPLETED at or after the anchor, where the anchor is
 the start of the previous BDFL run that held a session (anchor.py). A session that finished during that
@@ -129,6 +145,8 @@ from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
 from artifacts import report as artifacts_report
 from attribution import comments_since
 from attribution import report as attribution_report
+from audit_facts import notional_cost
+import d1
 from opener import trim
 from rounds import report as rounds_report
 from trend import report as trend_report
@@ -375,7 +393,72 @@ def governor(observed, resets, used):
           "for budget.")
 
 
-def budget(samples, anchor, now=None):
+def spend(meta):
+    """The run's notional cost, by the price rule the session table uses, or
+    None. Reads the one field it needs, so an artifact in an older shape
+    (`telemetry` or `modelUsage` not a mapping) is unpriced, not fatal: the
+    share's numerator must never take the footer down."""
+    tele = meta.get("telemetry")
+    return notional_cost(tele.get("modelUsage") if isinstance(tele, dict) else None)
+
+
+def share(opened, burned, used, spent, query=None):
+    """One line: how much of the governed window's burn over the audited minutes
+    was the fleet's own sessions, as an upper bound.
+
+    `opened` is the window's opening instant as a stamp; `burned` and `used`
+    are fractions of the window, moved over the audited minutes and used
+    since it opened; `spent` is the audited sessions' notional costs, and the
+    window's whole notional cost is one `sessions` read. The bound is
+    (interval cost / window cost) / (burned / used): the fleet's share of its
+    own week's spend, over the interval's share of the window's movement.
+    Usage outside the factory, the operator's own sessions on the same
+    subscription, moves points without a session row, so it inflates `used`
+    and `burned` alone, and the true share is at most the bound. SLOW DOWN
+    reads it as "shedding reaches at most this much of the cause". No dollar
+    price per point is needed, which is what kept #896 item 6 open.
+
+    Every branch prints one line, UNREADABLE when the table could not be
+    read, never a share of zero in its place.
+    """
+    query = query or d1.query
+    head = "        fleet share: "
+    if burned <= 0:
+        print(head + "the window did not move at reporting precision over the "
+              "audited minutes; nothing to apportion.")
+        return
+    if used <= 0:
+        print(head + "the window shows no use since it opened; nothing to compare against.")
+        return
+    if not spent:
+        print(head + "no audited session carried a price; nothing to apportion.")
+        return
+    try:
+        rows = query("SELECT SUM(cost_usd) AS usd FROM sessions WHERE at >= ?", [opened])
+    except d1.Unreadable as error:
+        print(head + f"UNREADABLE ({error}); the session table could not be read.")
+        return
+    window_usd = rows[0].get("usd") if rows else None
+    if not isinstance(window_usd, (int, float)) or window_usd <= 0:
+        print(head + f"no priced session since the window opened ({opened}); "
+              "nothing to compare against.")
+        return
+    interval_usd = sum(spent)
+    usd_share = interval_usd / window_usd
+    points_share = burned / used
+    bound = usd_share / points_share
+    basis = (f"${interval_usd:,.2f} of the window's ${window_usd:,.2f} notional, "
+             f"{usd_share:.1%}, against {burned * 100:.1f} of its {used * 100:.0f} points, "
+             f"{points_share:.1%}")
+    if round(bound, 2) >= 1:
+        print(head + f"at most all of the {burned:.1%} burned is the fleet's ({basis}); "
+              "the fleet cannot be ruled out as the cause, so shedding may reach it.")
+        return
+    print(head + f"at most {bound:.0%} of the {burned:.1%} burned is the fleet's ({basis}); "
+          "the rest is usage outside the factory, which shedding cannot reach.")
+
+
+def budget(samples, anchor, now=None, spent=None, query=None):
     """What the subscription has left, from the rate-limit events just read.
 
     `samples` is (when, rate_limit_info) in session order. Each info carries
@@ -407,6 +490,10 @@ def budget(samples, anchor, now=None):
     `used` over the elapsed that produced it, and it does not run at all
     on a window that already reset: a stale SLOW DOWN throttles a seat
     the guard has already released.
+
+    `spent` is the audited sessions' notional costs and `query` the session
+    table's reader, both for `share`, which rides the governed window's
+    burn observation and prints under its governor line.
     """
     now = now or datetime.now(timezone.utc)
     print("\nbudget:")
@@ -469,6 +556,9 @@ def budget(samples, anchor, now=None):
             print("        on overage: past the included allowance already.")
         if kind == GOVERNED:
             governor(observed.timestamp(), resets_at, used)
+            if observation:
+                opened = datetime.fromtimestamp(resets_at - WEEK, timezone.utc).strftime(STAMP)
+                share(opened, burned, used, spent or [], query)
 
     for kind in sorted(set(unreadable) - set(by_type)):
         print(f"    {kind}: present in {unreadable[kind]} event(s), none "
@@ -510,7 +600,7 @@ def main():
     window.sort(key=lambda r: r["updatedAt"])
 
     workspace = tempfile.mkdtemp(prefix="retrospect-")
-    read, skipped, openers, orphans, phantoms, samples = 0, 0, 0, [], [], []
+    read, skipped, openers, orphans, phantoms, samples, spent = 0, 0, 0, [], [], [], []
     try:
         for run in window:
             directory = download(run["databaseId"], workspace)
@@ -527,6 +617,9 @@ def main():
             openers += describe(run, meta, response)
             read += 1
             when = iso(run["updatedAt"])
+            cost = spend(meta)
+            if cost is not None:
+                spent.append(cost)
             for info in meta.get("rate_limit_events") or []:
                 if isinstance(info, dict):
                     samples.append((when, info))
@@ -559,7 +652,7 @@ def main():
 
     print()
     rounds_report(repo, anchor)
-    budget(samples, anchor)
+    budget(samples, anchor, spent=spent)
     trend_report()
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
