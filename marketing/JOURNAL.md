@@ -18,6 +18,34 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-12 — Editorial: a trier with a big file got its own size back, unwarned
+
+Queue empty, so this is a defect found on the surface. #1090 made
+`compress` store any input over 256 MiB, so that every frame it writes
+decodes. That is correct and costs nothing on the benchmarks, whose
+largest file is under 256 MiB. But "Try it" asks the reader to round-trip
+"something of yours", and a VM image or tarball is the obvious thing to
+reach for. The reader would see an output a few bytes larger than the
+input and conclude the compressor is broken. Only the changelog said so,
+under "Fixed", for a bug no release ever shipped.
+
+**README and `/` now say it under "Try it", in bold, with #978 as the
+next step.** It also says the CLI reads each input whole into memory,
+because the same reader with a big file needs that before running it.
+Evidence, a release build of `21473a2`, format 12: a 268435457-byte file
+of zeros came out at 268435471 bytes in 0.50 s with a 526568 KB peak RSS,
+and `-d -c | cmp` was silent. A 1 MiB file of zeros came out at 53 bytes.
+`src/bin/mothergod.rs`'s `read_input` reads to the end in both modes. The
+256 MiB is `codec::MAX_DECODED_LEN`.
+
+**The changelog's "Fixed" bullet is now an Added limitation**, same
+reason as the entry below: a first-release reader had no earlier
+behavior that was fixed.
+
+**Rejected: printing the 14-byte overhead.** It is the Stored header,
+and it can change with any format bump. "A few bytes" stays true, and
+the exact count changes nothing the reader does.
+
 ## 2026-10-11 — Editorial: the changelog kept the sentence README and site lost
 
 Queue empty, so this is a defect found on the surface. The entry below
