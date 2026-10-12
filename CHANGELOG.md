@@ -74,6 +74,13 @@ All notable changes to this project are documented here. Format follows
   mistyped link still offers a way to the three real pages instead of a
   silent copy of the homepage.
 
+### Fixed
+
+- format: `compress` stores an input longer than 256 MiB instead of writing a
+  compressed frame that `decompress` rejects as too large, which made the
+  output of a 256 MiB to 4 GiB input unreadable. Such inputs lose their
+  compression until frames split large inputs (#1086).
+
 ### Changed
 
 - Status page: the TRUST panel's fuzz CPU-hours and crasher count are
