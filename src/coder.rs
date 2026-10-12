@@ -334,8 +334,7 @@ impl<'a> Decoder<'a> {
 /// count. [`Encoder::encode_bit`] and [`Decoder::decode_bit`] both call this
 /// with identical inputs and only `+ - * /`, [`f64::clamp`], and rounding —
 /// no libm transcendental — so both sides compute the same threshold
-/// bit-for-bit (ADR-0024's determinism rule, the same reason
-/// [`crate::sse::Sse`] chose linear-domain bins over a logit transform).
+/// bit-for-bit (ADR-0024's determinism rule).
 fn quantize_probability(probability_of_one: f64) -> u64 {
     #[allow(
         clippy::cast_precision_loss,

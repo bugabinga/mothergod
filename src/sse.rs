@@ -1,86 +1,40 @@
-//! Secondary symbol estimation: [`Sse`], a standalone adaptive probability
-//! calibration primitive for ROADMAP M3's oldest standing lead (`JOURNAL`
-//! S1-P1, "SSE", targeting the five zstd text holdouts). Not a port: S1-P1
-//! is a literature lead the founding session never implemented (grepped
-//! `research/imports/session-1/` clean of any SSE/APM code), so there is no
-//! archive behavior to carry forward, unlike every other module in this
-//! crate (ADR-0006).
+//! Secondary symbol estimation (Mahoney 2005, also called an APM): [`Table`],
+//! an adaptive probability calibration primitive. It takes a primary model's
+//! probability for one outcome plus a small side context and looks up a
+//! separately adapted probability for that `(context, estimate)` pair,
+//! correcting the primary model's systematic bias ("when the mixer says 70%,
+//! the true rate in this context is 85%").
 //!
-//! An SSE (secondary symbol estimation, Mahoney 2005; also called an APM,
-//! adaptive probability map) stage takes a primary model's probability
-//! estimate for one outcome plus a small side context, and looks up a
-//! separately-adapted, better-calibrated probability for that same
-//! `(context, estimate)` pair — it corrects a primary model's systematic
-//! bias ("when the mixer says 70%, the true rate in this context is
-//! actually 85%") rather than predicting from raw symbol history itself.
+//! Calibration quantizes `p` into two neighboring bins, interpolates for a
+//! read, and nudges both toward the observed outcome on a write. [`Spacing`]
+//! is the only axis the two tables differ on: [`Sse`] spaces its bins evenly
+//! in linear probability, [`LogitSse`] evenly in [`stretch`]-space, which
+//! concentrates resolution near 0 and 1.
 //!
-//! **Design deviation from the classic APM.** PAQ's APM warps its bin
-//! spacing through a logit transform (`stretch = ln(p / (1 - p))`,
-//! `squash` its inverse) so bins concentrate resolution near 0 and 1,
-//! where calibration errors cost the most. This crate's `clippy.toml`
-//! forbids every libm transcendental crate-wide (ADR-0024): a mixing
-//! weight or probability the encoder computes and the decoder must
-//! reproduce bit-for-bit cannot depend on a function libm implementations
-//! disagree on in the last ulp. [`Literal`](crate::literal::Literal)
-//! solved the identical problem for its own weight update by vendoring a
-//! deterministic `exp`; this module sidesteps it instead, by choosing
-//! *linear*-domain bins (evenly spaced across `[0.0, 1.0]`) rather than
-//! log-domain ones. The calibration mechanism — quantize into two
-//! neighboring bins, interpolate for a read, nudge both toward the
-//! observed outcome on a write — is the same idea `stretch`/`squash`
-//! serves; only the bin spacing is simpler, at the cost of coarser
-//! resolution near the extremes than a production APM would want. Bit-
-//! exact reproducibility (`+ - * /` and [`f64::clamp`] only) matters more
-//! here than that resolution, so this crate takes the trade.
+//! Every probability here feeds the coder, so it must be bit-exact between
+//! encoder and decoder: the arithmetic is `+ - * /`, [`f64::clamp`],
+//! [`f64::floor`] and [`crate::logistic`]'s deterministic `stretch`/`squash`,
+//! never a libm transcendental (ADR-0024).
 //!
-//! **Wired (`JOURNAL` S1-P1 closed, ADR-0038).** This slice also closed a
-//! prerequisite: [`crate::coder::Encoder::encode_bit`]/
-//! [`crate::coder::Decoder::decode_bit`] let a caller drive the range
-//! coder from an arbitrary probability instead of only a
-//! [`crate::model::Model`]-derived frequency, and this module's own test
-//! suite proves the two work together — an `Sse`-calibrated probability,
-//! coded through that primitive, round-trips exactly and costs far fewer
-//! bits than a fixed 50/50 split on the same skewed sequence. Decomposing
-//! the flag model's binary "is this a copy, not a literal" sub-decision
-//! and wiring `Sse` behind it was tried and reverted (`research/JOURNAL.md`
-//! S2-R1): an `Sse` stage over an already order-0-adaptive binary decision
-//! showed no train improvement and one sealed regression — SSE earns its
-//! keep calibrating a compound estimate, not a lone counter already
-//! tracking its own rate. The next attempt calibrated exactly that: the
-//! six-expert literal mixer's own blended probability at each node of
-//! [`crate::bittree`]'s binary decomposition
-//! ([`crate::literal::Literal::encode_sse`]/`decode_sse`, `research/JOURNAL.md`
-//! S2-A60), which won on the train/sealed split (net train -0.36736 b/B,
-//! both sealed kinds improved). `research/JOURNAL.md` S2-A60 has the full
-//! numbers and mechanism read.
+//! Consumers: [`crate::bittree`]'s binary walk ([`Sse`]) and
+//! [`crate::literal::SurpriseLogisticMix`] ([`Sse`] and [`LogitSse`]).
 
 use std::marker::PhantomData;
 
 use crate::logistic::{squash, stretch};
 
-/// Number of probability bins per context: 33 evenly spaced points across
-/// `[0.0, 1.0]` (32 intervals), the classic PAQ/APM bin count (Mahoney
-/// 2005) — one bin per point, `1.0 / 32.0` apart, so bin `i` starts life
-/// at exactly `i / 32.0`.
+/// Bins per context: 33 points across `[0.0, 1.0]` (32 intervals, the classic
+/// APM count), so under [`Linear`] bin `i` starts at exactly `i / 32.0`.
 const BINS: usize = 33;
 
-/// Learning rate for [`Sse::update`]: how far a bin's calibrated
-/// probability moves toward each observed outcome, per update. An
-/// exponential moving average, not a running count-based mean — matching
-/// this crate's other adaptive tables ([`crate::model::Model`]'s
-/// increment-then-halve rule, [`crate::literal::Literal`]'s mixing-weight
-/// update), which all favor recent evidence over an unweighted lifetime
-/// average, because compressible data is rarely stationary (`JOURNAL`
-/// S1-L4).
+/// How far a bin moves toward each observed outcome per update: an
+/// exponential moving average, favoring recent evidence over a lifetime mean
+/// because compressible data is rarely stationary.
 const LEARNING_RATE: f64 = 1.0 / 32.0;
 
-/// The smallest probability [`Sse::refine`] ever returns, and `1.0` minus
-/// this is the largest. A probability of exactly `0.0` or `1.0` costs
-/// infinite or zero bits under `-log2`, and declares an outcome
-/// impossible — a claim no adaptive table fed by finite, noisy evidence
-/// should ever make (the same "nothing is ever impossible to code"
-/// guarantee [`crate::model::Model`] gives by starting every frequency at
-/// 1, applied to a continuous probability instead of a discrete count).
+/// The smallest probability [`Table::refine`] returns; `1.0` minus this is
+/// the largest. Exactly `0.0` or `1.0` costs infinite bits when wrong, a
+/// claim no table fed by finite evidence may make.
 const MIN_PROBABILITY: f64 = 1.0 / 4096.0;
 const MAX_PROBABILITY: f64 = 1.0 - MIN_PROBABILITY;
 
@@ -165,7 +119,7 @@ fn stretch_bound() -> f64 {
 }
 
 /// Evenly spaced bins in [`stretch`]-space, concentrating resolution near
-/// 0 and 1 the way [`Sse`]'s own module doc says a production APM wants.
+/// 0 and 1.
 #[derive(Debug, Clone)]
 pub struct Logit;
 
@@ -214,15 +168,7 @@ pub struct Table<S> {
 /// [`Table`] over [`Linear`] bins.
 pub type Sse = Table<Linear>;
 
-/// Logit-domain counterpart to [`Sse`]'s bin spacing, a research candidate
-/// (`research/JOURNAL.md` S2-A106): [`Sse`]'s own module doc records a
-/// deliberate deviation from the classic APM (Mahoney 2005) because this
-/// crate had no deterministic transcendental pair to spend on it at the
-/// time (S2-A40). [`crate::logistic`] (S2-A101) built exactly that pair for
-/// [`crate::literal::LogisticMix`]'s own mixing step and it already ships
-/// on the real coding path (`FORMAT_VERSION` 5+), so the blocker no longer
-/// holds. This is the untried side of that deviation: [`Table`] over
-/// [`Logit`] bins, everything else identical to [`Sse`].
+/// [`Table`] over [`Logit`] bins.
 pub type LogitSse = Table<Logit>;
 
 impl<S: Spacing> Table<S> {
