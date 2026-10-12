@@ -8542,3 +8542,38 @@ record.
   not regenerated here: `baseline_gate check` passes against the unchanged
   baseline, and a new baseline retires both finals reports' fingerprint,
   which needs their network fetches. `research/progress.jsonl` it190.
+
+- S2-A116 | ACCEPTED | Encoder-only slice of #978 (block-split encode) serving #1094:
+  `compress` cuts an input into blocks of 16 MiB (`BLOCK_LEN`), one frame
+  each, so the optimal parse's per-position state (about 42 bytes per input
+  byte: `dp`, `parent`, `cache`, and the match finder's `left`, `right`) is
+  held for one block and not the whole input. The block is set by the memory
+  budget #978 states, peak encode RSS under 1 GiB on a 256 MiB input, not
+  tuned on ratio; no decode change, no `FORMAT_VERSION` bump, since ADR-0067
+  already lets a stream carry any number of frames, and every input of at
+  most 16 MiB is byte-identical to before (the `baseline_gate` cases and the
+  goldens are all far below it). Past 256 MiB the input is still one `Stored`
+  frame (#1086). | Measured, release build, one Linux x86_64 runner, whole
+  file vs 16 MiB blocks, real bitstreams, Silesia finals at the pins in
+  `bench/corpus.toml` (the four files over 16 MiB; the other eight are
+  unchanged by construction), every output round-tripped through `-dc` and
+  `cmp`: samba 4,253,355 -> 4,252,263 (-0.03%), nci 1,967,961 -> 1,970,675
+  (+0.14%), webster 9,273,938 -> 9,314,890 (+0.44%), mozilla 15,595,700 ->
+  15,586,911 (-0.06%); over the four, 31,090,954 -> 31,124,739 bytes, **+0.11%**
+  (1.6824 -> 1.6843 b/B on 147,839,028 bytes). Encode time within 5% either
+  way (samba 125 s -> 128 s, mozilla 302 s -> 315 s). Memory:
+  16 MiB of zeros peaks at 691 MB; 256 MiB of zeros, which did not finish in
+  300 s at 11 GB before, encodes in 6 min 13 s at 946 MB peak, 6,160 bytes,
+  and decodes back to the input. | Mechanism: a block restarts the adaptive
+  models and cannot match into an earlier block, so the cost is the lost
+  cross-boundary history, largest where long-range repeats span the cut
+  (webster, a dictionary-ordered text). samba and mozilla come out smaller,
+  so a restart also helps where the statistics drift inside a file; which of
+  the two effects dominates in each file is not isolated. Time stays linear
+  in input: the block bounds memory, not seconds (SPEED, untouched). The
+  finals were run once, as the cost of a constraint, and tuned against
+  nothing, so the sealed-validation rule has nothing to guard. Remaining
+  scope: carrying history across blocks (a window primed from the
+  previous block's tail) would recover the boundary cost and is a format
+  change, untested. `research/progress.jsonl`
+  it191.

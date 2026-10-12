@@ -84,6 +84,47 @@ fn compressible_input_past_the_decode_bound_is_stored_and_round_trips() {
     assert!(decompress(&frame).is_ok_and(|output| output == input));
 }
 
+/// The methods of `stream`'s frames, in order.
+fn frame_methods(stream: &[u8]) -> Vec<Method> {
+    Frames::new(stream)
+        .map(|frame| frame.expect("compress writes whole frames").method)
+        .collect()
+}
+
+#[test]
+fn input_past_the_block_length_is_one_frame_per_block_and_round_trips() {
+    // Block 0 compresses, block 1 is incompressible so it falls back to
+    // `Stored` on its own, and the short tail is a third frame: each
+    // block chooses its method alone.
+    const BLOCK: usize = 4096;
+    let mut input = vec![b'a'; BLOCK];
+    input.extend(
+        test_support::Xorshift32::new(1)
+            .take(BLOCK)
+            .map(|word| word.to_le_bytes()[1]),
+    );
+    input.extend_from_slice(b"tail");
+    let stream = compress_blocks(&input, BLOCK);
+    assert_eq!(
+        frame_methods(&stream),
+        [Method::Lz, Method::Stored, Method::Stored]
+    );
+    assert_eq!(decompress(&stream), Ok(input));
+}
+
+#[test]
+fn input_of_exactly_the_block_length_is_one_frame() {
+    const BLOCK: usize = 4096;
+    for len in [0, 1, BLOCK - 1, BLOCK] {
+        let input = vec![b'a'; len];
+        let stream = compress_blocks(&input, BLOCK);
+        assert_eq!(frame_methods(&stream).len(), 1, "input of {len} bytes");
+        assert_eq!(decompress(&stream), Ok(input));
+    }
+    let stream = compress_blocks(&vec![b'a'; BLOCK + 1], BLOCK);
+    assert_eq!(frame_methods(&stream).len(), 2);
+}
+
 #[test]
 fn candidate_beats_incumbent_keeps_the_strictly_smaller_candidate_only() {
     assert!(
