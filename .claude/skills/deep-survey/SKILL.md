@@ -125,13 +125,15 @@ that issue's research comment. Smallest effective context is the target
 metric. Open with the seat's measured tool use, the `tools` table joined
 to `sessions` for the seat (#725's proof, #891 slice 5):
 
-    sessions sql "SELECT tool, SUM(uses) AS uses, SUM(tools.denials) AS denials, SUM(tools.denials IS NULL) AS denials_uncounted, COUNT(*) AS runs FROM tools JOIN sessions USING (run_id, attempt) WHERE role = ? AND at >= ? GROUP BY tool ORDER BY uses DESC" <seat> <since>
+    .github/scripts/sessions sql "SELECT tool, SUM(uses) AS uses, SUM(tools.denials) AS denials, SUM(tools.denials IS NULL) AS denials_uncounted, COUNT(*) AS runs FROM tools JOIN sessions USING (run_id, attempt) WHERE role = ? AND at >= ? GROUP BY tool ORDER BY uses DESC" <seat> <since>
 
 A tool with no row is one the seat never called; a `--tools` trim names
 the rows it drops, and a denials column that is not zero names the wall
 the seat keeps hitting. `denials_uncounted` is the runs whose artifact
 named the tool refused before the per-tool count existed (2026-10-09 to
-2026-10-12); it reads 0 once they expire. Name the seat you audited in the digest so the
+2026-10-12). Those rows live in D1, which nothing prunes, so the column
+stays nonzero for any `<since>` on or before 2026-10-12 and reads 0 for
+a later one. Name the seat you audited in the digest so the
 rotation is visible and does not silently stall on the same seat.
 
 ## Completion gate
