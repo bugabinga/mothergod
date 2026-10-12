@@ -596,6 +596,49 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
     stream
 }
 
+/// Compresses everything `source` yields into `sink` as a stream of frames,
+/// holding one block of 16 MiB at a time: the encoder's memory is bounded by
+/// the block and not by the input, which [`compress`] cannot offer because it
+/// takes the whole input as a slice.
+///
+/// An input of at most [`codec::MAX_DECODED_LEN`] bytes writes the bytes
+/// [`compress`] returns. A longer one writes `Lz` frames [`compress`] would
+/// store, so its total `Lz` output passes what [`decompress`] and
+/// [`decompress_bounded`] hold in memory and they reject it as
+/// [`Error::TooLarge`]; [`decompress_to_writer`] carries any length.
+///
+/// # Errors
+///
+/// The first error `source` or `sink` returns. `sink` then holds the frames
+/// of the blocks before the failing one, a stream that decodes to a prefix.
+pub fn copy_encode<R: std::io::Read, W: std::io::Write>(source: R, sink: W) -> std::io::Result<()> {
+    copy_encode_blocks(source, sink, BLOCK_LEN)
+}
+
+/// [`copy_encode`] with the block length a parameter, as [`compress_blocks`]
+/// is for [`compress`]. `block_len` is nonzero.
+fn copy_encode_blocks<R: std::io::Read, W: std::io::Write>(
+    mut source: R,
+    mut sink: W,
+    block_len: usize,
+) -> std::io::Result<()> {
+    use std::io::Read as _;
+    let limit = u64::try_from(block_len).unwrap_or(u64::MAX);
+    let mut block = Vec::new();
+    let mut wrote_a_frame = false;
+    loop {
+        block.clear();
+        (&mut source).take(limit).read_to_end(&mut block)?;
+        // A stream is one or more frames (ADR-0067): empty input is the
+        // one case where the first read is the last.
+        if block.is_empty() && wrote_a_frame {
+            return Ok(());
+        }
+        sink.write_all(&compress_block(&block))?;
+        wrote_a_frame = true;
+    }
+}
+
 /// One frame for `block`: [`Method::Lz`] if it is smaller, else
 /// [`Method::Stored`].
 fn compress_block(block: &[u8]) -> Vec<u8> {

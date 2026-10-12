@@ -399,14 +399,6 @@ cmp FILE FILE.out</pre>
           put it in a bug report. Expect the encode to take a while, at the
           rates above.
         </p>
-        <p>
-          <strong>A file over 256 MiB comes out stored, not compressed:</strong>
-          the output is the input plus a few bytes, and it still round-trips.
-          The CLI also reads each input whole into memory before it starts.
-          Splitting large inputs is
-          <a href="https://github.com/bugabinga/mothergod/issues/978"
-          >issue #978</a>.
-        </p>
       </section>
 
       <section>

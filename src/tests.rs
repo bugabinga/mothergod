@@ -171,6 +171,90 @@ fn input_of_exactly_the_block_length_is_one_frame() {
     assert_eq!(frame_methods(&stream).len(), 2);
 }
 
+/// A reader that hands out `chunk` bytes per call, so `copy_encode_blocks`
+/// cannot rely on one `read` filling a block.
+struct Dribble<'a> {
+    rest: &'a [u8],
+    chunk: usize,
+}
+
+impl std::io::Read for Dribble<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.chunk.min(buf.len()).min(self.rest.len());
+        buf[..n].copy_from_slice(&self.rest[..n]);
+        self.rest = &self.rest[n..];
+        Ok(n)
+    }
+}
+
+#[test]
+fn copy_encode_writes_the_bytes_compress_returns_at_every_block_boundary() {
+    const BLOCK: usize = 4096;
+    let noise: Vec<u8> = test_support::Xorshift32::new(7)
+        .take(BLOCK)
+        .map(|word| word.to_le_bytes()[1])
+        .collect();
+    let mut mixed = vec![b'a'; BLOCK];
+    mixed.extend_from_slice(&noise);
+    mixed.extend_from_slice(b"tail");
+    for input in [
+        Vec::new(),
+        vec![b'a'],
+        vec![b'a'; BLOCK - 1],
+        vec![b'a'; BLOCK],
+        vec![b'a'; BLOCK + 1],
+        vec![b'a'; 3 * BLOCK],
+        mixed,
+    ] {
+        for chunk in [1, 1000, usize::MAX] {
+            let mut sink = Vec::new();
+            copy_encode_blocks(
+                Dribble {
+                    rest: &input,
+                    chunk,
+                },
+                &mut sink,
+                BLOCK,
+            )
+            .expect("a slice and a Vec do not fail");
+            assert_eq!(
+                sink,
+                compress_blocks(&input, BLOCK),
+                "input of {} bytes read {chunk} at a time",
+                input.len()
+            );
+            assert_eq!(decompress(&sink), Ok(input.clone()));
+        }
+    }
+}
+
+#[test]
+fn copy_encode_reports_a_failing_source_and_a_failing_sink() {
+    struct Failing;
+    impl std::io::Read for Failing {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::PermissionDenied.into())
+        }
+    }
+    impl std::io::Write for Failing {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut sink = Vec::new();
+    let err = copy_encode(Failing, &mut sink).expect_err("the source failed");
+    assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(
+        sink.is_empty(),
+        "no frame is written for a block never read"
+    );
+    let err = copy_encode(&b"abc"[..], Failing).expect_err("the sink failed");
+    assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+}
+
 #[test]
 fn candidate_beats_incumbent_keeps_the_strictly_smaller_candidate_only() {
     assert!(

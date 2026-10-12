@@ -195,6 +195,21 @@ fn a_failing_operand_does_not_stop_the_next_and_the_run_exits_one() {
 }
 
 #[test]
+fn compress_of_an_unreadable_operand_names_it_and_leaves_no_output_file() {
+    let dir = Dir::new("unreadable-operand");
+    let operand = dir.0.join("subdir");
+    std::fs::create_dir(&operand).unwrap();
+    let output = run_output(bin().arg(&operand), b"");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("reading") && stderr.contains("subdir"),
+        "{stderr}"
+    );
+    assert!(!dir.0.join("subdir.mgdc").exists());
+}
+
+#[test]
 fn help_flag_succeeds() {
     let (stdout, code) = run(bin().arg("--help"), b"");
     assert_eq!(code, 0);
