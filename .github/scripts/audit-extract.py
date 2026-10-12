@@ -238,22 +238,31 @@ for _, name, _ in uses:
 # project's shared state, so "a wake that changed nothing" is a column of
 # the session row and a seat's no-op share is a query (trend.py), not a
 # posture. A write is a Bash call that runs one of the four posting and
-# shipping scripts at command position, or a github_file_ops commit or
-# delete, whose result was not an error: a hook denial and a script that
-# exited non-zero both come back as a tool_result with is_error. tg-send
-# is not a write, because every BDFL wake sends its status line, no-op
-# included; a label edit is not either, because a verdict never lands
-# without its gh-comment. The command text is matched and never kept: the
-# count is the whole record, the keys-only rule above.
+# shipping scripts, or `gh issue edit` or `gh pr edit` (a label, milestone
+# or title is how the curator and the reviewer act without a post), at
+# command position, or a github_file_ops commit or delete, whose result was
+# not an error: a hook denial and a script that exited non-zero both come
+# back as a tool_result with is_error. tg-send is not a write, because
+# every BDFL wake sends its status line, no-op included. The command text
+# is matched and never kept: the count is the whole record, the keys-only
+# rule above.
 WRITE_TOOLS = {"mcp__github_file_ops__commit_files", "mcp__github_file_ops__delete_files"}
-# Command position: the start, or after `;`, `&`, `|`, `(` or a newline,
-# then optional `VAR=value` assignments and an optional `timeout N`, then
-# the script by any path, followed by whitespace or the end. So
+# Command position: the start, or after `;`, `&`, `|`, `(`, `{` or a newline,
+# then an optional `then`, `do`, `else` or `!`, then any run of `VAR=value`
+# assignments (a quoted value may hold spaces), `env`, `timeout` with its
+# options and duration, and `bash` or `sh` running a script file, then the
+# command by any path, followed by whitespace or the end. So
 # `sed -n 1,9p .github/scripts/gh-comment` reads the script and is not a
-# write, and `gh-comment.test.mjs` is a test file, not a post.
+# write, and `gh-comment.test.mjs` is a test file, not a post. Known
+# misses, undercounts both: `bash -c '...'` and a quoted command. Known
+# overcount: a heredoc or commit-message line that begins with a script
+# name, because matching text cannot tell it from a command.
 WRITE_SCRIPT = re.compile(
-    r"(?:^|[;&|(\n])\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout\s+\S+\s+)?"
-    r"(?:\S*/)?(?:gh-comment|gh-pr|merge-pr|push-branch)(?=\s|$)")
+    r"(?:^|[;&|({\n])\s*(?:(?:then|do|else|!)\s+)?"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\S*)|env|bash|sh"
+    r"|timeout(?:\s+-\S+(?:\s+\d\S*)?)*\s+\d\S*)\s+)*"
+    r"(?:(?:\S*/)?(?:gh-comment|gh-pr|merge-pr|push-branch)"
+    r"|gh\s+(?:issue|pr)\s+edit)(?=\s|$)")
 
 
 def is_write(name, tool_input):

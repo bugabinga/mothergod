@@ -19,8 +19,8 @@ it, so a constant moved either way, or a `>=` made `>`, fails a test.
 Errors have no constant: any change prints.
 
 The no-op share (#896 item 5, operator steer of 2026-10-03) is read from
-the `writes` column: a run with 0 changed nothing, a post, a PR, a merge
-or a commit, and a seat past NOOP_SHARE of its recorded runs is a
+the `writes` column: a run with 0 changed nothing, a post, a PR, a merge,
+a commit or a label edit, and a seat past NOOP_SHARE of its recorded runs is a
 deletion candidate the survey names by name. Runs from before the column
 carry NULL and are neither no-ops nor counted; a seat prints on this
 week's share alone, like `skipped`, because changing nothing half the

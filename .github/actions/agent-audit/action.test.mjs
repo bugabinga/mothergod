@@ -344,10 +344,13 @@ test("an execution log without an init entry records the offered set as unknown"
 
 // Issue #896 item 5: a run that changed nothing is a count of zero, so a
 // seat's no-op share is a query over the session table and not a posture.
-// A write is one of the four posting and shipping scripts at command
-// position, or a github_file_ops commit or delete, whose result was not an
-// error. Reading a script, naming its test file, a denied call and a
-// non-zero exit are not writes. The command text never reaches the record.
+// A write is one of the four posting and shipping scripts, or `gh issue
+// edit` or `gh pr edit` (the curator and the reviewer act by label and
+// milestone), at command position, or a github_file_ops commit or delete,
+// whose result was not an error. Reading a script, naming its test file, a
+// denied call and a non-zero exit are not writes; a call that never got a
+// result is counted, because it may have landed. The command text never
+// reaches the record.
 test("write-shaped tool calls are counted, errored and denied ones are not, inputs never leak", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
   try {
@@ -402,8 +405,21 @@ test("write-shaped tool calls are counted, errored and denied ones are not, inpu
         result("r2", false),
         bash("r3", ".github/scripts/tg-send <<'EOF'\nstatus\nEOF"),
         result("r3", false),
-        bash("r4", "gh issue edit 3 --add-label ledger"),
+        bash("r4", "gh issue list --label ledger"),
         result("r4", false),
+        bash("l1", "gh issue edit 3 --add-label ready-to-ship"),
+        result("l1", false),
+        bash("l2", "gh pr edit 4 --milestone M --title 'sharper'"),
+        result("l2", false),
+        bash("c1", "if true; then GH_TOKEN=\"a b\" .github/scripts/gh-comment 3; fi"),
+        result("c1", false),
+        bash("c2", "timeout -k 5 10 .github/scripts/merge-pr 1"),
+        result("c2", false),
+        bash("c3", "bash .github/scripts/push-branch"),
+        result("c3", false),
+        bash("c4", "env X=1 .github/scripts/gh-comment 3"),
+        result("c4", false),
+        bash("k1", ".github/scripts/push-branch"),
         { type: "result", result: "done", permission_denials: [{ tool_name: "Bash" }] },
       ]),
     );
@@ -421,8 +437,8 @@ test("write-shaped tool calls are counted, errored and denied ones are not, inpu
     assert.equal(r.status, 0, r.stderr || r.stdout);
     const metadata = readFileSync(join(out, "metadata.json"), "utf8");
     const tools = JSON.parse(metadata).telemetry.tools;
-    assert.equal(tools.writes, 5, JSON.stringify(tools));
-    assert.deepEqual(tools.used, { Bash: 10, mcp__github_file_ops__commit_files: 1 });
+    assert.equal(tools.writes, 12, JSON.stringify(tools));
+    assert.deepEqual(tools.used, { Bash: 17, mcp__github_file_ops__commit_files: 1 });
     assert.ok(!metadata.includes("secret-looking"), "a tool input or result leaked into the record");
   } finally {
     rmSync(directory, { recursive: true, force: true });
