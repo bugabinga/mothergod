@@ -145,7 +145,7 @@ from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
 from artifacts import report as artifacts_report
 from attribution import comments_since
 from attribution import report as attribution_report
-from audit_facts import facts
+from audit_facts import notional_cost
 import d1
 from opener import trim
 from rounds import report as rounds_report
@@ -393,6 +393,15 @@ def governor(observed, resets, used):
           "for budget.")
 
 
+def spend(meta):
+    """The run's notional cost, by the price rule the session table uses, or
+    None. Reads the one field it needs, so an artifact in an older shape
+    (`telemetry` or `modelUsage` not a mapping) is unpriced, not fatal: the
+    share's numerator must never take the footer down."""
+    tele = meta.get("telemetry")
+    return notional_cost(tele.get("modelUsage") if isinstance(tele, dict) else None)
+
+
 def share(opened, burned, used, spent, query=None):
     """One line: how much of the governed window's burn over the audited minutes
     was the fleet's own sessions, as an upper bound.
@@ -418,6 +427,9 @@ def share(opened, burned, used, spent, query=None):
         print(head + "the window did not move at reporting precision over the "
               "audited minutes; nothing to apportion.")
         return
+    if used <= 0:
+        print(head + "the window shows no use since it opened; nothing to compare against.")
+        return
     if not spent:
         print(head + "no audited session carried a price; nothing to apportion.")
         return
@@ -427,7 +439,7 @@ def share(opened, burned, used, spent, query=None):
         print(head + f"UNREADABLE ({error}); the session table could not be read.")
         return
     window_usd = rows[0].get("usd") if rows else None
-    if not isinstance(window_usd, (int, float)) or window_usd <= 0 or used <= 0:
+    if not isinstance(window_usd, (int, float)) or window_usd <= 0:
         print(head + f"no priced session since the window opened ({opened}); "
               "nothing to compare against.")
         return
@@ -438,7 +450,7 @@ def share(opened, burned, used, spent, query=None):
     basis = (f"${interval_usd:,.2f} of the window's ${window_usd:,.2f} notional, "
              f"{usd_share:.1%}, against {burned * 100:.1f} of its {used * 100:.0f} points, "
              f"{points_share:.1%}")
-    if bound >= 1:
+    if round(bound, 2) >= 1:
         print(head + f"at most all of the {burned:.1%} burned is the fleet's ({basis}); "
               "the fleet cannot be ruled out as the cause, so shedding may reach it.")
         return
@@ -605,10 +617,7 @@ def main():
             openers += describe(run, meta, response)
             read += 1
             when = iso(run["updatedAt"])
-            # `facts` prices the run the way the session table does, so the
-            # share's numerator and denominator are one parse.
-            meta["_at"] = stamp_to_dt(when)
-            cost = facts(meta)["cost"]
+            cost = spend(meta)
             if cost is not None:
                 spent.append(cost)
             for info in meta.get("rate_limit_events") or []:

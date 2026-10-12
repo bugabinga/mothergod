@@ -411,6 +411,24 @@ const shareCases = [
     reject: [/at most \d/, /1\d\d%/, /is all/],
   },
   {
+    // :.0% rounds 0.996 to 100%, a percentage the "all" branch exists to avoid.
+    name: "a bound that rounds to 100% reads as all, never as 100%",
+    case: { opened: WINDOW_OPENED, burned: 0.005, used: 0.5, spent: [0.996], window_usd: 100.0 },
+    expect: [/fleet share: at most all of the 0\.5% burned is the fleet's/],
+    reject: [/at most 100%/],
+  },
+  {
+    name: "a bound just under that prints its percentage",
+    case: { opened: WINDOW_OPENED, burned: 0.005, used: 0.5, spent: [0.99], window_usd: 100.0 },
+    expect: [/fleet share: at most 99% of the 0\.5% burned is the fleet's/],
+  },
+  {
+    name: "a window with no use since it opened spends no read",
+    case: { opened: WINDOW_OPENED, burned: 0.01, used: 0.0, spent: [1.0], window_usd: "unreadable" },
+    expect: [/fleet share: the window shows no use since it opened; nothing to compare against\./],
+    reject: [/UNREADABLE/],
+  },
+  {
     name: "a table that cannot be read says UNREADABLE, never a share",
     case: { opened: WINDOW_OPENED, burned: 0.31, used: 0.32, spent: [21.0], window_usd: "unreadable" },
     expect: [/fleet share: UNREADABLE \(HTTP 500: edge\); the session table could not be read\./],
@@ -500,4 +518,39 @@ test("a budget with no spent sessions still prints the share line, degraded", ()
   );
   assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.match(r.stdout, /fleet share: no audited session carried a price; nothing to apportion\./);
+});
+
+// The numerator's source: `spend` prices one artifact by the session table's
+// own rule, and an artifact in an older shape is unpriced, never fatal.
+const spendDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(json.dumps(mod.spend(json.loads(sys.argv[2]))))
+`;
+
+const spendOf = (meta) => {
+  const r = spawnSync("python3", ["-c", spendDriver, scriptsDir, JSON.stringify(meta)], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  return JSON.parse(r.stdout);
+};
+
+test("spend prices an artifact by the session table's rule", () => {
+  const usage = { a: { costUSD: 1.5 }, b: { costUSD: 2.0, costBasis: "list" }, c: { costUSD: 9.0, costBasis: "api" } };
+  assert.equal(spendOf({ telemetry: { modelUsage: usage } }), 3.5);
+});
+
+test("spend leaves an artifact in an older shape unpriced", async (t) => {
+  const legacy = [
+    ["no telemetry", {}],
+    ["telemetry null", { telemetry: null }],
+    ["list-shaped telemetry", { telemetry: [{ tool_name: "Bash" }] }],
+    ["list-shaped modelUsage", { telemetry: { modelUsage: [{ costUSD: 1.0 }] } }],
+    ["list-shaped denials beside a price", { telemetry: { permission_denials: [{ tool_name: "Bash" }] } }],
+    ["a non-list costBasis entry", { telemetry: { modelUsage: { a: "x", b: { costUSD: "1", costBasis: ["list"] } } } }],
+  ];
+  for (const [name, meta] of legacy) await t.test(name, () => assert.equal(spendOf(meta), null));
 });

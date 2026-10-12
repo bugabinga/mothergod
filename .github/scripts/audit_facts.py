@@ -34,6 +34,22 @@ class Unreadable(Exception):
     """The archive could not be listed, or one artifact could not be read."""
 
 
+def notional_cost(model_usage):
+    """Projected API cost at list rates, straight from the SDK's own
+    per-model figure. None, not 0, when the field is missing or not a
+    per-model mapping: an unpriced run excluded from sums beats a total
+    that quietly undercounts. The one price rule, for `facts` and for
+    every reader that needs only the price of an artifact whose other
+    fields may be in an older shape.
+    """
+    if not isinstance(model_usage, dict):
+        return None
+    costs = [v["costUSD"] for v in model_usage.values()
+             if isinstance(v, dict) and isinstance(v.get("costUSD"), (int, float))
+             and v.get("costBasis") in (None, "list")]
+    return sum(costs) if costs else None
+
+
 def facts(meta):
     """Whitelist the numbers. Everything else in the artifact is ignored."""
     tele = meta.get("telemetry") or {}
@@ -50,13 +66,6 @@ def facts(meta):
         model = max(model_usage.items(),
                     key=lambda kv: (kv[1] or {}).get("outputTokens", 0))[0]
     thinking = details.get("thinking_tokens")
-    # Projected API cost at list rates, straight from the SDK's own
-    # per-model figure. None, not 0, when the field is missing: an
-    # unpriced run excluded from sums beats a total that quietly
-    # undercounts.
-    costs = [v["costUSD"] for v in model_usage.values()
-             if isinstance(v, dict) and isinstance(v.get("costUSD"), (int, float))
-             and v.get("costBasis") in (None, "list")]
     trigger = meta.get("trigger") if isinstance(meta.get("trigger"), dict) else {}
     persona = meta.get("persona") if isinstance(meta.get("persona"), dict) else {}
     tools = tele.get("tools") if isinstance(tele.get("tools"), dict) else {}
@@ -84,7 +93,7 @@ def facts(meta):
         "measured": bool(tele),
         "model": model,
         "out": out,
-        "cost": sum(costs) if costs else None,
+        "cost": notional_cost(model_usage),
         # Share of output spent thinking: the direct read on whether an
         # effort level is doing anything (ADR-0021).
         "think": (100.0 * thinking / out) if thinking is not None and out else None,
