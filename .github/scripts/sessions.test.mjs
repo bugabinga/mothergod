@@ -132,10 +132,10 @@ test("an empty result is a finding, printed as such", async () => {
 
 test("roles aggregates per role with medians over measured runs only", async () => {
   const rows = [
-    { role: "bdfl", measured: 1, turns: 10, out_tokens: 100, denials: 0, error: 0, cost_usd: 1 },
-    { role: "bdfl", measured: 1, turns: 30, out_tokens: 300, denials: 2, error: 1, cost_usd: 2 },
-    { role: "bdfl", measured: 0, turns: null, out_tokens: null, denials: 0, error: 0, cost_usd: null },
-    { role: "reviewer", measured: 1, turns: 5, out_tokens: 50, denials: 0, error: 0, cost_usd: null },
+    { role: "bdfl", measured: 1, turns: 10, out_tokens: 100, denials: 0, error: 0, cost_usd: 1, writes: 0 },
+    { role: "bdfl", measured: 1, turns: 30, out_tokens: 300, denials: 2, error: 1, cost_usd: 2, writes: 4 },
+    { role: "bdfl", measured: 0, turns: null, out_tokens: null, denials: 0, error: 0, cost_usd: null, writes: null },
+    { role: "reviewer", measured: 1, turns: 5, out_tokens: 50, denials: 0, error: 0, cost_usd: null, writes: null },
   ];
   await withStub(d1(rows), async (base, seen) => {
     const r = await run(["roles", "--since", "14d"], { D1_API_BASE: base });
@@ -146,10 +146,10 @@ test("roles aggregates per role with medians over measured runs only", async () 
     const bdfl = r.out.split("\n").find((l) => l.startsWith("bdfl"));
     assert.ok(bdfl, r.out);
     const cells = bdfl.trim().split(/\s+/);
-    // role runs measured turns_p50 turns_max out_tokens denials errors cost_usd
-    assert.deepEqual(cells, ["bdfl", "3", "2", "20.00", "30", "400", "2", "1", "3.00"]);
+    // role runs measured turns_p50 turns_max out_tokens denials errors noops recorded cost_usd
+    assert.deepEqual(cells, ["bdfl", "3", "2", "20.00", "30", "400", "2", "1", "1", "2", "3.00"]);
     const reviewer = r.out.split("\n").find((l) => l.startsWith("reviewer"));
-    assert.deepEqual(reviewer.trim().split(/\s+/), ["reviewer", "1", "1", "5.00", "5", "50", "0", "0"]);
+    assert.deepEqual(reviewer.trim().split(/\s+/), ["reviewer", "1", "1", "5.00", "5", "50", "0", "0", "0", "0"]);
   });
 });
 
@@ -185,14 +185,48 @@ test("show prints one run vertically, or says which run is missing", async () =>
   });
 });
 
-test("migrate posts the schema file as one batch", async () => {
+// One statement per call, because `ALTER TABLE ADD COLUMN` is not
+// idempotent in SQLite and a one-batch replay would stop at its "duplicate
+// column name" with every statement after it unapplied. The schema file's
+// header promises a replay on an existing database; this is what keeps it.
+test("migrate posts the schema one statement at a time, comments stripped", async () => {
   await withStub(d1([]), async (base, seen) => {
     const r = await run(["migrate"], { D1_API_BASE: base });
     assert.equal(r.code, 0, r.err);
-    assert.match(seen[0].body.sql, /CREATE TABLE IF NOT EXISTS sessions/);
-    assert.match(seen[0].body.sql, /CREATE INDEX IF NOT EXISTS sessions_role_at/);
-    assert.deepEqual(seen[0].body.params, []);
-    assert.match(r.out, /schema applied/);
+    assert.ok(seen.length > 4, `${seen.length} statements`);
+    assert.match(seen[0].body.sql, /^CREATE TABLE IF NOT EXISTS sessions \(/);
+    assert.match(seen[1].body.sql, /^CREATE INDEX IF NOT EXISTS sessions_role_at/);
+    for (const { body } of seen) {
+      assert.doesNotMatch(body.sql, /;|--/, body.sql);
+      assert.deepEqual(body.params, []);
+    }
+    assert.match(
+      r.out,
+      new RegExp(`schema applied from .*schema\\.sql: ${seen.length} statements, 0 columns already present`),
+    );
+  });
+});
+
+test("migrate counts a column already present and applies the statements after it", async () => {
+  const present = {
+    payload: { success: false, errors: [{ message: "D1_ERROR: duplicate column name: writes: SQLITE_ERROR" }] },
+  };
+  // The ALTER is the fourth statement of the file: sessions, its two indexes, then the column.
+  await withStub([d1([]), d1([]), d1([]), present, d1([])], async (base, seen) => {
+    const r = await run(["migrate"], { D1_API_BASE: base });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(seen[3].body.sql, /^ALTER TABLE sessions ADD COLUMN writes INTEGER$/);
+    assert.ok(seen.length > 4, "the statements after the present column were applied");
+    assert.match(r.out, new RegExp(`${seen.length - 1} statements, 1 columns already present`));
+  });
+});
+
+test("migrate on any other refusal is unreadable, with the message", async () => {
+  const refused = { payload: { success: false, errors: [{ message: "no such table: nowhere" }] } };
+  await withStub([d1([]), refused], async (base) => {
+    const r = await run(["migrate"], { D1_API_BASE: base });
+    assert.notEqual(r.code, 0);
+    assert.match(r.out + r.err, /UNREADABLE.*no such table: nowhere/);
   });
 });
 
@@ -311,9 +345,9 @@ test("backfill writes the rows the archive has and the table lacks, and names th
     assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
     assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
     const p = seen[1].body.params;
-    assert.equal(p.length, 21);
+    assert.equal(p.length, 22);
     assert.deepEqual(p.slice(0, 4), [200, 1, "2026-09-01T00:00:00Z", "reviewer"]); // at is the artifact's creation
-    assert.deepEqual(p.slice(19), [1234, 567]); // sizes read from the zip
+    assert.deepEqual(p.slice(19), [1234, 567, null]); // sizes read from the zip; writes null, the artifact predates the count
     assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
     assert.equal(seen.length, 3);
     // Sorted: eight workers download concurrently, so the stub's log holds no order.

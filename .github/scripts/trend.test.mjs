@@ -26,7 +26,8 @@ function block(recent, prior, gates = []) {
   return r.stdout;
 }
 
-const run = (role, turns, { denials = 0, error = 0 } = {}) => ({
+// `writes` absent is a row from before the column (#896 item 5), null in the table.
+const run = (role, turns, { denials = 0, error = 0, writes } = {}) => ({
   role,
   at: "2026-10-10T00:00:00Z",
   measured: 1,
@@ -35,6 +36,7 @@ const run = (role, turns, { denials = 0, error = 0 } = {}) => ({
   denials,
   error,
   cost_usd: 1,
+  ...(writes === undefined ? {} : { writes }),
 });
 const runs = (role, n, turns, extra) => Array.from({ length: n }, () => run(role, turns, extra));
 
@@ -46,7 +48,7 @@ test("a seat whose median turns climbed a quarter prints with every measure; a s
   assert.match(out, /^trend, 7d vs the prior 7d, per role, the rows past a threshold in trend\.py:$/m);
   assert.match(
     out,
-    /^ {4}reviewer {4}runs 10 vs 10 {3}turns p50 14\.0 vs 9\.0 {3}denials 0 vs 0 {3}errors 0 vs 0 {3}skipped 0 of 10 {3}moved: turns_p50$/m,
+    /^ {4}reviewer {4}runs 10 vs 10 {3}turns p50 14\.0 vs 9\.0 {3}denials 0 vs 0 {3}errors 0 vs 0 {3}no-op 0 of 0 {3}skipped 0 of 10 {3}moved: turns_p50$/m,
   );
   assert.match(out, /^ {4}quiet: maintainer$/m);
   assert.doesNotMatch(out, /^ {4}maintainer {4}runs/m);
@@ -172,6 +174,43 @@ test("the guard holding back a quarter of a seat's wakes prints; a stale wake is
   ], gates);
   assert.match(out, /^ {4}bdfl {8}runs 6 vs 6 .*skipped 2 of 8 {3}moved: skipped$/m);
   assert.match(out, /^ {4}quiet: reviewer$/m);
+});
+
+// #896 item 5, operator steer of 2026-10-03: a seat that wakes and changes
+// nothing half the time is a deletion candidate named by name. The share
+// is over runs with writes recorded; rows from before the column are null
+// and count on neither side, so the column's first week prints on what it
+// has, never on a history of zeros.
+test("a seat that changed nothing in half its recorded runs prints: 4 of 8", () => {
+  const out = block(
+    [...runs("curator", 4, 20, { writes: 0 }), ...runs("curator", 4, 20, { writes: 2 })],
+    runs("curator", 8, 20, { writes: 1 }),
+  );
+  assert.match(out, /^ {4}curator {5}runs 8 vs 8 .*errors 0 vs 0 {3}no-op 4 of 8 {3}skipped 0 of 8 {3}moved: no-op$/m);
+});
+
+test("3 no-ops of 8 recorded is under half, so it stays quiet", () => {
+  const out = block(
+    [...runs("curator", 3, 20, { writes: 0 }), ...runs("curator", 5, 20, { writes: 1 })],
+    runs("curator", 8, 20, { writes: 1 }),
+  );
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("2 no-ops of 3 recorded is under the floor of 4, so it stays quiet", () => {
+  const out = block(
+    [...runs("curator", 2, 20, { writes: 0 }), run("curator", 20, { writes: 1 }), ...runs("curator", 5, 20)],
+    runs("curator", 8, 20),
+  );
+  assert.match(out, /^trend: quiet, 1 roles/m);
+});
+
+test("rows without the column are neither no-ops nor recorded: 4 zeros among 10 runs print as 4 of 4", () => {
+  const out = block(
+    [...runs("curator", 4, 20, { writes: 0 }), ...runs("curator", 6, 20)],
+    runs("curator", 10, 20),
+  );
+  assert.match(out, /^ {4}curator {5}runs 10 vs 10 .*no-op 4 of 4 .*moved: no-op$/m);
 });
 
 test("an error appearing prints, and so does one vanishing", () => {
