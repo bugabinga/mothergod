@@ -29,6 +29,13 @@ All notable changes to this project are documented here. Format follows
   stream's output, not each frame's, and `decompress` holds the compressed
   frames of a stream to 256 MiB of output together; `decompress_to_writer`
   and the CLI stream past that at constant memory.
+- compress: an input is cut into 16 MiB blocks, one frame each, so peak
+  encode memory stays under 1 GiB however long the input: 256 MiB of zeros
+  took 11 GB and did not finish in 300 s, and now takes 946 MB and 6 minutes
+  (#1094, #978). Inputs of at most 16 MiB compress to the same bytes as
+  before. On the four Silesia files over 16 MiB the output changes by +0.11% in
+  total (webster +0.44%, mozilla -0.06%): each block restarts the
+  model.
 - format: an input over 256 MiB is stored, not compressed, so every frame
   `compress` writes is one `decompress` reads back; the output is the input
   plus a few bytes until large inputs are split (#1086, #978).

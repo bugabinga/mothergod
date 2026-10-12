@@ -522,23 +522,53 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
     candidate_len < incumbent_len
 }
 
-/// Compresses `input` into a self-describing frame.
+/// The input bytes one [`compress`] frame covers. The optimal parse holds
+/// about 42 bytes of state per input byte (#1094), so this sets the encoder's
+/// peak memory at roughly 700 MB whatever the input length; the ratio a
+/// block gives up by restarting its models is priced in `research/JOURNAL.md`
+/// S2-A116.
+const BLOCK_LEN: usize = 16 * 1024 * 1024;
+
+/// Compresses `input` into a self-describing stream of frames.
 ///
-/// Tries [`Method::Lz`] and falls back to [`Method::Stored`] whenever that
+/// Cuts `input` into blocks of 16 MiB, one frame each, so the
+/// encoder's memory is bounded by the block and not by the input. Each frame
+/// tries [`Method::Lz`] and falls back to [`Method::Stored`] whenever that
 /// does not produce a smaller frame (`docs/format/SPEC.md`'s Stored-floor
-/// invariant): tiny, incompressible, or already-compressed input, and any
-/// input longer than [`codec::MAX_DECODED_LEN`] bytes, because [`decompress`]
-/// rejects an `Lz` frame past that bound as [`Error::TooLarge`] and a frame
-/// this crate cannot read back is not one it may write.
+/// invariant): tiny, incompressible, or already-compressed input. An input
+/// longer than [`codec::MAX_DECODED_LEN`] bytes is one [`Method::Stored`]
+/// frame, because [`decompress`] caps the `Lz` frames of a stream at that
+/// total as [`Error::TooLarge`] and a stream this crate cannot read back is
+/// not one it may write.
 #[must_use]
 pub fn compress(input: &[u8]) -> Vec<u8> {
-    if u32::try_from(input.len()).is_ok_and(|len| len <= codec::MAX_DECODED_LEN) {
-        let body = codec::encode(input);
-        if candidate_beats_incumbent(body.len(), input.len()) {
-            return build_frame(Method::Lz, &[&body]);
-        }
+    compress_blocks(input, BLOCK_LEN)
+}
+
+/// [`compress`] with the block length a parameter, so a test cuts at a
+/// length it can afford. `block_len` is nonzero.
+fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
+    if !u32::try_from(input.len()).is_ok_and(|len| len <= codec::MAX_DECODED_LEN) {
+        return build_stored_frame(input);
     }
-    build_stored_frame(input)
+    if input.len() <= block_len {
+        return compress_block(input);
+    }
+    let mut stream = Vec::new();
+    for block in input.chunks(block_len) {
+        stream.extend_from_slice(&compress_block(block));
+    }
+    stream
+}
+
+/// One frame for `block`: [`Method::Lz`] if it is smaller, else
+/// [`Method::Stored`].
+fn compress_block(block: &[u8]) -> Vec<u8> {
+    let body = codec::encode(block);
+    if candidate_beats_incumbent(body.len(), block.len()) {
+        return build_frame(Method::Lz, &[&body]);
+    }
+    build_stored_frame(block)
 }
 
 /// Decodes a frame produced by [`compress`] back into the original bytes.
