@@ -19,9 +19,12 @@
 
 // Every module but `filters` is `#[doc(hidden)]`: the engine's internals, not
 // a surface downstream crates are meant to call (ROADMAP M6). They stay `pub`
-// because `bench` and `fuzz` call into `lz`, `literal` and `codec`, and because
-// `pub(crate)` would make the unwired research items (`fieldtype`,
-// `Sse::contexts`) `dead_code` errors under `-D warnings`. Narrowing them
+// for two reasons. `bench` and `fuzz` call into `lz`, `literal` and `codec`.
+// And the live codec path does not reach the research primitives (`Ppm`,
+// `Model::ideal_cost_bits`, `bittree`'s symbol and ideal-cost functions,
+// `codec`'s `compressed_len_*` and `ideal_cost_bits_*` experiment entry
+// points, `fieldtype`, `Sse::contexts`), whose callers are tests: under
+// `pub(crate)` they become `dead_code` errors with `-D warnings`. Narrowing
 // waits on wiring or removing those items. `filters` is documented: S2-A2
 // judged it "a defensible standalone library surface on their own merits"
 // (`research/JOURNAL.md`).
