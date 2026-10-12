@@ -78,6 +78,11 @@ compression levels, no tuning knobs. `--version` also prints the format version
 the build reads; put it in a bug report. Expect the encode to take a while, at
 the rates above.
 
+**A file over 256 MiB comes out stored, not compressed:** the output is the
+input plus a few bytes, and it still round-trips. The CLI also reads each input
+whole into memory before it starts. Splitting large inputs is
+[#978](https://github.com/bugabinga/mothergod/issues/978).
+
 Library API (subject to change until 1.0):
 
 ```rust

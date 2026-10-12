@@ -29,6 +29,9 @@ All notable changes to this project are documented here. Format follows
   stream's output, not each frame's, and `decompress` holds the compressed
   frames of a stream to 256 MiB of output together; `decompress_to_writer`
   and the CLI stream past that at constant memory.
+- format: an input over 256 MiB is stored, not compressed, so every frame
+  `compress` writes is one `decompress` reads back; the output is the input
+  plus a few bytes until large inputs are split (#1086, #978).
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
   interface, with no compression levels and no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact
@@ -73,13 +76,6 @@ All notable changes to this project are documented here. Format follows
   now, carrying the same site nav as every other page so a broken or
   mistyped link still offers a way to the three real pages instead of a
   silent copy of the homepage.
-
-### Fixed
-
-- format: `compress` stores an input longer than 256 MiB instead of writing a
-  compressed frame that `decompress` rejects as too large, which made the
-  output of a 256 MiB to 4 GiB input unreadable. Such inputs lose their
-  compression until frames split large inputs (#1086).
 
 ### Changed
 
