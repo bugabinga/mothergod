@@ -1,97 +1,45 @@
-//! Six-expert context-mixing literal model: [`Literal`], the S2-D2
-//! entropy stage for the bytes an LZ parse ([`crate::lz`]) leaves as
-//! literals, once the length/offset/flag streams (each a plain
-//! [`crate::model::Model`]) have claimed everything else.
+//! Six-expert context-mixing literal model: [`Literal`], the entropy stage
+//! for the bytes an LZ parse ([`crate::lz`]) leaves as literals.
 //!
-//! Ported from the archive's `Lit`
-//! (`research/imports/session-1/mothergod.rs`), not the code, per
-//! ADR-0006: six order-N context predictors ("experts") each keep their
-//! own order-0 frequency table over the 256 byte values in whatever
-//! context they're keyed on (a rolling two-rate fast/slow order-1 hash,
-//! an order-0 catch-all, a 12-bit order-2 hash, a position/nibble
-//! "alignment" hash, and a 12-bit alnum-only rolling word hash), and
-//! their per-symbol counts blend under weights the coder adapts after
-//! every symbol via an exponentiated-gradient rule (Mahoney 2005),
-//! context-sensitive: the weight vector itself is selected by a small
+//! Six experts each keep an order-0 frequency table over the 256 byte values
+//! in their own context: a fast and a slow order-1 hash, an order-0
+//! catch-all, a 12-bit order-2 hash, a position/nibble "alignment" hash, and
+//! a 12-bit alphanumeric rolling word hash. Their per-symbol counts blend
+//! under weights adapted after every symbol by an exponentiated-gradient
+//! rule (Mahoney 2005). The weight vector is selected by a small
 //! `(prev-byte nibble, after-copy)` key, so the mixer favors different
-//! experts after a match than after a run of literals (`JOURNAL` S1-A4).
+//! experts after a match than after a run of literals.
 //!
-//! [`Literal::ideal_cost_bits`] is [`crate::model::Model::ideal_cost_bits`]'s
-//! counterpart for this six-expert mixer, ROADMAP M2's ideal-cost
-//! accounting mode (`JOURNAL` S2-A31, completing S2-A30's remaining
-//! scope): sums `-log2(p)` against the mixed distribution instead of
-//! driving [`crate::coder::Encoder`].
+//! The `ideal_cost_bits*` methods price a byte without driving an
+//! [`crate::coder::Encoder`]. The coding paths, each taking the blend one
+//! step past the last:
 //!
-//! **SSE-calibrated coding (`JOURNAL` S1-P1, S2-A58, S2-A59, `FORMAT_VERSION`
-//! 3, retired wire path).** [`Literal::encode_sse`]/[`Literal::decode_sse`] code the six-expert
-//! mixer's blended `cum` table through
-//! [`crate::bittree::encode_symbol_sse`]/[`crate::bittree::decode_symbol_sse`]:
-//! 8 chained binary decisions, each refined by [`Literal`]'s own [`Sse`]
-//! table (`crate::bittree::SSE_CONTEXTS` contexts, keyed by tree position
-//! only, `crate::bittree::sse_context`) before it reaches the coder. This
-//! calibrates the six-expert mixer's own blended probability at each
-//! binary-tree node, a compound estimate — unlike `JOURNAL` S2-R1's
-//! rejected attempt, which SSE-calibrated an already order-0-adaptive lone
-//! frequency counter (the flag model's `is_copy` bit) and found nothing to
-//! correct. No `FORMAT_VERSION` this build decodes codes a literal through
-//! this path any more: versions 3 and 4 did, and were retired with the rest
-//! below 10 (`docs/adr/0063-retire-format-versions-1-through-9.md`, no
-//! release having ever written them). It stays as the ideal-cost
-//! measurement baseline and the calibration [`Literal::encode_column`]
-//! reuses.
+//! - [`Literal::encode_sse`]/[`Literal::decode_sse`]: the blended `cum`
+//!   table coded as 8 binary decisions through [`crate::bittree`], each
+//!   calibrated by [`Literal`]'s own [`Sse`] table. No frame this build
+//!   decodes uses it; it stays as the pricing baseline and as the
+//!   calibration [`Literal::encode_column`] reuses.
+//! - [`Literal::encode_logistic`]/[`Literal::decode_logistic`]: the
+//!   experts' estimates [`crate::logistic::stretch`]ed into the logit
+//!   domain and blended by [`LogisticMix`], whose own [`Sse`] calibrates
+//!   the result. Not wired.
+//! - [`Literal::encode_logistic_surprise`]/
+//!   [`Literal::decode_logistic_surprise`]: the same walk, with
+//!   [`SurpriseLogisticMix`] taking its step size from a fast EMA of a
+//!   key's squared error against a slower one. Not wired.
+//! - [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`]: the same
+//!   again, calibrating through [`SurpriseLogisticMixLogitSse`], whose bins
+//!   are even in [`crate::logistic::stretch`]-space. The wire path of every
+//!   frame this build decodes, except a transposed one.
+//! - [`Literal::encode_column`]/[`Literal::decode_column`]: a seventh,
+//!   column-keyed expert ([`ColumnExpertState`]) blended into the six
+//!   before [`Sse`] calibration. The wire path of a transposed frame.
 //!
-//! **Decode-path determinism (`JOURNAL` S2-D3, resolved by ADR-0024).**
-//! The exponentiated-gradient weight update runs on both the encode and
-//! decode path, so anything it calls must produce a bit-identical result
-//! on every platform, or an encoder and a decoder desync mid-frame (hard
-//! rule 1). `f64::exp()` is libm's and not guaranteed bit-identical
-//! across implementations; `exp` replaces it with an `e^x` built from
-//! IEEE-754 basic operations only (range reduction plus a polynomial,
-//! `2^k` by exact repeated doubling), enforced crate-wide by
-//! `clippy.toml`'s `disallowed-methods`. `JOURNAL` S1-A5's full
-//! integer-only mixer is no longer a prerequisite here; ADR-0024
-//! demotes it to an M5 speed lead, since its speed claim is unmeasured
-//! in this codebase.
-//!
-//! **Logit-domain mixing (`JOURNAL` S1-P8, S2-A101, `FORMAT_VERSION` 5,
-//! ADR-0052, retired wire path).**
-//! [`Literal::encode_logistic`]/[`Literal::decode_logistic`] replace the
-//! SSE-calibrated path above with a second mixer, [`LogisticMix`]: the six
-//! real experts' own probability estimates are [`crate::logistic::stretch`]ed
-//! into the logit domain, blended under a weight vector `logistic_rate`'s
-//! annealed schedule adapts, [`crate::logistic::squash`]ed back, then
-//! calibrated through `LogisticMix`'s own [`Sse`] table, independent of
-//! `Literal`'s own — the same separation [`Literal::encode_column`] already
-//! keeps for its seventh expert. The six real experts still adapt exactly as
-//! [`Literal::encode_sse`] leaves them (`Literal::update` still runs,
-//! unperturbed): only the literal path's own coding and calibration change.
-//! `LogisticMix` reuses `stretch`/`squash` rather than `exp`/`ln` directly;
-//! both are built from IEEE-754 basic operations only, the same
-//! ADR-0024 determinism this module's `exp` already provides
-//! (`crate::logistic`'s own module docs).
-//!
-//! **Learned-baseline rate schedule (`JOURNAL` S2-A104/S2-A105,
-//! `FORMAT_VERSION` 6, ADR-0054, retired wire path).**
-//! [`Literal::encode_logistic_surprise`]/[`Literal::decode_logistic_surprise`]
-//! replace [`Literal::encode_logistic`]/`decode_logistic` for every
-//! candidate except `Candidate::Transpose`: the same six-expert
-//! logit-domain walk, but [`SurpriseLogisticMix`]'s per-key step size reads
-//! a fast EMA of that key's own squared prediction error against a slower
-//! EMA of the identical signal (its own learned baseline) instead of
-//! [`LogisticMix`]'s step-count-derived schedule, so a converged-but-noisy
-//! context's stable residual reads as "no surprise" while genuine drift
-//! still raises the rate.
-//!
-//! **Logit-domain SSE bins (`JOURNAL` S2-A106/S2-A108, `FORMAT_VERSION`
-//! 7, ADR-0055; the wire path of every version this build decodes).**
-//! [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`] replace
-//! [`Literal::encode_logistic_surprise`]/`decode_logistic_surprise` for
-//! every candidate except `Candidate::Transpose`: the identical walk,
-//! rate schedule and gradient step, but [`SurpriseLogisticMixLogitSse`]'s
-//! calibration table spaces its bins evenly in
-//! [`crate::logistic::stretch`]-space instead of [`Sse`]'s own linear
-//! probability space, concentrating resolution near 0/1 where a
-//! calibration error costs most.
+//! Determinism: the weight update runs on the encode and the decode path,
+//! so everything it calls must be bit-identical on every platform, or the
+//! two desync mid-frame. `f64::exp` is libm's and is not, so `exp` builds
+//! `e^x` from IEEE-754 basic operations only, and `clippy.toml` forbids the
+//! libm transcendentals crate-wide (ADR-0024).
 
 use std::num::NonZeroUsize;
 
@@ -105,7 +53,7 @@ use crate::sse::{Calibrate, Sse};
 const EXPERTS: usize = 6;
 
 /// Number of distinct mixing-weight vectors: one per `(prev-byte nibble,
-/// after-copy)` key (`JOURNAL` S1-A4's "context-sensitive MIX weights").
+/// after-copy)` key.
 const WEIGHT_CONTEXTS: usize = 32;
 
 /// Byte alphabet every context bank models.
@@ -114,10 +62,8 @@ const ALPHABET: usize = 256;
 /// so no truncation lint applies to a compile-time-obvious value.
 const ALPHABET_U32: u32 = 256;
 
-// Bank layout, ported from the archive's `O_CF`/`O_CS`/`O_O0`/`O_O2`/
-// `O_AL`/`O_WD`/`NB` (`research/imports/session-1/mothergod.rs`): one
-// contiguous bank space, sliced per expert so [`banks`] can address any
-// of them with a single base offset.
+// Bank layout: one contiguous bank space, sliced per expert so [`banks`]
+// can address any of them with a single base offset.
 const FAST_BASE: usize = 0;
 const FAST_BANKS: usize = 512;
 const SLOW_BASE: usize = FAST_BASE + FAST_BANKS;
@@ -133,21 +79,18 @@ const WORD_BANKS: usize = 4096;
 /// Total context banks across all six experts.
 const BANKS: usize = WORD_BASE + WORD_BANKS;
 
-/// Frequency increment for the fast-rate context expert (bank 0):
-/// higher increment and lower rescale ceiling than the other five, so
-/// it tracks recent bytes hardest and forgets fastest. Ported unchanged
-/// from the archive's inline `(32u32, 6144u32)` special case for `e==0`.
+/// Frequency increment and rescale ceiling for the fast-rate context expert
+/// (bank 0): higher increment and lower ceiling than the other five, so it
+/// tracks recent bytes hardest and forgets fastest.
 const FAST_INCREMENT: u32 = 32;
 const FAST_LIMIT: u32 = 6144;
 
-/// Exponentiated-gradient learning rate and weight clamp, ported
-/// unchanged from the archive's inline `0.05`/`1e-4`/`1e4`.
+/// Exponentiated-gradient learning rate and weight clamp.
 const LEARNING_RATE: f64 = 0.05;
 const MIN_WEIGHT: f64 = 1e-4;
 const MAX_WEIGHT: f64 = 1e4;
 /// Floor under the mixed-probability denominator so a weight update
-/// never divides by (near) zero. Ported unchanged from the archive's
-/// inline `1e-9`.
+/// never divides by (near) zero.
 const MIN_DENOMINATOR: f64 = 1e-9;
 
 /// Beyond this magnitude, `weights[expert] * exp(gradient)` already
@@ -161,8 +104,7 @@ const EXP_ARG_LIMIT: f64 = 30.0;
 /// `e^x`, built from IEEE-754 basic operations only (`+ - * /`,
 /// comparisons, and [`f64::round`]): no libm transcendental call, so
 /// [`Literal::update`] computes the identical mixing weight on every
-/// platform whether it runs on the encode or the decode path
-/// (ADR-0024, `JOURNAL` S2-D3).
+/// platform whether it runs on the encode or the decode path (ADR-0024).
 ///
 /// Not a general-purpose `exp`: the argument is clamped to
 /// `[-EXP_ARG_LIMIT, EXP_ARG_LIMIT]` first (see that constant's doc for
@@ -219,10 +161,9 @@ const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
 /// `weight`'s share of `weight_sum`, scaled into [`FIXED_POINT_SCALE`]'s
 /// fixed-point space and normalized by `bank_total` so an expert's raw
 /// frequency count converts into that same fixed-point unit before
-/// summing. Shared by [`Literal::mix`] and [`Literal::mix7`]'s own
-/// seven-wide blend (`research/JOURNAL.md` S1-P5): both need the
-/// identical scale-factor formula, only the `weight_sum` they normalize
-/// against differs (six experts' worth vs. seven).
+/// summing. Shared by every blend ([`Literal::mix`], [`Literal::scale6`],
+/// [`Literal::mix7`]); only the `weight_sum` they normalize against
+/// differs (six experts' worth vs. seven).
 fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
     let normalized = weight / weight_sum;
     #[allow(
@@ -239,28 +180,22 @@ fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
 /// moves given `estimate` (this expert's own prediction) versus `mixed`
 /// (the blend's prediction), clamped to `[MIN_WEIGHT, MAX_WEIGHT]`.
 /// Shared by [`Literal::update`]'s six real experts and
-/// [`Literal::update_column_expert`]'s seventh: that method's own docs
-/// already claim its column weight adapts "the same ... rule
-/// `Self::update` uses" — this makes that claim true by construction
-/// instead of by two independently written copies.
+/// [`Literal::adapt_seventh_weight`]'s extra one, so both adapt by the same
+/// rule.
 fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) -> f64 {
     let denominator = mixed.max(MIN_DENOMINATOR);
     let gradient = LEARNING_RATE * (estimate - mixed) / denominator;
     (weight * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT)
 }
 
-/// Per-byte modeling context [`Literal::encode_sse`]/[`Literal::decode_sse`]
-/// read to select which banks blend at this position: the previous two
-/// bytes (`0` before the start of output, matching the archive's
-/// `fd[pos-1]`/`fd[pos-2]` boundary convention), the output position,
-/// whether the previous token was a copy (LZ match or rep) rather than
-/// a literal, and the rolling alnum-only word hash
-/// ([`advance_word_hash`]).
+/// Per-byte modeling context every [`Literal`] coding path reads to select
+/// which banks blend at this position: the previous two bytes (`0` before
+/// the start of output), the output position, whether the previous token was
+/// a copy (LZ match or rep) rather than a literal, and the rolling
+/// alnum-only word hash ([`advance_word_hash`]).
 ///
-/// [`Self::after_literal`]/[`Self::after_copy`] compute the next context
-/// the same way the archive's `encode_body`/`decode` update
-/// `(b1, b2, pos, am, wh)` after every token, so a caller driving an
-/// encode pass and a decode pass from the same token stream reuses one
+/// [`Self::after_literal`]/[`Self::after_copy`] compute the next context,
+/// so an encode pass and a decode pass over the same token stream share one
 /// update rule instead of two copies that could drift apart.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Context {
@@ -314,10 +249,9 @@ impl Context {
     }
 }
 
-/// Advances a rolling word hash by one byte. Ported unchanged from the
-/// archive's `whup`: only alphanumeric bytes extend the hash, anything
-/// else resets it to `0`, so the hash tracks how far into the current
-/// alnum run a position is, never text spanning punctuation.
+/// Advances a rolling word hash by one byte: only alphanumeric bytes extend
+/// the hash, anything else resets it to `0`, so the hash tracks how far into
+/// the current alnum run a position is, never text spanning punctuation.
 #[must_use]
 pub fn advance_word_hash(word_hash: u32, byte: u8) -> u32 {
     if byte.is_ascii_alphanumeric() {
@@ -328,8 +262,7 @@ pub fn advance_word_hash(word_hash: u32, byte: u8) -> u32 {
 }
 
 /// Bank indices for [`Context`]'s six experts, and the mixing-weight
-/// index that goes with them. Ported unchanged from the archive's
-/// `Lit::banks`.
+/// index that goes with them.
 fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let prev1 = usize::from(context.prev1);
     let prev2 = usize::from(context.prev2);
@@ -356,16 +289,13 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
 
 /// The seventh, column-keyed expert [`Literal::encode_column`]/
 /// `decode_column` blend into the mix for a [`Candidate::Transpose`]
-/// frame's literal sub-stream (`research/JOURNAL.md` S1-P5,
-/// `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
-/// `FORMAT_VERSION` 4). Not part of [`Literal`]'s own persisted state and
-/// never touched by the plain `encode`/`decode` (or `encode_sse`/
-/// `decode_sse`) pair: `codec.rs` constructs it separately, per trial, and
-/// threads it through only the column-coding path. A column-keyed
+/// frame's literal sub-stream
+/// (`docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`).
+/// Not part of [`Literal`]'s own state: `codec.rs` constructs it per trial
+/// and threads it through only the column-coding path. A column-keyed
 /// frequency bank plus its own single mixing weight per weight-context key
-/// (the same key `Literal`'s own six weight vectors are indexed by),
-/// adapting on its own trajectory alongside, never inside, the six real
-/// experts' weights.
+/// (the key [`Literal`]'s six weight vectors are indexed by), adapting
+/// alongside, never inside, the six real experts' weights.
 ///
 /// [`Candidate::Transpose`]: crate::filters::select::Candidate::Transpose
 #[derive(Debug, Clone)]
@@ -379,20 +309,16 @@ pub struct ColumnExpertState {
     /// key.
     weight: Vec<f64>,
     /// This expert's own SSE calibration trajectory, independent of
-    /// [`Literal::sse`]'s real one (`research/JOURNAL.md` S1-P5's
-    /// SSE-interaction question). [`Literal::encode_column`]/
-    /// `decode_column` calibrate the seven-expert mix through this table
-    /// instead, so the column signal's own calibration never perturbs the
-    /// six-expert model's shipped calibration trajectory.
+    /// [`Literal::sse`]'s. [`Literal::encode_column`]/`decode_column`
+    /// calibrate the seven-expert mix through this table instead, so the
+    /// column signal's calibration never perturbs the six-expert model's.
     sse: Sse,
 }
 
 impl ColumnExpertState {
-    /// A fresh column-expert state: every bank starts at frequency 1 per
-    /// symbol (the same Laplace floor [`Literal::new`] starts its six
-    /// experts at), every weight starts at 1.0 (equally trusted), and its
-    /// own [`Sse`] table starts at the identity mapping, same as
-    /// [`Literal::new`]'s.
+    /// A fresh column-expert state, started as [`Literal::new`] starts its
+    /// six experts: every bank at frequency 1 per symbol (the Laplace floor),
+    /// every weight at 1.0, the [`Sse`] table at the identity mapping.
     #[must_use]
     pub fn new(max_banks: NonZeroUsize) -> Self {
         Self {
@@ -403,11 +329,10 @@ impl ColumnExpertState {
         }
     }
 
-    /// Fallible counterpart to [`Self::new`], the same shape
-    /// [`Literal::try_new`] gives the six real experts: `codec::decode`'s
-    /// real decode path constructs a `ColumnExpertState` from a fixed,
+    /// Fallible counterpart to [`Self::new`], as [`Literal::try_new`] is for
+    /// the six real experts: `codec::decode` builds this from a fixed,
     /// decoder-chosen `max_banks` (never a value read off untrusted input),
-    /// but the allocation itself can still fail, and hard rule 2 requires
+    /// but the allocation can still fail, and hard rule 2 requires
     /// `Error::OutOfMemory` there instead of an abort.
     pub(crate) fn try_new(
         max_banks: NonZeroUsize,
@@ -421,27 +346,18 @@ impl ColumnExpertState {
     }
 }
 
-/// Bank count for [`PpmExpertState`]: the previous byte's high nibble,
-/// the same coarse key `research/JOURNAL.md` S2-R16/S2-R17's
-/// `NibbleFallback` used for its own (rejected, substitutive) fallback
-/// table.
+/// Bank count for [`PpmExpertState`]: one per value of the previous byte's
+/// high nibble.
 const PPM_EXPERT_BANKS: usize = 16;
 
-/// `research/JOURNAL.md` S1-P3's own remaining scope after S2-R17: a
-/// genuinely additive, [`Ppm`]-backed expert, never substituted into any
-/// of [`Literal`]'s six real experts' own banks the way every prior S1-P3
-/// slice (S2-R6, S2-R16, S2-R17) tried and had rejected. Same
-/// "own bank space, own adaptive weight, own additive contribution" shape
-/// as [`ColumnExpertState`] (S1-P5) — the difference is what each bank is:
-/// a [`Ppm`] table, not a plain Laplace-smoothed frequency bank, so a
-/// symbol this bank has never observed contributes exactly zero mass
-/// (Method C's own "genuinely unseen" floor is 0, not 1), never a false
-/// floor competing with the six real experts' own Laplace-smoothed ones.
-/// Keyed the same coarse way `research/JOURNAL.md` S2-R16/S2-R17's
-/// `NibbleFallback` was (the previous byte's high nibble, `PPM_EXPERT_BANKS`
-/// contexts), deliberately reusing that context signal so this slice
-/// isolates the mechanism question (additive vs. substitutive) from the
-/// keying question those two entries already answered.
+/// An additive, [`Ppm`]-backed expert, never substituted into any of
+/// [`Literal`]'s six real experts' banks (`research/JOURNAL.md` S2-R6,
+/// S2-R16 and S2-R17 tried that and were rejected). Same shape as
+/// [`ColumnExpertState`]: own bank space, own adaptive weight, own additive
+/// contribution. Each bank is a [`Ppm`] table, not a Laplace-smoothed
+/// frequency bank, so a symbol it has never observed contributes exactly
+/// zero mass instead of a false floor competing with the six real experts'.
+/// Keyed by the previous byte's high nibble (`PPM_EXPERT_BANKS` contexts).
 #[derive(Debug, Clone)]
 pub struct PpmExpertState {
     /// One [`Ppm`] table per bank ([`PPM_EXPERT_BANKS`] of them).
@@ -451,10 +367,8 @@ pub struct PpmExpertState {
 }
 
 impl PpmExpertState {
-    /// A fresh PPM-expert state: every bank starts as a fresh [`Ppm`]
-    /// table (every symbol unseen), every weight starts at 1.0 (equally
-    /// trusted), the same convention [`ColumnExpertState::new`] uses for
-    /// its own fresh state.
+    /// A fresh PPM-expert state: every bank a fresh [`Ppm`] table (every
+    /// symbol unseen), every weight 1.0, as [`ColumnExpertState::new`].
     #[must_use]
     pub fn new() -> Self {
         Self {
