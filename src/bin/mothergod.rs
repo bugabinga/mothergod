@@ -214,7 +214,9 @@ fn output_name(mode: Mode, source: &Path) -> Result<PathBuf, String> {
 
 /// A reader that keeps the error its inner reader raised, so a failure of
 /// [`mothergod::copy_encode`] can be told to come from reading and not from
-/// writing: the library returns one `io::Error` for both.
+/// writing: the library returns one `io::Error` for both. An `Interrupted`
+/// read is not kept: the library retries it and it never surfaces, so
+/// keeping it would blame a later write failure on the read.
 struct Tracked<R> {
     inner: R,
     failure: Option<io::Error>,
@@ -224,7 +226,9 @@ impl<R: Read> Read for Tracked<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.inner.read(buf).map_err(|err| {
             let kind = err.kind();
-            self.failure = Some(err);
+            if kind != io::ErrorKind::Interrupted {
+                self.failure = Some(err);
+            }
             kind.into()
         })
     }
@@ -392,4 +396,40 @@ fn write_fail(dest_name: &str, err: &io::Error) -> ExitCode {
 fn fail(message: &str) -> ExitCode {
     eprintln!("mothergod: {message}");
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fails once with `kind`, then reads as an empty stream.
+    struct FailOnce(Option<io::ErrorKind>);
+
+    impl Read for FailOnce {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            self.0.take().map_or(Ok(0), |kind| Err(kind.into()))
+        }
+    }
+
+    fn tracked_after_one_read(kind: io::ErrorKind) -> Option<io::ErrorKind> {
+        let mut reader = Tracked {
+            inner: FailOnce(Some(kind)),
+            failure: None,
+        };
+        let _ = reader.read(&mut [0; 1]);
+        reader.failure.map(|err| err.kind())
+    }
+
+    #[test]
+    fn tracked_keeps_a_read_failure() {
+        assert_eq!(
+            tracked_after_one_read(io::ErrorKind::PermissionDenied),
+            Some(io::ErrorKind::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn tracked_drops_an_interrupted_read_the_library_retries() {
+        assert_eq!(tracked_after_one_read(io::ErrorKind::Interrupted), None);
+    }
 }
