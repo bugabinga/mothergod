@@ -259,7 +259,7 @@ WRITE_TOOLS = {"mcp__github_file_ops__commit_files", "mcp__github_file_ops__dele
 # name, because matching text cannot tell it from a command.
 WRITE_SCRIPT = re.compile(
     r"(?:^|[;&|({\n])\s*(?:(?:then|do|else|!)\s+)?"
-    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\S*)|env|bash|sh"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|[^\s\"']*)|env|bash|sh"
     r"|timeout(?:\s+-\S+(?:\s+\d\S*)?)*\s+\d\S*)\s+)*"
     r"(?:(?:\S*/)?(?:gh-comment|gh-pr|merge-pr|push-branch)"
     r"|gh\s+(?:issue|pr)\s+edit)(?=\s|$)")

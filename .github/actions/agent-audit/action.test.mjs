@@ -420,11 +420,18 @@ test("write-shaped tool calls are counted, errored and denied ones are not, inpu
         bash("c4", "env X=1 .github/scripts/gh-comment 3"),
         result("c4", false),
         bash("k1", ".github/scripts/push-branch"),
+        // A quoted-assignment run with no script after it backtracked
+        // exponentially; the spawn timeout below turns a regression into a failure.
+        bash("q1", `;${"A=\"x\" ".repeat(40)}notwrite`),
+        result("q1", false),
+        bash("q2", "A=\"x\" B='y m' .github/scripts/gh-comment 3"),
+        result("q2", false),
         { type: "result", result: "done", permission_denials: [{ tool_name: "Bash" }] },
       ]),
     );
     const r = spawnSync("python3", [script, out], {
       encoding: "utf8",
+      timeout: 20000,
       env: {
         ...process.env,
         EXEC_FILE: execution,
@@ -434,11 +441,11 @@ test("write-shaped tool calls are counted, errored and denied ones are not, inpu
         ROLE: "bdfl",
       },
     });
-    assert.equal(r.status, 0, r.stderr || r.stdout);
+    assert.equal(r.status, 0, r.stderr || r.stdout || String(r.error));
     const metadata = readFileSync(join(out, "metadata.json"), "utf8");
     const tools = JSON.parse(metadata).telemetry.tools;
-    assert.equal(tools.writes, 12, JSON.stringify(tools));
-    assert.deepEqual(tools.used, { Bash: 17, mcp__github_file_ops__commit_files: 1 });
+    assert.equal(tools.writes, 13, JSON.stringify(tools));
+    assert.deepEqual(tools.used, { Bash: 19, mcp__github_file_ops__commit_files: 1 });
     assert.ok(!metadata.includes("secret-looking"), "a tool input or result leaked into the record");
   } finally {
     rmSync(directory, { recursive: true, force: true });
