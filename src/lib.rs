@@ -166,6 +166,30 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl From<Error> for std::io::Error {
+    /// The [`std::io::ErrorKind`] each variant names, and nothing else:
+    /// `io::Error::from(kind)` allocates no payload, where wrapping `err`
+    /// through `io::Error::new` would box it and could abort under
+    /// allocator pressure, the failure [`WriteError`] exists to avoid
+    /// (issue #479). A caller that needs the variant matches on [`Error`]
+    /// before converting.
+    ///
+    /// [`Error::Truncated`] is `UnexpectedEof`, [`Error::OutOfMemory`] is
+    /// `OutOfMemory`, and every other variant is `InvalidData`, because the
+    /// bytes are what is wrong with them.
+    fn from(err: Error) -> Self {
+        Self::from(match err {
+            Error::Truncated => std::io::ErrorKind::UnexpectedEof,
+            Error::OutOfMemory => std::io::ErrorKind::OutOfMemory,
+            Error::BadMagic
+            | Error::UnsupportedVersion(_)
+            | Error::UnknownMethod(_)
+            | Error::Corrupt
+            | Error::TooLarge { .. } => std::io::ErrorKind::InvalidData,
+        })
+    }
+}
+
 impl From<std::collections::TryReserveError> for Error {
     /// Every `try_reserve`/`try_new` allocation this crate's decode path
     /// makes fails the same way: [`Error::OutOfMemory`], never a panic
@@ -211,6 +235,17 @@ impl std::error::Error for WriteError {
         match self {
             Self::Decode(err) => Some(err),
             Self::Io(err) => Some(err),
+        }
+    }
+}
+
+impl From<WriteError> for std::io::Error {
+    /// A writer's own [`std::io::Error`] comes back as it was; a decode
+    /// failure converts as [`Error`] does, so neither arm allocates.
+    fn from(err: WriteError) -> Self {
+        match err {
+            WriteError::Decode(err) => err.into(),
+            WriteError::Io(err) => err,
         }
     }
 }

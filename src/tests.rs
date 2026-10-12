@@ -49,6 +49,52 @@ fn error_display_names_each_variant() {
 }
 
 #[test]
+fn each_error_converts_to_the_io_kind_that_names_it_without_a_payload() {
+    use std::io::ErrorKind::{InvalidData, OutOfMemory, UnexpectedEof};
+    let cases = [
+        (Error::Truncated, UnexpectedEof),
+        (Error::OutOfMemory, OutOfMemory),
+        (Error::BadMagic, InvalidData),
+        (Error::UnsupportedVersion(9), InvalidData),
+        (Error::UnknownMethod(0xFF), InvalidData),
+        (Error::Corrupt, InvalidData),
+        (Error::TooLarge { len: 10, max: 5 }, InvalidData),
+    ];
+    for (err, kind) in cases {
+        let io = std::io::Error::from(err.clone());
+        assert_eq!(io.kind(), kind, "{err:?}");
+        // Boxing a payload is the allocation #479 removed from the decode path.
+        assert!(io.get_ref().is_none(), "{err:?} carries a boxed payload");
+    }
+}
+
+#[test]
+fn write_error_converts_to_io_keeping_the_writers_own_error_whole() {
+    let decode = std::io::Error::from(WriteError::Decode(Error::Truncated));
+    assert_eq!(decode.kind(), std::io::ErrorKind::UnexpectedEof);
+
+    let writer = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "gone");
+    let io = std::io::Error::from(WriteError::Io(writer));
+    assert_eq!(io.kind(), std::io::ErrorKind::BrokenPipe);
+    assert_eq!(io.to_string(), "gone");
+}
+
+#[test]
+fn a_decode_failure_propagates_with_question_mark_in_an_io_result_fn() {
+    fn read(frame: &[u8]) -> std::io::Result<Vec<u8>> {
+        Ok(decompress(frame)?)
+    }
+    assert_eq!(
+        read(&compress(b"abc")).expect("a frame decodes"),
+        b"abc".to_vec()
+    );
+    assert_eq!(
+        read(b"").expect_err("empty input").kind(),
+        std::io::ErrorKind::UnexpectedEof
+    );
+}
+
+#[test]
 fn roundtrip_empty() {
     assert_eq!(decompress(&compress(b"")), Ok(Vec::new()));
 }
