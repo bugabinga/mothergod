@@ -51,6 +51,7 @@ finding and the sentence to write instead.
 Liveness: every decision that mattered appends a line per finding to
 GITHUB_STEP_SUMMARY, the durable trace: a block, a second-stop allow that
 let the defect out, or a payload missing the field the predicate reads.
+The block alone is also a record for the audit (`walls.py`).
 Downstream, the retrospect's `openers` and `em dash x` counts are the
 number this hook exists to hold at zero; a count that climbs while the
 summary shows no blocks means the hook stopped firing.
@@ -60,8 +61,10 @@ import json
 import os
 import sys
 
+import walls
 from opener import announcement, split_first
 
+HOOK = "deny-off-voice"
 FIELD = "last_assistant_message"
 EM_DASH = "\u2014"
 
@@ -95,13 +98,6 @@ def findings(text: str) -> list[tuple[str, str]]:
     return found
 
 
-def note(line: str) -> None:
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-off-voice: {line}\n")
-
-
 def main() -> int:
     """Allow (empty) or block (decision JSON) the stop described on stdin."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -114,17 +110,17 @@ def main() -> int:
         return 0
     text = call.get(FIELD)
     if not isinstance(text, str):
-        note(f"allowed; payload carries no {FIELD}, predicate unread")
+        walls.note(HOOK, f"allowed; payload carries no {FIELD}, predicate unread")
         return 0
     found = findings(text)
     if not found:
         return 0
     if call.get("stop_hook_active"):
         for phrase, _ in found:
-            note(f"allowed second stop; final response still {phrase}")
+            walls.note(HOOK, f"allowed second stop; final response still {phrase}")
         return 0
     for phrase, _ in found:
-        note(f"blocked stop; final response {phrase}")
+        walls.denied(HOOK, "Stop", f"blocked stop; final response {phrase}")
     reason = " ".join(reason for _, reason in found)
     print(json.dumps({"decision": "block", "reason": reason}))
     return 0

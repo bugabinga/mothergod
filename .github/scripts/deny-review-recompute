@@ -61,9 +61,9 @@ allowed, as are malformed JSON and a null tool_input (the #324 shape).
 Exit 2 denies; stderr is shown to the model.
 
 Liveness: every deny appends a fixed-vocabulary line to
-GITHUB_STEP_SUMMARY, so the run page shows the guard working; the
-audit artifact excludes transcripts by design and would never show a
-deny. A missing or broken hook script errors loudly in-session on
+GITHUB_STEP_SUMMARY and the audit's record (`walls.py`), so the run page
+shows the guard working and the retrospect reads the deny under the
+session. A missing or broken hook script errors loudly in-session on
 every Bash call.
 """
 
@@ -71,6 +71,8 @@ import json
 import os
 import re
 import sys
+
+import walls
 
 # One entry per denied class: (name for the summary line, trigger, scope
 # escape). A segment matching the trigger is denied unless it also
@@ -187,10 +189,7 @@ def main() -> int:
     name = denied_class(command)
     if name is None:
         return 0
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-review-recompute: denied {name}\n")
+    walls.denied("deny-review-recompute", "Bash", f"denied {name}")
     print(MESSAGE, file=sys.stderr)
     return 2
 

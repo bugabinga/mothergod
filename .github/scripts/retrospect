@@ -53,9 +53,12 @@ WALLS is the fifth. A denial flag with a count and a tool name says a
 session was refused something, not what: "denied 1 (Edit)" on run
 35842553330 was the harness's protected-path check on `.cargo/`, and the
 BDFL learned that from the docs an hour later, not from this line. The
-audit now records each denial's typed reason (audit-extract.py), and
-every distinct one prints under the session, so the wall is read where
-the session is judged. Older artifacts carry no reasons and print none.
+audit records each denial's typed reason (audit-extract.py): the
+harness's own entry for a mode or rule denial, and the hook's record
+(`walls.py`) for the hook path the harness withholds, which is every
+guard this project runs (#990). Every distinct one prints under the
+session, so the wall is read where the session is judged. Older
+artifacts carry no reasons and print none.
 
 ROUNDS is the sixth, and it costs one `gh pr list`. Issue #663 argued for
 two fixes to the reviewer's one-must-per-round habit with no number either

@@ -46,7 +46,7 @@ allowed, as are malformed JSON and a null tool_input. Exit 2 denies;
 stderr is shown to the model.
 
 Liveness: the one deny per session appends a line to GITHUB_STEP_SUMMARY
-naming the age and the path count. Downstream, a retrospect session past
+and the audit's record (`walls.py`) naming the age and the path count. Downstream, a retrospect session past
 an hour whose posted output says it could not push, while the summary
 shows no deny, means the hook stopped firing.
 """
@@ -57,6 +57,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import walls
 
 TOKEN_TTL_S = 60 * 60
 LEAD_S = 5 * 60
@@ -161,13 +163,9 @@ def main() -> int:
     stamp["fired"] = True
     save_stamp(path, stamp)
     minutes = int(age // 60)
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(
-                f"deny-unpushed-work: denied at {minutes} min, "
-                f"{len(paths)} paths unpushed\n"
-            )
+    walls.denied(
+        "deny-unpushed-work", "Bash", f"denied at {minutes} min, {len(paths)} paths unpushed"
+    )
     shown = ", ".join(paths[:SHOWN]) + (", ..." if len(paths) > SHOWN else "")
     print(
         MESSAGE.format(

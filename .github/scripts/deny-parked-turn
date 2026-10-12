@@ -44,14 +44,17 @@ coverage, like deny-ci-background's idiom list.
 
 Liveness: every decision that mattered appends a line to
 GITHUB_STEP_SUMMARY, the durable trace: a block, or a second-stop
-allow that carried live processes out the door. A broken hook
-reference errors loudly in-session.
+allow that carried live processes out the door. The block alone is also
+a record for the audit (`walls.py`). A broken hook reference errors
+loudly in-session.
 """
 
 import json
 import os
 import subprocess
 import sys
+
+import walls
 
 # The build system's process names: the only work an agent session
 # legitimately runs long, so the only names worth scanning for. `cargo`
@@ -60,6 +63,7 @@ import sys
 TOOLCHAIN = ("rustc", "rustdoc", "clippy-driver")
 TOOLCHAIN_PREFIX = "cargo"
 
+HOOK = "deny-parked-turn"
 MESSAGE = (
     "Detached work is still running: {names}. The run ends the moment "
     "your turn ends: these processes are killed seconds later, and the "
@@ -117,14 +121,10 @@ def main() -> int:
     if not live:
         return 0
     names = ", ".join(f"{comm}({pid})" for pid, comm in live)
-    second = bool(call.get("stop_hook_active"))
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        verdict = "allowed second stop with live" if second else "blocked stop; live"
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-parked-turn: {verdict} {names}\n")
-    if second:
+    if call.get("stop_hook_active"):
+        walls.note(HOOK, f"allowed second stop with live {names}")
         return 0
+    walls.denied(HOOK, "Stop", f"blocked stop; live {names}")
     print(json.dumps({"decision": "block", "reason": MESSAGE.format(names=names)}))
     return 0
 

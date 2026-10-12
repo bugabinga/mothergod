@@ -145,12 +145,18 @@ test("allows non-Bash tools, null tool_input, malformed JSON", () => {
   }
 });
 
-test("a deny writes its class to GITHUB_STEP_SUMMARY", () => {
-  const summary = join(mkdtempSync(join(tmpdir(), "deny-")), "summary.md");
-  const env = { ...reviewEnv, GITHUB_STEP_SUMMARY: summary };
+test("a deny writes its class to GITHUB_STEP_SUMMARY and the audit's record", () => {
+  const temp = mkdtempSync(join(tmpdir(), "deny-"));
+  const summary = join(temp, "summary.md");
+  const env = { ...reviewEnv, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp };
   assert.equal(run(bash("cargo x test"), env).status, 2);
   assert.match(
     readFileSync(summary, "utf8"),
     /^deny-review-recompute: denied unscoped cargo x test\/lint\/doc\/fmt$/m,
   );
+  assert.deepEqual(JSON.parse(readFileSync(join(temp, "walls.jsonl"), "utf8")), {
+    tool: "Bash",
+    type: "hook",
+    reason: "deny-review-recompute: denied unscoped cargo x test/lint/doc/fmt",
+  });
 });

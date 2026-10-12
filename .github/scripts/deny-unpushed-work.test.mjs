@@ -34,8 +34,14 @@ function session(ageMinutes) {
     writeFileSync(stamp, JSON.stringify({ start, fired: false }));
   }
   const summary = join(tmp, "summary.md");
-  const env = { PATH: process.env.PATH, GITHUB_ACTIONS: "true", TMPDIR: tmp, GITHUB_STEP_SUMMARY: summary };
-  return { stamp, summary, env };
+  const env = {
+    PATH: process.env.PATH,
+    GITHUB_ACTIONS: "true",
+    TMPDIR: tmp,
+    GITHUB_STEP_SUMMARY: summary,
+    RUNNER_TEMP: tmp,
+  };
+  return { stamp, summary, record: join(tmp, "walls.jsonl"), env };
 }
 
 function bash(cwd, command = "cargo test") {
@@ -88,7 +94,7 @@ test("an aged session with a clean tree is allowed", () => {
 test("an aged session with edits and no push is denied once, told the path and the command", () => {
   const { dir, dirty } = repo();
   dirty();
-  const { stamp, summary, env } = session(40);
+  const { stamp, summary, record, env } = session(40);
   const first = run(env, bash(dir));
   assert.equal(first.status, 2);
   assert.match(first.stderr, /40 min old, 1 edited path unpushed: src\.rs\./);
@@ -96,6 +102,11 @@ test("an aged session with edits and no push is denied once, told the path and t
   assert.match(first.stderr, /#81/);
   assert.doesNotMatch(first.stderr, /—/);
   assert.equal(readFileSync(summary, "utf8"), "deny-unpushed-work: denied at 40 min, 1 paths unpushed\n");
+  assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), {
+    tool: "Bash",
+    type: "hook",
+    reason: "deny-unpushed-work: denied at 40 min, 1 paths unpushed",
+  });
   assert.equal(JSON.parse(readFileSync(stamp, "utf8")).fired, true);
   // The writer may judge the edits not ready; the second call goes through.
   const second = run(env, bash(dir));

@@ -41,12 +41,16 @@ then end with what changed.
 Liveness: every decision that mattered appends a line to
 GITHUB_STEP_SUMMARY, the durable trace: a block, a second-stop allow that
 let a question out, or a payload missing the field the predicate reads.
+The block alone is also a record for the audit (`walls.py`).
 """
 
 import json
 import os
 import sys
 
+import walls
+
+HOOK = "deny-open-question"
 FIELD = "last_assistant_message"
 
 # Markdown emphasis a model closes a sentence with; stripped before the
@@ -73,13 +77,6 @@ def closing_question(text: str) -> bool:
     return tail.endswith("?")
 
 
-def note(line: str) -> None:
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-open-question: {line}\n")
-
-
 def main() -> int:
     """Allow (empty) or block (decision JSON) the stop described on stdin."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -92,14 +89,14 @@ def main() -> int:
         return 0
     text = call.get(FIELD)
     if not isinstance(text, str):
-        note(f"allowed; payload carries no {FIELD}, predicate unread")
+        walls.note(HOOK, f"allowed; payload carries no {FIELD}, predicate unread")
         return 0
     if not closing_question(text):
         return 0
     if call.get("stop_hook_active"):
-        note("allowed second stop; final response still ends on a question")
+        walls.note(HOOK, "allowed second stop; final response still ends on a question")
         return 0
-    note("blocked stop; final response ends on a question")
+    walls.denied(HOOK, "Stop", "blocked stop; final response ends on a question")
     print(json.dumps({"decision": "block", "reason": MESSAGE}))
     return 0
 

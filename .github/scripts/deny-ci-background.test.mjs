@@ -148,9 +148,10 @@ test("a shell-& deny writes its own summary line", () => {
   );
 });
 
-test("a deny writes the tool name to GITHUB_STEP_SUMMARY", () => {
-  const summary = join(mkdtempSync(join(tmpdir(), "deny-")), "summary.md");
-  const env = { ...ciEnv, GITHUB_STEP_SUMMARY: summary };
+test("a deny writes the tool name to GITHUB_STEP_SUMMARY and the audit's record", () => {
+  const temp = mkdtempSync(join(tmpdir(), "deny-"));
+  const summary = join(temp, "summary.md");
+  const env = { ...ciEnv, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp };
   const bg = {
     tool_name: "Bash",
     tool_input: { command: "cargo test", run_in_background: true },
@@ -160,4 +161,9 @@ test("a deny writes the tool name to GITHUB_STEP_SUMMARY", () => {
     readFileSync(summary, "utf8"),
     /^deny-ci-background: denied Bash in background$/m,
   );
+  assert.deepEqual(JSON.parse(readFileSync(join(temp, "walls.jsonl"), "utf8")), {
+    tool: "Bash",
+    type: "hook",
+    reason: "deny-ci-background: denied Bash in background",
+  });
 });

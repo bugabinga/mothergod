@@ -43,8 +43,8 @@ not a proof of coverage: the shell offers more ways to daemonize, and a
 new one observed in the wild gets appended here, not to prose.
 
 Liveness: every deny appends a line to GITHUB_STEP_SUMMARY, the durable
-trace, because the audit artifact excludes transcripts by design
-(agent-review.yml's audit step) and would never show one; a broken hook
+trace, and to the audit's record (`walls.py`), the only way a deny reaches
+the artifact, which excludes transcripts by design; a broken hook
 reference errors loudly in-session.
 """
 
@@ -52,6 +52,8 @@ import json
 import os
 import re
 import sys
+
+import walls
 
 # Tools that can detach work from the turn. Bash backgrounds only on
 # request; the rest background by default, Workflow unconditionally.
@@ -131,10 +133,7 @@ def main() -> int:
         reason = "in background"
     if reason is None:
         return 0
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"deny-ci-background: denied {tool} {reason}\n")
+    walls.denied("deny-ci-background", tool, f"denied {tool} {reason}")
     message = DETACH_MESSAGE if reason == "in background" else SHELL_DETACH_MESSAGE
     print(message, file=sys.stderr)
     return 2
