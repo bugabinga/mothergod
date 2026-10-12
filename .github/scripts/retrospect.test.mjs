@@ -403,12 +403,12 @@ const shareCases = [
   {
     // The fleet's spend share exceeds the burn's share of the window: the
     // bound passes one and says so, never a percentage over 100.
-    name: "a burn the fleet's own spend accounts for is all the fleet's",
+    name: "a burn the fleet's own spend can account for is at most all the fleet's",
     case: { opened: WINDOW_OPENED, burned: 0.005, used: 0.45, spent: [2.0, 2.5], window_usd: 224.0 },
     expect: [
-      /fleet share: all of the 0\.5% burned is the fleet's \(\$4\.50 of the window's \$224\.00 notional, 2\.0%, against 0\.5 of its 45 points, 1\.1%\); shedding reaches the cause\./,
+      /fleet share: at most all of the 0\.5% burned is the fleet's \(\$4\.50 of the window's \$224\.00 notional, 2\.0%, against 0\.5 of its 45 points, 1\.1%\); the fleet cannot be ruled out as the cause, so shedding may reach it\./,
     ],
-    reject: [/at most/, /1\d\d%/],
+    reject: [/at most \d/, /1\d\d%/, /is all/],
   },
   {
     name: "a table that cannot be read says UNREADABLE, never a share",
@@ -481,7 +481,7 @@ test("the fleet-share line rides the governed window's observation alone", () =>
   assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.match(
     r.stdout,
-    /seven_day: 33% used[^\n]*burned 1\.0% over the 16 min audited\n\s+governor:[^\n]*\n\s+fleet share: all of the 1\.0% burned is the fleet's/,
+    /seven_day: 33% used[^\n]*burned 1\.0% over the 16 min audited\n\s+governor:[^\n]*\n\s+fleet share: at most all of the 1\.0% burned is the fleet's/,
   );
   assert.doesNotMatch(r.stdout, /five_hour[^\n]*\n\s+fleet share/);
   // SEVEN_DAY_RESET is 2026-09-17T02:00:00Z; the window opened a WEEK before.

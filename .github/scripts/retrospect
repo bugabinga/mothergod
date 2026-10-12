@@ -90,7 +90,9 @@ notional cost over the window's whole notional cost, divided by the burn
 over the points used since the window opened. Usage outside the factory
 moves points without a session row, so it inflates only the denominators;
 the true share is at most the bound, and no dollar price per point is
-needed.
+needed. The bound assumes notional dollars are proportional to points
+between the interval and the window, which model and cache mix can break;
+a bound past one is printed as "at most all", never as "is all".
 
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
@@ -437,8 +439,8 @@ def share(opened, burned, used, spent, query=None):
              f"{usd_share:.1%}, against {burned * 100:.1f} of its {used * 100:.0f} points, "
              f"{points_share:.1%}")
     if bound >= 1:
-        print(head + f"all of the {burned:.1%} burned is the fleet's ({basis}); "
-              "shedding reaches the cause.")
+        print(head + f"at most all of the {burned:.1%} burned is the fleet's ({basis}); "
+              "the fleet cannot be ruled out as the cause, so shedding may reach it.")
         return
     print(head + f"at most {bound:.0%} of the {burned:.1%} burned is the fleet's ({basis}); "
           "the rest is usage outside the factory, which shedding cannot reach.")
