@@ -36,6 +36,14 @@ All notable changes to this project are documented here. Format follows
   before. On the four Silesia files over 16 MiB the output changes by +0.11% in
   total (webster +0.44%, mozilla -0.06%): each block restarts the
   model.
+- library: `mothergod::copy_encode(reader, writer)` compresses everything a
+  `Read` yields into a `Write`, one 16 MiB block and one frame at a time, so
+  its memory is bounded by the block and not by the input (#978). The CLI
+  compresses through it, so a file or pipe of any length compresses in under
+  1 GiB, where it read its input whole before. Up to 256 MiB the bytes equal
+  `compress`'s; past it the stream holds compressed frames where `compress`
+  stores, and `decompress_to_writer` and the CLI read it back, while
+  `decompress` rejects it as `TooLarge`.
 - library: `mothergod::Error` and `WriteError` convert into `std::io::Error`,
   so `?` works in a function returning `io::Result` without a `map_err`
   (#1081). A truncated frame is `UnexpectedEof`, an allocator failure is

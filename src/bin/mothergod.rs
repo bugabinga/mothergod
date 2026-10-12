@@ -19,11 +19,12 @@
 //! goes on to the next, then exits 1; a reader that went away ends the run at
 //! once with status 141.
 //!
-//! Compression builds its whole output before writing it: the optimal-parse
-//! encoder needs the full input. Decompression streams through
+//! Compression streams through [`mothergod::copy_encode`], one 16 MiB block
+//! and one frame at a time, so its memory is bounded by the block and not by
+//! the input. Decompression streams through
 //! [`mothergod::decompress_to_writer`], which bounds resident memory on the
 //! output side (ROADMAP M4) for every frame kind except a `Transpose`-filtered
-//! one, which decodes whole first. Input is read whole either way.
+//! one, which decodes whole first. Decompression reads its input whole.
 //!
 //! A decode failure to stdout surfaces after whatever prefix was already
 //! written: `| tar x` sees truncated bytes ahead of the nonzero exit code.
@@ -178,24 +179,28 @@ fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool) -> ExitCode {
         },
         None => None,
     };
+    let input_name = operand.map_or_else(|| "stdin".to_owned(), |path| path.display().to_string());
+    if matches!(mode, Mode::Compress) {
+        let reader = match open_input(operand) {
+            Ok(reader) => reader,
+            Err(err) => return fail(&err),
+        };
+        return match target {
+            None => compress_into(reader, io::stdout().lock(), "stdout", &input_name),
+            Some((source, out_path)) => write_new_file_with(&out_path, source, |file| {
+                compress_into(reader, file, &out_path.display().to_string(), &input_name)
+            }),
+        };
+    }
     let input = match read_input(operand) {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
-    let input_name = operand.map_or_else(|| "stdin".to_owned(), |path| path.display().to_string());
-    match (mode, target) {
-        (Mode::Compress, None) => write_stdout(&mothergod::compress(&input)),
-        (Mode::Compress, Some((source, out_path))) => {
-            write_new_file(&out_path, &mothergod::compress(&input), source)
-        }
-        (Mode::Decompress, None) => {
-            decompress_into(&input, &mut io::stdout().lock(), "stdout", &input_name)
-        }
-        (Mode::Decompress, Some((source, out_path))) => {
-            write_new_file_with(&out_path, source, |file| {
-                decompress_into(&input, file, &out_path.display().to_string(), &input_name)
-            })
-        }
+    match target {
+        None => decompress_into(&input, &mut io::stdout().lock(), "stdout", &input_name),
+        Some((source, out_path)) => write_new_file_with(&out_path, source, |file| {
+            decompress_into(&input, file, &out_path.display().to_string(), &input_name)
+        }),
     }
 }
 
@@ -204,6 +209,45 @@ fn output_name(mode: Mode, source: &Path) -> Result<PathBuf, String> {
     match mode {
         Mode::Compress => Ok(add_suffix(source)),
         Mode::Decompress => strip_suffix(source),
+    }
+}
+
+/// A reader that keeps the error its inner reader raised, so a failure of
+/// [`mothergod::copy_encode`] can be told to come from reading and not from
+/// writing: the library returns one `io::Error` for both.
+struct Tracked<R> {
+    inner: R,
+    failure: Option<io::Error>,
+}
+
+impl<R: Read> Read for Tracked<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf).map_err(|err| {
+            let kind = err.kind();
+            self.failure = Some(err);
+            kind.into()
+        })
+    }
+}
+
+/// Runs [`mothergod::copy_encode`] from `reader` into `writer`: a read
+/// failure is reported with `input_name`, a write failure with `dest_name`.
+fn compress_into<R: Read, W: Write>(
+    reader: R,
+    writer: W,
+    dest_name: &str,
+    input_name: &str,
+) -> ExitCode {
+    let mut reader = Tracked {
+        inner: reader,
+        failure: None,
+    };
+    match mothergod::copy_encode(&mut reader, writer) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => match reader.failure {
+            Some(read_err) => fail(&format!("reading {input_name}: {read_err}")),
+            None => write_fail(dest_name, &err),
+        },
     }
 }
 
@@ -243,7 +287,7 @@ fn strip_suffix(path: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{}: expected a {SUFFIX} file", path.display()))
 }
 
-/// Reads stdin, or `path` if given.
+/// Reads stdin, or `path` if given, whole.
 fn read_input(path: Option<&Path>) -> Result<Vec<u8>, String> {
     match path {
         None => {
@@ -258,27 +302,22 @@ fn read_input(path: Option<&Path>) -> Result<Vec<u8>, String> {
     }
 }
 
-fn write_stdout(bytes: &[u8]) -> ExitCode {
-    match io::stdout().lock().write_all(bytes) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => write_fail("stdout", &err),
+/// Opens stdin, or `path` if given, to be read as it is consumed.
+fn open_input(path: Option<&Path>) -> Result<Box<dyn Read>, String> {
+    match path {
+        None => Ok(Box::new(io::stdin().lock())),
+        Some(path) => File::open(path)
+            .map(|file| Box::new(file) as Box<dyn Read>)
+            .map_err(|err| format!("reading {}: {err}", path.display())),
     }
 }
 
-/// Writes `bytes` to `path`, refusing to clobber an existing file (a compression
-/// re-run over an already-compressed file, or a decompression target that
-/// already exists, must not silently destroy it).
-fn write_new_file(path: &Path, bytes: &[u8], source: &Path) -> ExitCode {
-    write_new_file_with(path, source, |file| match file.write_all(bytes) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => fail(&format!("writing {}: {err}", path.display())),
-    })
-}
-
-/// Opens `path` as a new file, refusing to clobber an existing one, then
-/// runs `write` against it. Shared by [`write_new_file`] and
-/// [`process`]'s decompression branch, which otherwise each open the file and
-/// clean up after a failed write identically.
+/// Opens `path` as a new file, refusing to clobber an existing one (a
+/// compression re-run over an already-compressed file, or a decompression
+/// target that already exists, must not silently destroy it), then runs
+/// `write` against it. Shared by both of [`process`]'s file branches, which
+/// otherwise each open the file and clean up after a failed write
+/// identically.
 ///
 /// A write failure after `create_new` succeeded (disk full, interrupted, a
 /// corrupt decode) removes the partial file: otherwise it survives as a
