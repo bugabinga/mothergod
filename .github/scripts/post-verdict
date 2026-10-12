@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Apply the reviewer's verdict: flip the label pair, post the comment stamped with the diff it covers.
+
+Extensionless and executable because the reviewer types it as a command
+mid-session, like gh-comment and merge-pr. Tested by `post-verdict.test.mjs`.
+
+A verdict is two writes that must agree: exactly one of `agent-approved`
+and `changes-requested` on the PR (CLAUDE.md, labels) and one comment
+carrying the items. The reviewer's prompt choreographed them as four
+`gh` calls in prose for six weeks, and the two drifted apart in the ways
+prose allows: a label with no items (PR #516, the run 401'd between
+them), and a comment that named its head by habit and never by contract,
+so no later run could tell that the diff it faced was already judged
+(#953, #1050). This script is the one shape of a verdict: the pair flips,
+then the comment goes through gh-comment with the stamp `verdict-stands`
+reads, `<!-- verdict <pass|fail> <id> -->`, where `<id>` is DIFF_ID from
+the environment, computed by the workflow's `stamp` step over the diff,
+title and body the model was handed.
+
+An empty DIFF_ID posts the verdict unstamped with one stderr line: the
+diff did not read at guard time, and a verdict withheld for a missing
+stamp would stall the PR where an unstamped one merely costs the next
+refresh a review (verdict-stands fails open toward reviewing).
+
+The labels ride the ambient GH_TOKEN, the app token the reviewer always
+used for them; the comment rides gh-comment's GH_WORKFLOW_TOKEN with its
+footer, opener trim and secret scrub, so a verdict stays one comment the
+retrospect, rounds.py and the self-trigger guard already recognise.
+ROLE must be `reviewer`: the pair is that seat's typed verdict and no
+other seat applies it (#181).
+
+Usage: post-verdict <pr> pass|fail < body
+Prints the comment's URL on stdout.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+
+SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+LABELS = {
+    "pass": ("agent-approved", "changes-requested"),
+    "fail": ("changes-requested", "agent-approved"),
+}
+
+
+def die(*lines):
+    for line in lines:
+        print(f"post-verdict: {line}", file=sys.stderr)
+    sys.exit(1)
+
+
+def stamped(body, verdict, diff_id):
+    """The body with the stamp verdict-stands reads, or unchanged when there is no id."""
+    if not diff_id:
+        return body
+    return f"{body}\n\n<!-- verdict {verdict} {diff_id} -->"
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="post-verdict", description=__doc__.splitlines()[0])
+    parser.add_argument("number", help="the PR the verdict is on")
+    parser.add_argument("verdict", choices=sorted(LABELS), help="pass or fail")
+    args = parser.parse_args()
+    if not args.number.isdigit():
+        die("usage: post-verdict <pr> pass|fail < body")
+    if os.environ.get("ROLE", "") != "reviewer":
+        die("ROLE is not reviewer; the verdict pair is the reviewer's typed verdict (#181)")
+    scope = os.environ.get("PR_NUMBER")
+    if scope and args.number != scope:
+        die(f"target #{args.number} does not match PR_NUMBER={scope} from the environment; "
+            "a review session writes only to the PR it was scoped to (issue #771), "
+            "and the label moves before the comment does")
+    body = sys.stdin.read().strip()
+    if not body:
+        die("empty body; a verdict with no items is a label with nothing behind it")
+    diff_id = os.environ.get("DIFF_ID", "")
+    if not diff_id:
+        print("post-verdict: DIFF_ID is empty, posting unstamped; the next refresh "
+              "re-reviews instead of standing", file=sys.stderr)
+
+    add, remove = LABELS[args.verdict]
+    edit = subprocess.run(
+        ["gh", "pr", "edit", args.number, "--add-label", add, "--remove-label", remove],
+        capture_output=True, text=True,
+    )
+    if edit.returncode != 0:
+        die(f"gh pr edit on #{args.number} failed: {edit.stderr.strip()}")
+
+    post = subprocess.run(
+        [os.path.join(SCRIPTS, "gh-comment"), args.number],
+        input=stamped(body, args.verdict, diff_id), capture_output=True, text=True,
+    )
+    sys.stderr.write(post.stderr)
+    if post.returncode != 0:
+        die(f"the comment did not post; the {add} label is on #{args.number} with no items behind it")
+    print(post.stdout.strip())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

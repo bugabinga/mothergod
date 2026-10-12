@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Decide whether a review run has anything new to judge, and print the id that says so.
+
+Run by agent-review.yml's `stamp` step, before the model starts; tested by
+`verdict-stands.test.mjs`. Extensionless and executable because a workflow
+step types it as a command, like guard-decide.py's callers and stalled-prs.
+
+The class this compiles (#953, #1050): a review run that re-judges a diff
+the reviewer already returned. Two triggers produce it. A cancelled run
+whose Claude step outlives the cancel by a minute posts its FAIL, and the
+run that replaced it reads that verdict and re-posts it as round 2 (PR
+#950, 69 seconds apart). And propagate-review merges main into every open
+PR after agent-review.yml changes, a new head whose PR diff is
+byte-identical to the one already judged (PRs #956, #1038, #1045: a full
+review, the same [must] re-posted as a new round). Nothing told a run that
+the current diff already carried this seat's verdict, because the comment
+named the head only by habit ("PASS at `7ca9bef`"), not by contract.
+
+The contract: `post-verdict` writes `<!-- verdict fail <id> -->` into
+every verdict comment, where `<id>` is the sha256 of what the reviewer
+judged: the PR's three-dot diff against its base, its title and its body.
+This script computes the same id from the event's base and head, reads the
+PR's newest reviewer comment, and prints two GITHUB_OUTPUT lines:
+
+    diff_id=<64 hex chars, or empty when the diff could not be read>
+    stands=<true when the newest reviewer comment carries a `fail` stamp
+            equal to diff_id and the PR carries `changes-requested`>
+
+`stands=true` skips the model: the standing verdict covers this exact
+diff and body, the author has changed nothing the reviewer reads, so a
+second run would post the same items and cost a review. Every other
+state reviews. The decision never fails closed toward skipping: an
+unreadable PR, an unreadable diff, an unstamped newest comment, a stamp
+from a different id, or a PASS stamp all print `stands=false`, because a
+skipped review that was owed is a merge with no judgment behind it and a
+duplicate review is only a wasted run.
+
+Why the body is in the id: `edited` is a review trigger precisely so a
+body edit answering a [must] gets its round (agent-review.yml, 2026-09-25).
+A diff-only stamp would call that answer "unchanged" and skip it forever.
+The price is that #950's own instance, a body correction nine seconds
+after `opened`, still reviews twice: the second run is judging a different
+body, which is the round `edited` exists to give.
+
+Why sha256 over the raw diff and not `git patch-id`: patch-id ignores
+whitespace, and whitespace is the program in YAML and Python, the two
+languages under `.github/`. An indentation fix answering a [must] would
+read as the same patch and stand unreviewed.
+
+Only `changes-requested` skips. An `agent-approved` PR re-reviews on a
+refresh because `merge-pr --wait` and the stalled-prs rescue both test
+that the approval postdates the head's review round (verdict.py); a skip
+there would leave a label that vouches for no head, and the armed
+auto-merge already lands the refreshed head on the standing PASS (#1041).
+
+Usage: verdict-stands <pr> <base-sha> <head-sha> >> "$GITHUB_OUTPUT"
+Stderr says which case fired. Exit 0 on every readable or unreadable
+state; nonzero only on a usage error.
+"""
+
+import hashlib
+import json
+import re
+import subprocess
+import sys
+
+REVIEWER_FOOTER = "_reviewer ·"
+STAMP = re.compile(r"<!--\s*verdict\s+(pass|fail)\s+([0-9a-f]{64})\s*-->")
+
+
+def digest(diff, title, body):
+    """The id a verdict covers: the diff, the title and the body, in that order."""
+    material = "\n".join(["--diff", diff, "--title", title, "--body", body])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def footer(text):
+    """The last non-empty line, where gh-comment writes the role (rounds.py's tell)."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def stamp_of(text):
+    """(verdict, id) from the comment's stamp, or None when it carries none."""
+    found = STAMP.search(text)
+    return (found.group(1), found.group(2)) if found else None
+
+
+def decide(labels, comments, diff_id):
+    """Pure. (stands, why): does the newest reviewer comment's stamp cover this id?"""
+    if not diff_id:
+        return False, "no diff id, so no stamp can match; reviewing"
+    if "changes-requested" not in labels:
+        return False, "no changes-requested label, so no verdict is standing; reviewing"
+    reviewer = [
+        comment for comment in sorted(comments, key=lambda item: item.get("createdAt") or "")
+        if footer(comment.get("body") or "").startswith(REVIEWER_FOOTER)
+    ]
+    if not reviewer:
+        return False, "no reviewer comment on the thread; reviewing"
+    stamp = stamp_of(reviewer[-1].get("body") or "")
+    if stamp is None:
+        return False, "the newest reviewer comment carries no stamp; reviewing"
+    verdict, stamped = stamp
+    if verdict != "fail":
+        return False, f"the newest reviewer comment is a {verdict} stamp; reviewing"
+    if stamped != diff_id:
+        return False, f"the standing fail covers {stamped[:12]}, this diff is {diff_id[:12]}; reviewing"
+    return True, f"the standing fail covers {diff_id[:12]}: the diff, title and body are unchanged"
+
+
+def run(args):
+    """stdout of a command, or None when it fails; stderr carries the reason."""
+    proc = subprocess.run(args, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(f"verdict-stands: {' '.join(args[:3])} failed: {proc.stderr.strip()}", file=sys.stderr)
+        return None
+    return proc.stdout
+
+
+def diff_of(base, head):
+    """The PR's three-dot diff, base's merge-base with head to head, or None."""
+    merge_base = run(["git", "merge-base", base, head])
+    if merge_base is None:
+        return None
+    return run(["git", "diff", "--no-color", "--no-ext-diff", merge_base.strip(), head])
+
+
+def main(argv):
+    if len(argv) != 4:
+        print('usage: verdict-stands <pr> <base-sha> <head-sha> >> "$GITHUB_OUTPUT"', file=sys.stderr)
+        return 2
+    _, number, base, head = argv
+    diff_id = ""
+    labels, comments = [], []
+    raw = run(["gh", "pr", "view", number, "--json", "title,body,labels,comments"])
+    if raw is not None:
+        try:
+            pr = json.loads(raw)
+            labels = [label["name"] for label in pr.get("labels") or []]
+            comments = pr.get("comments") or []
+            diff = diff_of(base, head)
+            if diff is not None:
+                diff_id = digest(diff, pr.get("title") or "", pr.get("body") or "")
+        except (AttributeError, KeyError, TypeError, ValueError) as err:
+            print(f"verdict-stands: PR #{number} did not read: {err}", file=sys.stderr)
+    stands, why = decide(labels, comments, diff_id)
+    print(f"verdict-stands: {why}", file=sys.stderr)
+    print(f"diff_id={diff_id}")
+    print(f"stands={'true' if stands else 'false'}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

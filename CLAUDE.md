@@ -245,7 +245,8 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 - Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
   `marketing`, `blocked-on-human`, `agents-paused`, `ops-log`, `ledger`,
   `ready-to-ship`, `agent-approved`, `changes-requested`. The last two are the reviewer's
-  verdict, typed: exactly one of them, never both, and the maintainer
+  verdict, typed: exactly one of them, never both, flipped by
+  `.github/scripts/post-verdict` with the verdict comment, and the maintainer
   filters on them rather than reading prose. `ledger` marks an issue the
   machinery writes and no session ships, so queues can exclude it: six
   such issues carried no common marker until 2026-09-18, and each one

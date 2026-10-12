@@ -29,10 +29,15 @@
 # token, so this seat and the agent PRs it reviews share the claude[bot]
 # identity and GitHub refuses a formal approval on every one of them
 # (every verdict in September 2026 landed as a plain comment). The
-# verdict is therefore the label plus a comment through gh-comment on
-# the workflow token (github-actions[bot]), whose events raise no runs:
-# a claude[bot] verdict comment woke a BDFL run that skipped, three per
-# PR on #683 (issue #590).
+# verdict is therefore the label plus a comment, applied as one shape by
+# .github/scripts/post-verdict: the pair flips, the comment rides
+# gh-comment on the workflow token (github-actions[bot]), whose events
+# raise no runs (a claude[bot] verdict comment woke a BDFL run that
+# skipped, three per PR on #683, issue #590), stamped with the id of the
+# diff, title and body it judged. The `stamp` step below computes that
+# id before the model starts and skips the run when the newest verdict
+# already covers it (#953, #1050): a cancelled run's late post, or a
+# propagate-review merge of main, no longer buys a second round.
 name: agent-review
 
 on:
@@ -144,17 +149,31 @@ jobs:
           cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           role: reviewer
 
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+      # Is there anything new to judge? verdict-stands prints the id of
+      # the diff, title and body (DIFF_ID below, which post-verdict stamps
+      # into the verdict) and `stands=true` when the newest reviewer
+      # comment is a fail stamped with that same id under a standing
+      # `changes-requested`. It fails open toward reviewing: an unreadable
+      # PR or diff prints an empty id and reviews.
+      - id: stamp
         if: steps.guard.outputs.paused != 'true'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/verdict-stands "$PR" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
         with:
           toolchain: stable
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        if: steps.guard.outputs.paused != 'true'
+        if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
 
       - id: claude
-        if: steps.guard.outputs.paused != 'true'
+        if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
         uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
         env:
           # The PR under review. Here rather than in the prompt because a
@@ -163,6 +182,9 @@ jobs:
           # such interpolation in any agent workflow.
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # What post-verdict stamps into the verdict comment (the stamp
+          # step's id of the diff, title and body this session was handed).
+          DIFF_ID: ${{ steps.stamp.outputs.diff_id }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_commit_signing: true
@@ -238,10 +260,10 @@ jobs:
             Verdict, in one round: finish the whole procedure over the whole
             diff before posting, and list every [must] you found. A round per
             must costs the author a cycle and you a run (#663).
-            - PASS: post the verdict with `.github/scripts/gh-comment
-              $PR_NUMBER`, body on stdin, listing what you executed and why it
-              holds. Add `agent-approved`, remove `changes-requested` if an
-              earlier round left it, then merge as your last action:
+            - PASS: `.github/scripts/post-verdict $PR_NUMBER pass`, body on
+              stdin, listing what you executed and why it holds; it sets
+              the label pair and stamps the comment with the diff it covers.
+              Then merge as your last action:
               `.github/scripts/merge-pr $PR_NUMBER --sha <reviewed-head>`.
               Attempt it before predicting it will fail; an unsigned branch
               commit is not a reason to stop (GOVERNANCE.md "Merging"). Exit 2
@@ -259,9 +281,8 @@ jobs:
               neither existed as an issue until a retrospect filed #954;
               #987's review saw a truncated Stored frame decode clean and
               left it unfiled until a retrospect filed #988.
-            - FAIL: add `changes-requested`, remove `agent-approved` if it is
-              there, and deliver the items with `.github/scripts/gh-comment
-              $PR_NUMBER`, each tagged [must] or [nit], specific and
+            - FAIL: `.github/scripts/post-verdict $PR_NUMBER fail`, body on
+              stdin, each item tagged [must] or [nit], specific and
               actionable. Courteous and explanatory, especially to human
               authors. The label carries the verdict.
 
@@ -310,6 +331,7 @@ jobs:
       # only stops one from looking reviewed when it was not.
       - name: A green review means a review happened
         if: steps.guard.outputs.paused != 'true' &&
+          steps.stamp.outputs.stands != 'true' &&
           steps.claude.outputs.execution_file == ''
         env:
           PR: ${{ github.event.pull_request.number }}
@@ -342,8 +364,11 @@ jobs:
       # Does this verdict owe the maintainer a wake? Read from the label,
       # never from the review prose: typing the verdict is what made it
       # machine-readable in the first place (#181).
+      # A standing verdict woke the maintainer when it landed; a run it
+      # stood through has nothing new to say.
       - id: verdict
-        if: always() && steps.guard.outputs.paused != 'true'
+        if: always() && steps.guard.outputs.paused != 'true' &&
+          steps.stamp.outputs.stands != 'true'
         env:
           PR: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
