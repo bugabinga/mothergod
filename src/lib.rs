@@ -532,11 +532,12 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 /// Tries [`Method::Lz`] and falls back to [`Method::Stored`] whenever that
 /// does not produce a smaller frame (`docs/format/SPEC.md`'s Stored-floor
 /// invariant): tiny, incompressible, or already-compressed input, and any
-/// input longer than `u32::MAX` bytes, which [`codec::encode`] does not
-/// support yet.
+/// input longer than [`codec::MAX_DECODED_LEN`] bytes, because [`decompress`]
+/// rejects an `Lz` frame past that bound as [`Error::TooLarge`] and a frame
+/// this crate cannot read back is not one it may write.
 #[must_use]
 pub fn compress(input: &[u8]) -> Vec<u8> {
-    if u32::try_from(input.len()).is_ok() {
+    if u32::try_from(input.len()).is_ok_and(|len| len <= codec::MAX_DECODED_LEN) {
         let body = codec::encode(input);
         if candidate_beats_incumbent(body.len(), input.len()) {
             return build_frame(Method::Lz, &[&body]);

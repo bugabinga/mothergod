@@ -74,6 +74,17 @@ fn compressible_input_picks_method_lz() {
 }
 
 #[test]
+fn compressible_input_past_the_decode_bound_is_stored_and_round_trips() {
+    // `decompress` rejects an `Lz` frame past `MAX_DECODED_LEN`, so
+    // `compress` must not write one. Past the bound no encode runs, which
+    // keeps this cheap.
+    let input = vec![0u8; codec::MAX_DECODED_LEN as usize + 1];
+    let frame = compress(&input);
+    assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
+    assert!(decompress(&frame).is_ok_and(|output| output == input));
+}
+
+#[test]
 fn candidate_beats_incumbent_keeps_the_strictly_smaller_candidate_only() {
     assert!(
         candidate_beats_incumbent(3, 5),
