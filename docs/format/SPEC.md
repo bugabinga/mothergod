@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 11)
+# mothergod bitstream format (FORMAT_VERSION 12)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 11)
+4       1     format version (currently 12)
 5       1     method byte
 6       ...   payload (method-defined)
 ```
@@ -36,7 +36,25 @@ mixer, a learned-baseline rate schedule and stretch-domain SSE bins
 (ADR-0052, ADR-0054, ADR-0055); 8 split the length model by token kind
 (ADR-0057); 9 split the offset model by match length (ADR-0058); 10 added
 the length residual trees (ADR-0061); 11 gave the `Stored` payload a
-declared length (ADR-0065).
+declared length (ADR-0065); 12 gave the `Lz` payload a declared coded
+length, so a frame's end is knowable and frames chain into a stream
+(ADR-0067).
+
+## Streams (ADR-0067)
+
+A compressed stream is one or more frames, back to back, decoded in order;
+its output is their outputs concatenated. Every frame names its own extent
+(the `Stored` data length, the `Lz` coded length), so a decoder finds where
+one ends without decoding it. Nothing else may follow the last frame: a
+decoder MUST reject bytes that are not a frame, as the next frame's
+`Truncated` (fewer than 6 bytes, or a payload cut short) or `BadMagic`,
+and an empty stream is `Truncated`. The frame count is not bounded: each
+frame costs at least its own input bytes. A caller's output bound below
+`codec::MAX_DECODED_LEN` covers the stream's total, and a frame whose
+output would carry the total past it is `TooLarge` before any of its
+decode work. At or above that ceiling there is no total, and each `Lz`
+frame is capped alone, so a stream of any length decodes under the same
+per-frame worst case a single frame has.
 
 ## Methods
 
@@ -54,10 +72,10 @@ offset  size  field
 ```
 
 A decoder MUST reject a payload shorter than 8 bytes, or holding fewer
-data bytes than the field declares, as `Truncated`, and one holding more
-as `Corrupt`. The field is never an allocation size: it is compared with
-the bytes present. It is a `u64` because an encoder stores inputs longer
-than `u32::MAX` bytes. There is no check value: a bit flip inside the data
+data bytes than the field declares, as `Truncated`. Bytes past the declared
+length are the next frame's. The field is never an allocation size: it is
+compared with the bytes present. It is a `u64` because an encoder stores
+inputs longer than `u32::MAX` bytes. There is no check value: a bit flip inside the data
 is not detected (ADR-0065).
 
 ### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028, ADR-0038)
@@ -75,8 +93,14 @@ offset  size  field
 0       2     filter selector: [kind, param]
 2       4     declared output length, u32 LE
 6       4     token count, u32 LE
-10      ...   range-coded stream, of the FILTERED bytes
+10      8     coded length: the range-coded stream's byte count, u64 LE
+18      ...   range-coded stream, of the FILTERED bytes
 ```
+
+A decoder MUST reject a payload holding fewer stream bytes than the coded
+length declares as `Truncated`; bytes past it are the next frame's. The
+field is never an allocation size: it is compared with the bytes present,
+as `Stored`'s is, and it is a `u64` for the same reason.
 
 **Literal sub-stream (ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055).**
 Each literal byte is 8 chained binary decisions over the symbol alphabet

@@ -21,6 +21,12 @@ All notable changes to this project are documented here. Format follows
   terminal, so a forgotten redirect does not fill the screen with binary
   (#1039). A reader that closes stdout early (`| head`) ends it silently with
   status 141, as gzip does.
+- format: concatenated frames decode to their payloads back to back, as
+  `cat a.gz b.gz | gunzip` does, and bytes after the last frame are an error
+  instead of being dropped in silence with exit status 0 (#978, ADR-0067).
+  The price is 8 bytes on each compressed frame, which now says where it
+  ends. A caller's `decompress_bounded` limit below 256 MiB caps the whole
+  stream's output, not each frame's.
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
   interface, with no compression levels and no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact
@@ -34,12 +40,12 @@ All notable changes to this project are documented here. Format follows
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 11, specified in
+- Bitstream format at `FORMAT_VERSION` 12, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 11 no longer decode: no release ever wrote them, and
+- Format versions below 12 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.

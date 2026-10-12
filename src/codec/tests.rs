@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_support::as_codec_error;
+use crate::test_support::{as_codec_error, lz_payload};
 
 /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
 /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
@@ -484,9 +484,7 @@ fn declared_length_lie_is_rejected_not_overallocated() {
     // this actually now hits the TooLarge fast-reject path below
     // before token_count is even consulted; kept as Corrupt's own
     // regression case too since it predates that check.
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&u32::MAX.to_le_bytes());
-    payload.extend_from_slice(&0u32.to_le_bytes());
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), u32::MAX, 0, &[]);
     assert_eq!(
         decode(&payload, MAX_DECODED_LEN),
         Err(Error::TooLarge {
@@ -505,9 +503,7 @@ fn declared_length_over_the_max_is_rejected_before_any_work() {
     // length-bounds-work argument (true, but declared_len itself was
     // unbounded); now rejected in zero loop iterations.
     let over = MAX_DECODED_LEN + 1;
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&over.to_le_bytes());
-    payload.extend_from_slice(&over.to_le_bytes());
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, over, &[]);
     assert_eq!(
         decode(&payload, MAX_DECODED_LEN),
         Err(Error::TooLarge {
@@ -526,9 +522,7 @@ fn decode_clamps_a_max_len_above_max_decoded_len() {
     // past MAX_DECODED_LEN, the only value this decoder's worst-case
     // decode time has been measured against (S2-A27).
     let over = MAX_DECODED_LEN + 1;
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&over.to_le_bytes());
-    payload.extend_from_slice(&over.to_le_bytes());
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, over, &[]);
     assert_eq!(
         decode(&payload, u32::MAX),
         Err(Error::TooLarge {
@@ -554,11 +548,8 @@ fn single_match_payload(distance: u32) -> Vec<u8> {
     sink.length(&mut models, FlagKind::Match, 4);
     sink.offset(&mut models, 4, distance);
 
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&4u32.to_le_bytes()); // declared_len
-    payload.extend_from_slice(&1u32.to_le_bytes()); // token_count
-    payload.extend(ac.finish());
-    payload
+    // declared_len 4, token_count 1
+    lz_payload(Candidate::Identity.to_header_bytes(), 4, 1, &ac.finish())
 }
 
 #[test]
@@ -1107,9 +1098,7 @@ fn streaming_rejects_match_distance_beyond_window() {
 #[test]
 fn streaming_rejects_declared_length_over_the_max_before_any_work() {
     let over = MAX_DECODED_LEN + 1;
-    let mut payload = Candidate::Identity.to_header_bytes().to_vec();
-    payload.extend_from_slice(&over.to_le_bytes());
-    payload.extend_from_slice(&over.to_le_bytes());
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, over, &[]);
     let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("declared length past MAX_DECODED_LEN must be rejected");
     assert_eq!(
@@ -1129,11 +1118,12 @@ fn streaming_falls_back_to_decode_for_transpose_declared_length_over_the_max() {
     // path), which must reject before calling it, not after. Identity,
     // Delta, and Bcj all stream instead (research/JOURNAL.md S1-P7).
     let over = MAX_DECODED_LEN + 1;
-    let mut payload = Candidate::Transpose(crate::test_support::nz(2))
-        .to_header_bytes()
-        .to_vec();
-    payload.extend_from_slice(&over.to_le_bytes());
-    payload.extend_from_slice(&over.to_le_bytes());
+    let payload = lz_payload(
+        Candidate::Transpose(crate::test_support::nz(2)).to_header_bytes(),
+        over,
+        over,
+        &[],
+    );
     let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("declared length past MAX_DECODED_LEN must be rejected");
     assert_eq!(
@@ -1245,4 +1235,54 @@ fn ppm_expert_experiment_baseline_non_literal_subtotal_matches_ideal_cost_bits()
         "non_literal_from_whole={non_literal_from_whole} paired_baseline={}",
         paired.cost.baseline
     );
+}
+
+#[test]
+fn the_coded_length_names_the_streams_extent() {
+    // ADR-0067: a payload spans its selector, header and exactly the stream
+    // its header declares, so a frame's end is known without decoding it.
+    let payload = encode(
+        b"the quick brown fox jumps over the lazy dog. "
+            .repeat(40)
+            .as_slice(),
+    );
+    let Extent {
+        payload_len,
+        output_len,
+    } = extent(&payload).expect("a real payload has an extent");
+    assert_eq!(payload_len, payload.len());
+    assert_eq!(output_len, 45 * 40);
+
+    // The next frame's bytes past it are not the stream's.
+    let mut run_on = payload.clone();
+    run_on.extend_from_slice(b"next frame");
+    assert_eq!(extent(&run_on).map(|e| e.payload_len), Ok(payload.len()));
+    assert_eq!(decode(&run_on, MAX_DECODED_LEN), Err(Error::Corrupt));
+
+    // A stream cut short of its declared length is truncated, never read
+    // as the zero bits the range decoder pads a short stream with.
+    for cut in 0..payload.len() {
+        assert_eq!(
+            extent(&payload[..cut]),
+            Err(Error::Truncated),
+            "cut at {cut}"
+        );
+        assert_eq!(
+            decode(&payload[..cut], MAX_DECODED_LEN),
+            Err(Error::Truncated)
+        );
+    }
+}
+
+#[test]
+fn a_hostile_coded_length_is_truncated_not_allocated() {
+    // The field is compared with the bytes present and sizes nothing.
+    let mut payload = lz_payload(Candidate::Identity.to_header_bytes(), 4, 1, &[0; 3]);
+    let field = SELECTOR_LEN + TOKEN_HEADER_LEN - size_of::<u64>();
+    payload[field..field + size_of::<u64>()].copy_from_slice(&u64::MAX.to_le_bytes());
+    assert_eq!(
+        extent(&payload).map(|e| e.payload_len),
+        Err(Error::Truncated)
+    );
+    assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Truncated));
 }

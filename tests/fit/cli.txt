@@ -41,5 +41,5 @@ broken-pipe | holds | a reader that quits early ends the run silently with statu
 refuses-terminal | holds | compressed data is not written to a terminal | gzip(1) OPTIONS -f, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION implicit output | probed through script(1), so Linux only; a lane whose script(1) cannot show a pty leaves it unmeasured
 mtime-copied | holds | the output file carries the source's modification time | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, brotli(1) OPTIONS -n |
 mode-copied | holds | the output file carries the source's permission bits | gzip(1) DESCRIPTION, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, brotli(1) OPTIONS -n | unix only
-concatenation | gap | concatenated compressed members decompress to the concatenated payloads | gzip(1) ADVANCED USAGE, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION | #978
+concatenation | holds | concatenated compressed members decompress to the concatenated payloads | gzip(1) ADVANCED USAGE, bzip2(1) DESCRIPTION, xz(1) DESCRIPTION, zstd(1) DESCRIPTION, lz4(1) DESCRIPTION | ADR-0067
 env-defaults | declined | an environment variable carries default options | gzip(1) ENVIRONMENT GZIP, xz(1) ENVIRONMENT XZ_DEFAULTS, zstd(1) ENVIRONMENT ZSTD_CLEVEL | mothergod has no tunable option to default; revisit with level-digit

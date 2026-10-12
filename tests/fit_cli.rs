@@ -263,7 +263,7 @@ fn corrupt_nonzero() -> Seen {
 fn broken_pipe() -> Seen {
     // 300 000 stored bytes outgrow any pipe buffer, so the write after the
     // reader closes cannot be absorbed (the same frame `tests/cli.rs` builds).
-    let mut frame = b"MGDC\x0b\x00".to_vec();
+    let mut frame = [MAGIC, &[mothergod::FORMAT_VERSION, 0]].concat();
     frame.extend(300_000u64.to_le_bytes());
     frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
     let (stderr, code) = run_with_early_closing_reader(&["-d"], &frame);

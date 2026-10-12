@@ -28,6 +28,29 @@ fn compress_then_decompress_roundtrips_arbitrary_bytes() {
 }
 
 #[test]
+fn concatenated_frames_decode_to_their_payloads_back_to_back() {
+    // `cat a.gz b.gz | gunzip` is `a` then `b`; so is this (#978).
+    let first: Vec<u8> = (0..2000u32).map(|i| (i * 37 % 251) as u8).collect();
+    let second = b"the quick brown fox jumps over the lazy dog. ".repeat(40);
+    let (frame_a, _) = run(&mut bin(), &first);
+    let (frame_b, _) = run(&mut bin(), &second);
+
+    let (decompressed, code) = run(bin().arg("-d"), &[frame_a, frame_b].concat());
+    assert_eq!(code, 0);
+    assert_eq!(decompressed, [first, second].concat());
+}
+
+#[test]
+fn bytes_after_the_last_frame_fail_instead_of_being_dropped() {
+    let (frame, _) = run(&mut bin(), &b"abc".repeat(500));
+    for tail in [&b"xyz"[..], b"xyzxyzxyz"] {
+        let output = run_output(bin().arg("-d"), &[frame.as_slice(), tail].concat());
+        assert!(!output.status.success(), "tail {tail:?} must fail");
+        assert!(!output.stderr.is_empty(), "tail {tail:?} must say why");
+    }
+}
+
+#[test]
 fn compress_then_decompress_roundtrips_empty_input() {
     let (compressed, compress_code) = run(&mut bin(), b"");
     assert_eq!(compress_code, 0);
@@ -377,7 +400,7 @@ fn decompress_of_a_file_without_the_mgdc_suffix_fails_cleanly() {
 fn decompress_exits_quietly_when_the_stdout_reader_goes_away() {
     // A Stored frame (method byte 0): 300 000 data bytes exceed any pipe
     // buffer, so the write after the reader closes cannot be absorbed.
-    let mut frame = b"MGDC\x0b\x00".to_vec();
+    let mut frame = [b"MGDC".as_slice(), &[mothergod::FORMAT_VERSION, 0]].concat();
     frame.extend(300_000u64.to_le_bytes());
     frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
 
