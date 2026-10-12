@@ -9,3 +9,5 @@
 /docs/adr/                      @bugabinga
 /.github/actions/agent-guard/   @bugabinga
 /.github/actions/agent-pause/   @bugabinga
+/.github/scripts/guard-decide.py @bugabinga
+/.github/scripts/pause-decide.py @bugabinga
