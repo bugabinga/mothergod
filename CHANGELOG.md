@@ -36,6 +36,11 @@ All notable changes to this project are documented here. Format follows
   before. On the four Silesia files over 16 MiB the output changes by +0.11% in
   total (webster +0.44%, mozilla -0.06%): each block restarts the
   model.
+- library: `mothergod::Error` and `WriteError` convert into `std::io::Error`,
+  so `?` works in a function returning `io::Result` without a `map_err`
+  (#1081). A truncated frame is `UnexpectedEof`, an allocator failure is
+  `OutOfMemory`, every other failure is `InvalidData`; the conversion boxes
+  nothing, so a decode error cannot abort under memory pressure.
 - format: an input over 256 MiB is stored, not compressed, so every frame
   `compress` writes is one `decompress` reads back; the output is the input
   plus a few bytes until large inputs are split (#1086, #978).
