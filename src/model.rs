@@ -1,7 +1,7 @@
 //! Order-0 adaptive frequency table: [`Model`], the data-derived
 //! cumulative-frequency source for [`crate::coder`]'s range coder. One
-//! instance per flag, length, offset and slot alphabet; the literal mixer
-//! in [`crate::literal`] is built on the coder directly, not on this type.
+//! instance per coded alphabet; the literal mixer in [`crate::literal`] is
+//! built on the coder directly, not on this type.
 //!
 //! [`Model::ideal_cost_bits`] prices a symbol as `-log2(p)` against the
 //! adaptive state without driving an [`crate::coder::Encoder`]
