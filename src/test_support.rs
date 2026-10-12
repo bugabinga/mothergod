@@ -53,3 +53,21 @@ pub(crate) fn as_codec_error(err: &super::WriteError) -> Option<&super::Error> {
         super::WriteError::Io(_) => None,
     }
 }
+
+/// A `Method::Lz` payload from its parts: the filter `selector`, the
+/// declared output length and token count, then `stream`, with the coded
+/// length computed from it. Tests that hand-build a payload each needed
+/// this layout and had each re-spelled its fields.
+pub(crate) fn lz_payload(
+    selector: [u8; 2],
+    declared_len: u32,
+    token_count: u32,
+    stream: &[u8],
+) -> Vec<u8> {
+    let mut payload = selector.to_vec();
+    payload.extend_from_slice(&declared_len.to_le_bytes());
+    payload.extend_from_slice(&token_count.to_le_bytes());
+    payload.extend_from_slice(&(stream.len() as u64).to_le_bytes());
+    payload.extend_from_slice(stream);
+    payload
+}

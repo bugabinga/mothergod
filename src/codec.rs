@@ -16,7 +16,8 @@
 //! 0       2     filter selector: [kind, param] (`filters::select::Candidate`)
 //! 2       4     declared output length, u32 LE
 //! 6       4     token count, u32 LE
-//! 10      ...   range-coded stream (crate::coder), of the FILTERED bytes
+//! 10      8     range-coded stream length in bytes, u64 LE
+//! 18      ...   range-coded stream (crate::coder), of the FILTERED bytes
 //! ```
 //!
 //! `docs/adr/0028-wire-filter-selection.md` added the 2-byte filter
@@ -653,10 +654,13 @@ fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Toke
         },
     );
 
-    let mut out = Vec::with_capacity(TOKEN_HEADER_LEN + data.len() / 2);
+    let stream = ac.finish();
+    let coded_len = u64::try_from(stream.len()).expect("usize is at most 64 bits");
+    let mut out = Vec::with_capacity(TOKEN_HEADER_LEN + stream.len());
     out.extend_from_slice(&declared_len.to_le_bytes());
     out.extend_from_slice(&token_count.to_le_bytes());
-    out.extend(ac.finish());
+    out.extend_from_slice(&coded_len.to_le_bytes());
+    out.extend(stream);
     out
 }
 
@@ -954,20 +958,25 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     let (candidate, body) =
         best.expect("filters::select::pick always returns at least Candidate::Identity");
 
-    let mut out = Vec::with_capacity(2 + body.len());
+    let mut out = Vec::with_capacity(SELECTOR_LEN + body.len());
     out.extend_from_slice(&candidate.to_header_bytes());
     out.extend(body);
     out
 }
 
-/// Byte length of [`encode_tokens_with`]'s header (declared output length
-/// then token count, each a little-endian `u32`): this module's own
-/// "Payload layout" doc names it as the two 4-byte fields at relative
-/// offsets 0 and 4, right before the range-coded stream. [`read_header`]
-/// inverts it exactly, so a caller sizing a buffer around that header
-/// (encode's own capacity hint, a test computing coded-bits-past-header)
-/// reads this constant instead of re-deriving `2 * 4`.
-const TOKEN_HEADER_LEN: usize = 2 * size_of::<u32>();
+/// Byte length of [`encode_tokens_with`]'s header: declared output length
+/// and token count, each a little-endian `u32`, then the range-coded
+/// stream's byte length as a little-endian `u64` (this module's own
+/// "Payload layout" doc names the fields), right before the stream.
+/// [`read_header`] inverts it exactly, so a caller sizing a buffer around
+/// that header (encode's own capacity hint, a test computing
+/// coded-bits-past-header) reads this constant instead of re-deriving it.
+/// The stream length is a `u64` for the reason a `Stored` payload's is
+/// (ADR-0065): no bound short of `u64` is proved for what the coder emits.
+const TOKEN_HEADER_LEN: usize = 2 * size_of::<u32>() + size_of::<u64>();
+
+/// Byte length of the filter selector that opens a `Method::Lz` payload.
+const SELECTOR_LEN: usize = 2;
 
 /// Splits a `Method::Lz` payload into the filter [`Candidate`] its 2-byte
 /// selector names and the rest, which [`read_header`] expects.
@@ -982,31 +991,87 @@ fn split_candidate(payload: &[u8]) -> Result<(Candidate, &[u8]), Error> {
     Ok((candidate, rest))
 }
 
+/// The three fields of an `Lz` payload's header, before the stream.
+struct TokenHeader {
+    declared_len: u32,
+    token_count: u32,
+    coded_len: u64,
+}
+
+/// Reads the [`TOKEN_HEADER_LEN`]-byte header off the front of `rest` (a
+/// payload past its filter selector), returning it and the bytes after it.
+fn split_token_header(rest: &[u8]) -> Result<(TokenHeader, &[u8]), Error> {
+    let (&declared_len, rest) = rest.split_first_chunk().ok_or(Error::Truncated)?;
+    let (&token_count, rest) = rest.split_first_chunk().ok_or(Error::Truncated)?;
+    let (&coded_len, rest) = rest.split_first_chunk().ok_or(Error::Truncated)?;
+    let header = TokenHeader {
+        declared_len: u32::from_le_bytes(declared_len),
+        token_count: u32::from_le_bytes(token_count),
+        coded_len: u64::from_le_bytes(coded_len),
+    };
+    Ok((header, rest))
+}
+
+/// What a frame's framing needs of a `Method::Lz` payload without decoding
+/// it: how many bytes it spans and how many it decodes to.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Extent {
+    /// Bytes the payload spans: selector, header and range-coded stream.
+    pub(crate) payload_len: usize,
+    /// The declared output length.
+    pub(crate) output_len: u32,
+}
+
+/// The [`Extent`] of the `Method::Lz` payload at the front of `bytes`,
+/// which may run on into the next frame: reads the selector and header
+/// and trusts nothing else, so it costs no decode work and no allocation.
+///
+/// # Errors
+///
+/// [`Error::Truncated`] if `bytes` is shorter than the header, or than the
+/// stream length the header declares; [`Error::Corrupt`] if the selector
+/// names no [`Candidate`].
+pub(crate) fn extent(bytes: &[u8]) -> Result<Extent, Error> {
+    let (_, rest) = split_candidate(bytes)?;
+    let (header, stream) = split_token_header(rest)?;
+    let coded_len = usize::try_from(header.coded_len).map_err(|_| Error::Truncated)?;
+    if stream.len() < coded_len {
+        return Err(Error::Truncated);
+    }
+    Ok(Extent {
+        payload_len: SELECTOR_LEN + TOKEN_HEADER_LEN + coded_len,
+        output_len: header.declared_len,
+    })
+}
+
 /// Splits `payload` into its declared output length, token count, and the
-/// remaining range-coded bytes, rejecting a declared length past `max_len`
-/// (clamped to [`MAX_DECODED_LEN`]) before any allocation or decode work.
+/// range-coded bytes, rejecting a declared length past `max_len` (clamped
+/// to [`MAX_DECODED_LEN`]) before any allocation or decode work. The
+/// stream is exactly the bytes its declared length names: `payload` is one
+/// frame's, so a payload with bytes past the stream is corrupt.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the
-/// [`TOKEN_HEADER_LEN`]-byte header, [`Error::TooLarge`] if the declared
-/// length exceeds the clamped `max_len`.
+/// [`TOKEN_HEADER_LEN`]-byte header or than the stream it declares,
+/// [`Error::TooLarge`] if the declared length exceeds the clamped
+/// `max_len`, [`Error::Corrupt`] if bytes follow the stream.
 fn read_header(payload: &[u8], max_len: u32) -> Result<(usize, u32, &[u8]), Error> {
     let max_len = max_len.min(MAX_DECODED_LEN);
-    let (&declared_len, rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
-    let (&token_count, ac_bytes) = rest.split_first_chunk().ok_or(Error::Truncated)?;
-    let declared_len = u32::from_le_bytes(declared_len);
-    if declared_len > max_len {
+    let (header, stream) = split_token_header(payload)?;
+    if header.declared_len > max_len {
         return Err(Error::TooLarge {
-            len: declared_len,
+            len: header.declared_len,
             max: max_len,
         });
     }
-    Ok((
-        declared_len as usize,
-        u32::from_le_bytes(token_count),
-        ac_bytes,
-    ))
+    match u64::try_from(stream.len()).map(|len| len.cmp(&header.coded_len)) {
+        Ok(std::cmp::Ordering::Less) => Err(Error::Truncated),
+        Ok(std::cmp::Ordering::Equal) => {
+            Ok((header.declared_len as usize, header.token_count, stream))
+        }
+        _ => Err(Error::Corrupt),
+    }
 }
 
 /// Rejects a token whose declared size would grow `output` past

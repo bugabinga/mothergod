@@ -154,11 +154,155 @@ fn every_prefix_of_a_stored_frame_is_rejected() {
 }
 
 #[test]
-fn stored_frame_with_bytes_past_its_declared_length_is_corrupt() {
-    let mut frame = compress(b"hi there");
+fn bytes_past_the_last_frame_are_not_a_frame() {
+    // #978: trailing bytes were dropped in silence, exit 0. They are the
+    // start of a next frame, and none of these is one.
+    let frame = compress(b"hi there");
     assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
-    frame.push(0);
-    assert_eq!(decompress(&frame), Err(Error::Corrupt));
+    for (tail, err) in [
+        (&b"x"[..], Error::Truncated),
+        (&b"xyzxyz"[..], Error::BadMagic),
+        (&frame[..frame.len() - 1], Error::Truncated),
+    ] {
+        let mut stream = frame.clone();
+        stream.extend_from_slice(tail);
+        assert_eq!(decompress(&stream), Err(err.clone()), "tail {tail:?}");
+        assert_eq!(
+            test_support::as_codec_error(
+                &decompress_to_writer(&stream, u32::MAX, &mut Vec::new())
+                    .expect_err("trailing bytes must not decode")
+            ),
+            Some(&err),
+            "writer, tail {tail:?}"
+        );
+        assert_eq!(decodes_incrementally(&stream), Err(err));
+    }
+}
+
+/// A stream of a `Stored` frame, an `Lz` frame and a `Stored` frame, with
+/// the bytes it decodes to.
+fn mixed_stream() -> (Vec<u8>, Vec<u8>) {
+    let parts: [Vec<u8>; 3] = [
+        b"hi".to_vec(),
+        b"the quick brown fox jumps over the lazy dog. ".repeat(50),
+        Vec::new(),
+    ];
+    let methods = [Method::Stored, Method::Lz, Method::Stored];
+    let mut stream = Vec::new();
+    for (part, method) in parts.iter().zip(methods) {
+        let frame = compress(part);
+        assert_eq!(frame[METHOD_OFFSET], method as u8);
+        stream.extend(frame);
+    }
+    (stream, parts.concat())
+}
+
+#[test]
+fn a_stream_of_frames_decodes_to_their_payloads_back_to_back() {
+    let (stream, plain) = mixed_stream();
+    assert_eq!(decompress(&stream), Ok(plain.clone()));
+    let mut out = Vec::new();
+    decompress_to_writer(&stream, u32::MAX, &mut out).expect("a stream decodes");
+    assert_eq!(out, plain);
+}
+
+#[test]
+fn every_prefix_of_a_stream_is_a_stream_or_truncated() {
+    // A cut inside a frame is Truncated; a cut on a frame boundary is a
+    // shorter stream and decodes. Nothing else is possible.
+    let (stream, plain) = mixed_stream();
+    for cut in 0..stream.len() {
+        match decompress(&stream[..cut]) {
+            Ok(prefix) => assert!(plain.starts_with(&prefix), "cut at {cut}"),
+            Err(err) => assert_eq!(err, Error::Truncated, "cut at {cut}"),
+        }
+    }
+}
+
+#[test]
+fn max_len_bounds_a_streams_total_output() {
+    // A bound tighter than MAX_DECODED_LEN caps the sum over frames, so a
+    // stream of small frames is no way around it.
+    let (stream, plain) = mixed_stream();
+    let total = u32::try_from(plain.len()).expect("fits");
+    assert_eq!(decompress_bounded(&stream, total), Ok(plain.clone()));
+    let tight = total - 1;
+    let expected = Err(Error::TooLarge {
+        len: total,
+        max: tight,
+    });
+    assert_eq!(decompress_bounded(&stream, tight), expected);
+    let mut out = Vec::new();
+    let err =
+        decompress_to_writer(&stream, tight, &mut out).expect_err("the total exceeds the bound");
+    assert_eq!(test_support::as_codec_error(&err), expected.as_ref().err());
+}
+
+#[test]
+fn collected_lz_output_is_capped_in_total_but_streamed_output_is_not() {
+    // Each frame is legal alone, their sum is not: memory held across
+    // frames must not outgrow the bytes that paid for it, and an `Lz`
+    // frame's output is not bounded by its input (#1085 review). The
+    // rejection is from the headers, so the second frame's decode work
+    // (about 2 s per MiB at this length) never runs.
+    let (stream, plain) = mixed_stream();
+    let mut big = lz_frame_header();
+    big.extend(test_support::lz_payload(
+        filters::select::Candidate::Identity.to_header_bytes(),
+        codec::MAX_DECODED_LEN,
+        codec::MAX_DECODED_LEN,
+        &[],
+    ));
+    let mut over = stream.clone();
+    over.extend(big.clone());
+    // Two bytes of `plain` are the `Stored` "hi"; the rest is the `Lz` frame.
+    let lz_len = u32::try_from(plain.len() - 2).expect("fits");
+    let lz_total = lz_len + codec::MAX_DECODED_LEN;
+    let expected = Err(Error::TooLarge {
+        len: lz_total,
+        max: codec::MAX_DECODED_LEN,
+    });
+    assert_eq!(decompress(&over), expected);
+    assert_eq!(decompress_bounded(&over, u32::MAX), expected);
+}
+
+#[test]
+fn only_a_collecting_budget_caps_the_lz_total() {
+    // `decompress_to_writer` holds one write buffer however long the
+    // stream is, so it is exempt from the `Lz` total the `Vec`-returning
+    // functions carry; the block-split streams past 256 MiB rely on it.
+    let lz = Frame {
+        method: Method::Lz,
+        payload: &[],
+        output_len: u64::from(codec::MAX_DECODED_LEN),
+    };
+    let mut streaming = Budget::new(u32::MAX, false);
+    assert_eq!(streaming.admit(&lz), Ok(()));
+    assert_eq!(streaming.admit(&lz), Ok(()));
+    let mut collecting = Budget::new(u32::MAX, true);
+    assert_eq!(collecting.admit(&lz), Ok(()));
+    assert_eq!(
+        collecting.admit(&lz),
+        Err(Error::TooLarge {
+            len: 2 * codec::MAX_DECODED_LEN,
+            max: codec::MAX_DECODED_LEN,
+        })
+    );
+}
+
+#[test]
+fn a_stream_decodes_incrementally_only_if_every_frame_does() {
+    let (mut stream, _) = mixed_stream();
+    assert_eq!(decodes_incrementally(&stream), Ok(true));
+    let mut transpose = lz_frame_header();
+    transpose.extend(test_support::lz_payload(
+        filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
+        0,
+        0,
+        &[],
+    ));
+    stream.extend(transpose);
+    assert_eq!(decodes_incrementally(&stream), Ok(false));
 }
 
 #[test]
@@ -239,9 +383,12 @@ fn lz_declared_length_over_the_max_is_rejected() {
     // cover directly.
     let over = codec::MAX_DECODED_LEN + 1;
     let mut frame = lz_frame_header();
-    frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
-    frame.extend_from_slice(&over.to_le_bytes());
-    frame.extend_from_slice(&over.to_le_bytes());
+    frame.extend(test_support::lz_payload(
+        filters::select::Candidate::Identity.to_header_bytes(),
+        over,
+        over,
+        &[],
+    ));
     assert_eq!(
         decompress(&frame),
         Err(Error::TooLarge {
@@ -306,9 +453,12 @@ fn decompress_bounded_clamps_a_max_len_above_max_decoded_len() {
     // clamp, not the caller's value, is the real ceiling.
     let over = codec::MAX_DECODED_LEN + 1;
     let mut frame = lz_frame_header();
-    frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
-    frame.extend_from_slice(&over.to_le_bytes());
-    frame.extend_from_slice(&over.to_le_bytes());
+    frame.extend(test_support::lz_payload(
+        filters::select::Candidate::Identity.to_header_bytes(),
+        over,
+        over,
+        &[],
+    ));
     assert_eq!(
         decompress_bounded(&frame, u32::MAX),
         Err(Error::TooLarge {
@@ -345,7 +495,12 @@ fn non_transpose_candidates_decode_incrementally() {
         filters::select::Candidate::Bcj,
     ] {
         let mut frame = lz_frame_header();
-        frame.extend_from_slice(&candidate.to_header_bytes());
+        frame.extend(test_support::lz_payload(
+            candidate.to_header_bytes(),
+            0,
+            0,
+            &[],
+        ));
         assert_eq!(
             decodes_incrementally(&frame),
             Ok(true),
@@ -357,9 +512,12 @@ fn non_transpose_candidates_decode_incrementally() {
 #[test]
 fn transpose_candidate_does_not_decode_incrementally() {
     let mut frame = lz_frame_header();
-    frame.extend_from_slice(
-        &filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
-    );
+    frame.extend(test_support::lz_payload(
+        filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
+        0,
+        0,
+        &[],
+    ));
     assert_eq!(decodes_incrementally(&frame), Ok(false));
 }
 
@@ -370,7 +528,12 @@ fn decodes_incrementally_pins_the_lz_version_boundary() {
     // version-blind one. Both sides of the boundary, on the same frame
     // shape so only the version byte differs.
     let mut frame = lz_frame_header();
-    frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
+    frame.extend(test_support::lz_payload(
+        filters::select::Candidate::Identity.to_header_bytes(),
+        0,
+        0,
+        &[],
+    ));
     frame[MAGIC.len()] = FORMAT_VERSION - 1;
     assert_eq!(
         decodes_incrementally(&frame),
@@ -422,9 +585,12 @@ fn decompress_to_writer_matches_decompress_for_stored_and_lz_frames() {
 fn decompress_to_writer_rejects_an_lz_frame_over_the_max() {
     let over = codec::MAX_DECODED_LEN + 1;
     let mut frame = lz_frame_header();
-    frame.extend_from_slice(&filters::select::Candidate::Identity.to_header_bytes());
-    frame.extend_from_slice(&over.to_le_bytes());
-    frame.extend_from_slice(&over.to_le_bytes());
+    frame.extend(test_support::lz_payload(
+        filters::select::Candidate::Identity.to_header_bytes(),
+        over,
+        over,
+        &[],
+    ));
     let mut out = Vec::new();
     let err = decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out)
         .expect_err("declared length past MAX_DECODED_LEN must be rejected");

@@ -65,14 +65,14 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Every bump is a bitstream format change (CLAUDE.md hard rule 5); the
 /// history of what each version changed lives in `docs/format/SPEC.md` and
 /// the ADRs it cites. This build decodes exactly this version for both
-/// methods: versions 1 through 10 were retired outright, no release having
+/// methods: versions 1 through 11 were retired outright, no release having
 /// written any of them
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
 /// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a frame
 /// naming any other version is rejected as `UnsupportedVersion` before its
-/// payload is read (`tests/golden/v11-*.mgdc` pins the current version's
+/// payload is read (`tests/golden/v12-*.mgdc` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 11;
+pub const FORMAT_VERSION: u8 = 12;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,7 +105,9 @@ impl TryFrom<u8> for Method {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Input ended before the frame was complete: inside the header, or
-    /// short of the length a [`Method::Stored`] payload declares.
+    /// short of the length a [`Method::Stored`] payload or a [`Method::Lz`]
+    /// coded stream declares. Bytes after the last frame of a stream read
+    /// as the start of one more, so they are this or [`Error::BadMagic`].
     Truncated,
     /// Input does not start with [`MAGIC`].
     BadMagic,
@@ -114,8 +116,7 @@ pub enum Error {
     /// Method byte does not name a known [`Method`].
     UnknownMethod(u8),
     /// Payload does not decode to a value consistent with itself (a
-    /// declared length its content does not match, as with bytes past a
-    /// [`Method::Stored`] payload's declared length, a match/rep distance
+    /// declared length its content does not match, a match/rep distance
     /// reaching before the start of decoded output, or similar):
     /// adversarial or corrupted input, never a bug in this decoder.
     Corrupt,
@@ -235,80 +236,172 @@ const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
-/// Splits `input` into its [`Method`] and the payload past the header,
-/// checked against [`MAGIC`] and [`FORMAT_VERSION`] but nothing past that:
-/// shared by every function that dispatches on a frame's method before
-/// deciding how much of the payload it actually needs, so they never drift
-/// on what counts as a well-formed header. A frame of either method must
-/// name exactly [`FORMAT_VERSION`], the one version this build decodes.
-/// A version above it is reported before an unknown method, so a newer
-/// build's frame says "unsupported version", not "unknown method".
-fn parse_header(input: &[u8]) -> Result<(Method, &[u8]), Error> {
-    let (header, payload) = input.split_at_checked(HEADER_LEN).ok_or(Error::Truncated)?;
-    if header[..MAGIC.len()] != MAGIC {
-        return Err(Error::BadMagic);
-    }
-    let version = header[VERSION_OFFSET];
-    if version > FORMAT_VERSION {
-        return Err(Error::UnsupportedVersion(version));
-    }
-    let method = Method::try_from(header[METHOD_OFFSET])?;
-    if version != FORMAT_VERSION {
-        return Err(Error::UnsupportedVersion(version));
-    }
-    Ok((method, payload))
-}
-
-/// A parsed frame header plus the two bounds [`decompress_bounded`] and
-/// [`decompress_to_writer`] both enforce before dispatching on `method`,
-/// built by [`bounded_header`] so the two can't drift on either rule.
-struct BoundedHeader<'a> {
-    /// `Some` only when the caller's `max_len` is strictly tighter than
-    /// [`codec::MAX_DECODED_LEN`]; see [`bounded_header`] for why a looser
-    /// one never rejects a [`Method::Stored`] frame on size alone.
-    stored_bound: Option<u32>,
-    max_len: u32,
+/// One frame of a stream, split off the front of the bytes that remain.
+struct Frame<'a> {
     method: Method,
+    /// Exactly the frame's payload: the bytes its method says it spans.
     payload: &'a [u8],
+    /// What the frame decodes to, known from its header alone.
+    output_len: u64,
 }
 
-/// Shared by [`decompress_bounded`] and [`decompress_to_writer`]: parses the
-/// header, then reduces `max_len` and the caller-visible `stored_bound` the
-/// same way both do. Both callers need `Error`, never `WriteError`;
-/// `decompress_to_writer` converts on its own `?` through [`WriteError`]'s
-/// `From<Error>` impl.
-fn bounded_header(input: &[u8], max_len: u32) -> Result<BoundedHeader<'_>, Error> {
-    // Method::Stored's payload length is read directly from `input`, never
-    // spoofable past what was already loaded into memory, so unlike
-    // Method::Lz's declared-length field (docs/format/SPEC.md lines 91-94)
-    // MAX_DECODED_LEN itself buys it no safety margin. Only a caller-chosen
-    // bound strictly tighter than MAX_DECODED_LEN is worth enforcing here;
-    // at or above it this arm stays exactly as unbounded as `decompress`
-    // (equivalent to calling this with max_len == MAX_DECODED_LEN) always
-    // was, so incompressible input at or past 256 MiB keeps round-tripping.
-    let stored_bound = (max_len < codec::MAX_DECODED_LEN).then_some(max_len);
-    let max_len = max_len.min(codec::MAX_DECODED_LEN);
-    let (method, payload) = parse_header(input)?;
-    Ok(BoundedHeader {
-        stored_bound,
-        max_len,
-        method,
-        payload,
-    })
+/// Width of the declared-length field that opens a [`Method::Stored`]
+/// payload: `u64`, not the `u32` an `Lz` payload declares, because
+/// [`compress`] stores inputs longer than `u32::MAX` bytes.
+const STORED_LEN_BYTES: usize = size_of::<u64>();
+
+/// The frames of a stream, in order, each split off by its header alone:
+/// every frame names its own extent (a [`Method::Stored`] payload its data
+/// length, a [`Method::Lz`] payload its coded length), so none is decoded
+/// to find where it ends and a hostile length costs no allocation, only
+/// the [`Error::Truncated`] of bytes that are not there. A stream is one
+/// or more frames and nothing else: empty input yields [`Error::Truncated`],
+/// and bytes after the last frame are not one, so they surface as the next
+/// frame's [`Error::Truncated`] or [`Error::BadMagic`]. After an `Err` the
+/// iterator is finished.
+struct Frames<'a> {
+    rest: &'a [u8],
+    /// Set once a frame was yielded, so only the empty stream is an error.
+    started: bool,
 }
 
-/// Rejects a [`Method::Stored`] frame whose data exceeds `stored_bound`
-/// (see [`bounded_header`] for when that bound is `None`).
-fn check_stored_bound(data: &[u8], stored_bound: Option<u32>) -> Result<(), Error> {
-    if let Some(bound) = stored_bound
-        && data.len() > bound as usize
-    {
-        return Err(Error::TooLarge {
-            len: u32::try_from(data.len()).unwrap_or(u32::MAX),
-            max: bound,
-        });
+impl<'a> Frames<'a> {
+    fn new(input: &'a [u8]) -> Self {
+        Self {
+            rest: input,
+            started: false,
+        }
     }
-    Ok(())
+
+    /// Splits one frame off `rest`, checked against [`MAGIC`] and
+    /// [`FORMAT_VERSION`]: a frame of either method must name exactly
+    /// [`FORMAT_VERSION`], the one version this build decodes. A version
+    /// above it is reported before an unknown method, so a newer build's
+    /// frame says "unsupported version", not "unknown method".
+    fn split(&mut self) -> Result<Frame<'a>, Error> {
+        let (header, tail) = self
+            .rest
+            .split_at_checked(HEADER_LEN)
+            .ok_or(Error::Truncated)?;
+        if header[..MAGIC.len()] != MAGIC {
+            return Err(Error::BadMagic);
+        }
+        let version = header[VERSION_OFFSET];
+        if version > FORMAT_VERSION {
+            return Err(Error::UnsupportedVersion(version));
+        }
+        let method = Method::try_from(header[METHOD_OFFSET])?;
+        if version != FORMAT_VERSION {
+            return Err(Error::UnsupportedVersion(version));
+        }
+        let (payload_len, output_len) = match method {
+            Method::Stored => {
+                let (declared, data) = tail
+                    .split_first_chunk::<STORED_LEN_BYTES>()
+                    .ok_or(Error::Truncated)?;
+                let declared = u64::from_le_bytes(*declared);
+                match usize::try_from(declared) {
+                    Ok(len) if len <= data.len() => (STORED_LEN_BYTES + len, declared),
+                    _ => return Err(Error::Truncated),
+                }
+            }
+            Method::Lz => {
+                let extent = codec::extent(tail)?;
+                (extent.payload_len, u64::from(extent.output_len))
+            }
+        };
+        let (payload, rest) = tail.split_at(payload_len);
+        self.rest = rest;
+        Ok(Frame {
+            method,
+            payload,
+            output_len,
+        })
+    }
+}
+
+impl<'a> Iterator for Frames<'a> {
+    type Item = Result<Frame<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.started && self.rest.is_empty() {
+            return None;
+        }
+        self.started = true;
+        let frame = self.split();
+        if frame.is_err() {
+            self.rest = &[];
+        }
+        Some(frame)
+    }
+}
+
+/// The caller's `max_len` applied across a stream's frames, shared by
+/// [`decompress_bounded`] and [`decompress_to_writer`] so the two can't
+/// drift on it.
+struct Budget {
+    /// `Some` only when the caller's `max_len` is strictly tighter than
+    /// [`codec::MAX_DECODED_LEN`]: then it caps the stream's total output,
+    /// `Stored` frames included. At or above it there is no total cap and
+    /// each `Lz` frame stays under [`codec::MAX_DECODED_LEN`], the only
+    /// ceiling its worst-case decode time has been measured against. A
+    /// `Stored` frame's length is read from `input`, never spoofable past
+    /// what was already loaded, so [`codec::MAX_DECODED_LEN`] buys it no
+    /// safety margin, only a compatibility break for large incompressible
+    /// input; a stream of such frames is no different.
+    cap: Option<u32>,
+    /// Whether the output is held in memory (`decompress_bounded`) and not
+    /// handed on as it is produced (`decompress_to_writer`). Then the `Lz`
+    /// frames' total is capped at [`codec::MAX_DECODED_LEN`] whatever
+    /// `max_len` says: an `Lz` frame's output is not bounded by its input
+    /// bytes (a 1,440-byte frame decodes to 64 MiB), so memory held
+    /// across frames would grow without any input-proportional limit.
+    collects: bool,
+    /// Output admitted so far.
+    produced: u64,
+    /// `Lz` output admitted so far.
+    lz_produced: u64,
+}
+
+impl Budget {
+    fn new(max_len: u32, collects: bool) -> Self {
+        Self {
+            cap: (max_len < codec::MAX_DECODED_LEN).then_some(max_len),
+            collects,
+            produced: 0,
+            lz_produced: 0,
+        }
+    }
+
+    /// Admits `frame`'s output against the total caps, before any decode
+    /// work (`rust-craft` skill's allocation-discipline).
+    fn admit(&mut self, frame: &Frame<'_>) -> Result<(), Error> {
+        self.produced = self.produced.saturating_add(frame.output_len);
+        if let Some(max) = self.cap
+            && self.produced > u64::from(max)
+        {
+            return Err(Error::TooLarge {
+                len: u32::try_from(self.produced).unwrap_or(u32::MAX),
+                max,
+            });
+        }
+        if self.collects && frame.method == Method::Lz {
+            self.lz_produced = self.lz_produced.saturating_add(frame.output_len);
+            if self.lz_produced > u64::from(codec::MAX_DECODED_LEN) {
+                return Err(Error::TooLarge {
+                    len: u32::try_from(self.lz_produced).unwrap_or(u32::MAX),
+                    max: codec::MAX_DECODED_LEN,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The data of a [`Method::Stored`] frame's `payload`, past its declared
+/// length, which [`Frames`] already checked against the bytes present.
+fn stored_data(payload: &[u8]) -> &[u8] {
+    payload.get(STORED_LEN_BYTES..).unwrap_or_default()
 }
 
 /// Frequency increment and rescale ceiling of every adaptive frequency table
@@ -412,32 +505,11 @@ fn build_frame(method: Method, parts: &[&[u8]]) -> Vec<u8> {
     frame
 }
 
-/// Width of the declared-length field that opens a [`Method::Stored`]
-/// payload: `u64`, not the `u32` an `Lz` payload declares, because
-/// [`compress`] stores inputs longer than `u32::MAX` bytes.
-const STORED_LEN_BYTES: usize = size_of::<u64>();
-
 /// A complete [`Method::Stored`] frame: the payload is `data`'s length as a
 /// little-endian `u64`, then `data` verbatim.
 fn build_stored_frame(data: &[u8]) -> Vec<u8> {
     let declared = u64::try_from(data.len()).expect("usize is at most 64 bits");
     build_frame(Method::Stored, &[&declared.to_le_bytes(), data])
-}
-
-/// The data of a [`Method::Stored`] `payload`: exactly the bytes its
-/// declared length names. A payload too short for its length is
-/// [`Error::Truncated`], the cut a gzip user gets "unexpected end of file"
-/// for; one with bytes past it is [`Error::Corrupt`].
-fn stored_data(payload: &[u8]) -> Result<&[u8], Error> {
-    let (declared, data) = payload
-        .split_first_chunk::<STORED_LEN_BYTES>()
-        .ok_or(Error::Truncated)?;
-    let declared = u64::from_le_bytes(*declared);
-    match u64::try_from(data.len()).map(|len| len.cmp(&declared)) {
-        Ok(std::cmp::Ordering::Less) => Err(Error::Truncated),
-        Ok(std::cmp::Ordering::Equal) => Ok(data),
-        _ => Err(Error::Corrupt),
-    }
 }
 
 /// Whether a `candidate_len`-byte encoding beats an `incumbent_len`-byte
@@ -474,10 +546,14 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 }
 
 /// Decodes a frame produced by [`compress`] back into the original bytes.
+/// A stream of frames back to back, as `cat a.mgdc b.mgdc` makes, decodes to
+/// their outputs concatenated; bytes that are not a frame after the last
+/// one are an error, never dropped (`docs/format/SPEC.md`, "Streams").
 ///
 /// Equivalent to [`decompress_bounded`] with [`codec::MAX_DECODED_LEN`] as
 /// the bound, the largest output this decoder's worst-case decode time has
-/// been measured against.
+/// been measured against. The `Lz` frames of a stream decode to at most that
+/// much in total; a longer stream goes through [`decompress_to_writer`].
 ///
 /// # Errors
 ///
@@ -488,14 +564,18 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     decompress_bounded(input, codec::MAX_DECODED_LEN)
 }
 
-/// Like [`decompress`], but rejects any frame whose output would exceed
-/// `max_len` bytes, checked before any allocation or decode work
-/// (`rust-craft` skill's allocation-discipline). `max_len` is clamped to
-/// [`codec::MAX_DECODED_LEN`] regardless of what is passed in: that
-/// constant is the only ceiling this decoder's worst-case decode time has
-/// been measured against (see its docs), so a caller can tighten the bound
-/// for its own memory budget but never loosen it past what has been
-/// proven safe.
+/// Like [`decompress`], but rejects a stream whose total output would exceed
+/// `max_len` bytes, checked frame by frame from its header before any
+/// allocation or decode work (`rust-craft` skill's allocation-discipline).
+/// An `Lz` frame is never allowed past [`codec::MAX_DECODED_LEN`] whatever
+/// `max_len` says: that constant is the only ceiling this decoder's
+/// worst-case decode time has been measured against (see its docs), so a
+/// caller can tighten the bound for its own memory budget but never loosen
+/// it past what has been proven safe. A `max_len` at or above it caps no
+/// total of its own, but the `Lz` frames' output together is still held to
+/// [`codec::MAX_DECODED_LEN`], because the returned `Vec` is memory and an
+/// `Lz` frame's output is not bounded by its input bytes. `Stored` frames
+/// add nothing to that total: each is as long as the input it was read from.
 ///
 /// A caller embedding mothergod under a known memory budget (well below
 /// [`codec::MAX_DECODED_LEN`]'s 256 MiB) should call this instead of
@@ -504,31 +584,35 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 ///
 /// # Errors
 ///
-/// Same as [`decompress`], plus [`Error::TooLarge`] whenever [`Method::Lz`]'s
-/// declared output length exceeds the effective bound (`max_len` clamped to
-/// [`codec::MAX_DECODED_LEN`]), or a [`Method::Stored`] frame's payload
-/// exceeds a `max_len` strictly below [`codec::MAX_DECODED_LEN`] (an
-/// explicit opt-in to a smaller memory budget). `max_len` at or above
+/// Same as [`decompress`], plus [`Error::TooLarge`] whenever the output so
+/// far, with the next frame's, would exceed a `max_len` strictly below
+/// [`codec::MAX_DECODED_LEN`] (an explicit opt-in to a smaller memory
+/// budget), or the [`Method::Lz`] frames' declared output lengths together
+/// exceed [`codec::MAX_DECODED_LEN`]. `max_len` at or above
 /// [`codec::MAX_DECODED_LEN`] never rejects a [`Method::Stored`] frame on
 /// size alone: its payload length is read directly from `input`, never
 /// spoofable past what was already loaded, so unlike [`Method::Lz`]'s
 /// declared-length field, [`codec::MAX_DECODED_LEN`] buys it no safety
 /// margin, only a compatibility break for large incompressible input.
 pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
-    let BoundedHeader {
-        stored_bound,
-        max_len,
-        method,
-        payload,
-    } = bounded_header(input, max_len)?;
-    match method {
-        Method::Stored => {
-            let data = stored_data(payload)?;
-            check_stored_bound(data, stored_bound)?;
-            Ok(data.to_vec())
+    let mut budget = Budget::new(max_len, true);
+    let mut output: Option<Vec<u8>> = None;
+    for frame in Frames::new(input) {
+        let frame = frame?;
+        budget.admit(&frame)?;
+        let data = match frame.method {
+            Method::Stored => stored_data(frame.payload).to_vec(),
+            Method::Lz => codec::decode(frame.payload, codec::MAX_DECODED_LEN)?,
+        };
+        match &mut output {
+            None => output = Some(data),
+            Some(output) => {
+                output.try_reserve(data.len())?;
+                output.extend_from_slice(&data);
+            }
         }
-        Method::Lz => codec::decode(payload, max_len),
     }
+    output.ok_or(Error::Truncated)
 }
 
 /// Minimal write-buffering wrapper, standing in for [`std::io::BufWriter`]
@@ -638,20 +722,17 @@ pub fn decompress_to_writer<W: std::io::Write>(
 ) -> Result<(), WriteError> {
     use std::io::Write as _;
 
-    let BoundedHeader {
-        stored_bound,
-        max_len,
-        method,
-        payload,
-    } = bounded_header(input, max_len)?;
+    let mut budget = Budget::new(max_len, false);
     let mut writer = TryBufWriter::try_new(writer).map_err(Error::from)?;
-    match method {
-        Method::Stored => {
-            let data = stored_data(payload)?;
-            check_stored_bound(data, stored_bound)?;
-            writer.write_all(data)?;
+    for frame in Frames::new(input) {
+        let frame = frame?;
+        budget.admit(&frame)?;
+        match frame.method {
+            Method::Stored => writer.write_all(stored_data(frame.payload))?,
+            Method::Lz => {
+                codec::decode_to_writer(frame.payload, codec::MAX_DECODED_LEN, &mut writer)?;
+            }
         }
-        Method::Lz => codec::decode_to_writer(payload, max_len, &mut writer)?,
     }
     writer.flush()?;
     Ok(())
@@ -686,20 +767,17 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// frame's filter selector does not name a real [`filters::select::Candidate`]
 /// — everything short of actually decoding the payload.
 pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
-    let (method, payload) = parse_header(input)?;
-    match method {
-        Method::Stored => Ok(true),
-        Method::Lz => {
-            let filter_bytes = payload.get(0..2).ok_or(Error::Truncated)?;
+    let mut incremental = true;
+    for frame in Frames::new(input) {
+        let frame = frame?;
+        if frame.method == Method::Lz {
+            let selector = frame.payload.first_chunk().ok_or(Error::Truncated)?;
             let candidate =
-                filters::select::Candidate::from_header_bytes([filter_bytes[0], filter_bytes[1]])
-                    .ok_or(Error::Corrupt)?;
-            Ok(!matches!(
-                candidate,
-                filters::select::Candidate::Transpose(_)
-            ))
+                filters::select::Candidate::from_header_bytes(*selector).ok_or(Error::Corrupt)?;
+            incremental &= !matches!(candidate, filters::select::Candidate::Transpose(_));
         }
     }
+    Ok(incremental)
 }
 
 /// Shared test-only fixtures multiple modules' test suites had each
