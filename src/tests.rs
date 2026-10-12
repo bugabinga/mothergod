@@ -267,6 +267,30 @@ fn collected_lz_output_is_capped_in_total_but_streamed_output_is_not() {
 }
 
 #[test]
+fn only_a_collecting_budget_caps_the_lz_total() {
+    // `decompress_to_writer` holds one write buffer however long the
+    // stream is, so it is exempt from the `Lz` total the `Vec`-returning
+    // functions carry; the block-split streams past 256 MiB rely on it.
+    let lz = Frame {
+        method: Method::Lz,
+        payload: &[],
+        output_len: u64::from(codec::MAX_DECODED_LEN),
+    };
+    let mut streaming = Budget::new(u32::MAX, false);
+    assert_eq!(streaming.admit(&lz), Ok(()));
+    assert_eq!(streaming.admit(&lz), Ok(()));
+    let mut collecting = Budget::new(u32::MAX, true);
+    assert_eq!(collecting.admit(&lz), Ok(()));
+    assert_eq!(
+        collecting.admit(&lz),
+        Err(Error::TooLarge {
+            len: 2 * codec::MAX_DECODED_LEN,
+            max: codec::MAX_DECODED_LEN,
+        })
+    );
+}
+
+#[test]
 fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     let (mut stream, _) = mixed_stream();
     assert_eq!(decodes_incrementally(&stream), Ok(true));

@@ -25,7 +25,7 @@ Bytes that are not a frame surface as the next frame's `Truncated` or `BadMagic`
 
 `max_len` keeps its meaning: a bound below `codec::MAX_DECODED_LEN` caps the stream's total output, checked from the frame header before any decode work.
 At or above it no total covers `Stored` frames, which had none and are as long as the input they were read from.
-The `Lz` frames of a stream returned as a `Vec` (`decompress`, `decompress_bounded`) are capped together at `MAX_DECODED_LEN`, checked from the headers before decode work, because an `Lz` frame's output is not bounded by its input: 100 copies of a 1,440-byte frame of 64 MiB of zeros made `decompress` allocate 6.7 GB (reviewer's repro on the first draft of this ADR's PR).
+The `Lz` frames of a stream returned as a `Vec` (`decompress`, `decompress_bounded`) are capped together at `MAX_DECODED_LEN`, checked frame by frame from the headers, so decode work stops within one frame of the cap, because an `Lz` frame's output is not bounded by its input: 100 copies of a 1,440-byte frame of 64 MiB of zeros made `decompress` allocate 6.7 GB (reviewer's repro on the first draft of this ADR's PR).
 `decompress_to_writer` holds one write buffer however long the stream is, so it caps each `Lz` frame alone and carries the multi-gigabyte streams.
 A hostile stream therefore buys no more decode work per input byte than one frame did, and no more held memory than `MAX_DECODED_LEN` plus the input.
 
