@@ -52,8 +52,12 @@ and an empty stream is `Truncated`. The frame count is not bounded: each
 frame costs at least its own input bytes. A caller's output bound below
 `codec::MAX_DECODED_LEN` covers the stream's total, and a frame whose
 output would carry the total past it is `TooLarge` before any of its
-decode work. At or above that ceiling there is no total, and each `Lz`
-frame is capped alone, so a stream of any length decodes under the same
+decode work. At or above that ceiling no total covers `Stored` frames, each as long as the
+input it was read from. The `Lz` frames of a stream held in memory
+(`decompress`, `decompress_bounded`) are capped together at the same
+ceiling, since an `Lz` frame's output is not bounded by its input; a decoder
+that hands its output on (`decompress_to_writer`) holds none across frames and
+caps each `Lz` frame alone, so a stream of any length decodes under the same
 per-frame worst case a single frame has.
 
 ## Methods

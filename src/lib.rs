@@ -350,29 +350,51 @@ struct Budget {
     /// safety margin, only a compatibility break for large incompressible
     /// input; a stream of such frames is no different.
     cap: Option<u32>,
+    /// Whether the output is held in memory (`decompress_bounded`) and not
+    /// handed on as it is produced (`decompress_to_writer`). Then the `Lz`
+    /// frames' total is capped at [`codec::MAX_DECODED_LEN`] whatever
+    /// `max_len` says: an `Lz` frame's output is not bounded by its input
+    /// bytes (a 1,440-byte frame decodes to 64 MiB), so memory held
+    /// across frames would grow without any input-proportional limit.
+    collects: bool,
     /// Output admitted so far.
     produced: u64,
+    /// `Lz` output admitted so far.
+    lz_produced: u64,
 }
 
 impl Budget {
-    fn new(max_len: u32) -> Self {
+    fn new(max_len: u32, collects: bool) -> Self {
         Self {
             cap: (max_len < codec::MAX_DECODED_LEN).then_some(max_len),
+            collects,
             produced: 0,
+            lz_produced: 0,
         }
     }
 
-    /// Admits `frame`'s output against the total cap, before any decode
+    /// Admits `frame`'s output against the total caps, before any decode
     /// work (`rust-craft` skill's allocation-discipline).
     fn admit(&mut self, frame: &Frame<'_>) -> Result<(), Error> {
         self.produced = self.produced.saturating_add(frame.output_len);
-        match self.cap {
-            Some(max) if self.produced > u64::from(max) => Err(Error::TooLarge {
+        if let Some(max) = self.cap
+            && self.produced > u64::from(max)
+        {
+            return Err(Error::TooLarge {
                 len: u32::try_from(self.produced).unwrap_or(u32::MAX),
                 max,
-            }),
-            _ => Ok(()),
+            });
         }
+        if self.collects && frame.method == Method::Lz {
+            self.lz_produced = self.lz_produced.saturating_add(frame.output_len);
+            if self.lz_produced > u64::from(codec::MAX_DECODED_LEN) {
+                return Err(Error::TooLarge {
+                    len: u32::try_from(self.lz_produced).unwrap_or(u32::MAX),
+                    max: codec::MAX_DECODED_LEN,
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -530,7 +552,8 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 ///
 /// Equivalent to [`decompress_bounded`] with [`codec::MAX_DECODED_LEN`] as
 /// the bound, the largest output this decoder's worst-case decode time has
-/// been measured against.
+/// been measured against. The `Lz` frames of a stream decode to at most that
+/// much in total; a longer stream goes through [`decompress_to_writer`].
 ///
 /// # Errors
 ///
@@ -549,7 +572,10 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// worst-case decode time has been measured against (see its docs), so a
 /// caller can tighten the bound for its own memory budget but never loosen
 /// it past what has been proven safe. A `max_len` at or above it caps no
-/// total, so a stream of many frames, each under it, decodes in full.
+/// total of its own, but the `Lz` frames' output together is still held to
+/// [`codec::MAX_DECODED_LEN`], because the returned `Vec` is memory and an
+/// `Lz` frame's output is not bounded by its input bytes. `Stored` frames
+/// add nothing to that total: each is as long as the input it was read from.
 ///
 /// A caller embedding mothergod under a known memory budget (well below
 /// [`codec::MAX_DECODED_LEN`]'s 256 MiB) should call this instead of
@@ -561,15 +587,15 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// Same as [`decompress`], plus [`Error::TooLarge`] whenever the output so
 /// far, with the next frame's, would exceed a `max_len` strictly below
 /// [`codec::MAX_DECODED_LEN`] (an explicit opt-in to a smaller memory
-/// budget), or a [`Method::Lz`] frame's declared output length exceeds
-/// [`codec::MAX_DECODED_LEN`]. `max_len` at or above
+/// budget), or the [`Method::Lz`] frames' declared output lengths together
+/// exceed [`codec::MAX_DECODED_LEN`]. `max_len` at or above
 /// [`codec::MAX_DECODED_LEN`] never rejects a [`Method::Stored`] frame on
 /// size alone: its payload length is read directly from `input`, never
 /// spoofable past what was already loaded, so unlike [`Method::Lz`]'s
 /// declared-length field, [`codec::MAX_DECODED_LEN`] buys it no safety
 /// margin, only a compatibility break for large incompressible input.
 pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
-    let mut budget = Budget::new(max_len);
+    let mut budget = Budget::new(max_len, true);
     let mut output: Option<Vec<u8>> = None;
     for frame in Frames::new(input) {
         let frame = frame?;
@@ -696,7 +722,7 @@ pub fn decompress_to_writer<W: std::io::Write>(
 ) -> Result<(), WriteError> {
     use std::io::Write as _;
 
-    let mut budget = Budget::new(max_len);
+    let mut budget = Budget::new(max_len, false);
     let mut writer = TryBufWriter::try_new(writer).map_err(Error::from)?;
     for frame in Frames::new(input) {
         let frame = frame?;

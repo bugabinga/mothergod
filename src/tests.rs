@@ -239,6 +239,34 @@ fn max_len_bounds_a_streams_total_output() {
 }
 
 #[test]
+fn collected_lz_output_is_capped_in_total_but_streamed_output_is_not() {
+    // Each frame is legal alone, their sum is not: memory held across
+    // frames must not outgrow the bytes that paid for it, and an `Lz`
+    // frame's output is not bounded by its input (#1085 review). The
+    // rejection is from the headers, so the second frame's decode work
+    // (about 2 s per MiB at this length) never runs.
+    let (stream, plain) = mixed_stream();
+    let mut big = lz_frame_header();
+    big.extend(test_support::lz_payload(
+        filters::select::Candidate::Identity.to_header_bytes(),
+        codec::MAX_DECODED_LEN,
+        codec::MAX_DECODED_LEN,
+        &[],
+    ));
+    let mut over = stream.clone();
+    over.extend(big.clone());
+    // Two bytes of `plain` are the `Stored` "hi"; the rest is the `Lz` frame.
+    let lz_len = u32::try_from(plain.len() - 2).expect("fits");
+    let lz_total = lz_len + codec::MAX_DECODED_LEN;
+    let expected = Err(Error::TooLarge {
+        len: lz_total,
+        max: codec::MAX_DECODED_LEN,
+    });
+    assert_eq!(decompress(&over), expected);
+    assert_eq!(decompress_bounded(&over, u32::MAX), expected);
+}
+
+#[test]
 fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     let (mut stream, _) = mixed_stream();
     assert_eq!(decodes_incrementally(&stream), Ok(true));

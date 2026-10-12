@@ -26,7 +26,9 @@ All notable changes to this project are documented here. Format follows
   instead of being dropped in silence with exit status 0 (#978, ADR-0067).
   The price is 8 bytes on each compressed frame, which now says where it
   ends. A caller's `decompress_bounded` limit below 256 MiB caps the whole
-  stream's output, not each frame's.
+  stream's output, not each frame's, and `decompress` holds the compressed
+  frames of a stream to 256 MiB of output together; `decompress_to_writer`
+  and the CLI stream past that at constant memory.
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
   interface, with no compression levels and no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact

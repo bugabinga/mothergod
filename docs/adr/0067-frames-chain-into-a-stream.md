@@ -24,8 +24,10 @@ Bytes that are not a frame surface as the next frame's `Truncated` or `BadMagic`
 `decodes_incrementally` answers `true` only if every frame does.
 
 `max_len` keeps its meaning: a bound below `codec::MAX_DECODED_LEN` caps the stream's total output, checked from the frame header before any decode work.
-At or above it there is no total, as a `Stored` frame had none, and each `Lz` frame is still capped alone at `MAX_DECODED_LEN`.
-A hostile stream therefore buys no more decode work per input byte than one frame did, and `decompress_to_writer` holds one write buffer however long the stream is.
+At or above it no total covers `Stored` frames, which had none and are as long as the input they were read from.
+The `Lz` frames of a stream returned as a `Vec` (`decompress`, `decompress_bounded`) are capped together at `MAX_DECODED_LEN`, checked from the headers before decode work, because an `Lz` frame's output is not bounded by its input: 100 copies of a 1,440-byte frame of 64 MiB of zeros made `decompress` allocate 6.7 GB (reviewer's repro on the first draft of this ADR's PR).
+`decompress_to_writer` holds one write buffer however long the stream is, so it caps each `Lz` frame alone and carries the multi-gigabyte streams.
+A hostile stream therefore buys no more decode work per input byte than one frame did, and no more held memory than `MAX_DECODED_LEN` plus the input.
 
 `FORMAT_VERSION` becomes 12.
 Under ADR-0063 the bump retires version 11 in the same PR.
@@ -52,6 +54,7 @@ The decoder primes 32 bits and pads past the end, so where it stands after the l
 **A sentinel or end-of-frame marker in the stream.**
 It costs bits per frame inside the model and still leaves `Stored` to delimit separately.
 
-**A total cap at `MAX_DECODED_LEN` for `decompress`.**
-It would reject the multi-gigabyte block-split streams the next PR emits, and it would be new behavior for `Stored` data, which round-trips past that length today.
-`decompress_bounded` below the ceiling is the caller's total budget.
+**A total cap at `MAX_DECODED_LEN` on every frame, `Stored` included, for `decompress`.**
+It would be new behavior for `Stored` data, which round-trips past that length today, and `Stored` memory is bounded by the input already.
+Only the `Lz` total is capped.
+A caller that needs more than `MAX_DECODED_LEN` out of the block-split streams the next PR emits uses `decompress_to_writer`; `compress` and `decompress` agree past that length only for `Stored` output (#1086).
