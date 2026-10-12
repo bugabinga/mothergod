@@ -18,6 +18,30 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-12 — Editorial: the big-file warning outlived its bug by one bullet
+
+Queue empty, so this is a defect found on the surface. #1106 made the
+CLI compress through `copy_encode` and took the entry below's warning off
+README and `/`. `CHANGELOG.md` kept it as its own bullet: "an input over
+256 MiB is stored ... until large inputs are split". A first-release
+reader would believe their VM image comes back uncompressed. The CLI
+bullet also said "Decompression streams instead of buffering the whole
+file", and `src/bin/mothergod.rs` reads the compressed input whole.
+
+**The stored-input bullet is gone; its one true remainder, that the
+library's `compress` stores past 256 MiB, rides in the `copy_encode`
+bullet, which already named the boundary.** The CLI bullet now says
+decompression reads the compressed file whole, with #978, because the
+same reader with a 10 GB tar needs that before decompressing it.
+Evidence, a release build of `69750ff`, format 12: a 268435457-byte file
+of zeros compressed to 6175 bytes in 412 s at a 716620 KB peak RSS, and
+`-dc | cmp` was silent. "where it read its input whole before" also left
+the `copy_encode` bullet: no release had the earlier behavior.
+
+**Rejected: printing the 412 s.** It is one input class on one runner,
+and in release notes it reads as a speed claim; the README's Speed
+section owns speed, with its corpus named.
+
 ## 2026-10-12 — Editorial: a trier with a big file got its own size back, unwarned
 
 Queue empty, so this is a defect found on the surface. #1090 made

@@ -17,8 +17,9 @@ All notable changes to this project are documented here. Format follows
   writes `<file>.mgdc` and back. Nothing overwrites an existing file or deletes
   its input, and a file output keeps its input's modification time and, on
   Unix, its permission bits, as gzip, bzip2 and xz do (#1040). Decompression
-  streams instead of buffering the whole file. Compressing to stdout refuses a
-  terminal, so a forgotten redirect does not fill the screen with binary
+  writes as it decodes but reads the compressed file whole first, so its
+  memory grows with the compressed size (#978). Compressing to stdout refuses
+  a terminal, so a forgotten redirect does not fill the screen with binary
   (#1039). A reader that closes stdout early (`| head`) ends it silently with
   status 141, as gzip does.
 - format: concatenated frames decode to their payloads back to back, as
@@ -40,18 +41,16 @@ All notable changes to this project are documented here. Format follows
   `Read` yields into a `Write`, one 16 MiB block and one frame at a time, so
   its memory is bounded by the block and not by the input (#978). The CLI
   compresses through it, so a file or pipe of any length compresses in under
-  1 GiB, where it read its input whole before. Up to 256 MiB the bytes equal
-  `compress`'s; past it the stream holds compressed frames where `compress`
-  stores, and `decompress_to_writer` and the CLI read it back, while
+  1 GiB. Up to 256 MiB the bytes equal `compress`'s. Past it, `compress`
+  stores the input, plus a few bytes, so that `decompress` reads back every
+  frame it writes (#1086); `copy_encode` compresses, and
+  `decompress_to_writer` and the CLI read the result back, while
   `decompress` rejects it as `TooLarge`.
 - library: `mothergod::Error` and `WriteError` convert into `std::io::Error`,
   so `?` works in a function returning `io::Result` without a `map_err`
   (#1081). A truncated frame is `UnexpectedEof`, an allocator failure is
   `OutOfMemory`, every other failure is `InvalidData`; the conversion boxes
   nothing, so a decode error cannot abort under memory pressure.
-- format: an input over 256 MiB is stored, not compressed, so every frame
-  `compress` writes is one `decompress` reads back; the output is the input
-  plus a few bytes until large inputs are split (#1086, #978).
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
   interface, with no compression levels and no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact
