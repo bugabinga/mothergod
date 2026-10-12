@@ -66,11 +66,17 @@ test("another tool, malformed JSON and a null tool_input are allowed", () => {
   assert.equal(run(JSON.stringify({ tool_name: "Bash", tool_input: null })).status, 0);
 });
 
-test("a deny writes its fixed-vocabulary line to the step summary", () => {
-  const summary = join(mkdtempSync(join(tmpdir(), "em-dash-")), "summary.md");
-  const r = run(bash(denied[0][0]), { ...ciEnv, GITHUB_STEP_SUMMARY: summary });
+test("a deny writes its fixed-vocabulary line to the step summary and the audit's record", () => {
+  const temp = mkdtempSync(join(tmpdir(), "em-dash-"));
+  const summary = join(temp, "summary.md");
+  const r = run(bash(denied[0][0]), { ...ciEnv, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp });
   assert.equal(r.status, 2);
   assert.equal(readFileSync(summary, "utf8"), "deny-em-dash: denied\n");
+  assert.deepEqual(JSON.parse(readFileSync(join(temp, "walls.jsonl"), "utf8")), {
+    tool: "Bash",
+    type: "hook",
+    reason: "deny-em-dash: denied",
+  });
 });
 
 // The heredoc is not the only way a body travels: a file written earlier

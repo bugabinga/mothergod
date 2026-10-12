@@ -4,7 +4,7 @@
 // filesystem beyond the summary file.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -22,8 +22,10 @@ function run(call, env = ciEnv) {
 }
 
 function withSummary(env = ciEnv) {
-  const summary = join(mkdtempSync(join(tmpdir(), "off-voice-")), "summary.md");
-  return { env: { ...env, GITHUB_STEP_SUMMARY: summary }, summary };
+  const temp = mkdtempSync(join(tmpdir(), "off-voice-"));
+  const summary = join(temp, "summary.md");
+  const record = join(temp, "walls.jsonl");
+  return { env: { ...env, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp }, summary, record };
 }
 
 const DASH = "\u2014";
@@ -95,18 +97,23 @@ test("malformed or shapeless stdin allows", () => {
   assert.equal(run("[1, 2]").stdout, "");
 });
 
-test("a block writes one summary line per finding", () => {
-  const { env, summary } = withSummary();
+test("a block writes one summary line and one audit record per finding", () => {
+  const { env, summary, record } = withSummary();
   const res = run({ last_assistant_message: `Run complete.\n\n${DASHED}` }, env);
   assert.equal(JSON.parse(res.stdout).decision, "block");
   const written = readFileSync(summary, "utf8");
   assert.match(written, /^deny-off-voice: blocked stop; final response opens on an announcement$/m);
   assert.match(written, /^deny-off-voice: blocked stop; final response carries 2 em dashes$/m);
+  const walls = readFileSync(record, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(walls, [
+    { tool: "Stop", type: "hook", reason: "deny-off-voice: blocked stop; final response opens on an announcement" },
+    { tool: "Stop", type: "hook", reason: "deny-off-voice: blocked stop; final response carries 2 em dashes" },
+  ]);
 });
 
 test("allows the second stop, recording what walked out", () => {
   // One warning only: re-blocking forever would hold a dead session open.
-  const { env, summary } = withSummary();
+  const { env, summary, record } = withSummary();
   const res = run({ last_assistant_message: ANNOUNCING, stop_hook_active: true }, env);
   assert.equal(res.status, 0);
   assert.equal(res.stdout, "");
@@ -114,6 +121,7 @@ test("allows the second stop, recording what walked out", () => {
     readFileSync(summary, "utf8"),
     /^deny-off-voice: allowed second stop; final response still opens on an announcement$/m,
   );
+  assert.equal(existsSync(record), false, "an allow is a summary line, not a wall");
 });
 
 test("a payload without the field allows and says which field", () => {

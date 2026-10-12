@@ -4,7 +4,7 @@
 // table, no filesystem beyond the summary file.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -22,8 +22,10 @@ function run(call, env = ciEnv) {
 }
 
 function withSummary(env = ciEnv) {
-  const summary = join(mkdtempSync(join(tmpdir(), "open-question-")), "summary.md");
-  return { env: { ...env, GITHUB_STEP_SUMMARY: summary }, summary };
+  const temp = mkdtempSync(join(tmpdir(), "open-question-"));
+  const summary = join(temp, "summary.md");
+  const record = join(temp, "walls.jsonl");
+  return { env: { ...env, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp }, summary, record };
 }
 
 // Run 35842553330's last words, verbatim in shape.
@@ -73,16 +75,21 @@ test("malformed or shapeless stdin allows", () => {
   assert.equal(run("[1, 2]").stdout, "");
 });
 
-test("a block writes its own summary line", () => {
-  const { env, summary } = withSummary();
+test("a block writes its own summary line and the audit's record", () => {
+  const { env, summary, record } = withSummary();
   const res = run({ last_assistant_message: ASKING }, env);
   assert.equal(JSON.parse(res.stdout).decision, "block");
   assert.match(readFileSync(summary, "utf8"), /^deny-open-question: blocked stop; final response ends on a question$/m);
+  assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), {
+    tool: "Stop",
+    type: "hook",
+    reason: "deny-open-question: blocked stop; final response ends on a question",
+  });
 });
 
 test("allows the second stop, recording the question that walked out", () => {
   // One warning only: re-blocking forever would hold a dead session open.
-  const { env, summary } = withSummary();
+  const { env, summary, record } = withSummary();
   const res = run({ last_assistant_message: ASKING, stop_hook_active: true }, env);
   assert.equal(res.status, 0);
   assert.equal(res.stdout, "");
@@ -90,6 +97,7 @@ test("allows the second stop, recording the question that walked out", () => {
     readFileSync(summary, "utf8"),
     /^deny-open-question: allowed second stop; final response still ends on a question$/m,
   );
+  assert.equal(existsSync(record), false, "an allow is a summary line, not a wall");
 });
 
 test("a payload without the field allows and says which field", () => {

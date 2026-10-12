@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -257,6 +257,80 @@ test("a denial's typed reason reaches metadata.json, distinct and capped", () =>
     assert.equal(denials.reasons[0].type, "protectedPath");
     assert.equal(denials.reasons[0].reason.length, 240, "capped");
     assert.deepEqual(denials.reasons[1], { tool: "Edit", type: "hook", reason: "{\"hook\": \"deny-em-dash\"}" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// Issue #990: the harness's permission_denied entry skips the hook path,
+// and the hooks' summary lines land in the Claude step's own summary file,
+// which the extract step cannot open. The record under RUNNER_TEMP is the
+// channel. End to end on purpose: #700's fixture synthesized the entry from
+// the docs and handed both writers one path, and went green on a reason no
+// run ever carried. Here the real hook writes and the real extractor reads,
+// each with the summary file its own step would get.
+test("a hook denial's reason reaches metadata.json through the record under RUNNER_TEMP", () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
+  try {
+    const out = join(directory, "agent-audit");
+    mkdirSync(out);
+    const hook = new URL("../../scripts/deny-em-dash", import.meta.url).pathname;
+    const call = JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command: "gh-comment 1 <<'EOF'\nsymptom \u2014 evidence\nEOF" },
+    });
+    const claudeStepSummary = join(directory, "claude-step-summary.md");
+    for (let hit = 0; hit < 2; hit++) {
+      const denied = spawnSync(hook, [], {
+        input: call,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          GITHUB_ACTIONS: "true",
+          RUNNER_TEMP: directory,
+          GITHUB_STEP_SUMMARY: claudeStepSummary,
+        },
+      });
+      assert.equal(denied.status, 2, denied.stderr);
+    }
+    appendFileSync(join(directory, "walls.jsonl"), "{not a record\n");
+    const execution = join(directory, "execution.json");
+    writeFileSync(
+      execution,
+      JSON.stringify([{
+        type: "result",
+        result: "done",
+        permission_denials: [{ tool_name: "Bash", tool_input: {} }, { tool_name: "Bash", tool_input: {} }],
+      }]),
+    );
+    const extractStepSummary = join(directory, "extract-step-summary.md");
+    const result = spawnSync("python3", [script, out], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EXEC_FILE: execution,
+        GITHUB_OUTPUT: join(directory, "github-output"),
+        GITHUB_STEP_SUMMARY: extractStepSummary,
+        GITHUB_WORKSPACE: new URL("../../../", import.meta.url).pathname,
+        RUNNER_TEMP: directory,
+        ROLE: "reviewer",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const denials = JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")).telemetry.permission_denials;
+    assert.equal(denials.count, 2, "the result entry's count stays authoritative");
+    assert.deepEqual(denials.by_tool, { Bash: 2 });
+    assert.deepEqual(
+      denials.reasons,
+      [{ tool: "Bash", type: "hook", reason: "deny-em-dash: denied" }],
+      "one wall hit twice is one line, and the corrupt line is skipped",
+    );
+    assert.equal(readFileSync(claudeStepSummary, "utf8"), "deny-em-dash: denied\ndeny-em-dash: denied\n");
+    assert.doesNotMatch(
+      readFileSync(extractStepSummary, "utf8"),
+      /^deny-em-dash/m,
+      "the extract step's summary never saw the hook",
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

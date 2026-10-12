@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -49,16 +49,21 @@ test("blocks a stop while a cargo process is alive", async () => {
   }
 });
 
-test("a block writes its own summary line", async () => {
+test("a block writes its own summary line and the audit's record", async () => {
   const child = plantCargo();
-  const summary = join(mkdtempSync(join(tmpdir(), "parked-")), "summary.md");
+  const temp = mkdtempSync(join(tmpdir(), "parked-"));
+  const summary = join(temp, "summary.md");
   try {
-    const res = run({ stop_hook_active: false }, { ...ciEnv, GITHUB_STEP_SUMMARY: summary });
+    const res = run({ stop_hook_active: false }, { ...ciEnv, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp });
     assert.equal(JSON.parse(res.stdout).decision, "block");
     assert.match(
       readFileSync(summary, "utf8"),
       /^deny-parked-turn: blocked stop; live .*cargo\(\d+\)/m,
     );
+    const wall = JSON.parse(readFileSync(join(temp, "walls.jsonl"), "utf8"));
+    assert.equal(wall.tool, "Stop");
+    assert.equal(wall.type, "hook");
+    assert.match(wall.reason, /^deny-parked-turn: blocked stop; live .*cargo\(\d+\)/);
   } finally {
     child.kill();
     await once(child, "exit");
@@ -69,15 +74,17 @@ test("allows the second stop, recording what walked out", async () => {
   // One warning only: re-blocking forever would hold a dead session
   // open, so stop_hook_active allows and the summary carries the loss.
   const child = plantCargo();
-  const summary = join(mkdtempSync(join(tmpdir(), "parked-")), "summary.md");
+  const temp = mkdtempSync(join(tmpdir(), "parked-"));
+  const summary = join(temp, "summary.md");
   try {
-    const res = run({ stop_hook_active: true }, { ...ciEnv, GITHUB_STEP_SUMMARY: summary });
+    const res = run({ stop_hook_active: true }, { ...ciEnv, GITHUB_STEP_SUMMARY: summary, RUNNER_TEMP: temp });
     assert.equal(res.status, 0);
     assert.equal(res.stdout, "");
     assert.match(
       readFileSync(summary, "utf8"),
       /^deny-parked-turn: allowed second stop with live .*cargo\(\d+\)/m,
     );
+    assert.equal(existsSync(join(temp, "walls.jsonl")), false, "an allow is a summary line, not a wall");
   } finally {
     child.kill();
     await once(child, "exit");

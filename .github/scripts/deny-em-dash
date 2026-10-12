@@ -52,14 +52,17 @@ null tool_input (the #324 shape). Exit 2 denies; stderr is shown to the
 model.
 
 Liveness: every deny appends a fixed-vocabulary line to
-GITHUB_STEP_SUMMARY, so the run page shows the guard working and a
-retrospect can count what the prompt alone did not prevent.
+GITHUB_STEP_SUMMARY and the audit's record (`walls.py`), so the run page
+shows the guard working and a retrospect reads what the prompt alone did
+not prevent.
 """
 
 import json
 import os
 import re
 import sys
+
+import walls
 
 EM_DASH = "—"
 POSTS = re.compile(
@@ -120,10 +123,7 @@ def main() -> int:
     command = tool_input.get("command")
     if not isinstance(command, str) or not denied(command):
         return 0
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write("deny-em-dash: denied\n")
+    walls.denied("deny-em-dash", "Bash", "denied")
     print(MESSAGE, file=sys.stderr)
     return 2
 
