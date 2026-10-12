@@ -15,7 +15,8 @@ instant the row describes: the artifact's creation time when walking the
 archive, now when the run itself is writing.
 
 The allowance table's rows (#891 slice 2) come from the same metadata by
-`allowance_rows`, so the two writers that share `row` share them too.
+`allowance_rows`, so the two writers that share `row` share them too; the
+tools table's rows (#891 slice 5) by `tools_rows`, the same way.
 """
 
 import collections
@@ -175,6 +176,78 @@ def allowance_rows(meta):
                           bindable(reset) if valid_reset(reset) else None,
                           int(overage) if isinstance(overage, bool) else None)
     return [last[kind] for kind in sorted(last)[:MAX_WINDOWS]]
+
+
+# The tools table's row: one tool the run called or was refused, with its
+# counts (#891 slice 5). `at` and `role` are the session's, joined on
+# (run_id, attempt), never repeated here.
+TOOLS_COLUMNS = ("run_id", "attempt", "tool", "uses", "denials")
+# A run names the tools it used, a dozen against an offered set of 28 on
+# 2026-10-12; past MAX_TOOLS the artifact is not a run's. The statements
+# are chunked under the bind cap, so a real run never loses a row to it.
+MAX_TOOLS = 100
+TOOLS_PER_STATEMENT = MAX_BOUND_PARAMETERS // len(TOOLS_COLUMNS)
+
+
+def tools_insert(rows):
+    values = f"({', '.join('?' * len(TOOLS_COLUMNS))})"
+    return (f"INSERT OR REPLACE INTO tools ({', '.join(TOOLS_COLUMNS)}) "
+            f"VALUES {', '.join([values] * len(rows))}")
+
+
+def tools_statements(rows):
+    """(sql, params) per statement, each binding at most MAX_BOUND_PARAMETERS."""
+    for start in range(0, len(rows), TOOLS_PER_STATEMENT):
+        chunk = rows[start:start + TOOLS_PER_STATEMENT]
+        yield tools_insert(chunk), [v for r in chunk for v in r]
+
+
+def count(value):
+    """A count the extractor wrote, or None: a bool, a float or a string is not one."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value < 2**63 else None
+
+
+def tools_rows(meta):
+    """One row per tool the run called or was refused, sorted by name.
+
+    Rows exist only where the use record does (`telemetry.tools.used`,
+    #946): an older artifact names its refused tools and nothing it used,
+    and a row of unknowns for it would read as a run that used nothing.
+    `uses` is the record's count, 0 for a tool only refused. `denials` is
+    the per-tool count where the artifact carries one
+    (`permission_denials.by_tool`), NULL where it names the tool refused
+    and carries no count, 0 for a tool it does not name. A count that is
+    not one raises, so the artifact costs one unreadable line (the walk's
+    invariant) and never a row of invented zeros.
+    """
+    run_id = as_int(meta.get("run_id"))
+    tele = meta.get("telemetry") if isinstance(meta.get("telemetry"), dict) else {}
+    record = tele.get("tools") if isinstance(tele.get("tools"), dict) else {}
+    used = record.get("used")
+    if run_id is None or not isinstance(used, dict):
+        return []
+    attempt = as_int(meta.get("run_attempt")) or 1
+    refused = tele.get("permission_denials")
+    refused = refused if isinstance(refused, dict) else {}
+    by_tool = refused.get("by_tool") if isinstance(refused.get("by_tool"), dict) else None
+    named = ({str(n) for n in refused["tools"]}
+             if isinstance(refused.get("tools"), list) else set())
+    names = set(used) | (set(by_tool) if by_tool is not None else named)
+    rows = []
+    for name in sorted(names)[:MAX_TOOLS]:
+        uses = count(used.get(name, 0))
+        if uses is None:
+            raise ValueError(f"tools.used[{name!r}] is not a count")
+        if by_tool is not None:
+            denials = count(by_tool.get(name, 0))
+            if denials is None:
+                raise ValueError(f"permission_denials.by_tool[{name!r}] is not a count")
+        else:
+            denials = None if name in named else 0
+        rows.append((run_id, attempt, name, uses, denials))
+    return rows
 
 
 def as_int(value):

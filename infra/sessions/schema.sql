@@ -107,3 +107,22 @@ CREATE TABLE IF NOT EXISTS trust (
   PRIMARY KEY (run_id, attempt)
 );
 CREATE INDEX IF NOT EXISTS trust_at ON trust (at);
+
+-- tools: one row per tool a run called or was refused (#891 slice 5).
+-- The question is #725's: which tools a seat uses and which walls it
+-- hits, so an envelope trim or a `--tools` list comes from counts and
+-- not from a guess. Same writers as sessions, from the same metadata;
+-- `at` and `role` live in sessions once, joined on (run_id, attempt).
+-- Rows exist from the first artifact that recorded tool use (#946,
+-- 2026-10-09): an older one names its refused tools and nothing it
+-- used, and a row of unknowns for it would read as a run that used
+-- nothing. Read by `sessions sql` in the deep survey's context audit
+-- (.claude/skills/deep-survey, step 9).
+CREATE TABLE IF NOT EXISTS tools (
+  run_id   INTEGER NOT NULL,
+  attempt  INTEGER NOT NULL,
+  tool     TEXT    NOT NULL,   -- the name the harness reports: Bash, Edit, mcp__github_file_ops__commit_files
+  uses     INTEGER NOT NULL,   -- tool_use blocks by that name; 0 for a tool only refused
+  denials  INTEGER,            -- permission denials of that tool; NULL where the artifact named the tool refused and carried no per-tool count
+  PRIMARY KEY (run_id, attempt, tool)
+);

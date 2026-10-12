@@ -396,6 +396,59 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
   });
 });
 
+// #891 slice 5: the tool counts ride the same download as the session row.
+// Edit and Write are named refused with no per-tool count, so their denials
+// are null; the artifacts before #946 carry no `tools` record and get no row.
+test("backfill writes an artifact's tool counts beside its row, none for an artifact without the record", async () => {
+  const base_meta = metadata(100, "bdfl");
+  const meta = {
+    ...base_meta,
+    telemetry: { ...base_meta.telemetry, tools: { offered: null, used: { Bash: 7 }, writes: 1 } },
+  };
+  const files = (m) => ({ "metadata.json": JSON.stringify(m), "input-prompt.md": "p", "output-response.md": "r" });
+  const gh = stubGh(listing.slice(0, 2), { 1: files(meta), 2: files(metadata(200, "reviewer")) });
+  await withStub([keys([]), d1([]), d1([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 5);
+    assert.equal(
+      seen[2].body.sql,
+      "INSERT OR REPLACE INTO tools (run_id, attempt, tool, uses, denials) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+    );
+    assert.deepEqual(seen[2].body.params, [100, 1, "Bash", 7, 0, 100, 1, "Edit", 0, null, 100, 1, "Write", 0, null]);
+    assert.match(seen[3].body.sql, /^INSERT OR REPLACE INTO sessions /); // the reviewer artifact: a row, no tools
+    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+test("a tool count that is not a count makes its artifact unreadable, never the walk", async () => {
+  const base_meta = metadata(100, "bdfl");
+  const meta = {
+    ...base_meta,
+    telemetry: { ...base_meta.telemetry, tools: { offered: null, used: { Bash: 7.5 }, writes: 1 } },
+  };
+  const files = (m) => ({ "metadata.json": JSON.stringify(m), "input-prompt.md": "p", "output-response.md": "r" });
+  const gh = stubGh(listing.slice(0, 2), { 1: files(meta), 2: files(metadata(200, "reviewer")) });
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(seen.filter((q) => q.body.sql.startsWith("INSERT")).length, 1); // the reviewer artifact alone
+    assert.match(
+      r.out,
+      /^  unreadable audit-bdfl-100-1: metadata has a malformed field \(ValueError: tools.used\['Bash'\] is not a count\)$/m,
+    );
+    assert.match(r.out, /written 1 \| unreadable 1 \| missing 1$/m);
+  });
+});
+
 test("an artifact with more windows than D1 binds in one statement costs rows, never the walk", async () => {
   const windows = Object.fromEntries(
     Array.from({ length: 20 }, (_, i) => [`w${String(i).padStart(2, "0")}`, { utilization: 0.1 }]),

@@ -156,10 +156,18 @@ for e in entries:
             telemetry["total_cost_usd_notional"] = e["total_cost_usd"]
         denials = e.get("permission_denials")
         if isinstance(denials, list):
+            by_tool = {}
+            for d in denials:
+                if isinstance(d, dict):
+                    name = str(d.get("tool_name", "?"))
+                    by_tool[name] = by_tool.get(name, 0) + 1
+            # `by_tool` is the count per name, the tools table's column
+            # (#891 slice 5); `tools` keeps the sorted names for the readers
+            # that predate it.
             telemetry["permission_denials"] = {
                 "count": len(denials),
-                "tools": sorted({d.get("tool_name", "?")
-                                 for d in denials if isinstance(d, dict)}),
+                "tools": sorted(by_tool),
+                "by_tool": dict(sorted(by_tool.items())),
             }
 
 # Why each denial happened (run 35842553330): the result entry counts

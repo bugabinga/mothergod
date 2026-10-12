@@ -9,7 +9,8 @@ of an artifact shares; no prose reaches the table (ADR-0019). The same row
 written from the archive is `sessions backfill`.
 
 The run's allowance readings follow as rows of the allowance table (#891
-slice 2), through audit_facts.allowance_rows, the same function `sessions
+slice 2) and its tool counts as rows of the tools table (slice 5), through
+audit_facts.allowance_rows and tools_rows, the same functions `sessions
 backfill` writes them with from the archive.
 
 Never fails the run: exit 0 on every path, because observability does not
@@ -27,7 +28,7 @@ import sys
 from datetime import datetime, timezone
 
 import d1
-from audit_facts import INSERT, allowance_insert, allowance_rows, row
+from audit_facts import INSERT, allowance_insert, allowance_rows, row, tools_rows, tools_statements
 
 
 def size_in(audit_dir):
@@ -40,8 +41,20 @@ def size_in(audit_dir):
     return size
 
 
+def beside(label, write_rows):
+    """One derived table's write after the session row: its miss is its own
+    warning, and the status line still reports the row. Returns the status
+    suffix `write_rows` produced, or nothing."""
+    try:
+        return write_rows() or ""
+    except Exception as error:  # noqa: BLE001, the docstring's exit-0 invariant
+        print(f"::warning::session-row: {label} not written: {type(error).__name__}: {error}")
+        return ""
+
+
 def write(audit_dir):
-    """Write the run's row, then its allowance readings; print the status line.
+    """Write the run's row, then its allowance readings and tool counts;
+    print the status line.
 
     Raises on anything that stops the row: a missing or malformed
     metadata.json, a field row() cannot turn into a number, a database that
@@ -56,17 +69,22 @@ def write(audit_dir):
     if values[0] is None:
         raise ValueError("metadata carries no run_id")
     d1.query(INSERT, values)
-    # The session row is in by here, so an allowance miss is its own
-    # warning and the status line still reports the row.
-    windows = ""
-    try:
+
+    def allowance():
         readings = allowance_rows(meta)
         if readings:
             d1.query(allowance_insert(readings), [v for r in readings for v in r])
-            windows = ", allowance " + " ".join(r[2] for r in readings)
-    except Exception as error:  # noqa: BLE001, the docstring's exit-0 invariant
-        print(f"::warning::session-row: allowance not written: {type(error).__name__}: {error}")
-    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{windows}")
+            return ", allowance " + " ".join(r[2] for r in readings)
+
+    def tools():
+        rows = tools_rows(meta)
+        for sql, params in tools_statements(rows):
+            d1.query(sql, params)
+        if rows:
+            return f", tools {len(rows)}"
+
+    suffix = beside("allowance", allowance) + beside("tools", tools)
+    print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{suffix}")
 
 
 def main(argv):
