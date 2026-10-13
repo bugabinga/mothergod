@@ -5,6 +5,9 @@ use std::sync::LazyLock;
 use libfuzzer_sys::fuzz_target;
 use mothergod_fuzz_support::{FUZZ_MAX_DECODED_LEN, frame_gen};
 
+/// Width of the check value that closes a frame (`docs/format/SPEC.md`).
+const CHECK_LEN: usize = 4;
+
 // frame_gen::frames() re-runs the real encoder over every preimage
 // (compress trials each shortlisted filter candidate through a full
 // optimal-parse + entropy-coding pass), so it is computed once per
@@ -41,4 +44,8 @@ fuzz_target!(|data: &[u8]| {
         frame[offset] ^= xor;
     }
     let _ = mothergod::decompress_bounded(&frame, FUZZ_MAX_DECODED_LEN);
+    // The check value turns away nearly every flipped frame before its
+    // payload is read; re-sealed, the same flips reach the decoder.
+    let body = frame.len().saturating_sub(CHECK_LEN);
+    let _ = mothergod::decompress_bounded(&frame_gen::sealed(&frame[..body]), FUZZ_MAX_DECODED_LEN);
 });

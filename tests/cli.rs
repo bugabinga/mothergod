@@ -13,7 +13,7 @@
 
 mod common;
 
-use common::{bin, run, run_output, run_with_early_closing_reader};
+use common::{bin, run, run_output, run_with_early_closing_reader, stored_frame};
 
 #[test]
 fn compress_then_decompress_roundtrips_arbitrary_bytes() {
@@ -482,9 +482,8 @@ fn decompress_of_a_file_without_the_mgdc_suffix_fails_cleanly() {
 fn decompress_exits_quietly_when_the_stdout_reader_goes_away() {
     // A Stored frame (method byte 0): 300 000 data bytes exceed any pipe
     // buffer, so the write after the reader closes cannot be absorbed.
-    let mut frame = [b"MGDC".as_slice(), &[mothergod::FORMAT_VERSION, 0]].concat();
-    frame.extend(300_000u64.to_le_bytes());
-    frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
+    let data: Vec<u8> = (0..300_000u32).map(|i| (i * 37 % 251) as u8).collect();
+    let frame = stored_frame(&data);
 
     let (stderr, code) = run_with_early_closing_reader(&["-d"], &frame);
     assert_eq!(String::from_utf8_lossy(&stderr), "");

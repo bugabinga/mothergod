@@ -37,6 +37,8 @@ pub mod coder;
 #[doc(hidden)]
 pub mod column;
 #[doc(hidden)]
+pub mod crc32;
+#[doc(hidden)]
 pub mod fieldtype;
 pub mod filters;
 #[doc(hidden)]
@@ -60,14 +62,14 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Every bump is a bitstream format change (CLAUDE.md hard rule 5); the
 /// history of what each version changed lives in `docs/format/SPEC.md` and
 /// the ADRs it cites. This build decodes exactly this version for both
-/// methods: versions 1 through 11 were retired outright, no release having
+/// methods: versions 1 through 12 were retired outright, no release having
 /// written any of them
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
 /// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a frame
 /// naming any other version is rejected as `UnsupportedVersion` before its
-/// payload is read (`tests/golden/v12-*.mgdc` pins the current version's
+/// payload is read (`tests/golden/v13-*.mgdc` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 12;
+pub const FORMAT_VERSION: u8 = 13;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,9 +101,9 @@ impl TryFrom<u8> for Method {
 /// Errors produced when decoding a frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// Input ended before the frame was complete: inside the header, or
-    /// short of the length a [`Method::Stored`] payload or a [`Method::Lz`]
-    /// coded stream declares. Bytes after the last frame of a stream read
+    /// Input ended before the frame was complete: inside the header, short
+    /// of the length a [`Method::Stored`] payload or a [`Method::Lz`] coded
+    /// stream declares, or short of the check value that closes the frame. Bytes after the last frame of a stream read
     /// as the start of one more, so they are this or [`Error::BadMagic`].
     Truncated,
     /// Input does not start with [`MAGIC`].
@@ -115,6 +117,10 @@ pub enum Error {
     /// reaching before the start of decoded output, or similar):
     /// adversarial or corrupted input, never a bug in this decoder.
     Corrupt,
+    /// The frame's check value does not match its bytes: a bit flipped, or
+    /// a byte changed, after [`compress`] wrote it. Reported before any of
+    /// the payload is decoded, so a damaged frame writes nothing.
+    BadChecksum,
     /// Payload's declared ([`Method::Lz`]) or actual ([`Method::Stored`])
     /// output length exceeds the bound in effect: [`codec::MAX_DECODED_LEN`]
     /// under [`decompress`], or a caller's own tighter `max_len` under
@@ -153,6 +159,7 @@ impl core::fmt::Display for Error {
             Self::UnsupportedVersion(v) => write!(f, "unsupported format version {v}"),
             Self::UnknownMethod(m) => write!(f, "unknown compression method {m}"),
             Self::Corrupt => write!(f, "compressed payload is corrupt"),
+            Self::BadChecksum => write!(f, "frame check value does not match its bytes"),
             Self::TooLarge { len, max } => {
                 write!(
                     f,
@@ -185,6 +192,7 @@ impl From<Error> for std::io::Error {
             | Error::UnsupportedVersion(_)
             | Error::UnknownMethod(_)
             | Error::Corrupt
+            | Error::BadChecksum
             | Error::TooLarge { .. } => std::io::ErrorKind::InvalidData,
         })
     }
@@ -266,6 +274,11 @@ const VERSION_OFFSET: usize = MAGIC.len();
 const METHOD_OFFSET: usize = VERSION_OFFSET + 1;
 const HEADER_LEN: usize = METHOD_OFFSET + 1;
 
+/// Width of the check value that closes every frame: the CRC-32 of every
+/// byte of the frame before it, header included, as a `u32` little-endian
+/// (ADR-0068).
+const CHECK_LEN: usize = size_of::<u32>();
+
 /// One frame of a stream, split off the front of the bytes that remain.
 struct Frame<'a> {
     method: Method,
@@ -284,7 +297,9 @@ const STORED_LEN_BYTES: usize = size_of::<u64>();
 /// every frame names its own extent (a [`Method::Stored`] payload its data
 /// length, a [`Method::Lz`] payload its coded length), so none is decoded
 /// to find where it ends and a hostile length costs no allocation, only
-/// the [`Error::Truncated`] of bytes that are not there. A stream is one
+/// the [`Error::Truncated`] of bytes that are not there. A frame is yielded
+/// only once its check value matches, so a damaged one costs one pass over
+/// its own bytes and no decode work ([`Error::BadChecksum`]). A stream is one
 /// or more frames and nothing else: empty input yields [`Error::Truncated`],
 /// and bytes after the last frame are not one, so they surface as the next
 /// frame's [`Error::Truncated`] or [`Error::BadMagic`]. After an `Err` the
@@ -340,8 +355,16 @@ impl<'a> Frames<'a> {
                 (extent.payload_len, u64::from(extent.output_len))
             }
         };
-        let (payload, rest) = tail.split_at(payload_len);
+        let (checked, rest) = self
+            .rest
+            .split_at_checked(HEADER_LEN + payload_len + CHECK_LEN)
+            .ok_or(Error::Truncated)?;
+        let (covered, check) = checked.split_at(HEADER_LEN + payload_len);
+        if crc32::crc32(covered).to_le_bytes() != check {
+            return Err(Error::BadChecksum);
+        }
         self.rest = rest;
+        let payload = &covered[HEADER_LEN..];
         Ok(Frame {
             method,
             payload,
@@ -522,16 +545,18 @@ pub(crate) fn try_vec_from_slice(
 }
 
 /// Assembles a complete frame from `method` and its payload, the
-/// concatenation of `parts`, so a large payload is copied once.
+/// concatenation of `parts`, so a large payload is copied once, closed by
+/// the check value over everything before it.
 fn build_frame(method: Method, parts: &[&[u8]]) -> Vec<u8> {
     let payload_len: usize = parts.iter().map(|part| part.len()).sum();
-    let mut frame = Vec::with_capacity(HEADER_LEN + payload_len);
+    let mut frame = Vec::with_capacity(HEADER_LEN + payload_len + CHECK_LEN);
     frame.extend_from_slice(&MAGIC);
     frame.push(FORMAT_VERSION);
     frame.push(method as u8);
     for part in parts {
         frame.extend_from_slice(part);
     }
+    frame.extend_from_slice(&crc32::crc32(&frame).to_le_bytes());
     frame
 }
 
@@ -867,7 +892,8 @@ pub fn decompress_to_writer<W: std::io::Write>(
 ///
 /// Same as [`decompress`]'s header-parsing errors
 /// ([`Error::Truncated`], [`Error::BadMagic`], [`Error::UnsupportedVersion`],
-/// [`Error::UnknownMethod`]), plus [`Error::Corrupt`] when a [`Method::Lz`]
+/// [`Error::UnknownMethod`]), plus [`Error::BadChecksum`] for a frame whose
+/// check value does not match, and [`Error::Corrupt`] when a [`Method::Lz`]
 /// frame's filter selector does not name a real [`filters::select::Candidate`]
 /// — everything short of actually decoding the payload.
 pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {

@@ -34,6 +34,12 @@ All notable changes to this project are documented here. Format follows
   stream's output, not each frame's, and `decompress` holds the compressed
   frames of a stream to 256 MiB of output together; `decompress_to_writer`
   and the CLI stream past that at constant memory.
+- format: a bit flip anywhere in a frame is an error, never wrong bytes with
+  exit status 0 (#1020, ADR-0068). Each frame ends in a CRC-32 of the bytes
+  before it, as gzip and xz carry, and a mismatch is `Error::BadChecksum`,
+  reported before any of the frame is decoded, so a damaged frame writes
+  nothing. The price is 4 bytes on each frame and one pass over it at decode,
+  measured at 380 MB/s, where `Lz` decode of Rust source runs at 11 MB/s.
 - compress: an input is cut into 16 MiB blocks, one frame each, so peak
   encode memory stays under 1 GiB however long the input: 256 MiB of zeros
   took 11 GB and did not finish in 300 s, and now takes 946 MB and 6 minutes
@@ -68,12 +74,12 @@ All notable changes to this project are documented here. Format follows
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 12, specified in
+- Bitstream format at `FORMAT_VERSION` 13, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 12 no longer decode: no release ever wrote them, and
+- Format versions below 13 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.

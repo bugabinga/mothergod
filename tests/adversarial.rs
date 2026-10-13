@@ -31,6 +31,7 @@ const PINS: &[(&str, Error)] = &[
     ("frame-trailing-garbage", Error::BadMagic),
     ("frame-trailing-partial-frame", Error::Truncated),
     ("future-version", Error::UnsupportedVersion(0)),
+    ("lz-bad-checksum", Error::BadChecksum),
     ("lz-coded-length-max", Error::Truncated),
     ("lz-declared-length-mismatch", Error::Corrupt),
     (
@@ -43,8 +44,10 @@ const PINS: &[(&str, Error)] = &[
     ("lz-truncated-stream", Error::Truncated),
     ("lz-unknown-filter-selector", Error::Corrupt),
     ("random-garbage", Error::BadMagic),
+    ("stored-bad-checksum", Error::BadChecksum),
     ("stored-declared-length-max", Error::Truncated),
     ("stored-trailing-bytes", Error::Truncated),
+    ("stored-truncated-check", Error::Truncated),
     ("stored-truncated-body", Error::Truncated),
     ("stored-truncated-length", Error::Truncated),
     ("truncated-1-byte", Error::Truncated),
