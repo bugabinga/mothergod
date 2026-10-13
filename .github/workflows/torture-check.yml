@@ -1,0 +1,54 @@
+# Nightly allocation-failure torture sweep (#791; docs/TESTING.md layer 2,
+# hard rule 2 under an allocator that actually refuses).
+#
+# `tests/torture.rs` counts every allocator call one decode makes, then
+# re-runs the decode once per call with that call sabotaged, each in a
+# child process; an abort is a decode path that grows memory before it
+# has validated its input. The binary is a no-op without
+# MOTHERGOD_TORTURE=1 (`harness = false`, the required gate's
+# fast-and-deterministic contract), so the PR path never runs it, and
+# before this file nothing else did: 9b456bb (#1085) landed a `to_vec`
+# abort on the Stored path on 2026-10-12, main stayed green, and a
+# session running the sweep by hand found it a day later (#1130).
+# Nightly, not per PR, because the sweep forks one child per swept call
+# (11,985 across 108 fixture/API pairs on 2026-10-13). Red here means an
+# abort, named by fixture, API and call index in the log; agent-alarm
+# wakes the BDFL on it.
+name: torture-check
+
+on:
+  schedule:
+    # Nightly 01:31 UTC, clear of fuzz-check at 02:13 and the weekend
+    # sweeps (`grep -n cron: .github/workflows/*.yml` lists them all).
+    - cron: "31 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: torture-check
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  torture:
+    runs-on: ubuntu-24.04
+    # About four minutes measured cold on 2026-10-13, release build
+    # included. A hung child is killed by the sweep's own CHILD_TIMEOUT
+    # (tests/torture.rs), so 20 is headroom for a slow runner, not a
+    # budget the sweep can spend.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      # --release: the profile a user runs and the one every by-hand run
+      # measured; the swept call count is the same either way, the wall
+      # clock is not. --nocapture so the per-pair lines reach the log.
+      - run: cargo test --release --test torture -- --nocapture
+        env:
+          MOTHERGOD_TORTURE: "1"

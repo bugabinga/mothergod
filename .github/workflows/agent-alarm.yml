@@ -72,6 +72,7 @@ on:
       - corpus-fetch-check
       - coverage-check
       - fuzz-check
+      - torture-check
       - monster
       - docs-watch
       - deploy-site
