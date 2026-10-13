@@ -201,6 +201,77 @@ fn a_source_error_comes_back_as_it_was() {
     );
 }
 
+/// The `Read` contract lets a call with an empty buffer return `Ok(0)`,
+/// which a decoder must not mistake for the end of the stream, so it asks
+/// only with room to fill: this source panics on a call without it.
+struct NeedsRoom<'a>(&'a [u8]);
+
+impl Read for NeedsRoom<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        assert!(!buf.is_empty(), "read called with an empty buffer");
+        let n = buf.len().min(self.0.len());
+        buf[..n].copy_from_slice(&self.0[..n]);
+        self.0 = &self.0[n..];
+        Ok(n)
+    }
+}
+
+/// A source that fails each `read` with `Interrupted` before it succeeds,
+/// the retry `Read` callers owe it.
+struct Interrupting<'a> {
+    rest: &'a [u8],
+    pending: bool,
+}
+
+impl Read for Interrupting<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.pending = !self.pending;
+        if self.pending {
+            return Err(io::Error::from(ErrorKind::Interrupted));
+        }
+        let n = buf.len().min(self.rest.len());
+        buf[..n].copy_from_slice(&self.rest[..n]);
+        self.rest = &self.rest[n..];
+        Ok(n)
+    }
+}
+
+#[test]
+fn a_frame_filled_to_its_length_asks_the_source_for_nothing_more() {
+    let stream = [
+        compress(b"hi"),
+        compress(&b"the quick brown fox ".repeat(50)),
+    ]
+    .concat();
+    let (out, err) = drain(Decoder::new(NeedsRoom(&stream)));
+    assert_eq!((out.len(), err), (2 + 20 * 50, None));
+}
+
+#[test]
+fn an_interrupted_read_is_retried_not_returned() {
+    let payload = b"the quick brown fox ".repeat(50);
+    let stream = [compress(b"hi"), compress(&payload)].concat();
+    let source = Interrupting {
+        rest: &stream,
+        pending: false,
+    };
+    // Not `read_to_end`: it retries `Interrupted` itself, and a decoder that
+    // returned it would repeat it forever, a hang where a failure is meant.
+    let mut reader = Decoder::new(source);
+    let mut out = Vec::new();
+    let mut buf = [0; 4096];
+    loop {
+        match reader
+            .read(&mut buf)
+            .expect("Interrupted is retried inside")
+        {
+            0 => break,
+            n => out.extend_from_slice(&buf[..n]),
+        }
+    }
+    assert_eq!(out, [b"hi".as_slice(), &payload].concat());
+}
+
 #[test]
 fn max_len_rejects_a_frame_from_its_header_before_reading_its_payload() {
     let first = compress(b"hi");
