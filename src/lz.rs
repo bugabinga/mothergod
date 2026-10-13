@@ -1,50 +1,25 @@
-//! LZ token stream: greedy/lazy parse and its inverse (`JOURNAL` S1-A3, M1
-//! port, first slice of `research/JOURNAL.md` S2-D2).
+//! LZ token stream: [`parse_greedy`] (greedy with one-step lazy matching),
+//! [`parse_optimal`] (DP-priced, seeded by [`parse_greedy`]) and [`replay`],
+//! their token-level inverse.
 //!
-//! Ported from the archive's `lz` (`research/imports/session-1/
-//! mothergod.rs`), not `lz_opt`: the archive's optimal-parse DP prices
-//! candidates against its own lightweight frequency tables (not the real
-//! entropy models, which still don't exist in this crate — `filters` is
-//! ported, the coder is not). `lz_opt` also runs `lz` internally as its
-//! price-seeding first pass, so this greedy/lazy parser is not a detour,
-//! it is a real prerequisite. [`parse_greedy`] alone is already a usable
-//! LZ front end (a real encoder could ship on it today) and [`replay`]
-//! proves it losslessly reversible at the token level without needing
-//! the entropy coder to exist.
-//!
-//! [`parse_optimal`] is the follow-up slice: the archive's `lz_opt`, a
-//! DP-priced optimal parse seeded by [`parse_greedy`] and iterated a fixed
-//! number of rounds (S2-A56 raised the archive's original two to three).
-//! See its docs for one deliberate correctness fix over the archive's own
-//! DP.
-//!
-//! Behavior ported, not code, per ADR-0006: the archive's single `find`
-//! closure captured by both the rep-cache scan and the hash-chain search
-//! becomes two named functions here (`match_len` and
-//! `MatchFinder::find_best`), and the raw `(usize, usize)` `(0, 0)`
-//! "no match" sentinel pair becomes `Option<(usize, Distance)>` — a match
-//! can no longer be represented with a zero distance, closing the exact
-//! confusion class the session-1 port bug came from (`rust-craft` skill,
+//! A match is an `Option<(usize, Distance)>`, never a `(0, 0)` sentinel: a
+//! match with zero distance cannot be represented (`rust-craft` skill,
 //! type-precision).
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
-/// Largest backward distance a match may reference (`JOURNAL` S1-A3: 1 MiB
-/// window). The wired parse (`dp_round`) always uses this value; the
-/// crate's internal binary-tree match finder takes the window as a
-/// parameter instead of reading this constant directly, so a larger one
-/// can be measured standalone before any wiring or format change
+/// Largest backward distance a match may reference: 1 MiB. The wired parse
+/// passes this to the match finders, which take their window as a
+/// parameter so a larger one can be measured without a format change
 /// (`JOURNAL` S1-P4).
 pub const WINDOW: usize = 1 << 20;
 
 /// Shortest run [`parse_greedy`] emits as [`Token::Match`]. Below this a
 /// literal costs fewer bits than a match's length+distance overhead.
 ///
-/// Shared with [`crate::codec`]'s offset-length-split experiment
-/// (`JOURNAL` S2-A111), so the match-length-state formula it derives from
-/// this floor has one source of truth instead of a copy that could drift,
-/// matching [`LENGTH_BUCKETS`]/[`OFFSET_BUCKETS`]'s own reasoning.
+/// [`crate::codec`]'s match-length-state formula derives from this floor,
+/// so the two share one source.
 pub(crate) const MIN_MATCH_LEN: usize = 4;
 
 /// Shortest run [`parse_greedy`] emits as [`Token::Rep`]. Cheaper than
@@ -52,15 +27,13 @@ pub(crate) const MIN_MATCH_LEN: usize = 4;
 /// cache slot.
 const MIN_REP_LEN: usize = 2;
 
-/// [`MIN_REP_LEN`] as a `u32`, for [`dp_round`]'s price-table indexing
-/// (lengths are priced as `u32` throughout, matching [`Token`]'s own
-/// fields). A compile-time literal (2): always fits, so the truncation
-/// lint below has nothing to actually catch.
+/// [`MIN_REP_LEN`] as a `u32`, the type [`Token`] lengths and the price
+/// table use. The cast is of the literal 2, so it cannot truncate.
 #[allow(clippy::cast_possible_truncation)]
 const MIN_REP_LEN_U32: u32 = MIN_REP_LEN as u32;
 
 /// Longest run a single token can cover; longer repeats are split into
-/// several tokens. Matches the archive's cap.
+/// several tokens.
 const MAX_MATCH_LEN: usize = 65535;
 
 /// Above this length the one-step lazy-matching check ([`parse_greedy`])
@@ -74,12 +47,7 @@ const LAZY_MAX_LEN: usize = 256;
 const MAX_CHAIN_TRIES: usize = 128;
 
 /// Tree-depth bound [`dp_round`] passes to
-/// [`BinaryTreeMatchFinder::insert_and_find`] (JOURNAL S1-P2/S2-A48):
-/// [`dp_round`] used a hash-chain `MatchFinder` at this same depth before
-/// the S2-A48 finder swap (as `MAX_CHAIN_TRIES_OPTIMAL`, since retired —
-/// [`parse_greedy`]'s hash-chain search uses [`MAX_CHAIN_TRIES`] instead,
-/// unrelated), held equal on purpose so ratio measurements isolated the
-/// finder algorithm change from the depth budget.
+/// [`BinaryTreeMatchFinder::insert_and_find`] (JOURNAL S1-P2/S2-A48).
 const MAX_TREE_DEPTH_OPTIMAL: usize = 640;
 
 /// `nice_len` bound [`dp_round`] passes to the same call (JOURNAL S2-A46):
@@ -193,15 +161,12 @@ fn match_len_as_u32(len: usize) -> u32 {
 pub(crate) struct RepCache([Distance; REP_SLOTS]);
 
 impl RepCache {
-    /// Starting cache before any real match has been seen. Matches the
-    /// archive's initial `[1, 4, 8]`: plausible small distances, never
-    /// read unless a rep candidate actually matches at one of them.
+    /// Starting cache before any real match has been seen: `[1, 4, 8]`,
+    /// plausible small distances, never read unless a rep candidate
+    /// actually matches at one of them.
     ///
-    /// Shared with [`crate::codec`]'s decode path (`JOURNAL` S2-D2): the
-    /// rep cache's update rules are exactly the S1-A3 port bug's former
-    /// hazard, so decode reuses this type instead of a second
-    /// hand-written copy that could drift out of sync with what
-    /// [`replay`] actually does.
+    /// [`crate::codec`]'s decode path reuses this type, so its update rules
+    /// cannot drift from [`replay`]'s.
     pub(crate) fn initial() -> Self {
         const ONE: Distance = NonZeroU32::new(1).unwrap();
         const FOUR: Distance = NonZeroU32::new(4).unwrap();
@@ -236,16 +201,11 @@ impl RepCache {
     }
 }
 
-/// Fixed-capacity ring buffer over the last [`WINDOW`] decoded bytes.
-/// [`crate::codec`]'s streaming decode path uses it in place of a
-/// fully-resident `Vec<u8>` (`research/JOURNAL.md` S1-P7/S2-D5, ROADMAP
-/// M4's bounded-memory decode guarantee): a byte older than `WINDOW` is
-/// silently overwritten rather than freed one at a time, which is sound
-/// because no legitimate match or rep distance can ever reference it —
-/// `crate::codec::ensure_within_window` rejects anything wider before it
-/// reaches here — so a caller that has already handed each byte to its own
-/// sink the instant it was produced loses nothing when the ring overwrites
-/// it later.
+/// Fixed-capacity ring buffer over the last [`WINDOW`] decoded bytes, for
+/// [`crate::codec`]'s streaming decode (bounded memory, ROADMAP M4). A byte
+/// older than `WINDOW` is silently overwritten, which is sound because
+/// `crate::codec::ensure_within_window` rejects any distance wider before it
+/// reaches here, and the caller has already handed every byte to its sink.
 pub(crate) struct Window {
     buf: Box<[u8]>,
     /// Total bytes ever pushed, unbounded (mirrors `decode`'s
@@ -257,13 +217,8 @@ pub(crate) struct Window {
 
 impl Window {
     /// An empty window: `WINDOW` bytes of backing storage, nothing written
-    /// yet. Fallible (hard rule 2, `rust-craft` skill's
-    /// allocation-discipline): [`crate::codec`]'s streaming decode path,
-    /// this type's only production caller, needs a real allocator failure
-    /// on `WINDOW`'s fixed 1 MiB backing store to return `Err` instead of
-    /// aborting the process (`tests/torture.rs`, issue #479 — this
-    /// allocation was the one left on that path once the error-wrapping
-    /// half of #479 was fixed).
+    /// yet. Fallible so an allocator failure on the decode path returns
+    /// `Err` instead of aborting (hard rule 2, `tests/torture.rs`).
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             buf: crate::try_filled_vec(WINDOW, 0u8)?.into_boxed_slice(),
@@ -326,8 +281,7 @@ fn match_len(data: &[u8], i: usize, distance: Distance) -> usize {
 
 /// Longest match against each of `reps`' three cached distances at `i`,
 /// and which slot won. Ties keep the earliest (most-recently-used) slot:
-/// the comparison below is strict, so an equal-length match at a later
-/// slot never displaces an earlier one, matching the archive.
+/// the comparison below is strict.
 fn best_rep(data: &[u8], reps: RepCache, i: usize) -> (usize, RepSlot) {
     let mut best_len = 0;
     let mut best_slot = RepSlot::First;
@@ -646,8 +600,8 @@ impl<'d> BinaryTreeMatchFinder<'d> {
 }
 
 /// Greedy parse with one-step lazy matching and the 3-slot repeat-offset
-/// cache (`JOURNAL` S1-A3, the archive's `lz`; see the module docs for why
-/// this precedes `lz_opt` rather than skipping to it).
+/// cache (`JOURNAL` S1-A3). [`parse_optimal`] seeds its first price table
+/// with this.
 ///
 /// # Panics
 ///
@@ -661,17 +615,9 @@ pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
 }
 
 /// [`parse_greedy`], with its match reach bound by `window` instead of the
-/// wired [`WINDOW`] (`research/JOURNAL.md` S1-P4: named remaining scope,
-/// "`parse_greedy`'s own hash-chain finder, still hardcoded to WINDOW,
-/// unexamined"; mirrors [`parse_optimal_with_window`]'s own
-/// parameterize-the-primitive pattern one level up the call stack). Lets a
-/// candidate window be measured through the seed pass [`parse_optimal`]
-/// actually runs, and through the short-input (`< OPTIMAL_MIN_LEN`) path
-/// that bypasses the DP entirely, before any wiring or `FORMAT_VERSION`
-/// decision is made. Not yet called by [`parse_optimal_with_window`]: its
-/// own docs already record that the seed pass stays bound to the wired
-/// [`WINDOW`] regardless of the DP rounds' window, a deliberate choice this
-/// function does not change, only makes measurable on its own.
+/// wired [`WINDOW`] (`research/JOURNAL.md` S1-P4), so a candidate window can
+/// be measured through the seed pass and the short-input path that bypasses
+/// the DP.
 ///
 /// # Panics
 ///
@@ -753,11 +699,8 @@ fn copy_match(out: &mut Vec<u8>, len: u32, distance: Distance) {
 }
 
 /// Reconstructs the original bytes from `tokens`, the inverse of
-/// [`parse_greedy`]. Not decode of a real bitstream yet: there is no
-/// entropy coder (`research/JOURNAL.md` S2-D2), so `Token` is not wire
-/// format, only this crate's own intermediate representation. It is the
-/// same replay loop a real decoder will need, and it is what proves
-/// `parse_greedy` losslessly reversible today, ahead of the coder.
+/// [`parse_greedy`] and [`parse_optimal`]. `Token` is not wire format, so
+/// this is the token-level inverse, not [`crate::codec`]'s decode.
 ///
 /// # Panics
 ///
@@ -790,24 +733,16 @@ pub fn replay(tokens: &[Token]) -> Vec<u8> {
 // ---- optimal parse: DP-priced, in-DP rep cache, 3-round price iteration ----
 
 /// Below this input length [`parse_optimal`] falls back to [`parse_greedy`]:
-/// matches the archive's `n<64` short-circuit in `lz_opt` — the DP's fixed
-/// setup cost (two full passes, hash-chain rebuild) isn't worth paying on
-/// an input this small.
+/// the DP's fixed setup cost isn't worth paying on an input this small.
 const OPTIMAL_MIN_LEN: usize = 64;
 
 /// Match length at and above which [`rep_match_len`]'s rep-cache scan
 /// reuses the previous position's result instead of re-walking
 /// [`match_len`] from scratch: a run this long at position `i` is `len -
-/// 1` bytes long at `i + 1` too, at the same distance, since it is the
-/// same underlying repeat. Also the breakpoint below which
-/// [`DpState::relax_match_candidate`] prices every [`LENGTH_STEPS`] entry
-/// for a fresh match instead of only the full length (the archive's
-/// `l1>=4` branch); unrelated to the reuse this doc names, but the
-/// archive uses the same threshold for both. `dp_round`'s normal-match
-/// search itself no longer has a carry-reuse counterpart: `research/
-/// JOURNAL.md` S2-R2/S2-A47 replaced its hash-chain [`MatchFinder`] with
-/// [`BinaryTreeMatchFinder`], whose `insert_and_find` fuses insertion with
-/// search, so nothing is left to skip.
+/// 1` bytes long at `i + 1` too, at the same distance. Also the breakpoint
+/// below which [`DpState::relax_match_candidate`] prices every
+/// [`LENGTH_STEPS`] entry for a fresh match instead of only the full
+/// length; unrelated to the reuse, the two merely share the value.
 const CARRY_MIN_LEN: usize = 64;
 
 /// Match length [`dp_round`] additionally prices as a candidate when the
@@ -821,14 +756,13 @@ const SHORT_MATCH_LEN: u32 = 3;
 const SHORT_MATCH_MAX_DISTANCE: u32 = 4096;
 
 /// Length candidates [`dp_round`] prices at each position instead of every
-/// length up to the longest available match (the archive's `BOUND`):
-/// log2-ish spaced breakpoints, cheap to price exhaustively, plus the
+/// length up to the longest available match: log2-ish spaced breakpoints, cheap to price exhaustively, plus the
 /// longest available length itself so a long match is never left
 /// unpriced merely for falling between two breakpoints.
 const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63];
 
 /// Previous-byte high-nibble contexts the literal price table conditions
-/// on, matching the archive's `lh` (16 contexts of 256 symbols each).
+/// on (16 contexts of 256 symbols each).
 const LITERAL_CONTEXTS: usize = 16;
 
 /// Flat index into a [`LITERAL_CONTEXTS`]-by-256 literal table for `byte`,
@@ -840,42 +774,36 @@ fn literal_price_index(prev_byte: Option<u8>, byte: u8) -> usize {
 }
 
 /// [`bucket`] values a match/rep length ever falls into: `bucket(1)` is 0,
-/// `bucket(MAX_MATCH_LEN)` (65535) is 15, one slot of headroom kept as in
-/// the archive's `lb`.
+/// `bucket(MAX_MATCH_LEN)` (65535) is 15, one slot of headroom.
 ///
-/// Shared with [`crate::codec`] (`JOURNAL` S2-D2): the length [`Model`]
-/// `Method::Lz` drives has exactly this many symbols, so its alphabet
-/// size has one source of truth instead of a copy that could drift.
+/// Also the alphabet size of the length [`Model`] `Method::Lz` drives in
+/// [`crate::codec`].
 ///
 /// [`Model`]: crate::model::Model
 pub(crate) const LENGTH_BUCKETS: usize = 17;
 
 /// [`bucket`] values a match distance ever falls into: `bucket(WINDOW)`
-/// (2^20) is 20, matching the archive's `ob`.
-///
-/// Shared with [`crate::codec`], same reason as [`LENGTH_BUCKETS`].
+/// (2^20) is 20. Shared with [`crate::codec`], same reason as
+/// [`LENGTH_BUCKETS`].
 pub(crate) const OFFSET_BUCKETS: usize = 21;
 
-/// Flat price approximation for the flag bit selecting a literal over a
-/// match/rep at this pre-coder stage (the archive's literal `+1.0`): cheap
-/// enough not to warrant its own frequency model yet.
+/// Flat price, in bits, of the flag bit selecting a literal over a
+/// match/rep; not modelled.
 const FLAG_BIT_PRICE: f64 = 1.0;
 
-/// Flat price approximation for the extra header bits a rep-slot choice
-/// or a fresh match distance costs beyond its modeled price (the
-/// archive's `+1.6`, used for both).
+/// Flat price, in bits, of the extra header bits a rep-slot choice or a
+/// fresh match distance costs beyond its modeled price.
 const EXTRA_HEADER_BITS_PRICE: f64 = 1.6;
 
 /// `floor(log2(v))`: the price table's bucket index for a match length or
-/// distance, matching the archive's `bkt`. `v` is always a real length
+/// distance. `v` is always a real length
 /// (>= [`MIN_REP_LEN`], the smallest length ever priced) or a real
 /// [`Distance`] (never zero by construction), so `v.leading_zeros()` is
 /// always < 32 and the subtraction below never underflows.
 ///
-/// Shared with [`crate::codec`] (`JOURNAL` S2-D2), which buckets the same
-/// two quantities the same way on both the encode and decode path: a
-/// second implementation here is exactly the kind of drift the S1-A3
-/// rep-symbol/offset-bucket collision came from.
+/// [`crate::codec`] buckets the same two quantities on both the encode and
+/// decode path through this function: a second implementation is the drift
+/// the S1-A3 rep-symbol/offset-bucket collision came from.
 pub(crate) fn bucket(v: u32) -> usize {
     debug_assert!(
         v > 0,
@@ -925,7 +853,7 @@ struct PriceTable {
     /// Match distance price by [`bucket`], [`OFFSET_BUCKETS`] entries.
     offset: Vec<f64>,
     /// Flat price of choosing a rep over a normal match, independent of
-    /// slot or length (the archive's `rp`, a single scalar).
+    /// slot or length.
     rep: f64,
 }
 
@@ -939,7 +867,7 @@ impl PriceTable {
 }
 
 /// Raw frequency counts [`PriceTable`] is derived from, tallied from a
-/// token sequence (the archive's `lh`/`lb`/`ob`/`nrep`). Every entry
+/// token sequence. Every entry
 /// starts at 1 (Laplace smoothing): an unseen symbol still gets a finite,
 /// merely expensive, price instead of `-log2(0) = infinity`.
 struct PriceCounts {
@@ -959,9 +887,8 @@ impl PriceCounts {
         }
     }
 
-    /// Tallies `tokens` (produced by replaying them over `data`, only to
-    /// recover each literal's preceding-byte context; a token's own
-    /// length/distance/slot need no data lookup).
+    /// Tallies `tokens`; `data` supplies each literal's preceding-byte
+    /// context, which a token does not carry.
     fn tally(tokens: &[Token], data: &[u8]) -> Self {
         let mut counts = Self::new();
         let mut pos = 0usize;
@@ -980,14 +907,10 @@ impl PriceCounts {
     /// byte (for a literal's context; `None` at the start of the stream,
     /// matching [`Self::tally`]'s own `pos > 0` check) is `prev_byte`.
     ///
-    /// Lets a caller build up frequency counts one finalized token at a
-    /// time — the DP price table is currently frozen per round (`JOURNAL`
-    /// S1-P2's named gap), and closing that gap needs [`dp_round`]'s
-    /// forward pass to feed its own already-finalized moves back into a
-    /// running table as it advances, which [`Self::tally`] cannot do
-    /// (it only ever replays a *complete* token sequence). Not yet called
-    /// from [`dp_round`]: this is the standalone primitive, matching how
-    /// [`BinaryTreeMatchFinder`] shipped before its own wiring slice.
+    /// Lets a caller build up counts one finalized token at a time, which
+    /// [`Self::tally`] cannot (it replays a complete sequence). [`dp_round`]
+    /// freezes its price table per round and does not call this
+    /// (`JOURNAL` S1-P2's named gap).
     fn observe(&mut self, token: Token, prev_byte: Option<u8>) {
         match token {
             Token::Literal(byte) => {
@@ -1005,9 +928,8 @@ impl PriceCounts {
     }
 
     /// Derives a [`PriceTable`] from these counts. `total_tokens` prices
-    /// the rep flag against the full token count (the archive's
-    /// `toks.len() + 2`, a small Laplace pad matching the `+1` already
-    /// folded into every frequency entry).
+    /// the rep flag against the full token count plus a Laplace pad of 2,
+    /// matching the `+1` folded into every frequency entry.
     fn prices(&self, total_tokens: usize) -> PriceTable {
         let mut literal = vec![0.0; LITERAL_CONTEXTS * 256];
         for context in 0..LITERAL_CONTEXTS {
@@ -1086,8 +1008,7 @@ impl DpState {
 
     /// Prices every [`Token::Rep`] candidate at position `i`: for each of
     /// the three cached distances that actually matches here, a length-2
-    /// candidate (always tried, matching the archive's unconditional
-    /// `relax(2.min(lr))` once a rep of any length exists), each
+    /// candidate (always tried once a rep of any length exists), each
     /// [`LENGTH_STEPS`] breakpoint at or under the real match length, and
     /// the real match length itself if it isn't already a breakpoint.
     fn relax_rep_candidates(
@@ -1127,7 +1048,7 @@ impl DpState {
     /// enough, and — for a real
     /// [`MIN_MATCH_LEN`]-or-longer match — each [`LENGTH_STEPS`]
     /// breakpoint under [`CARRY_MIN_LEN`] plus the real match length
-    /// itself, matching the archive's `l1>=4` branch.
+    /// itself.
     fn relax_match_candidate(
         &mut self,
         prices: &PriceTable,
@@ -1201,18 +1122,12 @@ impl DpState {
 /// [`Token::Rep`]) so the chosen tokens replay exactly as this DP
 /// costed them.
 ///
-/// This is *not* a full port of the archive's `lz_opt` DP: on a fresh
-/// match, the archive's own price simulation updates its rep cache by
-/// deduplicating the new distance against the existing three slots
-/// (dropping whichever slot already held it, instead of always dropping
-/// the oldest). The archive's actual decoder (`decode`, not `lz_opt`)
-/// never does this: it always shifts blindly, the same rule [`replay`]
-/// already implements via [`RepCache::push_front`]. Porting the dedup
-/// rule into this DP would let it choose a later `Token::Rep` slot based
-/// on a cache state [`replay`] never reaches, corrupting round-trip
-/// exactly when a fresh match's distance happens to coincide with an
-/// already-cached one. Hard rule 1 makes that not a judgment call: this
-/// DP's cache bookkeeping matches [`replay`] unconditionally instead.
+/// On a fresh match the cache always shifts blindly, never deduplicating
+/// the new distance against the three slots: deduplicating would let this
+/// DP choose a later `Token::Rep` slot from a cache state [`replay`] never
+/// reaches, corrupting round-trip whenever a fresh match's distance
+/// coincides with a cached one (hard rule 1).
+///
 /// `window` bounds [`BinaryTreeMatchFinder`]'s reach, same parameter
 /// [`BinaryTreeMatchFinder::new`] itself takes (`research/JOURNAL.md`
 /// S2-A61). Must keep `bucket(window as u32) < OFFSET_BUCKETS`, i.e.
@@ -1247,10 +1162,9 @@ fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
             // Never actually reached: dp[0] = 0 and the literal transition
             // below always advances dp[i] -> dp[i+1] when dp[i] is finite,
             // so every position is reachable by induction. Kept as a
-            // defensive guard matching the archive's identical check.
-            // `insert_and_find` still runs unconditionally above, matching
-            // the unconditional `finder.insert(i)` this replaced: every
-            // position must enter the tree regardless of dp[i]'s state.
+            // defensive guard. `insert_and_find` runs unconditionally
+            // above: every position must enter the tree regardless of
+            // dp[i]'s state.
             continue;
         }
         let base = state.dp[i];
@@ -1323,10 +1237,9 @@ fn rep_match_len(
     len
 }
 
-/// Walks `parent` backward from `data.len()` to `0`, matching the archive's
-/// reconstruction loop: at each step, the recorded move's length says how
-/// far back its start was, and (for a literal) `data` at that start says
-/// which byte it was.
+/// Walks `parent` backward from `data.len()` to `0`: at each step, the
+/// recorded move's length says how far back its start was, and (for a
+/// literal) `data` at that start says which byte it was.
 fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut i = data.len();
@@ -1350,22 +1263,14 @@ fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
     tokens
 }
 
-/// `DP_ROUNDS`-round DP-priced optimal parse (`JOURNAL` S1-A3, S2-D2's
-/// `lz_opt` slice; round count raised from the archive's original two by
-/// S2-A56): a first pass with [`parse_greedy`] seeds a price table, then
-/// each `DP_ROUNDS` `dp_round` round finds the min-price path under the
-/// current table and reseeds a sharper one from its own output for the
-/// next round (the archive stopped after one reseed; S2-A56 measured a
-/// second reseed as a further net win with no sealed-validation
-/// regression, not yet iterated to full convergence). Below
-/// `OPTIMAL_MIN_LEN` (64 bytes) the DP's fixed setup cost isn't worth
-/// paying: falls back to [`parse_greedy`] directly,
-/// matching the archive.
+/// `DP_ROUNDS`-round DP-priced optimal parse (`JOURNAL` S1-A3): a first
+/// pass with [`parse_greedy`] seeds a price table, then each `dp_round`
+/// round finds the min-price path under the current table and reseeds a
+/// sharper one from its own output. Below `OPTIMAL_MIN_LEN` it falls back
+/// to [`parse_greedy`] directly.
 ///
-/// See `dp_round`'s docs for one deliberate correctness fix over the
-/// archive's own `lz_opt`: this DP's internal rep-cache bookkeeping always
-/// matches what [`replay`] will actually do, even where the archive's own
-/// price simulation diverges from its real decoder.
+/// See `dp_round`'s docs for the rep-cache rule that keeps the chosen
+/// tokens replayable.
 ///
 /// # Panics
 ///
@@ -1378,16 +1283,12 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 }
 
 /// [`parse_optimal`], with the `dp_round` rounds' match reach bound by
-/// `window` instead of the wired [`WINDOW`] (`research/JOURNAL.md` S1-P4,
-/// S2-A61's own primitive-parameterization pattern carried one level up
-/// the call stack): lets a candidate window be measured through the real
-/// `DP_ROUNDS`-round DP before any wiring or `FORMAT_VERSION` decision is made.
-/// [`parse_greedy`]'s own seed pass stays bound by the wired [`WINDOW`]
-/// regardless of `window`: it only informs the first round's starting
-/// price table, so a seed that cannot see as far as `window` costs the DP
-/// a worse initial guess, not correctness. Every `dp_round` round after it
-/// searches at `window`. See `dp_round`'s docs for the bucket ceiling
-/// `window` must stay under.
+/// `window` instead of the wired [`WINDOW`] (`research/JOURNAL.md` S1-P4),
+/// so a candidate window can be measured through the real DP. The
+/// [`parse_greedy`] seed pass stays bound by [`WINDOW`]: it only informs
+/// the first round's price table, so a seed that sees less than `window`
+/// costs a worse initial guess, not correctness. See `dp_round`'s docs for
+/// the bucket ceiling `window` must stay under.
 ///
 /// # Panics
 ///
@@ -1404,21 +1305,12 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
 /// [`parse_optimal_adaptive_window`]: [`DP_ROUNDS`] `dp_round` rounds at
 /// `search_window`, seeded by [`parse_greedy_with_window`] at
 /// `seed_window`. [`parse_optimal_with_window`] always passes
-/// [`WINDOW`] as `seed_window` (its own documented contract); the adaptive
-/// gate is the one caller that passes the same value for both
-/// (`research/JOURNAL.md` S1-P4: S2-R9's rejected gate mismatched the two,
-/// which measured as its regression's actual cause, not the detector
-/// finding an unexploitable match).
+/// [`WINDOW`] as `seed_window`; the adaptive gate passes the same value for
+/// both, because a seed narrower than the search measured as the cause of
+/// S2-R9's regression (`research/JOURNAL.md` S1-P4).
 ///
-/// `pub(crate)`, not private: `research/JOURNAL.md` S1-P4's S2-A95 diagnosed
-/// `Base64Wrapped`'s far-match net-loss (S2-R11) as a pricing gap, not a
-/// detector one, and the next slice re-tests S2-R9's own rejected mismatch
-/// (seed capped at [`WINDOW`] while every `dp_round` searches wider) against
-/// that specific data class through [`crate::codec::compressed_len_with_seed_and_search_window`]
-/// — the mismatch that regressed `access_log`/`json_records` might cut the
-/// other way for base64's far-recurrence-heavy content, and the cheapest way
-/// to find out is measuring this exact function under both seed policies,
-/// not re-deriving it.
+/// `pub(crate)` for [`crate::codec::compressed_len_with_seed_and_search_window`],
+/// which measures both seed policies.
 pub(crate) fn parse_optimal_with_seed_and_search_window(
     data: &[u8],
     seed_window: usize,
@@ -1436,35 +1328,26 @@ pub(crate) fn parse_optimal_with_seed_and_search_window(
 }
 
 /// Number of `dp_round` reseed-and-relax passes [`parse_optimal_with_seed_and_search_window`]
-/// runs. Raised from the archive's original two to three by S2-A56, which
-/// measured a further net win with no sealed-validation regression; S2-R4
-/// then measured a fourth round losing on the sealed split, so the count
-/// stays three until new evidence reopens it (`research/JOURNAL.md`
-/// S1-P2).
+/// runs. S2-A56 measured a third round winning and S2-R4 a fourth losing on
+/// the sealed split, so the count stays three until new evidence reopens it
+/// (`research/JOURNAL.md` S1-P2).
 const DP_ROUNDS: usize = 3;
 
 /// Exact-match byte width an anchor in
 /// [`likely_benefits_from_larger_window_content_defined_confirmed`] must
-/// share before two positions count as recurring. Matches the crate's own
-/// hash-chain match finder's hash prefix width in spirit (a short exact
-/// prefix is enough to make a false positive from hash collision alone
-/// vanishingly unlikely) but is compared byte-for-byte here, not hashed, so
-/// there is no collision to guard against at all.
+/// share before two positions count as recurring. Compared byte-for-byte,
+/// not hashed, so a hash collision cannot produce a false positive.
 pub const DETECTOR_ANCHOR_LEN: usize = 8;
 
 /// Selects roughly one anchor in every `DETECTOR_STRIDE` candidate windows
-/// (the low bits of `is_content_defined_anchor`'s hash), the density
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`]'s
-/// pre-pass samples at. Coarser than any real match finder's per-byte
-/// insertion on purpose: this is a cheap pre-pass, not a parse, so it
-/// trades recall (a recurrence entirely between two sampled anchors goes
-/// unseen) for a cost close to a linear scan.
+/// (the low bits of `is_content_defined_anchor`'s hash). Coarser than a
+/// match finder's per-byte insertion on purpose: a recurrence entirely
+/// between two sampled anchors goes unseen, in exchange for a cost close to
+/// a linear scan.
 pub const DETECTOR_STRIDE: usize = 64;
 
-/// Multiplier for [`is_content_defined_anchor`]'s polynomial hash. Any odd
-/// constant works under wrapping `u64` arithmetic; this is the standard
-/// Fibonacci-hashing multiplier, chosen for decent bit mixing, not tuned
-/// against any corpus.
+/// Multiplier for [`is_content_defined_anchor`]'s polynomial hash: the
+/// Fibonacci-hashing multiplier, not tuned against any corpus.
 const CONTENT_HASH_BASE: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// True when the [`DETECTOR_ANCHOR_LEN`]-byte window at `data[i..]` is a
@@ -1474,15 +1357,10 @@ const CONTENT_HASH_BASE: u64 = 0x9E37_79B9_7F4A_7C15;
 /// result, which is the property
 /// [`likely_benefits_from_larger_window_content_defined_confirmed`] needs
 /// and a fixed absolute stride cannot offer: a fixed-stride sampler only
-/// samples a recurrence when both occurrences' distance happens to be a
-/// multiple of the stride, unrelated to whether the recurrence is real
+/// samples a recurrence whose distance is a multiple of the stride
 /// (`research/JOURNAL.md` S2-R9).
 ///
-/// Recomputes the hash from scratch per call rather than rolling it
-/// incrementally: correctness over cost for this detector-only primitive,
-/// not yet on any wired path. A future wiring slice that adopts this
-/// should roll the hash in O(1) per position instead, the way real
-/// content-defined chunkers (rsync, restic) do.
+/// Recomputes the hash from scratch per call rather than rolling it.
 ///
 /// # Panics
 ///
@@ -1501,20 +1379,12 @@ fn is_content_defined_anchor(data: &[u8], i: usize) -> bool {
 /// Extra bytes, beyond [`DETECTOR_ANCHOR_LEN`], that two candidate
 /// occurrences of the same anchor must also agree on before
 /// [`likely_benefits_from_larger_window_content_defined_confirmed`] reports
-/// `true`. Answers `research/JOURNAL.md` S2-R9's second, independent
-/// finding: an [`DETECTOR_ANCHOR_LEN`]-byte agreement alone recurs often
-/// enough on real structured text (`access_log`'s repeated request lines
-/// and timestamp prefixes) to fire with no long match behind it — S2-R9
-/// measured this exact false positive on `access_log` at 4,000,000 bytes.
-/// That is not a hash collision (the anchor bytes really do recur); it is a
-/// short, common substring that is not itself worth reaching a larger
-/// window for. Requiring more bytes to agree past the anchor is a direct,
-/// cheap test of exactly that: whether the recurrence keeps going into
-/// something long enough to matter, without computing the match's actual
-/// length (still `dp_round`'s job, not this pre-pass's). 24, giving a
-/// 32-byte total confirmed run, is a starting value pending the wiring
-/// slice's own measurement against `bench::baseline`; it is not tuned
-/// against any corpus.
+/// `true`. An anchor-only agreement recurs often enough on structured text
+/// (`access_log`'s request lines and timestamp prefixes) to fire with no
+/// long match behind it (`research/JOURNAL.md` S2-R9, measured at 4,000,000
+/// bytes); agreement past the anchor tests whether the recurrence goes on
+/// long enough to matter. 24, a 32-byte total run, is not tuned against any
+/// corpus.
 const DETECTOR_CONFIRM_LEN: usize = 24;
 
 /// True when the [`DETECTOR_CONFIRM_LEN`] bytes immediately following each
@@ -1539,41 +1409,20 @@ fn confirms_past_anchor(data: &[u8], prev: usize, i: usize) -> bool {
     data[prev_start..prev_end] == data[i_start..i_end]
 }
 
-/// Cheap pre-pass for `research/JOURNAL.md` S1-P4's own named remaining
-/// scope: "grow the window only when a cheap pre-pass suggests recurrence
-/// past it exists, paying the encode-time cost only where the bpb win is
-/// real." S2-R7 measured that growing the wired [`WINDOW`] unconditionally
-/// regresses the sealed set on data without such recurrence while costing
-/// every position real encode time; this function is the untried
-/// alternative that named result called for — it never grows a window
-/// itself, it only answers whether growing one might pay off on `data`.
+/// Cheap pre-pass answering whether growing the match window might pay off
+/// on `data` (`research/JOURNAL.md` S1-P4): S2-R7 measured that growing
+/// [`WINDOW`] unconditionally regresses data without recurrence past it.
 ///
-/// Samples anchors at `is_content_defined_anchor` positions (a pure
-/// function of a window's own bytes, not a fixed absolute stride) and
-/// remembers the most recent position each exact anchor was seen at,
-/// reporting `true` the first time two occurrences of the same anchor sit
-/// more than `base_window` bytes apart AND the `DETECTOR_CONFIRM_LEN`
-/// bytes immediately past each occurrence also agree
-/// (`confirms_past_anchor`). Content-defined anchor selection closes a
-/// fixed-stride sampler's blind spot: `research/JOURNAL.md` S2-R9 measured
-/// a fixed stride miss a real repeat whenever the two occurrences'
-/// distance was not itself a multiple of the stride (about 63 in 64 of
-/// possible distances, unrelated to whether the recurrence was real). The
-/// confirmation step closes S2-R9's second, independent finding: an
-/// anchor-only agreement alone recurs often enough on real structured text
-/// (`access_log`'s repeated request lines and timestamp prefixes) to fire
-/// with no long match behind it, so this additionally requires
-/// `DETECTOR_CONFIRM_LEN` bytes past the anchor to agree before
-/// reporting `true`.
+/// Samples anchors at `is_content_defined_anchor` positions and remembers
+/// the most recent position each exact anchor was seen at, reporting `true`
+/// the first time two occurrences of the same anchor sit more than
+/// `base_window` bytes apart AND the `DETECTOR_CONFIRM_LEN` bytes
+/// immediately past each occurrence also agree (`confirms_past_anchor`).
+/// Never measures the match's actual length or cost, which is `dp_round`'s
+/// job. Used by [`parse_optimal_adaptive_window`] only.
 ///
-/// Never measures the match's actual length or cost (still `dp_round`'s
-/// job, not this pre-pass's); it only answers whether growing the window
-/// might pay off. Not yet wired to any parse call site beyond
-/// [`parse_optimal_adaptive_window`] below.
-///
-/// Returns `false` immediately when `data` cannot possibly contain a gap
-/// wider than `base_window` (`data.len() <= base_window`), before
-/// sampling anything.
+/// Returns `false` immediately when `data` cannot contain a gap wider than
+/// `base_window` (`data.len() <= base_window`).
 #[must_use]
 pub fn likely_benefits_from_larger_window_content_defined_confirmed(
     data: &[u8],
@@ -1611,19 +1460,12 @@ pub const ADAPTIVE_WINDOW: usize = (1 << OFFSET_BUCKETS) - 1;
 /// [`parse_optimal`], but grows its window from the wired [`WINDOW`] to
 /// [`ADAPTIVE_WINDOW`] when
 /// [`likely_benefits_from_larger_window_content_defined_confirmed`] finds a
-/// real recurrence past [`WINDOW`] (`research/JOURNAL.md` S1-P4's next
-/// slice after S2-A92). Both the seed pass and every `dp_round` round are
-/// bound to the SAME chosen window, unlike [`parse_optimal_with_window`]:
-/// S2-R9's rejected gate left the seed pass capped at [`WINDOW`] while
-/// `dp_round` searched past it, and that mismatch measured as the actual
-/// cause of its sealed-set regression on `access_log`/`json_records`, not
-/// the detector finding an unexploitable match — matching the seed window
-/// to the search window (direct manipulation, not inference) flipped both
-/// cases from regression to improvement. Not yet wired to [`parse_optimal`]
-/// or `compress`/`encode`: a standalone primitive first, the same shape
-/// every earlier S1-P4 slice took, so a real-bitstream sealed-set
-/// measurement (not this function's own ideal-cost one) is still owed
-/// before any such wiring.
+/// real recurrence past [`WINDOW`] (`research/JOURNAL.md` S1-P4). The seed
+/// pass and every `dp_round` round are bound to the same chosen window,
+/// unlike [`parse_optimal_with_window`]: a seed narrower than the search
+/// measured as the cause of S2-R9's regression. Not wired to
+/// [`parse_optimal`] or `compress`/`encode`: a sealed-set measurement on a
+/// real bitstream is owed first.
 ///
 /// # Panics
 ///
