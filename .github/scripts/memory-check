@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Measure the CLI's peak memory on a stream past 256 MiB, red over the bound.
+
+Extensionless and executable because agents type it as a command mid-session,
+like stalled-prs and survey-due, and because the weekly `memory-check`
+workflow is nothing but its schedule.
+
+CHANGELOG.md states the one memory number a user plans around: the CLI
+compresses a file or pipe of any length in under 1 GiB, one 16 MiB block at a
+time (#1094, #978). No test input exceeds 256 MiB, so the claim was proven by
+hand: three seats ran a 256 MiB encode on 2026-10-12 and four more runs
+followed on 2026-10-13, each a release build on a runner, about six minutes
+and one hand-rolled `/usr/bin/time` recipe apiece (#1109, #1145). The next
+PR on the path would have bought them again.
+
+This is that recipe, once. Zeros, 256 MiB plus one byte, 16 full blocks and
+a one-byte seventeenth, the smallest input past `decompress`'s 256 MiB cap
+and so the stream-of-frames path end to end, and the input every by-hand
+reading used; the file is sparse, so it costs no disk. Encode and decode run as children of this process and each child's
+peak resident set is read from `os.wait4`, the kernel's own number for that
+child, so no `time(1)` has to be installed, parsed or remembered. The round
+trip is compared byte for byte, because a bound on a broken decode is not a
+bound on anything.
+
+The bound is the published claim, 1 GiB, not a fit to the readings: a user
+reads the changelog, not the lane's log. The readings print beside it so the
+log is the trend, and a peak that climbs toward the bound is visible before
+it crosses.
+
+Usage: memory-check [--bytes N] [--bound-kib K] <mothergod binary>
+
+Exit 0 when the round trip holds and both peaks are under the bound. Exit 1
+otherwise, naming which. The footer always prints the bytes, both peaks in
+KiB, the bound and the compressed size, so a reader can tell a bound that
+holds from a measurement that never ran.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+
+# 256 MiB plus one byte, 17 frames: past the cap by the least amount, so
+# the stream-of-frames path runs and the encode stays at minutes.
+DEFAULT_BYTES = 256 * 1024 * 1024 + 1
+# The changelog's claim, "under 1 GiB", in the unit ru_maxrss reports.
+DEFAULT_BOUND_KIB = 1024 * 1024
+CHUNK = 16 * 1024 * 1024
+
+
+def run_child(argv, stdin_path, stdout_path):
+    """Run argv with the files on stdin and stdout; return its peak RSS in KiB.
+
+    `os.wait4` returns the rusage of exactly this child, where
+    `resource.getrusage(RUSAGE_CHILDREN)` would return the maximum over every
+    child ever waited for and could not tell encode from decode.
+    """
+    with open(stdin_path, "rb") as stdin, open(stdout_path, "wb") as stdout:
+        child = subprocess.Popen(argv, stdin=stdin, stdout=stdout)
+        _, status, usage = os.wait4(child.pid, 0)
+    child.returncode = status  # keep Popen's finaliser quiet
+    if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
+        peak = usage.ru_maxrss
+        if sys.platform == "darwin":
+            peak //= 1024  # bytes there, KiB on Linux
+        return peak
+    print(f"memory-check: {' '.join(argv)} did not exit 0 (wait status {status})")
+    sys.exit(1)
+
+
+def is_zeros(path, expected):
+    size = 0
+    with open(path, "rb") as f:
+        while chunk := f.read(CHUNK):
+            if chunk != bytes(len(chunk)):
+                return False
+            size += len(chunk)
+    return size == expected
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--bytes", type=int, default=DEFAULT_BYTES)
+    parser.add_argument("--bound-kib", type=int, default=DEFAULT_BOUND_KIB)
+    parser.add_argument("binary")
+    args = parser.parse_args()
+
+    with tempfile.TemporaryDirectory(prefix="memory-check-") as tmp:
+        zeros = os.path.join(tmp, "zeros")
+        packed = os.path.join(tmp, "zeros.mgdc")
+        back = os.path.join(tmp, "zeros.out")
+        with open(zeros, "wb") as f:
+            f.truncate(args.bytes)  # sparse: reads as zeros, costs no disk
+        encode = run_child([args.binary], zeros, packed)
+        compressed = os.path.getsize(packed)
+        decode = run_child([args.binary, "-d"], packed, back)
+        lossless = is_zeros(back, args.bytes)
+
+    failures = []
+    if not lossless:
+        failures.append("round trip differs")
+    for name, peak in (("encode", encode), ("decode", decode)):
+        if peak >= args.bound_kib:
+            failures.append(f"{name} peak {peak} KiB is not under the bound")
+    print(
+        f"memory-check: bytes {args.bytes} | encode peak {encode} KiB"
+        f" | decode peak {decode} KiB | bound {args.bound_kib} KiB"
+        f" | compressed {compressed} B | round trip {'ok' if lossless else 'DIFFERS'}"
+    )
+    for failure in failures:
+        print(f"memory-check: {failure}")
+    sys.exit(1 if failures else 0)
+
+
+if __name__ == "__main__":
+    main()
