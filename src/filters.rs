@@ -1,29 +1,23 @@
-//! Reversible byte-stream transforms (`JOURNAL` S1-A2, M1 port).
+//! Reversible byte-stream transforms.
 //!
-//! Filters trade the input for a differently-shaped byte stream that a
-//! downstream model can predict more cheaply — never a smaller one on their
-//! own. Trial selection (`JOURNAL` S1-A1), not a static rule, decides when
-//! to apply a filter: each submodule here provides the reversible
-//! transform itself, [`select`] shortlists which candidates are worth a
-//! full trial encode, and `crate::codec` (`JOURNAL` S2-D2, ADR-0028) trials
-//! them against real [`crate::Method::Lz`] output and keeps the smallest.
+//! A filter reshapes the input so a downstream model predicts it more
+//! cheaply; it does not shrink it. [`select`] shortlists candidates and
+//! `crate::codec` trial-encodes each, keeping the smallest (`JOURNAL` S1-A1,
+//! ADR-0028).
 //!
-//! `delta`, `transpose` and `bcj`, the three `crate::codec` selects, each
-//! invert in two forms. The public `decode` aborts if the allocator cannot
-//! satisfy its output buffer and is what the tests drive. The `pub(crate)`
-//! `try_decode`, and each streaming `Undo::try_new`, return `Err` instead:
-//! `crate::codec`'s real decode paths use them, because hard rule 2 forbids
-//! an abort on untrusted input (`rust-craft` skill's allocation-discipline,
-//! `tests/torture.rs`, #453). A pair differs only in how the buffer is
-//! built, never in the scan run over it.
+//! `delta`, `transpose` and `bcj`, the three filters `crate::codec` selects,
+//! each invert in two forms. The public `decode` aborts if the allocator
+//! cannot satisfy its output buffer. The `pub(crate)` `try_decode`, and each
+//! streaming `Undo::try_new`, return `Err` instead, because the decode path
+//! must not abort on untrusted input (hard rule 2, `tests/torture.rs`, #453).
+//! A pair differs only in how the buffer is built, never in the scan run
+//! over it.
 
 /// Fixed-stride delta filter.
 ///
-/// Wins on data with fixed-width records where corresponding columns of
-/// adjacent rows are numerically close (for example interleaved
-/// multi-channel audio samples); `JOURNAL` S1-R1 shows the same transform
-/// loses on text, where the numeric difference of letters is *more*
-/// scattered than the letters themselves.
+/// Wins on fixed-width records whose corresponding columns in adjacent rows
+/// are numerically close (interleaved audio channels); loses on text
+/// (`JOURNAL` S1-R1).
 pub mod delta {
     use std::num::NonZeroUsize;
 
@@ -31,10 +25,8 @@ pub mod delta {
     /// difference from the byte at `i - stride`; the first `stride` bytes
     /// are left as-is.
     ///
-    /// Reversible by [`decode`] with the same `stride`. `stride` is
-    /// [`NonZeroUsize`] because a zero stride would subtract every byte
-    /// from itself, zeroing the data instead of transforming it reversibly
-    /// — the type rules out that misuse instead of a runtime check.
+    /// Reversible by [`decode`] with the same `stride`. [`NonZeroUsize`]
+    /// because a zero stride would subtract every byte from itself.
     #[must_use]
     pub fn encode(data: &[u8], stride: NonZeroUsize) -> Vec<u8> {
         let stride = stride.get();
@@ -71,19 +63,13 @@ pub mod delta {
         }
     }
 
-    /// Streaming counterpart to [`decode`]: undoes the transform one
-    /// filtered byte at a time instead of over a complete buffer, so a
-    /// caller never needs the whole filtered stream resident to recover the
-    /// original bytes (`research/JOURNAL.md` S1-P7, ROADMAP M4's
+    /// Streaming counterpart to [`decode`]: undoes one filtered byte at a
+    /// time, so the whole filtered stream is never resident (ROADMAP M4's
     /// bounded-memory decode guarantee).
     ///
-    /// `history` holds the last `stride` bytes this instance has itself
-    /// undone, not `decode`'s raw output directly — the two never diverge,
-    /// because each undone byte is exactly what a future [`Self::apply`]
-    /// call `stride` positions later needs, matching `decode`'s
-    /// `out[i] = out[i-stride] + data[i]` reading `out`, not `data`, on its
-    /// right-hand side. Bounded by `stride` (at most 255, since it comes off
-    /// an 8-bit header field), never by input length.
+    /// `history` holds the last `stride` bytes this instance has undone, the
+    /// same values `decode` reads back from `out`. Bounded by `stride` (at
+    /// most 255, an 8-bit header field), never by input length.
     pub(crate) struct Undo {
         stride: usize,
         history: Vec<u8>,
@@ -91,8 +77,8 @@ pub mod delta {
     }
 
     impl Undo {
-        /// An undo state ready to accept the first filtered byte, holding
-        /// `stride` bytes of history (module docs on why it is fallible).
+        /// An undo state ready for the first filtered byte (fallible: module
+        /// docs).
         pub(crate) fn try_new(
             stride: NonZeroUsize,
         ) -> Result<Self, std::collections::TryReserveError> {
@@ -105,9 +91,8 @@ pub mod delta {
         }
 
         /// Undoes one more filtered byte, returning the raw byte [`decode`]
-        /// would produce at this same stream position. Calls must be in
-        /// stream order: each call's result feeds the one `stride` calls
-        /// later, the same dependency [`decode`]'s loop has on `out`.
+        /// produces at this stream position. Calls must be in stream order:
+        /// each result feeds the call `stride` bytes later.
         pub(crate) fn apply(&mut self, filtered_byte: u8) -> u8 {
             let slot = self.count % self.stride;
             let raw = if self.count < self.stride {
@@ -138,22 +123,18 @@ pub mod delta {
 ///
 /// Treats `data` as rows of `columns` bytes each (the last row possibly
 /// short) and rewrites it column by column: all bytes at column 0, then all
-/// bytes at column 1, and so on. Wins on data with a fixed record width
-/// where a column carries its own regularity across rows (`JOURNAL` S1-A2's
-/// x-ray dataset: −0.47 b/B). Distinct from [`delta`], which predicts a
-/// column's *next* value from the previous row; this filter regroups
-/// columns so a downstream model with only short-range context can see
-/// that regularity at all.
+/// bytes at column 1, and so on. Wins on fixed-width records whose columns
+/// are regular across rows (`JOURNAL` S1-A2's x-ray dataset: −0.47 b/B).
+/// Where [`delta`] predicts a column's next value from the previous row,
+/// this regroups columns so a short-range model can see that regularity.
 pub mod transpose {
     use std::num::NonZeroUsize;
 
     /// Rewrites `data`, interpreted as rows of `columns` bytes, column by
     /// column.
     ///
-    /// Reversible by [`decode`] with the same `columns`. `columns` is
-    /// [`NonZeroUsize`] because a zero column count has no rows to
-    /// transpose — the type rules out that empty case instead of a
-    /// runtime check.
+    /// Reversible by [`decode`] with the same `columns`. [`NonZeroUsize`]
+    /// because a zero column count has no rows to transpose.
     #[must_use]
     pub fn encode(data: &[u8], columns: NonZeroUsize) -> Vec<u8> {
         let columns = columns.get();
@@ -215,37 +196,27 @@ pub mod transpose {
 ///
 /// Rewrites the 4-byte little-endian operand following every `0xE8`/`0xE9`
 /// opcode (`call rel32` / `jmp rel32`) between a position-relative offset
-/// and an absolute one. Executable code's call targets cluster (many calls
-/// target the same handful of functions); as relative offsets each
-/// occurrence encodes a different byte pattern, but as absolute addresses
-/// they collide, which is what a downstream model actually matches
-/// against. `JOURNAL` S1-A2.
+/// and an absolute one. Calls cluster on a few targets: as relative offsets
+/// each occurrence is a different byte pattern, as absolute addresses they
+/// repeat, which is what a downstream model matches. `JOURNAL` S1-A2.
 pub mod bcj {
     /// Byte length of an opcode plus its rel32 operand: the unit the scan
-    /// advances by on a match, and the position `encode`/`decode` measure
-    /// the call/jmp target's absolute address from. `pub(crate)` rather
-    /// than private: `codec`'s own test fixtures build hand-crafted
-    /// instructions and need the same constant, not a second copy of `5`.
+    /// advances by on a match, and the offset past the opcode that the
+    /// absolute address is measured from. `pub(crate)` for `codec`'s test
+    /// fixtures.
     pub(crate) const INSTRUCTION_LEN: usize = 5;
 
     /// Whether `byte` opens a BCJ-eligible instruction (`call rel32` /
-    /// `jmp rel32`). The one source of truth [`rewrite_in_place`],
-    /// [`Undo::apply`] and `select::pick`'s density heuristic all gate on,
-    /// so widening the targeted opcode set is one edit, not three kept in
-    /// sync by hand.
+    /// `jmp rel32`). The one gate for [`rewrite_in_place`], [`Undo::apply`]
+    /// and `select::pick`'s density heuristic.
     pub(crate) const fn is_opcode(byte: u8) -> bool {
         byte == 0xE8 || byte == 0xE9
     }
 
-    /// Walks `data`, rewriting each `0xE8`/`0xE9` opcode's operand through
-    /// `rewrite_operand`.
-    ///
-    /// Shared by [`encode`] and [`decode`], which differ only in whether
-    /// the operand is added to or subtracted from the post-instruction
-    /// address: the scan itself (which positions count as an instruction,
-    /// how far it advances) must stay identical between the two directions,
-    /// or `decode` would rediscover different positions than `encode`
-    /// wrote them at.
+    /// Copies `data` and rewrites each instruction's operand through
+    /// `rewrite_operand`. [`encode`] adds the post-instruction address and
+    /// [`decode`] subtracts it; the scan must be identical in both
+    /// directions or `decode` finds different positions than `encode` wrote.
     fn rewrite(data: &[u8], rewrite_operand: impl Fn(u32, u32) -> u32) -> Vec<u8> {
         let mut out = data.to_vec();
         rewrite_in_place(&mut out, rewrite_operand);
@@ -254,9 +225,8 @@ pub mod bcj {
 
     /// Rewrites the rel32 operand of the [`INSTRUCTION_LEN`]-byte
     /// `instruction` that starts at stream index `position`, through
-    /// `rewrite_operand(operand, post_addr)`. The one place the operand's
-    /// layout and its post-instruction address are computed, shared by the
-    /// batch scan and [`Undo::apply`] so the two cannot disagree on either.
+    /// `rewrite_operand(operand, post_addr)`. Shared by the batch scan and
+    /// [`Undo::apply`] so the two cannot disagree on layout or address.
     fn rewrite_instruction(
         instruction: &mut [u8],
         position: usize,
@@ -268,10 +238,8 @@ pub mod bcj {
             instruction[3],
             instruction[4],
         ]);
-        // x86 rel32 addressing itself wraps at 2^32; truncating the
-        // position to u32 before adding matches that hardware semantic
-        // rather than losing information, so a stream past 4 GiB still
-        // round-trips the same address a batch decode would compute.
+        // x86 rel32 addressing wraps at 2^32, so truncating the position
+        // to u32 keeps a stream past 4 GiB round-tripping.
         #[allow(clippy::cast_possible_truncation)]
         let post_addr = (position as u32).wrapping_add(INSTRUCTION_LEN as u32);
         instruction[1..INSTRUCTION_LEN]
@@ -296,11 +264,10 @@ pub mod bcj {
     /// Rewrites each `0xE8`/`0xE9` opcode's operand from relative to
     /// absolute.
     ///
-    /// Reversible by [`decode`]. Only the opcode byte gates which
-    /// positions are rewritten; the 4-byte operand that follows is never
-    /// itself mistaken for a new opcode, because the scan jumps past the
-    /// whole 5-byte instruction on a match — so `decode` rediscovers
-    /// exactly the same positions from the same untouched opcode bytes.
+    /// Reversible by [`decode`]: the scan jumps past each whole
+    /// instruction, so an operand is never mistaken for an opcode and
+    /// `decode` finds the same positions from the same untouched opcode
+    /// bytes.
     #[must_use]
     pub fn encode(data: &[u8]) -> Vec<u8> {
         rewrite(data, u32::wrapping_add)
@@ -319,10 +286,9 @@ pub mod bcj {
         Ok(out)
     }
 
-    /// Bytes [`Undo::apply`]/[`Undo::finish`] resolved from stream data so
-    /// far, in order. Fixed [`INSTRUCTION_LEN`] capacity avoids a heap
-    /// allocation per filtered byte in the streaming decode's hot loop
-    /// (`rust-craft` skill, mechanical sympathy).
+    /// Bytes [`Undo::apply`]/[`Undo::finish`] resolved, in order. Fixed
+    /// capacity: no heap allocation per filtered byte in the streaming
+    /// decode's hot loop.
     pub(crate) struct Resolved {
         buf: [u8; INSTRUCTION_LEN],
         len: u8,
@@ -340,13 +306,11 @@ pub mod bcj {
             Self { buf, len: 1 }
         }
 
-        /// `bytes.len()` must be at most [`INSTRUCTION_LEN`]: the only
-        /// caller, [`Undo`], never accumulates more than that many pending
-        /// bytes before resolving or flushing them.
+        /// `bytes.len()` must be at most [`INSTRUCTION_LEN`]: [`Undo`] never
+        /// holds more pending bytes.
         fn from_slice(bytes: &[u8]) -> Self {
             let mut buf = [0; INSTRUCTION_LEN];
             buf[..bytes.len()].copy_from_slice(bytes);
-            // Undo's pending buffer never exceeds INSTRUCTION_LEN (5).
             #[allow(clippy::cast_possible_truncation)]
             let len = bytes.len() as u8;
             Self { buf, len }
@@ -357,29 +321,22 @@ pub mod bcj {
         }
     }
 
-    /// Streaming counterpart to [`decode`]: undoes the transform as filtered
-    /// bytes arrive instead of over a complete buffer (`research/JOURNAL.md`
-    /// S1-P7, ROADMAP M4's bounded-memory decode guarantee), mirroring
-    /// [`delta::Undo`]'s role for this filter.
+    /// Streaming counterpart to [`decode`], as [`delta::Undo`] is for delta
+    /// (ROADMAP M4's bounded-memory decode guarantee).
     ///
-    /// Unlike delta's fixed lookback, bcj's [`rewrite`] scan needs
-    /// *lookahead*: whether the byte at position `i` starts an instruction
-    /// is decidable the instant it arrives (opcode byte or not), but
-    /// transforming that instruction's operand needs the
-    /// `INSTRUCTION_LEN - 1` bytes that follow it, not yet available when
-    /// the opcode byte itself reaches [`Self::apply`]. `pending` holds those
-    /// not-yet-resolved bytes; `position` is the same absolute stream index
-    /// [`rewrite`]'s own `i` tracks, advancing only once a byte is resolved
-    /// one way or the other, never while `pending` is still filling.
+    /// Unlike delta's lookback, the scan needs *lookahead*: an opcode byte
+    /// is recognised on arrival, but its operand needs the
+    /// `INSTRUCTION_LEN - 1` bytes after it. `pending` holds the
+    /// unresolved bytes; `position` is [`rewrite`]'s `i`, advancing only as
+    /// bytes resolve, never while `pending` fills.
     pub(crate) struct Undo {
         pending: Vec<u8>,
         position: usize,
     }
 
     impl Undo {
-        /// A fresh undo state, ready to accept the first filtered byte, with
-        /// [`INSTRUCTION_LEN`] bytes of pending-buffer capacity (module docs
-        /// on why it is fallible).
+        /// A fresh undo state with [`INSTRUCTION_LEN`] bytes of pending
+        /// capacity (fallible: module docs).
         pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
             let mut pending = Vec::new();
             pending.try_reserve_exact(INSTRUCTION_LEN)?;
@@ -389,12 +346,10 @@ pub mod bcj {
             })
         }
 
-        /// Feeds one more filtered byte, in stream order, returning any
-        /// bytes this call resolved: empty while still buffering a
-        /// candidate instruction's operand, one immediately for a
-        /// non-opcode byte (no lookahead needed to know it is not
-        /// `0xE8`/`0xE9`), or all [`INSTRUCTION_LEN`] the instant a full
-        /// instruction's operand has arrived.
+        /// Feeds one more filtered byte, in stream order, returning the
+        /// bytes this call resolved: none while an operand is buffering, one
+        /// for a non-opcode byte, all [`INSTRUCTION_LEN`] once an
+        /// instruction's operand is complete.
         pub(crate) fn apply(&mut self, filtered_byte: u8) -> Resolved {
             if self.pending.is_empty() {
                 if is_opcode(filtered_byte) {
@@ -415,12 +370,10 @@ pub mod bcj {
             resolved
         }
 
-        /// Flushes any bytes still buffered at end of stream: a candidate
-        /// instruction seen too close to the end to resolve (fewer than
-        /// [`INSTRUCTION_LEN`] bytes followed its opcode byte), passed
-        /// through unchanged — the same "too short for any instruction"
-        /// case [`rewrite`]'s own scan bound (`i + INSTRUCTION_LEN <= n`)
-        /// leaves untouched.
+        /// Flushes bytes still buffered at end of stream: an opcode with
+        /// fewer than [`INSTRUCTION_LEN`] bytes after it, passed through
+        /// unchanged as [`rewrite`]'s scan bound (`i + INSTRUCTION_LEN <= n`)
+        /// leaves it.
         pub(crate) fn finish(&mut self) -> Resolved {
             let resolved = Resolved::from_slice(&self.pending);
             self.pending.clear();
@@ -443,37 +396,28 @@ pub mod bcj {
 
 /// Standard-base64 unwrap.
 ///
-/// Base64-encoded data (email attachments, embedded certs, JSON blobs with
-/// inline binary) inflates every 3 source bytes to 4 printable ones; a
-/// downstream model sees only the 4-symbol blow-up, never the binary
-/// structure underneath. Unwrapping it back to raw bytes before modeling
-/// was the single biggest ratio drop of the founding session (`JOURNAL`
-/// S1-A2). Unlike [`delta`]/[`transpose`]/[`bcj`], this filter's decision
-/// is data-dependent rather than a caller-supplied parameter, so it can't
-/// be a pure `data -> data` pair: whether `data` was in fact unwrapped has
-/// to survive into [`decode`](base64_unwrap::decode).
-/// [`encode`](base64_unwrap::encode) therefore always prepends one flag
-/// byte (`1` = unwrapped, `0` = passed through) ahead of its output, and
-/// [`decode`](base64_unwrap::decode) reads that byte back instead of
-/// taking a filter parameter.
+/// Base64 inflates every 3 source bytes to 4 printable ones and hides the
+/// binary structure underneath; unwrapping it was the biggest ratio drop of
+/// the founding session (`JOURNAL` S1-A2). Unlike [`delta`], [`transpose`]
+/// and [`bcj`], whether it applies depends on the data, not a caller
+/// parameter, so [`encode`](base64_unwrap::encode) always prepends one flag
+/// byte (`1` unwrapped, `0` passed through) for
+/// [`decode`](base64_unwrap::decode) to read back.
 pub mod base64_unwrap {
     /// Standard base64 alphabet (RFC 4648 with `+`/`/` and `=` padding),
     /// indexed by 6-bit value.
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    /// Shortest input worth trying to unwrap. Below this, the one-byte
-    /// flag overhead can't be recouped even in the best case.
+    /// Shortest input worth unwrapping: below this the flag byte cannot be
+    /// recouped.
     const MIN_LEN: usize = 8;
 
-    /// How much of the input the alphabet scan checks before giving up.
-    /// Matches the founding session's proxy: full-buffer decode is tried
-    /// only after this cheap prefix check passes, so a large non-base64
-    /// input costs a bounded scan, not a wasted full decode attempt.
+    /// Prefix the alphabet scan checks before a full decode is attempted,
+    /// so a large non-base64 input costs a bounded scan.
     const SCAN_LIMIT: usize = 4096;
 
-    /// [`ALPHABET`]'s inverse, indexed by byte value: `DECODE_TABLE[b]` is
-    /// `Some(v)` iff `ALPHABET[v] == b`. Built from `ALPHABET` itself so the
-    /// two directions cannot drift apart.
+    /// [`ALPHABET`]'s inverse: `DECODE_TABLE[b]` is `Some(v)` iff
+    /// `ALPHABET[v] == b`.
     const DECODE_TABLE: [Option<u8>; 256] = {
         let mut table = [None; 256];
         let mut v = 0;
@@ -604,18 +548,12 @@ pub mod base64_unwrap {
 /// Byte-order reversal.
 ///
 /// Wins when structure is right-anchored (a fixed suffix, a length-prefixed
-/// tail, records better predicted from their end than their start):
-/// reversing turns that right anchor into a left one, where the downstream
-/// LZ/model's recency bias and forward context actually reach it (`JOURNAL`
-/// S1-A2). Its own inverse: reversing twice reproduces the input, so
-/// [`decode`](reverse::decode) is [`encode`](reverse::encode) under a
-/// different name, kept as two functions to match this module's
-/// established encode/decode-pair shape.
+/// tail): reversing moves the anchor to where the downstream LZ/model's
+/// forward context reaches it (`JOURNAL` S1-A2). Its own inverse, so
+/// [`decode`](reverse::decode) is [`encode`](reverse::encode) under the
+/// module's encode/decode-pair shape.
 pub mod reverse {
-    /// Reverses `data`.
-    ///
-    /// Self-inverse: applying this function to its own output reproduces
-    /// the original `data`, so [`decode`] is this same operation.
+    /// Reverses `data`. Self-inverse.
     #[must_use]
     pub fn encode(data: &[u8]) -> Vec<u8> {
         let mut out = data.to_vec();
@@ -623,8 +561,7 @@ pub mod reverse {
         out
     }
 
-    /// Inverts [`encode`]. Identical to [`encode`] because byte-order
-    /// reversal is its own inverse.
+    /// Inverts [`encode`], which is its own inverse.
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
         encode(data)
@@ -636,18 +573,10 @@ pub mod reverse {
 
 /// Trial-selection shortlist: which filters are worth a full trial encode.
 ///
-/// `JOURNAL` S1-A1: the filter bank is never applied by a static rule, only
-/// kept when a trial encode measurably wins. Trialing every filter this
-/// crate knows against every input would be correct but wasteful;
-/// [`select::pick`] narrows the menu to a cheap shortlist using an order-1
-/// entropy proxy on a bounded probe, so the expensive trial encode in the
-/// caller only runs on candidates worth the cost. Ported from the archive's
-/// `pick_filters`
-/// (`research/imports/session-1/mothergod.rs`), not the code (ADR-0006):
-/// only [`delta`] and [`bcj`] and [`transpose`] are shortlisted here,
-/// because those are the only filters `pick_filters` covers in that file —
-/// [`base64_unwrap`] and [`reverse`] are selected by a different path in the
-/// archive (`JOURNAL` S2-A5, S2-A6) that this slice does not port.
+/// [`select::pick`] narrows the menu with an order-1 entropy proxy on a
+/// bounded probe, so the expensive trial encode runs only on candidates
+/// worth it (`JOURNAL` S1-A1). It shortlists [`delta`], [`bcj`] and
+/// [`transpose`]; [`base64_unwrap`] and [`reverse`] are not wired in.
 pub mod select {
     use super::delta;
     use std::collections::HashMap;
@@ -659,13 +588,11 @@ pub mod select {
     /// many bytes.
     const PROBE_LEN: usize = 16384;
 
-    /// Largest fixed stride [`pick`] scores for [`delta`]. Matches the
-    /// archive's scan range (`sdelta` tried for `k` in `1..=96`).
+    /// Largest fixed stride [`pick`] scores for [`delta`].
     const MAX_DELTA_STRIDE: u8 = 96;
 
-    /// How much of `data` [`pick`] scans for x86 call/jmp opcode density.
-    /// Unlike the delta/transpose probes this is measured from the full
-    /// input, not [`PROBE_LEN`], matching the archive.
+    /// How much of `data` [`pick`] scans for x86 call/jmp opcode density,
+    /// counted from the full input, not [`PROBE_LEN`].
     const BCJ_SCAN_LEN: usize = 65536;
 
     /// [`Candidate::Bcj`] is shortlisted when opcode hits exceed one in
@@ -676,12 +603,9 @@ pub mod select {
     /// few rows for a column count to mean anything.
     const MIN_TRANSPOSE_LEN: usize = 4096;
 
-    /// Column counts [`pick`] scores for [`transpose`]. Common fixed-width
-    /// record sizes (small integer types, alignment-padded structs), not
-    /// an exhaustive scan. `NonZeroUsize` so [`pick`] never needs a
-    /// fallible conversion back from a plain `usize` at call time; the
-    /// `unwrap()`s below run over literals at compile time, never at
-    /// runtime.
+    /// Column counts [`pick`] scores for [`transpose`]: common fixed-width
+    /// record sizes (small integer types, alignment-padded structs). The
+    /// `unwrap()`s run over literals at compile time.
     const TRANSPOSE_COLUMNS: [NonZeroUsize; 14] = [
         NonZeroUsize::new(2).unwrap(),
         NonZeroUsize::new(3).unwrap(),
@@ -718,24 +642,16 @@ pub mod select {
     }
 
     impl Candidate {
-        /// Serializes this candidate into the 2-byte filter-selector
-        /// prefix `Method::Lz`'s payload carries ahead of its declared-
-        /// length header (`docs/format/SPEC.md`): `[kind, param]`.
-        /// `param` is the delta stride or transpose column count, zero
-        /// for the two filters that take none ([`Self::Identity`],
-        /// [`Self::Bcj`]). [`pick`] never returns a stride past
-        /// `MAX_DELTA_STRIDE` (96) or a column count past this
-        /// module's widest `TRANSPOSE_COLUMNS` entry (96), both well
-        /// under 256, so `param` never truncates a value this module
-        /// actually produces.
+        /// Serializes this candidate into the 2-byte filter selector
+        /// `[kind, param]` that opens `Method::Lz`'s payload
+        /// (`docs/format/SPEC.md`). `param` is the delta stride or transpose
+        /// column count, zero for [`Self::Identity`] and [`Self::Bcj`].
         ///
         /// # Panics
         ///
-        /// Does not panic on any `Candidate` this module's [`pick`] can
-        /// build: the two internal `.expect()`s guard exactly the
-        /// stride/column bound argued above, never adversarial input —
-        /// this side of the format only ever runs on the encoder's own
-        /// choices, never a decoded payload.
+        /// If a stride or column count exceeds 255. [`pick`] bounds both at
+        /// 96, and this runs only on the encoder's own choices, never a
+        /// decoded payload.
         #[must_use]
         pub fn to_header_bytes(self) -> [u8; 2] {
             match self {
@@ -777,12 +693,7 @@ pub mod select {
     /// One `(from, to)` pair's contribution to an order-1 entropy sum:
     /// `-count * log2(count / total)`, `total` being how often `from`
     /// occurred as the first byte of a pair. Shared by [`order1_entropy`]
-    /// and [`column_entropy`], which both score a byte stream's
-    /// predictability by this same formula and differ only in how they
-    /// count `(from, to)` pairs — a plain array over the full probe in one,
-    /// a `HashMap` over one interleaved column in the other, sized that way
-    /// because a column is far smaller than the 256x256 pairs the array
-    /// bounds — never in what a pair's count is worth once counted.
+    /// and [`column_entropy`], which differ only in how they count pairs.
     #[allow(
         clippy::disallowed_methods,
         reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
@@ -794,11 +705,9 @@ pub mod select {
 
     /// Order-1 entropy in bits per byte: `data`, conditioned on each byte's
     /// immediate predecessor, estimated from `data`'s own pair frequencies.
-    /// The proxy [`pick`] ranks delta candidates by — never a
-    /// compressibility measurement itself, only a cheap stand-in for one
-    /// (`JOURNAL` S1-L3: histogram entropy is not compressibility, but a
-    /// *conditional* entropy proxy still separates structured candidates
-    /// from noise well enough to shortlist).
+    /// The proxy [`pick`] ranks delta candidates by: not a compressibility
+    /// measurement, but it separates structure from noise well enough to
+    /// shortlist (`JOURNAL` S1-L3).
     fn order1_entropy(data: &[u8]) -> f64 {
         let mut pair_counts = vec![0u32; 256 * 256];
         let mut byte_counts = [0u32; 256];
@@ -829,10 +738,8 @@ pub mod select {
     /// Order-1 entropy of `data` reinterpreted as `columns` interleaved
     /// streams (column `j` is `data[j], data[j + columns], ...`), weighted
     /// by each column's own transition count. The scoring proxy for
-    /// [`Candidate::Transpose`]: low when a fixed-width record's columns
-    /// are each internally predictable, even though the raw byte stream
-    /// (whose immediate predecessor is usually a *different* column) looks
-    /// unpredictable.
+    /// [`Candidate::Transpose`]: low when each column of a fixed-width
+    /// record is internally predictable.
     fn column_entropy(data: &[u8], columns: usize) -> f64 {
         let mut bits = 0f64;
         let mut transitions = 0usize;
@@ -861,9 +768,8 @@ pub mod select {
 
     /// Shortlists filters worth a full trial encode against `data`.
     ///
-    /// [`Candidate::Identity`] is always included, either as the top-scored
-    /// candidate or alongside it, so a caller trialing every returned
-    /// candidate never trials filters alone without a baseline to beat.
+    /// [`Candidate::Identity`] is always included, as the top-scored
+    /// candidate or alongside it, so every trial has a baseline.
     #[must_use]
     pub fn pick(data: &[u8]) -> Vec<Candidate> {
         let probe = &data[..data.len().min(PROBE_LEN)];
