@@ -122,7 +122,8 @@ the numbers above are the first one's report card. How it works:
 
 ## Principles (the short version)
 
-- Lossless is sacred; the decoder never panics on any input.
+- Lossless is sacred; the decoder never panics on any input, and a flipped bit
+  in a compressed file is an error, never quietly wrong output.
 - Every benchmark claim names its corpus; a ratio is a claim about data.
 - Every experiment, failed or not, is recorded. Rejections are knowledge.
 - Verification is independent of the proposer: agents never grade their own

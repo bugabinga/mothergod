@@ -449,7 +449,10 @@ cmp FILE FILE.out</pre>
             <a
               href="https://github.com/bugabinga/mothergod/blob/main/tests/torture.rs"
             >torture suite</a> that feed it truncated and bit-flipped input on
-            purpose. Cumulative fuzz time and the crash count run live on
+            purpose. Every frame ends in a CRC-32 of its own bytes, so a file
+            damaged on disk or in transit by a flipped bit fails with an error,
+            never decodes to output that looks fine and is not. Cumulative fuzz
+            time and the crash count run live on
             <a href="/status">the status page</a>.
           </li>
           <li>
