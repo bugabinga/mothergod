@@ -993,24 +993,28 @@ pub(crate) struct Extent {
     pub(crate) output_len: u32,
 }
 
-/// The [`Extent`] of the `Method::Lz` payload at the front of `bytes`,
-/// which may run on into the next frame: reads the selector and header
-/// and trusts nothing else, so it costs no decode work and no allocation.
+/// Bytes at the front of a `Method::Lz` payload that [`declared_extent`]
+/// reads: the selector and the header, before the range-coded stream.
+pub(crate) const EXTENT_PREFIX_LEN: usize = SELECTOR_LEN + TOKEN_HEADER_LEN;
+
+/// The [`Extent`] the first [`EXTENT_PREFIX_LEN`] bytes of a `Method::Lz`
+/// payload declare, whatever follows them: reads the selector and header
+/// and trusts nothing else, so it costs no decode work and no allocation,
+/// and a reader that has not yet seen the stream can learn how long it is.
 ///
 /// # Errors
 ///
-/// [`Error::Truncated`] if `bytes` is shorter than the header, or than the
-/// stream length the header declares; [`Error::Corrupt`] if the selector
-/// names no [`Candidate`].
-pub(crate) fn extent(bytes: &[u8]) -> Result<Extent, Error> {
+/// [`Error::Truncated`] if `bytes` is shorter than the header or the
+/// declared stream length overflows `usize`; [`Error::Corrupt`] if the
+/// selector names no [`Candidate`].
+pub(crate) fn declared_extent(bytes: &[u8]) -> Result<Extent, Error> {
     let (_, rest) = split_candidate(bytes)?;
-    let (header, stream) = split_token_header(rest)?;
+    let (header, _) = split_token_header(rest)?;
     let coded_len = usize::try_from(header.coded_len).map_err(|_| Error::Truncated)?;
-    if stream.len() < coded_len {
-        return Err(Error::Truncated);
-    }
     Ok(Extent {
-        payload_len: SELECTOR_LEN + TOKEN_HEADER_LEN + coded_len,
+        payload_len: EXTENT_PREFIX_LEN
+            .checked_add(coded_len)
+            .ok_or(Error::Truncated)?,
         output_len: header.declared_len,
     })
 }

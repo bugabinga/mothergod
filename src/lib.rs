@@ -17,17 +17,18 @@
 //! assert_eq!(mothergod::decompress(&frame), Ok(original));
 //! ```
 
-// Every module but `filters` is `#[doc(hidden)]`: the engine's internals, not
-// a surface downstream crates are meant to call (ROADMAP M6). They stay `pub`
-// for two reasons. `bench` and `fuzz` call into `lz`, `literal` and `codec`.
-// And the live codec path does not reach the research primitives (`Ppm`,
-// `Model::ideal_cost_bits`, `bittree`'s symbol and ideal-cost functions,
-// `codec`'s `compressed_len_*` and `ideal_cost_bits_*` experiment entry
-// points, `fieldtype`, `Sse::contexts`), whose callers are tests: under
-// `pub(crate)` they become `dead_code` errors with `-D warnings`. Narrowing
-// waits on wiring or removing those items. `filters` is documented: S2-A2
-// judged it "a defensible standalone library surface on their own merits"
-// (`research/JOURNAL.md`).
+// Every module but `filters` and `read` is `#[doc(hidden)]`: the engine's
+// internals, not a surface downstream crates are meant to call (ROADMAP M6).
+// They stay `pub` for two reasons. `bench` and `fuzz` call into `lz`, `literal`
+// and `codec`. And the live codec path does not reach the research
+// primitives (`Ppm`, `Model::ideal_cost_bits`, `bittree`'s symbol and
+// ideal-cost functions, `codec`'s `compressed_len_*` and `ideal_cost_bits_*`
+// experiment entry points, `fieldtype`, `Sse::contexts`), whose callers are
+// tests: under `pub(crate)` they become `dead_code` errors with `-D
+// warnings`. Narrowing waits on wiring or removing those items. `filters` is
+// documented: S2-A2 judged it "a defensible standalone library surface on
+// their own merits" (`research/JOURNAL.md`). `read` is the library idiom
+// matrix's front page (ADR-0064, #979).
 #[doc(hidden)]
 pub mod bittree;
 #[doc(hidden)]
@@ -51,6 +52,7 @@ pub mod lz;
 pub mod model;
 #[doc(hidden)]
 pub mod ppm;
+pub mod read;
 #[doc(hidden)]
 pub mod sse;
 
@@ -318,46 +320,18 @@ impl<'a> Frames<'a> {
         }
     }
 
-    /// Splits one frame off `rest`, checked against [`MAGIC`] and
-    /// [`FORMAT_VERSION`]: a frame of either method must name exactly
-    /// [`FORMAT_VERSION`], the one version this build decodes. A version
-    /// above it is reported before an unknown method, so a newer build's
-    /// frame says "unsupported version", not "unknown method".
+    /// Splits one frame off `rest`, its header checked by [`parse_header`]
+    /// and its extent read by [`declared_extent`].
     fn split(&mut self) -> Result<Frame<'a>, Error> {
         let (header, tail) = self
             .rest
-            .split_at_checked(HEADER_LEN)
+            .split_first_chunk::<HEADER_LEN>()
             .ok_or(Error::Truncated)?;
-        if header[..MAGIC.len()] != MAGIC {
-            return Err(Error::BadMagic);
-        }
-        let version = header[VERSION_OFFSET];
-        if version > FORMAT_VERSION {
-            return Err(Error::UnsupportedVersion(version));
-        }
-        let method = Method::try_from(header[METHOD_OFFSET])?;
-        if version != FORMAT_VERSION {
-            return Err(Error::UnsupportedVersion(version));
-        }
-        let (payload_len, output_len) = match method {
-            Method::Stored => {
-                let (declared, data) = tail
-                    .split_first_chunk::<STORED_LEN_BYTES>()
-                    .ok_or(Error::Truncated)?;
-                let declared = u64::from_le_bytes(*declared);
-                match usize::try_from(declared) {
-                    Ok(len) if len <= data.len() => (STORED_LEN_BYTES + len, declared),
-                    _ => return Err(Error::Truncated),
-                }
-            }
-            Method::Lz => {
-                let extent = codec::extent(tail)?;
-                (extent.payload_len, u64::from(extent.output_len))
-            }
-        };
-        let (checked, rest) = self
-            .rest
-            .split_at_checked(HEADER_LEN + payload_len + CHECK_LEN)
+        let method = parse_header(*header)?;
+        let (payload_len, output_len) = declared_extent(method, tail)?;
+        let (checked, rest) = payload_len
+            .checked_add(HEADER_LEN + CHECK_LEN)
+            .and_then(|len| self.rest.split_at_checked(len))
             .ok_or(Error::Truncated)?;
         let (covered, check) = checked.split_at(HEADER_LEN + payload_len);
         if crc32::crc32(covered).to_le_bytes() != check {
@@ -370,6 +344,57 @@ impl<'a> Frames<'a> {
             payload,
             output_len,
         })
+    }
+}
+
+/// The [`Method`] a frame `header` names, checked against [`MAGIC`] and
+/// [`FORMAT_VERSION`]: a frame of either method must name exactly
+/// [`FORMAT_VERSION`], the one version this build decodes. A version
+/// above it is reported before an unknown method, so a newer build's
+/// frame says "unsupported version", not "unknown method".
+fn parse_header(header: [u8; HEADER_LEN]) -> Result<Method, Error> {
+    if header[..MAGIC.len()] != MAGIC {
+        return Err(Error::BadMagic);
+    }
+    let version = header[VERSION_OFFSET];
+    if version > FORMAT_VERSION {
+        return Err(Error::UnsupportedVersion(version));
+    }
+    let method = Method::try_from(header[METHOD_OFFSET])?;
+    if version != FORMAT_VERSION {
+        return Err(Error::UnsupportedVersion(version));
+    }
+    Ok(method)
+}
+
+/// How many bytes past a frame's header [`declared_extent`] reads for
+/// `method`.
+fn extent_prefix_len(method: Method) -> usize {
+    match method {
+        Method::Stored => STORED_LEN_BYTES,
+        Method::Lz => codec::EXTENT_PREFIX_LEN,
+    }
+}
+
+/// The payload length and output length a frame declares, read from the
+/// first [`extent_prefix_len`] bytes of `after_header`, the bytes after its
+/// header, and trusting nothing else: a caller that has not read the payload
+/// yet learns how much of the input the frame spans, with no allocation and
+/// no decode work. That the payload is present is the caller's check, and a
+/// bad selector in a prefix cut short is [`Error::Corrupt`], not
+/// [`Error::Truncated`], as it is with the whole frame in hand.
+fn declared_extent(method: Method, after_header: &[u8]) -> Result<(usize, u64), Error> {
+    match method {
+        Method::Stored => {
+            let declared = u64::from_le_bytes(*after_header.first_chunk().ok_or(Error::Truncated)?);
+            let len = usize::try_from(declared).map_err(|_| Error::Truncated)?;
+            let payload_len = STORED_LEN_BYTES.checked_add(len).ok_or(Error::Truncated)?;
+            Ok((payload_len, declared))
+        }
+        Method::Lz => {
+            let extent = codec::declared_extent(after_header)?;
+            Ok((extent.payload_len, u64::from(extent.output_len)))
+        }
     }
 }
 
@@ -428,8 +453,8 @@ impl Budget {
 
     /// Admits `frame`'s output against the total caps, before any decode
     /// work (`rust-craft` skill's allocation-discipline).
-    fn admit(&mut self, frame: &Frame<'_>) -> Result<(), Error> {
-        self.produced = self.produced.saturating_add(frame.output_len);
+    fn admit(&mut self, method: Method, output_len: u64) -> Result<(), Error> {
+        self.produced = self.produced.saturating_add(output_len);
         if let Some(max) = self.cap
             && self.produced > u64::from(max)
         {
@@ -438,8 +463,8 @@ impl Budget {
                 max,
             });
         }
-        if self.collects && frame.method == Method::Lz {
-            self.lz_produced = self.lz_produced.saturating_add(frame.output_len);
+        if self.collects && method == Method::Lz {
+            self.lz_produced = self.lz_produced.saturating_add(output_len);
             if self.lz_produced > u64::from(codec::MAX_DECODED_LEN) {
                 return Err(Error::TooLarge {
                     len: u32::try_from(self.lz_produced).unwrap_or(u32::MAX),
@@ -728,7 +753,7 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     let mut output: Option<Vec<u8>> = None;
     for frame in Frames::new(input) {
         let frame = frame?;
-        budget.admit(&frame)?;
+        budget.admit(frame.method, frame.output_len)?;
         let data = match frame.method {
             Method::Stored => try_vec_from_slice(stored_data(frame.payload))?,
             Method::Lz => codec::decode(frame.payload, codec::MAX_DECODED_LEN)?,
@@ -855,7 +880,7 @@ pub fn decompress_to_writer<W: std::io::Write>(
     let mut writer = TryBufWriter::try_new(writer).map_err(Error::from)?;
     for frame in Frames::new(input) {
         let frame = frame?;
-        budget.admit(&frame)?;
+        budget.admit(frame.method, frame.output_len)?;
         match frame.method {
             Method::Stored => writer.write_all(stored_data(frame.payload))?,
             Method::Lz => {
