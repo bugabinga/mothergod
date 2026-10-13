@@ -641,17 +641,16 @@ fn unknown_method_is_rejected() {
 
 #[test]
 fn lz_declared_length_over_the_max_is_rejected() {
-    // A tiny frame declaring an output far past codec::MAX_DECODED_LEN
-    // (and a matching token count, so the loop-iterations argument in
-    // codec::decode's docs doesn't save it either): must reject before
-    // doing any decode work, not just eventually. Public-API-level
-    // regression for the amplification hazard codec.rs's unit tests
-    // cover directly.
+    // A tiny frame declaring an output past codec::MAX_DECODED_LEN: must
+    // reject on the declared length. The token count is zero so a mutated
+    // guard falls through to a fast `Corrupt`, not minutes of decoding
+    // (#1124); the adversarial seed `lz-declared-size-amplification-bomb`
+    // pins the matching-token-count amplification shape.
     let over = codec::MAX_DECODED_LEN + 1;
     let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         over,
-        over,
+        0,
         &[],
     ));
     assert_eq!(
@@ -720,7 +719,7 @@ fn decompress_bounded_clamps_a_max_len_above_max_decoded_len() {
     let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         over,
-        over,
+        0,
         &[],
     ));
     assert_eq!(
@@ -848,7 +847,7 @@ fn decompress_to_writer_rejects_an_lz_frame_over_the_max() {
     let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         over,
-        over,
+        0,
         &[],
     ));
     let mut out = Vec::new();
