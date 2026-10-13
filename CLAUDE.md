@@ -254,8 +254,9 @@ platform requirement). New files follow the placement rule in `agents/README.md`
   leave it alone. `ready-to-ship` marks an issue whose thread holds a
   complete, verified diff with nothing left to build, waiting on a
   credential or a review alone: whoever leaves the diff applies it,
-  `agent-queue` ranks it ahead of every urgency tier, and it leaves with
-  the ship (#454 sat built for 18 days behind fresh bugs, #840).
+  `agent-queue` and the heartbeat's ladder rank it ahead of every
+  urgency tier, and it leaves with the ship (#454 sat built for 18 days
+  behind fresh bugs, #840; #979 sat invisible to the heartbeat).
 - Every issue carries exactly one realm label, and whoever opens it applies
   it: `product` for what a user of the compressor gets (codec, docs, site,
   releases), `agent-system` for the factory (agents, workflows, prompts,

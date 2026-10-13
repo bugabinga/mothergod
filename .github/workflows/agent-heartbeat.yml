@@ -131,7 +131,11 @@ jobs:
                conclusion stated. Checks still pending: skip it, the
                next wake owns it.
             4. Otherwise ship progress from ONE queue of product work,
-               issues included. Urgency outranks importance, because a
+               issues included. First a product issue labeled
+               ready-to-ship: its thread holds the verified diff, the
+               ship is one push and a PR, and its claude/* branch is
+               the item, not a claim; only an open PR claims it
+               (#979). Then urgency outranks importance, because a
                broken thing costs someone every hour while an unbuilt
                thing costs nothing new. Take the first item nobody has
                claimed:
