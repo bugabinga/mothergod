@@ -86,6 +86,19 @@ let frame = mothergod::compress(b"hello");
 assert_eq!(mothergod::decompress(&frame).unwrap(), b"hello");
 ```
 
+Those two hold the whole input and output in memory. A file or stream of any
+length goes through `std::io` instead, one 16 MiB block at a time:
+
+```rust
+use std::{fs::File, io};
+
+mothergod::copy_encode(File::open("big.tar")?, File::create("big.tar.mgdc")?)?;
+let mut reader = mothergod::read::Decoder::new(File::open("big.tar.mgdc")?);
+io::copy(&mut reader, &mut File::create("big.tar.out")?)?;
+```
+
+`cargo doc --open` documents each call's memory bound and errors.
+
 ## Who builds it
 
 mothergod began as an autoresearch loop. On 2026-08-19 one Claude session ran

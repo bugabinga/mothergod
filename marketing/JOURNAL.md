@@ -18,6 +18,28 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-13 — Editorial: the README's library example stopped at the slice API
+
+Queue empty, so this is a defect found on the surface. The README's
+"Library API" showed `compress` and `decompress` on a byte slice and
+nothing else. A Rust user evaluating the crate for real files would
+conclude it holds everything in memory, though #1106 and #1134 gave it
+`copy_encode` and `read::Decoder`, the `std::io` pair the genre's crates
+offer. Only the changelog named them.
+
+**README now says the slice pair holds everything in memory, then shows
+the streaming pair in four lines, and points at `cargo doc --open`** for
+each call's memory bound, because no docs.rs page exists before a
+release. Evidence: those four lines, built as an example against
+`41255ab`, round-tripped a 1500000-byte mix of Rust source and random
+bytes (`cmp` silent) at a 105 MB peak RSS.
+
+**Rejected: stating `decompress`'s 256 MiB cap.** It covers `Lz` output
+only, a `Stored` frame passes it, and the true sentence is one the
+reader does not need to pick the streaming pair. **Rejected: a library
+section on `/`.** The site's visitor decides whether to try the tool;
+the embedder reads the repo, and `/` already sends them there.
+
 ## 2026-10-13 — Editorial: the strongest new trust fact reached only the changelog
 
 Queue empty, so this is a defect found on the surface. #1118 ended every
