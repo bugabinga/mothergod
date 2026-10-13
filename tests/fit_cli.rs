@@ -25,7 +25,7 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{bin, run, run_output, run_with_early_closing_reader};
+use common::{bin, run, run_output, run_with_early_closing_reader, stored_frame};
 use matrix::{Probe, Seen, seen};
 
 /// Every compressed frame starts with this magic (`docs/format/SPEC.md`).
@@ -263,9 +263,8 @@ fn corrupt_nonzero() -> Seen {
 fn broken_pipe() -> Seen {
     // 300 000 stored bytes outgrow any pipe buffer, so the write after the
     // reader closes cannot be absorbed (the same frame `tests/cli.rs` builds).
-    let mut frame = [MAGIC, &[mothergod::FORMAT_VERSION, 0]].concat();
-    frame.extend(300_000u64.to_le_bytes());
-    frame.extend((0..300_000u32).map(|i| (i * 37 % 251) as u8));
+    let data: Vec<u8> = (0..300_000u32).map(|i| (i * 37 % 251) as u8).collect();
+    let frame = stored_frame(&data);
     let (stderr, code) = run_with_early_closing_reader(&["-d"], &frame);
     seen(stderr.is_empty() && code == 141)
 }

@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 12)
+# mothergod bitstream format (FORMAT_VERSION 13)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,9 +16,10 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 12)
+4       1     format version (currently 13)
 5       1     method byte
 6       ...   payload (method-defined)
+end-4   4     check value: CRC-32 of every byte before it, u32 LE
 ```
 
 A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
@@ -38,16 +39,36 @@ mixer, a learned-baseline rate schedule and stretch-domain SSE bins
 the length residual trees (ADR-0061); 11 gave the `Stored` payload a
 declared length (ADR-0065); 12 gave the `Lz` payload a declared coded
 length, so a frame's end is knowable and frames chain into a stream
-(ADR-0067).
+(ADR-0067); 13 closed each frame with a check value (ADR-0068).
+
+## Check value (ADR-0068)
+
+Every frame ends in the CRC-32 of the frame's bytes from the magic through
+the last payload byte, as a `u32` LE. The CRC is CRC-32/ISO-HDLC, the one
+gzip, zlib and xz use: reflected polynomial `0xEDB88320`, initial value and
+final XOR `0xFFFFFFFF`, and `"123456789"` checks to `0xCBF43926`. It is
+always present, for both methods, and never optional.
+
+The check value follows the payload's extent, which the method names (the
+`Stored` data length, the `Lz` coded length), so a decoder finds it without
+decoding. A decoder MUST verify it before it decodes the payload or writes
+any byte of the frame, and MUST reject a mismatch as `BadChecksum`. A frame
+with fewer bytes than its extent and check value need is `Truncated`. The
+parse errors that locate the check value (version, method, extent) come
+first, so a flip of those fields may surface as them.
+
+The value detects corruption; it is not authentication. Anyone can compute
+it for forged bytes, so no decoder bound may rely on it (invariants below).
 
 ## Streams (ADR-0067)
 
 A compressed stream is one or more frames, back to back, decoded in order;
 its output is their outputs concatenated. Every frame names its own extent
-(the `Stored` data length, the `Lz` coded length), so a decoder finds where
-one ends without decoding it. Nothing else may follow the last frame: a
+(the `Stored` data length, the `Lz` coded length) and ends in its check
+value, so a decoder finds where one ends without decoding it. Nothing else may follow the last frame: a
 decoder MUST reject bytes that are not a frame, as the next frame's
-`Truncated` (fewer than 6 bytes, or a payload cut short) or `BadMagic`,
+`Truncated` (fewer than 6 bytes, or a payload or check value cut short) or
+`BadMagic`,
 and an empty stream is `Truncated`. The frame count is not bounded: each
 frame costs at least its own input bytes. A caller's output bound below
 `codec::MAX_DECODED_LEN` covers the stream's total, and a frame whose
@@ -79,8 +100,7 @@ A decoder MUST reject a payload shorter than 8 bytes, or holding fewer
 data bytes than the field declares, as `Truncated`. Bytes past the declared
 length are the next frame's. The field is never an allocation size: it is
 compared with the bytes present. It is a `u64` because an encoder stores
-inputs longer than `u32::MAX` bytes. There is no check value: a bit flip inside the data
-is not detected (ADR-0065).
+inputs longer than `u32::MAX` bytes.
 
 ### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028, ADR-0038)
 
@@ -175,8 +195,8 @@ founding port bug this section's invariant exists to rule out.
 
 - Lossless: decode(encode(x)) == x for all x.
 - Stored floor: an encoder MUST NOT emit a frame larger than
-  `header + 8 + len(x)` (the header and the `Stored` length field) — fall
-  back to Stored (JOURNAL S1-L1).
+  `header + 8 + len(x) + 4` (the header, the `Stored` length field and the
+  check value) — fall back to Stored (JOURNAL S1-L1).
 - Decoders never panic and allocate at most a bounded multiple of the
   declared output size for any input. For `Lz`, "declared output size" is
   the payload's own length field: the decoder never preallocates from it,

@@ -251,7 +251,9 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   frame is valid by construction); a third libFuzzer target,
   `frame_mutate`, that applies byte flips near a `frame_gen` frame so
   mutation explores the decoder's post-header state machine instead of
-  mostly rediscovering `BadMagic`/`Truncated`; and `bin/seed_corpus.rs`,
+  mostly rediscovering `BadMagic`/`Truncated` (it also re-seals each
+  flipped frame with the check value of ADR-0068, as `decode_arbitrary`
+  does its raw bytes, or `BadChecksum` would turn away nearly every one); and `bin/seed_corpus.rs`,
   writing `frame_gen`'s output as corpus seeds (measured gain on
   `decode_arbitrary`, this build: libFuzzer's own single generated seed
   reaches cov 26/ft 27, `frame_gen`'s 12 seeds alone reach cov 418/ft

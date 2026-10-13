@@ -1,9 +1,15 @@
 use super::*;
 
-/// `MAGIC` + `FORMAT_VERSION` + `Method::Lz` as a fresh `Vec<u8>`, for
-/// tests that hand-craft a payload past it rather than going through
-/// [`compress`]: several need a specific declared length or filter
-/// selector `compress` itself would never choose.
+/// A complete `Method::Lz` frame around `payload`, check value included, for
+/// tests that hand-craft a payload rather than going through [`compress`]:
+/// several need a specific declared length or filter selector `compress`
+/// itself would never choose.
+fn lz_frame(payload: &[u8]) -> Vec<u8> {
+    build_frame(Method::Lz, &[payload])
+}
+
+/// `MAGIC` + `FORMAT_VERSION` + `Method::Lz` and no payload or check value,
+/// for the tests whose frame is cut short on purpose.
 fn lz_frame_header() -> Vec<u8> {
     vec![
         MAGIC[0],
@@ -39,6 +45,10 @@ fn error_display_names_each_variant() {
     );
     assert_eq!(Error::Corrupt.to_string(), "compressed payload is corrupt");
     assert_eq!(
+        Error::BadChecksum.to_string(),
+        "frame check value does not match its bytes"
+    );
+    assert_eq!(
         Error::TooLarge { len: 10, max: 5 }.to_string(),
         "output length 10 exceeds the decoder's bound (5 bytes)"
     );
@@ -58,6 +68,7 @@ fn each_error_converts_to_the_io_kind_that_names_it_without_a_payload() {
         (Error::UnsupportedVersion(9), InvalidData),
         (Error::UnknownMethod(0xFF), InvalidData),
         (Error::Corrupt, InvalidData),
+        (Error::BadChecksum, InvalidData),
         (Error::TooLarge { len: 10, max: 5 }, InvalidData),
     ];
     for (err, kind) in cases {
@@ -321,6 +332,81 @@ fn stored_frame_of_any_other_version_is_unsupported() {
     }
 }
 
+/// One frame of each method: a short `Lz` frame and a `Stored` one.
+fn one_frame_of_each_method() -> [(Vec<u8>, Vec<u8>); 2] {
+    let text = b"the quick brown fox jumps over the lazy dog".repeat(20);
+    let random: Vec<u8> = test_support::Xorshift32::new(0x9E37_79B9)
+        .take(300)
+        .map(|state| u8::try_from(state % 256).unwrap())
+        .collect();
+    [text, random].map(|input| (compress(&input), input))
+}
+
+#[test]
+fn every_single_bit_flip_of_a_frame_is_rejected_and_writes_nothing() {
+    // #1020: a flip inside a payload once decoded to wrong bytes with
+    // exit 0. The check value covers the whole frame, so no flip anywhere
+    // in either method's frame gets through any entry point.
+    let [(lz, _), (stored, _)] = one_frame_of_each_method();
+    assert_eq!(lz[METHOD_OFFSET], Method::Lz as u8);
+    assert_eq!(stored[METHOD_OFFSET], Method::Stored as u8);
+    for frame in [lz, stored] {
+        for bit in 0..frame.len() * 8 {
+            let mut flipped = frame.clone();
+            flipped[bit / 8] ^= 1 << (bit % 8);
+            assert!(decompress(&flipped).is_err(), "decompress, bit {bit}");
+            assert!(
+                decodes_incrementally(&flipped).is_err(),
+                "decodes_incrementally, bit {bit}"
+            );
+            let mut out = Vec::new();
+            assert!(
+                decompress_to_writer(&flipped, codec::MAX_DECODED_LEN, &mut out).is_err(),
+                "decompress_to_writer, bit {bit}"
+            );
+            assert!(out.is_empty(), "bit {bit} wrote {} bytes", out.len());
+        }
+    }
+}
+
+#[test]
+fn a_flip_past_the_header_is_a_checksum_error() {
+    // A flip in the data, the coded stream, or the check value itself is
+    // named as what it is, not as whatever the damaged payload decodes to.
+    // The first payload byte is the `Lz` filter selector or a `Stored`
+    // length's low byte, which the extent parse may reject first.
+    for (frame, _) in one_frame_of_each_method() {
+        for index in [frame.len() - CHECK_LEN - 1, frame.len() - 1] {
+            let mut flipped = frame.clone();
+            flipped[index] ^= 0x01;
+            assert_eq!(
+                decompress(&flipped),
+                Err(Error::BadChecksum),
+                "byte {index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_damaged_frame_fails_the_stream_after_the_frames_before_it_decoded() {
+    // The check is per frame, so frames before the damaged one were valid;
+    // `decompress` returns nothing, `decompress_to_writer` has written them.
+    let [(lz, lz_input), (mut stored, _)] = one_frame_of_each_method();
+    let last = stored.len() - 1;
+    stored[last] ^= 0x01;
+    let stream = [lz, stored].concat();
+    assert_eq!(decompress(&stream), Err(Error::BadChecksum));
+    let mut out = Vec::new();
+    let err = decompress_to_writer(&stream, codec::MAX_DECODED_LEN, &mut out)
+        .expect_err("the second frame is damaged");
+    assert_eq!(
+        test_support::as_codec_error(&err),
+        Some(&Error::BadChecksum)
+    );
+    assert_eq!(out, lz_input);
+}
+
 #[test]
 fn every_prefix_of_a_stored_frame_is_rejected() {
     // #988: a Stored frame cut short once decoded to the bytes that
@@ -428,8 +514,7 @@ fn collected_lz_output_is_capped_in_total_but_streamed_output_is_not() {
     // rejection is from the headers, so the second frame's decode work
     // (about 2 s per MiB at this length) never runs.
     let (stream, plain) = mixed_stream();
-    let mut big = lz_frame_header();
-    big.extend(test_support::lz_payload(
+    let big = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         codec::MAX_DECODED_LEN,
         codec::MAX_DECODED_LEN,
@@ -476,8 +561,7 @@ fn only_a_collecting_budget_caps_the_lz_total() {
 fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     let (mut stream, _) = mixed_stream();
     assert_eq!(decodes_incrementally(&stream), Ok(true));
-    let mut transpose = lz_frame_header();
-    transpose.extend(test_support::lz_payload(
+    let transpose = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
         0,
         0,
@@ -502,7 +586,7 @@ fn stored_frame_is_never_larger_than_header_length_field_and_input() {
     // The Stored floor (docs/format/SPEC.md): every frame is at most this.
     for len in [0, 1, 2, 100] {
         let input = vec![0xA5u8; len];
-        assert!(compress(&input).len() <= HEADER_LEN + STORED_LEN_BYTES + len);
+        assert!(compress(&input).len() <= HEADER_LEN + STORED_LEN_BYTES + len + CHECK_LEN);
     }
 }
 
@@ -564,8 +648,7 @@ fn lz_declared_length_over_the_max_is_rejected() {
     // regression for the amplification hazard codec.rs's unit tests
     // cover directly.
     let over = codec::MAX_DECODED_LEN + 1;
-    let mut frame = lz_frame_header();
-    frame.extend(test_support::lz_payload(
+    let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         over,
         over,
@@ -634,8 +717,7 @@ fn decompress_bounded_clamps_a_max_len_above_max_decoded_len() {
     // A caller passing u32::MAX must not bypass MAX_DECODED_LEN: the
     // clamp, not the caller's value, is the real ceiling.
     let over = codec::MAX_DECODED_LEN + 1;
-    let mut frame = lz_frame_header();
-    frame.extend(test_support::lz_payload(
+    let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         over,
         over,
@@ -676,8 +758,7 @@ fn non_transpose_candidates_decode_incrementally() {
         filters::select::Candidate::Delta(test_support::nz(4)),
         filters::select::Candidate::Bcj,
     ] {
-        let mut frame = lz_frame_header();
-        frame.extend(test_support::lz_payload(
+        let frame = lz_frame(&test_support::lz_payload(
             candidate.to_header_bytes(),
             0,
             0,
@@ -693,8 +774,7 @@ fn non_transpose_candidates_decode_incrementally() {
 
 #[test]
 fn transpose_candidate_does_not_decode_incrementally() {
-    let mut frame = lz_frame_header();
-    frame.extend(test_support::lz_payload(
+    let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
         0,
         0,
@@ -709,8 +789,7 @@ fn decodes_incrementally_pins_the_lz_version_boundary() {
     // `==`, `<` -> `<=`) because no test distinguished it from a
     // version-blind one. Both sides of the boundary, on the same frame
     // shape so only the version byte differs.
-    let mut frame = lz_frame_header();
-    frame.extend(test_support::lz_payload(
+    let mut frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         0,
         0,
@@ -766,8 +845,7 @@ fn decompress_to_writer_matches_decompress_for_stored_and_lz_frames() {
 #[test]
 fn decompress_to_writer_rejects_an_lz_frame_over_the_max() {
     let over = codec::MAX_DECODED_LEN + 1;
-    let mut frame = lz_frame_header();
-    frame.extend(test_support::lz_payload(
+    let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         over,
         over,

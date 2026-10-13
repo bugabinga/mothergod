@@ -91,6 +91,18 @@ pub fn frames() -> Vec<(&'static str, Vec<u8>)> {
         .collect()
 }
 
+/// `bytes` followed by the check value that makes it a complete frame
+/// (`docs/format/SPEC.md`). Every decoder entry point verifies the check
+/// before it decodes, so a mutated frame or a raw byte string reaches the
+/// parse and the models behind it only through this; an adversary forges
+/// the same value at will, so the decoder must hold up behind it.
+#[must_use]
+pub fn sealed(bytes: &[u8]) -> Vec<u8> {
+    let mut frame = bytes.to_vec();
+    frame.extend(mothergod::crc32::crc32(bytes).to_le_bytes());
+    frame
+}
+
 /// Small-step pseudo-random walk: a deterministic LCG selecting one of
 /// five `{-2, -1, 0, 1, 2}` steps, matching `src/filters.rs`'s own
 /// `next_step` test helper exactly. Small enough that consecutive

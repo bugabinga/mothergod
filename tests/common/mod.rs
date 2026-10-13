@@ -11,6 +11,18 @@ pub fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_mothergod"))
 }
 
+/// A `Stored` frame of `data` built from `docs/format/SPEC.md`: header,
+/// length, data, then the CRC-32 of those bytes. A test that needs a large
+/// `Stored` frame builds it here instead of compressing incompressible
+/// bytes, which would spend the encoder's whole search to reach `Stored`.
+pub fn stored_frame(data: &[u8]) -> Vec<u8> {
+    let mut frame = [b"MGDC".as_slice(), &[mothergod::FORMAT_VERSION, 0]].concat();
+    frame.extend((data.len() as u64).to_le_bytes());
+    frame.extend(data);
+    frame.extend(mothergod::crc32::crc32(&frame).to_le_bytes());
+    frame
+}
+
 /// Runs `command` with `stdin` piped in and everything captured.
 ///
 /// A child that exits without reading its stdin (an unknown flag, `--help`)
