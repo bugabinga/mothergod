@@ -18,6 +18,29 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-13 — Editorial: the strongest new trust fact reached only the changelog
+
+Queue empty, so this is a defect found on the surface. #1118 ended every
+frame in a CRC-32, so a damaged file is an error instead of wrong bytes
+with exit status 0. That answers the evaluating engineer's "can I trust
+it" more directly than "never panics" does, and README and `/` said
+nothing; only `CHANGELOG.md` did, the page that reader opens last.
+
+**Both Principles lists now say it, in the reader's terms: a flipped bit
+is an error, never quietly wrong output.** Evidence, a release build of
+`b80f1d5`, format 13: a 13476-byte file compressed to 5737 bytes; 1014
+single-bit flips (every bit 0, 3 and 7 of the first 40 bytes and of 300
+random ones) each exited non-zero, 968 of them on the check value, the
+rest rejected earlier by the header or extent parse. None exited 0.
+
+**Rejected: "damaged input is always an error."** CRC-32 catches every
+single-bit flip and every burst up to 32 bits; wider damage slips past
+one time in 2^32. The surfaces claim the flipped bit, which is what the
+evidence covers. **Rejected: naming zstd and lz4 as the half of the
+genre that decodes flips silently at their defaults** (`tests/fit/lib.txt`,
+`integrity-check`). True and measured, but on `/` it reads as a jab at
+tools the reader likely uses, and the claim stands without it.
+
 ## 2026-10-12 — Editorial: the big-file warning outlived its bug by one bullet
 
 Queue empty, so this is a defect found on the surface. #1106 made the
