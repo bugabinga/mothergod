@@ -25,11 +25,11 @@
 # the names it picks in the same diff. A row without one is probed in
 # tests/fit_lib.rs by running the behavior.
 
-enc-writer | gap | a type wraps a `Write` and compresses what is written through it | flate2 write::GzEncoder, zstd stream::write::Encoder, xz2 write::XzEncoder, brotli CompressorWriter, lz4_flex frame::FrameEncoder | #979
+enc-writer | holds | a type wraps a `Write` and compresses what is written through it | flate2 write::GzEncoder, zstd stream::write::Encoder, xz2 write::XzEncoder, brotli CompressorWriter, lz4_flex frame::FrameEncoder | #979; blocks of 16 MiB, one frame each, so the buffer is bounded by one block, not by the total written
 dec-reader | holds | a type wraps a `Read` and yields the decompressed bytes | flate2 read::GzDecoder, zstd stream::read::Decoder, xz2 read::XzDecoder, brotli Decompressor, lz4_flex frame::FrameDecoder | #979; one frame is resident at a time, because its check value is verified before any of it decodes
 enc-reader | gap | a type wraps a `Read` and yields the compressed bytes | flate2 read::GzEncoder, zstd stream::read::Encoder, xz2 read::XzEncoder, brotli CompressorReader, snap read::FrameEncoder | #979; lz4_flex has none
 dec-writer | gap | a type wraps a `Write` and decompresses what is written through it | flate2 write::GzDecoder, zstd stream::write::Decoder, xz2 write::XzDecoder, brotli DecompressorWriter | #979; lz4_flex and snap have none
-finish-returns-writer | gap | ending an encoder hands the wrapped writer back | flate2 write::GzEncoder::finish, zstd stream::write::Encoder::finish, xz2 write::XzEncoder::finish, lz4_flex frame::FrameEncoder::finish, brotli CompressorWriter::into_inner | #979
+finish-returns-writer | holds | ending an encoder hands the wrapped writer back | flate2 write::GzEncoder::finish, zstd stream::write::Encoder::finish, xz2 write::XzEncoder::finish, lz4_flex frame::FrameEncoder::finish, brotli CompressorWriter::into_inner | #979
 copy-encode | holds | one call compresses everything a `Read` yields into a `Write` | zstd stream::copy_encode, brotli BrotliCompress | #978
 one-shot-compress | holds | a byte slice compresses to a `Vec<u8>` in one call | zstd bulk::compress, lz4_flex block::compress_prepend_size, snap raw::Encoder::compress_vec |
 one-shot-decompress | holds | a compressed byte slice decompresses to a `Vec<u8>` in one call | zstd bulk::decompress, lz4_flex block::decompress_size_prepended, snap raw::Decoder::decompress_vec |

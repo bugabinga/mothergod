@@ -17,7 +17,7 @@
 //! assert_eq!(mothergod::decompress(&frame), Ok(original));
 //! ```
 
-// Every module but `filters` and `read` is `#[doc(hidden)]`: the engine's
+// Every module but `filters`, `read` and `write` is `#[doc(hidden)]`: the engine's
 // internals, not a surface downstream crates are meant to call (ROADMAP M6).
 // They stay `pub` for two reasons. `bench` and `fuzz` call into `lz`, `literal`
 // and `codec`. And the live codec path does not reach the research
@@ -27,8 +27,8 @@
 // tests: under `pub(crate)` they become `dead_code` errors with `-D
 // warnings`. Narrowing waits on wiring or removing those items. `filters` is
 // documented: S2-A2 judged it "a defensible standalone library surface on
-// their own merits" (`research/JOURNAL.md`). `read` is the library idiom
-// matrix's front page (ADR-0064, #979).
+// their own merits" (`research/JOURNAL.md`). `read` and `write` are the
+// library idiom matrix's front page (ADR-0064, #979).
 #[doc(hidden)]
 pub mod bittree;
 #[doc(hidden)]
@@ -55,6 +55,7 @@ pub mod ppm;
 pub mod read;
 #[doc(hidden)]
 pub mod sse;
+pub mod write;
 
 /// First bytes of every mothergod frame.
 pub const MAGIC: [u8; 4] = *b"MGDC";
@@ -651,7 +652,9 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
 /// Compresses everything `source` yields into `sink` as a stream of frames,
 /// holding one block of 16 MiB at a time: the encoder's memory is bounded by
 /// the block and not by the input, which [`compress`] cannot offer because it
-/// takes the whole input as a slice.
+/// takes the whole input as a slice. It is [`io::copy`](std::io::copy) into a
+/// [`write::Encoder`], which a caller who produces the bytes instead of
+/// pulling them uses directly.
 ///
 /// An input of at most [`codec::MAX_DECODED_LEN`] bytes writes the bytes
 /// [`compress`] returns. A longer one writes `Lz` frames [`compress`] would
@@ -671,24 +674,12 @@ pub fn copy_encode<R: std::io::Read, W: std::io::Write>(source: R, sink: W) -> s
 /// is for [`compress`]. `block_len` is nonzero.
 fn copy_encode_blocks<R: std::io::Read, W: std::io::Write>(
     mut source: R,
-    mut sink: W,
+    sink: W,
     block_len: usize,
 ) -> std::io::Result<()> {
-    use std::io::Read as _;
-    let limit = u64::try_from(block_len).unwrap_or(u64::MAX);
-    let mut block = Vec::new();
-    let mut wrote_a_frame = false;
-    loop {
-        block.clear();
-        (&mut source).take(limit).read_to_end(&mut block)?;
-        // A stream is one or more frames (ADR-0067): empty input is the
-        // one case where the first read is the last.
-        if block.is_empty() && wrote_a_frame {
-            return Ok(());
-        }
-        sink.write_all(&compress_block(&block))?;
-        wrote_a_frame = true;
-    }
+    let mut encoder = write::Encoder::with_block_len(sink, block_len);
+    std::io::copy(&mut source, &mut encoder)?;
+    encoder.finish().map(drop)
 }
 
 /// One frame for `block`: [`Method::Lz`] if it is smaller, else
