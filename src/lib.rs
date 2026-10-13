@@ -2,7 +2,7 @@
     html_logo_url = "https://raw.githubusercontent.com/bugabinga/mothergod/main/assets/logo.svg"
 )]
 #![forbid(unsafe_code)]
-//! mothergod — general purpose compression.
+//! mothergod: general purpose compression.
 //!
 //! The library speaks a tiny framed container format. Every frame starts
 //! with a magic number, a format version, and a method byte identifying
@@ -105,8 +105,9 @@ impl TryFrom<u8> for Method {
 pub enum Error {
     /// Input ended before the frame was complete: inside the header, short
     /// of the length a [`Method::Stored`] payload or a [`Method::Lz`] coded
-    /// stream declares, or short of the check value that closes the frame. Bytes after the last frame of a stream read
-    /// as the start of one more, so they are this or [`Error::BadMagic`].
+    /// stream declares, or short of the check value that closes the frame.
+    /// Bytes after the last frame of a stream read as the start of one more,
+    /// so they are this or [`Error::BadMagic`].
     Truncated,
     /// Input does not start with [`MAGIC`].
     BadMagic,
@@ -140,16 +141,13 @@ pub enum Error {
         /// see the variant's docs).
         max: u32,
     },
-    /// The allocator could not satisfy some fixed-size allocation partway
-    /// through decode: the output buffer's reservation (`declared_len`
-    /// bytes, already checked against the effective bound before this
-    /// point), a model's adaptive frequency table, or a filter's undo
-    /// buffer. A real allocator failure this far into decode is rare, but
-    /// hard rule 2 (`CLAUDE.md`) does not carve out an exception for it:
-    /// every one of those allocations goes through `try_reserve_exact`
-    /// specifically so this returns an `Err` instead of the process
-    /// aborting (`rust-craft` skill's allocation-discipline, torture-swept
-    /// by `tests/torture.rs`, #453).
+    /// The allocator could not satisfy an allocation partway through
+    /// decode: the output buffer (`declared_len` bytes, already checked
+    /// against the effective bound), a model's frequency table, or a
+    /// filter's undo buffer. Hard rule 2 (`CLAUDE.md`) carves out no
+    /// exception for allocator failure: each of those goes through a
+    /// fallible reserve so this is an `Err`, not an abort
+    /// (`tests/torture.rs`).
     OutOfMemory,
 }
 
@@ -201,10 +199,8 @@ impl From<Error> for std::io::Error {
 }
 
 impl From<std::collections::TryReserveError> for Error {
-    /// Every `try_reserve`/`try_new` allocation this crate's decode path
-    /// makes fails the same way: [`Error::OutOfMemory`], never a panic
-    /// (hard rule 2). One impl instead of a `.map_err(|_| Error::OutOfMemory)`
-    /// at each of the decoder's fallible-allocation call sites.
+    /// Every fallible allocation on the decode path fails as
+    /// [`Error::OutOfMemory`], never a panic (hard rule 2).
     fn from(_: std::collections::TryReserveError) -> Self {
         Self::OutOfMemory
     }
@@ -214,15 +210,11 @@ impl From<std::collections::TryReserveError> for Error {
 /// ([`Error`], same variants and meaning as [`decompress`]'s) or `writer`
 /// itself failed.
 ///
-/// Two owned variants instead of the single [`std::io::Error`] this type
-/// replaced (downcast via [`std::io::Error::get_ref`]): that shape needed
-/// `std::io::Error::other` to wrap every decode error, which boxes its
-/// payload through two allocations with no fallible sibling on stable Rust
-/// (`Box::new` twice: once into `Box<dyn Error + Send + Sync>`, once into
-/// `io::Error`'s own `Custom` struct). That meant *every* decode error —
-/// even `Truncated` on a two-byte input — could abort the process under
-/// real allocator pressure, violating hard rule 2 (issue #479). Plain enum
-/// construction allocates nothing.
+/// Two owned variants and not a single [`std::io::Error`]: wrapping a decode
+/// error through `std::io::Error::other` boxes it twice with no fallible
+/// sibling on stable Rust, so *every* decode error, `Truncated` on a two-byte
+/// input included, could abort the process under allocator pressure, against
+/// hard rule 2 (issue #479). Plain enum construction allocates nothing.
 #[derive(Debug)]
 pub enum WriteError {
     /// The frame did not decode; see [`Error`] for what each variant means.
@@ -713,7 +705,7 @@ fn compress_block(block: &[u8]) -> Vec<u8> {
 ///
 /// Returns an [`Error`] when `input` is truncated, is not a mothergod
 /// frame, uses a version or method this build does not understand, or (for
-/// [`Method::Lz`]) is not internally consistent — see [`codec::decode`].
+/// [`Method::Lz`]) is not internally consistent; see [`codec::decode`].
 pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     decompress_bounded(input, codec::MAX_DECODED_LEN)
 }
@@ -733,8 +725,7 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 ///
 /// A caller embedding mothergod under a known memory budget (well below
 /// [`codec::MAX_DECODED_LEN`]'s 256 MiB) should call this instead of
-/// [`decompress`] directly: ROADMAP M4's bounded-memory decode guarantee,
-/// ahead of and independent from a future streaming/block API.
+/// [`decompress`].
 ///
 /// # Errors
 ///
@@ -744,10 +735,8 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// budget), or the [`Method::Lz`] frames' declared output lengths together
 /// exceed [`codec::MAX_DECODED_LEN`]. `max_len` at or above
 /// [`codec::MAX_DECODED_LEN`] never rejects a [`Method::Stored`] frame on
-/// size alone: its payload length is read directly from `input`, never
-/// spoofable past what was already loaded, so unlike [`Method::Lz`]'s
-/// declared-length field, [`codec::MAX_DECODED_LEN`] buys it no safety
-/// margin, only a compatibility break for large incompressible input.
+/// size alone: its length is read from `input`, so unlike [`Method::Lz`]'s
+/// declared length it cannot be spoofed past the bytes present.
 pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let mut budget = Budget::new(max_len, true);
     let mut output: Option<Vec<u8>> = None;
@@ -769,16 +758,12 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     output.ok_or(Error::Truncated)
 }
 
-/// Minimal write-buffering wrapper, standing in for [`std::io::BufWriter`]
-/// on [`decompress_to_writer`]'s real decode path: `BufWriter::new` itself
-/// allocates its buffer through an infallible path, which would abort the
-/// process under a real allocator failure instead of returning an `Err`
-/// (hard rule 2, `rust-craft` skill's allocation-discipline,
-/// `tests/torture.rs`, #453). [`codec::decode_to_writer`]'s streaming path
-/// writes one filtered byte at a time
-/// (`codec::StreamUndo::apply`), so wrapping `writer` unbuffered would turn
-/// each into its own `write_all` call; this preserves that batching while
-/// building its buffer through `try_reserve_exact`.
+/// [`std::io::BufWriter`] for [`decompress_to_writer`], with its buffer built
+/// through `try_reserve_exact`: `BufWriter::new` allocates infallibly and
+/// would abort under allocator failure (hard rule 2, `tests/torture.rs`).
+/// [`codec::decode_to_writer`] writes one filtered byte at a time
+/// (`codec::StreamUndo::apply`), so an unbuffered `writer` would take a
+/// `write_all` call per byte.
 struct TryBufWriter<'w, W: std::io::Write> {
     inner: &'w mut W,
     buf: Vec<u8>,
@@ -840,9 +825,8 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 
 /// Like [`decompress_bounded`], but writes the decoded bytes to `writer`
 /// incrementally instead of collecting them into one returned `Vec<u8>`.
-/// Same frame-level checks, in the same order (shared with it through the
-/// same private header-parsing and bound-checking helpers), so the two
-/// can't drift.
+/// Same frame-level checks, in the same order, through the same `Frames`
+/// and `Budget`.
 ///
 /// A [`Method::Lz`] frame whose encoder picked
 /// [`filters::select::Candidate::Identity`], `Delta`, or `Bcj` streams:
@@ -850,8 +834,7 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// lookahead (a no-op, a stride, or a 5-byte call/jmp instruction), so the
 /// decoded LZ token stream needs no whole-buffer pass afterward, and
 /// `codec::decode_to_writer` bounds memory to [`lz::WINDOW`] (1 MiB) for any
-/// of them regardless of the frame's declared length (`research/JOURNAL.md`
-/// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee).
+/// of them regardless of the frame's declared length.
 /// [`Method::Stored`] writes its payload slice of `input` through the same
 /// bounded writer and allocates no decoded buffer, so resident memory is the
 /// input plus the write buffer. [`filters::select::Candidate::Transpose`]
@@ -865,10 +848,7 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// [`WriteError::Decode`] for anything [`decompress_bounded`] would itself
 /// return as an `Err`, plus [`Error::OutOfMemory`] if the allocator cannot
 /// satisfy the write buffer's own allocation; [`WriteError::Io`] if
-/// `writer` itself fails. Neither variant boxes its payload through
-/// `std::io::Error::other` (issue #479): both are plain enum
-/// construction, so a decode error can never abort the process under
-/// allocator pressure the way the wrapped form could.
+/// `writer` itself fails.
 pub fn decompress_to_writer<W: std::io::Write>(
     input: &[u8],
     max_len: u32,
@@ -892,26 +872,22 @@ pub fn decompress_to_writer<W: std::io::Write>(
     Ok(())
 }
 
-/// Reports whether `input`'s frame can decode with the output produced in
-/// address order and bounded lookback, without doing any of that decode
-/// work itself: a precondition a future streaming/block API needs, checked
-/// here first because it does not have one uniform answer
-/// (`research/JOURNAL.md` S2-D4, ROADMAP M4).
+/// Reports whether every frame of `input` can decode with the output
+/// produced in address order and bounded lookback, without doing any of that
+/// decode work itself. The answer is not uniform across frames, hence the
+/// check.
 ///
 /// [`Method::Stored`] always answers `true`: there is no filter step, so
 /// nothing about a bound on resident memory depends on its content.
-/// [`Method::Lz`]'s answer depends on which filter its encoder picked —
+/// [`Method::Lz`]'s answer depends on which filter its encoder picked:
 /// [`filters::select::Candidate::Identity`], `Delta`, and `Bcj` all undo
 /// sequentially with small fixed lookback or lookahead (a no-op, a stride,
 /// or a 5-byte call/jmp instruction), and [`decompress_to_writer`] streams
 /// all three, but `Candidate::Transpose`'s decode writes scattered across
 /// the *entire* buffer in column-major order, so it needs the whole buffer
-/// resident regardless of how a streaming decoder is otherwise built. This
-/// predicate is checked independently of [`decompress_to_writer`]'s own
-/// dispatch rather than the two sharing one classification, so a caller can
-/// ask the question before committing to either API, and the two staying in
-/// sync is a property tests can verify rather than an invariant the code
-/// silently assumes.
+/// resident. This predicate does not share [`decompress_to_writer`]'s own
+/// dispatch: a caller can ask before committing to either API, and tests
+/// hold the two in sync.
 ///
 /// # Errors
 ///
@@ -919,8 +895,8 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// ([`Error::Truncated`], [`Error::BadMagic`], [`Error::UnsupportedVersion`],
 /// [`Error::UnknownMethod`]), plus [`Error::BadChecksum`] for a frame whose
 /// check value does not match, and [`Error::Corrupt`] when a [`Method::Lz`]
-/// frame's filter selector does not name a real [`filters::select::Candidate`]
-/// — everything short of actually decoding the payload.
+/// frame's filter selector does not name a real [`filters::select::Candidate`]:
+/// everything short of actually decoding the payload.
 pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
     let mut incremental = true;
     for frame in Frames::new(input) {
