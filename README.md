@@ -71,8 +71,9 @@ cmp FILE FILE.out   # silence means the round trip was lossless
 
 Given file arguments instead, compression writes `<file>.mgdc` for each and
 `-d` reads one back to the name with the suffix stripped; `-c` writes to stdout
-and leaves files alone, and `-` names stdin. Nothing deletes its input or
-overwrites an existing file.
+and leaves files alone, and `-` names stdin. Nothing deletes its input, and an
+existing output file is overwritten only under `-f`; `-k` is accepted and does
+nothing, since the input is kept anyway.
 That and `--help` and `--version` are the entire interface so far: no
 compression levels, no tuning knobs. `--version` also prints the format version
 the build reads; put it in a bug report. Expect the encode to take a while, at

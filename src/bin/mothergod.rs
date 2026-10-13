@@ -4,7 +4,9 @@
 //! compresses, `-d` decompresses, `-c` writes to stdout. With no file operand,
 //! or the operand `-`, it reads stdin and writes stdout. A file operand
 //! follows the `.mgdc` suffix convention already used by `tests/golden/`, and
-//! the run never deletes the input or overwrites an existing output file:
+//! the run never deletes the input, nor overwrites an existing output file
+//! unless `-f` says to. `-k` is accepted and does nothing, because the input
+//! is kept anyway (ADR-0066):
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -13,6 +15,7 @@
 //! mothergod input input2                    # writes input.mgdc, input2.mgdc
 //! mothergod -d input.mgdc                   # writes input
 //! mothergod -dc input.mgdc | tar x          # writes stdout, keeps input.mgdc
+//! mothergod -f input                        # replaces input.mgdc
 //! ```
 //!
 //! Operands are processed in order. A failure on one is reported and the run
@@ -47,18 +50,26 @@ use std::process::ExitCode;
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod [-d] [-c] [--] [file ...]\n       \
+const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
+-k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
 With no file, or the file -, reads stdin and writes stdout.\n\
 With a file, compression writes <file>.mgdc; decompression reads a .mgdc file and writes <file> \
-(the name with the suffix stripped). Never overwrites an existing output file.";
+(the name with the suffix stripped). Never overwrites an existing output file without -f.";
 
 /// Which way a run converts.
 #[derive(Clone, Copy)]
 enum Mode {
     Compress,
     Decompress,
+}
+
+/// What a file output does when its path already exists.
+#[derive(Clone, Copy)]
+enum Existing {
+    Refuse,
+    Replace,
 }
 
 /// What the command line asked for.
@@ -68,6 +79,7 @@ enum Request {
     Run {
         mode: Mode,
         to_stdout: bool,
+        existing: Existing,
         /// Empty means stdin to stdout; `-` is already folded to `None`.
         operands: Vec<Option<PathBuf>>,
     },
@@ -90,18 +102,21 @@ fn main() -> ExitCode {
         Ok(Request::Run {
             mode,
             to_stdout,
+            existing,
             operands,
-        }) => run(mode, to_stdout, &operands),
+        }) => run(mode, to_stdout, existing, &operands),
         Err(message) => fail(&format!("{message}\n\n{USAGE}")),
     }
 }
 
 /// Reads the genre's grammar: option clusters (`-dc`), long options, `--` to
 /// end options, and `-` as an operand naming stdin. `-h` and `-V` answer at
-/// once, wherever they stand.
+/// once, wherever they stand. `-k` is accepted and changes nothing: the
+/// input is kept without it.
 fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
     let mut mode = Mode::Compress;
     let mut to_stdout = false;
+    let mut existing = Existing::Refuse;
     let mut operands = Vec::new();
     let mut options_ended = false;
     for arg in args {
@@ -119,6 +134,8 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 "" => options_ended = true,
                 "decompress" => mode = Mode::Decompress,
                 "stdout" => to_stdout = true,
+                "keep" => {}
+                "force" => existing = Existing::Replace,
                 "help" => return Ok(Request::Help),
                 "version" => return Ok(Request::Version),
                 _ => return Err(format!("unknown option \"--{long}\"")),
@@ -129,6 +146,8 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
             match flag {
                 'd' => mode = Mode::Decompress,
                 'c' => to_stdout = true,
+                'k' => {}
+                'f' => existing = Existing::Replace,
                 'h' => return Ok(Request::Help),
                 'V' => return Ok(Request::Version),
                 _ => return Err(format!("unknown option \"-{flag}\"")),
@@ -138,13 +157,14 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
     Ok(Request::Run {
         mode,
         to_stdout,
+        existing,
         operands,
     })
 }
 
 /// Processes each operand in order, or stdin when there is none. A failed
 /// operand does not stop the rest; the run exits 1 if any failed.
-fn run(mode: Mode, to_stdout: bool, operands: &[Option<PathBuf>]) -> ExitCode {
+fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathBuf>]) -> ExitCode {
     let stdin_only = [None];
     let operands = if operands.is_empty() {
         &stdin_only
@@ -157,7 +177,7 @@ fn run(mode: Mode, to_stdout: bool, operands: &[Option<PathBuf>]) -> ExitCode {
     }
     let mut status = ExitCode::SUCCESS;
     for operand in operands {
-        let code = process(mode, operand.as_deref(), to_stdout);
+        let code = process(mode, operand.as_deref(), to_stdout, existing);
         if code == ExitCode::from(SIGPIPE_STATUS) {
             return code;
         }
@@ -171,7 +191,7 @@ fn run(mode: Mode, to_stdout: bool, operands: &[Option<PathBuf>]) -> ExitCode {
 /// Converts one input, stdin when `operand` is `None`, to stdout when there
 /// is no operand or `to_stdout` is set, else to the file named from `operand`
 /// by [`add_suffix`] or [`strip_suffix`].
-fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool) -> ExitCode {
+fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool, existing: Existing) -> ExitCode {
     let target = match operand.filter(|_| !to_stdout) {
         Some(source) => match output_name(mode, source) {
             Ok(out_path) => Some((source, out_path)),
@@ -187,7 +207,7 @@ fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool) -> ExitCode {
         };
         return match target {
             None => compress_into(reader, io::stdout().lock(), "stdout", &input_name),
-            Some((source, out_path)) => write_new_file_with(&out_path, source, |file| {
+            Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
                 compress_into(reader, file, &out_path.display().to_string(), &input_name)
             }),
         };
@@ -198,7 +218,7 @@ fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool) -> ExitCode {
     };
     match target {
         None => decompress_into(&input, &mut io::stdout().lock(), "stdout", &input_name),
-        Some((source, out_path)) => write_new_file_with(&out_path, source, |file| {
+        Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
             decompress_into(&input, file, &out_path.display().to_string(), &input_name)
         }),
     }
@@ -316,10 +336,13 @@ fn open_input(path: Option<&Path>) -> Result<Box<dyn Read>, String> {
     }
 }
 
-/// Opens `path` as a new file, refusing to clobber an existing one (a
-/// compression re-run over an already-compressed file, or a decompression
-/// target that already exists, must not silently destroy it), then runs
-/// `write` against it. Shared by both of [`process`]'s file branches, which
+/// Opens `path` as a new file, refusing to clobber an existing one unless
+/// `existing` is [`Existing::Replace`] (a compression re-run over an
+/// already-compressed file, or a decompression target that already exists,
+/// must not silently destroy it), then runs `write` against it. Replacing
+/// unlinks the old file first and creates a new one, so a hard link to the
+/// input, whose bytes are still being read or were read whole, cannot be
+/// truncated under it; a failed write then leaves no file, as gzip does. Shared by both of [`process`]'s file branches, which
 /// otherwise each open the file and clean up after a failed write
 /// identically.
 ///
@@ -333,8 +356,15 @@ fn open_input(path: Option<&Path>) -> Result<Box<dyn Read>, String> {
 fn write_new_file_with(
     path: &Path,
     source: &Path,
+    existing: Existing,
     write: impl FnOnce(&mut File) -> ExitCode,
 ) -> ExitCode {
+    if matches!(existing, Existing::Replace)
+        && let Err(err) = fs::remove_file(path)
+        && err.kind() != io::ErrorKind::NotFound
+    {
+        return fail(&format!("writing {}: {err}", path.display()));
+    }
     let mut file = match File::options().write(true).create_new(true).open(path) {
         Ok(file) => file,
         Err(err) => return fail(&format!("writing {}: {err}", path.display())),

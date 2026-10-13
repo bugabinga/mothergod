@@ -377,6 +377,73 @@ fn decompress_refuses_to_overwrite_an_existing_output_file() {
 }
 
 #[test]
+fn force_replaces_an_existing_output_file_in_both_directions() {
+    let dir = Dir::new("force");
+    let original = b"force force force force";
+    let source = dir.file("payload", original);
+    let output = dir.file("payload.mgdc", b"already here");
+    for flag in ["-f", "--force"] {
+        let (_stdout, code) = run(bin().arg(flag).arg(&source), b"");
+        assert_eq!(code, 0, "{flag}");
+        let (restored, code) = run(bin().arg("-d"), &std::fs::read(&output).unwrap());
+        assert_eq!((restored.as_slice(), code), (&original[..], 0), "{flag}");
+        std::fs::write(&output, b"already here").expect("restore the old output");
+    }
+
+    let (frame, _) = run(&mut bin(), original);
+    let compressed = dir.file("again.mgdc", &frame);
+    let target = dir.file("again", b"already here");
+    let (_stdout, code) = run(bin().args(["-df"]).arg(&compressed), b"");
+    assert_eq!(code, 0);
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+}
+
+#[test]
+fn force_over_a_hard_link_to_the_input_leaves_the_input_intact() {
+    let dir = Dir::new("force-link");
+    let original = b"link link link link";
+    let (frame, _) = run(&mut bin(), original);
+    let compressed = dir.file("payload.mgdc", &frame);
+    std::fs::hard_link(&compressed, dir.0.join("payload")).expect("link the output to the input");
+    let (_stdout, code) = run(bin().arg("-df").arg(&compressed), b"");
+    assert_eq!(code, 0);
+    assert_eq!(std::fs::read(&compressed).unwrap(), frame);
+    assert_eq!(std::fs::read(dir.0.join("payload")).unwrap(), original);
+}
+
+#[test]
+fn force_over_a_directory_fails_and_names_the_path() {
+    let dir = Dir::new("force-dir");
+    let source = dir.file("payload", b"hello");
+    std::fs::create_dir(dir.0.join("payload.mgdc")).expect("create directory in the way");
+    let output = run_output(bin().arg("-f").arg(&source), b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("payload.mgdc"));
+    assert!(dir.0.join("payload.mgdc").is_dir());
+}
+
+#[test]
+fn force_leaves_no_file_when_the_decode_fails() {
+    let dir = Dir::new("force-corrupt");
+    let corrupt = dir.file("bad.mgdc", b"not a mothergod frame");
+    let old = dir.file("bad", b"already here");
+    let (_stdout, code) = run(bin().arg("-df").arg(&corrupt), b"");
+    assert_eq!(code, 1);
+    assert!(!old.exists());
+}
+
+#[test]
+fn keep_is_accepted_and_changes_nothing() {
+    let dir = Dir::new("keep");
+    let source = dir.file("payload", b"keep keep keep keep");
+    let (_stdout, code) = run(bin().arg("-k").arg(&source), b"");
+    assert_eq!(code, 0);
+    let (kept, _) = run(bin().arg("--keep").arg("-c").arg(&source), b"");
+    assert_eq!(std::fs::read(&source).unwrap(), b"keep keep keep keep");
+    assert_eq!(std::fs::read(dir.0.join("payload.mgdc")).unwrap(), kept);
+}
+
+#[test]
 fn decompress_of_a_corrupt_file_argument_leaves_no_output_file() {
     let dir = std::env::temp_dir().join(format!(
         "mothergod-cli-test-decompress-corrupt-{}",
