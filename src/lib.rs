@@ -730,7 +730,7 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
         let frame = frame?;
         budget.admit(&frame)?;
         let data = match frame.method {
-            Method::Stored => stored_data(frame.payload).to_vec(),
+            Method::Stored => try_vec_from_slice(stored_data(frame.payload))?,
             Method::Lz => codec::decode(frame.payload, codec::MAX_DECODED_LEN)?,
         };
         match &mut output {
