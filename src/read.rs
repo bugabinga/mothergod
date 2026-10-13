@@ -8,6 +8,11 @@ use super::{
     extent_prefix_len, parse_header,
 };
 
+/// The most [`Decoder::fill`] reserves ahead of the bytes the source has
+/// delivered: a hostile length field costs the input that actually arrives,
+/// never what it declares.
+const FILL_STEP: usize = 64 * 1024;
+
 /// Where the decoder stands in the stream it reads.
 #[derive(Clone, Copy)]
 enum State {
@@ -100,12 +105,31 @@ impl<R: Read> Decoder<R> {
 
     /// Grows `self.frame` toward `len` bytes from the source. It holds fewer
     /// afterwards only if the source ended first. Memory follows the bytes
-    /// that arrive, never a declared length.
+    /// that arrive, never a declared length: each step reserves at most
+    /// [`FILL_STEP`] bytes ahead of what the source has delivered.
+    ///
+    /// [`Read::read_to_end`] would be shorter, but it aborts the process on
+    /// a failed allocation where this returns [`Error::OutOfMemory`] (hard
+    /// rule 2; `tests/torture.rs`).
     fn fill(&mut self, len: usize) -> io::Result<()> {
-        let missing = u64::try_from(len - self.frame.len()).unwrap_or(u64::MAX);
-        (&mut self.source)
-            .take(missing)
-            .read_to_end(&mut self.frame)?;
+        while self.frame.len() < len {
+            let have = self.frame.len();
+            let step = (len - have).min(FILL_STEP);
+            self.frame.try_reserve(step).map_err(Error::from)?;
+            // Within the reserved capacity: `resize` allocates nothing.
+            self.frame.resize(have + step, 0);
+            let read = loop {
+                match self.source.read(&mut self.frame[have..]) {
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                    result => break result,
+                }
+            };
+            let read = read.inspect_err(|_| self.frame.truncate(have))?;
+            self.frame.truncate(have + read);
+            if read == 0 {
+                break;
+            }
+        }
         Ok(())
     }
 

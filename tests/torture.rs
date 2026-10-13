@@ -26,12 +26,14 @@
 //! `cargo test --all-targets` still builds this binary but its `main` exits
 //! immediately.
 //!
-//! Coverage today: every fixture is swept through both
-//! [`mothergod::decompress`] (`codec::decode`'s buffered path) and
+//! Coverage today: every fixture is swept through
+//! [`mothergod::decompress`] (`codec::decode`'s buffered path),
 //! [`mothergod::decompress_to_writer`] (`codec::decode_to_writer`/
-//! `decode_undoable_streaming`'s streaming path) — the two paths allocate
-//! different things for the same frame, so a green run on one is not a
-//! claim about the other. On the buffered path, every allocation is
+//! `decode_undoable_streaming`'s streaming path) and
+//! [`mothergod::read::Decoder`] (one frame read whole, its buffer grown
+//! through `try_reserve`). The paths allocate different things for the
+//! same frame, so a green run on one is not a claim about the others.
+//! On the buffered path, every allocation is
 //! fallible: `output`'s capacity — the one allocation whose size is
 //! attacker-controlled (`declared_len`, up to `codec::MAX_DECODED_LEN`)
 //! rather than fixed by a constant — is reserved through
@@ -234,22 +236,29 @@ fn fixture_path(id: &str) -> PathBuf {
 }
 
 /// Which public decode entry point one sweep pass drives: [`mothergod::decompress`]'s
-/// buffered path or [`mothergod::decompress_to_writer`]'s streaming one. The
-/// two allocate different things for the same frame (module doc), so each
-/// fixture is swept under both.
+/// buffered path, [`mothergod::decompress_to_writer`]'s streaming one, or
+/// [`mothergod::read::Decoder`]'s frame-at-a-time reader. They allocate
+/// different things for the same frame (module doc), so each fixture is
+/// swept under all three.
 #[derive(Clone, Copy)]
 enum Api {
     Decompress,
     DecompressToWriter,
+    ReadDecoder,
 }
 
 impl Api {
-    const ALL: [Self; 2] = [Self::Decompress, Self::DecompressToWriter];
+    const ALL: [Self; 3] = [
+        Self::Decompress,
+        Self::DecompressToWriter,
+        Self::ReadDecoder,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::Decompress => "decompress",
             Self::DecompressToWriter => "decompress_to_writer",
+            Self::ReadDecoder => "read_decoder",
         }
     }
 
@@ -257,6 +266,7 @@ impl Api {
         match label {
             "decompress" => Self::Decompress,
             "decompress_to_writer" => Self::DecompressToWriter,
+            "read_decoder" => Self::ReadDecoder,
             other => panic!("unknown api {other:?} in child spec"),
         }
     }
@@ -275,6 +285,14 @@ impl Api {
                 // u32::MAX so this leg's only bound is codec::MAX_DECODED_LEN
                 // itself, matching decompress's own effective bound.
                 let _ = mothergod::decompress_to_writer(data, u32::MAX, &mut out);
+            }
+            Self::ReadDecoder => {
+                // A stack buffer, not read_to_end into a Vec, for the reason
+                // DiscardSink gives.
+                use std::io::Read as _;
+                let mut decoder = mothergod::read::Decoder::new(data);
+                let mut buf = [0u8; 4096];
+                while decoder.read(&mut buf).is_ok_and(|len| len > 0) {}
             }
         }
     }
