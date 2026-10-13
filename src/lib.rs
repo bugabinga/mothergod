@@ -886,8 +886,9 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// all three, but `Candidate::Transpose`'s decode writes scattered across
 /// the *entire* buffer in column-major order, so it needs the whole buffer
 /// resident. This predicate does not share [`decompress_to_writer`]'s own
-/// dispatch: a caller can ask before committing to either API, and tests
-/// hold the two in sync.
+/// dispatch: a caller can ask before committing to either API. No test runs
+/// [`decompress_to_writer`] against the answer, so the two agreeing is
+/// unchecked.
 ///
 /// # Errors
 ///
