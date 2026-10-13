@@ -1,13 +1,10 @@
-//! `Method::Lz` wiring (`research/JOURNAL.md` S2-D2, ROADMAP M1's last
-//! `Method`-wiring slice): [`crate::filters::select::pick`] shortlists
-//! candidate filters, each is trial-encoded through the optimal-parse LZ
-//! parser ([`crate::lz`]), the flag/length/offset/rep-slot adaptive
-//! tables ([`crate::model`]), the six-expert literal mixer
-//! ([`crate::literal`]), and the range coder ([`crate::coder`]), and
-//! whichever candidate produces the smallest payload wins. Ported from
-//! the archive's `encode`/`encode_body`/`decode`
-//! (`research/imports/session-1/mothergod.rs`), not the code, per
-//! ADR-0006.
+//! `Method::Lz` wiring (`research/JOURNAL.md` S2-D2):
+//! [`crate::filters::select::pick`] shortlists candidate filters, each is
+//! trial-encoded through the optimal-parse LZ parser ([`crate::lz`]), the
+//! flag/length/offset/rep-slot adaptive tables ([`crate::model`]), the
+//! six-expert literal mixer ([`crate::literal`]), and the range coder
+//! ([`crate::coder`]), and whichever candidate produces the smallest payload
+//! wins.
 //!
 //! # Payload layout
 //!
@@ -19,9 +16,6 @@
 //! 10      8     range-coded stream length in bytes, u64 LE
 //! 18      ...   range-coded stream (crate::coder), of the FILTERED bytes
 //! ```
-//!
-//! `docs/adr/0028-wire-filter-selection.md` added the 2-byte filter
-//! selector ahead of the layout ADR-0026 shipped.
 //!
 //! [`decode`] reads exactly one wire version, `FORMAT_VERSION`: every
 //! earlier version was retired outright, no release ever having written
@@ -49,17 +43,16 @@
 //! The declared output length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
 //! hostile payload can claim any token count or any match/rep length, but
-//! [`decode`] never grows its output buffer past this field, and never
-//! preallocates a capacity derived from it either. That field is itself
-//! capped at [`decode`]'s caller-supplied `max_len`, in turn capped at
-//! [`MAX_DECODED_LEN`] by [`crate::decompress_bounded`], so a tiny payload
-//! cannot declare an unbounded length and force unbounded decode work; see
-//! [`MAX_DECODED_LEN`]'s docs for why, and [`decode`]'s docs for the rest.
+//! [`decode`] rejects the token that would grow its output buffer past this
+//! field. That field is itself capped at [`decode`]'s caller-supplied
+//! `max_len`, in turn capped at [`MAX_DECODED_LEN`] by
+//! [`crate::decompress_bounded`], so a tiny payload cannot declare an
+//! unbounded length and force unbounded decode work; see [`MAX_DECODED_LEN`]'s
+//! docs for why, and [`decode`]'s docs for the rest.
 //!
-//! [`ideal_cost_bits`] completes ROADMAP M2's ideal-cost accounting mode
-//! (`research/JOURNAL.md` S2-A30/S2-A31 built the per-model pieces this
-//! sums): the whole-codec `-log2(p)` pass across the flag/length/offset/slot
-//! streams and literal bytes together, without touching an [`Encoder`].
+//! [`ideal_cost_bits`] is the whole-codec `-log2(p)` pass (ROADMAP M2's
+//! ideal-cost accounting mode) across the flag/length/offset/slot streams and
+//! literal bytes together, without touching an [`Encoder`].
 
 use std::num::{NonZeroU32, NonZeroUsize};
 
@@ -96,7 +89,7 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// degenerate case this format's adaptive models handle best), a
 /// legitimate frame already reaches a ~3,158:1 ratio at a 19-byte payload,
 /// with the ratio still climbing as input grows and the payload barely
-/// moving — this format's models saturate fast enough that a real
+/// moving: this format's models saturate fast enough that a real
 /// encoder's output and a forged header become indistinguishable by size
 /// alone. An explicit ceiling on the declared length itself is the only
 /// bound left, and it caps total decode work too: every token contributes
@@ -133,7 +126,7 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Which of the three kinds a token codes as: the flag symbol coded
-/// before every token. Matches the archive's `flag.enc(ac, {0,1,2})`.
+/// before every token.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum FlagKind {
     Literal,
@@ -142,7 +135,7 @@ enum FlagKind {
 }
 
 impl FlagKind {
-    /// The [`Model`] symbol this kind codes as, `flag.enc`'s `{0,1,2}`.
+    /// The [`Model`] symbol this kind codes as.
     const fn index(self) -> usize {
         match self {
             Self::Literal => 0,
@@ -175,10 +168,9 @@ struct Models {
     /// its own weights, error EMAs and `LogitSse` table, one per
     /// frame/trial, the same lifetime as `literal`'s six real banks.
     logit_sse: SurpriseLogisticMixLogitSse,
-    /// One flag table per "was the previous token a copy" state (the
-    /// archive's `flag[2]`): a literal run and a post-copy position have
-    /// different flag distributions worth modeling separately. Indexed by
-    /// [`Context::after_copy`].
+    /// One flag table per "was the previous token a copy" state: a literal
+    /// run and a post-copy position have different flag distributions worth
+    /// modeling separately. Indexed by [`Context::after_copy`].
     flag: [Model; 2],
     /// [`Token::Match`]'s own copy-length [`Model`], independent of
     /// `length_rep` (`research/JOURNAL.md` S2-A109/S2-A110,
@@ -262,9 +254,7 @@ fn bucket_bits(b: usize) -> u32 {
 
 /// Codes `value` (a match/rep length, or a match distance) as a
 /// [`lz::bucket`] symbol through `model`, then the residual low bits of
-/// `value` within that bucket as raw, unmodeled bits. Matches the
-/// archive's `lenm.enc(ac,lb); ac.bits(l,lb)` (and the identical shape for
-/// offsets).
+/// `value` within that bucket as raw, unmodeled bits.
 fn encode_bucketed(model: &mut Model, ac: &mut Encoder, value: u32) {
     let b = lz::bucket(value);
     model.encode(ac, b);
@@ -285,8 +275,8 @@ fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
 
 /// [`ideal_cost_bits`]'s counterpart to [`encode_bucketed`]: the bucket
 /// symbol's modeled `-log2(p)` cost plus the residual low bits' cost, which
-/// is exactly `bits` — [`crate::coder::Encoder::encode_bits`] emits them
-/// raw and unmodeled, so their cost is their count, not a `Model` lookup.
+/// is their count: [`crate::coder::Encoder::encode_bits`] emits them raw and
+/// unmodeled, so there is no `Model` lookup to price.
 fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
     let b = lz::bucket(value);
     let cost = model.ideal_cost_bits(b);
@@ -522,25 +512,17 @@ impl TokenSink for CostSink {
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        // Matches EncodeSink::literal's None branch (encode_logit_sse;
-        // every CostSink caller here parses `data` with no filter selection,
-        // so Candidate::Transpose's encode_column never arises) — this
-        // trait's own docs: CostSink and EncodeSink must price and code the
-        // same thing, so ideal_cost_bits stays a true estimate of what
-        // encode_tokens's real Encoder pays.
+        // No filter selection here, so `Candidate::Transpose`'s
+        // `encode_column` never arises: this prices `EncodeSink::literal`'s
+        // `None` branch.
         self.bits += price_literal(models, context, byte);
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        // Matches EncodeSink::length (split models, residual trees): ideal_cost_bits
-        // stays a true estimate of what encode_tokens's real Encoder pays.
         self.bits += price_length(models, kind, value);
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        // Matches EncodeSink::offset (the length-keyed models):
-        // ideal_cost_bits stays a true estimate of what encode_tokens's
-        // real Encoder pays.
         self.bits += price_offset(models, len, value);
     }
 
@@ -550,9 +532,7 @@ impl TokenSink for CostSink {
 }
 
 /// Encodes already-filtered `data` through the LZ + context-mixing
-/// pipeline: [`encode`]'s per-candidate trial body, and the whole of what
-/// this function used to be before filter trial-selection wrapped it.
-/// `columns` is `Some` exactly when this trial's candidate is
+/// pipeline: [`encode`]'s per-candidate trial body. `columns` is `Some` exactly when this trial's candidate is
 /// [`Candidate::Transpose`] with that column count, selecting the
 /// column-expert literal path for the whole trial (see [`EncodeSink`]).
 /// Panics under the same condition as [`encode_tokens_with`], which this
@@ -768,19 +748,10 @@ where
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        // Matches CostSink::length (the split models): this sink's
-        // baseline half must equal ideal_cost_bits's own length pricing
-        // exactly (not its literal pricing, which differs on purpose — see
-        // `tests::LiteralOnlyCostSink`'s docs), the guard
-        // `ppm_expert_experiment_baseline_non_literal_subtotal_matches_ideal_cost_bits`
-        // checks.
         self.cost.add_same(price_length(models, kind, value));
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        // Matches CostSink::offset (the length-keyed models): this sink's
-        // baseline half must equal ideal_cost_bits's own offset pricing
-        // exactly, the same guard `length`'s own comment above names.
         self.cost.add_same(price_offset(models, len, value));
     }
 
@@ -932,8 +903,8 @@ impl ResidualTree {
 /// filter [`filters::select::pick`] shortlists, keeps whichever produces
 /// the smallest `encode_tokens` body, and prefixes that body with the
 /// winning candidate's 2-byte selector (see the module docs' "Payload
-/// layout"). Filters are trialed against the raw input directly (never
-/// stacked), matching the archive's `encode`.
+/// layout"). Filters are trialed against the raw input directly, never
+/// stacked.
 ///
 /// # Panics
 ///
@@ -1105,7 +1076,7 @@ fn ensure_within_window(distance: NonZeroU32) -> Result<(), Error> {
 /// instead of panicking when `distance` reaches before the start of
 /// `output`: unlike `replay`, this runs on a token stream decoded from an
 /// adversarial bitstream, not one [`lz::parse_optimal`] just produced
-/// (`rust-craft` skill, panic-discipline — decode-path input is never
+/// (`rust-craft` skill, panic-discipline: decode-path input is never
 /// trusted).
 fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<(), Error> {
     let distance = distance.get() as usize;
@@ -1114,8 +1085,8 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
         // start + k < output.len() at every iteration: start < output.len()
         // going in (checked_sub succeeded against a distance >= 1), and
         // output grows by exactly one element per iteration from there, so
-        // the index this iteration reads is always already written —
-        // either from before this call, or by an earlier iteration of it
+        // the index this iteration reads is always already written,
+        // either from before this call or by an earlier iteration of it
         // (the overlapping-run case).
         let byte = output[start + k];
         output.push(byte);
@@ -1287,63 +1258,49 @@ impl DecodeSink for VecSink<'_> {
 
 /// Decodes a payload produced by [`encode`] back into the original bytes.
 ///
-/// Bounds decode work and allocation to the frame's declared output size,
-/// itself bounded by `max_len` (`docs/format/SPEC.md`,
-/// `rust-craft` skill's allocation-discipline): `output` is reserved
-/// fallibly and exactly once, up front, to `declared_len` (`try_reserve_exact`,
-/// returning [`Error::OutOfMemory`] on a real allocator failure instead of
-/// aborting), and every token is rejected the moment it would grow `output`
-/// past that length — so a payload lying about either the declared length or
-/// the token count cannot make this function do more work, or allocate more
-/// memory, than the length it declared allows, and `max_len` bounds what it
-/// is allowed to declare in the first place, itself
-/// clamped to [`MAX_DECODED_LEN`] regardless of what is passed in: that
-/// constant is the only ceiling this decoder's worst-case decode time has
-/// been measured against (see its docs). [`crate::decompress_bounded`]
-/// clamps before calling this function too, so the clamp here is a second,
-/// redundant guarantee for any other caller reaching this `#[doc(hidden)]`
-/// but still `pub` function directly. See [`MAX_DECODED_LEN`]'s docs for why
-/// a fixed ceiling, not a ratio check against the payload's own size, is the
-/// sound bound here.
+/// Bounds decode work and allocation to the frame's declared output length
+/// (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline):
+/// `output` is reserved fallibly and exactly once, up front, to
+/// `declared_len` (`try_reserve_exact`, so a real allocator failure is
+/// [`Error::OutOfMemory`], not an abort), and every token is rejected the
+/// moment it would grow `output` past that length. A payload lying about the
+/// declared length or the token count therefore cannot cost more work or
+/// memory than the length it declared allows. `max_len` bounds what it may
+/// declare, clamped to [`MAX_DECODED_LEN`] whatever the caller passes:
+/// [`crate::decompress_bounded`] clamps too, so the clamp here covers other
+/// callers of this `#[doc(hidden)]` `pub` function. See [`MAX_DECODED_LEN`]'s
+/// docs for why a fixed ceiling, not a ratio against the payload's own size,
+/// is the sound bound.
+///
+/// A [`Candidate::Transpose`] frame decodes its literals through
+/// [`crate::literal::Literal::decode_column`], every other candidate through
+/// [`crate::literal::Literal::decode_logit_sse`] (see the module docs'
+/// "Payload layout"). `payload` is a `Method::Lz` payload of the current
+/// `FORMAT_VERSION`: [`crate::decompress`] rejects any other version before
+/// calling this.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Truncated`] if `payload` is shorter than the 2-byte
-/// filter selector plus the 8-byte declared-length/token-count header.
-/// Returns [`Error::Corrupt`] if the filter selector is not one
-/// [`Candidate::from_header_bytes`] recognizes. Returns
-/// [`Error::TooLarge`] if the declared length exceeds `max_len`, checked
-/// before any allocation or decode work.
-/// Returns [`Error::OutOfMemory`] if the allocator cannot satisfy `output`'s
-/// capacity reservation, one of the model's fixed-size tables, or (for
-/// [`Candidate::Delta`]/[`Candidate::Bcj`]/[`Candidate::Transpose`]) the
-/// filter's undo buffer.
-/// Returns [`Error::Corrupt`] if a match token's distance exceeds
-/// [`lz::WINDOW`] (the real encoder's match finder never searches past it,
-/// `research/JOURNAL.md` M4's bounded-memory decode guarantee: a distance
-/// beyond `WINDOW` is never legitimate and, left unrejected, would force
-/// this decoder to retain output far past what any real bitstream needs),
-/// if a match or rep token's distance reaches before the start of decoded
-/// output, if a token would grow decoded output past the declared length,
-/// or if the final decoded length does not equal it: all adversarial or
-/// malformed input, never a bug in this decoder (`rust-craft` skill,
-/// panic-discipline).
-///
-/// `payload` is a `Method::Lz` payload of the current `FORMAT_VERSION`:
-/// [`crate::decompress`] rejects any other version before calling this.
-/// A [`Candidate::Transpose`] frame decodes its literals through
-/// [`crate::literal::Literal::decode_column`], blending a column-keyed
-/// seventh expert into the mix; every other candidate through
-/// [`crate::literal::Literal::decode_logit_sse`] (see the module docs'
-/// "Payload layout" section).
+/// - [`Error::Truncated`] if `payload` is shorter than the filter selector,
+///   the header, or the stream the header declares.
+/// - [`Error::TooLarge`] if the declared length exceeds `max_len`, checked
+///   before any allocation or decode work.
+/// - [`Error::OutOfMemory`] if the allocator cannot satisfy `output`'s
+///   reservation, one of the model's fixed-size tables, or (for
+///   [`Candidate::Delta`], [`Candidate::Bcj`] and [`Candidate::Transpose`])
+///   the filter's undo buffer.
+/// - [`Error::Corrupt`] if the filter selector names no [`Candidate`]; bytes
+///   follow the stream; a match distance exceeds [`lz::WINDOW`] (the
+///   encoder's match finder never searches past it, so a wider one is never
+///   legitimate, and left unrejected would force the decoder to retain
+///   output far past what any real bitstream needs, `research/JOURNAL.md`
+///   M4); a match or rep distance reaches before the start of decoded
+///   output; a token would grow decoded output past the declared length; or
+///   the final decoded length differs from it.
 ///
 /// # Panics
 ///
-/// Does not panic on adversarial `payload`. One internal `.expect()`
-/// guards an invariant of this function's own math, never a property of
-/// `payload`: turning a decoded match distance into a [`NonZeroU32`]
-/// (a mathematical invariant of `decode_bucketed`, see that function's
-/// docs).
+/// Never, on any `payload`.
 pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let (candidate, payload) = split_candidate(payload)?;
     let (declared_len, token_count, ac_bytes) = read_header(payload, max_len)?;
@@ -1530,9 +1487,9 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
 /// [`decode`], replaying matches and reps through a fixed-capacity
 /// [`lz::Window`] instead of a fully-resident `Vec<u8>`, undoing each byte
 /// through `undo` and writing the result to `writer` the instant it is
-/// produced. `window` holds the *filtered* byte stream throughout — matches
+/// produced. `window` holds the *filtered* byte stream throughout: matches
 /// and reps reference positions in what the encoder's LZ pass actually saw,
-/// which is filtered data (`apply_filter` runs before `encode_tokens`) — so
+/// which is filtered data (`apply_filter` runs before `encode_tokens`), so
 /// only the byte handed to `writer` differs per candidate, never what goes
 /// into `window` or `context`. `payload` here has already had its 2-byte
 /// filter selector stripped by [`decode_to_writer`], matching
@@ -1576,13 +1533,13 @@ fn decode_undoable_streaming<W: std::io::Write>(
 /// through `window` (the filtered stream), undoing each byte through `undo`
 /// and writing the result to `writer` as it is produced, returning the
 /// context updated the same way [`decode`]'s batch
-/// `context.after_copy(&output[start..])` does — `context` folds over the
+/// `context.after_copy(&output[start..])` does: `context` folds over the
 /// *filtered* bytes `window` holds, never `undo`'s output, matching
 /// [`decode_undoable_streaming`]'s own split. Splitting the run into
 /// per-byte [`Context::after_copy`] calls instead of one batch call is
 /// exactly equivalent: each call folds `word_hash` over its slice and sets
 /// `prev1`/`prev2` from its last (up to) two bytes, so chaining single-byte
-/// calls reproduces the same final state a single multi-byte call would —
+/// calls reproduces the same final state a single multi-byte call would;
 /// `window`'s ring buffer never holds the whole run contiguously when it
 /// wraps, so a batch call is not an option here the way it is in [`decode`].
 ///
