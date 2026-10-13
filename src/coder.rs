@@ -1,42 +1,30 @@
-//! Adaptive range coder: [`Encoder`] and [`Decoder`], the arithmetic-coding
-//! primitive [`crate::model::Model`] and [`crate::literal::Literal`] drive
-//! (`JOURNAL` S2-D2).
+//! Adaptive range coder: [`Encoder`] and [`Decoder`], driven by
+//! caller-supplied cumulative-frequency ranges (`JOURNAL` S2-D2).
 //!
-//! Ported from the archive's `Enc`/`Dec`
-//! (`research/imports/session-1/mothergod.rs`), not the code, per ADR-0006:
-//! same 32-bit interval, same three renormalization cases (top-half fixed,
-//! bottom-half fixed, straddling the middle with carry deferred via
-//! `pending`), same byte-oriented bit packer. This slice is the coder
-//! alone, driven directly by caller-supplied cumulative-frequency ranges;
-//! [`crate::model::Model`] is the order-0 adaptive frequency table that
-//! supplies those ranges from real data, and [`crate::literal::Literal`]
-//! is the six-expert mixer that supplies them for literal bytes.
-//! [`Decoder`] already treats a stream shorter than the coder expects as
-//! implicit trailing zero bits rather than panicking (hard rule 2,
-//! `CLAUDE.md`): the archive's own decoder relied on the same behavior.
+//! A 32-bit interval renormalizes in three cases: top half fixed, bottom
+//! half fixed, straddling the middle with the carry deferred via `pending`.
+//!
+//! [`Decoder`] reads a stream shorter than it expects as implicit trailing
+//! zero bits, never a panic (hard rule 2, `CLAUDE.md`).
 
-/// Width of the coder's `[low, high]` interval, in bits. `u64` arithmetic
-/// throughout keeps every intermediate (`range * total`) from overflowing
-/// as long as `total` also fits in 32 bits, the same bound the archive's
-/// frequency tables (`LIM`, `research/imports/session-1/mothergod.rs`)
-/// stay far under.
+/// The coder's `[low, high]` interval is `[0, TOP)`. `u64` arithmetic keeps
+/// every intermediate (`range * total`) from overflowing as long as `total`
+/// fits in 32 bits.
 const TOP: u64 = 1 << 32;
 const HALF: u64 = TOP >> 1;
 const QUARTER: u64 = TOP >> 2;
 const THREE_QUARTERS: u64 = 3 * (TOP >> 2);
 const MASK: u64 = TOP - 1;
 
-/// Uniform-probability scale [`Encoder::encode_bits`]/[`Decoder::decode_bits`]
-/// use to code raw bits with no model: each bit is symbol 0 or 1 out of this
-/// total, i.e. exactly 50/50. Used for the residual bits below an
-/// adaptively-coded length/offset bucket.
+/// Total the binary coders split: [`Encoder::encode_bits`] and
+/// [`Decoder::decode_bits`] take each bit as symbol 0 or 1 out of it, exactly
+/// 50/50; [`Encoder::encode_bit`] and [`Decoder::decode_bit`] split it at a
+/// quantized probability.
 const BIT_SCALE: u64 = 1 << 16;
 
 /// Narrows `[low, high]` to the sub-range `[cum_low, cum_high)` out of
-/// `total`: the interval-splitting arithmetic [`Encoder::encode`] and
-/// [`Decoder::decode`] each perform before renormalizing. Shared so a future
-/// change to the rounding here can't drift between the two and desync them
-/// mid-stream (hard rule 1, `CLAUDE.md`).
+/// `total`. Shared by [`Encoder::encode`] and [`Decoder::decode`] so their
+/// rounding cannot drift apart and desync the stream (hard rule 1).
 ///
 /// # Panics
 ///
@@ -48,11 +36,9 @@ fn narrow(low: u64, high: u64, cum_low: u64, cum_high: u64, total: u64) -> (u64,
     (new_low, new_high)
 }
 
-/// Splits `[0, BIT_SCALE)` at `threshold` for
-/// [`Encoder::encode_bit`]/[`Decoder::decode_bit`]: `bit` takes the low side
+/// Splits `[0, BIT_SCALE)` at `threshold`: `bit` takes the low side
 /// `[0, threshold)`, `!bit` the high side `[threshold, BIT_SCALE)`. Shared
-/// for the same reason as [`narrow`]: both sides must derive the identical
-/// range from the identical threshold.
+/// by [`Encoder::encode_bit`] and [`Decoder::decode_bit`], like [`narrow`].
 fn threshold_range(bit: bool, threshold: u64) -> (u64, u64) {
     if bit {
         (0, threshold)
@@ -61,20 +47,16 @@ fn threshold_range(bit: bool, threshold: u64) -> (u64, u64) {
     }
 }
 
-/// Splits `[0, BIT_SCALE)` in half for
-/// [`Encoder::encode_bits`]/[`Decoder::decode_bits`]'s fixed, unmodeled
-/// 50/50 coding: `bit` `0` takes the low half, `1` the high half. Shared
-/// for the same reason as [`narrow`].
+/// Splits `[0, BIT_SCALE)` in half: `bit` `0` takes the low half, `1` the
+/// high half. Shared by [`Encoder::encode_bits`] and [`Decoder::decode_bits`],
+/// like [`narrow`].
 fn uniform_range(bit: u64) -> (u64, u64) {
     (bit * (BIT_SCALE / 2), (bit + 1) * (BIT_SCALE / 2))
 }
 
-/// Range-codes a byte stream from a sequence of caller-supplied
-/// cumulative-frequency ranges.
-///
-/// Holds no model of its own: [`Self::encode`] takes `[cum_low, cum_high)`
-/// out of `total` on every call, so any adaptive frequency table (or a
-/// fixed one) can drive it.
+/// Range-codes a byte stream from caller-supplied cumulative-frequency
+/// ranges. Holds no model: [`Self::encode`] takes `[cum_low, cum_high)` out
+/// of `total` on every call.
 #[derive(Debug)]
 pub struct Encoder {
     low: u64,
@@ -161,9 +143,8 @@ impl Encoder {
     }
 
     /// Encodes the low `bits` bits of `value`, most-significant first, each
-    /// at a fixed 50/50 probability (no model). For residual bits below an
-    /// adaptively-coded bucket, e.g. a match length's low bits once its
-    /// bucket symbol is coded.
+    /// at a fixed 50/50 probability: the residual bits below an
+    /// adaptively-coded length or offset bucket.
     pub fn encode_bits(&mut self, value: u32, bits: u32) {
         for k in (0..bits).rev() {
             let bit = u64::from((value >> k) & 1);
@@ -172,13 +153,9 @@ impl Encoder {
         }
     }
 
-    /// Codes `bit` at `probability_of_one` (the caller's current estimate
-    /// that the bit is `1`), quantized into a fixed-point threshold.
-    /// Complements [`Self::encode_bits`]: that method codes a bit at a
-    /// fixed, unmodeled 50/50 split, this one at an arbitrary
-    /// caller-supplied split — the primitive an [`crate::sse::Sse`]-
-    /// calibrated binary decision (`JOURNAL` S1-P1) needs, once wired into
-    /// `codec.rs`.
+    /// Codes `bit` at `probability_of_one` (the caller's estimate that the
+    /// bit is `1`), quantized into a fixed-point threshold: the primitive an
+    /// [`crate::sse::Sse`]-calibrated binary decision needs.
     pub fn encode_bit(&mut self, bit: bool, probability_of_one: f64) {
         let threshold = quantize_probability(probability_of_one);
         let (cum_low, cum_high) = threshold_range(bit, threshold);
@@ -198,9 +175,8 @@ impl Encoder {
     }
 }
 
-/// Reads a byte stream coded by [`Encoder`], resolving cumulative-frequency
-/// targets from caller-supplied ranges the same way `Encoder::encode` was
-/// driven, symbol by symbol in lockstep.
+/// Reads a byte stream coded by [`Encoder`], driven by the same ranges in the
+/// same order.
 #[derive(Debug)]
 pub struct Decoder<'a> {
     low: u64,
@@ -214,10 +190,9 @@ impl<'a> Decoder<'a> {
     /// Starts decoding `data`, priming the coder's window with its first 32
     /// bits.
     ///
-    /// Never panics on short input: a stream under 32 bits reads as
-    /// implicit trailing zero bits, the same past-the-end behavior used
-    /// throughout decoding (hard rule 2, `CLAUDE.md`) — adversarial
-    /// truncation degrades to garbage output, not a crash.
+    /// Never panics on short input: a stream under 32 bits reads as implicit
+    /// trailing zero bits, so truncation degrades to garbage output, not a
+    /// crash (hard rule 2).
     #[must_use]
     pub fn new(data: &'a [u8]) -> Self {
         let mut decoder = Self {
@@ -234,10 +209,8 @@ impl<'a> Decoder<'a> {
         decoder
     }
 
-    /// Reads one bit from `data`, MSB first within each byte. Past the end
-    /// of `data`, reads as `0` rather than panicking or erroring: the
-    /// standard range-coder convention of treating a truncated stream as
-    /// padded with zero bits.
+    /// Reads one bit from `data`, MSB first within each byte; `0` past the
+    /// end.
     fn next_bit(&mut self) -> u8 {
         let byte_index = self.bit_pos >> 3;
         let bit = if byte_index < self.data.len() {
@@ -264,8 +237,7 @@ impl<'a> Decoder<'a> {
 
     /// Consumes the sub-range `[cum_low, cum_high)` out of `total` the
     /// caller determined from [`Self::target`], mirroring
-    /// [`Encoder::encode`]'s narrowing and renormalization bit-for-bit so
-    /// encoder and decoder stay in lockstep.
+    /// [`Encoder::encode`]'s narrowing and renormalization bit-for-bit.
     ///
     /// # Panics
     ///
@@ -308,11 +280,9 @@ impl<'a> Decoder<'a> {
     }
 
     /// Inverse of [`Encoder::encode_bit`]: resolves which side of the same
-    /// `probability_of_one`-derived threshold the coder's current value
-    /// falls on, consumes that sub-range, and returns the coded bit. Never
-    /// panics on adversarial `self` state, same guarantee as
-    /// [`Self::decode_bits`]: [`Self::target`] is mathematically bounded to
-    /// `[0, total)` regardless of what bytes produced it.
+    /// threshold the coder's value falls on, consumes that sub-range, and
+    /// returns the coded bit. Never panics on adversarial `self` state:
+    /// [`Self::target`] is bounded to `[0, total)` whatever bytes produced it.
     #[must_use]
     pub fn decode_bit(&mut self, probability_of_one: f64) -> bool {
         let threshold = quantize_probability(probability_of_one);
@@ -323,18 +293,15 @@ impl<'a> Decoder<'a> {
     }
 }
 
-/// Quantizes `probability_of_one` (the caller's estimate that the coded bit
-/// is `1`) into a [`BIT_SCALE`]-wide integer threshold: bit `1` occupies
-/// `[0, threshold)`, bit `0` occupies `[threshold, BIT_SCALE)` — so a
-/// `probability_of_one` near `1.0` gives bit `1` the wide interval, and
-/// costs it the fewer bits. Clamped to
-/// `1..=BIT_SCALE - 1` so neither outcome is ever assigned zero width,
-/// mirroring [`crate::model::Model::new`]'s "nothing is ever impossible to
-/// code" guarantee for a caller-supplied probability instead of a frequency
-/// count. [`Encoder::encode_bit`] and [`Decoder::decode_bit`] both call this
-/// with identical inputs and only `+ - * /`, [`f64::clamp`], and rounding —
-/// no libm transcendental — so both sides compute the same threshold
-/// bit-for-bit (ADR-0024's determinism rule).
+/// Quantizes `probability_of_one` into a [`BIT_SCALE`]-wide integer
+/// threshold: bit `1` occupies `[0, threshold)`, bit `0` occupies
+/// `[threshold, BIT_SCALE)`. Clamped to `1..=BIT_SCALE - 1` so neither
+/// outcome is ever assigned zero width, mirroring
+/// [`crate::model::Model::new`]'s "nothing is ever impossible to code".
+/// [`Encoder::encode_bit`] and [`Decoder::decode_bit`] both call this with
+/// identical inputs and only `+ - * /`, [`f64::clamp`], and rounding, no libm
+/// transcendental, so both sides compute the same threshold bit-for-bit
+/// (ADR-0024's determinism rule).
 fn quantize_probability(probability_of_one: f64) -> u64 {
     #[allow(
         clippy::cast_precision_loss,
@@ -356,16 +323,8 @@ fn quantize_probability(probability_of_one: f64) -> u64 {
 #[cfg(test)]
 mod tests;
 
-// `mod tests` above is a wall of `roundtrip*` examples that each vary one
-// dimension (alphabet size, symbol distribution, stream length): the
-// escalation ladder's rung-2 trigger (`test-craft`'s escalation-ladder
-// reference, #452 scope item 1). The examples stay as named anchors for
-// the specific edge cases they document; this property sweeps arbitrary
-// alphabets and symbol streams instead of one example per shape.
-// `roundtrip_symbols` is `mod tests`' own helper (its `FreqTable` test
-// double stands in for a real model, same shape as `model.rs`'s own
-// `Model` type, which gets the same property against the real thing),
-// reused here rather than duplicated.
+// Sweeps arbitrary alphabets and symbol streams where `mod tests` has one
+// `roundtrip*` example per shape, through `mod tests`' own `roundtrip_symbols`.
 // Not under Miri: interpretation costs 300-5000x per case on this
 // crate (measured, issue #456), the storm multiplies that by its case
 // count, and the deterministic example tests already walk the same
