@@ -8,6 +8,14 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- library: `mothergod::write::Encoder` wraps any `std::io::Write` and
+  compresses what is written through it, so a `tar` builder, `io::copy` or an
+  HTTP body can write into a compressor without the caller collecting the whole
+  input first. It buffers one 16 MiB block at a time and writes one frame per
+  block; `finish` writes the last frame and returns the writer. Written
+  without `flush`, its stream is byte for byte what `copy_encode` writes, and
+  a failing writer ends the encoder instead of leaving a stream that skips a
+  block (#979).
 - library: `mothergod::read::Decoder` wraps any `std::io::Read` and yields the
   decompressed bytes, so a stream drops into `io::copy`, a `BufReader` or a
   `tar` builder without the caller buffering the compressed file. It holds one
