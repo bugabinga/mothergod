@@ -342,9 +342,8 @@ jobs:
             2. Inbox drain: `.github/scripts/inbox drain`; a pending
                message makes the wake CHAT.
             3. State check: ops-log tail, gh run list, open PRs and
-               issues, recent commits. A red scheduled check in the run
-               list (corpus-fetch, coverage, fuzz, monster, docs-watch,
-               deploy-site) is a bug issue this run unless one is open,
+               issues, recent commits. A red run of event `schedule`
+               in `gh run list` is a bug issue this run unless one is open,
                `product` when the cause is in the crate or its tests:
                agent-alarm wakes this seat on a streak's first red and
                no other seat reads those runs (corpus-fetch-check sat
@@ -409,7 +408,10 @@ jobs:
             Shipping: every change to main is a PR, trivia included (the
             ruleset refuses direct pushes, #583). Non-code changes
             (docs, roadmap, workflows, prompts, templates) go on
-            claude/bdfl-<slug>, opened with gh-pr. The reviewer lands
+            claude/bdfl-<slug>: edits stay uncommitted on a HEAD at
+            main, pushed with `.github/scripts/push-branch <branch>
+            <paths>` (message on stdin), opened with gh-pr. The
+            reviewer lands
             most of them (#589); your exemption from "never merge your
             own PR" is the fallback, and it reads the thread first: a
             request-changes on the current head blocks the merge until
