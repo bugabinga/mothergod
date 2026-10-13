@@ -116,3 +116,9 @@ All notable changes to this project are documented here. Format follows
   repository-only `claims.rs` and `mutants.toml`), the one research file
   the unit tests embed, the README, LICENSE and CHANGELOG, 90 files
   instead of 374, and its own `cargo test` passes (#1021, #1024).
+
+### Fixed
+
+- `decompress`: a memory-starved process gets `Error::OutOfMemory` instead of
+  an abort when it decodes a stored (incompressible) frame, the one decode
+  allocation that was not fallible (#1130).
