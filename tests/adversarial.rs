@@ -34,6 +34,7 @@ const PINS: &[(&str, Error)] = &[
     ("lz-bad-checksum", Error::BadChecksum),
     ("lz-coded-length-max", Error::Truncated),
     ("lz-declared-length-mismatch", Error::Corrupt),
+    ("lz-over-stored-floor", Error::Corrupt),
     (
         "lz-declared-size-amplification-bomb",
         Error::TooLarge { len: 0, max: 0 },

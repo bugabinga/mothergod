@@ -54,6 +54,29 @@ pub(crate) fn as_codec_error(err: &super::WriteError) -> Option<&super::Error> {
     }
 }
 
+/// The least declared output length for which an `Lz` payload with an empty
+/// range-coded stream stays within the Stored floor (`docs/format/SPEC.md`,
+/// "Invariants"): a test that hand-builds a header-only frame declares at
+/// least this, or the extent parse rejects it as `Corrupt`.
+pub(crate) fn floor_declared_len() -> u32 {
+    u32::try_from(crate::codec::EXTENT_PREFIX_LEN - crate::STORED_LEN_BYTES)
+        .expect("the extent prefix is a few bytes")
+}
+
+/// Rewrites the declared output length of the `Lz` `frame` to `declared_len`
+/// and its coded length to the most the Stored floor lets that declare, so
+/// the extent parse accepts a frame whose stream is not there. The check
+/// value is left stale: the extent is read before it.
+pub(crate) fn forge_floor_extent(frame: &mut [u8], declared_len: u32) {
+    let coded_field = crate::HEADER_LEN + crate::codec::EXTENT_PREFIX_LEN - size_of::<u64>();
+    let declared_field = coded_field - 2 * size_of::<u32>();
+    let coded_len = u64::from(declared_len) + (crate::STORED_LEN_BYTES as u64)
+        - crate::codec::EXTENT_PREFIX_LEN as u64;
+    frame[declared_field..declared_field + size_of::<u32>()]
+        .copy_from_slice(&declared_len.to_le_bytes());
+    frame[coded_field..coded_field + size_of::<u64>()].copy_from_slice(&coded_len.to_le_bytes());
+}
+
 /// A `Method::Lz` payload from its parts: the filter `selector`, the
 /// declared output length and token count, then `stream`, with the coded
 /// length computed from it. Tests that hand-build a payload each needed
