@@ -109,11 +109,11 @@ const ruleset = {
 };
 const runs = (...entries) => ({
   stdout: {
-    check_runs: entries.map(([name, status, conclusion]) => ({
+    check_runs: entries.map(([name, status, conclusion, started_at = "2026-10-09T08:00:00Z"]) => ({
       name,
       status,
       conclusion,
-      started_at: "2026-10-09T08:00:00Z",
+      started_at,
     })),
   },
 });
@@ -192,6 +192,24 @@ test("--wait: an agent-approved applied before this head's review run started is
     stderr,
     /applied at 2026-10-09T07:30:00Z, before this head's review run started at 2026-10-09T08:00:00Z/,
   );
+  assert.deepEqual(merges, []);
+});
+
+test("--wait: a concluded review run with a null started_at is held, not merged", () => {
+  // The label event reads fine; the run's own stamp is missing. `labeled < ""`
+  // is False for every stamp, so the old read merged on no timing evidence
+  // (#967). Polling cannot grow a stamp a finished run never got: exit 4.
+  const { status, stderr, merges } = run(WAIT, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "success", null], ...GREEN_GATES)] },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 4);
+  assert.match(stderr, /review run on abc123456789 concluded with no started_at stamp/);
   assert.deepEqual(merges, []);
 });
 

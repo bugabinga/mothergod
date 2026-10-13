@@ -280,13 +280,22 @@ def wait_for_verdict(pr, sha, timeout, interval):
                 if not pending:
                     # Both stamps are GitHub's ISO-8601 UTC strings, so the
                     # string order is the time order (stalled-prs holds the
-                    # same comparison). None is an unread timeline, retried.
+                    # same comparison). A None label event is an unread
+                    # timeline, retried; a None start on a concluded run is
+                    # final, because polling cannot grow a stamp a finished
+                    # run never got, and `labeled < ""` is False for every
+                    # stamp, which is the fail-open #967 closed.
                     labeled = approved_at(pr, REPO)
-                    started = run.get("started_at") or ""
+                    started = run.get("started_at")
                     unread = labeled is None
                     if unread:
                         note("the agent-approved label event did not read; "
                              "retrying at the next poll")
+                    elif started is None:
+                        die(f"the review run on {sha[:12]} concluded with no "
+                            "started_at stamp, so agent-approved cannot be placed "
+                            "before or after it (stalled-prs holds on the same "
+                            "test); read the round, then merge without --wait", 4)
                     elif labeled < started:
                         die(f"agent-approved on #{pr} was applied at {labeled}, "
                             f"before this head's review run started at {started}: "
