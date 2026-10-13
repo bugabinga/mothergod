@@ -15,23 +15,34 @@ mutate step cut at the 25-minute budget. Every one of those survivors is a
 line on main no test distinguishes from its mutation, and the only record
 was a `::warning` annotation on a closed PR.
 
+A cut run is the second silence (#947): the step's budget ends, the mutants
+it never reached have no outcome and no file names them, and an empty
+`missed.txt` read alone says "clean" when the truth is "undecided". Five
+cuts in 17 days, the last on the FORMAT_VERSION 12 decoder (#1085), read
+as "no survivors" and merged. So the listing is read against the outcomes
+by name, and every line this script prints ends in `undecided N of M`: N
+mutants the run listed and never decided, M it listed. Zero is the
+liveness signal; a decode-safety undecided mutant is debt in the same
+sense as a survivor and is filed with them.
+
 Run as the mutants job's last step, after the report exists:
 
     mutants-debt <pr-number> [mutants-out-dir]
 
 and it does one of five things, printed on one line:
 
-    no survivors     missed.txt absent or empty; nothing to file
+    no survivors     nothing owed in decode-safety territory and no
+                     scaffold survivor; nothing to file
     scaffold         every survivor sits outside decode-safety territory
                      (TERRITORY below, ADR-0056): a map reading, not debt,
                      left on the diff's annotations; nothing to file
-    open             the PR is still open, so the annotations on its diff
-                     are the reader (agent-review.yml's step 3 names them)
-    filed already    an open issue already carries this PR's survivors
-    filed #N         the PR is merged: its decode-safety survivors become
-                     one issue, labeled `product` + `bug`, slot a of the
-                     heartbeat's product queue, so the fix lands while the
-                     diff is still warm
+    open             the PR is still open, so its red on the thread is the
+                     reader (agent-review.yml's step 3 names the annotations)
+    filed already    an open issue already carries this PR's debt
+    filed #N         the PR is merged: its decode-safety survivors and
+                     undecided mutants become one issue, labeled `product`
+                     + `bug`, slot a of the heartbeat's product queue, so
+                     the fix lands while the diff is still warm
 
 The issue is written by gh-comment (footer, credential), never by `gh issue
 create`, and posted as the reviewer: the survivor rule is agent-review.yml
@@ -50,8 +61,9 @@ unreadable PR state or a failed filing exits 1 so the run's red says why,
 because printing the survivors to a log nobody opens is the exact failure
 this script exists to end.
 
-`decide`, `render` and `in_territory` are pure so mutants-debt.test.mjs can
-pin both failure directions without spawning gh.
+`triage`, `decide`, `render` and `in_territory` are pure so
+mutants-debt.test.mjs can pin both failure directions without spawning gh;
+`read_report` reads the three files cargo-mutants leaves and nothing else.
 """
 
 import json
@@ -59,6 +71,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 LABELS = ("product", "bug")
@@ -89,10 +102,57 @@ SCAFFOLD_OVERRIDE = re.compile(r"\bstretch_bound\b")
 
 
 def in_territory(line):
-    """Whether one cargo-mutants `missed.txt` line names decode-safety territory."""
+    """Whether one mutant name (a `missed.txt` line, a `mutants.json` entry) names decode-safety territory."""
     if SCAFFOLD_OVERRIDE.search(line):
         return False
     return TERRITORY.search(line) is not None
+
+
+@dataclass
+class Debt:
+    """One run's report, sorted by the territory rule: what is owed on main and what is a map reading.
+
+    Each mutant is its cargo-mutants name, `file:line:col: replace ...`,
+    the form `missed.txt` lists and `mutants.json` carries.
+    """
+
+    missed: list  # survivors in decode-safety territory
+    outside: int  # survivors outside it: scaffold, never filed
+    undecided: list  # listed, never run, in decode-safety territory (#947)
+    undecided_outside: int  # listed, never run, outside it
+    generated: int  # mutants the run listed; 0 when the diff touched no src line
+
+    @property
+    def owed(self):
+        """"2 survivors", "3 undecided", both comma-joined, or "" when nothing is owed on main."""
+        parts = []
+        if self.missed:
+            parts.append(plural(len(self.missed), "survivor"))
+        if self.undecided:
+            parts.append(f"{len(self.undecided)} undecided")
+        return ", ".join(parts)
+
+    @property
+    def never_ran(self):
+        """Mutants the run listed and never decided, territory or not: the liveness count."""
+        return len(self.undecided) + self.undecided_outside
+
+
+def plural(n, noun):
+    return f"{n} {noun}{'s' if n != 1 else ''}"
+
+
+def triage(missed, undecided, generated):
+    """Sort survivors and never-run mutants by territory into one Debt."""
+    owed_missed = [line for line in missed if in_territory(line)]
+    owed_undecided = [name for name in undecided if in_territory(name)]
+    return Debt(
+        missed=owed_missed,
+        outside=len(missed) - len(owed_missed),
+        undecided=owed_undecided,
+        undecided_outside=len(undecided) - len(owed_undecided),
+        generated=generated,
+    )
 
 
 def gh_json(args):
@@ -107,71 +167,90 @@ def gh_json(args):
 
 
 def read_report(out_dir):
-    """(sorted missed lines, mutants generated, mutants decided) from a cargo-mutants output directory."""
+    """(sorted missed lines, sorted never-run mutant names, mutants listed) from a cargo-mutants output directory.
+
+    cargo-mutants writes `mutants.json` (every mutant it will try) before
+    the baseline and appends to `outcomes.json` as each mutant is decided,
+    so a run cut by the step's budget leaves names in the listing with no
+    outcome: those are the never-run set. An absent listing is a run that
+    found nothing to mutate (a diff with no src line leaves no `mutants.out`
+    at all), so it reads as zero listed; a crash before the listing is the
+    mutate step's own red. A listing or outcome file that exists and does
+    not parse raises, so the run's red says which file.
+    """
     out = Path(out_dir)
-    missed_path = out / "missed.txt"
     missed = []
+    missed_path = out / "missed.txt"
     if missed_path.is_file():
         missed = sorted(line for line in missed_path.read_text().splitlines() if line.strip())
-    generated = decided = None
-    try:
-        generated = len(json.loads((out / "mutants.json").read_text()))
-    except (OSError, ValueError):
-        pass
-    try:
-        decided = json.loads((out / "outcomes.json").read_text()).get("total_mutants")
-    except (OSError, ValueError, AttributeError):
-        pass
-    return missed, generated, decided
+    listed = []
+    listing = out / "mutants.json"
+    if listing.is_file():
+        listed = [mutant["name"] for mutant in json.loads(listing.read_text())]
+    decided = set()
+    outcomes = out / "outcomes.json"
+    if outcomes.is_file():
+        for outcome in json.loads(outcomes.read_text()).get("outcomes", []):
+            scenario = outcome.get("scenario")
+            if isinstance(scenario, dict) and "Mutant" in scenario:
+                decided.add(scenario["Mutant"]["name"])
+    undecided = sorted(name for name in listed if name not in decided)
+    return missed, undecided, len(listed)
 
 
-def decide(missed, outside, merged, filed):
+def decide(debt, merged, filed):
     """The verdict and its one-line reason.
 
-    missed: survivor lines in decode-safety territory; outside: how many
-    survivors sit outside it; merged: the PR's merged state, None when
-    unreadable; filed: an existing open issue number, None when absent or
-    unreadable.
+    debt: the run's triaged report; merged: the PR's merged state, None
+    when unreadable; filed: an existing open issue number, None when absent
+    or unreadable.
     """
-    if not missed and not outside:
-        return "no survivors", "missed.txt empty or absent"
-    if not missed:
-        return "scaffold", f"{outside} survivor(s) outside decode-safety territory; scaffold, not filed (ADR-0056)"
+    if not debt.owed and not debt.outside:
+        return "no survivors", "nothing owed in decode-safety territory"
+    if not debt.owed:
+        return "scaffold", f"{debt.outside} survivor(s) outside decode-safety territory; scaffold, not filed (ADR-0056)"
     if merged is None:
         return "unreadable", "PR state could not be read"
     if not merged:
-        return "open", f"{len(missed)} survivor(s) annotate the open diff; the review reads them there"
+        return "open", f"{debt.owed} on the open PR; its red on the thread is the reader"
     if filed:
-        return "filed already", f"#{filed} carries this PR's survivors"
-    return "file", f"{len(missed)} survivor(s) on merged code"
+        return "filed already", f"#{filed} carries this PR's {debt.owed}"
+    return "file", f"{debt.owed} on merged code"
 
 
-def render(pr, missed, outside, generated, decided, run_url):
-    """(title, body) for the issue the merged PR's decode-safety survivors become."""
-    files = sorted({line.split(":", 1)[0] for line in missed})
-    n = len(missed)
-    title = f"mutants: {n} survivor{'s' if n != 1 else ''} {TITLE_MARK}{pr} ({', '.join(files)})"
+def render(pr, debt, run_url):
+    """(title, body) for the issue the merged PR's decode-safety debt becomes."""
+    files = sorted({line.split(":", 1)[0] for line in [*debt.missed, *debt.undecided]})
+    title = f"mutants: {debt.owed} {TITLE_MARK}{pr} ({', '.join(files)})"
     lines = [
         f"PR #{pr} merged while its mutants-check was still running; the check",
         "finished red afterwards, on a thread no seat reads.",
-        "",
-        "Survivors, each a line on main no test distinguishes from its mutation:",
-        "",
-        "```",
-        *missed,
-        "```",
     ]
-    if outside:
+    if debt.missed:
         lines += [
             "",
-            f"{outside} more {'survivors sit' if outside != 1 else 'survivor sits'} outside decode-safety territory:",
-            "scaffold, not debt (ADR-0056), left on the PR's annotations.",
+            "Survivors, each a line on main no test distinguishes from its mutation:",
+            "",
+            "```",
+            *debt.missed,
+            "```",
         ]
-    if generated is not None and decided is not None and generated > decided:
+    if debt.undecided:
         lines += [
             "",
-            f"{generated - decided} of {generated} mutants never ran: the step's time budget",
-            "ended first. Undecided, not counted, unknown until the next run over this code.",
+            f"Undecided, each a mutant the step's time budget ended before it ran ({debt.never_ran} of",
+            f"{debt.generated} listed never ran): debt in the same sense as a survivor until a run over",
+            "this code decides it (#947):",
+            "",
+            "```",
+            *debt.undecided,
+            "```",
+        ]
+    if debt.outside:
+        lines += [
+            "",
+            f"{debt.outside} more {'survivors sit' if debt.outside != 1 else 'survivor sits'} outside decode-safety territory:",
+            "scaffold, not debt (ADR-0056), left on the PR's annotations.",
         ]
     lines += [
         "",
@@ -180,6 +259,13 @@ def render(pr, missed, outside, generated, decided, run_url):
         "the `compression-experiment` skill keeps it until its wiring slice), a test",
         "that fails under the mutation, or an exclusion in `tests/mutants.toml` with",
         "the equivalence proof (#391's shape). Procedure: the `test-craft` skill.",
+    ]
+    if debt.undecided:
+        lines += [
+            "An undecided mutant is run first, `cargo mutants --config tests/mutants.toml",
+            "--package mothergod --re '<its name>'`, then answered as a survivor or closed as caught.",
+        ]
+    lines += [
         "",
         f"Run: {run_url}",
     ]
@@ -227,30 +313,29 @@ def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
     run_url = os.environ.get("RUN_URL", "(run url unset)")
 
-    survivors, generated, decided = read_report(out_dir)
-    missed = [line for line in survivors if in_territory(line)]
-    outside = len(survivors) - len(missed)
+    debt = triage(*read_report(out_dir))
+    liveness = f"undecided {debt.never_ran} of {debt.generated}"
     merged = filed = None
     err = None
-    if missed:
+    if debt.owed:
         merged, err = pr_merged(repo, pr)
         if merged:
             filed, err = already_filed(repo, pr)
             if err:
                 filed = None  # a dedup read that failed must not suppress the filing
-    verdict, detail = decide(missed, outside, merged, filed)
+    verdict, detail = decide(debt, merged, filed)
     if verdict == "unreadable":
-        print(f"::error::mutants-debt: {detail}: {err}")
+        print(f"::error::mutants-debt: {detail}: {err} | {liveness}")
         return 1
     if verdict != "file":
-        print(f"mutants-debt: {verdict} | {detail}")
+        print(f"mutants-debt: {verdict} | {detail} | {liveness}")
         return 0
-    title, body = render(pr, missed, outside, generated, decided, run_url)
+    title, body = render(pr, debt, run_url)
     created, err = file_issue(title, body)
     if err:
-        print(f"::error::mutants-debt: filing failed: {err}")
+        print(f"::error::mutants-debt: filing failed: {err} | {liveness}")
         return 1
-    print(f"mutants-debt: filed {created} | {detail}")
+    print(f"mutants-debt: filed {created} | {detail} | {liveness}")
     return 0
 
 

@@ -294,7 +294,11 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   issue, slot a of the heartbeat's product queue; survivors outside it are
   scaffold territory and are not filed. The territory rule is executable
   in the script, and its docstring is the contract. An open PR's red stays
-  on the diff, where the review reads it.
+  on the diff, where the review reads it. A mutate step cut by its budget
+  leaves mutants listed and never run; the same script prints
+  `undecided N of M` on every run and files a merged PR's decode-safety
+  ones with its survivors, because an untested line on main is debt in the
+  same sense (#947).
 - Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
   at ~3.8h is a one-time backlog measurement, not weekly news.
 - Planned (#455): a monthly sharded whole-crate sweep, mutation score to

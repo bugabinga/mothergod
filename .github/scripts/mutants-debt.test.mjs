@@ -1,10 +1,11 @@
 // Fixtures for mutants-debt: a red that lands after the merge must become an
-// issue, and every other state must not. `decide`, `render` and
+// issue, and every other state must not. `triage`, `decide`, `render` and
 // `in_territory` are pure so both failure directions pin without spawning
 // gh: filing on an open PR duplicates the annotations the review already
 // reads; not filing a decode-safety survivor on a merged one is the silent
 // loss the script exists to end (#676, #677, #690); filing a scaffold
-// survivor is the debt ADR-0056 retired.
+// survivor is the debt ADR-0056 retired; reading a cut run's empty
+// missed.txt as clean is the silence #947 ends.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
@@ -12,19 +13,34 @@ import { test } from "node:test";
 const scriptsDir = new URL(".", import.meta.url).pathname;
 
 const driver = `
-import importlib.machinery, importlib.util, json, sys
+import dataclasses, importlib.machinery, importlib.util, json, sys, tempfile
+from pathlib import Path
 loader = importlib.machinery.SourceFileLoader("mutants_debt", sys.argv[1] + "/mutants-debt")
 spec = importlib.util.spec_from_loader("mutants_debt", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 raw = json.loads(sys.argv[2])
+def debt():
+    return mod.Debt(
+        missed=raw.get("missed", []), outside=raw.get("outside", 0),
+        undecided=raw.get("undecided", []), undecided_outside=raw.get("undecided_outside", 0),
+        generated=raw.get("generated", 0),
+    )
 if raw["fn"] == "decide":
-    verdict, detail = mod.decide(raw["missed"], raw.get("outside", 0), raw["merged"], raw["filed"])
+    verdict, detail = mod.decide(debt(), raw["merged"], raw["filed"])
     print(json.dumps({"verdict": verdict, "detail": detail}))
 elif raw["fn"] == "territory":
     print(json.dumps([mod.in_territory(line) for line in raw["lines"]]))
+elif raw["fn"] == "triage":
+    print(json.dumps(dataclasses.asdict(mod.triage(raw["missed"], raw["undecided"], raw["generated"]))))
+elif raw["fn"] == "read_report":
+    with tempfile.TemporaryDirectory() as out:
+        for name, content in raw["files"].items():
+            (Path(out) / name).write_text(content)
+        missed, undecided, generated = mod.read_report(out)
+    print(json.dumps({"missed": missed, "undecided": undecided, "generated": generated}))
 else:
-    title, body = mod.render(raw["pr"], raw["missed"], raw.get("outside", 0), raw["generated"], raw["decided"], raw["run_url"])
+    title, body = mod.render(raw["pr"], debt(), raw["run_url"])
     print(json.dumps({"title": title, "body": body}))
 `;
 
@@ -46,6 +62,11 @@ const scaffold = [
   "src/literal.rs:952:55: replace + with - in Literal::mix_ppm",
   "src/codec.rs:608:9: replace <impl TokenSink for PpmExpertCostSink<'_>>::flag with ()",
 ];
+// The two mutants run 38191593517 listed and never ran (#947), both decode territory.
+const undecided = [
+  "src/codec.rs:1062:28: replace > with < in read_header",
+  "src/codec.rs:1062:28: replace > with == in read_header",
+];
 
 test("territory is read off the function the line names, cheap direction is under-filing", () => {
   const lines = [
@@ -63,6 +84,46 @@ test("territory is read off the function the line names, cheap direction is unde
   assert.deepEqual(out, [true, true, true, true, true, false, false, false, false]);
 });
 
+test("triage sorts survivors and never-run mutants by the one territory rule", () => {
+  const out = call({
+    fn: "triage",
+    missed: [...survivors, ...scaffold],
+    undecided: [...undecided, scaffold[0]],
+    generated: 74,
+  });
+  assert.deepEqual(out, {
+    missed: survivors,
+    outside: 2,
+    undecided,
+    undecided_outside: 1,
+    generated: 74,
+  });
+});
+
+test("read_report names the listed mutants no outcome decided; an absent listing is zero, not an error", () => {
+  const mutant = (name) => ({ name, package: "mothergod", file: name.split(":")[0] });
+  const outcome = (name, summary) => ({ scenario: { Mutant: mutant(name) }, summary });
+  const out = call({
+    fn: "read_report",
+    files: {
+      "missed.txt": `${survivors[0]}\n`,
+      "mutants.json": JSON.stringify([...undecided, ...survivors].map(mutant)),
+      "outcomes.json": JSON.stringify({
+        total_mutants: 2,
+        outcomes: [
+          { scenario: "Baseline", summary: "Success" },
+          outcome(survivors[0], "MissedMutant"),
+          outcome(survivors[1], "CaughtMutant"),
+        ],
+      }),
+    },
+  });
+  assert.deepEqual(out, { missed: [survivors[0]], undecided, generated: 4 });
+
+  // A diff with no src line leaves no mutants.out at all (run 37728310524).
+  assert.deepEqual(call({ fn: "read_report", files: {} }), { missed: [], undecided: [], generated: 0 });
+});
+
 test("scaffold-only survivors are not filed, whatever the PR state", () => {
   for (const merged of [true, false, null]) {
     const out = call({ fn: "decide", missed: [], outside: scaffold.length, merged, filed: null });
@@ -75,6 +136,11 @@ test("no survivors files nothing, whatever the PR state", () => {
   for (const merged of [true, false, null]) {
     assert.equal(call({ fn: "decide", missed: [], merged, filed: null }).verdict, "no survivors");
   }
+});
+
+test("never-run mutants outside decode-safety territory change no verdict", () => {
+  const out = call({ fn: "decide", missed: [], undecided_outside: 3, generated: 10, merged: true, filed: null });
+  assert.equal(out.verdict, "no survivors");
 });
 
 test("survivors on an open PR stay on the diff", () => {
@@ -90,6 +156,16 @@ test("survivors on a merged PR are filed once", () => {
   assert.match(dup.detail, /#700/);
 });
 
+test("a cut run's decode-safety mutants are debt in the same sense as survivors (#947)", () => {
+  const cut = { fn: "decide", missed: [], undecided, generated: 74, filed: null };
+  assert.equal(call({ ...cut, merged: true }).verdict, "file");
+  assert.match(call({ ...cut, merged: true }).detail, /2 undecided on merged code/);
+  assert.equal(call({ ...cut, merged: false }).verdict, "open");
+  assert.equal(call({ ...cut, merged: null }).verdict, "unreadable");
+  const both = call({ ...cut, missed: survivors, merged: true });
+  assert.match(both.detail, /2 survivors, 2 undecided/);
+});
+
 test("an unreadable PR state is its own verdict, never silently open", () => {
   assert.equal(call({ fn: "decide", missed: survivors, merged: null, filed: null }).verdict, "unreadable");
 });
@@ -100,7 +176,6 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
     pr: 690,
     missed: survivors,
     generated: 104,
-    decided: 104,
     run_url: "https://x/run/1",
   });
   assert.equal(full.title, "mutants: 2 survivors outlived PR #690 (src/codec.rs, src/coder.rs)");
@@ -115,7 +190,6 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
     missed: survivors,
     outside: scaffold.length,
     generated: 104,
-    decided: 104,
     run_url: "u",
   });
   assert.equal(mixed.title, "mutants: 2 survivors outlived PR #690 (src/codec.rs, src/coder.rs)");
@@ -126,23 +200,31 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
     fn: "render",
     pr: 690,
     missed: survivors,
+    undecided,
+    undecided_outside: 18,
     generated: 104,
-    decided: 84,
     run_url: "u",
   });
-  assert.ok(partial.body.includes("20 of 104 mutants never ran"));
+  assert.equal(partial.title, "mutants: 2 survivors, 2 undecided outlived PR #690 (src/codec.rs, src/coder.rs)");
+  assert.ok(partial.body.includes("20 of\n104 listed never ran"));
+  for (const line of undecided) assert.ok(partial.body.includes(line), line);
+  assert.ok(partial.body.includes("--re '<its name>'"), "the body says how to decide one");
 
-  const one = call({ fn: "render", pr: 5, missed: [survivors[0]], generated: null, decided: null, run_url: "u" });
+  // Run 38191593517's shape: nothing missed, two never run, and it merged.
+  const cutOnly = call({ fn: "render", pr: 1085, undecided, generated: 74, run_url: "u" });
+  assert.equal(cutOnly.title, "mutants: 2 undecided outlived PR #1085 (src/codec.rs)");
+  assert.ok(!cutOnly.body.includes("Survivors, each"), "no survivors, no survivor block");
+
+  const one = call({ fn: "render", pr: 5, missed: [survivors[0]], generated: 1, run_url: "u" });
   assert.equal(one.title, "mutants: 1 survivor outlived PR #5 (src/codec.rs)");
-  assert.ok(!one.body.includes("never ran"), "unknown totals must not invent a shortfall");
+  assert.ok(!one.body.includes("never ran"), "a complete run must not claim undecided mutants");
 
   const oneOutside = call({
     fn: "render",
     pr: 5,
     missed: [survivors[0]],
     outside: 1,
-    generated: null,
-    decided: null,
+    generated: 2,
     run_url: "u",
   });
   assert.ok(
