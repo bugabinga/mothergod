@@ -16,11 +16,15 @@ PR on the path would have bought them again.
 This is that recipe, once. Zeros, 256 MiB plus one byte, 16 full blocks and
 a one-byte seventeenth, the smallest input past `decompress`'s 256 MiB cap
 and so the stream-of-frames path end to end, and the input every by-hand
-reading used; the file is sparse, so it costs no disk. Encode and decode run as children of this process and each child's
-peak resident set is read from `os.wait4`, the kernel's own number for that
-child, so no `time(1)` has to be installed, parsed or remembered. The round
-trip is compared byte for byte, because a bound on a broken decode is not a
-bound on anything.
+reading used; the file is sparse, so it costs no disk. Encode and decode run
+as children of this process and each child's peak resident set is read from
+`os.wait4`, the kernel's own number for that child, so no `time(1)` has to
+be installed, parsed or remembered. The round trip is compared byte for
+byte, because a bound on a broken decode is not a bound on anything. Encode
+plus decode take three to seven minutes on a hosted runner, release build
+excluded (192 s and 7m03 on 2026-10-13, two runners, this corpus), which is
+why the lane is weekly and the PR gate never runs it; the workflow's timeout
+and docs/TESTING.md defer to this range rather than restate it.
 
 The bound is the published claim, 1 GiB, not a fit to the readings: a user
 reads the changelog, not the lane's log. The readings print beside it so the
@@ -29,10 +33,12 @@ it crosses.
 
 Usage: memory-check [--bytes N] [--bound-kib K] <mothergod binary>
 
-Exit 0 when the round trip holds and both peaks are under the bound. Exit 1
-otherwise, naming which. The footer always prints the bytes, both peaks in
-KiB, the bound and the compressed size, so a reader can tell a bound that
-holds from a measurement that never ran.
+Exit 0 when the round trip holds and both peaks are under the bound,
+strictly, because the claim says under. Exit 1 otherwise, naming which. The
+footer prints once both children ran: the bytes, both peaks in KiB, the bound
+and the compressed size, so a reader can tell a bound that holds from a
+measurement that never ran. A child that does not exit 0 ends the run before
+the footer, named instead.
 """
 
 import argparse
@@ -79,6 +85,19 @@ def is_zeros(path, expected):
     return size == expected
 
 
+def verdict(encode, decode, bound_kib, lossless):
+    """The failure lines; empty when the round trip holds under the bound.
+
+    Under is strict: CHANGELOG.md says "under 1 GiB", so a peak exactly at
+    the bound fails (#1148).
+    """
+    failures = [] if lossless else ["round trip differs"]
+    for name, peak in (("encode", encode), ("decode", decode)):
+        if peak >= bound_kib:
+            failures.append(f"{name} peak {peak} KiB is not under the bound")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bytes", type=int, default=DEFAULT_BYTES)
@@ -97,12 +116,7 @@ def main():
         decode = run_child([args.binary, "-d"], packed, back)
         lossless = is_zeros(back, args.bytes)
 
-    failures = []
-    if not lossless:
-        failures.append("round trip differs")
-    for name, peak in (("encode", encode), ("decode", decode)):
-        if peak >= args.bound_kib:
-            failures.append(f"{name} peak {peak} KiB is not under the bound")
+    failures = verdict(encode, decode, args.bound_kib, lossless)
     print(
         f"memory-check: bytes {args.bytes} | encode peak {encode} KiB"
         f" | decode peak {decode} KiB | bound {args.bound_kib} KiB"
