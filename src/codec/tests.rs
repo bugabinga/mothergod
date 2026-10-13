@@ -496,14 +496,15 @@ fn declared_length_lie_is_rejected_not_overallocated() {
 
 #[test]
 fn declared_length_over_the_max_is_rejected_before_any_work() {
-    // The amplification hazard a ratio check cannot rule out (see
-    // MAX_DECODED_LEN's docs): declared_len and token_count agree with
-    // each other, both far past MAX_DECODED_LEN, with an empty coded
-    // stream. Previously legal-but-slow under ADR-0026's declared-
-    // length-bounds-work argument (true, but declared_len itself was
-    // unbounded); now rejected in zero loop iterations.
+    // The declared length alone decides the rejection, so the token count
+    // is zero: a mutated guard (#1124) then falls through to a fast
+    // `Corrupt` instead of decoding `over` tokens for minutes, which
+    // cargo-mutants reports as an undecided timeout. The amplification
+    // shape, declared_len and token_count both past the max (see
+    // MAX_DECODED_LEN's docs), stays pinned by the adversarial seed
+    // `lz-declared-size-amplification-bomb`.
     let over = MAX_DECODED_LEN + 1;
-    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, over, &[]);
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, 0, &[]);
     assert_eq!(
         decode(&payload, MAX_DECODED_LEN),
         Err(Error::TooLarge {
@@ -522,7 +523,7 @@ fn decode_clamps_a_max_len_above_max_decoded_len() {
     // past MAX_DECODED_LEN, the only value this decoder's worst-case
     // decode time has been measured against (S2-A27).
     let over = MAX_DECODED_LEN + 1;
-    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, over, &[]);
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, 0, &[]);
     assert_eq!(
         decode(&payload, u32::MAX),
         Err(Error::TooLarge {
@@ -1098,7 +1099,7 @@ fn streaming_rejects_match_distance_beyond_window() {
 #[test]
 fn streaming_rejects_declared_length_over_the_max_before_any_work() {
     let over = MAX_DECODED_LEN + 1;
-    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, over, &[]);
+    let payload = lz_payload(Candidate::Identity.to_header_bytes(), over, 0, &[]);
     let err = decode_streaming(&payload, MAX_DECODED_LEN)
         .expect_err("declared length past MAX_DECODED_LEN must be rejected");
     assert_eq!(
@@ -1112,7 +1113,7 @@ fn streaming_rejects_declared_length_over_the_max_before_any_work() {
 
 #[test]
 fn streaming_falls_back_to_decode_for_transpose_declared_length_over_the_max() {
-    // Same amplification-hazard shape as the Identity case above, but
+    // Same declared-length rejection as the Identity case above, but
     // routed through decode_to_writer's fallback branch (the one
     // candidate, Transpose, that still needs decode's own whole-buffer
     // path), which must reject before calling it, not after. Identity,
@@ -1121,7 +1122,7 @@ fn streaming_falls_back_to_decode_for_transpose_declared_length_over_the_max() {
     let payload = lz_payload(
         Candidate::Transpose(crate::test_support::nz(2)).to_header_bytes(),
         over,
-        over,
+        0,
         &[],
     );
     let err = decode_streaming(&payload, MAX_DECODED_LEN)
