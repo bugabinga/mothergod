@@ -125,6 +125,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `read::Decoder`, `decompress`: an `Lz` frame whose header declares a
+  payload longer than a `Stored` frame of the same output holds is `Corrupt`
+  as soon as its header is read, so `Decoder::with_max_len(src, 1 << 20)` no
+  longer buffers hundreds of MiB of a hostile source for a frame that
+  declares 10 bytes of output. No frame `compress` wrote is affected (#1137,
+  ADR-0069).
 - `decompress`: a memory-starved process gets `Error::OutOfMemory` instead of
   an abort when it decodes a stored (incompressible) frame, the one decode
   allocation that was not fallible (#1130).

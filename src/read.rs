@@ -94,7 +94,10 @@ impl<R: Read> Decoder<R> {
     /// [`decompress_to_writer`](crate::decompress_to_writer) does for its
     /// `max_len`: checked from each frame's header, before the frame's
     /// payload is read or any decode work is done. A `max_len` at or above
-    /// [`codec::MAX_DECODED_LEN`] caps no total, only each `Lz` frame.
+    /// [`codec::MAX_DECODED_LEN`] caps no total, only each `Lz` frame. The
+    /// payload an `Lz` frame may buffer is bounded by the output it
+    /// declares, so by `max_len` plus a few bytes, not by what the source
+    /// sends (ADR-0069).
     pub fn with_max_len(source: R, max_len: u32) -> Self {
         Self {
             source,

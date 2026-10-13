@@ -124,7 +124,12 @@ offset  size  field
 A decoder MUST reject a payload holding fewer stream bytes than the coded
 length declares as `Truncated`; bytes past it are the next frame's. The
 field is never an allocation size: it is compared with the bytes present,
-as `Stored`'s is, and it is a `u64` for the same reason.
+as `Stored`'s is, and it is a `u64` for the same reason. A decoder MUST
+also reject a payload longer than a `Stored` payload of the same output, an
+`Lz` payload of more than `8 + declared output length` bytes (coded length
+plus 18, against the declared length plus 8), as `Corrupt`, from the header
+alone: the Stored floor below makes it one no conforming encoder writes
+(ADR-0069).
 
 **Literal sub-stream (ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055).**
 Each literal byte is 8 chained binary decisions over the symbol alphabet
@@ -196,7 +201,9 @@ founding port bug this section's invariant exists to rule out.
 - Lossless: decode(encode(x)) == x for all x.
 - Stored floor: an encoder MUST NOT emit a frame larger than
   `header + 8 + len(x) + 4` (the header, the `Stored` length field and the
-  check value) — fall back to Stored (JOURNAL S1-L1).
+  check value) — fall back to Stored (JOURNAL S1-L1). A decoder MUST reject
+  an `Lz` frame that breaks it as `Corrupt` before reading its payload
+  (ADR-0069).
 - Decoders never panic and allocate at most a bounded multiple of the
   declared output size for any input. For `Lz`, "declared output size" is
   the payload's own length field: the decoder never preallocates from it,

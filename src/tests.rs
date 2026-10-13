@@ -541,7 +541,7 @@ fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     assert_eq!(decodes_incrementally(&stream), Ok(true));
     let transpose = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
-        0,
+        test_support::floor_declared_len(),
         0,
         &[],
     ));
@@ -561,13 +561,29 @@ fn stored_frame_declaring_u64_max_is_truncated_not_allocated() {
 
 #[test]
 fn lz_frame_declaring_a_huge_coded_length_is_truncated_not_allocated() {
-    // The coded length is compared against the bytes present, so a hostile
-    // one that does not overflow `usize` is cut at the frame, not read.
+    // The coded length is compared against the bytes present, so the
+    // largest one the Stored floor admits is cut at the frame, not read.
     let mut frame = compress(&b"the quick brown fox ".repeat(50));
     assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
-    let field = HEADER_LEN + codec::EXTENT_PREFIX_LEN - size_of::<u64>();
-    frame[field..field + size_of::<u64>()].copy_from_slice(&(1u64 << 40).to_le_bytes());
+    test_support::forge_floor_extent(&mut frame, codec::MAX_DECODED_LEN);
     assert_eq!(decompress(&frame), Err(Error::Truncated));
+}
+
+#[test]
+fn lz_frame_over_the_stored_floor_is_corrupt_from_its_header() {
+    // An `Lz` payload longer than the `Stored` payload of the same output
+    // cannot come from a conforming encoder (SPEC "Invariants", Stored
+    // floor), so the header alone convicts it: one byte over is `Corrupt`,
+    // at the floor it is only cut short.
+    let mut frame = compress(&b"the quick brown fox ".repeat(50));
+    test_support::forge_floor_extent(&mut frame, 1000);
+    assert_eq!(decompress(&frame), Err(Error::Truncated));
+    let coded_field = HEADER_LEN + codec::EXTENT_PREFIX_LEN - size_of::<u64>();
+    let at_floor = u64::from_le_bytes(frame[coded_field..coded_field + 8].try_into().unwrap());
+    frame[coded_field..coded_field + 8].copy_from_slice(&(at_floor + 1).to_le_bytes());
+    assert_eq!(decompress(&frame), Err(Error::Corrupt));
+    frame[coded_field..coded_field + 8].copy_from_slice(&(1u64 << 40).to_le_bytes());
+    assert_eq!(decompress(&frame), Err(Error::Corrupt));
 }
 
 #[test]
@@ -748,7 +764,7 @@ fn non_transpose_candidates_decode_incrementally() {
     ] {
         let frame = lz_frame(&test_support::lz_payload(
             candidate.to_header_bytes(),
-            0,
+            test_support::floor_declared_len(),
             0,
             &[],
         ));
@@ -764,7 +780,7 @@ fn non_transpose_candidates_decode_incrementally() {
 fn transpose_candidate_does_not_decode_incrementally() {
     let frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
-        0,
+        test_support::floor_declared_len(),
         0,
         &[],
     ));
@@ -779,7 +795,7 @@ fn decodes_incrementally_pins_the_lz_version_boundary() {
     // shape so only the version byte differs.
     let mut frame = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
-        0,
+        test_support::floor_declared_len(),
         0,
         &[],
     ));

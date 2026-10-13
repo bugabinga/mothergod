@@ -2,7 +2,8 @@ use std::io::ErrorKind;
 
 use super::*;
 use crate::test_support::{
-    bcj_call_dense_data, columnar_drift_data, mixed_stream, tabular_columns_data,
+    bcj_call_dense_data, columnar_drift_data, forge_floor_extent, mixed_stream,
+    tabular_columns_data,
 };
 use crate::{FORMAT_VERSION, MAGIC, METHOD_OFFSET, WriteError, compress, decompress_to_writer};
 
@@ -299,14 +300,29 @@ fn a_hostile_declared_length_is_truncated_not_read_into_memory() {
     let mut stored = compress(b"hi");
     stored[HEADER_LEN..HEADER_LEN + STORED_LEN_BYTES].copy_from_slice(&u64::MAX.to_le_bytes());
     let mut lz = compress(&b"the quick brown fox ".repeat(50));
-    let field = HEADER_LEN + codec::EXTENT_PREFIX_LEN - size_of::<u64>();
-    lz[field..field + size_of::<u64>()].copy_from_slice(&(1u64 << 40).to_le_bytes());
+    forge_floor_extent(&mut lz, codec::MAX_DECODED_LEN);
     for frame in [stored, lz] {
         assert_eq!(
             drain(Decoder::new(frame.as_slice())),
             (Vec::new(), Some(ErrorKind::UnexpectedEof))
         );
     }
+}
+
+#[test]
+fn an_lz_header_over_the_stored_floor_buffers_no_payload() {
+    // #1137: a frame that declares 10 bytes of output and a huge coded length
+    // is convicted by its header, so `with_max_len` holds the header and
+    // not what the source would go on to send.
+    let mut frame = compress(&b"the quick brown fox ".repeat(50));
+    forge_floor_extent(&mut frame, 10);
+    let coded_field = HEADER_LEN + codec::EXTENT_PREFIX_LEN - size_of::<u64>();
+    frame[coded_field..coded_field + size_of::<u64>()].copy_from_slice(&(1u64 << 40).to_le_bytes());
+    let sent = 400 << 20;
+    let mut tail = io::repeat(0).take(sent);
+    let reader = Decoder::with_max_len(frame.as_slice().chain(&mut tail), 1 << 20);
+    assert_eq!(drain(reader), (Vec::new(), Some(ErrorKind::InvalidData)));
+    assert!(sent - tail.limit() <= FILL_STEP as u64, "the tail was read");
 }
 
 #[test]

@@ -393,7 +393,17 @@ fn declared_extent(method: Method, after_header: &[u8]) -> Result<(usize, u64), 
         }
         Method::Lz => {
             let extent = codec::declared_extent(after_header)?;
-            Ok((extent.payload_len, u64::from(extent.output_len)))
+            let output_len = u64::from(extent.output_len);
+            // The Stored floor (`docs/format/SPEC.md`, "Invariants"): no
+            // conforming encoder writes an `Lz` payload longer than the
+            // `Stored` payload of the same output, so a reader that has
+            // seen only this header may refuse before it buffers a byte.
+            if u64::try_from(extent.payload_len).map_err(|_| Error::Truncated)?
+                > output_len + STORED_LEN_BYTES as u64
+            {
+                return Err(Error::Corrupt);
+            }
+            Ok((extent.payload_len, output_len))
         }
     }
 }
