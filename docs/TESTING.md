@@ -14,7 +14,7 @@ blocking PRs.
 |---|---|---|---|
 | Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
 | Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
-| Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451) |
+| Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451); allocation torture (`torture-check`) |
 | Weekly | schedule | no, alarmed | monster matrix, coverage, Miri (#456) |
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
 
@@ -97,6 +97,13 @@ resuming from a corpus persisted across runs and minimized with `cmin`
 (layer 3, #450). A found crasher fails the job, uploads
 `fuzz/artifacts/`, and wakes the fixer through the alarm (ADR-0036).
 Every run, crash or clean, also uploads its trust-ledger entry (#449).
+
+The advisory `torture-check` workflow runs nightly at 01:31 UTC and on
+manual dispatch: `tests/torture.rs` with `MOTHERGOD_TORTURE=1`, release
+profile, every fixture through every decode API (layer 2, #791). An
+abort fails the job, named by fixture, API and call index in the log, and
+wakes the fixer through the alarm. No ledger entry: the sweep is a gate
+on a rule, not a number.
 
 The advisory `mutants-check` workflow runs on pull requests that touch
 `src/` or the crate's build inputs, mutating only the changed lines
@@ -218,8 +225,9 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `Delta`/`Transpose` filters' undo buffers, both found by the sweep, and
   `Bcj`'s undo buffer, the same shape by code inspection but not swept by
   any current fixture (none selects the `Bcj` candidate) — separable
-  follow-up on #453, which stays open. Not yet on a schedule (needs a
-  workflow-file change); run manually until it is.
+  follow-up on #453, which stays open. Scheduled: the advisory
+  `torture-check` workflow runs the sweep nightly at 01:31 UTC and on
+  manual dispatch, red on any abort and alarmed to the BDFL (#791).
 
 ## 3. Fuzzing (scheduled: `fuzz-check`, nightly)
 
