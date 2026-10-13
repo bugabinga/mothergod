@@ -447,27 +447,9 @@ fn bytes_past_the_last_frame_are_not_a_frame() {
     }
 }
 
-/// A stream of a `Stored` frame, an `Lz` frame and a `Stored` frame, with
-/// the bytes it decodes to.
-fn mixed_stream() -> (Vec<u8>, Vec<u8>) {
-    let parts: [Vec<u8>; 3] = [
-        b"hi".to_vec(),
-        b"the quick brown fox jumps over the lazy dog. ".repeat(50),
-        Vec::new(),
-    ];
-    let methods = [Method::Stored, Method::Lz, Method::Stored];
-    let mut stream = Vec::new();
-    for (part, method) in parts.iter().zip(methods) {
-        let frame = compress(part);
-        assert_eq!(frame[METHOD_OFFSET], method as u8);
-        stream.extend(frame);
-    }
-    (stream, parts.concat())
-}
-
 #[test]
 fn a_stream_of_frames_decodes_to_their_payloads_back_to_back() {
-    let (stream, plain) = mixed_stream();
+    let (stream, plain) = test_support::mixed_stream();
     assert_eq!(decompress(&stream), Ok(plain.clone()));
     let mut out = Vec::new();
     decompress_to_writer(&stream, u32::MAX, &mut out).expect("a stream decodes");
@@ -478,7 +460,7 @@ fn a_stream_of_frames_decodes_to_their_payloads_back_to_back() {
 fn every_prefix_of_a_stream_is_a_stream_or_truncated() {
     // A cut inside a frame is Truncated; a cut on a frame boundary is a
     // shorter stream and decodes. Nothing else is possible.
-    let (stream, plain) = mixed_stream();
+    let (stream, plain) = test_support::mixed_stream();
     for cut in 0..stream.len() {
         match decompress(&stream[..cut]) {
             Ok(prefix) => assert!(plain.starts_with(&prefix), "cut at {cut}"),
@@ -491,7 +473,7 @@ fn every_prefix_of_a_stream_is_a_stream_or_truncated() {
 fn max_len_bounds_a_streams_total_output() {
     // A bound tighter than MAX_DECODED_LEN caps the sum over frames, so a
     // stream of small frames is no way around it.
-    let (stream, plain) = mixed_stream();
+    let (stream, plain) = test_support::mixed_stream();
     let total = u32::try_from(plain.len()).expect("fits");
     assert_eq!(decompress_bounded(&stream, total), Ok(plain.clone()));
     let tight = total - 1;
@@ -513,7 +495,7 @@ fn collected_lz_output_is_capped_in_total_but_streamed_output_is_not() {
     // frame's output is not bounded by its input (#1085 review). The
     // rejection is from the headers, so the second frame's decode work
     // (about 2 s per MiB at this length) never runs.
-    let (stream, plain) = mixed_stream();
+    let (stream, plain) = test_support::mixed_stream();
     let big = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Identity.to_header_bytes(),
         codec::MAX_DECODED_LEN,
@@ -538,18 +520,14 @@ fn only_a_collecting_budget_caps_the_lz_total() {
     // `decompress_to_writer` holds one write buffer however long the
     // stream is, so it is exempt from the `Lz` total the `Vec`-returning
     // functions carry; the block-split streams past 256 MiB rely on it.
-    let lz = Frame {
-        method: Method::Lz,
-        payload: &[],
-        output_len: u64::from(codec::MAX_DECODED_LEN),
-    };
+    let lz = (Method::Lz, u64::from(codec::MAX_DECODED_LEN));
     let mut streaming = Budget::new(u32::MAX, false);
-    assert_eq!(streaming.admit(&lz), Ok(()));
-    assert_eq!(streaming.admit(&lz), Ok(()));
+    assert_eq!(streaming.admit(lz.0, lz.1), Ok(()));
+    assert_eq!(streaming.admit(lz.0, lz.1), Ok(()));
     let mut collecting = Budget::new(u32::MAX, true);
-    assert_eq!(collecting.admit(&lz), Ok(()));
+    assert_eq!(collecting.admit(lz.0, lz.1), Ok(()));
     assert_eq!(
-        collecting.admit(&lz),
+        collecting.admit(lz.0, lz.1),
         Err(Error::TooLarge {
             len: 2 * codec::MAX_DECODED_LEN,
             max: codec::MAX_DECODED_LEN,
@@ -559,7 +537,7 @@ fn only_a_collecting_budget_caps_the_lz_total() {
 
 #[test]
 fn a_stream_decodes_incrementally_only_if_every_frame_does() {
-    let (mut stream, _) = mixed_stream();
+    let (mut stream, _) = test_support::mixed_stream();
     assert_eq!(decodes_incrementally(&stream), Ok(true));
     let transpose = lz_frame(&test_support::lz_payload(
         filters::select::Candidate::Transpose(test_support::nz(4)).to_header_bytes(),
@@ -578,6 +556,17 @@ fn stored_frame_declaring_u64_max_is_truncated_not_allocated() {
     let mut frame = compress(b"hi");
     assert_eq!(frame[METHOD_OFFSET], Method::Stored as u8);
     frame[HEADER_LEN..HEADER_LEN + STORED_LEN_BYTES].copy_from_slice(&u64::MAX.to_le_bytes());
+    assert_eq!(decompress(&frame), Err(Error::Truncated));
+}
+
+#[test]
+fn lz_frame_declaring_a_huge_coded_length_is_truncated_not_allocated() {
+    // The coded length is compared against the bytes present, so a hostile
+    // one that does not overflow `usize` is cut at the frame, not read.
+    let mut frame = compress(&b"the quick brown fox ".repeat(50));
+    assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+    let field = HEADER_LEN + codec::EXTENT_PREFIX_LEN - size_of::<u64>();
+    frame[field..field + size_of::<u64>()].copy_from_slice(&(1u64 << 40).to_le_bytes());
     assert_eq!(decompress(&frame), Err(Error::Truncated));
 }
 

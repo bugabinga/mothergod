@@ -1,5 +1,7 @@
 use super::*;
-use crate::test_support::{as_codec_error, lz_payload};
+use crate::test_support::{
+    as_codec_error, bcj_call_dense_data, columnar_drift_data, lz_payload, tabular_columns_data,
+};
 
 /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
 /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
@@ -109,29 +111,6 @@ fn roundtrip_founding_archive_source() {
     roundtrip(data);
 }
 
-/// Four independent small-step random walks, one per column, laid out
-/// row-major with a 4-byte stride: consecutive same-column bytes drift
-/// by a small step (`filters::select::pick` ranks `Candidate::Delta(4)`
-/// top for exactly this shape — mirrors its own
-/// `pick_selects_delta_for_columnar_drift` test), but consecutive raw
-/// bytes belong to different, unrelated walks.
-fn columnar_drift_data() -> Vec<u8> {
-    const STEPS: [u8; 5] = [0u8.wrapping_sub(2), 0u8.wrapping_sub(1), 0, 1, 2];
-    let mut rng = crate::test_support::Xorshift32::new(0x1234_5678);
-    let mut walk = [64u8, 96, 160, 200];
-    let rows = 2000usize;
-    let mut data = Vec::with_capacity(rows * walk.len());
-    for _ in 0..rows {
-        for col in &mut walk {
-            let state = rng.next().expect("Xorshift32 never terminates");
-            let step = STEPS[usize::try_from(state % 5).unwrap_or(0)];
-            *col = col.wrapping_add(step);
-            data.push(*col);
-        }
-    }
-    data
-}
-
 #[test]
 fn roundtrip_columnar_drift_data_selects_delta_and_streams_it() {
     // Proves encode() actually wires a trial-selected filter into the
@@ -169,27 +148,6 @@ fn decode_undoable_streaming_delta_path_covers_copy_streamed_too() {
     assert_decode_matches(&frame, &raw, "Delta path with match/rep copies");
 }
 
-/// Many `call rel32` instructions, 20 bytes apart (room for a full
-/// 5-byte instruction with no overlap), all targeting the same absolute
-/// address (0): as raw relative offsets each instance's operand differs
-/// by position, but `Candidate::Bcj` rewrites every one of them to the
-/// same absolute bytes, which is what gives `encode()`'s trial a real
-/// win to find here (mirrors `filters::select::pick`'s own
-/// `pick_shortlists_bcj_for_opcode_dense_data` density fixture, but
-/// with real operands instead of zeros so the rewrite actually creates
-/// the repetition rather than leaving it accidentally already there).
-fn bcj_call_dense_data() -> Vec<u8> {
-    let mut data = vec![0x90u8; 4000];
-    for (idx, chunk) in data.chunks_mut(20).enumerate() {
-        chunk[0] = 0xE8;
-        let post_addr = u32::try_from(idx * 20 + filters::bcj::INSTRUCTION_LEN)
-            .expect("idx * 20 + 5 fits u32 for this fixture's size (4000)");
-        let rel = 0u32.wrapping_sub(post_addr);
-        chunk[1..filters::bcj::INSTRUCTION_LEN].copy_from_slice(&rel.to_le_bytes());
-    }
-    data
-}
-
 #[test]
 fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
     // Same shape as roundtrip_columnar_drift_data_selects_delta_and_
@@ -205,43 +163,6 @@ fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
         encoded[0]
     );
     assert_decode_matches(&encoded, &data, "decode_undoable_streaming's Bcj path");
-}
-
-/// Fixed-width records whose columns each cycle through their own
-/// period (`research/JOURNAL.md` S1-P5's target shape, same
-/// construction as `tests/golden/v11-tabular-columns`), with a fraction
-/// of bytes jittered off the clean pattern so the literal model, not
-/// just `lz::parse_optimal`'s LZ matches, carries real weight — the
-/// data this ADR-0046 slice's own real-bitstream measurement used.
-fn tabular_columns_data(columns: usize, rows: usize, seed: u32) -> Vec<u8> {
-    let periods: Vec<u32> = (0..columns)
-        .map(|c| 3 + ((u32::try_from(c).unwrap() * 7 + seed) % 6))
-        .collect();
-    let bases: Vec<u8> = (0..columns)
-        .map(|c| {
-            u8::try_from(
-                (u32::try_from(c).unwrap().wrapping_mul(0x1e)).wrapping_add(seed.wrapping_mul(3))
-                    % 256,
-            )
-            .unwrap()
-        })
-        .collect();
-    let mut rng =
-        crate::test_support::Xorshift32::new(0x9e37_79b9 ^ seed.wrapping_mul(0x8551_4d97) | 1);
-    let mut data = vec![0u8; columns * rows];
-    for row in 0..rows {
-        for (col, &period) in periods.iter().enumerate() {
-            let phase = u32::try_from(row).unwrap() % period;
-            let mut v = bases[col].wrapping_add(u8::try_from(phase).unwrap());
-            let r = rng.next().expect("Xorshift32 never terminates");
-            if r % 100 < 20 {
-                let jitter = u8::try_from((r >> 8) % 40).unwrap();
-                v = v.wrapping_add(jitter).wrapping_sub(20);
-            }
-            data[row * columns + col] = v;
-        }
-    }
-    data
 }
 
 #[test]
@@ -1250,24 +1171,30 @@ fn the_coded_length_names_the_streams_extent() {
     let Extent {
         payload_len,
         output_len,
-    } = extent(&payload).expect("a real payload has an extent");
+    } = declared_extent(&payload).expect("a real payload has an extent");
     assert_eq!(payload_len, payload.len());
     assert_eq!(output_len, 45 * 40);
 
     // The next frame's bytes past it are not the stream's.
     let mut run_on = payload.clone();
     run_on.extend_from_slice(b"next frame");
-    assert_eq!(extent(&run_on).map(|e| e.payload_len), Ok(payload.len()));
+    assert_eq!(
+        declared_extent(&run_on).map(|e| e.payload_len),
+        Ok(payload.len())
+    );
     assert_eq!(decode(&run_on, MAX_DECODED_LEN), Err(Error::Corrupt));
 
     // A stream cut short of its declared length is truncated, never read
-    // as the zero bits the range decoder pads a short stream with.
-    for cut in 0..payload.len() {
+    // as the zero bits the range decoder pads a short stream with. The
+    // extent needs the selector and header alone.
+    for cut in 0..EXTENT_PREFIX_LEN {
         assert_eq!(
-            extent(&payload[..cut]),
+            declared_extent(&payload[..cut]).map(|e| e.payload_len),
             Err(Error::Truncated),
             "cut at {cut}"
         );
+    }
+    for cut in 0..payload.len() {
         assert_eq!(
             decode(&payload[..cut], MAX_DECODED_LEN),
             Err(Error::Truncated)
@@ -1282,7 +1209,7 @@ fn a_hostile_coded_length_is_truncated_not_allocated() {
     let field = SELECTOR_LEN + TOKEN_HEADER_LEN - size_of::<u64>();
     payload[field..field + size_of::<u64>()].copy_from_slice(&u64::MAX.to_le_bytes());
     assert_eq!(
-        extent(&payload).map(|e| e.payload_len),
+        declared_extent(&payload).map(|e| e.payload_len),
         Err(Error::Truncated)
     );
     assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Truncated));
