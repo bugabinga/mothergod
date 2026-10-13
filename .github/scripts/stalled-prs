@@ -593,7 +593,7 @@ def rescue(pr, found, now):
     timeline only for the merge arm, which is the one that needs them."""
     number = pr["number"]
     if found["kind"] == LAND:
-        step = plan(pr, found, now, changed_files(number), approved_at(number))
+        step = plan(pr, found, now, changed_files(number), approved_at(number, "{owner}/{repo}"))
     else:
         step = plan(pr, found, now)
     if step is None:

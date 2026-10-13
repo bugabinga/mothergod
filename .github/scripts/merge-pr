@@ -246,6 +246,9 @@ def wait_for_verdict(pr, sha, timeout, interval):
     review = "unread"
     labels = []
     pending = []
+    # True after a poll whose label-event read failed, so the deadline names
+    # the cause instead of "gates pending none" (#968).
+    unread = False
     while True:
         try:
             contexts = contexts or required_contexts()
@@ -278,9 +281,10 @@ def wait_for_verdict(pr, sha, timeout, interval):
                     # Both stamps are GitHub's ISO-8601 UTC strings, so the
                     # string order is the time order (stalled-prs holds the
                     # same comparison). None is an unread timeline, retried.
-                    labeled = approved_at(pr)
+                    labeled = approved_at(pr, REPO)
                     started = run.get("started_at") or ""
-                    if labeled is None:
+                    unread = labeled is None
+                    if unread:
                         note("the agent-approved label event did not read; "
                              "retrying at the next poll")
                     elif labeled < started:
@@ -309,7 +313,9 @@ def wait_for_verdict(pr, sha, timeout, interval):
         if time.monotonic() >= deadline:
             die(f"waited {timeout}s on {(sha or 'an unread head')[:12]}: review {review}, verdict labels "
                 f"{', '.join(labels) or 'none'}, gates pending "
-                f"{', '.join(pending) or 'none'}", 4)
+                f"{', '.join(pending) or 'none'}"
+                + (f"; the agent-approved event never read, `gh api repos/{REPO}"
+                   f"/issues/{pr}/timeline` says why" if unread else ""), 4)
         time.sleep(interval)
 
 

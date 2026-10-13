@@ -539,7 +539,7 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
-out = {"approved_at": mod.approved_at(571), "changed_files": mod.changed_files(571)}
+out = {"approved_at": mod.approved_at(571, "{owner}/{repo}"), "changed_files": mod.changed_files(571)}
 if "pr" in case:
     found = mod.classify(case["pr"], now)
     out["rescue"] = mod.rescue(case["pr"], found, now)

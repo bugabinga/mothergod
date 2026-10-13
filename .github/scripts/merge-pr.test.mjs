@@ -6,7 +6,7 @@
 // script every call fails loudly, so the guard tests prove only that the
 // guard did or did not let the call through. The unscripted merge paths
 // (403 escalation, 409) still have no coverage here; 405 is covered below. The timeline read
-// in verdict.py is covered through the wait's stale-approval tests only.
+// in verdict.py is covered through the wait's stale-approval and unread-timeline tests only.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -120,8 +120,10 @@ const runs = (...entries) => ({
 // The review run in every fixture started at 08:00:00Z; the label event
 // either postdates it (a verdict on this head) or predates it (a label that
 // survived a push, PR #966's review).
+// The read is on GITHUB_REPOSITORY, never gh's `{owner}/{repo}` placeholder,
+// which expands only inside a checkout (#968).
 const labeled = (at) => ({
-  match: "issues/42/timeline",
+  match: "^api repos/o/r/issues/42/timeline",
   responses: [{ stdout: [[{ event: "labeled", label: { name: "agent-approved" }, created_at: at }]] }],
 });
 const APPROVED_NOW = labeled("2026-10-09T08:01:30Z");
@@ -265,6 +267,31 @@ test("--wait: approved with a gate still pending keeps waiting, then names it at
   assert.equal(status, 4);
   assert.match(stderr, /review success, verdict labels agent-approved, gates pending test/);
   assert.deepEqual(merges, []);
+});
+
+test("--wait: a timeline that never reads is named at the deadline, not 'gates pending none'", () => {
+  // #968: run from outside a checkout, the placeholder read failed every poll
+  // and the deadline exit named nothing a reader could act on.
+  const { status, stderr, stdout, merges, calls } = run(["42", "--wait", "--interval", "0", "--timeout", "0"], {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "success"], ...GREEN_GATES)] },
+      {
+        match: "^api repos/o/r/issues/42/timeline",
+        responses: [{ status: 1, stderr: "unable to expand placeholder in path" }],
+      },
+      merge,
+    ],
+  });
+  assert.equal(status, 4);
+  assert.match(stdout, /the agent-approved label event did not read; retrying/);
+  assert.match(
+    stderr,
+    /gates pending none; the agent-approved event never read, `gh api repos\/o\/r\/issues\/42\/timeline` says why/,
+  );
+  assert.deepEqual(merges, []);
+  assert.equal(calls.filter((c) => c.join(" ").includes("timeline")).length, 1);
 });
 
 test("--wait: a failed review run exits 4, nobody will post a verdict", () => {
