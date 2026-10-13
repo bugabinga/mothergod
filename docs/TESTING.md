@@ -15,7 +15,7 @@ blocking PRs.
 | Gate | every PR, required | yes | `cargo x check` stages + `ratio` |
 | Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
 | Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451); allocation torture (`torture-check`) |
-| Weekly | schedule | no, alarmed | monster matrix, coverage, Miri (#456) |
+| Weekly | schedule | no, alarmed | monster matrix, coverage, CLI memory bound (`memory-check`), Miri (#456) |
 | Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
 
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
@@ -104,6 +104,18 @@ profile, every fixture through every decode API (layer 2, #791). An
 abort fails the job, named by fixture, API and call index in the log, and
 wakes the fixer through the alarm. No ledger entry: the sweep is a gate
 on a rule, not a number.
+
+The advisory `memory-check` workflow runs Saturdays at 06:29 UTC and on
+manual dispatch: `.github/scripts/memory-check` on the release CLI, 256
+MiB of zeros plus one byte (17 frames) through encode and then decode,
+each child's peak resident set read from the kernel (#1109; the claim is
+CHANGELOG.md's "under 1 GiB however long the input"). A round trip that
+differs or a peak at or over 1 GiB fails the job, named in the footer,
+and wakes the fixer through the alarm. No ledger entry: the bound is the
+gate, and the readings print beside it in the log, so a peak climbing
+toward the bound is visible before it crosses. Weekly, not per PR,
+because the encode alone runs about six minutes in release. A seat that
+needs the number runs the script instead of a `time(1)` recipe of its own.
 
 The advisory `mutants-check` workflow runs on pull requests that touch
 `src/` or the crate's build inputs, mutating only the changed lines

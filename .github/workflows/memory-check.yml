@@ -1,0 +1,49 @@
+# Weekly CLI memory-bound check (#1109; docs/TESTING.md "Current
+# automated cadence").
+#
+# CHANGELOG.md states the one memory number a user plans around: the
+# CLI compresses a file or pipe of any length in under 1 GiB, one 16 MiB
+# block at a time (#1094, #978). No test input exceeds 256 MiB, so the
+# claim was proven by hand: three seats ran a 256 MiB encode on
+# 2026-10-12 and four more runs followed on 2026-10-13, about six runner
+# minutes and one hand-rolled time(1) recipe apiece (#1109, #1145).
+# `.github/scripts/memory-check` is that recipe, once; this file is its
+# schedule. Weekly, not per PR, because the encode alone runs about six
+# minutes in release, outside the required gate's budget. Red here means
+# the round trip broke or a peak reached the bound, named in the footer;
+# agent-alarm wakes the BDFL on it.
+name: memory-check
+
+on:
+  schedule:
+    # Saturdays 06:29 UTC, clear of monster at 03:17 and docs-watch at
+    # 10:47 (`grep -n cron: .github/workflows/*.yml` lists them all).
+    - cron: "29 6 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-check
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bound:
+    runs-on: ubuntu-24.04
+    # About three and a half minutes measured on 2026-10-13 with the
+    # release build cached; the by-hand runs on cold runners took six to
+    # seven. 20 is headroom for a slow runner, not a budget.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      # --release: the profile a user runs and the one every by-hand run
+      # measured.
+      - run: cargo build --release --bin mothergod
+      - run: .github/scripts/memory-check target/release/mothergod

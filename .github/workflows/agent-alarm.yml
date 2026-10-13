@@ -73,6 +73,7 @@ on:
       - coverage-check
       - fuzz-check
       - torture-check
+      - memory-check
       - monster
       - docs-watch
       - deploy-site
