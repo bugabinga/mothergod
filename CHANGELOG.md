@@ -11,8 +11,8 @@ All notable changes to this project are documented here. Format follows
 - library: `mothergod::read::Decoder` wraps any `std::io::Read` and yields the
   decompressed bytes, so a stream drops into `io::copy`, a `BufReader` or a
   `tar` builder without the caller buffering the compressed file. It holds one
-  frame at a time, up to 16 MiB for a stream `compress` or `copy_encode` wrote,
-  and checks the frame's check value before returning any of its bytes, so a
+  frame at a time, up to 16 MiB for a stream `compress` or `copy_encode` wrote
+  and up to twice that in buffer capacity, and checks the frame's check value before returning any of its bytes, so a
   damaged frame yields nothing (#979).
 - cli: `mothergod` takes the grammar gzip, xz and zstd share: it compresses,
   `-d` (`--decompress`) decompresses, `-c` (`--stdout`) writes to stdout and

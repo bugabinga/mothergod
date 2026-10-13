@@ -8,9 +8,9 @@ use super::{
     extent_prefix_len, parse_header,
 };
 
-/// The most [`Decoder::fill`] reserves ahead of the bytes the source has
-/// delivered: a hostile length field costs the input that actually arrives,
-/// never what it declares.
+/// The most [`Decoder::fill`] asks for beyond the bytes the source has
+/// delivered: a hostile length field costs a multiple of the input that
+/// actually arrives, never what it declares.
 const FILL_STEP: usize = 64 * 1024;
 
 /// Where the decoder stands in the stream it reads.
@@ -38,10 +38,12 @@ enum State {
 /// verifies its check value before decoding any of it, so no byte of a
 /// damaged frame is ever returned: that is the property
 /// [`Error::BadChecksum`] promises, and it is why the decoder is incremental
-/// across frames and not within one. Resident memory is the frame's coded
-/// bytes plus the bytes it decodes to. [`compress`](crate::compress) and
+/// across frames and not within one. The buffers are the frame's coded bytes
+/// and the bytes it decodes to, each up to twice its size because a growing
+/// buffer doubles its capacity, and both stay allocated until a larger frame
+/// replaces them. [`compress`](crate::compress) and
 /// [`copy_encode`](crate::copy_encode) cut their input into frames of 16 MiB,
-/// so a stream they wrote holds at most that much per frame; a frame a
+/// so a stream they wrote holds at most 32 MiB per buffer; a frame a
 /// producer wrote longer is held as long as it is. A [`Method::Stored`]
 /// frame from [`compress`](crate::compress) of an input past
 /// [`u32::MAX`] bytes is one such frame. Wrap `R` in [`Read::take`] to bound
@@ -52,7 +54,9 @@ enum State {
 /// A failure ends the stream: the failing read returns the error, with its
 /// [`std::io::ErrorKind`] as [`Error`] converts it (`UnexpectedEof` for
 /// truncation, `InvalidData` for corruption), and every later read returns
-/// that kind again.
+/// that kind again. That includes a source error of kind
+/// [`WouldBlock`](io::ErrorKind::WouldBlock): the partial frame is dropped,
+/// so a non-blocking source cannot be resumed.
 ///
 /// ```
 /// use std::io::Read;
@@ -105,8 +109,11 @@ impl<R: Read> Decoder<R> {
 
     /// Grows `self.frame` toward `len` bytes from the source. It holds fewer
     /// afterwards only if the source ended first. Memory follows the bytes
-    /// that arrive, never a declared length: each step reserves at most
-    /// [`FILL_STEP`] bytes ahead of what the source has delivered.
+    /// that arrive, never a declared length: each step asks for at most
+    /// [`FILL_STEP`] bytes beyond what the source has delivered, and
+    /// `try_reserve` grows amortized, so capacity stays under twice the
+    /// bytes delivered plus [`FILL_STEP`]. `try_reserve_exact` would hold the
+    /// bytes delivered exactly but reallocate, and so copy, at every step.
     ///
     /// [`Read::read_to_end`] would be shorter, but it aborts the process on
     /// a failed allocation where this returns [`Error::OutOfMemory`] (hard
