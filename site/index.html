@@ -392,9 +392,11 @@ cmp FILE FILE.out</pre>
           <code>&lt;file&gt;.mgdc</code> for each and <code>-d</code> reads one
           back to the name with the suffix stripped; <code>-c</code> writes to
           stdout and leaves files alone, and <code>-</code> names stdin. Nothing
-          deletes its input or overwrites an existing file. That,
-          <code>--help</code> and <code>--version</code> are the entire
-          interface so far: no compression levels, no tuning knobs.
+          deletes its input, and an existing output file is overwritten only
+          under <code>-f</code>; <code>-k</code> is accepted and does nothing,
+          since the input is kept anyway. That, <code>--help</code> and <code
+          >--version</code> are the entire interface so far: no compression
+          levels, no tuning knobs.
           <code>--version</code> also prints the format version the build reads;
           put it in a bug report. Expect the encode to take a while, at the
           rates above.

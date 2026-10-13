@@ -22,6 +22,10 @@ All notable changes to this project are documented here. Format follows
   a terminal, so a forgotten redirect does not fill the screen with binary
   (#1039). A reader that closes stdout early (`| head`) ends it silently with
   status 141, as gzip does.
+- cli: `-f` (`--force`) overwrites an existing output file instead of refusing
+  it, replacing the file rather than truncating it, so a hard link to the
+  input is never cut under the read; `-k` (`--keep`) is accepted and changes
+  nothing, because the input is always kept (#983).
 - format: concatenated frames decode to their payloads back to back, as
   `cat a.gz b.gz | gunzip` does, and bytes after the last frame are an error
   instead of being dropped in silence with exit status 0 (#978, ADR-0067).
