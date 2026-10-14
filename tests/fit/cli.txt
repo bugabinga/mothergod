@@ -22,7 +22,7 @@ mode-d | holds | -d and --decompress select decompression | gzip(1), bzip2(1), x
 stdout-c | holds | -c and --stdout write to stdout and leave the input alone | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -c |
 keep-k | holds | -k and --keep are accepted and the input survives | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -k | the project keeps the input by default (source-kept), so -k is accepted and does nothing
 force-f | holds | -f and --force overwrite an existing output file | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -f |
-test-t | gap | -t and --test check a compressed file and write nothing | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -t | #983
+test-t | holds | -t and --test check a compressed file and write nothing | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -t |
 verbose-v | gap | -v and --verbose are accepted and the data on stdout is unchanged | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -v | #983
 level-digit | gap | -1 selects a compression level | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -# | #983; mothergod has one tier until M5
 help | holds | -h and --help print usage and exit 0 | gzip(1), bzip2(1), xz(1), zstd(1), brotli(1), lz4(1) OPTIONS -h | the genre splits three to three on the stream (gzip, xz, zstd to stdout; bzip2, brotli, lz4 to stderr), the man pages are silent on it; the probe accepts either

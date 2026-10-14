@@ -444,6 +444,65 @@ fn keep_is_accepted_and_changes_nothing() {
 }
 
 #[test]
+fn test_flag_checks_each_operand_and_writes_nothing() {
+    let dir = Dir::new("test-flag");
+    let (frame, _) = run(&mut bin(), b"test test test test");
+    // No `.mgdc` suffix: a test run names no output, so it has nothing to strip.
+    let good = dir.file("good.bin", &frame);
+    let output = run_output(bin().arg("-t").arg(&good), b"");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    let long = run_output(bin().arg("--test").arg(&good), b"");
+    assert_eq!(long.status.code(), Some(0));
+    assert!(long.stdout.is_empty() && long.stderr.is_empty());
+    let names: Vec<_> = std::fs::read_dir(&dir.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["good.bin"]);
+}
+
+#[test]
+fn test_flag_reports_a_corrupt_operand_and_goes_on_to_the_next() {
+    let dir = Dir::new("test-flag-corrupt");
+    let bad = dir.file("bad.mgdc", b"not a mothergod frame");
+    let (frame, _) = run(&mut bin(), b"good good good good");
+    let good = dir.file("good.mgdc", &frame);
+    let mut flipped = frame.clone();
+    let last = flipped.len() - 1;
+    flipped[last] ^= 1;
+    let flipped = dir.file("flipped.mgdc", &flipped);
+    let output = run_output(bin().arg("-t").arg(&bad).arg(&good).arg(&flipped), b"");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("bad.mgdc"), "{stderr}");
+    assert!(stderr.contains("flipped.mgdc"), "{stderr}");
+    assert!(!stderr.contains("good.mgdc"), "{stderr}");
+    let (_out, good_alone) = run(bin().arg("-t").arg(&good), b"");
+    assert_eq!(good_alone, 0);
+}
+
+#[test]
+fn test_flag_reads_stdin_and_wins_over_decompress_and_stdout() {
+    let (frame, _) = run(&mut bin(), b"stdin stdin stdin");
+    for args in [
+        &["-t"][..],
+        &["-dt"],
+        &["-td"],
+        &["-t", "-d", "-c"],
+        &["-t", "-"],
+    ] {
+        let (stdout, code) = run(bin().args(args), &frame);
+        assert_eq!((stdout, code), (Vec::new(), 0), "{args:?}");
+    }
+    let output = run_output(bin().arg("-t"), b"not a mothergod frame");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("stdin"));
+}
+
+#[test]
 fn decompress_of_a_corrupt_file_argument_leaves_no_output_file() {
     let dir = std::env::temp_dir().join(format!(
         "mothergod-cli-test-decompress-corrupt-{}",
