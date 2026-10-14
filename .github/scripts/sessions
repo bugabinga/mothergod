@@ -190,9 +190,12 @@ def backfill(repo, since, rebuild=False):
     Oldest first, as `archive` lists them, so a walk that dies midway has
     written what the 90-day expiry was about to take. Idempotent: a second
     run finds every row present and downloads nothing. Each artifact's
-    allowance readings and tool counts are written beside its session row,
-    from the same download; the census stays on sessions, because a run
-    that reported no reading has no allowance row to count.
+    allowance readings and tool counts are written before its session row,
+    from the same download, in audit_facts.statements' order; the census
+    stays on sessions, because a run that reported no reading has no
+    allowance row to count, and because the session row, written last,
+    marks its derived rows in: a write that fails mid-artifact leaves the
+    run absent for the next walk, never present without them (#1102).
 
     `rebuild` walks every artifact, present rows included: the way a table
     added after the archive began gets its history, once, after `migrate`.
@@ -230,10 +233,7 @@ def backfill(repo, since, rebuild=False):
         if values[0] is None:
             unreadable.append(f"{read.artifact.name}: metadata carries no run_id")
             continue
-        d1.query(audit_facts.INSERT, values)
-        if readings:
-            d1.query(audit_facts.allowance_insert(readings), [v for r in readings for v in r])
-        for sql, params in audit_facts.tools_statements(tool_rows):
+        for sql, params in audit_facts.statements(values, readings, tool_rows):
             d1.query(sql, params)
         keys[read.artifact.name] = (values[0], values[1])
         written += 1

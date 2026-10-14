@@ -8,10 +8,13 @@ identifiers only, through audit_facts.row(), the one whitelist every reader
 of an artifact shares; no prose reaches the table (ADR-0019). The same row
 written from the archive is `sessions backfill`.
 
-The run's allowance readings follow as rows of the allowance table (#891
-slice 2) and its tool counts as rows of the tools table (slice 5), through
-audit_facts.allowance_rows and tools_rows, the same functions `sessions
-backfill` writes them with from the archive.
+The run's allowance readings (#891 slice 2) and tool counts (slice 5) are
+written before the session row, in audit_facts.statements' order, the one
+`sessions backfill` writes from the archive too: a derived write that fails
+leaves the run absent from `sessions`, and the Sunday walk rewrites all
+three from the artifact (#1102). A reading or count the metadata cannot
+yield is a `::warning::` and that table alone stays empty, because the walk
+would raise on the same field and has nothing to heal.
 
 Never fails the run: exit 0 on every path, because observability does not
 get to break the thing it observes (ADR-0023). A row that could not be
@@ -28,7 +31,7 @@ import sys
 from datetime import datetime, timezone
 
 import d1
-from audit_facts import INSERT, allowance_insert, allowance_rows, row, tools_rows, tools_statements
+from audit_facts import allowance_rows, row, statements, tools_rows
 
 
 def size_in(audit_dir):
@@ -41,24 +44,23 @@ def size_in(audit_dir):
     return size
 
 
-def beside(label, write_rows):
-    """One derived table's write after the session row: its miss is its own
-    warning, and the status line still reports the row. Returns the status
-    suffix `write_rows` produced, or nothing."""
+def derive(label, rows):
+    """One derived table's rows from the metadata, or none with a warning:
+    a field of the wrong shape costs that table, never the session row."""
     try:
-        return write_rows() or ""
+        return rows()
     except Exception as error:  # noqa: BLE001, the docstring's exit-0 invariant
         print(f"::warning::session-row: {label} not written: {type(error).__name__}: {error}")
-        return ""
+        return []
 
 
 def write(audit_dir):
-    """Write the run's row, then its allowance readings and tool counts;
-    print the status line.
+    """Write the run's allowance readings, tool counts and row, in that
+    order; print the status line.
 
     Raises on anything that stops the row: a missing or malformed
     metadata.json, a field row() cannot turn into a number, a database that
-    refuses the write. main() turns the raise into the warning.
+    refuses any of the writes. main() turns the raise into the warning.
     """
     with open(os.path.join(audit_dir, "metadata.json"), encoding="utf-8") as fh:
         meta = json.load(fh)
@@ -68,22 +70,12 @@ def write(audit_dir):
     values = row(meta, size_in(audit_dir))
     if values[0] is None:
         raise ValueError("metadata carries no run_id")
-    d1.query(INSERT, values)
-
-    def allowance():
-        readings = allowance_rows(meta)
-        if readings:
-            d1.query(allowance_insert(readings), [v for r in readings for v in r])
-            return ", allowance " + " ".join(r[2] for r in readings)
-
-    def tools():
-        rows = tools_rows(meta)
-        for sql, params in tools_statements(rows):
-            d1.query(sql, params)
-        if rows:
-            return f", tools {len(rows)}"
-
-    suffix = beside("allowance", allowance) + beside("tools", tools)
+    readings = derive("allowance", lambda: allowance_rows(meta))
+    tool_rows = derive("tools", lambda: tools_rows(meta))
+    for sql, params in statements(values, readings, tool_rows):
+        d1.query(sql, params)
+    suffix = ", allowance " + " ".join(r[2] for r in readings) if readings else ""
+    suffix += f", tools {len(tool_rows)}" if tool_rows else ""
     print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{suffix}")
 
 
