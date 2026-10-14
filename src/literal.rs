@@ -188,6 +188,18 @@ fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) 
     (weight * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT)
 }
 
+/// Bits the cumulative table `cum` charges `symbol`: `-log2` of its share of
+/// `cum[ALPHABET]`. Shared by [`Literal::ideal_cost_bits`] and
+/// [`Literal::ideal_cost_bits_ppm_expert_pair`].
+fn cum_cost_bits(cum: &[u64; ALPHABET + 1], symbol: usize) -> f64 {
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "cum entries are fixed-point sums bounded well under 2^53 (FIXED_POINT_SCALE is 2^32, ALPHABET is 256), so this loses no precision that matters"
+    )]
+    let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
+    bittree::ideal_cost_bit(true, probability)
+}
+
 /// Per-byte modeling context every [`Literal`] coding path reads to select
 /// which banks blend at this position: the previous two bytes (`0` before
 /// the start of output), the output position, whether the previous token was
@@ -996,20 +1008,12 @@ impl Literal {
     /// six-expert mixer, the remaining scope `JOURNAL` S2-A30 flagged for
     /// ROADMAP M2's ideal-cost accounting mode.
     #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
     pub fn ideal_cost_bits(&mut self, context: Context, byte: u8) -> f64 {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let symbol = usize::from(byte);
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "cum entries are fixed-point sums bounded well under 2^53 (FIXED_POINT_SCALE is 2^32, ALPHABET is 256), so this loses no precision that matters"
-        )]
-        let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
+        let bits = cum_cost_bits(&cum, symbol);
         self.update(&bank_indices, weight_index, symbol, exp);
-        -probability.log2()
+        bits
     }
 
     /// [`Self::ideal_cost_bits`]'s counterpart for [`Self::encode_sse`]:
@@ -1022,10 +1026,6 @@ impl Literal {
     /// same thing, per that module's docs). Updates the mixer state the
     /// same way [`Self::ideal_cost_bits`] does.
     #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
     pub fn ideal_cost_bits_sse(&mut self, context: Context, byte: u8) -> f64 {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let bits = bittree::ideal_cost_bits_sse(&cum, byte, &mut self.sse);
@@ -1399,10 +1399,6 @@ impl Literal {
     ///
     /// Returns `(baseline_bits, with_ppm_bits)`.
     #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
     pub fn ideal_cost_bits_ppm_expert_pair(
         &mut self,
         context: Context,
@@ -1414,12 +1410,7 @@ impl Literal {
         let ppm_bank = PpmExpertState::bank_of(context);
 
         let cum7 = self.mix_ppm(&bank_indices, weight_index, ppm_bank, ppm_state);
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "same bound as ideal_cost_bits: fixed-point sums stay well under 2^53"
-        )]
-        let with_ppm_probability = (cum7[symbol + 1] - cum7[symbol]) as f64 / cum7[ALPHABET] as f64;
-        let with_ppm_bits = -with_ppm_probability.log2();
+        let with_ppm_bits = cum_cost_bits(&cum7, symbol);
 
         self.update_ppm_expert(&bank_indices, weight_index, symbol, ppm_bank, ppm_state);
 
