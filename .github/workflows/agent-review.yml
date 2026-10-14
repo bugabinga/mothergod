@@ -207,7 +207,10 @@ jobs:
             Procedure:
             1. Read the full diff and the PR body.
             2. fmt, clippy, test, doc and ratio run on this commit as required
-               checks, and a hook denies recomputing them. Read their state
+               checks, and a hook denies recomputing them: `cargo x check`
+               in any spelling, `cargo x test|lint|doc|fmt` without
+               `-- <path>`, and `cargo test` without `-p mothergod` or
+               `-- <filter>`. Read their state
                with `gh pr checks $PR_NUMBER`, never with `--watch`, which
                lists this review job and hangs on it. A red one: say so, and
                treat what it would have verified as unverified. A pending one
