@@ -419,6 +419,51 @@ fn to_u32(i: usize) -> u32 {
     u32::try_from(i).expect("bounded by data.len() or the finder's window, both under u32::MAX")
 }
 
+/// One side of [`BinaryTreeMatchFinder::insert_and_find`]'s split: the nodes
+/// attached so far, each the child of the one before it.
+struct Chain {
+    /// First node attached, which becomes the inserted position's child on
+    /// this side, or [`NO_POSITION`] while the chain is empty.
+    root: u32,
+    /// Most recently attached node. `None` means the next node becomes
+    /// `root` instead of some attached node's child.
+    tail: Option<usize>,
+    /// Length-prefix reuse (LZMA bt4's `len0`/`len1`): the common length
+    /// already proven between the inserted position and `tail`. Every node
+    /// still to be visited lies between the two chains' tails in suffix
+    /// order, so it shares at least the shorter of the two prefixes with the
+    /// inserted position, and `suffix_common_len` can start from that bound
+    /// instead of byte 0. Starts at 0, `suffix_common_len`'s own default.
+    common: usize,
+}
+
+impl Chain {
+    const EMPTY: Self = Self {
+        root: NO_POSITION,
+        tail: None,
+        common: 0,
+    };
+
+    /// Attaches `node`, which shares `common` bytes with the inserted
+    /// position, as `tail`'s child in `links`.
+    fn link(&mut self, links: &mut [u32], node: usize, common: usize) {
+        if let Some(tail) = self.tail {
+            links[tail] = to_u32(node);
+        } else {
+            self.root = to_u32(node);
+        }
+        self.tail = Some(node);
+        self.common = common;
+    }
+
+    /// Ends the chain: nothing below `tail` stays linked.
+    fn cut(&self, links: &mut [u32]) {
+        if let Some(tail) = self.tail {
+            links[tail] = NO_POSITION;
+        }
+    }
+}
+
 /// Binary-tree match finder (`JOURNAL` S1-P2): each hash bucket is a binary
 /// search tree ordered by the candidates' suffix bytes, and
 /// [`Self::insert_and_find`] inserts a position and returns the longest
@@ -512,26 +557,10 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         self.head[h] = to_u32(i);
 
         // The walk splits the existing tree into a "less" chain (suffixes
-        // sorting before i's) and a "greater" chain (sorting after),
-        // which become i's left and right subtrees. `less_tail`/
-        // `greater_tail` name the most recently attached node on each
-        // side; `None` means that side is still empty, so the next node
-        // found becomes `less_root`/`greater_root` (i's future child)
-        // instead of some existing node's child.
-        let mut less_root = NO_POSITION;
-        let mut less_tail: Option<usize> = None;
-        let mut greater_root = NO_POSITION;
-        let mut greater_tail: Option<usize> = None;
-
-        // Length-prefix reuse (LZMA bt4's `len0`/`len1`): the common length
-        // already proven between `i` and the nearest node linked so far on
-        // the "less"/"greater" chain. Every node still to be visited lies
-        // between those two in suffix order, so it shares at least the
-        // shorter of the two prefixes with `i` — `suffix_common_len` can
-        // start from that bound instead of byte 0. Both start at 0 (no
-        // bound proven yet), matching `suffix_common_len`'s own default.
-        let mut less_common = 0usize;
-        let mut greater_common = 0usize;
+        // sorting before i's) and a "greater" chain (sorting after), which
+        // become i's left and right subtrees.
+        let mut less = Chain::EMPTY;
+        let mut greater = Chain::EMPTY;
 
         let mut best_len = 0usize;
         let mut best_distance: Option<Distance> = None;
@@ -548,7 +577,7 @@ impl<'d> BinaryTreeMatchFinder<'d> {
                 // the tree for good.
                 break;
             }
-            let start = less_common.min(greater_common);
+            let start = less.common.min(greater.common);
             let common = suffix_common_len(self.data, cur_pos, i, start, nice_len);
             if common > best_len {
                 best_len = common;
@@ -558,24 +587,12 @@ impl<'d> BinaryTreeMatchFinder<'d> {
                 // cur's suffix sorts before i's: it belongs on the "less"
                 // side, descend into its right subtree (candidates
                 // between cur and i) to look for closer ones.
-                if let Some(t) = less_tail {
-                    self.right[t] = to_u32(cur_pos);
-                } else {
-                    less_root = to_u32(cur_pos);
-                }
-                less_tail = Some(cur_pos);
-                less_common = common;
+                less.link(&mut self.right, cur_pos, common);
                 cur = self.right[cur_pos];
             } else {
                 // cur's suffix sorts after (or ties with, up to the
                 // shorter one's end) i's: descend into its left subtree.
-                if let Some(t) = greater_tail {
-                    self.left[t] = to_u32(cur_pos);
-                } else {
-                    greater_root = to_u32(cur_pos);
-                }
-                greater_tail = Some(cur_pos);
-                greater_common = common;
+                greater.link(&mut self.left, cur_pos, common);
                 cur = self.left[cur_pos];
             }
             depth += 1;
@@ -586,14 +603,10 @@ impl<'d> BinaryTreeMatchFinder<'d> {
         // max_depth, or ended naturally) is cut off rather than left
         // dangling: those deeper candidates are permanently dropped from
         // the bucket (struct docs, "A shallow walk mutates").
-        if let Some(t) = less_tail {
-            self.right[t] = NO_POSITION;
-        }
-        if let Some(t) = greater_tail {
-            self.left[t] = NO_POSITION;
-        }
-        self.left[i] = less_root;
-        self.right[i] = greater_root;
+        less.cut(&mut self.right);
+        greater.cut(&mut self.left);
+        self.left[i] = less.root;
+        self.right[i] = greater.root;
 
         best_distance.map(|distance| (best_len, distance))
     }
