@@ -1,9 +1,12 @@
 // Pins for memory-check, the recipe seven by-hand measurements shared
-// (#1109, #1145): the footer prints whenever both children ran, a peak at
-// the bound fails and names the side, a decode that differs fails under
-// the bound, and a child that does not exit 0 is a failure, never a
-// reading. The compressor is a stub (cat both ways, or a liar), because
-// the script's claims are about the measurement, not the codec.
+// (#1109, #1145): the footer prints once both children ran, a peak at or
+// over the bound fails and names the side, a decode that differs fails
+// under the bound, and a child that does not exit 0 is a failure, never a
+// reading. The subprocess pins use a stub compressor (cat both ways, or a
+// liar), because the script's claims are about the measurement, not the
+// codec; the boundary is pinned on `verdict` directly, because a stub's
+// peak is whatever the kernel reports and a bound equal to it is a race
+// (#1148).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -23,6 +26,30 @@ function stub(body) {
 const run = (binary, ...args) => spawnSync(script, [...args, binary], { encoding: "utf8" });
 
 const footer = (out) => out.split("\n").find((line) => line.startsWith("memory-check: bytes"));
+
+const driver = `
+import importlib.machinery, importlib.util, json, sys
+loader = importlib.machinery.SourceFileLoader("memory_check", sys.argv[1])
+spec = importlib.util.spec_from_loader("memory_check", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(json.dumps(mod.verdict(*json.loads(sys.argv[2]))))
+`;
+
+function verdict(encode, decode, boundKib, lossless) {
+  const r = spawnSync("python3", ["-I", "-c", driver, script, JSON.stringify([encode, decode, boundKib, lossless])], {
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test("under is strict: a peak one below the bound holds, at the bound fails, each side named", () => {
+  assert.deepEqual(verdict(1023, 1023, 1024, true), []);
+  assert.deepEqual(verdict(1024, 1023, 1024, true), ["encode peak 1024 KiB is not under the bound"]);
+  assert.deepEqual(verdict(1023, 1024, 1024, true), ["decode peak 1024 KiB is not under the bound"]);
+  assert.deepEqual(verdict(5, 5, 1024, false), ["round trip differs"]);
+});
 
 test("a stub that copies both ways holds: exit 0, the footer carries both peaks and the size", () => {
   const r = run(stub("exec cat"), "--bytes", "4096");

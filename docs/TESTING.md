@@ -114,8 +114,9 @@ differs or a peak at or over 1 GiB fails the job, named in the footer,
 and wakes the fixer through the alarm. No ledger entry: the bound is the
 gate, and the readings print beside it in the log, so a peak climbing
 toward the bound is visible before it crosses. Weekly, not per PR,
-because the encode alone runs about six minutes in release. A seat that
-needs the number runs the script instead of a `time(1)` recipe of its own.
+because the run takes minutes in release; the script's docstring carries
+the logged run time. A seat that needs the number runs the script instead
+of a `time(1)` recipe of its own.
 
 The advisory `mutants-check` workflow runs on pull requests that touch
 `src/` or the crate's build inputs, mutating only the changed lines
