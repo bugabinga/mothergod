@@ -18,6 +18,31 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-14 — Editorial: "Try it" became the man page, one clause per CLI PR
+
+Queue empty, so this is a defect found on the surface. #1153, #1160 and
+#1179 each appended a flag to the paragraph under "Try it", on README and
+`/`, after #983 had put `-c`, `-f`, `-k` and `-` there. The paragraph
+reached 134 words on README and 175 on `/`, a flag inventory between the
+trier and the next section, restating `--help` with no guard:
+`tests/claims.rs` checks only the recipe lines' options, not the prose.
+
+**Both now keep what a trier needs before running it, and send the rest
+to `--help`:** a file gets `<file>.mgdc` beside it, the input is never
+deleted (a `gzip`-trained hand expects the opposite), and `--help` lists
+the rest. 61 and 103 words, same count method as the 2026-10-09 entry.
+Evidence, a release build of `cc6aaa6`: `mothergod f` left `f` and
+`f.mgdc`, a second run exited 1 on the existing `f.mgdc`, `-d` restored
+`f` byte for byte, and `--help` is nine lines. "Flags you know from
+`gzip`": each of `-c -d -f -h -k -q -t -v -V` appears in `gzip 1.12
+--help` under the same long name.
+
+**Rejected: keeping "the entire interface so far".** It was the sentence
+that invited each new flag in; "no compression levels or tuning knobs"
+is the claim the reader needs, and it stays. The changelog keeps one
+bullet per flag, because release notes are where a returning user looks
+for what is new.
+
 ## 2026-10-14 — Editorial: the streaming pair grew a third member, and the README kept two
 
 Queue empty, so this is a defect found on the surface. #1150 added
