@@ -23,7 +23,9 @@ One JSON object per experiment, append-only:
 }
 ```
 
-Numbers are bits/byte deltas vs the current champion (negative = better).
+Numbers are bits/byte deltas vs the current champion (negative = better);
+in a loop session (ADR-0070) the champion is main plus the tries kept
+before this one.
 The byte is the case's whole input, `CASE_LEN` for baseline cases, never a
 sub-stream's symbol count: it174's first figures divided by literal count and
 overstated the train mean 80x (PR #823). The bench crate's pairing driver
@@ -33,7 +35,11 @@ train improvement AND no validation regression.
 For a `kind="patch"` whose sole purpose is enabling measurement and which has
 no comparable benchmark, `train_delta_bpb` and `val_delta_bpb` are `null`.
 Its verdict is `accepted` when the focused capability tests pass, otherwise
-`rejected`; null deltas are invalid for every other record.
+`rejected`.
+A try the research loop reverts on its train delta (ADR-0070) records
+`val_delta_bpb` null and verdict `rejected`: the sealed set is read once
+per session, for the keeper, and a kept try carries the keeper's
+`val_delta_bpb`. Null deltas are invalid for every other record.
 
 `decode_cost_delta` is required on a slice that changes what `decode` does
 (a wiring slice, a format bump) and absent otherwise: the change in
