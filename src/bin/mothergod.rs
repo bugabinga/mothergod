@@ -231,13 +231,7 @@ fn test(operand: Option<&Path>, verbose: bool) -> ExitCode {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
-    decompress_into(
-        &input,
-        &mut io::sink(),
-        "nowhere",
-        &input_name(operand),
-        verbose,
-    )
+    decompress_into(&input, io::sink(), "nowhere", &input_name(operand), verbose)
 }
 
 /// What a message calls an input.
@@ -267,29 +261,31 @@ fn convert(direction: Direction, operand: Option<&Path>, options: Options) -> Ex
             Ok(reader) => reader,
             Err(err) => return fail(&err),
         };
-        return match target {
-            None => compress_into(reader, io::stdout().lock(), "stdout", &input_name, verbose),
-            Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
-                let dest_name = out_path.display().to_string();
-                compress_into(reader, file, &dest_name, &input_name, verbose)
-            }),
-        };
+        return write_to(target, existing, |sink, dest_name| {
+            compress_into(reader, sink, dest_name, &input_name, verbose)
+        });
     }
     let input = match read_input(operand) {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
+    write_to(target, existing, |sink, dest_name| {
+        decompress_into(&input, sink, dest_name, &input_name, verbose)
+    })
+}
+
+/// Runs `write` against stdout when `target` is `None`, else against the new
+/// file [`write_new_file_with`] makes for it, with the destination's name for
+/// messages.
+fn write_to(
+    target: Option<(&Path, PathBuf)>,
+    existing: Existing,
+    write: impl FnOnce(&mut dyn Write, &str) -> ExitCode,
+) -> ExitCode {
     match target {
-        None => decompress_into(
-            &input,
-            &mut io::stdout().lock(),
-            "stdout",
-            &input_name,
-            verbose,
-        ),
+        None => write(&mut io::stdout().lock(), "stdout"),
         Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
-            let dest_name = out_path.display().to_string();
-            decompress_into(&input, file, &dest_name, &input_name, verbose)
+            write(file, &out_path.display().to_string())
         }),
     }
 }
@@ -399,7 +395,7 @@ fn compress_into<R: Read, W: Write>(
 /// `verbose`, a success says the sizes on stderr.
 fn decompress_into<W: Write>(
     input: &[u8],
-    writer: &mut W,
+    writer: W,
     dest_name: &str,
     input_name: &str,
     verbose: bool,
