@@ -22,8 +22,13 @@ mod common;
 mod matrix;
 
 use std::fs::{self, File};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use common::{bin, run, run_output, run_with_early_closing_reader, stored_frame};
 use matrix::{Probe, Seen, seen};
@@ -113,6 +118,7 @@ const PROBES: &[(&str, Probe)] = &[
     ("mtime-copied", mtime_copied),
     ("mode-copied", mode_copied),
     ("concatenation", concatenation),
+    ("streaming-memory", streaming_memory),
 ];
 
 fn mode_d() -> Seen {
@@ -333,6 +339,53 @@ fn concatenation() -> Seen {
     let mut both = sample();
     both.extend(other_sample());
     seen(code == 0 && out == both)
+}
+
+/// The block `copy_encode` holds at a time (its doc names 16 MiB).
+const BLOCK: usize = 16 * 1024 * 1024;
+
+/// Past one block, a read-ahead beyond what the pipe itself buffers.
+const READ_AHEAD: usize = 1024 * 1024;
+
+/// How long the probe lets a child that has read one block keep reading.
+const SETTLE: Duration = Duration::from_secs(1);
+
+/// The encoder stops reading while it encodes a block, so a writer feeding
+/// three blocks stalls near one: input is not buffered ahead of the work.
+/// Measuring the peak itself needs an encode of at least one block, minutes
+/// in a debug build, so the weekly `memory-check` lane owns that number and
+/// the probe is killed with the first block still encoding. A child that
+/// slurps its input fails; a slow runner cannot fail a child that streams,
+/// only let a slurper pass, because the stall bound is an upper limit.
+fn streaming_memory() -> Seen {
+    let mut child = bin()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("mothergod binary should spawn");
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let written = Arc::new(AtomicUsize::new(0));
+    let progress = Arc::clone(&written);
+    let writer = thread::spawn(move || {
+        let chunk = vec![0u8; 64 * 1024];
+        for _ in 0..3 * BLOCK / chunk.len() {
+            if stdin.write_all(&chunk).is_err() {
+                return;
+            }
+            progress.fetch_add(chunk.len(), Ordering::SeqCst);
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while written.load(Ordering::SeqCst) < BLOCK && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    thread::sleep(SETTLE);
+    let read = written.load(Ordering::SeqCst);
+    child.kill().expect("kill the child still encoding");
+    writer.join().expect("writer thread");
+    child.wait().expect("reap the child");
+    seen((BLOCK..BLOCK + READ_AHEAD).contains(&read))
 }
 
 #[test]
