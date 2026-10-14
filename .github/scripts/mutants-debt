@@ -69,6 +69,7 @@ mutants-debt.test.mjs can pin both failure directions without spawning gh;
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -140,6 +141,39 @@ class Debt:
 
 def plural(n, noun):
     return f"{n} {noun}{'s' if n != 1 else ''}"
+
+
+# What Rust's `regex::escape` escapes, the crate cargo-mutants compiles `--re`
+# with. Python's re.escape also escapes space and `#`, which that crate
+# accepts only from 1.8 on, so the set is spelled here, not borrowed (#1121).
+RUST_REGEX_META = frozenset("\\.+*?()|[]{}^$#&-~")
+# A mutant name as cargo-mutants prints it: `file:line:col: ` then the mutation text.
+NAME = re.compile(r"^(?P<file>[^:]+):\d+:\d+: (?P<text>.+)$")
+
+
+def regex_escape(text):
+    """`text` as a Rust regex that matches it literally."""
+    return "".join(f"\\{c}" if c in RUST_REGEX_META else c for c in text)
+
+
+def decide_command(name):
+    """The cargo-mutants run that decides `name` alone, pasteable into a shell.
+
+    A bare name is a wrong regex: `|` alternates, so `replace || with &&`
+    matched all 2157 mutants of the crate on 27.1.0 (#1121). The pattern is
+    the mutation text, escaped, with the line and column left off and `-f`
+    scoping the file: `--re` searches the whole name, line included, but a
+    line moves on main between the filing and the fix and the text with
+    its function does not. `shlex.quote` because a name can hold a lifetime's
+    quote (`Frames<'a>::split`).
+    """
+    match = NAME.match(name)
+    scope = f"-f {match['file']} " if match else ""
+    text = match["text"] if match else name
+    return (
+        "cargo mutants --config tests/mutants.toml --package mothergod "
+        f"{scope}--re {shlex.quote(regex_escape(text))}"
+    )
 
 
 def triage(missed, undecided, generated):
@@ -261,11 +295,15 @@ def render(pr, debt, run_url):
         "the equivalence proof (#391's shape). Procedure: the `test-craft` skill.",
     ]
     if debt.undecided:
-        lines += [
-            "An undecided mutant is run first, `cargo mutants --config tests/mutants.toml",
-            "--package mothergod --re '<its name>'`, then answered as a survivor or closed as caught.",
-        ]
+        lines += ["An undecided mutant is run first, then answered as a survivor or closed as caught."]
     lines += [
+        "",
+        "One run per mutant listed above, `-f` scoping the file and the line left off the",
+        "pattern because it moves on main while the text does not:",
+        "",
+        "```",
+        *(decide_command(name) for name in [*debt.missed, *debt.undecided]),
+        "```",
         "",
         f"Run: {run_url}",
     ]

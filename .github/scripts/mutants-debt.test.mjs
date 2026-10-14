@@ -208,7 +208,13 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
   assert.equal(partial.title, "mutants: 2 survivors, 2 undecided outlived PR #690 (src/codec.rs, src/coder.rs)");
   assert.ok(partial.body.includes("20 of\n104 listed never ran"));
   for (const line of undecided) assert.ok(partial.body.includes(line), line);
-  assert.ok(partial.body.includes("--re '<its name>'"), "the body says how to decide one");
+  assert.ok(partial.body.includes("An undecided mutant is run first"), "the body says how to decide one");
+  assert.ok(
+    partial.body.includes(
+      "cargo mutants --config tests/mutants.toml --package mothergod -f src/codec.rs --re 'replace > with == in read_header'",
+    ),
+    "one pasteable run per mutant, the line left off",
+  );
 
   // Run 38191593517's shape: nothing missed, two never run, and it merged.
   const cutOnly = call({ fn: "render", pr: 1085, undecided, generated: 74, run_url: "u" });
@@ -231,4 +237,23 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
     oneOutside.body.includes("1 more survivor sits outside decode-safety territory"),
     "singular agrees (#932 read \"1 more survivor sit\")",
   );
+});
+
+test("render's per-mutant run is a regex of the text, not the name (#1121)", () => {
+  // `||` alternates: the bare name matched all 2157 mutants of the crate on
+  // cargo-mutants 27.1.0. The escaped text with `-f` listed exactly the one.
+  // A lifetime's quote has to survive the shell, hence the shlex form.
+  const meta = [
+    "src/bin/mothergod.rs:209:43: replace || with && in run",
+    "src/lib.rs:326:37: replace + with - in Frames<'a>::split",
+  ];
+  const out = call({ fn: "render", pr: 7, missed: [meta[1]], undecided: [meta[0]], generated: 9, run_url: "u" });
+  assert.ok(!out.body.includes("<its name>"), "no placeholder handed out as a recipe");
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(out.body.includes(`${prefix}-f src/bin/mothergod.rs --re 'replace \\|\\| with \\&\\& in run'`), out.body);
+  assert.ok(
+    out.body.includes(`${prefix}-f src/lib.rs --re 'replace \\+ with \\- in Frames<'"'"'a>::split'`),
+    out.body,
+  );
+  assert.ok(!out.body.includes("209:43: replace || with && in run'"), "the line is off the pattern");
 });
