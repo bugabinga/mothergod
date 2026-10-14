@@ -18,6 +18,25 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-14 — Editorial: the streaming pair grew a third member, and the README kept two
+
+Queue empty, so this is a defect found on the surface. #1150 added
+`write::Encoder`, the `std::io::Write` side, the day after the entry below
+showed the streaming pair. An embedder whose producer writes, a `tar`
+builder or a serializer, read `copy_encode` and concluded they must buffer
+or pipe first. Only the changelog said otherwise.
+
+**README now names `write::Encoder` in one sentence after the streaming
+example, with the one trap it carries: without `finish`, the last block
+never reaches the file.** Evidence, an example built against `fa861d7`: a
+636079-byte mix of Rust source and random bytes, written in 4096-byte
+chunks, came out byte for byte what `copy_encode` writes, and `mothergod
+-d | cmp` was silent. The same encoder dropped without `finish` left a
+0-byte file.
+
+**Rejected: a third code block.** It would repeat the example's shape with
+one name changed; the type's own doc example is a `cargo doc --open` away.
+
 ## 2026-10-13 — Editorial: the README's library example stopped at the slice API
 
 Queue empty, so this is a defect found on the surface. The README's

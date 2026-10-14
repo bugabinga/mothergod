@@ -99,6 +99,10 @@ let mut reader = mothergod::read::Decoder::new(File::open("big.tar.mgdc")?);
 io::copy(&mut reader, &mut File::create("big.tar.out")?)?;
 ```
 
+A producer that writes rather than reads, such as a `tar` builder, writes
+into `mothergod::write::Encoder` instead. Call its `finish`, or the last block
+never reaches the file.
+
 `cargo doc --open` documents each call's memory bound and errors.
 
 ## Who builds it
