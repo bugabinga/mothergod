@@ -41,13 +41,18 @@ const REPEATS: u32 = 5;
 pub const BASELINE_DECODE_COST: f64 = 120.0;
 
 /// Fraction [`decode_cost`] may exceed [`BASELINE_DECODE_COST`] before
-/// [`slowdown`] reports it. Measured with `baseline_gate -- speed` on
-/// `baseline::cases()`: five runs on an Intel Xeon Platinum 8573C span 116.9
-/// to 121.1, eight runs on an AMD EPYC 7763 span 102.98 to 130.13, so the
-/// worst run on record is +8.4% over the baseline. Not measured: the pool's
-/// other CPU models. The margin is wide for that reason; `baseline_gate`
-/// prints the CPU beside every cost so the pool's spread accrues in the CI
-/// logs, and the margin tightens once those show it.
+/// [`slowdown`] reports it. Measured from the `bench speed gate` line of 136
+/// `ci.yml` push runs on main, 2026-10-08 to 2026-10-14 (issue #918): the
+/// pool's six CPU models have median costs 103.70 to 132.28 and the whole
+/// range is 94.87 to 132.95, so the worst run is +10.8% over the baseline.
+/// Within one model the range is up to 33.6% (AMD EPYC 7763, 69 runs, 94.87
+/// to 126.76), main's code changes included, so that figure bounds the noise
+/// from above. The kernel therefore does not track the decoder across
+/// models (the 8370C holds 130.39 to 132.95 across the window while the
+/// 7763 sits near 100 to 115); within one model it is unresolved. A margin under about 0.11 would redden main on the
+/// Intel Xeon Platinum 8370C alone. The margin stays wide until the
+/// calibration kernel is replaced by one closer to the decoder's access
+/// pattern; `baseline_gate` prints the CPU beside every cost.
 pub const MAX_SLOWDOWN: f64 = 0.25;
 
 /// Wall time of a fixed dependent-load kernel: `CALIBRATION_STEPS` steps of
