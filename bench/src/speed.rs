@@ -43,12 +43,13 @@ pub const BASELINE_DECODE_COST: f64 = 120.0;
 /// Fraction [`decode_cost`] may exceed [`BASELINE_DECODE_COST`] before
 /// [`slowdown`] reports it. Measured from the `bench speed gate` line of 136
 /// `ci.yml` push runs on main, 2026-10-08 to 2026-10-14 (issue #918): the
-/// pool's six CPU models have median costs 103.70 to 132.17 and the whole
+/// pool's six CPU models have median costs 103.70 to 132.28 and the whole
 /// range is 94.87 to 132.95, so the worst run is +10.8% over the baseline.
 /// Within one model the range is up to 33.6% (AMD EPYC 7763, 69 runs, 94.87
 /// to 126.76), main's code changes included, so that figure bounds the noise
-/// from above. The kernel therefore does not track the decoder across or
-/// within models, and a margin under about 0.11 would redden main on the
+/// from above. The kernel therefore does not track the decoder across
+/// models (the 8370C holds 130.39 to 132.95 across the window while the
+/// 7763 sits near 100 to 115); within one model it is unresolved. A margin under about 0.11 would redden main on the
 /// Intel Xeon Platinum 8370C alone. The margin stays wide until the
 /// calibration kernel is replaced by one closer to the decoder's access
 /// pattern; `baseline_gate` prints the CPU beside every cost.

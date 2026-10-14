@@ -8584,16 +8584,17 @@ record.
   `ci.yml` push runs on main, 2026-10-08 to 2026-10-14 (the curator's table
   on #918), against `BASELINE_DECODE_COST` 120.0. Per CPU, runs, min, median,
   max: EPYC 7763 69, 94.87, 107.51, 126.76; EPYC 9V74 23, 110.70, 113.03,
-  121.80; EPYC 9V45 22, 106.88, 111.64, 116.29; Xeon Platinum 8573C 11,
-  105.87, 108.44, 115.19; Xeon Platinum 8370C 8, 130.39, 132.17, 132.95;
-  Xeon 6973P-C 3, 98.93, 103.70, 111.36. Cross-model medians span 27%,
+  121.80; EPYC 9V45 22, 106.88, 111.72, 116.29; Xeon Platinum 8573C 11,
+  105.87, 108.44, 115.19; Xeon Platinum 8370C 8, 130.39, 132.28, 132.95;
+  Xeon 6973P-C 3, 98.93, 103.70, 111.36. Cross-model medians span 28%,
   within EPYC 7763 the range is 33.6%, and the worst run is +10.8% over the
   baseline. | Decision 1: `MAX_SLOWDOWN` stays 0.25. #918's item 2 sets the
   trigger (cross-model spread over 10%) and both spreads exceed it, so the
   kernel is replaced before the margin moves; tightening on today's kernel
   would gate on the runner lottery (a margin under about 0.11 fails the 8370C
   alone). The within-model figure carries main's own code changes, so it is
-  an upper bound on noise. Decision 2, encode: no gate, no per-run encode
+  an upper bound on noise, not a tracking failure within a model; that
+  half is unresolved. Decision 2, encode: no gate, no per-run encode
   cost in CI. Measured on one EPYC 9V74 runner, `baseline::cases()` (550,000
   bytes), best of five per case: encode 3.31 s, 0.166 MB/s, 959 calibration
   steps per byte, eight rounds within 0.4% of each other (one process, so a
@@ -8602,6 +8603,9 @@ record.
   would divide by the same calibration kernel whose cross-model and
   within-model spread is the open problem, so it adds a second reading of an
   unvalidated ruler. It gets decided again when the kernel is replaced; the
-  encode figure above is its first data point. **Not measured:** encode on
+  encode figure above is its first data point. The per-accepted-slice
+  encode delta (#907 item 2) is not recorded in `progress.jsonl` either,
+  for the same reason: a delta read off the same unvalidated kernel is
+  noise of unknown size. **Not measured:** encode on
   the pool's other CPU models, and a candidate replacement kernel. The
   kernel replacement is issue #1184. `research/progress.jsonl` it192.
