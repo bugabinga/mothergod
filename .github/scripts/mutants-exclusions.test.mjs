@@ -75,6 +75,7 @@ test("an entry Python re cannot compile is a finding, not a skip", () => {
   const r = run(toml("replace \\p{Lu} with"));
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /::error::unreadable exclusion: 'replace \\\\p\{Lu\} with' does not compile/);
+  assert.match(r.stdout, /\(no \\p\{\} classes\)\./);
   assert.match(r.stdout, /entries 1 \| live 0 \| dead 0 \| unreadable 1/);
 });
 

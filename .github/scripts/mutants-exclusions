@@ -99,7 +99,7 @@ def render(rows, mutant_count, out=sys.stdout):
         print(
             f"::error::unreadable exclusion: {entry!r} does not compile as a Python"
             " re, so this check cannot read it. Rewrite it in the common subset"
-            " (no \\p{{}} classes).",
+            " (no \\p{} classes).",
             file=out,
         )
     print(
