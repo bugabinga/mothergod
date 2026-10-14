@@ -74,7 +74,8 @@ Given file arguments instead, compression writes `<file>.mgdc` for each and
 and leaves files alone, and `-` names stdin. Nothing deletes its input, and an
 existing output file is overwritten only under `-f`; `-k` is accepted and does
 nothing, since the input is kept anyway. `-t` decodes each file and writes
-nothing, so a silent exit 0 says it is intact.
+nothing, so a silent exit 0 says it is intact; `-v` adds one stderr line per
+file with its sizes.
 That and `--help` and `--version` are the entire interface so far: no
 compression levels, no tuning knobs. `--version` also prints the format version
 the build reads; put it in a bug report. Expect the encode to take a while, at

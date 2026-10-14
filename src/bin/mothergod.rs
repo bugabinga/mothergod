@@ -7,7 +7,8 @@
 //! the run never deletes the input, nor overwrites an existing output file
 //! unless `-f` says to. `-k` is accepted and does nothing, because the input
 //! is kept anyway. `-t` decodes without writing anything, so a silent exit 0
-//! says the file is intact (ADR-0066):
+//! says the file is intact (ADR-0066). `-v` reports each input's sizes on
+//! stderr and leaves stdout alone:
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -18,6 +19,7 @@
 //! mothergod -dc input.mgdc | tar x          # writes stdout, keeps input.mgdc
 //! mothergod -f input                        # replaces input.mgdc
 //! mothergod -t input.mgdc                   # writes nothing, exits 0 if intact
+//! mothergod -v input                        # also says: input: 2000 -> 640 bytes (32.0%)
 //! ```
 //!
 //! Operands are processed in order. A failure on one is reported and the run
@@ -52,11 +54,12 @@ use std::process::ExitCode;
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [-t] [--] [file ...]\n       \
+const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [-t] [-v] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
 -k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
 -t (--test) checks that each input decompresses and writes nothing.\n\
+-v (--verbose) reports each input's sizes on stderr.\n\
 With no file, or the file -, reads stdin and writes stdout.\n\
 With a file, compression writes <file>.mgdc; decompression reads a .mgdc file and writes <file> \
 (the name with the suffix stripped). Never overwrites an existing output file without -f.";
@@ -83,14 +86,22 @@ enum Existing {
     Replace,
 }
 
+/// What every operand of a run shares, apart from its mode.
+#[derive(Clone, Copy)]
+struct Options {
+    to_stdout: bool,
+    existing: Existing,
+    /// Reports each input's sizes on stderr once it converted.
+    verbose: bool,
+}
+
 /// What the command line asked for.
 enum Request {
     Help,
     Version,
     Run {
         mode: Mode,
-        to_stdout: bool,
-        existing: Existing,
+        options: Options,
         /// Empty means stdin to stdout; `-` is already folded to `None`.
         operands: Vec<Option<PathBuf>>,
     },
@@ -112,10 +123,9 @@ fn main() -> ExitCode {
         }
         Ok(Request::Run {
             mode,
-            to_stdout,
-            existing,
+            options,
             operands,
-        }) => run(mode, to_stdout, existing, &operands),
+        }) => run(mode, options, &operands),
         Err(message) => fail(&format!("{message}\n\n{USAGE}")),
     }
 }
@@ -129,6 +139,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
     let mut test_only = false;
     let mut to_stdout = false;
     let mut existing = Existing::Refuse;
+    let mut verbose = false;
     let mut operands = Vec::new();
     let mut options_ended = false;
     for arg in args {
@@ -149,6 +160,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 "stdout" => to_stdout = true,
                 "keep" => {}
                 "force" => existing = Existing::Replace,
+                "verbose" => verbose = true,
                 "help" => return Ok(Request::Help),
                 "version" => return Ok(Request::Version),
                 _ => return Err(format!("unknown option \"--{long}\"")),
@@ -162,6 +174,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 'c' => to_stdout = true,
                 'k' => {}
                 'f' => existing = Existing::Replace,
+                'v' => verbose = true,
                 'h' => return Ok(Request::Help),
                 'V' => return Ok(Request::Version),
                 _ => return Err(format!("unknown option \"-{flag}\"")),
@@ -175,22 +188,25 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         } else {
             Mode::Convert(direction)
         },
-        to_stdout,
-        existing,
+        options: Options {
+            to_stdout,
+            existing,
+            verbose,
+        },
         operands,
     })
 }
 
 /// Processes each operand in order, or stdin when there is none. A failed
 /// operand does not stop the rest; the run exits 1 if any failed.
-fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathBuf>]) -> ExitCode {
+fn run(mode: Mode, options: Options, operands: &[Option<PathBuf>]) -> ExitCode {
     let stdin_only = [None];
     let operands = if operands.is_empty() {
         &stdin_only
     } else {
         operands
     };
-    let writes_stdout = to_stdout || operands.iter().any(Option::is_none);
+    let writes_stdout = options.to_stdout || operands.iter().any(Option::is_none);
     if matches!(mode, Mode::Convert(Direction::Compress))
         && writes_stdout
         && io::stdout().is_terminal()
@@ -201,8 +217,8 @@ fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathB
     for operand in operands {
         let operand = operand.as_deref();
         let code = match mode {
-            Mode::Convert(direction) => convert(direction, operand, to_stdout, existing),
-            Mode::Test => test(operand),
+            Mode::Convert(direction) => convert(direction, operand, options),
+            Mode::Test => test(operand, options.verbose),
         };
         if code == ExitCode::from(SIGPIPE_STATUS) {
             return code;
@@ -216,12 +232,18 @@ fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathB
 
 /// Decodes one input to nowhere: it names no output file, so the input needs
 /// no suffix, and nothing is written whether it decodes or not.
-fn test(operand: Option<&Path>) -> ExitCode {
+fn test(operand: Option<&Path>, verbose: bool) -> ExitCode {
     let input = match read_input(operand) {
         Ok(input) => input,
         Err(err) => return fail(&err),
     };
-    decompress_into(&input, &mut io::sink(), "nowhere", &input_name(operand))
+    decompress_into(
+        &input,
+        &mut io::sink(),
+        "nowhere",
+        &input_name(operand),
+        verbose,
+    )
 }
 
 /// What a message calls an input.
@@ -230,14 +252,14 @@ fn input_name(operand: Option<&Path>) -> String {
 }
 
 /// Converts one input, stdin when `operand` is `None`, to stdout when there
-/// is no operand or `to_stdout` is set, else to the file named from `operand`
-/// by [`add_suffix`] or [`strip_suffix`].
-fn convert(
-    direction: Direction,
-    operand: Option<&Path>,
-    to_stdout: bool,
-    existing: Existing,
-) -> ExitCode {
+/// is no operand or `options.to_stdout` is set, else to the file named from
+/// `operand` by [`add_suffix`] or [`strip_suffix`].
+fn convert(direction: Direction, operand: Option<&Path>, options: Options) -> ExitCode {
+    let Options {
+        to_stdout,
+        existing,
+        verbose,
+    } = options;
     let target = match operand.filter(|_| !to_stdout) {
         Some(source) => match output_name(direction, source) {
             Ok(out_path) => Some((source, out_path)),
@@ -252,9 +274,10 @@ fn convert(
             Err(err) => return fail(&err),
         };
         return match target {
-            None => compress_into(reader, io::stdout().lock(), "stdout", &input_name),
+            None => compress_into(reader, io::stdout().lock(), "stdout", &input_name, verbose),
             Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
-                compress_into(reader, file, &out_path.display().to_string(), &input_name)
+                let dest_name = out_path.display().to_string();
+                compress_into(reader, file, &dest_name, &input_name, verbose)
             }),
         };
     }
@@ -263,9 +286,16 @@ fn convert(
         Err(err) => return fail(&err),
     };
     match target {
-        None => decompress_into(&input, &mut io::stdout().lock(), "stdout", &input_name),
+        None => decompress_into(
+            &input,
+            &mut io::stdout().lock(),
+            "stdout",
+            &input_name,
+            verbose,
+        ),
         Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
-            decompress_into(&input, file, &out_path.display().to_string(), &input_name)
+            let dest_name = out_path.display().to_string();
+            decompress_into(&input, file, &dest_name, &input_name, verbose)
         }),
     }
 }
@@ -282,38 +312,86 @@ fn output_name(direction: Direction, source: &Path) -> Result<PathBuf, String> {
 /// [`mothergod::copy_encode`] can be told to come from reading and not from
 /// writing: the library returns one `io::Error` for both. An `Interrupted`
 /// read is not kept: the library retries it and it never surfaces, so
-/// keeping it would blame a later write failure on the read.
+/// keeping it would blame a later write failure on the read. It also counts
+/// the bytes it delivered, for `-v`.
 struct Tracked<R> {
     inner: R,
     failure: Option<io::Error>,
+    bytes: u64,
 }
 
 impl<R: Read> Read for Tracked<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.inner.read(buf).map_err(|err| {
+        let read = self.inner.read(buf).map_err(|err| -> io::Error {
             let kind = err.kind();
             if kind != io::ErrorKind::Interrupted {
                 self.failure = Some(err);
             }
             kind.into()
-        })
+        })?;
+        self.bytes += read as u64;
+        Ok(read)
     }
+}
+
+/// A writer that counts the bytes its inner writer accepted, for `-v`.
+struct Counted<W> {
+    inner: W,
+    bytes: u64,
+}
+
+impl<W: Write> Write for Counted<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// What `-v` says of a compression: the compressed size as a share of the
+/// input's, in tenths of a percent, left out for an empty input.
+fn share(read: u64, written: u64) -> String {
+    if read == 0 {
+        return String::new();
+    }
+    let tenths = u128::from(written) * 1000 / u128::from(read);
+    format!(" ({}.{}%)", tenths / 10, tenths % 10)
 }
 
 /// Runs [`mothergod::copy_encode`] from `reader` into `writer`: a read
 /// failure is reported with `input_name`, a write failure with `dest_name`.
+/// With `verbose`, a success says the sizes on stderr.
 fn compress_into<R: Read, W: Write>(
     reader: R,
     writer: W,
     dest_name: &str,
     input_name: &str,
+    verbose: bool,
 ) -> ExitCode {
     let mut reader = Tracked {
         inner: reader,
         failure: None,
+        bytes: 0,
     };
-    match mothergod::copy_encode(&mut reader, writer) {
-        Ok(()) => ExitCode::SUCCESS,
+    let mut writer = Counted {
+        inner: writer,
+        bytes: 0,
+    };
+    match mothergod::copy_encode(&mut reader, &mut writer) {
+        Ok(()) => {
+            if verbose {
+                let (read, written) = (reader.bytes, writer.bytes);
+                eprintln!(
+                    "mothergod: {input_name}: {read} -> {written} bytes{}",
+                    share(read, written)
+                );
+            }
+            ExitCode::SUCCESS
+        }
         Err(err) => match reader.failure {
             Some(read_err) => fail(&format!("reading {input_name}: {read_err}")),
             None => write_fail(dest_name, &err),
@@ -323,15 +401,30 @@ fn compress_into<R: Read, W: Write>(
 
 /// Runs [`mothergod::decompress_to_writer`] into `writer`: a write failure
 /// is reported with `dest_name`, a decode failure with `input_name`, which
-/// several operands make the only clue to which input failed.
+/// several operands make the only clue to which input failed. With
+/// `verbose`, a success says the sizes on stderr.
 fn decompress_into<W: Write>(
     input: &[u8],
     writer: &mut W,
     dest_name: &str,
     input_name: &str,
+    verbose: bool,
 ) -> ExitCode {
-    match mothergod::decompress_to_writer(input, u32::MAX, writer) {
-        Ok(()) => ExitCode::SUCCESS,
+    let mut writer = Counted {
+        inner: writer,
+        bytes: 0,
+    };
+    match mothergod::decompress_to_writer(input, u32::MAX, &mut writer) {
+        Ok(()) => {
+            if verbose {
+                eprintln!(
+                    "mothergod: {input_name}: {} -> {} bytes",
+                    input.len(),
+                    writer.bytes
+                );
+            }
+            ExitCode::SUCCESS
+        }
         Err(mothergod::WriteError::Decode(decode_err)) => {
             fail(&format!("{input_name}: {decode_err}"))
         }
@@ -489,6 +582,7 @@ mod tests {
         let mut reader = Tracked {
             inner: FailOnce(Some(kind)),
             failure: None,
+            bytes: 0,
         };
         let _ = reader.read(&mut [0; 1]);
         reader.failure.map(|err| err.kind())
