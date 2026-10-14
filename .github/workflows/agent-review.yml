@@ -237,7 +237,9 @@ jobs:
                itself. When `gh pr checks` shows it failed,
                `gh run view <run-id> --log | grep MISSED` lists the survivors;
                each one on a changed line gets a fix or a non-fix justification
-               on the thread, else it is a [must].
+               on the thread, else it is a [must]. Its `exclusions` job red
+               names an `exclude_re` in tests/mutants.toml matching no mutant:
+               the PR that moved the lines repins or deletes it, else [must].
             4. Format changes (CLAUDE.md rule 5's definition): FORMAT_VERSION
                bump, ADR and SPEC.md update in this same PR, else FAIL.
             5. Process changes (.github/**, .claude/skills/**, CLAUDE.md,
