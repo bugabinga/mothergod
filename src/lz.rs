@@ -145,13 +145,6 @@ pub enum Token {
     },
 }
 
-/// `len` is always at most [`MAX_MATCH_LEN`] (65535, well under
-/// `u32::MAX`): every call site bounds it before this conversion runs, so
-/// the cast never truncates.
-fn match_len_as_u32(len: usize) -> u32 {
-    u32::try_from(len).expect("match length bounded by MAX_MATCH_LEN, always fits u32")
-}
-
 /// The 3-slot repeat-offset cache carried through a parse (`JOURNAL`
 /// S1-A3): a distance a real match just used is cheap to reuse, so both
 /// [`parse_greedy`] and [`replay`] track the same three most-recently-used
@@ -408,15 +401,16 @@ fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize, limit: usize
     len
 }
 
-/// `i`, or a window-bounded distance derived from it, as a `u32`. Every
-/// caller in this module already bounds its argument below `u32::MAX`
-/// (a position by `data.len()` fitting `u32` per [`parse_greedy`]'s own
-/// precondition, a distance by [`WINDOW`] or
-/// [`BinaryTreeMatchFinder`]'s configured window), so this never
-/// truncates as long as that window itself fits `u32` — the caller's
-/// obligation, same as `WINDOW` itself already fitting by construction.
+/// `i`, a position, distance or length, as a `u32`. Every caller in this
+/// module already bounds its argument below `u32::MAX` (a position by
+/// `data.len()` fitting `u32` per [`parse_greedy`]'s own precondition, a
+/// distance by [`WINDOW`] or [`BinaryTreeMatchFinder`]'s configured window,
+/// a length by [`MAX_MATCH_LEN`]), so this never truncates as long as that
+/// window itself fits `u32` — the caller's obligation, same as `WINDOW`
+/// itself already fitting by construction.
 fn to_u32(i: usize) -> u32 {
-    u32::try_from(i).expect("bounded by data.len() or the finder's window, both under u32::MAX")
+    u32::try_from(i)
+        .expect("bounded by data.len(), the finder's window or MAX_MATCH_LEN, all under u32::MAX")
 }
 
 /// One side of [`BinaryTreeMatchFinder::insert_and_find`]'s split: the nodes
@@ -669,7 +663,7 @@ pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
                 finder.insert(k);
             }
             tokens.push(Token::Rep {
-                len: match_len_as_u32(rep_len),
+                len: to_u32(rep_len),
                 slot: rep_slot,
             });
             reps.promote(rep_slot);
@@ -681,7 +675,7 @@ pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
                 finder.insert(k);
             }
             tokens.push(Token::Match {
-                len: match_len_as_u32(match_len),
+                len: to_u32(match_len),
                 distance,
             });
             reps.push_front(distance);
@@ -949,9 +943,7 @@ impl PriceCounts {
             let row = &self.literal[context * 256..context * 256 + 256];
             literal[context * 256..context * 256 + 256].copy_from_slice(&to_prices(row));
         }
-        let total_tokens = u32::try_from(total_tokens).expect(
-            "token count bounded by input length, already checked to fit u32 by parse_greedy",
-        );
+        let total_tokens = to_u32(total_tokens);
         PriceTable {
             literal,
             length: to_prices(&self.length),
@@ -1041,7 +1033,7 @@ impl DpState {
             }
             let mut new_cache = reps;
             new_cache.promote(slot);
-            let rep_len = match_len_as_u32(rep_len);
+            let rep_len = to_u32(rep_len);
             self.relax_rep(prices, base, i, MIN_REP_LEN_U32, slot, new_cache);
             for &len in &LENGTH_STEPS {
                 if len > rep_len {
@@ -1095,7 +1087,7 @@ impl DpState {
         if match_len_here < MIN_MATCH_LEN {
             return;
         }
-        let full_len = match_len_as_u32(match_len_here);
+        let full_len = to_u32(match_len_here);
         if (full_len as usize) < CARRY_MIN_LEN {
             for &len in &LENGTH_STEPS {
                 if len > full_len {
