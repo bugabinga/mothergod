@@ -40,9 +40,10 @@ minimal case it reports.
 
 ## Profiles and persistence
 
-- Case counts come from the environment (`PROPTEST_CASES`): the PR
-  gate runs the fast profile, the weekly tier runs large, and the
-  tier table in TESTING.md owns that cadence.
+- Case counts come from the environment (`PROPTEST_CASES`), which
+  only a local heavier run sets: every CI tier runs the fast profile,
+  and the daily fuzzer carries the large sweep (TESTING.md layer 1,
+  #495).
 - Commit `proptest-regressions/`: every found failure replays first
   on later runs. It is the regression suite proptest writes for you.
 - A meaningful minimal case gets promoted to an example test named
