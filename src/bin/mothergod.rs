@@ -199,7 +199,11 @@ fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathB
     }
     let mut status = ExitCode::SUCCESS;
     for operand in operands {
-        let code = process(mode, operand.as_deref(), to_stdout, existing);
+        let operand = operand.as_deref();
+        let code = match mode {
+            Mode::Convert(direction) => convert(direction, operand, to_stdout, existing),
+            Mode::Test => test(operand),
+        };
         if code == ExitCode::from(SIGPIPE_STATUS) {
             return code;
         }
@@ -208,14 +212,6 @@ fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathB
         }
     }
     status
-}
-
-/// Runs `mode` on one input, stdin when `operand` is `None`.
-fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool, existing: Existing) -> ExitCode {
-    match mode {
-        Mode::Convert(direction) => convert(direction, operand, to_stdout, existing),
-        Mode::Test => test(operand),
-    }
 }
 
 /// Decodes one input to nowhere: it names no output file, so the input needs
@@ -392,9 +388,7 @@ fn open_input(path: Option<&Path>) -> Result<Box<dyn Read>, String> {
 /// must not silently destroy it), then runs `write` against it. Replacing
 /// unlinks the old file first and creates a new one, so a hard link to the
 /// input, whose bytes are still being read or were read whole, cannot be
-/// truncated under it; a failed write then leaves no file, as gzip does. Shared by both of [`process`]'s file branches, which
-/// otherwise each open the file and clean up after a failed write
-/// identically.
+/// truncated under it; a failed write then leaves no file, as gzip does.
 ///
 /// A write failure after `create_new` succeeded (disk full, interrupted, a
 /// corrupt decode) removes the partial file: otherwise it survives as a
