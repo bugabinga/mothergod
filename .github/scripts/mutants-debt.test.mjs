@@ -269,6 +269,27 @@ test("render keeps line and column only for a mutant that names no function (#11
   assert.ok(out.body.includes("keeps its line and column"), "the body says why this one keeps its line");
 });
 
+test("render drops the line for a function replacement and an impl-named operator mutant (#1121 review)", () => {
+  // Neither ends in a bare `in <fn>`: a replacement carries `<fn> -> <Type>`,
+  // an impl's name holds spaces. Both name their function, so the line, which
+  // moves on main, stays off.
+  const replacement = "src/bin/mothergod.rs:12:1: replace main -> ExitCode with Default::default()";
+  const impl = "src/read.rs:40:9: replace += with -= in <impl Read for Tracked<R>>::read";
+  const out = call({ fn: "render", pr: 7, missed: [replacement, impl], generated: 2, run_url: "u" });
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(
+    out.body.includes(`${prefix}-f src/bin/mothergod.rs --re 'replace main \\-> ExitCode with Default::default\\(\\)'`),
+    out.body,
+  );
+  assert.ok(
+    out.body.includes(`${prefix}-f src/read.rs --re 'replace \\+= with \\-= in <impl Read for Tracked<R>>::read'`),
+    out.body,
+  );
+  const runs = out.body.split("\n").filter((line) => line.startsWith("cargo mutants"));
+  assert.equal(runs.length, 2);
+  assert.ok(runs.every((run) => !/:\d+:\d+:/.test(run)), "no line in either pattern");
+});
+
 test("render's per-mutant run falls back to an unscoped escaped pattern for a name with no location", () => {
   const out = call({ fn: "render", pr: 7, missed: ["replace || with && in run"], generated: 1, run_url: "u" });
   const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";

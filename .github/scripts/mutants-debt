@@ -149,8 +149,11 @@ def plural(n, noun):
 RUST_REGEX_META = frozenset("\\.+*?()|[]{}^$#&-~")
 # A mutant name as cargo-mutants prints it: `file:line:col: ` then the mutation text.
 NAME = re.compile(r"^(?P<file>[^:]+):(?P<at>\d+:\d+): (?P<text>.+)$")
-# The function an operator mutation names: `replace + with - in Frames<'a>::split`.
-IN_FUNCTION = re.compile(r" in \S+$")
+# A mutation text names its function in one of two shapes: an operator mutation
+# ends `in <fn>` (`replace + with - in Frames<'a>::split`, `... in <impl Read
+# for Tracked<R>>::read`, the name holding spaces), a function replacement
+# carries `<fn> -> <Type>` (`replace main -> ExitCode with Default::default()`).
+NAMES_FUNCTION = (" in ", " -> ")
 
 
 def regex_escape(text):
@@ -166,15 +169,15 @@ def decide_command(name):
     the mutation text, escaped, with `-f` scoping the file. `--re` searches the
     whole name, line included, and a line moves on main between the filing and
     the fix while the text with its function does not, so the line stays off
-    when the text names a function (`in <fn>`). A text with none, a mutant in a
-    `const`, would list every same-text mutant of the file (50 on
+    when the text names a function (`NAMES_FUNCTION`). A text with none, a
+    mutant in a `const`, would list every same-text mutant of the file (50 on
     `src/literal.rs`), so it keeps `line:col`. `shlex.quote` because a name
     can hold a lifetime's quote (`Frames<'a>::split`).
     """
     match = NAME.match(name)
     scope = f"-f {match['file']} " if match else ""
     text = match["text"] if match else name
-    if match and not IN_FUNCTION.search(text):
+    if match and not any(shape in text for shape in NAMES_FUNCTION):
         text = f":{match['at']}: {text}"
     return (
         "cargo mutants --config tests/mutants.toml --package mothergod "
