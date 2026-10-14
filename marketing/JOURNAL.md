@@ -21,7 +21,7 @@ place, and pages cite it rather than restating it.
 ## 2026-10-14 — Editorial: the streaming pair grew a third member, and the README kept two
 
 Queue empty, so this is a defect found on the surface. #1150 added
-`write::Encoder`, the `std::io::Write` side, the day after the entry below
+`write::Encoder`, the `std::io::Write` side, hours after the entry below
 showed the streaming pair. An embedder whose producer writes, a `tar`
 builder or a serializer, read `copy_encode` and concluded they must buffer
 or pipe first. Only the changelog said otherwise.
