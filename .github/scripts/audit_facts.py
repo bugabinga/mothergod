@@ -250,6 +250,24 @@ def tools_rows(meta):
     return rows
 
 
+def statements(values, readings, tool_rows):
+    """Every write of one run's rows as (sql, params), the session row LAST.
+
+    `sessions backfill` walks the artifacts whose (run_id, attempt) the
+    sessions table lacks, so a session row present is the mark that the
+    run's allowance and tools rows are in. Written last, a derived write
+    that fails leaves the run absent and the next walk writes all three
+    from the artifact; written first, as before #1102, the miss was one
+    warning and then a gap for good, past the artifact's 90 days with
+    nothing left to repair it from. Both writers, session-row.py live and
+    backfill from the archive, take their order from here and nowhere else.
+    """
+    if readings:
+        yield allowance_insert(readings), [v for r in readings for v in r]
+    yield from tools_statements(tool_rows)
+    yield INSERT, list(values)
+
+
 def as_int(value):
     """An id or count as an integer, or None: '' and junk are absent, not 0."""
     try:

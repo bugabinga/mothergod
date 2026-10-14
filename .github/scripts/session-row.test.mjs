@@ -88,9 +88,9 @@ test("writes the whitelist as one INSERT OR REPLACE, in column order", async () 
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
       assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3$/m);
-      assert.equal(seen.length, 2); // the session row, then the tools rows
-      assert.match(seen[0].sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
-      const p = seen[0].params;
+      assert.equal(seen.length, 2); // the tools rows, then the session row, last (#1102)
+      assert.match(seen[1].sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
+      const p = seen[1].params;
       assert.equal(p.length, 22);
       assert.equal(p[0], 37148994173);
       assert.equal(p[1], 2);
@@ -142,7 +142,7 @@ const readings = [
   { unifiedWindows: { seven_day: { utilization: 1.5, resetsAt: 1792029600 } } }, // no valid fraction: not a reading
 ];
 
-test("the last valid reading per allowance window follows the session row, one statement", async () => {
+test("the last valid reading per allowance window precedes the session row, one statement", async () => {
   const dir = auditDir({ ...metadata, rate_limit_events: readings });
   try {
     await withStub({}, async (base, seen) => {
@@ -153,13 +153,13 @@ test("the last valid reading per allowance window follows the session row, one s
         /^session-row: wrote run 37148994173 attempt 2 for reviewer, allowance five_hour seven_day seven_day_overage_included, tools 3$/m,
       );
       assert.equal(seen.length, 3);
-      assert.match(seen[0].sql, /^INSERT OR REPLACE INTO sessions /);
+      assert.match(seen[2].sql, /^INSERT OR REPLACE INTO sessions /); // last, after both derived tables
       assert.equal(
-        seen[1].sql,
+        seen[0].sql,
         "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) "
           + "VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)",
       );
-      assert.deepEqual(seen[1].params, [
+      assert.deepEqual(seen[0].params, [
         37148994173,
         2,
         "five_hour",
@@ -185,17 +185,22 @@ test("the last valid reading per allowance window follows the session row, one s
   }
 });
 
-test("a failed allowance write is its own warning after the session row, exit 0", async () => {
+// #1102: a derived write that fails leaves the session row unwritten, so
+// `sessions backfill`, which walks the runs absent from `sessions`, writes
+// all three from the artifact on Sunday. Written first, the session row
+// hid the gap for good.
+test("a failed allowance write leaves the session row unwritten for the backfill to heal, exit 0", async () => {
   const dir = auditDir({ ...metadata, rate_limit_events: readings });
   try {
     await withStub(
-      [{}, { status: 500, payload: { success: false, errors: [{ message: "D1 is down" }] } }, {}],
+      [{ status: 500, payload: { success: false, errors: [{ message: "D1 is down" }] } }],
       async (base, seen) => {
         const r = await run([dir], { D1_API_BASE: base });
         assert.equal(r.code, 0, r.err);
-        assert.equal(seen.length, 3); // the tools write still follows the allowance miss
-        assert.match(r.out, /^::warning::session-row: allowance not written: Unreadable: HTTP 500/m);
-        assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3$/m);
+        assert.equal(seen.length, 1); // the allowance write that failed, nothing after it
+        assert.match(seen[0].sql, /^INSERT OR REPLACE INTO allowance /);
+        assert.match(r.out, /^::warning::session-row: not written: Unreadable: HTTP 500/m);
+        assert.doesNotMatch(r.out, /wrote run/);
       },
     );
   } finally {
@@ -207,18 +212,18 @@ test("a failed allowance write is its own warning after the session row, exit 0"
 // where the artifact has them. The fixture names Edit and Write refused
 // without a per-tool count (an artifact between #946 and that count), so
 // their denials are null, the visible unknown; Bash, never refused, is 0.
-test("one row per tool called or refused follows the session row", async () => {
+test("one row per tool called or refused precedes the session row", async () => {
   const dir = auditDir(metadata);
   try {
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
       assert.equal(
-        seen[1].sql,
+        seen[0].sql,
         "INSERT OR REPLACE INTO tools (run_id, attempt, tool, uses, denials) "
           + "VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
       );
-      assert.deepEqual(seen[1].params, [
+      assert.deepEqual(seen[0].params, [
         37148994173,
         2,
         "Bash",
@@ -251,7 +256,7 @@ test("a per-tool denial count fills the column where the artifact carries one", 
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      assert.deepEqual(seen[1].params, [
+      assert.deepEqual(seen[0].params, [
         37148994173,
         2,
         "Bash",

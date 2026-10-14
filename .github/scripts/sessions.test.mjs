@@ -381,12 +381,12 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
     assert.deepEqual(downloads(gh), ["1"]); // the row the table already holds, read again
     assert.equal(seen.length, 4);
     assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
-    assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions /);
     assert.equal(
-      seen[2].body.sql,
+      seen[1].body.sql,
       "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    assert.deepEqual(seen[2].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
+    assert.deepEqual(seen[1].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
+    assert.match(seen[2].body.sql, /^INSERT OR REPLACE INTO sessions /); // last: the mark that the derived rows are in (#1102)
     assert.equal(seen[3].body.sql, "SELECT run_id, attempt FROM sessions");
     // present 1, not 0: the row the table held before the walk counts, rewritten or not.
     assert.match(
@@ -416,12 +416,45 @@ test("backfill writes an artifact's tool counts beside its row, none for an arti
     assert.equal(r.code, 0, r.out + r.err);
     assert.equal(seen.length, 5);
     assert.equal(
-      seen[2].body.sql,
+      seen[1].body.sql,
       "INSERT OR REPLACE INTO tools (run_id, attempt, tool, uses, denials) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
     );
-    assert.deepEqual(seen[2].body.params, [100, 1, "Bash", 7, 0, 100, 1, "Edit", 0, null, 100, 1, "Write", 0, null]);
+    assert.deepEqual(seen[1].body.params, [100, 1, "Bash", 7, 0, 100, 1, "Edit", 0, null, 100, 1, "Write", 0, null]);
+    assert.match(seen[2].body.sql, /^INSERT OR REPLACE INTO sessions /); // the bdfl row, after its tools
     assert.match(seen[3].body.sql, /^INSERT OR REPLACE INTO sessions /); // the reviewer artifact: a row, no tools
     assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+// #1102: the session row is the last of a run's writes, so a derived write
+// that fails leaves the run absent and the next walk writes all three from
+// the artifact. Session row first, the run read as present and the gap
+// outlived the artifact.
+test("a derived write that fails leaves the run absent for the next walk, never a row without its tables", async () => {
+  const meta = {
+    ...metadata(100, "bdfl"),
+    rate_limit_events: [
+      { unifiedWindows: { seven_day: { utilization: 0.24, resetsAt: 1792029600, isUsingOverage: false } } },
+    ],
+  };
+  const gh = stubGh(listing.slice(0, 1), {
+    1: { "metadata.json": JSON.stringify(meta), "input-prompt.md": "p", "output-response.md": "r" },
+  });
+  const down = { status: 500, payload: { success: false, errors: [{ message: "edge down" }] } };
+  await withStub([keys([]), down], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.match(r.out, /^sessions: UNREADABLE: HTTP 500/m);
+    assert.equal(seen.length, 2); // the read, then the allowance write that failed
+    assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO allowance /);
+    assert.ok(
+      !seen.some((q) => q.body.sql.startsWith("INSERT OR REPLACE INTO sessions")),
+      "no session row without its allowance row",
+    );
   });
 });
 
