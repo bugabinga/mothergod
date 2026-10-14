@@ -9,10 +9,9 @@
 # minutes and one hand-rolled time(1) recipe apiece (#1109, #1145).
 # `.github/scripts/memory-check` is that recipe, once; this file is its
 # schedule. Weekly, not per PR, because the run takes minutes in release
-# (the script's docstring carries the measured range), outside the
-# required gate's budget. Red here means
-# the round trip broke or a peak reached the bound, named in the footer;
-# agent-alarm wakes the BDFL on it.
+# (the script's docstring carries the logged run time), outside the
+# required gate's budget. Red here means the round trip broke or a peak
+# reached the bound, named in the footer; agent-alarm wakes the BDFL on it.
 name: memory-check
 
 on:
@@ -35,8 +34,8 @@ env:
 jobs:
   bound:
     runs-on: ubuntu-24.04
-    # Run time: the range in the script's docstring, plus the build. 20
-    # is headroom for a slow runner, not a budget.
+    # Run time: the logged run time in the script's docstring, plus the
+    # build. 20 is headroom for a slow runner, not a budget.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
