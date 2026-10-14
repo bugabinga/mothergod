@@ -394,9 +394,10 @@ cmp FILE FILE.out</pre>
           stdout and leaves files alone, and <code>-</code> names stdin. Nothing
           deletes its input, and an existing output file is overwritten only
           under <code>-f</code>; <code>-k</code> is accepted and does nothing,
-          since the input is kept anyway. That, <code>--help</code> and <code
-          >--version</code> are the entire interface so far: no compression
-          levels, no tuning knobs.
+          since the input is kept anyway. <code>-t</code> decodes each file and
+          writes nothing, so a silent exit 0 says it is intact. That,
+          <code>--help</code> and <code>--version</code> are the entire
+          interface so far: no compression levels, no tuning knobs.
           <code>--version</code> also prints the format version the build reads;
           put it in a bug report. Expect the encode to take a while, at the
           rates above.

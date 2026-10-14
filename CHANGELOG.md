@@ -36,6 +36,9 @@ All notable changes to this project are documented here. Format follows
   a terminal, so a forgotten redirect does not fill the screen with binary
   (#1039). A reader that closes stdout early (`| head`) ends it silently with
   status 141, as gzip does.
+- cli: `-t` (`--test`) decodes each input and writes nothing, so a silent exit 0
+  says a `.mgdc` file is intact and exit 1 names the ones that are not, without
+  creating a file or needing the suffix (#983).
 - cli: `-f` (`--force`) overwrites an existing output file instead of refusing
   it, replacing the file rather than truncating it, so a hard link to the
   input is never cut under the read; `-k` (`--keep`) is accepted and changes

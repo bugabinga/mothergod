@@ -6,7 +6,8 @@
 //! follows the `.mgdc` suffix convention already used by `tests/golden/`, and
 //! the run never deletes the input, nor overwrites an existing output file
 //! unless `-f` says to. `-k` is accepted and does nothing, because the input
-//! is kept anyway (ADR-0066):
+//! is kept anyway. `-t` decodes without writing anything, so a silent exit 0
+//! says the file is intact (ADR-0066):
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -16,6 +17,7 @@
 //! mothergod -d input.mgdc                   # writes input
 //! mothergod -dc input.mgdc | tar x          # writes stdout, keeps input.mgdc
 //! mothergod -f input                        # replaces input.mgdc
+//! mothergod -t input.mgdc                   # writes nothing, exits 0 if intact
 //! ```
 //!
 //! Operands are processed in order. A failure on one is reported and the run
@@ -50,19 +52,28 @@ use std::process::ExitCode;
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [--] [file ...]\n       \
+const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [-t] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
 -k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
+-t (--test) checks that each input decompresses and writes nothing.\n\
 With no file, or the file -, reads stdin and writes stdout.\n\
 With a file, compression writes <file>.mgdc; decompression reads a .mgdc file and writes <file> \
 (the name with the suffix stripped). Never overwrites an existing output file without -f.";
 
-/// Which way a run converts.
+/// Which way a conversion goes.
 #[derive(Clone, Copy)]
-enum Mode {
+enum Direction {
     Compress,
     Decompress,
+}
+
+/// What a run does with each input.
+#[derive(Clone, Copy)]
+enum Mode {
+    Convert(Direction),
+    /// Decodes and discards, so the exit status alone reports the input's health.
+    Test,
 }
 
 /// What a file output does when its path already exists.
@@ -114,7 +125,8 @@ fn main() -> ExitCode {
 /// once, wherever they stand. `-k` is accepted and changes nothing: the
 /// input is kept without it.
 fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
-    let mut mode = Mode::Compress;
+    let mut direction = Direction::Compress;
+    let mut test_only = false;
     let mut to_stdout = false;
     let mut existing = Existing::Refuse;
     let mut operands = Vec::new();
@@ -132,7 +144,8 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         if let Some(long) = text.strip_prefix('-') {
             match long {
                 "" => options_ended = true,
-                "decompress" => mode = Mode::Decompress,
+                "decompress" => direction = Direction::Decompress,
+                "test" => test_only = true,
                 "stdout" => to_stdout = true,
                 "keep" => {}
                 "force" => existing = Existing::Replace,
@@ -144,7 +157,8 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         }
         for flag in text.chars() {
             match flag {
-                'd' => mode = Mode::Decompress,
+                'd' => direction = Direction::Decompress,
+                't' => test_only = true,
                 'c' => to_stdout = true,
                 'k' => {}
                 'f' => existing = Existing::Replace,
@@ -155,7 +169,12 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         }
     }
     Ok(Request::Run {
-        mode,
+        // `-t` wins over `-d` wherever each stands, as in gzip.
+        mode: if test_only {
+            Mode::Test
+        } else {
+            Mode::Convert(direction)
+        },
         to_stdout,
         existing,
         operands,
@@ -172,7 +191,10 @@ fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathB
         operands
     };
     let writes_stdout = to_stdout || operands.iter().any(Option::is_none);
-    if matches!(mode, Mode::Compress) && writes_stdout && io::stdout().is_terminal() {
+    if matches!(mode, Mode::Convert(Direction::Compress))
+        && writes_stdout
+        && io::stdout().is_terminal()
+    {
         return fail("compressed data not written to a terminal");
     }
     let mut status = ExitCode::SUCCESS;
@@ -188,19 +210,47 @@ fn run(mode: Mode, to_stdout: bool, existing: Existing, operands: &[Option<PathB
     status
 }
 
+/// Runs `mode` on one input, stdin when `operand` is `None`.
+fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool, existing: Existing) -> ExitCode {
+    match mode {
+        Mode::Convert(direction) => convert(direction, operand, to_stdout, existing),
+        Mode::Test => test(operand),
+    }
+}
+
+/// Decodes one input to nowhere: it names no output file, so the input needs
+/// no suffix, and nothing is written whether it decodes or not.
+fn test(operand: Option<&Path>) -> ExitCode {
+    let input = match read_input(operand) {
+        Ok(input) => input,
+        Err(err) => return fail(&err),
+    };
+    decompress_into(&input, &mut io::sink(), "nowhere", &input_name(operand))
+}
+
+/// What a message calls an input.
+fn input_name(operand: Option<&Path>) -> String {
+    operand.map_or_else(|| "stdin".to_owned(), |path| path.display().to_string())
+}
+
 /// Converts one input, stdin when `operand` is `None`, to stdout when there
 /// is no operand or `to_stdout` is set, else to the file named from `operand`
 /// by [`add_suffix`] or [`strip_suffix`].
-fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool, existing: Existing) -> ExitCode {
+fn convert(
+    direction: Direction,
+    operand: Option<&Path>,
+    to_stdout: bool,
+    existing: Existing,
+) -> ExitCode {
     let target = match operand.filter(|_| !to_stdout) {
-        Some(source) => match output_name(mode, source) {
+        Some(source) => match output_name(direction, source) {
             Ok(out_path) => Some((source, out_path)),
             Err(err) => return fail(&err),
         },
         None => None,
     };
-    let input_name = operand.map_or_else(|| "stdin".to_owned(), |path| path.display().to_string());
-    if matches!(mode, Mode::Compress) {
+    let input_name = input_name(operand);
+    if matches!(direction, Direction::Compress) {
         let reader = match open_input(operand) {
             Ok(reader) => reader,
             Err(err) => return fail(&err),
@@ -224,11 +274,11 @@ fn process(mode: Mode, operand: Option<&Path>, to_stdout: bool, existing: Existi
     }
 }
 
-/// The file `mode` writes for `source`.
-fn output_name(mode: Mode, source: &Path) -> Result<PathBuf, String> {
-    match mode {
-        Mode::Compress => Ok(add_suffix(source)),
-        Mode::Decompress => strip_suffix(source),
+/// The file `direction` writes for `source`.
+fn output_name(direction: Direction, source: &Path) -> Result<PathBuf, String> {
+    match direction {
+        Direction::Compress => Ok(add_suffix(source)),
+        Direction::Decompress => strip_suffix(source),
     }
 }
 
