@@ -385,10 +385,10 @@ fn compress_into<R: Read, W: Write>(
         Ok(()) => {
             if verbose {
                 let (read, written) = (reader.bytes, writer.bytes);
-                eprintln!(
-                    "mothergod: {input_name}: {read} -> {written} bytes{}",
+                say(&format!(
+                    "{input_name}: {read} -> {written} bytes{}",
                     share(read, written)
-                );
+                ));
             }
             ExitCode::SUCCESS
         }
@@ -417,11 +417,11 @@ fn decompress_into<W: Write>(
     match mothergod::decompress_to_writer(input, u32::MAX, &mut writer) {
         Ok(()) => {
             if verbose {
-                eprintln!(
-                    "mothergod: {input_name}: {} -> {} bytes",
+                say(&format!(
+                    "{input_name}: {} -> {} bytes",
                     input.len(),
                     writer.bytes
-                );
+                ));
             }
             ExitCode::SUCCESS
         }
@@ -512,11 +512,11 @@ fn write_new_file_with(
     } else if let Err(err) = copy_metadata(source, &file) {
         // The bytes are complete and correct; a stamp that did not take is
         // not worth discarding them, and `create_new` would refuse a retry.
-        eprintln!(
-            "mothergod: warning: {}: copying metadata from {}: {err}",
+        say(&format!(
+            "warning: {}: copying metadata from {}: {err}",
             path.display(),
             source.display()
-        );
+        ));
     }
     code
 }
@@ -560,8 +560,16 @@ fn write_fail(dest_name: &str, err: &io::Error) -> ExitCode {
     fail(&format!("writing {dest_name}: {err}"))
 }
 
+/// Writes one `mothergod: `-prefixed line to stderr. A failed write is
+/// dropped: `eprintln!` would panic, exit 101, and turn a complete output
+/// into a failed run because the diagnostic channel is full or closed
+/// (`2>/dev/full`). Every stderr line goes through here.
+fn say(message: &str) {
+    let _ = writeln!(io::stderr(), "mothergod: {message}");
+}
+
 fn fail(message: &str) -> ExitCode {
-    eprintln!("mothergod: {message}");
+    say(message);
     ExitCode::FAILURE
 }
 
