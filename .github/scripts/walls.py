@@ -23,10 +23,17 @@ harness's own reasons entry, `{tool, type, reason}` with `type` `hook`,
 so the audit keeps one list of one shape. A line is fixed vocabulary
 plus numbers and process names, never the model's text, which the
 audit's keys-only rule for model prose relies on.
+
+Neither write raises. A PreToolUse hook that dies with an exception exits
+1, which the harness reads as a non-blocking error and lets the call
+proceed, so a runner path that cannot be opened would turn the deny into
+an allow (#1111). A write that fails says so on stderr and the hook goes
+on to its own exit 2 and message.
 """
 
 import json
 import os
+import sys
 
 RECORD = "walls.jsonl"
 
@@ -35,8 +42,7 @@ def note(hook: str, line: str) -> None:
     """Append `hook: line` to the step summary, the run page's account."""
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(f"{hook}: {line}\n")
+        _append(summary, f"{hook}: {line}\n")
 
 
 def denied(hook: str, tool: str, line: str) -> None:
@@ -48,8 +54,16 @@ def denied(hook: str, tool: str, line: str) -> None:
     note(hook, line)
     path = record_path()
     if path:
+        _append(path, json.dumps({"tool": tool, "type": "hook", "reason": f"{hook}: {line}"}) + "\n")
+
+
+def _append(path: str, text: str) -> None:
+    """Append `text`, or name on stderr what was lost; never raise (#1111)."""
+    try:
         with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"tool": tool, "type": "hook", "reason": f"{hook}: {line}"}) + "\n")
+            fh.write(text)
+    except OSError as exc:
+        print(f"walls: {path}: {exc.strerror or exc}", file=sys.stderr)
 
 
 def record_path() -> str | None:

@@ -79,6 +79,24 @@ test("a deny writes its fixed-vocabulary line to the step summary and the audit'
   });
 });
 
+// A hook that dies exits 1, a non-blocking error the harness lets proceed,
+// so a telemetry write that raised turned the deny into an allow (#1111).
+test("a deny stands when the step summary or the record cannot be written", () => {
+  const dir = mkdtempSync(join(tmpdir(), "em-dash-"));
+  const missing = join(dir, "missing");
+  for (
+    const env of [
+      { ...ciEnv, GITHUB_STEP_SUMMARY: join(missing, "summary.md"), RUNNER_TEMP: dir },
+      { ...ciEnv, GITHUB_STEP_SUMMARY: join(dir, "summary.md"), RUNNER_TEMP: missing },
+    ]
+  ) {
+    const r = run(bash(denied[0][0]), env);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /em dash \(U\+2014\)/);
+    assert.match(r.stderr, /^walls: .*missing/m);
+  }
+});
+
 // The heredoc is not the only way a body travels: a file written earlier
 // carries the dash where the command string cannot show it (PR #669 review).
 test("a body file named by the command is read", () => {
