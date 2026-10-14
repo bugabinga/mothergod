@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Red when an exclude_re in tests/mutants.toml matches no mutant, so a dead pin has a reader.
+
+Extensionless and executable, like mutants-debt: a decision nobody was
+making gets made here, by the workflow itself, on every PR that can move
+a line.
+
+tests/mutants.toml excludes the mutants no test can decide, each with its
+proof, and chose its fail direction on purpose: an entry that drifts out of
+match lets the mutant resurface, which is visible, where an entry that
+over-matches hides a real mutant, which is not. Visible needs a reader,
+and for three weeks the reader was the curator comparing line numbers by
+eye. Four drifts: #699, #880, #999, #1172, the last two after deslop
+passes on coder.rs whose contract is no behaviour change, which a doc-only
+cut satisfies while moving every line below it. Each drift revived four
+non-terminating decoder mutants, and a sweep that reaches one spends its
+whole timeout on it.
+
+The check is two lists of strings. `cargo mutants --list --no-config`
+prints every mutant's name without the config applied (with it, an
+excluded mutant is absent from every output the job has, which is the
+blindness itself), and each `exclude_re` is searched against those names
+the way cargo-mutants searches it: unanchored, so `^` and `$` mean what
+the entry says. The regex dialect is Python's `re`; the Rust `regex`
+crate cargo-mutants uses is the smaller language (no lookaround, no
+backreferences), so an entry it accepts is an entry this reads, with one
+named exception: Unicode classes such as `\\p{Lu}`, which `re` has no
+spelling for. An entry this cannot compile is reported as its own finding
+rather than skipped, because an entry nobody checks is the state this
+exists to end.
+
+Usage: mutants-exclusions <config.toml> <list.txt>
+
+    config.toml    the cargo-mutants config carrying `exclude_re`
+    list.txt       `cargo mutants --list --no-config --package mothergod
+                   --colors=never`, one name per line
+
+Prints one line per entry, the count of names it matches then the entry,
+so the toml's own "N mutants" claims can be read against it, then one line
+per finding and a footer:
+
+    mutants-exclusions: entries N | live L | dead D | unreadable U | mutants M
+
+Exits 0 when every entry matches at least one name, 1 on any dead or
+unreadable entry, 2 when an input could not be read: a list with no names
+is a broken run, not a crate with no mutants, and reads UNREADABLE rather
+than as zero dead.
+"""
+
+import re
+import sys
+import tomllib
+
+
+def entries(config_text):
+    """The `exclude_re` strings in the config, in file order; none is an empty list."""
+    found = tomllib.loads(config_text).get("exclude_re", [])
+    if not isinstance(found, list) or not all(isinstance(e, str) for e in found):
+        raise ValueError("exclude_re is not a list of strings")
+    return found
+
+
+def names(list_text):
+    """The mutant names, one per non-blank line."""
+    return [line.strip() for line in list_text.splitlines() if line.strip()]
+
+
+def check(exclude_re, mutant_names):
+    """Per entry: ('live', count) when it matches, ('dead', 0) when nothing does,
+    ('unreadable', 0) when Python's re cannot compile it."""
+    rows = []
+    for entry in exclude_re:
+        try:
+            pattern = re.compile(entry)
+        except re.error:
+            rows.append((entry, "unreadable", 0))
+            continue
+        count = sum(1 for name in mutant_names if pattern.search(name))
+        rows.append((entry, "live" if count else "dead", count))
+    return rows
+
+
+def render(rows, mutant_count, out=sys.stdout):
+    """Print the table, the findings and the footer; return the exit status."""
+    for entry, _, count in rows:
+        print(f"{count:>5}  {entry}", file=out)
+    dead = [entry for entry, state, _ in rows if state == "dead"]
+    unreadable = [entry for entry, state, _ in rows if state == "unreadable"]
+    if dead or unreadable:
+        print(file=out)
+    for entry in dead:
+        print(
+            f"::error::dead exclusion: {entry!r} matches no mutant; the mutants it"
+            " proved are live again. Repin it to the current line, or delete it if"
+            " the mutant left, in tests/mutants.toml.",
+            file=out,
+        )
+    for entry in unreadable:
+        print(
+            f"::error::unreadable exclusion: {entry!r} does not compile as a Python"
+            " re, so this check cannot read it. Rewrite it in the common subset"
+            " (no \\p{{}} classes).",
+            file=out,
+        )
+    print(
+        f"\nmutants-exclusions: entries {len(rows)} | live {len(rows) - len(dead) - len(unreadable)}"
+        f" | dead {len(dead)} | unreadable {len(unreadable)} | mutants {mutant_count}",
+        file=out,
+    )
+    return 1 if dead or unreadable else 0
+
+
+def main(argv):
+    if len(argv) != 3:
+        print("usage: mutants-exclusions <config.toml> <list.txt>", file=sys.stderr)
+        return 2
+    config_path, list_path = argv[1], argv[2]
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            exclude_re = entries(f.read())
+        with open(list_path, encoding="utf-8") as f:
+            mutant_names = names(f.read())
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
+        print(f"mutants-exclusions: UNREADABLE ({e})", file=sys.stderr)
+        return 2
+    if not mutant_names:
+        print(
+            f"mutants-exclusions: UNREADABLE ({list_path} names no mutant; a crate"
+            " with none is not this crate, so the list step failed)",
+            file=sys.stderr,
+        )
+        return 2
+    return render(check(exclude_re, mutant_names), len(mutant_names))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
