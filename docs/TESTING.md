@@ -115,7 +115,7 @@ and wakes the fixer through the alarm. No ledger entry: the bound is the
 gate, and the readings print beside it in the log, so a peak climbing
 toward the bound is visible before it crosses. Weekly, not per PR,
 because the run takes minutes in release; the script's docstring carries
-the measured range. A seat that needs the number runs the script instead
+the logged run time. A seat that needs the number runs the script instead
 of a `time(1)` recipe of its own.
 
 The advisory `mutants-check` workflow runs on pull requests that touch

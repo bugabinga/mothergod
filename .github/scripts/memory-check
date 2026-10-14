@@ -9,9 +9,9 @@ CHANGELOG.md states the one memory number a user plans around: the CLI
 compresses a file or pipe of any length in under 1 GiB, one 16 MiB block at a
 time (#1094, #978). No test input exceeds 256 MiB, so the claim was proven by
 hand: three seats ran a 256 MiB encode on 2026-10-12 and four more runs
-followed on 2026-10-13, each a release build on a runner, about six minutes
-and one hand-rolled `/usr/bin/time` recipe apiece (#1109, #1145). The next
-PR on the path would have bought them again.
+followed on 2026-10-13, each a release build on a runner and one
+hand-rolled `/usr/bin/time` recipe apiece (#1109, #1145). The next PR on the
+path would have bought them again.
 
 This is that recipe, once. Zeros, 256 MiB plus one byte, 16 full blocks and
 a one-byte seventeenth, the smallest input past `decompress`'s 256 MiB cap
@@ -21,10 +21,11 @@ as children of this process and each child's peak resident set is read from
 `os.wait4`, the kernel's own number for that child, so no `time(1)` has to
 be installed, parsed or remembered. The round trip is compared byte for
 byte, because a bound on a broken decode is not a bound on anything. Encode
-plus decode take three to seven minutes on a hosted runner, release build
-excluded (192 s and 7m03 on 2026-10-13, two runners, this corpus), which is
-why the lane is weekly and the PR gate never runs it; the workflow's timeout
-and docs/TESTING.md defer to this range rather than restate it.
+plus decode took 172 s on a hosted runner, release build cached (run
+38468086345, `workflow_dispatch`, 2026-10-13, this corpus). One logged
+point, not a range: run times vary by runner, which is why the lane is
+weekly and the PR gate never runs it; the workflow's timeout and
+docs/TESTING.md defer to this figure rather than restate one.
 
 The bound is the published claim, 1 GiB, not a fit to the readings: a user
 reads the changelog, not the lane's log. The readings print beside it so the
