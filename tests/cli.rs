@@ -530,6 +530,32 @@ fn verbose_says_the_sizes_on_stderr_and_leaves_stdout_alone() {
 }
 
 #[test]
+fn quiet_cancels_verbose_when_it_comes_later_and_not_before() {
+    let payload = vec![b'a'; 3000];
+    let plain = run_output(&mut bin(), &payload);
+    for args in [&["-vq"][..], &["-v", "-q"], &["-v", "--quiet"]] {
+        let output = run_output(bin().args(args), &payload);
+        assert_eq!(output.stdout, plain.stdout, "{args:?}");
+        assert_eq!(output.stderr, Vec::<u8>::new(), "{args:?}");
+    }
+    for args in [&["-qv"][..], &["--quiet", "-v"]] {
+        let output = run_output(bin().args(args), &payload);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("3000 -> "),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn quiet_still_reports_an_error() {
+    let output = run_output(bin().args(["-q", "-d"]), b"not a mothergod frame");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("stdin"));
+}
+
+#[test]
 fn verbose_names_each_converted_file_and_not_a_failed_one() {
     let dir = Dir::new("verbose-files");
     let first = dir.file("first", b"first first first first");

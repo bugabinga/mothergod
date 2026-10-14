@@ -8,7 +8,8 @@
 //! unless `-f` says to. `-k` is accepted and does nothing, because the input
 //! is kept anyway. `-t` decodes without writing anything, so a silent exit 0
 //! says the file is intact (ADR-0066). `-v` reports each input's sizes on
-//! stderr and leaves stdout alone:
+//! stderr and leaves stdout alone; `-q` cancels it, the later of the two
+//! winning, and no flag silences an error:
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -54,12 +55,12 @@ use std::process::ExitCode;
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [-t] [-v] [--] [file ...]\n       \
+const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [-t] [-v] [-q] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
 -k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
 -t (--test) checks that each input decompresses and writes nothing.\n\
--v (--verbose) reports each input's sizes on stderr.\n\
+-v (--verbose) reports each input's sizes on stderr; -q (--quiet) cancels it, the later wins.\n\
 With no file, or the file -, reads stdin and writes stdout.\n\
 With a file, compression writes <file>.mgdc; decompression reads a .mgdc file and writes <file> \
 (the name with the suffix stripped). Never overwrites an existing output file without -f.";
@@ -155,6 +156,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 "keep" => {}
                 "force" => existing = Existing::Replace,
                 "verbose" => verbose = true,
+                "quiet" => verbose = false,
                 "help" => return Ok(Request::Help),
                 "version" => return Ok(Request::Version),
                 _ => return Err(format!("unknown option \"--{long}\"")),
@@ -169,6 +171,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 'k' => {}
                 'f' => existing = Existing::Replace,
                 'v' => verbose = true,
+                'q' => verbose = false,
                 'h' => return Ok(Request::Help),
                 'V' => return Ok(Request::Version),
                 _ => return Err(format!("unknown option \"-{flag}\"")),

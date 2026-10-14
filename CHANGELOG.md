@@ -42,6 +42,9 @@ All notable changes to this project are documented here. Format follows
 - cli: `-v` (`--verbose`) says on stderr, per input, how many bytes went in and
   came out and, for a compression, the result as a share of the input, so a
   user sees what a run did without touching the data on stdout (#983).
+- cli: `-q` (`--quiet`) cancels `-v`'s report when it comes later, as it does
+  in gzip, xz and zstd, so a script that wraps `mothergod -v` can silence it by
+  appending the flag; errors are always reported (#983).
 - cli: `-f` (`--force`) overwrites an existing output file instead of refusing
   it, replacing the file rather than truncating it, so a hard link to the
   input is never cut under the read; `-k` (`--keep`) is accepted and changes
