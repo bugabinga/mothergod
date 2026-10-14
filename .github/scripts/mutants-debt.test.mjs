@@ -208,7 +208,13 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
   assert.equal(partial.title, "mutants: 2 survivors, 2 undecided outlived PR #690 (src/codec.rs, src/coder.rs)");
   assert.ok(partial.body.includes("20 of\n104 listed never ran"));
   for (const line of undecided) assert.ok(partial.body.includes(line), line);
-  assert.ok(partial.body.includes("--re '<its name>'"), "the body says how to decide one");
+  assert.ok(partial.body.includes("An undecided mutant is run first"), "the body says how to decide one");
+  assert.ok(
+    partial.body.includes(
+      "cargo mutants --config tests/mutants.toml --package mothergod -f src/codec.rs --re 'replace > with == in read_header'",
+    ),
+    "one pasteable run per mutant, the line left off",
+  );
 
   // Run 38191593517's shape: nothing missed, two never run, and it merged.
   const cutOnly = call({ fn: "render", pr: 1085, undecided, generated: 74, run_url: "u" });
@@ -231,4 +237,61 @@ test("render names the PR, the files, and every survivor; partial runs say so", 
     oneOutside.body.includes("1 more survivor sits outside decode-safety territory"),
     "singular agrees (#932 read \"1 more survivor sit\")",
   );
+});
+
+test("render's per-mutant run is a regex of the text, not the name (#1121)", () => {
+  // `||` alternates: the bare name matched all 2157 mutants of the crate on
+  // cargo-mutants 27.1.0. The escaped text with `-f` listed exactly the one.
+  // A lifetime's quote has to survive the shell, hence the shlex form.
+  const meta = [
+    "src/bin/mothergod.rs:209:43: replace || with && in run",
+    "src/lib.rs:326:37: replace + with - in Frames<'a>::split",
+  ];
+  const out = call({ fn: "render", pr: 7, missed: [meta[1]], undecided: [meta[0]], generated: 9, run_url: "u" });
+  assert.ok(!out.body.includes("<its name>"), "no placeholder handed out as a recipe");
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(out.body.includes(`${prefix}-f src/bin/mothergod.rs --re 'replace \\|\\| with \\&\\& in run'`), out.body);
+  assert.ok(
+    out.body.includes(`${prefix}-f src/lib.rs --re 'replace \\+ with \\- in Frames<'"'"'a>::split'`),
+    out.body,
+  );
+  assert.ok(!out.body.includes("209:43: replace || with && in run'"), "the line is off the pattern");
+});
+
+test("render keeps line and column only for a mutant that names no function (#1121 review)", () => {
+  // A const's mutant has no `in <fn>`: without the line its text listed 50
+  // mutants of src/literal.rs. The line is exact as of the filing.
+  const constant = "src/literal.rs:69:36: replace + with -";
+  const out = call({ fn: "render", pr: 7, missed: [constant], generated: 1, run_url: "u" });
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(out.body.includes(`${prefix}-f src/literal.rs --re ':69:36: replace \\+ with \\-'`), out.body);
+  assert.ok(out.body.includes("a harmless extra"), "the body says what the unpinned run also lists");
+  assert.ok(out.body.includes("keeps its line and column"), "the body says why this one keeps its line");
+});
+
+test("render drops the line for a function replacement and an impl-named operator mutant (#1121 review)", () => {
+  // Neither ends in a bare `in <fn>`: a replacement carries `<fn> -> <Type>`,
+  // an impl's name holds spaces. Both name their function, so the line, which
+  // moves on main, stays off.
+  const replacement = "src/bin/mothergod.rs:12:1: replace main -> ExitCode with Default::default()";
+  const impl = "src/read.rs:40:9: replace += with -= in <impl Read for Tracked<R>>::read";
+  const out = call({ fn: "render", pr: 7, missed: [replacement, impl], generated: 2, run_url: "u" });
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(
+    out.body.includes(`${prefix}-f src/bin/mothergod.rs --re 'replace main \\-> ExitCode with Default::default\\(\\)'`),
+    out.body,
+  );
+  assert.ok(
+    out.body.includes(`${prefix}-f src/read.rs --re 'replace \\+= with \\-= in <impl Read for Tracked<R>>::read'`),
+    out.body,
+  );
+  const runs = out.body.split("\n").filter((line) => line.startsWith("cargo mutants"));
+  assert.equal(runs.length, 2);
+  assert.ok(runs.every((run) => !/:\d+:\d+:/.test(run)), "no line in either pattern");
+});
+
+test("render's per-mutant run falls back to an unscoped escaped pattern for a name with no location", () => {
+  const out = call({ fn: "render", pr: 7, missed: ["replace || with && in run"], generated: 1, run_url: "u" });
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(out.body.includes(`${prefix}--re 'replace \\|\\| with \\&\\& in run'`), out.body);
 });
