@@ -20,8 +20,8 @@ reading used; the file is sparse, so it costs no disk. Encode and decode run
 as children of this process and each child's peak resident set is read from
 `os.wait4`, the kernel's own number for that child, so no `time(1)` has to
 be installed, parsed or remembered. The round trip is compared byte for
-byte, because a bound on a broken decode is not a bound on anything. Encode
-plus decode took 172 s on a hosted runner, release build cached (run
+byte, because a bound on a broken decode is not a bound on anything. The
+script took 172 s end to end on a hosted runner, release build cached (run
 38468086345, `workflow_dispatch`, 2026-10-13, this corpus). One logged
 point, not a range: run times vary by runner, which is why the lane is
 weekly and the PR gate never runs it; the workflow's timeout and
