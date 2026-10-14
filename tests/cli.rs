@@ -503,6 +503,58 @@ fn test_flag_reads_stdin_and_wins_over_decompress_and_stdout() {
 }
 
 #[test]
+fn verbose_says_the_sizes_on_stderr_and_leaves_stdout_alone() {
+    let payload = vec![b'a'; 3000];
+    let (frame, _) = run(&mut bin(), &payload);
+    let quiet = run_output(&mut bin(), &payload);
+    let loud = run_output(bin().arg("-v"), &payload);
+    assert_eq!(loud.stdout, quiet.stdout);
+    assert_eq!(quiet.stderr, Vec::<u8>::new());
+    let line = format!("mothergod: stdin: 3000 -> {} bytes (", frame.len());
+    let stderr = String::from_utf8_lossy(&loud.stderr);
+    assert!(
+        stderr.starts_with(&line) && stderr.ends_with("%)\n"),
+        "{stderr}"
+    );
+
+    let decoded = run_output(bin().args(["-d", "--verbose"]), &frame);
+    assert_eq!(decoded.stdout, payload);
+    assert_eq!(
+        String::from_utf8_lossy(&decoded.stderr),
+        format!("mothergod: stdin: {} -> 3000 bytes\n", frame.len())
+    );
+
+    let tested = run_output(bin().args(["-tv"]), &frame);
+    assert_eq!(tested.stdout, Vec::<u8>::new());
+    assert_eq!(tested.stderr, decoded.stderr);
+}
+
+#[test]
+fn verbose_names_each_converted_file_and_not_a_failed_one() {
+    let dir = Dir::new("verbose-files");
+    let first = dir.file("first", b"first first first first");
+    let missing = dir.0.join("missing");
+    let output = run_output(bin().arg("-v").arg(&first).arg(&missing), b"");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!("{}: 23 -> ", first.display())),
+        "{stderr}"
+    );
+    assert_eq!(stderr.matches("bytes").count(), 1, "{stderr}");
+    assert!(stderr.contains("missing"), "{stderr}");
+}
+
+#[test]
+fn verbose_leaves_the_share_out_of_an_empty_input() {
+    let output = run_output(bin().arg("-v"), b"");
+    assert_eq!(output.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("mothergod: stdin: 0 -> "), "{stderr}");
+    assert!(!stderr.contains('%'), "{stderr}");
+}
+
+#[test]
 fn decompress_of_a_corrupt_file_argument_leaves_no_output_file() {
     let dir = std::env::temp_dir().join(format!(
         "mothergod-cli-test-decompress-corrupt-{}",
