@@ -554,6 +554,49 @@ fn verbose_leaves_the_share_out_of_an_empty_input() {
     assert!(!stderr.contains('%'), "{stderr}");
 }
 
+/// `/dev/full` fails every write with ENOSPC, so it stands for a stderr that
+/// cannot take the report. Linux only, because only Linux has the device.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_unwritable_stderr_does_not_panic_or_fail_a_complete_output() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let payload = vec![b'a'; 3000];
+    let (frame, _) = run(&mut bin(), &payload);
+    let run_on_full = |args: &[&str], stdin: &[u8]| {
+        let full = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .expect("/dev/full opens on Linux");
+        let mut child = bin()
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(full)
+            .spawn()
+            .expect("mothergod binary should spawn");
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(stdin)
+            .expect("write to child stdin");
+        child.wait_with_output().expect("mothergod should exit")
+    };
+
+    let compressed = run_on_full(&["-v"], &payload);
+    assert_eq!(compressed.status.code(), Some(0));
+    assert_eq!(compressed.stdout, frame);
+
+    let decoded = run_on_full(&["-dv"], &frame);
+    assert_eq!(decoded.status.code(), Some(0));
+    assert_eq!(decoded.stdout, payload);
+
+    let failed = run_on_full(&["-d"], b"not a frame");
+    assert_eq!(failed.status.code(), Some(1));
+}
+
 #[test]
 fn decompress_of_a_corrupt_file_argument_leaves_no_output_file() {
     let dir = std::env::temp_dir().join(format!(

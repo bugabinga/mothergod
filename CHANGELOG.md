@@ -139,6 +139,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- cli: a stderr that cannot take a message (`2>/dev/full`, a closed
+  descriptor) no longer aborts the run with exit 101 after the output is
+  complete; the message is dropped and the exit status stays what the
+  conversion earned (#1161).
 - `read::Decoder`, `decompress`: an `Lz` frame whose header declares a
   payload longer than a `Stored` frame of the same output holds is `Corrupt`
   as soon as its header is read, so `Decoder::with_max_len(src, 1 << 20)` no
