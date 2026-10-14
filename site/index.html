@@ -396,7 +396,8 @@ cmp FILE FILE.out</pre>
           under <code>-f</code>; <code>-k</code> is accepted and does nothing,
           since the input is kept anyway. <code>-t</code> decodes each file and
           writes nothing, so a silent exit 0 says it is intact; <code>-v</code>
-          adds one stderr line per file with its sizes. That,
+          adds one stderr line per file with its sizes, and a later
+          <code>-q</code> cancels it. That,
           <code>--help</code> and <code>--version</code> are the entire
           interface so far: no compression levels, no tuning knobs.
           <code>--version</code> also prints the format version the build reads;

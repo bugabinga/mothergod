@@ -100,6 +100,7 @@ const PROBES: &[(&str, Probe)] = &[
     ("force-f", force_f),
     ("test-t", test_t),
     ("verbose-v", verbose_v),
+    ("quiet-q", quiet_q),
     ("level-digit", level_digit),
     ("help", help),
     ("version", version),
@@ -171,6 +172,11 @@ fn test_t() -> Seen {
 
 fn verbose_v() -> Seen {
     let (out, code) = run(bin().arg("-v"), &sample());
+    seen(code == 0 && out.starts_with(MAGIC))
+}
+
+fn quiet_q() -> Seen {
+    let (out, code) = run(bin().arg("-q"), &sample());
     seen(code == 0 && out.starts_with(MAGIC))
 }
 
