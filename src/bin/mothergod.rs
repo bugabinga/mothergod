@@ -109,18 +109,12 @@ enum Request {
 
 fn main() -> ExitCode {
     match parse(std::env::args_os().skip(1)) {
-        Ok(Request::Help) => {
-            println!("{USAGE}");
-            ExitCode::SUCCESS
-        }
-        Ok(Request::Version) => {
-            println!(
-                "mothergod {} (format {})",
-                env!("CARGO_PKG_VERSION"),
-                mothergod::FORMAT_VERSION
-            );
-            ExitCode::SUCCESS
-        }
+        Ok(Request::Help) => print_line(USAGE),
+        Ok(Request::Version) => print_line(&format!(
+            "mothergod {} (format {})",
+            env!("CARGO_PKG_VERSION"),
+            mothergod::FORMAT_VERSION
+        )),
         Ok(Request::Run {
             mode,
             options,
@@ -558,6 +552,16 @@ fn write_fail(dest_name: &str, err: &io::Error) -> ExitCode {
         return ExitCode::from(SIGPIPE_STATUS);
     }
     fail(&format!("writing {dest_name}: {err}"))
+}
+
+/// Writes `text` and a newline to stdout, where the text is the whole output
+/// of the run (`--help`, `--version`). `println!` would panic and exit 101 on
+/// a full or closed stdout; a failed write takes [`write_fail`]'s status.
+fn print_line(text: &str) -> ExitCode {
+    match writeln!(io::stdout(), "{text}") {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => write_fail("stdout", &err),
+    }
 }
 
 /// Writes one `mothergod: `-prefixed line to stderr. A failed write is

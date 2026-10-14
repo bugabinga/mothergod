@@ -597,6 +597,33 @@ fn an_unwritable_stderr_does_not_panic_or_fail_a_complete_output() {
     assert_eq!(failed.status.code(), Some(1));
 }
 
+/// `--help` and `--version` have nothing but stdout to say. A stdout that
+/// cannot take it is a failed run with a message, never a panic (exit 101).
+#[cfg(target_os = "linux")]
+#[test]
+fn an_unwritable_stdout_fails_help_and_version_without_panicking() {
+    use std::process::Stdio;
+
+    for flag in ["--help", "-V"] {
+        let full = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .expect("/dev/full opens on Linux");
+        let output = bin()
+            .arg(flag)
+            .stdout(full)
+            .stderr(Stdio::piped())
+            .output()
+            .expect("mothergod should exit");
+        assert_eq!(output.status.code(), Some(1), "{flag}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.starts_with("mothergod: writing stdout: "),
+            "{flag}: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn decompress_of_a_corrupt_file_argument_leaves_no_output_file() {
     let dir = std::env::temp_dir().join(format!(

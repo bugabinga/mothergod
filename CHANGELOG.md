@@ -143,6 +143,10 @@ All notable changes to this project are documented here. Format follows
   descriptor) no longer aborts the run with exit 101 after the output is
   complete; the message is dropped and the exit status stays what the
   conversion earned (#1161).
+- cli: `--help` and `--version` on a stdout that cannot take them
+  (`>/dev/full`) exit 1 with `mothergod: writing stdout: ...` instead of
+  panicking with exit 101; a closed pipe exits 141 silently, as compression
+  already does (#1167).
 - `read::Decoder`, `decompress`: an `Lz` frame whose header declares a
   payload longer than a `Stored` frame of the same output holds is `Corrupt`
   as soon as its header is read, so `Decoder::with_max_len(src, 1 << 20)` no
