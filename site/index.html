@@ -388,18 +388,10 @@ cmp FILE FILE.out</pre>
           <code>zstd</code> already taught you: it compresses, <code>-d</code>
           decompresses, stdin to stdout when you name no file. That last line is
           the point of running it at all, and <code>cmp</code> printing nothing
-          is it passing. Given file arguments instead, compression writes
-          <code>&lt;file&gt;.mgdc</code> for each and <code>-d</code> reads one
-          back to the name with the suffix stripped; <code>-c</code> writes to
-          stdout and leaves files alone, and <code>-</code> names stdin. Nothing
-          deletes its input, and an existing output file is overwritten only
-          under <code>-f</code>; <code>-k</code> is accepted and does nothing,
-          since the input is kept anyway. <code>-t</code> decodes each file and
-          writes nothing, so a silent exit 0 says it is intact; <code>-v</code>
-          adds one stderr line per file with its sizes, and a later
-          <code>-q</code> cancels it. That,
-          <code>--help</code> and <code>--version</code> are the entire
-          interface so far: no compression levels, no tuning knobs.
+          is it passing. Given a file, it writes <code>&lt;file&gt;.mgdc</code>
+          beside it, and unlike <code>gzip</code> it never deletes the input.
+          <code>--help</code> lists the rest on one screen: flags you know from
+          <code>gzip</code>, and no compression levels or tuning knobs.
           <code>--version</code> also prints the format version the build reads;
           put it in a bug report. Expect the encode to take a while, at the
           rates above.

@@ -69,17 +69,11 @@ something of yours and check the result rather than taking our word for it.
 cmp FILE FILE.out   # silence means the round trip was lossless
 ```
 
-Given file arguments instead, compression writes `<file>.mgdc` for each and
-`-d` reads one back to the name with the suffix stripped; `-c` writes to stdout
-and leaves files alone, and `-` names stdin. Nothing deletes its input, and an
-existing output file is overwritten only under `-f`; `-k` is accepted and does
-nothing, since the input is kept anyway. `-t` decodes each file and writes
-nothing, so a silent exit 0 says it is intact; `-v` adds one stderr line per
-file with its sizes, and a later `-q` cancels it.
-That and `--help` and `--version` are the entire interface so far: no
-compression levels, no tuning knobs. `--version` also prints the format version
-the build reads; put it in a bug report. Expect the encode to take a while, at
-the rates above.
+Given a file, it writes `<file>.mgdc` beside it, and unlike `gzip` it never
+deletes the input. `--help` lists the rest on one screen: flags you know from
+`gzip`, and no compression levels or tuning knobs. `--version` also prints the
+format version the build reads; put it in a bug report. Expect the encode to
+take a while, at the rates above.
 
 Library API (subject to change until 1.0):
 
