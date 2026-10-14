@@ -257,3 +257,20 @@ test("render's per-mutant run is a regex of the text, not the name (#1121)", () 
   );
   assert.ok(!out.body.includes("209:43: replace || with && in run'"), "the line is off the pattern");
 });
+
+test("render keeps line and column only for a mutant that names no function (#1121 review)", () => {
+  // A const's mutant has no `in <fn>`: without the line its text listed 50
+  // mutants of src/literal.rs. The line is exact as of the filing.
+  const constant = "src/literal.rs:69:36: replace + with -";
+  const out = call({ fn: "render", pr: 7, missed: [constant], generated: 1, run_url: "u" });
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(out.body.includes(`${prefix}-f src/literal.rs --re ':69:36: replace \\+ with \\-'`), out.body);
+  assert.ok(out.body.includes("a harmless extra"), "the body says what the unpinned run also lists");
+  assert.ok(out.body.includes("keeps its line and column"), "the body says why this one keeps its line");
+});
+
+test("render's per-mutant run falls back to an unscoped escaped pattern for a name with no location", () => {
+  const out = call({ fn: "render", pr: 7, missed: ["replace || with && in run"], generated: 1, run_url: "u" });
+  const prefix = "cargo mutants --config tests/mutants.toml --package mothergod ";
+  assert.ok(out.body.includes(`${prefix}--re 'replace \\|\\| with \\&\\& in run'`), out.body);
+});

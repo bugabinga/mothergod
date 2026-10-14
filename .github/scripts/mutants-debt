@@ -148,7 +148,9 @@ def plural(n, noun):
 # accepts only from 1.8 on, so the set is spelled here, not borrowed (#1121).
 RUST_REGEX_META = frozenset("\\.+*?()|[]{}^$#&-~")
 # A mutant name as cargo-mutants prints it: `file:line:col: ` then the mutation text.
-NAME = re.compile(r"^(?P<file>[^:]+):\d+:\d+: (?P<text>.+)$")
+NAME = re.compile(r"^(?P<file>[^:]+):(?P<at>\d+:\d+): (?P<text>.+)$")
+# The function an operator mutation names: `replace + with - in Frames<'a>::split`.
+IN_FUNCTION = re.compile(r" in \S+$")
 
 
 def regex_escape(text):
@@ -157,19 +159,23 @@ def regex_escape(text):
 
 
 def decide_command(name):
-    """The cargo-mutants run that decides `name` alone, pasteable into a shell.
+    """The cargo-mutants run that decides `name`, pasteable into a shell.
 
     A bare name is a wrong regex: `|` alternates, so `replace || with &&`
     matched all 2157 mutants of the crate on 27.1.0 (#1121). The pattern is
-    the mutation text, escaped, with the line and column left off and `-f`
-    scoping the file: `--re` searches the whole name, line included, but a
-    line moves on main between the filing and the fix and the text with
-    its function does not. `shlex.quote` because a name can hold a lifetime's
-    quote (`Frames<'a>::split`).
+    the mutation text, escaped, with `-f` scoping the file. `--re` searches the
+    whole name, line included, and a line moves on main between the filing and
+    the fix while the text with its function does not, so the line stays off
+    when the text names a function (`in <fn>`). A text with none, a mutant in a
+    `const`, would list every same-text mutant of the file (50 on
+    `src/literal.rs`), so it keeps `line:col`. `shlex.quote` because a name
+    can hold a lifetime's quote (`Frames<'a>::split`).
     """
     match = NAME.match(name)
     scope = f"-f {match['file']} " if match else ""
     text = match["text"] if match else name
+    if match and not IN_FUNCTION.search(text):
+        text = f":{match['at']}: {text}"
     return (
         "cargo mutants --config tests/mutants.toml --package mothergod "
         f"{scope}--re {shlex.quote(regex_escape(text))}"
@@ -298,8 +304,10 @@ def render(pr, debt, run_url):
         lines += ["An undecided mutant is run first, then answered as a survivor or closed as caught."]
     lines += [
         "",
-        "One run per mutant listed above, `-f` scoping the file and the line left off the",
-        "pattern because it moves on main while the text does not:",
+        "One run per mutant listed above, `-f` scoping the file. The line is left off the",
+        "pattern where the text names its function, because it moves on main while the text",
+        "does not; a same-text mutant in that function runs too, a harmless extra. A mutant",
+        "in no function keeps its line and column, exact as of this filing:",
         "",
         "```",
         *(decide_command(name) for name in [*debt.missed, *debt.undecided]),
