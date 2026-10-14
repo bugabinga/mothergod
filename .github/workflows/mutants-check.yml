@@ -91,6 +91,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # One pin for both jobs below: they share the cached binary, and the
+  # exclusions job reads a list the mutants job must agree with.
+  CARGO_MUTANTS_VERSION: "27.1.0"
 
 jobs:
   mutants:
@@ -111,11 +114,11 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-mutants
-          key: cargo-mutants-${{ runner.os }}-27.1.0
+          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
       # Guarded by the binary, not by `cargo install`'s own check: the cache
       # restores the binary without ~/.cargo/.crates.toml, so an unguarded
       # install rebuilds from source on every hit (fuzz-check learned this).
-      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version 27.1.0 --locked
+      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
       # cache-bin: false, because this workflow already caches
       # ~/.cargo/bin/cargo-mutants itself (above): Swatinem's own bin
       # management defaults on and prunes untracked binaries from that same
@@ -212,3 +215,35 @@ jobs:
           name: mutants-report
           path: mutants.out/
           if-no-files-found: ignore
+
+  # Every `exclude_re` in tests/mutants.toml still matches a mutant, or this
+  # is red. A line-pinned entry dies when the lines above it move, the
+  # mutants it proved equivalent or non-terminating go live, and the next
+  # sweep spends a whole timeout on each hang. Four hand repins in three
+  # weeks (#699, #880, #999, #1172), the last two after deslop passes on
+  # coder.rs whose contract is no behaviour change, which a doc-only cut
+  # keeps while moving every line below it; no review catches that, so a
+  # reader had to be built (#702). Its own job, so its red says "repin" and
+  # the mutants job's red keeps saying "missed": the two are different
+  # work for whoever reads the thread. Red and not a warning because a
+  # warning on a merged PR has no reader, the lesson mutants-debt above
+  # already paid for. `--list` parses the crate without building it, 0.35 s
+  # for 2,196 mutants on 2026-10-14, so the job is a checkout and the
+  # cached binary; it has no path filter of its own because the workflow's
+  # already names tests/mutants.toml, which makes a repin PR verify itself.
+  exclusions:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
+      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
+      # --no-config on purpose: with the config applied an excluded mutant
+      # is absent from the list either way, which is the blindness itself.
+      - run: cargo mutants --list --no-config --package mothergod --colors=never > mutants.list
+      - run: .github/scripts/mutants-exclusions tests/mutants.toml mutants.list
