@@ -8639,5 +8639,5 @@ record.
   measured here. **Not measured:** `reverse`; line-wrapped base64; a streamed re-wrap, which
   the decoder does not do (kind 4 decodes through the whole-buffer path).
   `bench/baseline.json` is not regenerated: a new baseline retires both
-  finals reports' fingerprint, which needs their network fetches (#1204's
-  follow-up issue carries it). `research/progress.jsonl` it193.
+  finals reports' fingerprint, which needs their network fetches (#1205
+  carries it). `research/progress.jsonl` it193.

@@ -68,7 +68,7 @@ All notable changes to this project are documented here. Format follows
   re-wrapped on decode, so the model sees the bytes underneath. On
   `base64_wrapped`, a text payload base64-encoded, 50,000 bytes: 0.532 to 0.395
   bits/byte, and no other benchmark case moves. Line-wrapped base64 (MIME,
-  PEM) and base64 inside a larger file are not covered (#1204, ADR-0071).
+  PEM) and base64 inside a larger file are not covered (#1206, ADR-0071).
   Format change: `FORMAT_VERSION` 14, files written by 13 do not decode.
 - compress: an input is cut into 16 MiB blocks, one frame each, so peak
   encode memory stays under 1 GiB however long the input: 256 MiB of zeros
