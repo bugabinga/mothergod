@@ -174,7 +174,7 @@ jobs:
 
       - id: claude
         if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
         env:
           # The PR under review. Here rather than in the prompt because a
           # single ${{ }} makes the whole prompt block an expression,

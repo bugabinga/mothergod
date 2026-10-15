@@ -63,7 +63,7 @@ jobs:
 
       - id: claude
         if: steps.guard.outputs.paused != 'true'
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
         env:
           # Job-scoped fallback for gh writes after the claude app token
           # expires ~1h into a session (issue #81). Comments only, never
