@@ -8639,7 +8639,7 @@ record.
   measured here. **Not measured:** `reverse`; line-wrapped base64; a streamed re-wrap, which
   the decoder does not do (kind 4 decodes through the whole-buffer path).
   `bench/baseline.json` is not regenerated: a new baseline retires both
-  finals reports' fingerprint, which needs their network fetches (#1205
+  finals reports' fingerprint, which needs their network fetches (#1223
   carries it). `research/progress.jsonl` it193.
 - S2-A119 | ACCEPTED | Issue #1123, item 1 for `reverse`, closing it: the
   filter is wired as selector kind 5 (`Candidate::Reverse`, `[5, 0]`),
@@ -8682,4 +8682,4 @@ record.
   trial per shortlisted candidate. **Not measured:** the held-out finals
   (policy: never inside the loop), any real file, a gated shortlist, and
   decode on the pool's other CPU models. `bench/baseline.json` is not
-  regenerated, #1205 carries it. `research/progress.jsonl` it194.
+  regenerated, #1223 carries it. `research/progress.jsonl` it194.

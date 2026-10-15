@@ -5,13 +5,13 @@
 //! `crate::codec` trial-encodes each, keeping the smallest (`JOURNAL` S1-A1,
 //! ADR-0028).
 //!
-//! `delta`, `transpose`, `bcj`, `base64_unwrap` and `reverse`, the five
-//! filters `crate::codec` selects, each invert in two forms. The public
-//! `decode` aborts if the allocator cannot satisfy its output buffer. The `pub(crate)` `try_decode`, and each
-//! streaming `Undo::try_new`, return `Err` instead, because the decode path
-//! must not abort on untrusted input (hard rule 2, `tests/torture.rs`, #453).
-//! A pair differs only in how the buffer is built, never in the scan run
-//! over it.
+//! `delta`, `transpose`, `bcj` and `base64_unwrap` invert in two forms. The
+//! public `decode` aborts if the allocator cannot satisfy its output buffer.
+//! The `pub(crate)` `try_decode`, and each streaming `Undo::try_new`, return
+//! `Err` instead, because the decode path must not abort on untrusted input
+//! (hard rule 2, `tests/torture.rs`, #453). A pair differs only in how the
+//! buffer is built, never in the scan run over it. `reverse` needs no
+//! second form: `crate::codec` reverses the buffer it already owns in place.
 
 /// Fixed-stride delta filter.
 ///
@@ -558,13 +558,6 @@ pub mod reverse {
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
         encode(data)
-    }
-
-    /// Fallible [`decode`] (module docs of [`crate::filters`]).
-    pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
-        let mut out = crate::try_vec_from_slice(data)?;
-        out.reverse();
-        Ok(out)
     }
 
     #[cfg(test)]

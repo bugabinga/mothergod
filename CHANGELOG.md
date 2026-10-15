@@ -67,7 +67,7 @@ All notable changes to this project are documented here. Format follows
   block coded better backwards is stored that way. On the sealed
   `access_log` generator, 50,000 bytes: 5,377 to 5,340 bytes, 0.69% smaller;
   on `interleaved_audio16`, 0.05% smaller; no other benchmark case moves.
-  Encode takes 25 to 31% longer on the benchmark cases, because every input
+  Encode takes 24 to 31% longer on the benchmark cases, because every input
   pays one more trial encode; decode cost does not measurably change
   (#1123, ADR-0072). Format change: `FORMAT_VERSION` 15, files written by 14
   do not decode.

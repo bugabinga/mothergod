@@ -21,10 +21,9 @@ Under ADR-0063 the bump retires version 14 in the same PR: the six `v14-` golden
 
 ## Consequences
 
-An input at most 16 MiB (ADR-0067's block) pays one more trial encode: the benchmark cases encode 25 to 31% slower (S2-A119).
+An input at most 16 MiB (ADR-0067's block) pays one more trial encode: the benchmark cases encode 24 to 31% slower (S2-A119).
 Encode speed is tracked and not gated (ROADMAP SPEED), so the cost is stated and not defended by a threshold.
-Decode cost does not measurably change: a kind 5 frame adds one copy and one in-place reversal of the output.
-Peak decode memory for a kind 5 frame is the filtered bytes plus the output, twice the output, inside the existing ceiling.
+Decode cost does not measurably change: a kind 5 frame adds one in-place reversal of the output and no allocation.
 The filter is applied to the raw input and never stacked: reversal followed by a delta stride took `sqlite_like_records` from 20,864 to 20,292 bytes in the measurement that preceded this one, a gain the single-filter selector cannot express.
 That is a different design, a composed selector, and waits for its own entry.
 

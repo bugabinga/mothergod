@@ -377,14 +377,19 @@ fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
 /// Returns [`Error::OutOfMemory`] if the allocator cannot satisfy the
 /// undo buffer a non-`Identity` candidate needs (hard rule 2,
 /// `rust-craft` skill's allocation-discipline, `tests/torture.rs`, #453).
-fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Result<Vec<u8>, Error> {
+fn undo_filter(candidate: Candidate, mut data: Vec<u8>) -> Result<Vec<u8>, Error> {
     match candidate {
         Candidate::Identity => Ok(data),
         Candidate::Delta(stride) => Ok(filters::delta::try_decode(&data, stride)?),
         Candidate::Bcj => Ok(filters::bcj::try_decode(&data)?),
         Candidate::Transpose(columns) => Ok(filters::transpose::try_decode(&data, columns)?),
         Candidate::Base64 => Ok(filters::base64_unwrap::try_decode(&data)?),
-        Candidate::Reverse => Ok(filters::reverse::try_decode(&data)?),
+        Candidate::Reverse => {
+            // Self-inverse and length-preserving, so it reverses the owned
+            // buffer in place and allocates nothing.
+            data.reverse();
+            Ok(data)
+        }
     }
 }
 
