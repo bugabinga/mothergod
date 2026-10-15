@@ -41,7 +41,7 @@ use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
 use crate::ppm::Ppm;
-use crate::sse::{Calibrate, Sse};
+use crate::sse::{LogitSse, Sse};
 
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
@@ -493,7 +493,7 @@ fn logistic_mix_node(
     (stretched, dot)
 }
 
-/// [`SurpriseLogisticMix`]'s [`LogisticMixer::advance`]: squares the node's
+/// [`SurpriseLogisticMix`]'s per-node error bookkeeping: squares the node's
 /// prediction error (target bit minus the pre-refine mix `p`)
 /// and advances `recent` at `recent_decay` and `baseline` at
 /// [`SURPRISE_BASELINE_DECAY`], both through [`surprise_ema_update`].
@@ -579,8 +579,7 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 /// each expert's probability of the upper half is [`stretch`]ed, the
 /// stretches are summed under one weight vector per `WEIGHT_CONTEXTS`
 /// key (the same key `banks` selects [`Literal`]'s linear weights by), and
-/// the sum is [`squash`]ed back and refined through the calibration table
-/// `C`. The per-key step size separates a context's stable residual
+/// the sum is [`squash`]ed back and refined through [`LogitSse`]. The per-key step size separates a context's stable residual
 /// uncertainty from genuine drift by comparing a fast EMA of squared
 /// prediction error (`recent_sq_error`) against a slow EMA of the
 /// identical signal (`baseline_sq_error`, that key's own learned floor),
@@ -588,18 +587,11 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 /// shared constant the way S2-R26's own rejected mechanism did. Reads
 /// [`Literal`]'s banks, never writes them.
 ///
-/// Generic over its own calibration table `C` ([`Calibrate`]): the mixing
-/// weights, error EMAs and rate schedule never depend on which table
-/// calibrates them, only the walk's `refine`/`update` calls do.
-/// [`SurpriseLogisticMixLogitSse`] is the instantiation with
-/// [`crate::sse::LogitSse`] in `C`'s place, the real coding path
-/// (`research/JOURNAL.md` S2-A106, S2-A108,
+/// The real coding path (`research/JOURNAL.md` S2-A106, S2-A108,
 /// `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`):
-/// [`Literal::encode_logit_sse`]/`decode_logit_sse`. The `C = `[`Sse`]
-/// instantiation was the `FORMAT_VERSION` 6 coding path, retired
-/// (ADR-0063).
+/// [`Literal::encode_logit_sse`]/`decode_logit_sse`.
 #[derive(Debug, Clone)]
-pub struct SurpriseLogisticMix<C> {
+pub struct SurpriseLogisticMix {
     /// One weight vector per [`WEIGHT_CONTEXTS`] key.
     weights: Vec<[f64; EXPERTS]>,
     /// Each key's fast EMA of squared prediction error.
@@ -609,14 +601,13 @@ pub struct SurpriseLogisticMix<C> {
     baseline_sq_error: Vec<f64>,
     /// This mixer's own calibration table, keyed by
     /// [`bittree::sse_context`].
-    sse: C,
+    sse: LogitSse,
 }
 
-/// [`SurpriseLogisticMix`] over [`crate::sse::LogitSse`]: see
-/// [`SurpriseLogisticMix`]'s own docs.
-pub type SurpriseLogisticMixLogitSse = SurpriseLogisticMix<crate::sse::LogitSse>;
+/// [`SurpriseLogisticMix`] by its older, longer name.
+pub type SurpriseLogisticMixLogitSse = SurpriseLogisticMix;
 
-impl<C: Calibrate> SurpriseLogisticMix<C> {
+impl SurpriseLogisticMix {
     /// A fresh mixer: every weight at [`LOGISTIC_INITIAL_WEIGHT`], every
     /// error EMA at zero (read by [`surprise_rate`] as "not yet
     /// established," the maximum-surprise starting point).
@@ -626,7 +617,7 @@ impl<C: Calibrate> SurpriseLogisticMix<C> {
             weights: fresh_logistic_weights(),
             recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
-            sse: C::new(bittree::SSE_CONTEXTS),
+            sse: LogitSse::new(bittree::SSE_CONTEXTS),
         }
     }
 
@@ -641,65 +632,14 @@ impl<C: Calibrate> SurpriseLogisticMix<C> {
             weights: try_fresh_logistic_weights()?,
             recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
             baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
-            sse: C::try_new(bittree::SSE_CONTEXTS)?,
+            sse: LogitSse::try_new(bittree::SSE_CONTEXTS)?,
         })
     }
 }
 
-impl<C: Calibrate> Default for SurpriseLogisticMix<C> {
+impl Default for SurpriseLogisticMix {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// [`Literal::code_bit_walk`]'s per-mixer interface: the weight vector and
-/// calibration table the mixer keeps per [`WEIGHT_CONTEXTS`] key, plus its
-/// rate schedule ([`logistic_mix_node`]'s own docs).
-trait LogisticMixer {
-    /// This mixer's own calibration table type.
-    type Calibrator: Calibrate;
-
-    /// `weight_index`'s weight vector.
-    fn weights_mut(&mut self, weight_index: usize) -> &mut [f64; EXPERTS];
-
-    /// This mixer's calibration table.
-    fn sse_mut(&mut self) -> &mut Self::Calibrator;
-
-    /// `weight_index`'s step size for the node about to be coded, before
-    /// that node's bit is known.
-    fn rate(&self, weight_index: usize) -> f64;
-
-    /// Bookkeeping once the node's bit and pre-refine probability are
-    /// known.
-    fn advance(&mut self, weight_index: usize, bit: bool, p: f64);
-}
-
-impl<C: Calibrate> LogisticMixer for SurpriseLogisticMix<C> {
-    type Calibrator = C;
-
-    fn weights_mut(&mut self, weight_index: usize) -> &mut [f64; EXPERTS] {
-        &mut self.weights[weight_index]
-    }
-
-    fn sse_mut(&mut self) -> &mut C {
-        &mut self.sse
-    }
-
-    fn rate(&self, weight_index: usize) -> f64 {
-        surprise_rate(
-            self.recent_sq_error[weight_index],
-            self.baseline_sq_error[weight_index],
-        )
-    }
-
-    fn advance(&mut self, weight_index: usize, bit: bool, p: f64) {
-        surprise_error_tracking_step(
-            &mut self.recent_sq_error[weight_index],
-            &mut self.baseline_sq_error[weight_index],
-            SURPRISE_RECENT_DECAY,
-            bit,
-            p,
-        );
     }
 }
 
@@ -912,16 +852,16 @@ impl Literal {
         bits
     }
 
-    /// What [`Self::encode_mix`] would pay for `byte`, summed over the same
-    /// [`Self::code_bit_walk`] without driving a coder, and the same state
-    /// updates: `crate::codec`'s `CostSink` and `EncodeSink` must price and
-    /// code the same thing.
+    /// What [`Self::encode_logit_sse`] would pay for `byte`, summed over the
+    /// same [`Self::code_bit_walk`] without driving a coder, and the same
+    /// state updates: `crate::codec`'s `CostSink` and `EncodeSink` must price
+    /// and code the same thing.
     #[must_use]
-    fn ideal_cost_bits_mix<M: LogisticMixer>(
+    pub fn ideal_cost_bits_logistic_surprise_logit_sse(
         &mut self,
         context: Context,
         byte: u8,
-        mixer: &mut M,
+        mixer: &mut SurpriseLogisticMix,
     ) -> f64 {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
@@ -934,17 +874,6 @@ impl Literal {
         debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
         self.update(&bank_indices, weight_index, symbol, exp);
         bits
-    }
-
-    /// What [`Self::encode_logit_sse`] would pay for `byte`.
-    #[must_use]
-    pub fn ideal_cost_bits_logistic_surprise_logit_sse(
-        &mut self,
-        context: Context,
-        byte: u8,
-        mixer: &mut SurpriseLogisticMixLogitSse,
-    ) -> f64 {
-        self.ideal_cost_bits_mix(context, byte, mixer)
     }
 
     /// `weights6`, the extra expert's own weight, and their sum: the
@@ -1292,11 +1221,11 @@ impl Literal {
         prefix
     }
 
-    /// The [`LogisticMixer`] counterpart of [`bittree::walk_sse`], shared by
-    /// encode, decode and pricing so they cannot drift apart: blends the six
-    /// expert banks in the logit domain under `mixer`'s `weight_index`
-    /// vector, refines through `mixer`'s calibration table, and takes one
-    /// gradient step per node at [`LogisticMixer::rate`]. `code_bit`
+    /// The [`SurpriseLogisticMix`] counterpart of [`bittree::walk_sse`],
+    /// shared by encode, decode and pricing so they cannot drift apart:
+    /// blends the six expert banks in the logit domain under `mixer`'s
+    /// `weight_index` vector, refines through its calibration table, and
+    /// takes one gradient step per node at [`surprise_rate`]. `code_bit`
     /// receives each node's midpoint and refined probability and returns the
     /// bit the node resolved to.
     ///
@@ -1304,37 +1233,48 @@ impl Literal {
     /// before [`clamp_logistic_probability`] even runs: every bank
     /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
     /// every node's range holds at least one symbol on each side.
-    fn code_bit_walk<M: LogisticMixer>(
+    fn code_bit_walk(
         &self,
         bank_indices: &[usize; EXPERTS],
         weight_index: usize,
-        mixer: &mut M,
+        mixer: &mut SurpriseLogisticMix,
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let prefix = self.expert_prefix_sums(bank_indices);
         bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
             let (stretched, dot) =
-                logistic_mix_node(&prefix, mixer.weights_mut(weight_index), lo, mid, hi);
+                logistic_mix_node(&prefix, &mixer.weights[weight_index], lo, mid, hi);
             let p = clamp_logistic_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
-            let refined = mixer.sse_mut().refine(node_context, p);
+            let refined = mixer.sse.refine(node_context, p);
             let bit = code_bit(mid, refined);
-            mixer.sse_mut().update(node_context, p, bit);
-            let rate = mixer.rate(weight_index);
-            logistic_gradient_step(mixer.weights_mut(weight_index), &stretched, rate, bit, p);
-            mixer.advance(weight_index, bit, p);
+            mixer.sse.update(node_context, p, bit);
+            let rate = surprise_rate(
+                mixer.recent_sq_error[weight_index],
+                mixer.baseline_sq_error[weight_index],
+            );
+            logistic_gradient_step(&mut mixer.weights[weight_index], &stretched, rate, bit, p);
+            surprise_error_tracking_step(
+                &mut mixer.recent_sq_error[weight_index],
+                &mut mixer.baseline_sq_error[weight_index],
+                SURPRISE_RECENT_DECAY,
+                bit,
+                p,
+            );
             bit
         })
     }
 
-    /// The body of [`Self::encode_logit_sse`]: the six expert banks update
-    /// by `update` whichever mixer refined the probabilities.
-    fn encode_mix<M: LogisticMixer>(
+    /// Codes `byte` through `encoder` under `context`, mixed by `mixer`'s
+    /// logit-domain walk and refined through [`LogitSse`]
+    /// (`research/JOURNAL.md` S2-A106, S2-A108). The six expert banks
+    /// update by `update` whichever mixer refined the probabilities.
+    pub fn encode_logit_sse(
         &mut self,
         encoder: &mut Encoder,
         context: Context,
         byte: u8,
-        mixer: &mut M,
+        mixer: &mut SurpriseLogisticMix,
     ) {
         let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
@@ -1345,35 +1285,6 @@ impl Literal {
         });
         debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
         self.update(&bank_indices, weight_index, symbol, exp);
-    }
-
-    /// The body of [`Self::decode_logit_sse`], the inverse of
-    /// [`Self::encode_mix`].
-    fn decode_mix<M: LogisticMixer>(
-        &mut self,
-        decoder: &mut Decoder,
-        context: Context,
-        mixer: &mut M,
-    ) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, |_mid, p| {
-            decoder.decode_bit(p)
-        });
-        self.update(&bank_indices, weight_index, usize::from(byte), exp);
-        byte
-    }
-
-    /// Codes `byte` through `encoder` under `context`, mixed by `mixer`'s
-    /// logit-domain walk and refined through [`crate::sse::LogitSse`]
-    /// (`research/JOURNAL.md` S2-A106, S2-A108).
-    pub fn encode_logit_sse(
-        &mut self,
-        encoder: &mut Encoder,
-        context: Context,
-        byte: u8,
-        mixer: &mut SurpriseLogisticMixLogitSse,
-    ) {
-        self.encode_mix(encoder, context, byte, mixer);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -1388,9 +1299,14 @@ impl Literal {
         &mut self,
         decoder: &mut Decoder,
         context: Context,
-        mixer: &mut SurpriseLogisticMixLogitSse,
+        mixer: &mut SurpriseLogisticMix,
     ) -> u8 {
-        self.decode_mix(decoder, context, mixer)
+        let (bank_indices, weight_index) = banks(context);
+        let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, |_mid, p| {
+            decoder.decode_bit(p)
+        });
+        self.update(&bank_indices, weight_index, usize::from(byte), exp);
+        byte
     }
 }
 
