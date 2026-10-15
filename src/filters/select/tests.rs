@@ -117,6 +117,7 @@ fn header_bytes_round_trip_every_candidate_kind() {
         Candidate::Transpose(NonZeroUsize::new(2).unwrap()),
         Candidate::Transpose(NonZeroUsize::new(96).unwrap()),
         Candidate::Base64,
+        Candidate::Reverse,
     ] {
         let bytes = candidate.to_header_bytes();
         assert_eq!(
@@ -129,7 +130,7 @@ fn header_bytes_round_trip_every_candidate_kind() {
 
 #[test]
 fn header_bytes_reject_unknown_kind() {
-    assert_eq!(Candidate::from_header_bytes([5, 0]), None);
+    assert_eq!(Candidate::from_header_bytes([6, 0]), None);
     assert_eq!(Candidate::from_header_bytes([255, 255]), None);
 }
 
@@ -144,6 +145,7 @@ fn header_bytes_reject_nonzero_param_for_parameterless_kinds() {
     assert_eq!(Candidate::from_header_bytes([0, 1]), None);
     assert_eq!(Candidate::from_header_bytes([2, 1]), None);
     assert_eq!(Candidate::from_header_bytes([4, 1]), None);
+    assert_eq!(Candidate::from_header_bytes([5, 1]), None);
 }
 
 #[test]
@@ -156,6 +158,7 @@ fn header_bytes_pin_each_kind_byte() {
     assert_eq!(Candidate::Bcj.to_header_bytes(), [2, 0]);
     assert_eq!(Candidate::Transpose(one).to_header_bytes(), [3, 1]);
     assert_eq!(Candidate::Base64.to_header_bytes(), [4, 0]);
+    assert_eq!(Candidate::Reverse.to_header_bytes(), [5, 0]);
 }
 
 #[test]
@@ -165,6 +168,7 @@ fn output_len_is_the_filtered_length_except_for_base64() {
         Candidate::Delta(NonZeroUsize::MIN),
         Candidate::Bcj,
         Candidate::Transpose(NonZeroUsize::MIN),
+        Candidate::Reverse,
     ] {
         assert_eq!(candidate.output_len(1234), 1234, "{candidate:?}");
     }
@@ -185,4 +189,17 @@ fn pick_shortlists_base64_exactly_for_canonical_base64() {
     // One byte short of a whole group.
     assert!(!pick(&wrapped[..wrapped.len() - 1]).contains(&Candidate::Base64));
     assert!(!pick(&[]).contains(&Candidate::Base64));
+}
+
+#[test]
+fn pick_shortlists_reverse_for_every_input() {
+    // No entropy proxy sees its gain (JOURNAL S2-A119), so only the trial
+    // encode decides, on empty input and one byte included.
+    for data in [&[][..], b"x", b"not base64 data!", &[0u8; 5000]] {
+        assert!(
+            pick(data).contains(&Candidate::Reverse),
+            "{} bytes",
+            data.len()
+        );
+    }
 }

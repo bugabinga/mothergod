@@ -386,10 +386,10 @@ fn truncated_header_is_rejected() {
 
 #[test]
 fn unknown_filter_selector_is_rejected_not_panicking() {
-    // Kind byte 5 names no Candidate::from_header_bytes ever produces
-    // (0=Identity, 1=Delta, 2=Bcj, 3=Transpose): an adversarial or
-    // future-format payload, never a bug in this decoder.
-    let mut payload = vec![5u8, 0u8];
+    // Kind byte 6 names no Candidate::from_header_bytes ever produces
+    // (0=Identity, 1=Delta, 2=Bcj, 3=Transpose, 4=Base64, 5=Reverse): an
+    // adversarial or future-format payload, never a bug in this decoder.
+    let mut payload = vec![6u8, 0u8];
     payload.extend_from_slice(&1u32.to_le_bytes());
     payload.extend_from_slice(&0u32.to_le_bytes());
     assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Corrupt));
@@ -1319,4 +1319,46 @@ fn a_base64_frame_declaring_one_length_and_coding_another_is_corrupt() {
     let declared = u32::from_le_bytes(forced[field..field + 4].try_into().unwrap());
     forced[field..field + 4].copy_from_slice(&(declared + 1).to_le_bytes());
     assert_eq!(decode(&forced, MAX_DECODED_LEN), Err(Error::Corrupt));
+}
+
+#[test]
+fn le_rows_pick_the_reverse_filter_and_beat_identity() {
+    let rows = crate::test_support::le_rows(2500);
+    let encoded = encode(&rows);
+    assert_eq!(
+        Candidate::from_header_bytes([encoded[0], encoded[1]]),
+        Some(Candidate::Reverse)
+    );
+    assert!(
+        encoded.len() < SELECTOR_LEN + encode_tokens(&rows, None).len(),
+        "reversing must beat coding the rows as they stand"
+    );
+    assert_decode_matches(&encoded, &rows, "picked Reverse");
+}
+
+#[test]
+fn reverse_roundtrips_at_every_short_length_when_forced() {
+    let rows = crate::test_support::le_rows(2);
+    for len in 0..=rows.len() {
+        let forced = forced_payload(Candidate::Reverse, &rows[..len]);
+        assert_decode_matches(
+            &forced,
+            &rows[..len],
+            &format!("forced Reverse, {len} bytes"),
+        );
+        let Extent { output_len, .. } = declared_extent(&forced).expect("a real payload");
+        assert_eq!(output_len, len as u64, "{len} bytes");
+    }
+}
+
+#[test]
+fn reverse_output_past_max_len_is_rejected() {
+    let rows = crate::test_support::le_rows(100);
+    let forced = forced_payload(Candidate::Reverse, &rows);
+    let len = u32::try_from(rows.len()).expect("small");
+    assert_eq!(decode(&forced, len).as_deref(), Ok(rows.as_slice()));
+    let expected = Error::TooLarge { len, max: len - 1 };
+    assert_eq!(decode(&forced, len - 1), Err(expected.clone()));
+    let err = decode_streaming(&forced, len - 1).expect_err("output past max_len");
+    assert_eq!(as_codec_error(&err), Some(&expected));
 }

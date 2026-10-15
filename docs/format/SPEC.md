@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 14)
+# mothergod bitstream format (FORMAT_VERSION 15)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 14)
+4       1     format version (currently 15)
 5       1     method byte
 6       ...   payload (method-defined)
 end-4   4     check value: CRC-32 of every byte before it, u32 LE
@@ -41,7 +41,7 @@ declared length (ADR-0065); 12 gave the `Lz` payload a declared coded
 length, so a frame's end is knowable and frames chain into a stream
 (ADR-0067); 13 closed each frame with a check value (ADR-0068); 14 added
 the base64 filter and derived a frame's output length from its filtered
-length (ADR-0071).
+length (ADR-0071); 15 added the reverse filter (ADR-0072).
 
 ## Check value (ADR-0068)
 
@@ -106,8 +106,8 @@ inputs longer than `u32::MAX` bytes.
 
 ### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028, ADR-0038)
 
-A trial-selected filter (`src/filters.rs`: none, delta, BCJ, transpose, or
-base64 unwrap — `filters::select::pick` shortlists candidates,
+A trial-selected filter (`src/filters.rs`: none, delta, BCJ, transpose,
+base64 unwrap, or reverse — `filters::select::pick` shortlists candidates,
 `codec::encode` keeps whichever produces the smallest payload) applied to
 the frame data, then optimal-parse LZ tokens (`src/lz.rs`), entropy-coded
 by adaptive flag/length/offset/rep-slot tables (`src/model.rs`) and a
@@ -180,8 +180,9 @@ data repeats exact lengths (`research/JOURNAL.md` S2-A114/S2-A115). A
 distance's residual bits are raw.
 
 Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose),
-4 (base64 unwrap, ADR-0071). `param` is the delta stride or transpose column
-count, `1..=255`; zero for kinds that take none (0, 2, 4). A decoder MUST
+4 (base64 unwrap, ADR-0071), 5 (byte reversal, ADR-0072). `param` is the
+delta stride or transpose column count, `1..=255`; zero for kinds that take
+none (0, 2, 4, 5). A decoder MUST
 reject any other `[kind, param]` pair as `Corrupt`
 (`filters::select::Candidate::from_header_bytes`) — an unrecognized kind, or
 a zero `param` on a kind that requires one, or a nonzero one on a kind that
@@ -191,7 +192,7 @@ and only then reverses the filter to recover the original frame data.
 
 The *output length* is what the frame decodes to, derived from the declared
 length by the selector's kind (`filters::select::Candidate::output_len`).
-Kinds 0 to 3 preserve length, so it is the declared length. Kind 4 stores
+Kinds 0 to 3 and 5 preserve length, so it is the declared length. Kind 4 stores
 the standard-base64 decoding of the frame data, and the decoder re-wraps it
 to `4 * ceil(declared / 3)` bytes with `=` padding: 3 bytes to 4, a
 trailing 1 or 2 bytes to a padded group. Every filtered byte string is a
@@ -203,6 +204,10 @@ decoder MUST reject a frame whose output length exceeds its output ceiling
 (below) as `TooLarge`, from the header alone, before it allocates; that
 output length, not the declared one, is also what a stream's total budget
 and the Stored floor read.
+
+Kind 5 stores the frame data in reverse byte order, and the decoder reverses
+it back, whole-buffer. Every filtered byte string is a valid kind 5 frame,
+and an encoder MAY emit it for any input.
 
 Offset-bucket/rep-code disjointness (see the invariant below): a
 `Token::Match`'s distance is coded as a bucket symbol plus residual bits

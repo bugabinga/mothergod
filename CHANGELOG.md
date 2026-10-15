@@ -63,6 +63,14 @@ All notable changes to this project are documented here. Format follows
   reported before any of the frame is decoded, so a damaged frame writes
   nothing. The price is 4 bytes on each frame and one pass over it at decode,
   measured at 380 MB/s, where `Lz` decode of Rust source runs at 11 MB/s.
+- compress: the encoder also tries the input in reverse byte order, so a
+  block coded better backwards is stored that way. On the sealed
+  `access_log` generator, 50,000 bytes: 5,377 to 5,340 bytes, 0.69% smaller;
+  on `interleaved_audio16`, 0.05% smaller; no other benchmark case moves.
+  Encode takes 24 to 31% longer on the benchmark cases, because every input
+  pays one more trial encode; decode cost does not measurably change
+  (#1123, ADR-0072). Format change: `FORMAT_VERSION` 15, files written by 14
+  do not decode.
 - compress: an input that is entirely standard base64 (one unbroken line, RFC
   4648 alphabet, canonical padding) is decoded before it is coded and
   re-wrapped on decode, so the model sees the bytes underneath. On

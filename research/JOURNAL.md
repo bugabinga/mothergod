@@ -8639,5 +8639,47 @@ record.
   measured here. **Not measured:** `reverse`; line-wrapped base64; a streamed re-wrap, which
   the decoder does not do (kind 4 decodes through the whole-buffer path).
   `bench/baseline.json` is not regenerated: a new baseline retires both
-  finals reports' fingerprint, which needs their network fetches (#1205
+  finals reports' fingerprint, which needs their network fetches (#1223
   carries it). `research/progress.jsonl` it193.
+- S2-A119 | ACCEPTED | Issue #1123, item 1 for `reverse`, closing it: the
+  filter is wired as selector kind 5 (`Candidate::Reverse`, `[5, 0]`),
+  shortlisted by `select::pick` for every input, `FORMAT_VERSION` 15,
+  ADR-0072. Hypothesis: trial-encoding the input reversed lowers real
+  bits/byte on some train case and regresses none, train or sealed. Whole
+  frames, so decode streams nothing for kind 5 (whole-buffer path, like
+  kinds 3 and 4). | Measured, release build, one AMD EPYC 7763 runner, real
+  `mothergod::compress` bitstreams, main (`FORMAT_VERSION` 14) against the
+  branch, on the 11 train cases of `baseline::cases()` at `CASE_LEN` 50,000 /
+  `CASE_SEED` 0xBA5E11E5BA5E11E5 and on `access_log` and `gradient_image` at
+  `sealed_seed(CASE_SEED)`, same length. `interleaved_audio16` 35,984 to
+  35,965 bytes (-0.003040 b/B), sealed `access_log` 5,377 to 5,340 bytes
+  (-0.005920 b/B); the other nine train cases and sealed `gradient_image`
+  are the same bytes. Train mean -0.000276 b/B over 11 cases, sealed mean
+  -0.002960 over 2, no case regressed. Decode cost, `baseline_gate --
+  speed`, five alternating runs per side: median 101.94 main, 105.38 branch
+  calibration steps/byte, spreads 15% and 11%, so no measurable change.
+  Encode, best of five over the 11 train cases, two alternating rounds: main
+  3.852 and 4.031 s, branch 5.027 and 5.012 s, +31% and +24%, because every
+  input pays one more trial encode. | Mechanism not isolated: the two wins
+  are 19 and 37 bytes on inputs the generators build differently, and no
+  test here separates a direction effect from a trial-selection effect on
+  noise (a selector picks the smaller of N codings, so a candidate that is
+  merely a different sample of the same cost wins a few bytes by itself).
+  What is measured: no n-gram entropy tells a string from its reversal, so
+  `select::pick` cannot shortlist it and the trial encode decides; and
+  reversal composed with a delta stride is worth far more than reversal
+  alone on one class. `sqlite_like_records` with every field little-endian:
+  20,864 bytes as compressed, 20,292 as compressed after reversing the whole
+  input (a 2.7% gain, the delta stride 80 chosen on the reversed bytes);
+  with ts and measurement fields byte-swapped to big-endian: 20,333 as
+  compressed, 20,850 after reversing, the direction flipping with the byte
+  order. Whole-frame bytes, both through the kind 5 build, the reversed
+  case therefore a stacked filter the single-selector format cannot write.
+  One real file, observed and not a benchmark: the repository's `LICENSE`,
+  1,074 bytes, compresses to a 638-byte frame on main and 630 on the branch
+  (kind 5 selected). | Next lead, untried: a composed selector (reversal flag plus the existing
+  kinds), measured against this entry's champion; its cost is one more
+  trial per shortlisted candidate. **Not measured:** the held-out finals
+  (policy: never inside the loop), any real file, a gated shortlist, and
+  decode on the pool's other CPU models. `bench/baseline.json` is not
+  regenerated, #1223 carries it. `research/progress.jsonl` it194.

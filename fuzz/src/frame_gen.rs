@@ -55,6 +55,7 @@ pub fn preimages() -> Vec<(&'static str, Vec<u8>)> {
         ("bcj_opcode_dense", bcj_opcode_dense(1000)),
         ("transpose_columnar", columnar_drift(8, 2000)),
         ("base64_records", base64_records(60)),
+        ("le_rows", le_rows(20)),
         (
             "pseudo_random_incompressible",
             pseudo_random(0xdead_beef, 2048),
@@ -160,6 +161,28 @@ fn base64_records(rows: usize) -> Vec<u8> {
         .flat_map(|i| format!("{{\"id\":{i},\"score\":{}}}\n", i * 37 % 1000).into_bytes())
         .collect();
     mothergod::filters::base64_unwrap::decode(&text)
+}
+
+/// `rows` 20-byte rows of a little-endian timestamp, a 4-byte category and
+/// a little-endian `f64`: at 20 rows `compress` selects `Candidate::Reverse`
+/// for it (`JOURNAL` S2-A119), the one filter whose frame no other preimage
+/// reaches.
+fn le_rows(rows: usize) -> Vec<u8> {
+    const CATEGORIES: [[u8; 4]; 3] = [*b"temp", *b"hum\0", *b"pres"];
+    let mut state: u32 = 12345;
+    let mut next = || {
+        state = state.wrapping_mul(1_103_515_245).wrapping_add(12345) % (1 << 31);
+        state
+    };
+    let mut out = Vec::with_capacity(rows * 20);
+    for i in 0..rows {
+        let category = CATEGORIES[(next() >> 16) as usize % 3];
+        let value = 20.0 + f64::from((next() >> 8) % 6000) / 1000.0;
+        out.extend_from_slice(&(1_700_000_000_i64 + i as i64 * 60).to_le_bytes());
+        out.extend_from_slice(category.as_slice());
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
 }
 
 /// Two near-duplicate copies of a 26-byte block separated by unrelated
@@ -390,6 +413,13 @@ mod tests {
             "base64 text should shortlist Base64, same as filters.rs's \
              pick_shortlists_base64_exactly_for_canonical_base64"
         );
+    }
+
+    #[test]
+    fn le_rows_compress_with_the_reverse_filter() {
+        let frame = mothergod::compress(&le_rows(20));
+        // Past the 4-byte magic, the version and the method: the selector.
+        assert_eq!(frame[6..8], [5, 0], "le_rows should win as Reverse");
     }
 
     #[test]

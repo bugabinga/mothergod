@@ -40,7 +40,7 @@ decoded it at 1.778 MB/s. Methodology, per-file rates, and the regeneration
 command: [`docs/benchmarks/`](docs/benchmarks/).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 14) is specified but not frozen. Before the first
+format (`FORMAT_VERSION` 15) is specified but not frozen. Before the first
 release, each format change retires the version before it, so the next build
 that changes the format will not read a file you compress today. After that,
 until 1.0 a version can still be retired; from 1.0 on, none ever is. The
@@ -63,7 +63,7 @@ The first run needs no file of yours, because the clone ships one:
 
 ```console
 $ ./target/release/mothergod -v LICENSE
-mothergod: LICENSE: 1074 -> 638 bytes (59.4%)
+mothergod: LICENSE: 1074 -> 630 bytes (58.6%)
 ```
 
 `-v` asked for that line; without it, a run that worked prints nothing. One

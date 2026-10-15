@@ -218,7 +218,7 @@
         <b>Status</b>
         <p>
           <strong>Pre-alpha: no release, no packaged binary, no version
-            tag.</strong> The container format (version 14) is specified and
+            tag.</strong> The container format (version 15) is specified and
           versioned, not frozen. Before the first release, each format change
           retires the version before it, so the next build that changes the
           format will not read a file you compress today. After that, until 1.0
@@ -387,7 +387,7 @@ cargo build --release --bin mothergod</pre>
           role="region"
           aria-label="A first run on the clone's LICENSE file, and what it prints"
         >$ ./target/release/mothergod -v LICENSE
-mothergod: LICENSE: 1074 -&gt; 638 bytes (59.4%)</pre>
+mothergod: LICENSE: 1074 -&gt; 630 bytes (58.6%)</pre>
         <p>
           <code>-v</code> asked for that line; without it, a run that worked
           prints nothing. One 1 KB file is a smoke test, not a benchmark; the
