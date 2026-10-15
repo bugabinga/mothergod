@@ -1035,10 +1035,11 @@ fn streaming_rejects_declared_length_over_the_max_before_any_work() {
 #[test]
 fn streaming_falls_back_to_decode_for_transpose_declared_length_over_the_max() {
     // Same declared-length rejection as the Identity case above, but
-    // routed through decode_to_writer's fallback branch (the one
-    // candidate, Transpose, that still needs decode's own whole-buffer
-    // path), which must reject before calling it, not after. Identity,
-    // Delta, and Bcj all stream instead (research/JOURNAL.md S1-P7).
+    // routed through decode_to_writer's fallback branch (the
+    // candidates, Transpose and Base64, that still need decode's own
+    // whole-buffer path), which must reject before calling it, not after.
+    // Identity, Delta, and Bcj all stream instead (research/JOURNAL.md
+    // S1-P7).
     let over = MAX_DECODED_LEN + 1;
     let payload = lz_payload(
         Candidate::Transpose(crate::test_support::nz(2)).to_header_bytes(),
@@ -1213,4 +1214,109 @@ fn a_hostile_coded_length_is_truncated_not_allocated() {
         Err(Error::Truncated)
     );
     assert_eq!(decode(&payload, MAX_DECODED_LEN), Err(Error::Truncated));
+}
+
+/// The `Method::Lz` payload of `data` filtered through `candidate`
+/// whatever [`filters::select::pick`] would choose, so a decode path is
+/// reached by a data class the picker might decline.
+fn forced_payload(candidate: Candidate, data: &[u8]) -> Vec<u8> {
+    let columns = None;
+    let mut payload = candidate.to_header_bytes().to_vec();
+    payload.extend(encode_tokens(&apply_filter(candidate, data), columns));
+    payload
+}
+
+#[test]
+fn base64_text_picks_the_base64_filter_and_beats_identity() {
+    let wrapped = filters::base64_unwrap::decode(&crate::test_support::record_text(60));
+    let encoded = encode(&wrapped);
+    assert_eq!(
+        Candidate::from_header_bytes([encoded[0], encoded[1]]),
+        Some(Candidate::Base64)
+    );
+    assert!(
+        encoded.len() < SELECTOR_LEN + encode_tokens(&wrapped, None).len(),
+        "unwrapping must beat coding the base64 text as it stands"
+    );
+    assert_decode_matches(&encoded, &wrapped, "picked Base64");
+}
+
+#[test]
+fn base64_roundtrips_at_every_padding_length() {
+    // 0, 1 and 2 padding characters, whichever filter the picker chose,
+    // and the Base64 path itself forced for each.
+    for len in 1..=14 {
+        let wrapped = filters::base64_unwrap::decode(&crate::test_support::record_text(3)[..len]);
+        roundtrip(&wrapped);
+        let forced = forced_payload(Candidate::Base64, &wrapped);
+        assert_decode_matches(&forced, &wrapped, &format!("forced Base64, {len} bytes"));
+        let Extent { output_len, .. } = declared_extent(&forced).expect("a real payload");
+        assert_eq!(output_len, wrapped.len() as u64, "{len} bytes");
+    }
+}
+
+#[test]
+fn base64_extent_is_the_unwrapped_length_re_wrapped() {
+    // The header declares the filtered length; the frame's extent is what
+    // it decodes to, which framing budgets against (ADR-0071).
+    let wrapped = filters::base64_unwrap::decode(&crate::test_support::record_text(60));
+    let forced = forced_payload(Candidate::Base64, &wrapped);
+    let (_, rest) = split_candidate(&forced).expect("selector");
+    let (header, _) = split_token_header(rest).expect("header");
+    assert_eq!(header.declared_len as usize, wrapped.len() / 4 * 3);
+    let extent = declared_extent(&forced).expect("extent");
+    assert_eq!(extent.output_len, wrapped.len() as u64);
+}
+
+#[test]
+fn base64_output_past_max_len_is_rejected_though_the_filtered_length_fits() {
+    // The filtered bytes are three quarters of the output: a cap on them
+    // alone would let `max_len - 1` through, then allocate past it.
+    let wrapped = filters::base64_unwrap::decode(&crate::test_support::record_text(60));
+    let forced = forced_payload(Candidate::Base64, &wrapped);
+    let len = u32::try_from(wrapped.len()).expect("small");
+    assert_eq!(decode(&forced, len).as_deref(), Ok(wrapped.as_slice()));
+    let expected = Error::TooLarge { len, max: len - 1 };
+    assert_eq!(decode(&forced, len - 1), Err(expected.clone()));
+    let err = decode_streaming(&forced, len - 1).expect_err("output past max_len");
+    assert_eq!(as_codec_error(&err), Some(&expected));
+}
+
+#[test]
+fn base64_declared_length_whose_output_passes_the_ceiling_is_rejected_before_any_work() {
+    // The largest filtered length whose output fits is `MAX / 4 * 3`; one
+    // more re-wraps to a padded group past `MAX_DECODED_LEN`. No token
+    // follows, so a mutated guard falls through to `Corrupt` instead of
+    // allocating 192 MiB.
+    let filtered = MAX_DECODED_LEN / 4 * 3 + 1;
+    let payload = lz_payload(Candidate::Base64.to_header_bytes(), filtered, 0, &[]);
+    assert_eq!(
+        decode(&payload, MAX_DECODED_LEN),
+        Err(Error::TooLarge {
+            len: MAX_DECODED_LEN + 4,
+            max: MAX_DECODED_LEN
+        })
+    );
+    // Past `u32::MAX` the length saturates rather than wrapping.
+    let payload = lz_payload(Candidate::Base64.to_header_bytes(), u32::MAX, 0, &[]);
+    assert_eq!(
+        decode(&payload, MAX_DECODED_LEN),
+        Err(Error::TooLarge {
+            len: u32::MAX,
+            max: MAX_DECODED_LEN
+        })
+    );
+}
+
+#[test]
+fn a_base64_frame_declaring_one_length_and_coding_another_is_corrupt() {
+    // Any filtered length is a valid frame, so the check that guards
+    // this path is the one every candidate shares: the tokens must fill
+    // the declared length exactly.
+    let wrapped = filters::base64_unwrap::decode(&crate::test_support::record_text(60));
+    let mut forced = forced_payload(Candidate::Base64, &wrapped);
+    let field = SELECTOR_LEN;
+    let declared = u32::from_le_bytes(forced[field..field + 4].try_into().unwrap());
+    forced[field..field + 4].copy_from_slice(&(declared + 1).to_le_bytes());
+    assert_eq!(decode(&forced, MAX_DECODED_LEN), Err(Error::Corrupt));
 }

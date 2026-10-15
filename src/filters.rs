@@ -5,8 +5,8 @@
 //! `crate::codec` trial-encodes each, keeping the smallest (`JOURNAL` S1-A1,
 //! ADR-0028).
 //!
-//! `delta`, `transpose` and `bcj`, the three filters `crate::codec` selects,
-//! each invert in two forms. The public `decode` aborts if the allocator
+//! `delta`, `transpose`, `bcj` and `base64_unwrap`, the four filters
+//! `crate::codec` selects, each invert in two forms. The public `decode` aborts if the allocator
 //! cannot satisfy its output buffer. The `pub(crate)` `try_decode`, and each
 //! streaming `Undo::try_new`, return `Err` instead, because the decode path
 //! must not abort on untrusted input (hard rule 2, `tests/torture.rs`, #453).
@@ -399,18 +399,16 @@ pub mod bcj {
 /// Base64 inflates every 3 source bytes to 4 printable ones and hides the
 /// binary structure underneath; unwrapping it was the biggest ratio drop of
 /// the founding session (`JOURNAL` S1-A2). Unlike [`delta`], [`transpose`]
-/// and [`bcj`], whether it applies depends on the data, not a caller
-/// parameter, so [`encode`](base64_unwrap::encode) always prepends one flag
-/// byte (`1` unwrapped, `0` passed through) for
-/// [`decode`](base64_unwrap::decode) to read back.
+/// and [`bcj`], whether it applies depends on the data:
+/// [`encode`](base64_unwrap::encode) answers `None` for input that is not
+/// canonical standard base64, and the frame's filter selector, not a flag
+/// byte, records that it ran ([`select::Candidate::Base64`]). It is the one
+/// filter that changes length, so a frame's output length is derived from
+/// its filtered length ([`select::Candidate::output_len`]).
 pub mod base64_unwrap {
     /// Standard base64 alphabet (RFC 4648 with `+`/`/` and `=` padding),
     /// indexed by 6-bit value.
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    /// Shortest input worth unwrapping: below this the flag byte cannot be
-    /// recouped.
-    const MIN_LEN: usize = 8;
 
     /// Prefix the alphabet scan checks before a full decode is attempted,
     /// so a large non-base64 input costs a bounded scan.
@@ -447,7 +445,7 @@ pub mod base64_unwrap {
     /// `None` on any invalid character or invalid padding placement;
     /// non-canonical padding bits (set but insignificant) are caught by
     /// the round-trip check in [`encode`], not here.
-    fn try_decode(data: &[u8]) -> Option<Vec<u8>> {
+    fn strict_decode(data: &[u8]) -> Option<Vec<u8>> {
         if data.is_empty() || !data.len().is_multiple_of(4) {
             return None;
         }
@@ -479,8 +477,10 @@ pub mod base64_unwrap {
         Some(out)
     }
 
-    fn b64_encode(data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+    /// Appends the padded base64 text of `data` to `out`: the scan shared
+    /// by [`b64_encode`] and [`try_decode`], which differ only in how
+    /// `out` is allocated.
+    fn encode_into(data: &[u8], out: &mut Vec<u8>) {
         for chunk in data.chunks(3) {
             let b0 = chunk[0];
             let b1 = chunk.get(1).copied();
@@ -496,49 +496,45 @@ pub mod base64_unwrap {
                 None => b'=',
             });
         }
+    }
+
+    fn b64_encode(data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+        encode_into(data, &mut out);
         out
     }
 
     /// Unwraps `data` to its decoded form when `data` is valid, canonical
     /// standard base64 (checked by decoding it and re-encoding the result:
-    /// equal to `data` iff no information — non-canonical padding bits,
-    /// alternate alphabets — was thrown away). Otherwise passes `data`
-    /// through unchanged. Either way the result carries a one-byte prefix
-    /// (`1` unwrapped, `0` passed through) so [`decode`] knows which
-    /// happened; empty `data` is too short to be worth trying and is
-    /// always passed through.
+    /// equal to `data` iff no information, such as non-canonical padding
+    /// bits or an alternate alphabet, was thrown away), and answers `None`
+    /// otherwise. Empty `data` is not base64, so it answers `None` too.
     #[must_use]
-    pub fn encode(data: &[u8]) -> Vec<u8> {
-        let looks_like_base64 = data.len() >= MIN_LEN
-            && data.len().is_multiple_of(4)
+    pub fn encode(data: &[u8]) -> Option<Vec<u8>> {
+        let looks_like_base64 = data.len().is_multiple_of(4)
             && data[..data.len().min(SCAN_LIMIT)]
                 .iter()
                 .all(|&b| is_base64_byte(b));
-        let unwrapped = looks_like_base64
-            .then(|| try_decode(data))
+        looks_like_base64
+            .then(|| strict_decode(data))
             .flatten()
-            .filter(|decoded| b64_encode(decoded) == data);
-        let (flag, body) = match &unwrapped {
-            Some(decoded) => (1, decoded.as_slice()),
-            None => (0, data),
-        };
-        let mut out = Vec::with_capacity(1 + body.len());
-        out.push(flag);
-        out.extend_from_slice(body);
-        out
+            .filter(|decoded| b64_encode(decoded) == data)
     }
 
-    /// Inverts [`encode`]. Reads the flag byte [`encode`] always writes
-    /// first; any value other than `1` is treated as "passed through" (the
-    /// same as `0`), and empty `data` — no flag byte at all — decodes to
-    /// empty, so this never panics regardless of what `data` holds.
+    /// Inverts [`encode`]: the padded base64 text of `data`, `4 *
+    /// data.len().div_ceil(3)` bytes. Total, so no byte string is an
+    /// invalid unwrapped form.
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
-        match data.split_first() {
-            Some((1, rest)) => b64_encode(rest),
-            Some((_, rest)) => rest.to_vec(),
-            None => Vec::new(),
-        }
+        b64_encode(data)
+    }
+
+    /// Fallible [`decode`] (module docs of [`crate::filters`]).
+    pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let mut out = Vec::new();
+        out.try_reserve_exact(data.len().div_ceil(3) * 4)?;
+        encode_into(data, &mut out);
+        Ok(out)
     }
 
     #[cfg(test)]
@@ -575,8 +571,8 @@ pub mod reverse {
 ///
 /// [`select::pick`] narrows the menu with an order-1 entropy proxy on a
 /// bounded probe, so the expensive trial encode runs only on candidates
-/// worth it (`JOURNAL` S1-A1). It shortlists [`delta`], [`bcj`] and
-/// [`transpose`]; [`base64_unwrap`] and [`reverse`] are not wired in.
+/// worth it (`JOURNAL` S1-A1). It shortlists [`delta`], [`bcj`],
+/// [`transpose`] and [`base64_unwrap`]; [`reverse`] is not wired in.
 pub mod select {
     use super::delta;
     use std::collections::HashMap;
@@ -639,13 +635,18 @@ pub mod select {
         Bcj,
         /// [`super::transpose::encode`] with this many columns.
         Transpose(NonZeroUsize),
+        /// [`super::base64_unwrap::encode`], which succeeded: the filtered
+        /// bytes are the decoded binary, three for every four of the
+        /// original.
+        Base64,
     }
 
     impl Candidate {
         /// Serializes this candidate into the 2-byte filter selector
         /// `[kind, param]` that opens `Method::Lz`'s payload
         /// (`docs/format/SPEC.md`). `param` is the delta stride or transpose
-        /// column count, zero for [`Self::Identity`] and [`Self::Bcj`].
+        /// column count, zero for [`Self::Identity`], [`Self::Bcj`] and
+        /// [`Self::Base64`].
         ///
         /// # Panics
         ///
@@ -668,6 +669,7 @@ pub mod select {
                         "pick() only selects TRANSPOSE_COLUMNS entries, all under 100, fits u8",
                     ),
                 ],
+                Self::Base64 => [4, 0],
             }
         }
 
@@ -685,7 +687,25 @@ pub mod select {
                 [1, param] => NonZeroUsize::new(usize::from(param)).map(Self::Delta),
                 [2, 0] => Some(Self::Bcj),
                 [3, param] => NonZeroUsize::new(usize::from(param)).map(Self::Transpose),
+                [4, 0] => Some(Self::Base64),
                 _ => None,
+            }
+        }
+
+        /// The length of the frame data this candidate reconstructs from
+        /// `filtered_len` filtered bytes: the same length for every filter
+        /// but [`Self::Base64`], which re-wraps three bytes into four
+        /// (`4 * filtered_len.div_ceil(3)`, the padded text). `u64`
+        /// because that can pass `u32::MAX`. A frame's header declares the
+        /// filtered length, so this is what a decoder budgets the output
+        /// against before it allocates a byte.
+        #[must_use]
+        pub fn output_len(self, filtered_len: u32) -> u64 {
+            match self {
+                Self::Base64 => u64::from(filtered_len).div_ceil(3) * 4,
+                Self::Identity | Self::Delta(_) | Self::Bcj | Self::Transpose(_) => {
+                    u64::from(filtered_len)
+                }
             }
         }
     }
@@ -800,6 +820,10 @@ pub mod select {
             .count();
         if bcj_hits * BCJ_DENSITY_DIVISOR > bcj_window.len() {
             candidates.push(Candidate::Bcj);
+        }
+
+        if super::base64_unwrap::encode(data).is_some() {
+            candidates.push(Candidate::Base64);
         }
 
         if data.len() >= MIN_TRANSPOSE_LEN {

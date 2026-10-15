@@ -39,7 +39,7 @@
 //! rather than fixed by a constant — is reserved through
 //! `try_reserve_exact`. `Models::try_new` (`Model::try_new`,
 //! `Sse::try_new`, `Literal::try_new`, `SurpriseLogisticMix::try_new`) and the
-//! `Delta`/`Bcj`/`Transpose` filters' `try_decode` undo buffers cover the
+//! `Delta`/`Bcj`/`Transpose`/`Base64` filters' `try_decode` undo buffers cover the
 //! rest, each a fallible sibling of the panicking constructor the encoder
 //! and every test still use, since neither needs hard rule 2's guarantee.
 //! The streaming path's own allocations (`filters::delta::Undo::try_new`,

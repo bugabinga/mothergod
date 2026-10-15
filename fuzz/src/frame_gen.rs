@@ -54,6 +54,7 @@ pub fn preimages() -> Vec<(&'static str, Vec<u8>)> {
         ("delta_columnar_drift", columnar_drift(4, 2000)),
         ("bcj_opcode_dense", bcj_opcode_dense(1000)),
         ("transpose_columnar", columnar_drift(8, 2000)),
+        ("base64_records", base64_records(60)),
         (
             "pseudo_random_incompressible",
             pseudo_random(0xdead_beef, 2048),
@@ -149,6 +150,16 @@ fn bcj_opcode_dense(len: usize) -> Vec<u8> {
         chunk[0] = 0xE8;
     }
     data
+}
+
+/// `rows` lines of JSON-ish text, base64-encoded whole: the shape
+/// `Candidate::Base64` unwraps, which `filters::select::pick` shortlists
+/// for any canonical standard base64 input.
+fn base64_records(rows: usize) -> Vec<u8> {
+    let text: Vec<u8> = (0..rows)
+        .flat_map(|i| format!("{{\"id\":{i},\"score\":{}}}\n", i * 37 % 1000).into_bytes())
+        .collect();
+    mothergod::filters::base64_unwrap::decode(&text)
 }
 
 /// Two near-duplicate copies of a 26-byte block separated by unrelated
@@ -369,6 +380,15 @@ mod tests {
                 .any(|c| matches!(c, Candidate::Transpose(_))),
             "8-column drift should shortlist a Transpose candidate, same \
              as filters.rs's pick_shortlists_transpose_for_column_structured_data"
+        );
+    }
+
+    #[test]
+    fn base64_records_select_base64_as_documented() {
+        assert!(
+            pick(&base64_records(60)).contains(&Candidate::Base64),
+            "base64 text should shortlist Base64, same as filters.rs's \
+             pick_shortlists_base64_exactly_for_canonical_base64"
         );
     }
 

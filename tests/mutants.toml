@@ -46,7 +46,7 @@ exclude_re = [
 
   # Equivalent: base64 assembles disjoint 6-bit fields, so `|` on
   # non-overlapping bits equals `^`. 5 mutants.
-  "replace \\| with \\^ in base64_unwrap::(try_decode|b64_encode)$",
+  "replace \\| with \\^ in base64_unwrap::(strict_decode|encode_into)$",
 
   # Equivalent: field_bank ORs a 2-bit class index (bits 0-1) with
   # in_quotes shifted to bit 2, disjoint. banks ORs four more disjoint
