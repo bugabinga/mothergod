@@ -321,6 +321,18 @@ test("a run's reset drops its draft even while the next run's message waits", as
   assert.deepEqual(bot.drafts, [], "but a dead run's last words are not shown for it");
 });
 
+test("a draft over Telegram's cap is cut on a code point, never through a pair", async () => {
+  const bot = object();
+  at(1000);
+  await bot.draft(text("a".repeat(4093), "r1"));
+  await bot.draft(text("\u{1F600}".repeat(3), "r2"));
+  at(2000);
+  await bot.tick();
+  const sent = bot.lastDraft.text;
+  assert.equal(sent.length, 4095, "4093 + two newlines, then a pair that would not fit whole");
+  assert.ok(!/[\uD800-\uDBFF]$/.test(sent), "no lone high surrogate at the end");
+});
+
 test("a reset naming no run drops every run's text", async () => {
   const bot = object();
   at(1000);

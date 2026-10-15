@@ -63,8 +63,9 @@ const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
  * - `arrivals`: the wall-clock time of every message that landed and has
  *   not been answered, oldest first. A drain loop answering three queued
  *   messages must keep typing between replies one and three, which a
- *   boolean cannot express (PR #155 review). An arrival is given up on
- *   `TYPING_CAP_MS` after it landed.
+ *   boolean cannot express (PR #155 review). One deadline covers them
+ *   all, `TYPING_CAP_MS` after the last one landed; past it they are
+ *   given up on together.
  * - `runs`: every run that has said what it is doing within the cap,
  *   `{run, text, at}`, oldest first. Any seat's run, not only the one
  *   answering a message: the operator asked to watch them all (#742),
@@ -227,7 +228,12 @@ export class Typing {
     // expire. This loop is its only sender, and it composes the text
     // from the list on every tick, so a draft or a reset that lands
     // while a send is in flight shows on the next tick.
-    const text = runs.map((entry) => entry.text).join("\n\n").slice(0, DRAFT_LIMIT);
+    // Cut on a code point boundary: a slice through a surrogate pair is
+    // a text Telegram may reject, and the hook's own lines never reach
+    // the cap, only a caller holding the secret could.
+    const joined = runs.map((entry) => entry.text).join("\n\n");
+    const cut = /[\uD800-\uDBFF]$/.test(joined.slice(0, DRAFT_LIMIT)) ? DRAFT_LIMIT - 1 : DRAFT_LIMIT;
+    const text = joined.slice(0, cut);
     const shown = await this.state.storage.get("shown");
     const shownAt = await this.state.storage.get("shownAt");
     if (text && (text !== shown || shownAt == null || now - shownAt >= DRAFT_REFRESH_MS)) {
