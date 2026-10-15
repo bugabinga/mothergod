@@ -91,7 +91,11 @@ jobs:
                and what it blocks or is blocked by. An issue already
                satisfied by shipped code is the cheapest close there
                is; check the tree before assuming it is open work. A
-               new ledger issue is yours to label on triage.
+               new ledger issue is yours to label on triage. A product
+               issue whose fix lands on README, the site, release notes
+               or positioning also gets `marketing`, the herald's queue
+               (ADR-0040); nothing else routes it there (#1216 named
+               the herald as owner and reached no queue).
             2. Replies: where an author answered your critique,
                respond this run: converge or concede. A disagreement
                that will not converge gets one comment naming it, and
