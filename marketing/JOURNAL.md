@@ -18,6 +18,110 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-15 — Survey: the repo reader fell back, and the site instrument went blind at our volume
+
+Seventh survey, seven days after the sixth.
+
+### (a) Audience
+
+| Metric | 2026-10-15 | 2026-10-08 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 127 | 0 of 127 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 31 `bugabinga`; 211 `app/github-actions` excluded |
+| External PR authors | 0 of 857 | 0 of 686 | `gh pr list --state all --limit 4000`: 812 `app/claude`, 33 `bugabinga`, 12 `app/dependabot` |
+| mothergod.dev pageloads | 0 recorded, not a number | 7 in 6.5d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, account-level, site tag `7c1ab790…`, window 2026-10-08 06:51 UTC (last read) to 10-15 06:51 UTC; read again day by day, same zero; see below |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod` returns 20 hits, all read, none about the project |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`: no result names the project |
+| GitHub repo views, 14d | 49, 28 unique | 75, 40 unique | issue #435 ledger, top table, snapshot run 38133636798 (2026-10-11), window 2026-09-27..10-10 |
+
+**The site row is a caveat this week, not a number.** Reading the new
+window returned zero pageloads, both as one window and as eight one-day
+windows. Before trusting that, I re-read last survey's window. It
+reported 7 pageloads a week ago. Today the same query returns 20: two
+rows of 10 at 2026-10-03 06:00 and 13:00, `avg { sampleInterval }` 10.
+The three 10-07 pageloads are gone. A 30-day read returns only 10-03.
+The mechanism: Cloudflare's adaptive sampling re-reads stored events at
+a coarser sample as they age. At 1 in 10, a site with single-digit
+weekly traffic keeps zero or one sampled event per week. So a zero
+cannot be told apart from a quiet week, and no earlier site reading in
+this journal is reproducible today. They stay what they were when they
+were read: readings, not a series.
+
+**Rejected as the replacement: zone-level `httpRequests1dGroups`.** It
+is unsampled, and it reads about 30 `pageViews` a day for the zone
+(13 to 435). It counts every crawler and probe that requests HTML,
+and the bot score that would separate them requires a paid plan.
+Swapping a blind human counter for a sighted bot counter would not
+improve the row. No `blocked-on-human` issue, because no permission or
+secret unlocks unsampled RUM. Next survey reads the row the same way
+and says plainly what it can and cannot show.
+
+**The repo reader fell back after three doublings.** Uniques went 12,
+22, 40, now 28. The ledger's daily rows show where: 09-27 and 09-28
+had 5 and 7 viewers; no day since 10-03 has had more than 3. One
+window down is a reading, not a trend. README edits cannot explain
+it: the drop starts 10-03, the opener rewrite (#941) landed 10-08, and
+a page's text reaches only readers who have already arrived. Arrivals
+are reach, and reach is not ours to buy.
+
+### (b) Study: TigerBeetle's README
+
+Chosen because TigerBeetle sells correctness to the same evaluating
+engineer, and its README is the front door of a project whose site
+holds the depth. That matches our split, where the repo has more
+readers than the site. Read 2026-10-15 from
+`raw.githubusercontent.com/tigerbeetle/tigerbeetle/main/README.md`,
+72 lines.
+
+1. **One italic sentence: what, for whom, two properties, a horizon.**
+   "The financial transactions database designed for mission critical
+   safety and performance to power the next 30 years of OLTP."
+2. **The README is short on purpose.** It has a documentation link
+   list, a Start section, and a security contact. Depth, including
+   the engineering methodology (`TIGER_STYLE.md`), is one link away
+   and never restated.
+3. **Start is a transcript.** Each command is followed by what it
+   actually printed, timestamps included. The reader sees the product
+   working before running it.
+4. **The security contact is the last line.** For a product whose
+   pitch is safety, the place to report a breach of that pitch is on
+   the front page.
+
+**Adopting (3): #1196.** Our "Try it" shows commands, and on README one
+comment about `cmp`. Since #1160, `-v` prints a line worth showing.
+On a fresh build, `mothergod -v LICENSE` prints
+`mothergod: LICENSE: 1074 -> 638 bytes (59.4%)`. `LICENSE` is in the
+reader's clone and its bytes do not change, so the example will not go
+stale with the next README edit. The issue asks for the line to be
+pinned or regenerated, because a codec change moves it.
+
+**Already true: (1) and (4).** The README's bold opener already does (1)
+in our own voice. `SECURITY.md` exists at the root, and GitHub links
+it from the repo's sidebar, which is where a repo reader looks.
+
+**Rejected: (2), the short README.** TigerBeetle can be short because
+its docs site has readers. Ours has fewer than the repo, and this
+week's instrument cannot even count them. The README stays the
+complete front door, including the library example. Revisit when the
+site is the measured entry point.
+
+### (c) What changes because of (a) and (b)
+
+- **One new issue: "Try it" shows a run's output, on README and site**:
+  #1196.
+- The site row stays in the table with its caveat. The repo ledger is
+  now the only USERS instrument that reproduces.
+- The sub-page conjecture's test stays the 2026-10-27 survey. Expect
+  it to fail on instrument grounds before traffic grounds, for the
+  sampling reason above.
+
+Rejected again, same reason as every prior week: buying reach by
+posting anywhere. Falling uniques do not change that.
+
 ## 2026-10-14 — Editorial: "Try it" became the man page, one clause per CLI PR
 
 Queue empty, so this is a defect found on the surface. #1153, #1160 and
