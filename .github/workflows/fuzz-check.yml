@@ -151,7 +151,7 @@ jobs:
           find fuzz/corpus -type f | awk -F/ '{c[$3]++} END {for (t in c) print t ": " c[t] " input(s)"}'
       - name: upload crashers
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
@@ -177,7 +177,7 @@ jobs:
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_RUN_ID" "$seconds" "$crashers" > entry.json
       - name: upload trust-ledger entry
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: trust-fuzz-${{ github.run_id }}-${{ github.run_attempt }}
           path: entry.json
