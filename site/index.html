@@ -375,12 +375,29 @@
         <pre
           tabindex="0"
           role="region"
-          aria-label="Commands to build mothergod and round-trip a file"
+          aria-label="Commands to build mothergod"
         >git clone https://github.com/bugabinga/mothergod
 cd mothergod
-cargo build --release --bin mothergod
-
-./target/release/mothergod    &lt; FILE      &gt; FILE.mgdc
+cargo build --release --bin mothergod</pre>
+        <p>
+          The first run needs no file of yours, because the clone ships one:
+        </p>
+        <pre
+          tabindex="0"
+          role="region"
+          aria-label="A first run on the clone's LICENSE file, and what it prints"
+        >$ ./target/release/mothergod -v LICENSE
+mothergod: LICENSE: 1074 -&gt; 638 bytes (59.4%)</pre>
+        <p>
+          <code>-v</code> asked for that line; without it, a run that worked
+          prints nothing. One 1 KB file is a smoke test, not a benchmark; the
+          tables above are the benchmark. Then round-trip something of yours:
+        </p>
+        <pre
+          tabindex="0"
+          role="region"
+          aria-label="Commands to round-trip a file"
+        >./target/release/mothergod    &lt; FILE      &gt; FILE.mgdc
 ./target/release/mothergod -d &lt; FILE.mgdc &gt; FILE.out
 cmp FILE FILE.out</pre>
         <p>

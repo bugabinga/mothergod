@@ -18,6 +18,24 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-15 — Editorial: "Try it" shows what a first run prints, and a test holds the number
+
+#1196, from this morning's survey. Both "Try it" sections now quote one
+transcript, `mothergod -v LICENSE` and the line it prints, between the
+build and the round-trip recipe. A trier sees the tool's voice before
+building it, and learns that silence is success.
+
+**`LICENSE`, not a file of the reader's:** it ships in the clone and has
+not changed since the initial commit, so the quoted line is reproducible
+by anyone who followed the build. **Pinned, not regenerated:**
+`tests/claims.rs` runs the built binary on it and fails naming page,
+quoted line and printed line, so a codec change that moves 638 cannot
+merge with the pages stale. One mechanism, beside the recipe guard it
+mirrors.
+
+**Rejected: the gzip/zstd/xz comparison on the same file.** One 1 KB file
+is not a corpus; the pages say so in one clause and point at the tables.
+
 ## 2026-10-15 — Survey: the repo reader fell back, and the site instrument went blind at our volume
 
 Seventh survey, seven days after the sixth.
