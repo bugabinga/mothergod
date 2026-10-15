@@ -1,27 +1,5 @@
 use super::*;
 
-fn roundtrip_bytes_sse(bytes: &[u8]) {
-    let mut model = Literal::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in bytes {
-        model.encode_sse(&mut enc, context, b);
-        context = context.after_literal(b);
-    }
-    let encoded = enc.finish();
-
-    let mut model = Literal::new();
-    let mut context = Context::default();
-    let mut dec = Decoder::new(&encoded);
-    let mut got = Vec::with_capacity(bytes.len());
-    for _ in bytes {
-        let b = model.decode_sse(&mut dec, context);
-        context = context.after_literal(b);
-        got.push(b);
-    }
-    assert_eq!(got, bytes);
-}
-
 #[test]
 fn copy_tokens_interleave_with_literals_round_trip() {
     // The shape Method-wiring will actually drive this with: literal
@@ -29,13 +7,14 @@ fn copy_tokens_interleave_with_literals_round_trip() {
     // `after_copy` and re-deriving `prev1`/`prev2` from the copied
     // bytes rather than from `after_literal`'s single-byte update.
     let mut model = Literal::new();
+    let mut mixer = SurpriseLogisticMixLogitSse::new();
     let mut context = Context::default();
     let mut enc = Encoder::new();
     let literal_runs: &[&[u8]] = &[b"hello ", b"world", b" repeat repeat repeat"];
     let copy_runs: &[&[u8]] = &[b"repeat repeat", b"o", b""];
     for (lits, copy) in literal_runs.iter().zip(copy_runs.iter()) {
         for &b in *lits {
-            model.encode_sse(&mut enc, context, b);
+            model.encode_logit_sse(&mut enc, context, b, &mut mixer);
             context = context.after_literal(b);
         }
         context = context.after_copy(copy);
@@ -44,12 +23,13 @@ fn copy_tokens_interleave_with_literals_round_trip() {
     let total_literals: usize = literal_runs.iter().map(|r| r.len()).sum();
 
     let mut model = Literal::new();
+    let mut mixer = SurpriseLogisticMixLogitSse::new();
     let mut context = Context::default();
     let mut dec = Decoder::new(&encoded);
     let mut got = Vec::with_capacity(total_literals);
     for (lits, copy) in literal_runs.iter().zip(copy_runs.iter()) {
         for _ in *lits {
-            let b = model.decode_sse(&mut dec, context);
+            let b = model.decode_logit_sse(&mut dec, context, &mut mixer);
             context = context.after_literal(b);
             got.push(b);
         }
@@ -60,65 +40,6 @@ fn copy_tokens_interleave_with_literals_round_trip() {
         .flat_map(|r| r.iter().copied())
         .collect();
     assert_eq!(got, expected);
-}
-
-#[test]
-fn empty_stream_round_trips_through_sse() {
-    roundtrip_bytes_sse(&[]);
-}
-
-#[test]
-fn single_byte_round_trips_through_sse() {
-    roundtrip_bytes_sse(b"x");
-}
-
-#[test]
-fn skewed_repeat_round_trips_through_sse() {
-    roundtrip_bytes_sse(&b"aaaaaaaaaaaaaaaaaaaaaaaaaab".repeat(20));
-}
-
-#[test]
-fn full_alphabet_cycles_round_trip_through_sse() {
-    let bytes: Vec<u8> = (0..2000).map(|i| u8::try_from(i % 256).unwrap()).collect();
-    roundtrip_bytes_sse(&bytes);
-}
-
-#[test]
-fn ascii_text_round_trips_through_sse() {
-    let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
-    roundtrip_bytes_sse(&text);
-}
-
-#[test]
-fn pseudo_random_bytes_round_trip_through_sse() {
-    let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
-        .take(5000)
-        .map(|state| u8::try_from(state % 256).unwrap())
-        .collect();
-    roundtrip_bytes_sse(&bytes);
-}
-
-#[test]
-fn decoding_truncated_stream_does_not_panic_through_sse() {
-    let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
-    let mut model = Literal::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in &bytes {
-        model.encode_sse(&mut enc, context, b);
-        context = context.after_literal(b);
-    }
-    let encoded = enc.finish();
-    let truncated = &encoded[..encoded.len() / 2];
-
-    let mut model = Literal::new();
-    let mut context = Context::default();
-    let mut dec = Decoder::new(truncated);
-    for _ in &bytes {
-        let b = model.decode_sse(&mut dec, context);
-        context = context.after_literal(b);
-    }
-    // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
 }
 
 #[test]
@@ -199,35 +120,6 @@ fn ideal_cost_bits_sse_drops_as_a_byte_gets_more_likely() {
     let third = model.ideal_cost_bits_sse(context, b'a');
     assert!(second < first);
     assert!(third < second);
-}
-
-#[test]
-fn ideal_cost_bits_sse_updates_state_same_as_encode_sse() {
-    // Same shape as ideal_cost_updates_state_same_as_encode, for the
-    // SSE-calibrated path: encode_sse and ideal_cost_bits_sse must
-    // leave both the mixer and this model's own Sse table in the same
-    // state.
-    let bytes = b"hello world hello again";
-    let mut via_encode = Literal::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in bytes {
-        via_encode.encode_sse(&mut enc, context, b);
-        context = context.after_literal(b);
-    }
-    let mut via_ideal_cost = Literal::new();
-    let mut ideal_context = Context::default();
-    for &b in bytes {
-        let _ = via_ideal_cost.ideal_cost_bits_sse(ideal_context, b);
-        ideal_context = ideal_context.after_literal(b);
-    }
-    assert_eq!(context, ideal_context);
-    assert!(
-        (via_encode.ideal_cost_bits_sse(context, b'!')
-            - via_ideal_cost.ideal_cost_bits_sse(context, b'!'))
-        .abs()
-            < 1e-9
-    );
 }
 
 /// `f64::exp`, the pre-ADR-0024 reference this test diffs `exp`
@@ -392,11 +284,11 @@ fn decoding_truncated_stream_does_not_panic_through_column_expert() {
 }
 
 /// [`Literal::encode_column`] must leave the six real experts' weights
-/// exactly where [`Literal::encode_sse`] would, per the layering
+/// exactly where [`Literal::ideal_cost_bits`] would, per the layering
 /// [`Literal::encode_column`]'s own docs claim: `update_column_expert`
 /// touches only `column_state`, never `self.weights`/`self.freq`.
 #[test]
-fn encode_column_updates_the_six_real_experts_same_as_encode_sse() {
+fn encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits() {
     let bytes = b"hello world hello again";
     let mut via_column = Literal::new();
     let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
@@ -407,17 +299,16 @@ fn encode_column_updates_the_six_real_experts_same_as_encode_sse() {
         context_column = context_column.after_literal(b);
     }
 
-    let mut via_sse = Literal::new();
-    let mut context_sse = Context::default();
-    let mut enc_sse = Encoder::new();
+    let mut via_ideal_cost = Literal::new();
+    let mut context_ideal_cost = Context::default();
     for &b in bytes {
-        via_sse.encode_sse(&mut enc_sse, context_sse, b);
-        context_sse = context_sse.after_literal(b);
+        let _ = via_ideal_cost.ideal_cost_bits(context_ideal_cost, b);
+        context_ideal_cost = context_ideal_cost.after_literal(b);
     }
 
-    assert_eq!(via_column.freq, via_sse.freq);
-    assert_eq!(via_column.total, via_sse.total);
-    assert_eq!(via_column.weights, via_sse.weights);
+    assert_eq!(via_column.freq, via_ideal_cost.freq);
+    assert_eq!(via_column.total, via_ideal_cost.total);
+    assert_eq!(via_column.weights, via_ideal_cost.weights);
 }
 
 /// #705: `update_column_expert`'s own probability estimate,
@@ -584,39 +475,6 @@ fn mix_ppm_first_entry_matches_the_six_expert_mix_plus_ppm_contribution() {
     assert_eq!(cum[1], expected_first_entry);
 }
 
-#[test]
-fn logistic_mix_new_starts_at_uniform_weights_and_zero_steps() {
-    let mix = LogisticMix::new();
-    assert_eq!(
-        mix.weights,
-        vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
-    );
-    assert!((mix.weights[0].iter().sum::<f64>() - 1.0).abs() < 1e-12);
-    assert_eq!(mix.update_count, vec![0; WEIGHT_CONTEXTS]);
-    assert_eq!(mix.sse.contexts(), bittree::SSE_CONTEXTS);
-}
-
-#[test]
-fn logistic_rate_starts_at_the_initial_rate_and_decays_toward_the_floor() {
-    for decay in [0.0, 4e-4, 1.0] {
-        assert!((logistic_rate(0, decay) - LOGISTIC_INITIAL_RATE).abs() < 1e-18);
-    }
-    assert!((logistic_rate(1_000_000, 0.0) - LOGISTIC_INITIAL_RATE).abs() < 1e-18);
-    // 0.002 + 0.004 / (1 + 1 * 1.0) and 0.002 + 0.004 / (1 + 3 * 1.0).
-    assert!((logistic_rate(1, 1.0) - 0.004).abs() < 1e-15);
-    assert!((logistic_rate(3, 1.0) - 0.003).abs() < 1e-15);
-    let mut previous = logistic_rate(0, 4e-4);
-    for steps in [1, 10, 100, 1_000, 10_000, 100_000] {
-        let rate = logistic_rate(steps, 4e-4);
-        assert!(
-            rate < previous && rate > LOGISTIC_FLOOR_RATE,
-            "steps={steps}"
-        );
-        previous = rate;
-    }
-    assert!((logistic_rate(u64::MAX, 1.0) - LOGISTIC_FLOOR_RATE).abs() < 1e-15);
-}
-
 /// `#783`: pins the gradient step's arithmetic against hand-computed
 /// values (`error = bit - p`, `weight += rate * error * stretched`),
 /// independent of the bit-tree walk, so a mutated `-`, `+=`, or `*`
@@ -695,160 +553,10 @@ fn clamp_logistic_probability_bounds_both_tails_and_passes_the_middle() {
     assert!((clamp_logistic_probability(0.3) - 0.3).abs() < 1e-18);
 }
 
-fn roundtrip_bytes_logistic(bytes: &[u8]) {
-    let mut model = Literal::new();
-    let mut logistic = LogisticMix::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in bytes {
-        model.encode_logistic(&mut enc, context, b, &mut logistic);
-        context = context.after_literal(b);
-    }
-    let encoded = enc.finish();
-
-    let mut model = Literal::new();
-    let mut logistic = LogisticMix::new();
-    let mut context = Context::default();
-    let mut dec = Decoder::new(&encoded);
-    let mut got = Vec::with_capacity(bytes.len());
-    for _ in bytes {
-        let b = model.decode_logistic(&mut dec, context, &mut logistic);
-        context = context.after_literal(b);
-        got.push(b);
-    }
-    assert_eq!(got, bytes);
-}
-
-#[test]
-fn empty_stream_round_trips_through_logistic() {
-    roundtrip_bytes_logistic(&[]);
-}
-
-#[test]
-fn single_byte_round_trips_through_logistic() {
-    roundtrip_bytes_logistic(b"x");
-}
-
-#[test]
-fn ascii_text_round_trips_through_logistic() {
-    let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
-    roundtrip_bytes_logistic(&text);
-}
-
-#[test]
-fn pseudo_random_bytes_round_trip_through_logistic() {
-    let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
-        .take(5000)
-        .map(|state| u8::try_from(state % 256).unwrap())
-        .collect();
-    roundtrip_bytes_logistic(&bytes);
-}
-
-#[test]
-fn decoding_truncated_stream_does_not_panic_through_logistic() {
-    let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
-    let mut model = Literal::new();
-    let mut logistic = LogisticMix::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in &bytes {
-        model.encode_logistic(&mut enc, context, b, &mut logistic);
-        context = context.after_literal(b);
-    }
-    let encoded = enc.finish();
-    let truncated = &encoded[..encoded.len() / 2];
-
-    let mut model = Literal::new();
-    let mut logistic = LogisticMix::new();
-    let mut context = Context::default();
-    let mut dec = Decoder::new(truncated);
-    for _ in &bytes {
-        let b = model.decode_logistic(&mut dec, context, &mut logistic);
-        context = context.after_literal(b);
-    }
-    // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
-}
-
-/// [`Literal::encode_logistic`] must leave the six real experts' banks
-/// and linear weights exactly where [`Literal::encode_sse`] would, per
-/// the layering [`Literal::encode_logistic`]'s own docs claim: the
-/// logit-domain mix reads the banks but never perturbs them or
-/// `self.weights`, the same guarantee
-/// `encode_column_updates_the_six_real_experts_same_as_encode_sse`
-/// checks for the seventh expert.
-#[test]
-fn encode_logistic_updates_the_six_real_experts_same_as_encode_sse() {
-    let bytes = b"hello world hello again";
-    let mut via_logistic = Literal::new();
-    let mut logistic = LogisticMix::new();
-    let mut context_logistic = Context::default();
-    let mut enc_logistic = Encoder::new();
-    for &b in bytes {
-        via_logistic.encode_logistic(&mut enc_logistic, context_logistic, b, &mut logistic);
-        context_logistic = context_logistic.after_literal(b);
-    }
-
-    let mut via_sse = Literal::new();
-    let mut context_sse = Context::default();
-    let mut enc_sse = Encoder::new();
-    for &b in bytes {
-        via_sse.encode_sse(&mut enc_sse, context_sse, b);
-        context_sse = context_sse.after_literal(b);
-    }
-
-    assert_eq!(via_logistic.freq, via_sse.freq);
-    assert_eq!(via_logistic.total, via_sse.total);
-    assert_eq!(via_logistic.weights, via_sse.weights);
-}
-
-#[test]
-fn encode_logistic_steps_only_its_own_weight_key_once_per_node() {
-    let mut model = Literal::new();
-    let mut logistic = LogisticMix::new();
-    let context = Context {
-        prev1: 0x25,
-        ..Context::default()
-    };
-    // Give the banks a skew first, so the stretches (and therefore the
-    // gradient step) are nonzero.
-    for _ in 0..4 {
-        model.encode_logistic(&mut Encoder::new(), context, b'x', &mut LogisticMix::new());
-    }
-    let (_, weight_index) = banks(context);
-    model.encode_logistic(&mut Encoder::new(), context, b'x', &mut logistic);
-    for key in 0..WEIGHT_CONTEXTS {
-        if key == weight_index {
-            assert_eq!(logistic.update_count[key], 8);
-            assert_ne!(
-                logistic.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        } else {
-            assert_eq!(logistic.update_count[key], 0, "key {key}");
-            assert_eq!(
-                logistic.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        }
-    }
-}
-
-#[test]
-fn surprise_logistic_mix_new_starts_at_uniform_weights_and_zero_error_state() {
-    let mix: SurpriseLogisticMix = SurpriseLogisticMix::new();
-    assert_eq!(
-        mix.weights,
-        vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
-    );
-    assert_eq!(mix.recent_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
-    assert_eq!(mix.baseline_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
-    assert_eq!(mix.sse.contexts(), bittree::SSE_CONTEXTS);
-}
-
 #[test]
 fn surprise_rate_is_maximal_at_a_fresh_key_and_floor_at_a_converged_one() {
     // A fresh key (baseline not yet established) reads as maximum
-    // surprise, matching `logistic_rate`'s own `steps = 0` rate.
+    // surprise.
     assert!((surprise_rate(0.0, 0.0) - LOGISTIC_INITIAL_RATE).abs() < 1e-15);
     // `recent` tracking `baseline` (a converged, stable context) decays
     // to the floor regardless of the shared magnitude.
@@ -903,49 +611,6 @@ fn surprise_error_tracking_step_matches_hand_computed_error_sq() {
 }
 
 #[test]
-fn ideal_cost_bits_logistic_surprise_steps_only_its_own_weight_key_once_per_node() {
-    let mut model = Literal::new();
-    let context = Context {
-        prev1: 0x25,
-        ..Context::default()
-    };
-    // Give the banks a skew first, so the stretches (and therefore the
-    // gradient step) are nonzero.
-    for _ in 0..4 {
-        let _ =
-            model.ideal_cost_bits_logistic_surprise(context, b'x', &mut SurpriseLogisticMix::new());
-    }
-    let (_, weight_index) = banks(context);
-    let mut mixer = SurpriseLogisticMix::new();
-    let _ = model.ideal_cost_bits_logistic_surprise(context, b'x', &mut mixer);
-    for key in 0..WEIGHT_CONTEXTS {
-        if key == weight_index {
-            assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
-            assert_ne!(mixer.baseline_sq_error[key].to_bits(), 0.0f64.to_bits());
-            assert_ne!(
-                mixer.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        } else {
-            assert_eq!(
-                mixer.recent_sq_error[key].to_bits(),
-                0.0f64.to_bits(),
-                "key {key}"
-            );
-            assert_eq!(
-                mixer.baseline_sq_error[key].to_bits(),
-                0.0f64.to_bits(),
-                "key {key}"
-            );
-            assert_eq!(
-                mixer.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        }
-    }
-}
-
-#[test]
 fn surprise_logistic_mix_logit_sse_new_starts_at_uniform_weights_and_zero_error_state() {
     let mix = SurpriseLogisticMixLogitSse::new();
     assert_eq!(
@@ -974,195 +639,6 @@ fn ideal_cost_bits_logistic_surprise_logit_sse_steps_only_its_own_weight_key_onc
     let (_, weight_index) = banks(context);
     let mut mixer = SurpriseLogisticMixLogitSse::new();
     let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(context, b'x', &mut mixer);
-    for key in 0..WEIGHT_CONTEXTS {
-        if key == weight_index {
-            assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
-            assert_ne!(mixer.baseline_sq_error[key].to_bits(), 0.0f64.to_bits());
-            assert_ne!(
-                mixer.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        } else {
-            assert_eq!(
-                mixer.recent_sq_error[key].to_bits(),
-                0.0f64.to_bits(),
-                "key {key}"
-            );
-            assert_eq!(
-                mixer.baseline_sq_error[key].to_bits(),
-                0.0f64.to_bits(),
-                "key {key}"
-            );
-            assert_eq!(
-                mixer.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        }
-    }
-}
-
-/// Both candidates start from an identical mixer state and see the
-/// same byte stream; only their calibration table's bin spacing
-/// differs (linear vs. logit-domain), so a fresh comparison must
-/// start near-identical and is free to diverge as [`Sse`]/
-/// [`crate::sse::LogitSse`] each adapt away from their own identity
-/// mapping.
-#[test]
-fn ideal_cost_bits_logistic_surprise_logit_sse_diverges_from_the_champion_as_both_adapt() {
-    let mut champion_model = Literal::new();
-    let mut candidate_model = Literal::new();
-    let mut champion_mixer = SurpriseLogisticMix::new();
-    let mut candidate_mixer = SurpriseLogisticMixLogitSse::new();
-    let context = Context::default();
-    let mut champion_bits = 0.0;
-    let mut candidate_bits = 0.0;
-    for (i, &byte) in b"the quick brown fox jumps over the lazy dog repeatedly"
-        .iter()
-        .enumerate()
-    {
-        champion_bits +=
-            champion_model.ideal_cost_bits_logistic_surprise(context, byte, &mut champion_mixer);
-        candidate_bits += candidate_model.ideal_cost_bits_logistic_surprise_logit_sse(
-            context,
-            byte,
-            &mut candidate_mixer,
-        );
-        if i == 0 {
-            assert!(
-                (champion_bits - candidate_bits).abs() < 0.05,
-                "first byte should price near-identically from two fresh identity tables"
-            );
-        }
-    }
-    assert!(champion_bits.is_finite());
-    assert!(candidate_bits.is_finite());
-}
-
-fn roundtrip_bytes_logistic_surprise(bytes: &[u8]) {
-    let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMix::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in bytes {
-        model.encode_logistic_surprise(&mut enc, context, b, &mut mixer);
-        context = context.after_literal(b);
-    }
-    let encoded = enc.finish();
-
-    let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMix::new();
-    let mut context = Context::default();
-    let mut dec = Decoder::new(&encoded);
-    let mut got = Vec::with_capacity(bytes.len());
-    for _ in bytes {
-        let b = model.decode_logistic_surprise(&mut dec, context, &mut mixer);
-        context = context.after_literal(b);
-        got.push(b);
-    }
-    assert_eq!(got, bytes);
-}
-
-#[test]
-fn empty_stream_round_trips_through_logistic_surprise() {
-    roundtrip_bytes_logistic_surprise(&[]);
-}
-
-#[test]
-fn single_byte_round_trips_through_logistic_surprise() {
-    roundtrip_bytes_logistic_surprise(b"x");
-}
-
-#[test]
-fn ascii_text_round_trips_through_logistic_surprise() {
-    let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
-    roundtrip_bytes_logistic_surprise(&text);
-}
-
-#[test]
-fn pseudo_random_bytes_round_trip_through_logistic_surprise() {
-    let bytes: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
-        .take(5000)
-        .map(|state| u8::try_from(state % 256).unwrap())
-        .collect();
-    roundtrip_bytes_logistic_surprise(&bytes);
-}
-
-#[test]
-fn decoding_truncated_stream_does_not_panic_through_logistic_surprise() {
-    let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
-    let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMix::new();
-    let mut context = Context::default();
-    let mut enc = Encoder::new();
-    for &b in &bytes {
-        model.encode_logistic_surprise(&mut enc, context, b, &mut mixer);
-        context = context.after_literal(b);
-    }
-    let encoded = enc.finish();
-    let truncated = &encoded[..encoded.len() / 2];
-
-    let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMix::new();
-    let mut context = Context::default();
-    let mut dec = Decoder::new(truncated);
-    for _ in &bytes {
-        let b = model.decode_logistic_surprise(&mut dec, context, &mut mixer);
-        context = context.after_literal(b);
-    }
-    // No panic is the assertion, same as decoding_truncated_stream_does_not_panic.
-}
-
-/// [`Literal::encode_logistic_surprise`] must leave the six real
-/// experts' banks and linear weights exactly where [`Literal::encode_sse`]
-/// would, per the layering [`Literal::encode_logistic_surprise`]'s own
-/// docs claim, the same guarantee
-/// `encode_logistic_updates_the_six_real_experts_same_as_encode_sse`
-/// checks for [`LogisticMix`]'s own path.
-#[test]
-fn encode_logistic_surprise_updates_the_six_real_experts_same_as_encode_sse() {
-    let bytes = b"hello world hello again";
-    let mut via_surprise = Literal::new();
-    let mut mixer = SurpriseLogisticMix::new();
-    let mut context_surprise = Context::default();
-    let mut enc_surprise = Encoder::new();
-    for &b in bytes {
-        via_surprise.encode_logistic_surprise(&mut enc_surprise, context_surprise, b, &mut mixer);
-        context_surprise = context_surprise.after_literal(b);
-    }
-
-    let mut via_sse = Literal::new();
-    let mut context_sse = Context::default();
-    let mut enc_sse = Encoder::new();
-    for &b in bytes {
-        via_sse.encode_sse(&mut enc_sse, context_sse, b);
-        context_sse = context_sse.after_literal(b);
-    }
-
-    assert_eq!(via_surprise.freq, via_sse.freq);
-    assert_eq!(via_surprise.total, via_sse.total);
-    assert_eq!(via_surprise.weights, via_sse.weights);
-}
-
-#[test]
-fn encode_logistic_surprise_steps_only_its_own_weight_key_once_per_node() {
-    let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMix::new();
-    let context = Context {
-        prev1: 0x25,
-        ..Context::default()
-    };
-    // Give the banks a skew first, so the stretches (and therefore the
-    // gradient step) are nonzero.
-    for _ in 0..4 {
-        model.encode_logistic_surprise(
-            &mut Encoder::new(),
-            context,
-            b'x',
-            &mut SurpriseLogisticMix::new(),
-        );
-    }
-    let (_, weight_index) = banks(context);
-    model.encode_logistic_surprise(&mut Encoder::new(), context, b'x', &mut mixer);
     for key in 0..WEIGHT_CONTEXTS {
         if key == weight_index {
             assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
@@ -1225,6 +701,17 @@ fn single_byte_round_trips_through_logit_sse() {
 }
 
 #[test]
+fn skewed_repeat_round_trips_through_logit_sse() {
+    roundtrip_bytes_logit_sse(&b"aaaaaaaaaaaaaaaaaaaaaaaaaab".repeat(20));
+}
+
+#[test]
+fn full_alphabet_cycles_round_trip_through_logit_sse() {
+    let bytes: Vec<u8> = (0..2000).map(|i| u8::try_from(i % 256).unwrap()).collect();
+    roundtrip_bytes_logit_sse(&bytes);
+}
+
+#[test]
 fn ascii_text_round_trips_through_logit_sse() {
     let text = b"the quick brown fox jumps over the lazy dog, again and again.".repeat(50);
     roundtrip_bytes_logit_sse(&text);
@@ -1265,12 +752,13 @@ fn decoding_truncated_stream_does_not_panic_through_logit_sse() {
 }
 
 /// [`Literal::encode_logit_sse`] must leave the six real experts' banks
-/// and linear weights exactly where [`Literal::encode_sse`] would, the
-/// same guarantee
-/// `encode_logistic_surprise_updates_the_six_real_experts_same_as_encode_sse`
-/// checks for [`SurpriseLogisticMix`]'s own path.
+/// and linear weights exactly where [`Literal::ideal_cost_bits`] would, per
+/// the layering [`Literal::encode_logit_sse`]'s mixer reads the banks but
+/// never perturbs them or `self.weights`, the same guarantee
+/// `encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits`
+/// checks for the seventh expert.
 #[test]
-fn encode_logit_sse_updates_the_six_real_experts_same_as_encode_sse() {
+fn encode_logit_sse_updates_the_six_real_experts_same_as_ideal_cost_bits() {
     let bytes = b"hello world hello again";
     let mut via_logit_sse = Literal::new();
     let mut mixer = SurpriseLogisticMixLogitSse::new();
@@ -1281,17 +769,16 @@ fn encode_logit_sse_updates_the_six_real_experts_same_as_encode_sse() {
         context_logit_sse = context_logit_sse.after_literal(b);
     }
 
-    let mut via_sse = Literal::new();
-    let mut context_sse = Context::default();
-    let mut enc_sse = Encoder::new();
+    let mut via_ideal_cost = Literal::new();
+    let mut context_ideal_cost = Context::default();
     for &b in bytes {
-        via_sse.encode_sse(&mut enc_sse, context_sse, b);
-        context_sse = context_sse.after_literal(b);
+        let _ = via_ideal_cost.ideal_cost_bits(context_ideal_cost, b);
+        context_ideal_cost = context_ideal_cost.after_literal(b);
     }
 
-    assert_eq!(via_logit_sse.freq, via_sse.freq);
-    assert_eq!(via_logit_sse.total, via_sse.total);
-    assert_eq!(via_logit_sse.weights, via_sse.weights);
+    assert_eq!(via_logit_sse.freq, via_ideal_cost.freq);
+    assert_eq!(via_logit_sse.total, via_ideal_cost.total);
+    assert_eq!(via_logit_sse.weights, via_ideal_cost.weights);
 }
 
 #[test]

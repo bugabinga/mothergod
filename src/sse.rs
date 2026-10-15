@@ -17,7 +17,7 @@
 //! never a libm transcendental (ADR-0024).
 //!
 //! Consumers: [`crate::bittree`]'s binary walk ([`Sse`]) and
-//! [`crate::literal::SurpriseLogisticMix`] ([`Sse`] and [`LogitSse`]).
+//! [`crate::literal::SurpriseLogisticMix`] ([`LogitSse`]).
 
 use std::marker::PhantomData;
 
@@ -277,9 +277,8 @@ impl<S: Spacing> Table<S> {
 /// [`Sse`] and [`LogitSse`] in exactly the shape a generic mixer needs:
 /// both differ only in [`Spacing`], never in construction or the two public
 /// methods' own signatures. [`crate::literal::SurpriseLogisticMix`] is
-/// generic over this trait so its one walk serves both calibration tables,
-/// rather than two structs and two walks that differ only in which table
-/// they call.
+/// generic over this trait; since ADR-0063 retired its [`Sse`]
+/// instantiation, only [`LogitSse`] instantiates it.
 pub trait Calibrate: Sized {
     /// Same contract as [`Table::new`].
     fn new(contexts: usize) -> Self;

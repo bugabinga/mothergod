@@ -38,7 +38,7 @@
 //! attacker-controlled (`declared_len`, up to `codec::MAX_DECODED_LEN`)
 //! rather than fixed by a constant — is reserved through
 //! `try_reserve_exact`. `Models::try_new` (`Model::try_new`,
-//! `Sse::try_new`, `Literal::try_new`, `LogisticMix::try_new`) and the
+//! `Sse::try_new`, `Literal::try_new`, `SurpriseLogisticMix::try_new`) and the
 //! `Delta`/`Bcj`/`Transpose` filters' `try_decode` undo buffers cover the
 //! rest, each a fallible sibling of the panicking constructor the encoder
 //! and every test still use, since neither needs hard rule 2's guarantee.
