@@ -196,3 +196,11 @@ pub(crate) fn mixed_stream() -> (Vec<u8>, Vec<u8>) {
     }
     (stream, parts.concat())
 }
+
+/// JSON-ish text, `lines` rows long: what `Candidate::Base64` unwraps once
+/// `filters::base64_unwrap::decode` has wrapped it.
+pub(crate) fn record_text(lines: usize) -> Vec<u8> {
+    (0..lines)
+        .flat_map(|i| format!("{{\"id\":{i},\"score\":{}}}\n", i * 37 % 1000).into_bytes())
+        .collect()
+}

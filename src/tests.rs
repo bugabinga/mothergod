@@ -547,6 +547,51 @@ fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     ));
     stream.extend(transpose);
     assert_eq!(decodes_incrementally(&stream), Ok(false));
+
+    let (mut stream, _) = test_support::mixed_stream();
+    let base64 = lz_frame(&test_support::lz_payload(
+        filters::select::Candidate::Base64.to_header_bytes(),
+        test_support::floor_declared_len(),
+        0,
+        &[],
+    ));
+    stream.extend(base64);
+    assert_eq!(decodes_incrementally(&stream), Ok(false));
+}
+
+#[test]
+fn a_base64_frame_round_trips_through_every_entry_point_and_budgets_its_output() {
+    use std::io::Read as _;
+
+    let wrapped = filters::base64_unwrap::decode(&test_support::record_text(60));
+    let frame = compress(&wrapped);
+    assert_eq!(frame[HEADER_LEN..HEADER_LEN + 2], [4, 0], "picks Base64");
+    assert!(frame.len() < wrapped.len() / 4, "and it pays");
+
+    assert_eq!(decompress(&frame).as_deref(), Ok(wrapped.as_slice()));
+    let len = u32::try_from(wrapped.len()).expect("small");
+    assert_eq!(
+        decompress_bounded(&frame, len).as_deref(),
+        Ok(wrapped.as_slice())
+    );
+    // The budget sees the output a frame decodes to, not its filtered bytes.
+    assert_eq!(
+        decompress_bounded(&frame, len - 1),
+        Err(Error::TooLarge { len, max: len - 1 })
+    );
+    let mut written = Vec::new();
+    decompress_to_writer(&frame, len, &mut written).expect("writes");
+    assert_eq!(written, wrapped);
+    let mut refused = Vec::new();
+    assert!(decompress_to_writer(&frame, len - 1, &mut refused).is_err());
+    assert!(refused.is_empty(), "rejected before a byte is written");
+    assert_eq!(decodes_incrementally(&frame), Ok(false));
+
+    let mut read = Vec::new();
+    read::Decoder::new(frame.as_slice())
+        .read_to_end(&mut read)
+        .expect("reads");
+    assert_eq!(read, wrapped);
 }
 
 #[test]

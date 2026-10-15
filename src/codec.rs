@@ -11,7 +11,7 @@
 //! ```text
 //! offset  size  field
 //! 0       2     filter selector: [kind, param] (`filters::select::Candidate`)
-//! 2       4     declared output length, u32 LE
+//! 2       4     declared length of the filtered bytes, u32 LE
 //! 6       4     token count, u32 LE
 //! 10      8     range-coded stream length in bytes, u64 LE
 //! 18      ...   range-coded stream (crate::coder), of the FILTERED bytes
@@ -40,11 +40,12 @@
 //! (`docs/adr/0058-wire-the-offset-length-state-split.md`); a distance's
 //! residual bits stay raw. `slot` codes through one model.
 //!
-//! The declared output length is [`decode`]'s allocation bound
+//! The declared length is [`decode`]'s allocation bound
 //! (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline): a
 //! hostile payload can claim any token count or any match/rep length, but
 //! [`decode`] rejects the token that would grow its output buffer past this
-//! field. That field is itself capped at [`decode`]'s caller-supplied
+//! field. What the frame decodes to, [`Candidate::output_len`] of that
+//! field, is itself capped at [`decode`]'s caller-supplied
 //! `max_len`, in turn capped at [`MAX_DECODED_LEN`] by
 //! [`crate::decompress_bounded`], so a tiny payload cannot declare an
 //! unbounded length and force unbounded decode work; see [`MAX_DECODED_LEN`]'s
@@ -77,7 +78,7 @@ use crate::model::Model;
 /// uses (`ALPHABET`).
 const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 
-/// Largest declared output length [`decode`] accepts, checked before any
+/// Largest output length [`decode`] accepts, checked before any
 /// allocation or decode work: `rust-craft`'s allocation-discipline
 /// reference calls this the "against a configured ceiling" bound, needed
 /// because general-purpose compression has no bound on output size
@@ -345,14 +346,24 @@ fn price_slot(models: &mut Models, symbol: usize) -> f64 {
 }
 
 /// Applies `candidate`'s filter to `data`, or returns a copy of it
-/// unchanged for [`Candidate::Identity`]. Every filter here preserves
-/// length, so the result is always `data.len()` bytes.
+/// unchanged for [`Candidate::Identity`]. Every filter but
+/// [`Candidate::Base64`] preserves length, so the result is `data.len()`
+/// bytes; `Base64`'s is the decoded binary, which
+/// [`Candidate::output_len`] inverts.
+///
+/// # Panics
+///
+/// If `candidate` is [`Candidate::Base64`] and `data` is not canonical
+/// base64: [`filters::select::pick`] shortlists it only for data
+/// [`filters::base64_unwrap::encode`] accepted.
 fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
     match candidate {
         Candidate::Identity => data.to_vec(),
         Candidate::Delta(stride) => filters::delta::encode(data, stride),
         Candidate::Bcj => filters::bcj::encode(data),
         Candidate::Transpose(columns) => filters::transpose::encode(data, columns),
+        Candidate::Base64 => filters::base64_unwrap::encode(data)
+            .expect("pick() shortlists Base64 only for data base64_unwrap::encode accepted"),
     }
 }
 
@@ -371,6 +382,7 @@ fn undo_filter(candidate: Candidate, data: Vec<u8>) -> Result<Vec<u8>, Error> {
         Candidate::Delta(stride) => Ok(filters::delta::try_decode(&data, stride)?),
         Candidate::Bcj => Ok(filters::bcj::try_decode(&data)?),
         Candidate::Transpose(columns) => Ok(filters::transpose::try_decode(&data, columns)?),
+        Candidate::Base64 => Ok(filters::base64_unwrap::try_decode(&data)?),
     }
 }
 
@@ -434,7 +446,8 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
 /// [`EncodeSink`]'s column-coding state for a [`Candidate::Transpose`]
 /// trial: `columns` is the candidate's own param, `data_len` is the
 /// filtered data's length (`crate::column::column_of`'s `len`, always the
-/// pre-filter length too since every filter here preserves length), and
+/// pre-filter length too since a `Transpose` frame's filter preserves
+/// length), and
 /// `state` is the seventh expert's own fresh bank/weight/SSE state for this
 /// one trial encode.
 struct ColumnCoding<'a> {
@@ -917,7 +930,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
         let filtered = apply_filter(candidate, data);
         let columns = match candidate {
             Candidate::Transpose(columns) => Some(columns),
-            Candidate::Identity | Candidate::Delta(_) | Candidate::Bcj => None,
+            Candidate::Identity | Candidate::Delta(_) | Candidate::Bcj | Candidate::Base64 => None,
         };
         let body = encode_tokens(&filtered, columns);
         if best.as_ref().is_none_or(|(_, existing)| {
@@ -989,8 +1002,9 @@ fn split_token_header(rest: &[u8]) -> Result<(TokenHeader, &[u8]), Error> {
 pub(crate) struct Extent {
     /// Bytes the payload spans: selector, header and range-coded stream.
     pub(crate) payload_len: usize,
-    /// The declared output length.
-    pub(crate) output_len: u32,
+    /// What the payload decodes to: the declared length of the filtered
+    /// bytes, put through the selector's [`Candidate::output_len`].
+    pub(crate) output_len: u64,
 }
 
 /// Bytes at the front of a `Method::Lz` payload that [`declared_extent`]
@@ -1008,20 +1022,21 @@ pub(crate) const EXTENT_PREFIX_LEN: usize = SELECTOR_LEN + TOKEN_HEADER_LEN;
 /// declared stream length overflows `usize`; [`Error::Corrupt`] if the
 /// selector names no [`Candidate`].
 pub(crate) fn declared_extent(bytes: &[u8]) -> Result<Extent, Error> {
-    let (_, rest) = split_candidate(bytes)?;
+    let (candidate, rest) = split_candidate(bytes)?;
     let (header, _) = split_token_header(rest)?;
     let coded_len = usize::try_from(header.coded_len).map_err(|_| Error::Truncated)?;
     Ok(Extent {
         payload_len: EXTENT_PREFIX_LEN
             .checked_add(coded_len)
             .ok_or(Error::Truncated)?,
-        output_len: header.declared_len,
+        output_len: candidate.output_len(header.declared_len),
     })
 }
 
-/// Splits `payload` into its declared output length, token count, and the
-/// range-coded bytes, rejecting a declared length past `max_len` (clamped
-/// to [`MAX_DECODED_LEN`]) before any allocation or decode work. The
+/// Splits `payload` into its declared length, token count, and the
+/// range-coded bytes, rejecting a frame whose output ([`Candidate::output_len`]
+/// of the declared length) is past `max_len` (clamped to
+/// [`MAX_DECODED_LEN`]) before any allocation or decode work. The
 /// stream is exactly the bytes its declared length names: `payload` is one
 /// frame's, so a payload with bytes past the stream is corrupt.
 ///
@@ -1029,14 +1044,19 @@ pub(crate) fn declared_extent(bytes: &[u8]) -> Result<Extent, Error> {
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the
 /// [`TOKEN_HEADER_LEN`]-byte header or than the stream it declares,
-/// [`Error::TooLarge`] if the declared length exceeds the clamped
-/// `max_len`, [`Error::Corrupt`] if bytes follow the stream.
-fn read_header(payload: &[u8], max_len: u32) -> Result<(usize, u32, &[u8]), Error> {
+/// [`Error::TooLarge`] if the output exceeds the clamped `max_len`,
+/// [`Error::Corrupt`] if bytes follow the stream.
+fn read_header(
+    payload: &[u8],
+    max_len: u32,
+    candidate: Candidate,
+) -> Result<(usize, u32, &[u8]), Error> {
     let max_len = max_len.min(MAX_DECODED_LEN);
     let (header, stream) = split_token_header(payload)?;
-    if header.declared_len > max_len {
+    let output_len = candidate.output_len(header.declared_len);
+    if output_len > u64::from(max_len) {
         return Err(Error::TooLarge {
-            len: header.declared_len,
+            len: u32::try_from(output_len).unwrap_or(u32::MAX),
             max: max_len,
         });
     }
@@ -1262,7 +1282,7 @@ impl DecodeSink for VecSink<'_> {
 
 /// Decodes a payload produced by [`encode`] back into the original bytes.
 ///
-/// Bounds decode work and allocation to the frame's declared output length
+/// Bounds decode work and allocation to the frame's declared length
 /// (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline):
 /// `output` is reserved fallibly and exactly once, up front, to
 /// `declared_len` (`try_reserve_exact`, so a real allocator failure is
@@ -1287,12 +1307,13 @@ impl DecodeSink for VecSink<'_> {
 ///
 /// - [`Error::Truncated`] if `payload` is shorter than the filter selector,
 ///   the header, or the stream the header declares.
-/// - [`Error::TooLarge`] if the declared length exceeds `max_len`, checked
-///   before any allocation or decode work.
+/// - [`Error::TooLarge`] if the frame's output ([`Candidate::output_len`] of
+///   the declared length) exceeds `max_len`, checked before any allocation
+///   or decode work.
 /// - [`Error::OutOfMemory`] if the allocator cannot satisfy `output`'s
 ///   reservation, one of the model's fixed-size tables, or (for
-///   [`Candidate::Delta`], [`Candidate::Bcj`] and [`Candidate::Transpose`])
-///   the filter's undo buffer.
+///   [`Candidate::Delta`], [`Candidate::Bcj`], [`Candidate::Transpose`] and
+///   [`Candidate::Base64`]) the filter's undo buffer.
 /// - [`Error::Corrupt`] if the filter selector names no [`Candidate`]; bytes
 ///   follow the stream; a match distance exceeds [`lz::WINDOW`] (the
 ///   encoder's match finder never searches past it, so a wider one is never
@@ -1307,7 +1328,7 @@ impl DecodeSink for VecSink<'_> {
 /// Never, on any `payload`.
 pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let (candidate, payload) = split_candidate(payload)?;
-    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len)?;
+    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len, candidate)?;
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new()?;
@@ -1389,12 +1410,12 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             StreamUndo::Delta(filters::delta::Undo::try_new(stride).map_err(Error::from)?)
         }
         Candidate::Bcj => StreamUndo::Bcj(filters::bcj::Undo::try_new().map_err(Error::from)?),
-        Candidate::Transpose(_) => {
+        Candidate::Transpose(_) | Candidate::Base64 => {
             writer.write_all(&decode(payload, max_len)?)?;
             return Ok(());
         }
     };
-    decode_undoable_streaming(filtered_payload, max_len, writer, &mut undo)
+    decode_undoable_streaming(filtered_payload, max_len, candidate, writer, &mut undo)
 }
 
 /// Per-byte filter undo for [`decode_undoable_streaming`], one variant per
@@ -1501,10 +1522,11 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
 fn decode_undoable_streaming<W: std::io::Write>(
     payload: &[u8],
     max_len: u32,
+    candidate: Candidate,
     writer: &mut W,
     undo: &mut StreamUndo,
 ) -> Result<(), crate::WriteError> {
-    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len)?;
+    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len, candidate)?;
 
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(Error::from)?;

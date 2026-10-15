@@ -63,6 +63,13 @@ All notable changes to this project are documented here. Format follows
   reported before any of the frame is decoded, so a damaged frame writes
   nothing. The price is 4 bytes on each frame and one pass over it at decode,
   measured at 380 MB/s, where `Lz` decode of Rust source runs at 11 MB/s.
+- compress: an input that is entirely standard base64 (one unbroken line, RFC
+  4648 alphabet, canonical padding) is decoded before it is coded and
+  re-wrapped on decode, so the model sees the bytes underneath. On
+  `base64_wrapped`, a text payload base64-encoded, 50,000 bytes: 0.532 to 0.395
+  bits/byte, and no other benchmark case moves. Line-wrapped base64 (MIME,
+  PEM) and base64 inside a larger file are not covered (#1204, ADR-0071).
+  Format change: `FORMAT_VERSION` 14, files written by 13 do not decode.
 - compress: an input is cut into 16 MiB blocks, one frame each, so peak
   encode memory stays under 1 GiB however long the input: 256 MiB of zeros
   took 11 GB and did not finish in 300 s, and now takes 946 MB and 6 minutes

@@ -72,7 +72,7 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// naming any other version is rejected as `UnsupportedVersion` before its
 /// payload is read (`tests/golden/v13-*.mgdc` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 13;
+pub const FORMAT_VERSION: u8 = 14;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,7 +386,7 @@ fn declared_extent(method: Method, after_header: &[u8]) -> Result<(usize, u64), 
         }
         Method::Lz => {
             let extent = codec::declared_extent(after_header)?;
-            let output_len = u64::from(extent.output_len);
+            let output_len = extent.output_len;
             // The Stored floor (`docs/format/SPEC.md`, "Invariants"): no
             // conforming encoder writes an `Lz` payload longer than the
             // `Stored` payload of the same output, so a reader that has
@@ -839,8 +839,9 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// [`Method::Stored`] writes its payload slice of `input` through the same
 /// bounded writer and allocates no decoded buffer, so resident memory is the
 /// input plus the write buffer. [`filters::select::Candidate::Transpose`]
-/// alone falls back to a whole-buffer decode followed by one bulk write: no
-/// worse than [`decompress_bounded`], just never streamed.
+/// and [`filters::select::Candidate::Base64`] fall back to a whole-buffer
+/// decode followed by one bulk write: no worse than [`decompress_bounded`],
+/// just never streamed.
 /// [`decodes_incrementally`] tells a caller which case a frame is without
 /// decoding it, though this function does not require calling it first.
 ///
@@ -885,8 +886,8 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// sequentially with small fixed lookback or lookahead (a no-op, a stride,
 /// or a 5-byte call/jmp instruction), and [`decompress_to_writer`] streams
 /// all three, but `Candidate::Transpose`'s decode writes scattered across
-/// the *entire* buffer in column-major order, so it needs the whole buffer
-/// resident. This predicate does not share [`decompress_to_writer`]'s own
+/// the *entire* buffer in column-major order, and `Candidate::Base64` has
+/// no per-byte undo, so both need the whole buffer resident. This predicate does not share [`decompress_to_writer`]'s own
 /// dispatch: a caller can ask before committing to either API. No test runs
 /// [`decompress_to_writer`] against the answer, so the two agreeing is
 /// unchecked.
@@ -907,7 +908,10 @@ pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
             let selector = frame.payload.first_chunk().ok_or(Error::Truncated)?;
             let candidate =
                 filters::select::Candidate::from_header_bytes(*selector).ok_or(Error::Corrupt)?;
-            incremental &= !matches!(candidate, filters::select::Candidate::Transpose(_));
+            incremental &= !matches!(
+                candidate,
+                filters::select::Candidate::Transpose(_) | filters::select::Candidate::Base64
+            );
         }
     }
     Ok(incremental)

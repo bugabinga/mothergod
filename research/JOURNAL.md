@@ -8609,3 +8609,35 @@ record.
   noise of unknown size. **Not measured:** encode on
   the pool's other CPU models, and a candidate replacement kernel. The
   kernel replacement is issue #1184. `research/progress.jsonl` it192.
+- S2-A118 | ACCEPTED | Issue #1123, item 1 for `base64_unwrap` only: the
+  filter is wired as selector kind 4 (`Candidate::Base64`, `[4, 0]`),
+  `FORMAT_VERSION` 14, ADR-0071. `select::pick` shortlists it when the whole
+  block is canonical standard base64, the frame stores the decoded bytes, and
+  the decoder re-wraps them to `4 * ceil(declared / 3)` bytes. The old flag
+  byte is gone: the selector says it ran. `reverse` is untouched, unmeasured
+  and still unwired, so #1123 stays open for it. | Measured, release build,
+  one AMD EPYC 9V74 runner, real `mothergod::compress` bitstreams, main
+  (`FORMAT_VERSION` 13) against the branch, on the 11 train cases of
+  `baseline::cases()` at `CASE_LEN` 50,000 / `CASE_SEED` 0xBA5E11E5BA5E11E5
+  and on `access_log` and `gradient_image` at `sealed_seed(CASE_SEED)`, same
+  length. `base64_wrapped` 3,328 to 2,471 bytes, 0.53248 to 0.39536 b/B
+  (-0.137120); the payload bytes of the other ten train cases and of both
+  sealed cases are identical (FNV-1a of each frame between header and check
+  value), so the train mean is -0.012465 b/B over 11 cases and the sealed
+  delta is 0.000000. Decode cost, `baseline_gate -- speed`, five alternating
+  runs per side: main median 111.74, branch 110.41 calibration steps/byte,
+  each side's own spread about 10%, so no measurable change. | Mechanism: a
+  base64 character carries 6 bits in an 8-bit byte and every 3 source bytes
+  straddle 4 characters, so the literal model's order-N contexts and the match
+  finder see the source text through a phase that shifts every 4 bytes;
+  unwrapping restores the record structure and drops a quarter of the symbols
+  to code. The generator is the project's own (`json_records` through an
+  RFC 4648 encoder, truncated to length), so the number says what the filter
+  does to whole-input canonical base64, not how common that input is: MIME
+  and PEM wrap at 64 or 76 columns with newlines and the alphabet scan
+  declines them, and base64 inside a larger file is declined too, neither
+  measured here. **Not measured:** `reverse`; line-wrapped base64; a streamed re-wrap, which
+  the decoder does not do (kind 4 decodes through the whole-buffer path).
+  `bench/baseline.json` is not regenerated: a new baseline retires both
+  finals reports' fingerprint, which needs their network fetches (#1204's
+  follow-up issue carries it). `research/progress.jsonl` it193.

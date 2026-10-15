@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 13)
+# mothergod bitstream format (FORMAT_VERSION 14)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 13)
+4       1     format version (currently 14)
 5       1     method byte
 6       ...   payload (method-defined)
 end-4   4     check value: CRC-32 of every byte before it, u32 LE
@@ -39,7 +39,9 @@ mixer, a learned-baseline rate schedule and stretch-domain SSE bins
 the length residual trees (ADR-0061); 11 gave the `Stored` payload a
 declared length (ADR-0065); 12 gave the `Lz` payload a declared coded
 length, so a frame's end is knowable and frames chain into a stream
-(ADR-0067); 13 closed each frame with a check value (ADR-0068).
+(ADR-0067); 13 closed each frame with a check value (ADR-0068); 14 added
+the base64 filter and derived a frame's output length from its filtered
+length (ADR-0071).
 
 ## Check value (ADR-0068)
 
@@ -104,8 +106,8 @@ inputs longer than `u32::MAX` bytes.
 
 ### `Lz` (`src/codec.rs`, `JOURNAL` S2-D2, ADR-0028, ADR-0038)
 
-A trial-selected filter (`src/filters.rs`: none, delta, BCJ, or
-transpose — `filters::select::pick` shortlists candidates,
+A trial-selected filter (`src/filters.rs`: none, delta, BCJ, transpose, or
+base64 unwrap — `filters::select::pick` shortlists candidates,
 `codec::encode` keeps whichever produces the smallest payload) applied to
 the frame data, then optimal-parse LZ tokens (`src/lz.rs`), entropy-coded
 by adaptive flag/length/offset/rep-slot tables (`src/model.rs`) and a
@@ -115,7 +117,7 @@ adaptive range coder (`src/coder.rs`).
 ```
 offset  size  field
 0       2     filter selector: [kind, param]
-2       4     declared output length, u32 LE
+2       4     declared length of the filtered bytes, u32 LE
 6       4     token count, u32 LE
 10      8     coded length: the range-coded stream's byte count, u64 LE
 18      ...   range-coded stream, of the FILTERED bytes
@@ -126,9 +128,8 @@ length declares as `Truncated`; bytes past it are the next frame's. The
 field is never an allocation size: it is compared with the bytes present,
 as `Stored`'s is, and it is a `u64` for the same reason. A decoder MUST
 also reject a payload longer than a `Stored` payload of the same output, an
-`Lz` payload of more than `8 + declared output length` bytes (coded length
-plus 18, against the declared length plus 8), as `Corrupt`, from the header
-alone: the Stored floor below makes it one no conforming encoder writes
+`Lz` payload of more than `8 + output length` bytes (coded length plus 18,
+against the output length plus 8), as `Corrupt`, from the header alone: the Stored floor below makes it one no conforming encoder writes
 (ADR-0069).
 
 **Literal sub-stream (ADR-0038, ADR-0046, ADR-0052, ADR-0054, ADR-0055).**
@@ -178,15 +179,30 @@ a bit at exactly one bit, so the gain is adaptation alone: record-shaped
 data repeats exact lengths (`research/JOURNAL.md` S2-A114/S2-A115). A
 distance's residual bits are raw.
 
-Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose).
-`param` is the delta stride or transpose column count, `1..=255`; zero for
-kinds that take none (0, 2). A decoder MUST reject any other `[kind, param]`
-pair as `Corrupt` (`filters::select::Candidate::from_header_bytes`) — an
-unrecognized kind, or a zero `param` on a kind that requires one. Every
-filter this format defines preserves length, so "declared output length"
-above is also the length of the *filtered* bytes: a decoder reconstructs
-those first, checks their length against this field, and only then reverses
-the filter to recover the original frame data.
+Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose),
+4 (base64 unwrap, ADR-0071). `param` is the delta stride or transpose column
+count, `1..=255`; zero for kinds that take none (0, 2, 4). A decoder MUST
+reject any other `[kind, param]` pair as `Corrupt`
+(`filters::select::Candidate::from_header_bytes`) — an unrecognized kind, or
+a zero `param` on a kind that requires one, or a nonzero one on a kind that
+takes none. The declared length is the length of the *filtered* bytes: a
+decoder reconstructs those first, checks their length against this field,
+and only then reverses the filter to recover the original frame data.
+
+The *output length* is what the frame decodes to, derived from the declared
+length by the selector's kind (`filters::select::Candidate::output_len`).
+Kinds 0 to 3 preserve length, so it is the declared length. Kind 4 stores
+the standard-base64 decoding of the frame data, and the decoder re-wraps it
+to `4 * ceil(declared / 3)` bytes with `=` padding: 3 bytes to 4, a
+trailing 1 or 2 bytes to a padded group. Every filtered byte string is a
+valid kind 4 frame, so the re-wrap rejects nothing. An encoder MUST emit
+kind 4 only when the frame data is canonical standard base64 (RFC 4648
+alphabet, length a multiple of 4, `=` only as the last group's final 1 or 2
+characters, padding bits zero), so the re-wrap reproduces it exactly. A
+decoder MUST reject a frame whose output length exceeds its output ceiling
+(below) as `TooLarge`, from the header alone, before it allocates; that
+output length, not the declared one, is also what a stream's total budget
+and the Stored floor read.
 
 Offset-bucket/rep-code disjointness (see the invariant below): a
 `Token::Match`'s distance is coded as a bucket symbol plus residual bits
@@ -206,9 +222,10 @@ founding port bug this section's invariant exists to rule out.
   (ADR-0069).
 - Decoders never panic and allocate at most a bounded multiple of the
   declared output size for any input. For `Lz`, "declared output size" is
-  the payload's own length field: the decoder never preallocates from it,
-  only grows toward it, and rejects a token the instant it would exceed it.
-  That field is itself capped (`codec::MAX_DECODED_LEN`, currently 256
+  the payload's own length field, which bounds the filtered bytes, and the
+  output length derived from it is what the ceiling below caps: the decoder
+  never preallocates from it, only grows toward it, and rejects a token the
+  instant it would exceed it. That output length is itself capped (`codec::MAX_DECODED_LEN`, currently 256
   MiB): a ratio check against the payload's own byte count cannot bound
   this format's amplification, because its adaptive models saturate fast
   enough that a legitimate maximal-ratio frame and a forged header become

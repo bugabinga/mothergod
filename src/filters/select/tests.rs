@@ -116,6 +116,7 @@ fn header_bytes_round_trip_every_candidate_kind() {
         Candidate::Bcj,
         Candidate::Transpose(NonZeroUsize::new(2).unwrap()),
         Candidate::Transpose(NonZeroUsize::new(96).unwrap()),
+        Candidate::Base64,
     ] {
         let bytes = candidate.to_header_bytes();
         assert_eq!(
@@ -128,7 +129,7 @@ fn header_bytes_round_trip_every_candidate_kind() {
 
 #[test]
 fn header_bytes_reject_unknown_kind() {
-    assert_eq!(Candidate::from_header_bytes([4, 0]), None);
+    assert_eq!(Candidate::from_header_bytes([5, 0]), None);
     assert_eq!(Candidate::from_header_bytes([255, 255]), None);
 }
 
@@ -142,4 +143,46 @@ fn header_bytes_reject_zero_param_for_parameterized_kinds() {
 fn header_bytes_reject_nonzero_param_for_parameterless_kinds() {
     assert_eq!(Candidate::from_header_bytes([0, 1]), None);
     assert_eq!(Candidate::from_header_bytes([2, 1]), None);
+    assert_eq!(Candidate::from_header_bytes([4, 1]), None);
+}
+
+#[test]
+fn header_bytes_pin_each_kind_byte() {
+    // The wire values `docs/format/SPEC.md` names: a kind renumbered
+    // here is a format change.
+    let one = NonZeroUsize::MIN;
+    assert_eq!(Candidate::Identity.to_header_bytes(), [0, 0]);
+    assert_eq!(Candidate::Delta(one).to_header_bytes(), [1, 1]);
+    assert_eq!(Candidate::Bcj.to_header_bytes(), [2, 0]);
+    assert_eq!(Candidate::Transpose(one).to_header_bytes(), [3, 1]);
+    assert_eq!(Candidate::Base64.to_header_bytes(), [4, 0]);
+}
+
+#[test]
+fn output_len_is_the_filtered_length_except_for_base64() {
+    for candidate in [
+        Candidate::Identity,
+        Candidate::Delta(NonZeroUsize::MIN),
+        Candidate::Bcj,
+        Candidate::Transpose(NonZeroUsize::MIN),
+    ] {
+        assert_eq!(candidate.output_len(1234), 1234, "{candidate:?}");
+    }
+    // Three filtered bytes re-wrap to four, a partial group to a padded one.
+    for (filtered, output) in [(0, 0), (1, 4), (2, 4), (3, 4), (4, 8), (300, 400)] {
+        assert_eq!(Candidate::Base64.output_len(filtered), output, "{filtered}");
+    }
+    // Past `u32::MAX`, which is why it answers `u64`.
+    assert_eq!(Candidate::Base64.output_len(u32::MAX), 5_726_623_060);
+}
+
+#[test]
+fn pick_shortlists_base64_exactly_for_canonical_base64() {
+    let wrapped = b"aGVsbG8gd29ybGQ=".as_slice();
+    assert!(pick(wrapped).contains(&Candidate::Base64));
+    assert!(pick(wrapped).contains(&Candidate::Identity));
+    assert!(!pick(b"not base64 data!").contains(&Candidate::Base64));
+    // One byte short of a whole group.
+    assert!(!pick(&wrapped[..wrapped.len() - 1]).contains(&Candidate::Base64));
+    assert!(!pick(&[]).contains(&Candidate::Base64));
 }
