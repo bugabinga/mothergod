@@ -466,7 +466,8 @@ def budget(samples, anchor, now=None, spent=None, query=None):
 
     `samples` is (when, rate_limit_info) in session order. Each info carries
     one or both allowance windows' utilization and reset instant; the shape
-    rule is `allowance.window_readings`, shared with the allowance index.
+    rule is `allowance.window_readings`, shared with the guard's allowance
+    ledger and the allowance table.
     Only `valid_fraction` utilizations report a number; `resetsAt` degrades
     to "(no reset time reported)", because a valid fraction still informs
     without it. A window kind whose readings ALL fail validation is named
@@ -517,7 +518,7 @@ def budget(samples, anchor, now=None, spent=None, query=None):
     if not by_type:
         print("    rate-limit events present but no readable window "
               "utilization. Treat this as a payload shape change, not a "
-              "quiet window: the allowance index and the guard ledger read "
+              "quiet window: the allowance table and the guard ledger read "
               "the same events through allowance.py, so the whole budget "
               "chain is blind until it learns the new shape.")
         return
@@ -566,8 +567,8 @@ def budget(samples, anchor, now=None, spent=None, query=None):
     for kind in sorted(set(unreadable) - set(by_type)):
         print(f"    {kind}: present in {unreadable[kind]} event(s), none "
               "readable. A payload shape change for this window, not a "
-              "quiet one; the allowance index reads the same parse, so "
-              "teach allowance.py the new shape.")
+              "quiet one; the allowance table and the guard ledger read "
+              "the same parse, so teach allowance.py the new shape.")
 
 
 def main():
