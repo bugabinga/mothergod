@@ -185,3 +185,17 @@ fn decoding_truncated_stream_does_not_panic() {
     // are whatever implicit-zero bits produce, never treated as
     // ground truth here.
 }
+
+#[test]
+#[should_panic(expected = "Model alphabet must be non-empty")]
+fn new_over_no_symbols_panics() {
+    let _ = Model::new(0);
+}
+
+// `try_new` reaches the assert through `try_filled_vec`, `new` through
+// `vec!`: two paths into one assert, so each is pinned.
+#[test]
+#[should_panic(expected = "Model alphabet must be non-empty")]
+fn try_new_over_no_symbols_panics() {
+    let _ = Model::try_new(0);
+}
