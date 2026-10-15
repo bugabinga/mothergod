@@ -498,7 +498,9 @@ jobs:
       # a condition would miss: the pause guard skipped the session
       # whole, the session died, the job was cancelled, the count
       # drifted. The invariant is one sentence: the bot types while a
-      # BDFL run is alive and owes an answer, never after.
+      # run is alive or an answer is owed, never after. `run` ends this
+      # run's share of the draft; other seats' live runs keep theirs
+      # (#742).
       #
       # `since` is what keeps that from being a blunt zero: a message
       # that arrived mid-run is the queued run's to answer, and killing
@@ -519,8 +521,8 @@ jobs:
         env:
           WORKER_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         run: |
-          printf 'url = "https://bot.mothergod.dev/typing/reset?since=%s"\nheader = "x-mothergod-secret: %s"\n' \
-            "${TYPING_SINCE}" "${WORKER_SECRET}" |
+          printf 'url = "https://bot.mothergod.dev/typing/reset?since=%s&run=%s"\nheader = "x-mothergod-secret: %s"\n' \
+            "${TYPING_SINCE}" "${GITHUB_RUN_ID}" "${WORKER_SECRET}" |
             curl -sS -X POST --max-time 10 --config - -o /dev/null -w 'typing/reset: %{http_code}\n'
 
       - if: always() && steps.claude.outcome != 'skipped'

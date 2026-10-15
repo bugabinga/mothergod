@@ -37,11 +37,15 @@ const TYPING_CAP_MS = 20 * 60 * 1000;
 // own delivery lag eats into a 10s margin. 10s margin is three ticks of
 // slack instead of one.
 const DRAFT_REFRESH_MS = 10 * 1000;
-// One chat and one run answering at a time (agent-bdfl.yml's
-// concurrency lane), so one draft: Telegram animates edits to the same
-// id and the real reply removes it.
+// One operator chat, so one draft: Telegram animates edits to the same
+// id and the real reply removes it. Several runs may be live at once
+// (#742), so the draft is every live run's text, oldest run first.
 const DRAFT_ID = 1;
 const DRAFT_LIMIT = 4096; // Telegram's cap on draft text
+// A run id as GitHub mints it (GITHUB_RUN_ID) is digits; tg-draft falls
+// back to the session id where no run number exists, so letters and
+// dashes pass too. Anything longer or stranger is not ours.
+const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * The "typing..." indicator, as a self-refreshing alarm loop.
@@ -54,27 +58,38 @@ const DRAFT_LIMIT = 4096; // Telegram's cap on draft text
  * answers. The worker is awake at the exact moment the operator's
  * message arrives, which is the moment the indicator has to start.
  *
- * One instance for one operator chat, so what it tracks is not on/off but
- * `arrivals`: the wall-clock time of every message that landed and has
- * not been answered, oldest first. A drain loop answering three queued
- * messages must keep typing between replies one and three, which a
- * boolean cannot express (PR #155 review).
+ * One instance for one operator chat, tracking two lists, either of
+ * which keeps the loop alive:
+ * - `arrivals`: the wall-clock time of every message that landed and has
+ *   not been answered, oldest first. A drain loop answering three queued
+ *   messages must keep typing between replies one and three, which a
+ *   boolean cannot express (PR #155 review). One deadline covers them
+ *   all, `TYPING_CAP_MS` after the last one landed; past it they are
+ *   given up on together.
+ * - `runs`: every run that has said what it is doing within the cap,
+ *   `{run, text, at}`, oldest first. Any seat's run, not only the one
+ *   answering a message: the operator asked to watch them all (#742),
+ *   and a draft costs nothing while the chat is closed. A run is given
+ *   up on `TYPING_CAP_MS` after its last word, which is the only exit a
+ *   cancelled run has (agent-review.yml cancels a superseded review
+ *   mid-flight, before its reset step).
  *
  * Four verbs:
  * - /start, a message landed: append its arrival time.
  * - /stop, an answer went out (`.github/scripts/tg-send`): drop the
- *   oldest, because a drain answers in arrival order.
- * - /reset?since=<ms>, a run ended (agent-bdfl.yml's last step): drop
- *   every arrival older than that run's start. Those were its messages
- *   to answer, and whether it answered them, died, or was skipped by the
- *   pause guard, nobody is working on them now.
- * - /draft, the run says what it is doing (`.github/scripts/tg-draft`,
- *   a hook on every tool call): typing with content (#733). The text
- *   is shown as a Telegram message draft, an ephemeral preview the real
- *   reply replaces, by the same alarm loop that types, so it exists
- *   exactly while an answer is owed and a burst of parallel hooks
- *   collapses to the last text. A draft is proof the run is alive, so
- *   it moves the deadline the way an arrival does.
+ *   oldest arrival, because a drain answers in arrival order.
+ * - /reset?since=<ms>&run=<id>, a run ended (a seat workflow's last
+ *   step): drop every arrival older than that run's start, and the
+ *   run's own text. Those were its messages to answer, and whether it
+ *   answered them, died, or was skipped by the pause guard, nobody is
+ *   working on them now; a dead run's last words are not shown for it.
+ * - /draft, body `{text, run}`, the run says what it is doing
+ *   (`.github/scripts/tg-draft`, a hook on every tool call): typing
+ *   with content (#733). The loop shows the live runs' texts as one
+ *   Telegram message draft, an ephemeral preview the real reply
+ *   replaces, so a burst of parallel hooks collapses to the last text
+ *   per run. A run's first word starts the loop when nothing else has,
+ *   because a scheduled wake has no /start before it.
  *
  * The `since` cutoff is the whole reason /reset is not a blunt zero. A
  * message that lands mid-run belongs to the NEXT run, which the
@@ -82,9 +97,9 @@ const DRAFT_LIMIT = 4096; // Telegram's cap on draft text
  * would leave the operator staring at a silent screen for exactly the
  * wait this indicator exists to fill (PR #155 review, third round).
  *
- * Nothing here is trusted for long: every run's /reset clears everything
- * that predates it, and the deadline clears the lot if a run dies
- * without resetting. Drift lives one run at most.
+ * Nothing here is trusted for long: every run's /reset clears what was
+ * its own, and the cap clears the lot if a run dies without resetting.
+ * Drift lives one cap at most.
  */
 export class Typing {
   constructor(state, env) {
@@ -124,83 +139,108 @@ export class Typing {
       return pending;
     }
 
-    const arrivals = (await this.state.storage.get("arrivals")) ?? [];
+    const now = Date.now();
     if (url.pathname === "/draft") {
       let text;
+      let run;
       try {
-        ({ text } = await request.json());
+        ({ text, run } = await request.json());
       } catch {
         return new Response(null, { status: 400 });
       }
-      if (typeof text !== "string" || !text.trim() || text.length > DRAFT_LIMIT) {
+      if (
+        typeof text !== "string" || !text.trim() || text.length > DRAFT_LIMIT
+        || typeof run !== "string" || !RUN_ID.test(run)
+      ) {
         return new Response(null, { status: 400 });
       }
-      // Nobody waiting, nobody to show it to: a scheduled wake's drafts
-      // stop here, so the hook has nothing to know about who is owed.
-      // draftAt null means "changed, not yet sent".
-      if (arrivals.length) {
-        await this.state.storage.put({
-          draft: text,
-          draftAt: null,
-          deadline: Date.now() + TYPING_CAP_MS,
-        });
+      // Body first, storage second: from here every await is a storage
+      // call, which the object's input gate serializes, so two seats'
+      // hooks landing together cannot each write a list missing the
+      // other's slot. A run keeps its slot, so the draft does not reorder
+      // under the operator's eyes each time one run speaks.
+      const runs = (await this.state.storage.get("runs")) ?? [];
+      const slot = runs.findIndex((entry) => entry.run === run);
+      const entry = { run, text, at: now };
+      if (slot === -1) runs.push(entry);
+      else runs[slot] = entry;
+      await this.state.storage.put("runs", runs);
+      // A loop already running keeps its own cadence; only a cold object
+      // is woken, else every hook of a chatty run would tick it at once.
+      if ((await this.state.storage.getAlarm()) == null) {
+        await this.state.storage.setAlarm(now);
       }
       return new Response(null, { status: 204 });
     }
+    const arrivals = (await this.state.storage.get("arrivals")) ?? [];
+    const runs = (await this.state.storage.get("runs")) ?? [];
     if (url.pathname === "/start") {
-      arrivals.push(Date.now());
+      arrivals.push(now);
       await this.state.storage.put({
         arrivals,
-        deadline: Date.now() + TYPING_CAP_MS,
+        deadline: now + TYPING_CAP_MS,
       });
-      await this.state.storage.setAlarm(Date.now());
+      await this.state.storage.setAlarm(now);
       return new Response(null, { status: 204 });
     }
     // A missing or malformed `since` falls back to "now", which settles
-    // everything: the safe direction is silence, never a bot that types
-    // at nobody.
+    // every arrival, and a reset naming no run drops every run's text:
+    // the safe direction is silence, never a bot that types at nobody.
     const since = Number(url.searchParams.get("since"));
-    const cutoff = since > 0 ? since : Date.now();
-    const left = url.pathname === "/stop"
-      ? arrivals.slice(1)
-      : arrivals.filter((at) => at >= cutoff);
-    if (left.length) {
-      await this.state.storage.put("arrivals", left);
-      // A reset is a run ending, and its last draft says what a dead
-      // run was doing. The queued run posts its own.
-      if (url.pathname === "/reset") {
-        await this.state.storage.delete(["draft", "draftAt"]);
-      }
+    const cutoff = since > 0 ? since : now;
+    const run = url.searchParams.get("run");
+    const stop = url.pathname === "/stop";
+    const owed = stop ? arrivals.slice(1) : arrivals.filter((at) => at >= cutoff);
+    const working = stop ? runs : (run ? runs.filter((entry) => entry.run !== run) : []);
+    await this.settle(owed, working);
+    return new Response(null, { status: 204 });
+  }
+
+  // Both lists written back, or the loop ended when both are empty:
+  // nothing is owed and nobody is working.
+  async settle(arrivals, runs) {
+    if (arrivals.length || runs.length) {
+      await this.state.storage.put({ arrivals, runs });
     } else {
       await this.state.storage.deleteAlarm();
       await this.state.storage.deleteAll();
     }
-    return new Response(null, { status: 204 });
   }
 
   async alarm() {
+    const now = Date.now();
+    // Past the deadline an owed answer is given up on, so the reply, when
+    // it comes, arrives on a quiet screen instead of a lying one. No
+    // deadline means a stop won the race with a scheduled tick.
     const deadline = await this.state.storage.get("deadline");
-    // No deadline means a stop won the race with a scheduled tick. Both
-    // exits leave no alarm, so the loop ends by not rescheduling.
-    if (!deadline || Date.now() >= deadline) {
+    const arrivals = deadline && now < deadline
+      ? ((await this.state.storage.get("arrivals")) ?? [])
+      : [];
+    const runs = ((await this.state.storage.get("runs")) ?? [])
+      .filter((entry) => now - entry.at < TYPING_CAP_MS);
+    if (!arrivals.length && !runs.length) {
       await this.state.storage.deleteAll();
       return;
     }
+    await this.state.storage.put({ arrivals, runs });
     await this.telegram("sendChatAction", { action: "typing" });
-    // The draft goes out when it changed (draftAt null) or when its
-    // preview is about to expire. This loop is its only sender.
-    const draft = await this.state.storage.get("draft");
-    const draftAt = await this.state.storage.get("draftAt");
-    if (draft && (draftAt == null || Date.now() - draftAt >= DRAFT_REFRESH_MS)) {
-      await this.telegram("sendMessageDraft", { draft_id: DRAFT_ID, text: draft });
-      // Other requests interleave with the outbound call above. A draft
-      // that landed meanwhile keeps its zero stamp and goes out on the
-      // next tick instead of waiting a whole refresh.
-      if ((await this.state.storage.get("draft")) === draft) {
-        await this.state.storage.put("draftAt", Date.now());
-      }
+    // The draft goes out when it changed or when its preview is about to
+    // expire. This loop is its only sender, and it composes the text
+    // from the list on every tick, so a draft or a reset that lands
+    // while a send is in flight shows on the next tick.
+    // Cut on a code point boundary: a slice through a surrogate pair is
+    // a text Telegram may reject, and the hook's own lines never reach
+    // the cap, only a caller holding the secret could.
+    const joined = runs.map((entry) => entry.text).join("\n\n");
+    const cut = /[\uD800-\uDBFF]$/.test(joined.slice(0, DRAFT_LIMIT)) ? DRAFT_LIMIT - 1 : DRAFT_LIMIT;
+    const text = joined.slice(0, cut);
+    const shown = await this.state.storage.get("shown");
+    const shownAt = await this.state.storage.get("shownAt");
+    if (text && (text !== shown || shownAt == null || now - shownAt >= DRAFT_REFRESH_MS)) {
+      await this.telegram("sendMessageDraft", { draft_id: DRAFT_ID, text });
+      await this.state.storage.put({ shown: text, shownAt: now });
     }
-    await this.state.storage.setAlarm(Date.now() + TYPING_TICK_MS);
+    await this.state.storage.setAlarm(now + TYPING_TICK_MS);
   }
 
   // Never throws: decoration must not kill the loop that carries it.
@@ -1042,13 +1082,13 @@ export default {
       return new Response("mothergod telegram webhook", { status: 200 });
     }
     // `/typing/stop`: one answer went out (tg-send). `/typing/reset`: a
-    // run ended and owes nothing (agent-bdfl.yml's last step), which is
+    // run ended and owes nothing (a seat workflow's last step), which is
     // also the health probe that the object is reachable at all.
     // `/typing/draft`: the run says what it is doing (tg-draft), body
-    // `{"text": ...}`. Authenticated with WEBHOOK_SECRET under a header
-    // of its own, because the secret's role is "may talk to this
-    // worker" and every caller is ours. Telegram's header name is
-    // Telegram's; ours says who we are.
+    // `{"text": ..., "run": ...}`. Authenticated with WEBHOOK_SECRET
+    // under a header of its own, because the secret's role is "may talk
+    // to this worker" and every caller is ours. Telegram's header name
+    // is Telegram's; ours says who we are.
     const { pathname, search } = new URL(request.url);
     if (TYPING_VERBS.has(pathname)) {
       if (request.headers.get("x-mothergod-secret") !== env.WEBHOOK_SECRET) {
