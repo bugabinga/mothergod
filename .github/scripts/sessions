@@ -121,15 +121,18 @@ def since_of(spec, now):
             return now - timedelta(days=int(match.group(1)))
         except OverflowError:
             raise SystemExit(usage)
+    # A third overflow: `fromisoformat` accepts year 1 and year 9999 with a
+    # zone, and the shift to UTC then leaves the calendar (#1029).
     try:
         when = datetime.fromisoformat(spec.replace("Z", "+00:00"))
-    except ValueError:
+        # A date with no zone is UTC midnight: the table and the archive are
+        # stamped in UTC, and `astimezone` on a naive value would read the
+        # machine's clock.
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return when.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
         raise SystemExit(usage)
-    # A date with no zone is UTC midnight: the table and the archive are stamped
-    # in UTC, and `astimezone` on a naive value would read the machine's clock.
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    return when.astimezone(timezone.utc)
 
 
 # An artifact's name as agent-audit builds it, `audit-<role>-<run id>-<attempt>`.
