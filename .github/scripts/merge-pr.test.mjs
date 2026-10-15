@@ -326,6 +326,114 @@ test("--wait: a failed review run exits 4, nobody will post a verdict", () => {
   assert.deepEqual(merges, []);
 });
 
+// --gates-only (#975): the one PR no review can start on, agent-review.yml's
+// own edit, lands on its gates alone. The flag is the caller's typed
+// discretion; the script checks its precondition from the file list and
+// infers nothing from the diff otherwise.
+const files = (...paths) => ({
+  match: "^api repos/o/r/pulls/42/files",
+  responses: [{ stdout: paths.map((filename) => ({ filename })) }],
+});
+const GATES_ONLY = [...WAIT, "--gates-only"];
+
+test("--wait --gates-only: a failed review on a PR editing agent-review.yml lands on green gates", () => {
+  const { status, stdout, merges, calls } = run(GATES_ONLY, {
+    responses: [
+      files(".github/workflows/agent-review.yml", ".github/scripts/prompt-bytes"),
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "failure"], ...GREEN_GATES)] },
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout);
+  assert.match(
+    stdout,
+    /no verdict can come on a PR editing \.github\/workflows\/agent-review\.yml; landing by discretion \(--gates-only\)/,
+  );
+  assert.match(stdout, /merged #42 at abc123456789 as squash1/);
+  assert.equal(merges.length, 1);
+  assert.ok(!calls.some((c) => c.join(" ").includes("timeline")), "no verdict read under --gates-only");
+});
+
+test("--wait --gates-only: a PR that does not edit agent-review.yml is refused before any wait", () => {
+  const { status, stderr, merges, calls } = run(GATES_ONLY, {
+    responses: [
+      files(".github/workflows/agent-bdfl.yml", "agents/GOVERNANCE.md"),
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "failure"], ...GREEN_GATES)] },
+      merge,
+    ],
+  });
+  assert.equal(status, 1);
+  assert.match(stderr, /--gates-only refused: #42 does not edit \.github\/workflows\/agent-review\.yml/);
+  assert.deepEqual(merges, []);
+  assert.ok(!calls.some((c) => c.join(" ").includes("check-runs")), "refused before the first poll");
+});
+
+test("--wait --gates-only: an unreadable file list is refused, naming it", () => {
+  const { status, stderr, merges } = run(GATES_ONLY, {
+    responses: [
+      {
+        match: "^api repos/o/r/pulls/42/files",
+        responses: [{ status: 1, stderr: "gh: Server Error (HTTP 502)", stdout: { message: "Server Error" } }],
+      },
+      merge,
+    ],
+  });
+  assert.equal(status, 1);
+  assert.match(stderr, /cannot read #42's file list \(Server Error\); refusing to wait on the gates alone/);
+  assert.deepEqual(merges, []);
+});
+
+test("--wait --gates-only: a gate still pending keeps waiting, then names it at the deadline", () => {
+  const { status, stderr, merges } = run(["42", "--wait", "--gates-only", "--interval", "0", "--timeout", "0"], {
+    responses: [
+      files(".github/workflows/agent-review.yml"),
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      ruleset,
+      {
+        match: "check-runs",
+        responses: [
+          runs(["review", "completed", "failure"], ["fmt", "completed", "success"], ["test", "queued", null]),
+        ],
+      },
+      merge,
+    ],
+  });
+  assert.equal(status, 4);
+  assert.match(stderr, /review failure, verdict labels none, gates pending test/);
+  assert.deepEqual(merges, []);
+});
+
+test("--wait --gates-only: a red required gate exits 2 at once", () => {
+  const { status, stderr, merges } = run(GATES_ONLY, {
+    responses: [
+      files(".github/workflows/agent-review.yml"),
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      ruleset,
+      {
+        match: "check-runs",
+        responses: [
+          runs(["review", "completed", "failure"], ["fmt", "completed", "failure"], ["test", "queued", null]),
+        ],
+      },
+      merge,
+    ],
+  });
+  assert.equal(status, 2);
+  assert.match(stderr, /required gates red on abc123456789: fmt/);
+  assert.deepEqual(merges, []);
+});
+
+test("--gates-only without --wait is a usage error with exit 1", () => {
+  const { status, stderr, calls } = run(["42", "--gates-only"]);
+  assert.equal(status, 1);
+  assert.match(stderr, /usage: merge-pr/);
+  assert.deepEqual(calls, []);
+});
+
 test("--wait: a review that concluded green without a verdict label exits 4", () => {
   const { status, stderr, merges } = run(WAIT, {
     responses: [
