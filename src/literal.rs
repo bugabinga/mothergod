@@ -1033,18 +1033,10 @@ impl Literal {
         bits
     }
 
-    /// [`Self::ideal_cost_bits_sse`]'s counterpart for
-    /// [`Self::encode_logistic_surprise`]/[`Self::encode_logit_sse`]:
-    /// shared body, generic over `M` ([`LogisticMixer`]) the same way
-    /// [`Self::encode_mix`] is, since pricing `byte` and updating the six
-    /// expert banks afterward never depends on which mixer or calibration
-    /// table refines each node's probability. Sums the ideal cost of
-    /// `byte`'s `LEVELS` `mixer`-refined binary decisions through
-    /// [`Self::code_bit_walk`], so a caller pricing a whole stream this way
-    /// reflects what [`Self::encode_mix`] actually pays (`crate::codec`'s
-    /// `CostSink`/`EncodeSink` invariant, [`Self::ideal_cost_bits_sse`]'s
-    /// own docs). Updates the six real experts' banks and takes the same
-    /// gradient step `mixer` would, same as [`Self::ideal_cost_bits_sse`].
+    /// What [`Self::encode_mix`] would pay for `byte`, summed over the same
+    /// [`Self::code_bit_walk`] without driving a coder, and the same state
+    /// updates: `crate::codec`'s `CostSink` and `EncodeSink` must price and
+    /// code the same thing.
     #[must_use]
     fn ideal_cost_bits_mix<M: LogisticMixer>(
         &mut self,
@@ -1065,11 +1057,7 @@ impl Literal {
         bits
     }
 
-    /// [`Self::ideal_cost_bits_sse`]'s counterpart for
-    /// [`Self::encode_logistic_surprise`]: sums the ideal cost of `byte`'s
-    /// `LEVELS` `mixer`-refined binary decisions at the registered
-    /// [`SURPRISE_RECENT_DECAY`], reflecting what
-    /// `Self::encode_logistic_surprise` actually pays.
+    /// What [`Self::encode_logistic_surprise`] would pay for `byte`.
     #[must_use]
     pub fn ideal_cost_bits_logistic_surprise(
         &mut self,
@@ -1080,11 +1068,7 @@ impl Literal {
         self.ideal_cost_bits_mix(context, byte, mixer)
     }
 
-    /// [`Self::ideal_cost_bits_logistic_surprise`]'s counterpart for the
-    /// [`SurpriseLogisticMixLogitSse`] research candidate
-    /// (`research/JOURNAL.md` S2-A106): identical pricing, over a
-    /// [`SurpriseLogisticMix`] keyed to [`crate::sse::LogitSse`] instead of
-    /// [`Sse`].
+    /// What [`Self::encode_logit_sse`] would pay for `byte`.
     #[must_use]
     pub fn ideal_cost_bits_logistic_surprise_logit_sse(
         &mut self,
@@ -1440,25 +1424,13 @@ impl Literal {
         prefix
     }
 
-    /// Shared skeleton behind [`Self::encode_mix`]/[`Self::decode_mix`],
-    /// the [`LogisticMixer`] counterpart of
-    /// [`bittree::walk_sse`]: walks [`bittree::walk_nodes`], the shipped
-    /// coder's own tree traversal, blending this model's six expert banks
-    /// in the logit domain under `mixer`'s `weight_index` vector, refining
-    /// through `mixer`'s own calibration table, and taking one gradient
-    /// step per node at `mixer`'s own rate ([`LogisticMixer::rate`]) —
-    /// [`LogisticMix`]'s step-count decay or [`SurpriseLogisticMix`]'s
-    /// error-EMA one, the one place the two mixers differ
-    /// ([`logistic_mix_node`]'s own docs). `code_bit` receives each node's
-    /// midpoint and refined probability and returns the bit that node
-    /// resolved to — already known from a caller's own `symbol` for an
-    /// encode, decoded from [`Decoder::decode_bit`] for a decode — so
-    /// callers differ only in what they do with that bit and probability,
-    /// never in the walk itself. Generic over `mixer`'s own calibration
-    /// table ([`LogisticMixer::Calibrator`]) so [`SurpriseLogisticMix<Sse>`]
-    /// and [`SurpriseLogisticMixLogitSse`] share this one walk rather than
-    /// two that would differ only in which table's `refine`/`update` it
-    /// calls.
+    /// The [`LogisticMixer`] counterpart of [`bittree::walk_sse`], shared by
+    /// encode, decode and pricing so they cannot drift apart: blends the six
+    /// expert banks in the logit domain under `mixer`'s `weight_index`
+    /// vector, refines through `mixer`'s calibration table, and takes one
+    /// gradient step per node at [`LogisticMixer::rate`]. `code_bit`
+    /// receives each node's midpoint and refined probability and returns the
+    /// bit the node resolved to.
     ///
     /// Every expert's upper-half probability lies strictly inside `(0, 1)`
     /// before [`clamp_logistic_probability`] even runs: every bank
@@ -1487,12 +1459,10 @@ impl Literal {
         })
     }
 
-    /// [`Self::encode_logistic`]/[`Self::encode_logistic_surprise`]/
-    /// [`Self::encode_logit_sse`]'s shared body: generic over `M`
-    /// ([`LogisticMixer`]) the same way [`Self::code_bit_walk`] is, since
-    /// coding `byte` and updating the six expert banks afterward never
-    /// depends on which mixer or calibration table refines each node's
-    /// probability.
+    /// The shared body of [`Self::encode_logistic`],
+    /// [`Self::encode_logistic_surprise`] and [`Self::encode_logit_sse`]:
+    /// the six expert banks update the same way whichever mixer refined the
+    /// probabilities.
     fn encode_mix<M: LogisticMixer>(
         &mut self,
         encoder: &mut Encoder,
@@ -1511,9 +1481,9 @@ impl Literal {
         self.update(&bank_indices, weight_index, symbol, exp);
     }
 
-    /// [`Self::decode_logistic`]/[`Self::decode_logistic_surprise`]/
-    /// [`Self::decode_logit_sse`]'s shared body; see [`Self::encode_mix`]
-    /// for why this is generic over the mixer.
+    /// The shared body of [`Self::decode_logistic`],
+    /// [`Self::decode_logistic_surprise`] and [`Self::decode_logit_sse`],
+    /// the inverse of [`Self::encode_mix`].
     fn decode_mix<M: LogisticMixer>(
         &mut self,
         decoder: &mut Decoder,
@@ -1528,16 +1498,9 @@ impl Literal {
         byte
     }
 
-    /// Codes `byte` through `encoder` under `context`, blending this
-    /// model's six expert banks through `mixer`'s logit-domain mix under
-    /// [`SurpriseLogisticMix`]'s learned-baseline rate schedule instead of
-    /// [`Self::encode_logistic`]'s step-count-derived one
-    /// (`research/JOURNAL.md` S2-A104), then
-    /// updates every expert bank exactly as [`Self::encode_sse`] does. The
-    /// six real experts' own linear weights adapt unperturbed
-    /// ([`Self::update`] still runs on the same six-way `mixed` estimate it
-    /// always has), the same layering [`Self::encode_logistic`] already
-    /// uses.
+    /// [`Self::encode_logistic`] under [`SurpriseLogisticMix`]'s
+    /// learned-baseline rate schedule instead of a step-count-derived one
+    /// (`research/JOURNAL.md` S2-A104).
     pub fn encode_logistic_surprise(
         &mut self,
         encoder: &mut Encoder,
@@ -1549,14 +1512,12 @@ impl Literal {
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_logistic_surprise`]; see that method's docs for the
-    /// coding and update shape.
+    /// of [`Self::encode_logistic_surprise`].
     ///
-    /// Never panics on adversarial `decoder` state, the same argument
-    /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
-    /// over any coded bit pattern, and every probability
-    /// [`Self::code_bit_walk`] derives is this model's and `mixer`'s
-    /// own invariant, never derived from `decoder`'s bytes.
+    /// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`]
+    /// is total over any coded bit pattern, and every probability is this
+    /// model's and `mixer`'s own invariant, never derived from `decoder`'s
+    /// bytes.
     #[must_use]
     pub fn decode_logistic_surprise(
         &mut self,
@@ -1567,15 +1528,9 @@ impl Literal {
         self.decode_mix(decoder, context, mixer)
     }
 
-    /// Codes `byte` through `encoder` under `context`, blending this
-    /// model's six expert banks through `mixer`'s logit-domain mix under
-    /// [`SurpriseLogisticMix`]'s own rate schedule, refined through
-    /// [`crate::sse::LogitSse`] instead of [`Sse`]
-    /// (`research/JOURNAL.md` S2-A106/S2-A108),
-    /// then updates every expert bank exactly as
-    /// [`Self::encode_logistic_surprise`] does. The six real experts' own
-    /// linear weights adapt unperturbed, the same layering every other
-    /// `encode_*` method in this file uses.
+    /// [`Self::encode_logistic_surprise`] refined through
+    /// [`crate::sse::LogitSse`] instead of [`Sse`] (`research/JOURNAL.md`
+    /// S2-A106, S2-A108).
     pub fn encode_logit_sse(
         &mut self,
         encoder: &mut Encoder,
@@ -1587,14 +1542,12 @@ impl Literal {
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_logit_sse`]; see that method's docs for the coding
-    /// and update shape.
+    /// of [`Self::encode_logit_sse`].
     ///
-    /// Never panics on adversarial `decoder` state, the same argument
-    /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
-    /// over any coded bit pattern, and every probability
-    /// [`Self::code_bit_walk`] derives is this model's and `mixer`'s
-    /// own invariant, never derived from `decoder`'s bytes.
+    /// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`]
+    /// is total over any coded bit pattern, and every probability is this
+    /// model's and `mixer`'s own invariant, never derived from `decoder`'s
+    /// bytes.
     #[must_use]
     pub fn decode_logit_sse(
         &mut self,
@@ -1605,15 +1558,11 @@ impl Literal {
         self.decode_mix(decoder, context, mixer)
     }
 
-    /// Codes `byte` through `encoder` under `context`, blending this
-    /// model's six expert banks through `logistic`'s logit-domain mix
-    /// instead of [`Self::mix`]'s linear blend
-    /// (`research/JOURNAL.md` S1-P8, S2-A101),
-    /// then updates every expert bank exactly as [`Self::encode_sse`]
-    /// does. The six real experts' own linear weights adapt unperturbed
-    /// ([`Self::update`] still runs on the same six-way `mixed` estimate it
-    /// always has) — the same layering [`Self::encode_column`] already
-    /// uses for its seventh expert, not a new coupling.
+    /// Codes `byte` through `encoder` under `context`, blending the six
+    /// expert banks through `logistic`'s logit-domain mix instead of
+    /// [`Self::mix`]'s linear blend (`research/JOURNAL.md` S1-P8, S2-A101).
+    /// [`Self::update`] still adapts the six real weights on the linear
+    /// `mixed` estimate, unperturbed by `logistic`.
     pub fn encode_logistic(
         &mut self,
         encoder: &mut Encoder,
@@ -1625,14 +1574,12 @@ impl Literal {
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_logistic`]; see that method's docs for the coding
-    /// and update shape.
+    /// of [`Self::encode_logistic`].
     ///
-    /// Never panics on adversarial `decoder` state, the same argument
-    /// [`Self::decode_sse`]'s docs give: [`Decoder::decode_bit`] is total
-    /// over any coded bit pattern, and every probability
-    /// [`Self::code_bit_walk`] derives is this model's and `logistic`'s
-    /// own invariant, never derived from `decoder`'s bytes.
+    /// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`]
+    /// is total over any coded bit pattern, and every probability is this
+    /// model's and `logistic`'s own invariant, never derived from `decoder`'s
+    /// bytes.
     #[must_use]
     pub fn decode_logistic(
         &mut self,
