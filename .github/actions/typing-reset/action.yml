@@ -1,0 +1,47 @@
+name: typing-reset
+description: >-
+  End this run's share of the operator's Telegram draft (#742). The
+  webhook worker types while an operator message is unanswered or any
+  seat's run is live, and under it shows every live run's last words
+  (`tg-draft`). A run's words must end with the run, which is why every
+  seat's workflow runs this as its last step, unconditionally: the runs
+  that matter are exactly the ones a condition would miss, cancelled,
+  died, or skipped by the pause guard. Without it a dead run's draft
+  would stand for the worker's 20-minute cap.
+
+  `since` is the answering seat's alone. The BDFL passes its run start
+  in epoch ms, and the worker settles every operator message older than
+  it: those were this run's to answer, answered or not, while a message
+  that landed mid-run belongs to the run the concurrency lane has
+  already queued (PR #155 review). Every other seat answers nobody and
+  passes no `since`, so its reset leaves the messages the BDFL still
+  owes, and the phone keeps showing "typing..." for exactly the wait
+  the indicator exists to fill.
+
+  It doubles as the indicator's health check, which is why it logs the
+  status code: 204 reachable, 502 the Durable Object is not, 401 the
+  secret is wrong. Two attempts at this indicator failed by being
+  unobservable. The secret reaches curl as a --config file on stdin, so
+  it never enters any argv (CLAUDE.md rule 10). The caller sets
+  continue-on-error, because a stale draft expires on the worker's own
+  cap, and decoration must not redden a good run.
+inputs:
+  secret:
+    description: The worker's own secret, repo secret TELEGRAM_WEBHOOK_SECRET.
+    required: true
+  since:
+    description: >-
+      Epoch ms of this run's start, the answering seat's only; empty
+      settles no operator message.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        WORKER_SECRET: ${{ inputs.secret }}
+        SINCE: ${{ inputs.since }}
+      run: |
+        printf 'url = "https://bot.mothergod.dev/typing/reset?since=%s&run=%s"\nheader = "x-mothergod-secret: %s"\n' \
+          "${SINCE}" "${GITHUB_RUN_ID}" "${WORKER_SECRET}" |
+          curl -sS -X POST --max-time 10 --config - -o /dev/null -w 'typing/reset: %{http_code}\n'

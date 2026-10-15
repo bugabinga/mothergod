@@ -79,10 +79,13 @@ const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
  * - /stop, an answer went out (`.github/scripts/tg-send`): drop the
  *   oldest arrival, because a drain answers in arrival order.
  * - /reset?since=<ms>&run=<id>, a run ended (a seat workflow's last
- *   step): drop every arrival older than that run's start, and the
- *   run's own text. Those were its messages to answer, and whether it
- *   answered them, died, or was skipped by the pause guard, nobody is
- *   working on them now; a dead run's last words are not shown for it.
+ *   step): drop the run's own text, and with `since`, every arrival
+ *   older than that run's start. `since` is the BDFL's, the one seat
+ *   that answers: those were its messages, and whether it answered
+ *   them, died, or was skipped by the pause guard, nobody is working
+ *   on them now. The other seats reset with `run` alone, because a
+ *   heartbeat ending must not silence a message the BDFL still owes
+ *   (#742). A dead run's last words are not shown for it either way.
  * - /draft, body `{text, run}`, the run says what it is doing
  *   (`.github/scripts/tg-draft`, a hook on every tool call): typing
  *   with content (#733). The loop shows the live runs' texts as one
@@ -183,14 +186,20 @@ export class Typing {
       await this.state.storage.setAlarm(now);
       return new Response(null, { status: 204 });
     }
-    // A missing or malformed `since` falls back to "now", which settles
-    // every arrival, and a reset naming no run drops every run's text:
-    // the safe direction is silence, never a bot that types at nobody.
-    const since = Number(url.searchParams.get("since"));
-    const cutoff = since > 0 ? since : now;
+    // `since` is the answering seat's: arrivals older than it are
+    // settled, and a value that is not a time falls back to "now", which
+    // settles every one. A reset naming a run and no `since` is a seat
+    // that answers nobody (#742): it drops that run's text and leaves
+    // every arrival to the run that owes them. A reset naming no run
+    // drops every run's text. The safe direction is silence, never a
+    // bot that types at nobody.
+    const sinceRaw = url.searchParams.get("since");
     const run = url.searchParams.get("run");
     const stop = url.pathname === "/stop";
-    const owed = stop ? arrivals.slice(1) : arrivals.filter((at) => at >= cutoff);
+    const answers = Boolean(sinceRaw) || !run;
+    const since = Number(sinceRaw);
+    const cutoff = since > 0 ? since : now;
+    const owed = stop ? arrivals.slice(1) : answers ? arrivals.filter((at) => at >= cutoff) : arrivals;
     const working = stop ? runs : (run ? runs.filter((entry) => entry.run !== run) : []);
     await this.settle(owed, working);
     return new Response(null, { status: 204 });
