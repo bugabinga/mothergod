@@ -12,12 +12,13 @@ the harness, but its tool calls are, and a Bash call carries the human
 sentence its author wrote for exactly this reader (#733).
 
 What it posts: the seat, how long it has been running, and the last
-LINES tool calls as one-line verbs, newest last, to the webhook worker's
-`/typing/draft`. The worker shows the text with Telegram's
-`sendMessageDraft`, an ephemeral preview the real reply replaces, and
-only while an operator message is unanswered, so a scheduled wake posts
-here and nobody sees it; that gate lives in the worker so this script
-has nothing to know about who is waiting.
+LINES tool calls as one-line verbs, newest last, under the run's id, to
+the webhook worker's `/typing/draft`. The worker shows every live run's
+text as one Telegram `sendMessageDraft`, an ephemeral preview the real
+reply replaces, whether or not an operator message is waiting (#742):
+the operator asked to watch every seat, and which seats post is decided
+by which workflows hold the secret, so this script has nothing to know
+about who is waiting or watching.
 
 PreToolUse, not PostToolUse, because the operator wants to know what
 the run is doing, not what it just finished: a ten-minute test run
@@ -26,8 +27,7 @@ reads "running the worker tests" while it runs.
 Contract: reads the hook JSON on stdin; exit 0 always, because a
 decoration must never fail a tool call. Does nothing outside GitHub
 Actions (GITHUB_ACTIONS != "true") or when TELEGRAM_WEBHOOK_SECRET is
-unset, which is every seat but the one whose workflow holds the secret
-(agent-bdfl.yml). State is one file per session in the temp directory:
+unset, which is every seat whose workflow does not hold the secret. State is one file per session in the temp directory:
 the first call's time and the recent lines, replaced atomically so a
 parallel hook never reads half a file and forgets when the run started.
 The text goes through secret_scrub on the way out, tg-send's rule.
@@ -75,12 +75,15 @@ def main() -> int:
     line = describe(call["tool_name"], call.get("tool_input"), call.get("cwd"))
     now = time.time()
     session = call.get("session_id")
-    path = state_path(session if isinstance(session, str) and session else "unknown")
+    session = safe(session if isinstance(session, str) and session else "unknown")
+    path = state_path(session)
     state = load_state(path, now)
     state["lines"] = (state["lines"] + [line])[-LINES:]
     save_state(path, state)
     text, _ = scrub(render(state, now))
-    post(text, secret)
+    # The run id keys the worker's per-run slot; where no run number exists
+    # the session id stands in, so two hooks never share one slot.
+    post(text, os.environ.get("GITHUB_RUN_ID") or session, secret)
     return 0
 
 
@@ -138,10 +141,14 @@ def render(state: dict, now: float) -> str:
     return "\n".join([head, *(f"{DOT} {line}" for line in state["lines"])])
 
 
+def safe(session_id: str) -> str:
+    """The session id as a file name and a run slot: alphanumerics, dash, underscore."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)[:64]
+
+
 def state_path(session_id: str) -> str:
-    """One file per session, in the temp directory, filename-safe."""
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
-    return os.path.join(tempfile.gettempdir(), f"tg-draft-{safe}.json")
+    """One file per session, in the temp directory."""
+    return os.path.join(tempfile.gettempdir(), f"tg-draft-{session_id}.json")
 
 
 def load_state(path: str, now: float) -> dict:
@@ -168,11 +175,11 @@ def save_state(path: str, state: dict) -> None:
     os.replace(tmp, path)
 
 
-def post(text: str, secret: str) -> None:
+def post(text: str, run: str, secret: str) -> None:
     """Hand the draft to the worker. Best effort: it is decoration."""
     request = urllib.request.Request(
         DRAFT,
-        data=json.dumps({"text": text}).encode(),
+        data=json.dumps({"text": text, "run": run}).encode(),
         headers={
             "Content-Type": "application/json",
             "x-mothergod-secret": secret,

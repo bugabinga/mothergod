@@ -39,6 +39,7 @@ function hook(call, env = {}) {
         TMPDIR,
         GITHUB_ACTIONS: "true",
         GITHUB_WORKFLOW: "agent-bdfl",
+        GITHUB_RUN_ID: "38732814683",
         TELEGRAM_WEBHOOK_SECRET: SECRET,
         MOTHERGOD_WORKER_BASE: base,
         ...env,
@@ -55,14 +56,19 @@ function bash(session_id, description) {
   return { session_id, tool_name: "Bash", tool_input: { command: "true", description } };
 }
 
-test("a Bash call's description reaches the worker under the seat's name", async () => {
+test("a Bash call's description reaches the worker under the seat's name and the run's id", async () => {
   const before = posts.length;
   const { status } = await hook(bash("s-one", "Run the worker tests"));
   assert.equal(status, 0);
   const post = posts[before];
   assert.equal(post.path, "/typing/draft");
   assert.equal(post.secret, SECRET);
-  assert.equal(post.body.text, "bdfl, starting\n· Run the worker tests");
+  assert.deepEqual(post.body, { text: "bdfl, starting\n· Run the worker tests", run: "38732814683" });
+});
+
+test("without a run number the session id keys the run's slot", async () => {
+  await hook(bash("s-nine", "a"), { GITHUB_RUN_ID: "" });
+  assert.equal(posts.at(-1).body.run, "s-nine");
 });
 
 test("the draft keeps the last four calls of a session, newest last", async () => {

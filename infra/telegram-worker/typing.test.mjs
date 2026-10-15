@@ -56,6 +56,9 @@ function object() {
       async deleteAlarm() {
         alarm = null;
       },
+      async getAlarm() {
+        return alarm;
+      },
     },
   };
   sent.length = 0;
@@ -74,8 +77,12 @@ function object() {
       );
       return response.status;
     },
-    // One alarm tick, the moment the loop would send.
-    tick: () => typing.alarm(),
+    // One alarm tick, the moment the loop would send. An alarm is consumed
+    // by firing, so a handler that does not reschedule ends the loop.
+    tick: () => {
+      alarm = null;
+      return typing.alarm();
+    },
     // The operator sees "typing..." exactly while the alarm loop is armed.
     get typing() {
       return alarm !== null;
@@ -83,8 +90,9 @@ function object() {
     get owed() {
       return (storage.get("arrivals") ?? []).length;
     },
-    get draftText() {
-      return storage.get("draft");
+    // The live runs' texts, oldest run first: what the next tick composes.
+    get drafts() {
+      return (storage.get("runs") ?? []).map((entry) => entry.text);
     },
     // Bot API methods called so far, in order.
     get methods() {
@@ -96,7 +104,7 @@ function object() {
   };
 }
 
-const text = (line) => JSON.stringify({ text: line });
+const text = (line, run = "r1") => JSON.stringify({ text: line, run });
 
 test("one message, one answer", async () => {
   const bot = object();
@@ -176,8 +184,8 @@ test("a second run's reset cannot resurrect a settled indicator", async () => {
   assert.ok(!bot.typing);
 });
 
-// The draft (#733): typing with content, on the same loop, under the
-// same invariant. It exists exactly while an answer is owed.
+// The draft (#733): typing with content, on the same loop. It exists
+// while an answer is owed or a run is working (#742), per run.
 
 test("a draft while an answer is owed goes out on the next tick and is refreshed every 10s", async () => {
   const bot = object();
@@ -219,14 +227,59 @@ test("a changed draft goes out on the next tick, not on the next refresh", async
   assert.equal(bot.lastDraft.text, "b");
 });
 
-test("a draft with nobody waiting is dropped, and wakes nothing", async () => {
+test("a scheduled run's draft shows with nobody waiting, and its first word starts the loop", async () => {
   const bot = object();
   at(1000);
-  assert.equal(await bot.draft(text("bdfl, starting\n· reading the inbox")), 204);
-  assert.ok(!bot.typing);
-  assert.equal(bot.draftText, undefined);
+  assert.equal(await bot.draft(text("maintainer, starting\n· reading the queue", "m1")), 204);
+  assert.ok(bot.typing, "no /start preceded it: the draft armed the loop itself");
+  at(2000);
   await bot.tick();
-  assert.deepEqual(bot.methods, []);
+  assert.deepEqual(bot.methods, ["sendChatAction", "sendMessageDraft"]);
+  assert.equal(bot.lastDraft.text, "maintainer, starting\n· reading the queue");
+});
+
+test("two live runs share the draft, oldest run first, each keeping its slot", async () => {
+  const bot = object();
+  at(1000);
+  await bot.draft(text("maintainer, 1 min\n· building", "m1"));
+  at(1500);
+  await bot.draft(text("reviewer, starting\n· reading the diff", "r2"));
+  at(2000);
+  await bot.draft(text("maintainer, 1 min\n· testing", "m1"));
+  at(3000);
+  await bot.tick();
+  assert.equal(
+    bot.lastDraft.text,
+    "maintainer, 1 min\n· testing\n\nreviewer, starting\n· reading the diff",
+  );
+});
+
+test("a run's reset drops its text and leaves the other run's", async () => {
+  const bot = object();
+  at(1000);
+  await bot.draft(text("maintainer\n· building", "m1"));
+  await bot.draft(text("reviewer\n· reading", "r2"));
+  at(2000);
+  await bot.call("/reset?since=900&run=m1");
+  assert.ok(bot.typing, "the reviewer is still working");
+  assert.deepEqual(bot.drafts, ["reviewer\n· reading"]);
+  await bot.call("/reset?since=900&run=r2");
+  assert.ok(!bot.typing, "nobody working, nothing owed: the loop ends");
+});
+
+test("a run that falls silent for the cap drops out while another keeps the loop", async () => {
+  const bot = object();
+  at(0);
+  await bot.draft(text("reviewer\n· last words before the cancel", "r2"));
+  at(15 * 60_000);
+  await bot.draft(text("maintainer\n· still going", "m1"));
+  at(21 * 60_000);
+  await bot.tick();
+  assert.ok(bot.typing);
+  assert.equal(bot.lastDraft.text, "maintainer\n· still going", "the cancelled review's words are gone");
+  at(36 * 60_000);
+  await bot.tick();
+  assert.ok(!bot.typing, "the last run went quiet past the cap");
 });
 
 test("a draft is proof of life: the cap counts from the run's last word", async () => {
@@ -241,15 +294,18 @@ test("a draft is proof of life: the cap counts from the run's last word", async 
   assert.ok(bot.methods.includes("sendMessageDraft"));
 });
 
-test("the answer landing clears the draft with the indicator", async () => {
+test("the answer landing clears what was owed; the run's draft stays until its reset", async () => {
   const bot = object();
   at(1000);
   await bot.call("/start");
   await bot.draft(text("bdfl, 1 min\n· sending the reply"));
   at(2000);
   await bot.call("/stop");
+  assert.equal(bot.owed, 0);
+  assert.ok(bot.typing, "the run goes on after the reply, and the operator asked to watch it");
+  assert.deepEqual(bot.drafts, ["bdfl, 1 min\n· sending the reply"]);
+  await bot.call("/reset?since=900&run=r1");
   assert.ok(!bot.typing);
-  assert.equal(bot.draftText, undefined);
 });
 
 test("a run's reset drops its draft even while the next run's message waits", async () => {
@@ -260,9 +316,19 @@ test("a run's reset drops its draft even while the next run's message waits", as
   at(1500);
   await bot.call("/start");
   at(2000);
-  await bot.call("/reset?since=1200");
+  await bot.call("/reset?since=1200&run=r1");
   assert.ok(bot.typing, "the second message is still owed");
-  assert.equal(bot.draftText, undefined, "but a dead run's last words are not shown for it");
+  assert.deepEqual(bot.drafts, [], "but a dead run's last words are not shown for it");
+});
+
+test("a reset naming no run drops every run's text", async () => {
+  const bot = object();
+  at(1000);
+  await bot.draft(text("a", "r1"));
+  await bot.draft(text("b", "r2"));
+  await bot.call("/reset?since=900");
+  assert.ok(!bot.typing);
+  assert.deepEqual(bot.drafts, []);
 });
 
 test("a malformed draft is refused and stores nothing", async () => {
@@ -270,9 +336,22 @@ test("a malformed draft is refused and stores nothing", async () => {
   at(1000);
   await bot.call("/start");
   for (
-    const body of ["not json", "null", "{}", text(""), text("   "), JSON.stringify({ text: 5 }), text("x".repeat(4097))]
+    const body of [
+      "not json",
+      "null",
+      "{}",
+      text(""),
+      text("   "),
+      JSON.stringify({ text: 5, run: "r1" }),
+      text("x".repeat(4097)),
+      JSON.stringify({ text: "x" }),
+      text("x", ""),
+      text("x", "a b"),
+      text("x", "r".repeat(65)),
+      JSON.stringify({ text: "x", run: 5 }),
+    ]
   ) {
     assert.equal(await bot.draft(body), 400, body.slice(0, 20));
   }
-  assert.equal(bot.draftText, undefined);
+  assert.deepEqual(bot.drafts, []);
 });

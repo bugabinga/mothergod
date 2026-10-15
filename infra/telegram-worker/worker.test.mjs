@@ -86,6 +86,9 @@ function harness(github = () => json({}), sessions = []) {
             },
             async setAlarm() {},
             async deleteAlarm() {},
+            async getAlarm() {
+              return null;
+            },
           };
           objects.set(id, new Typing({ storage }, env));
         }
@@ -820,11 +823,20 @@ test("/typing/draft carries a run's draft to the typing object on the worker sec
       }),
       setup.env,
     );
-  assert.equal((await post("wrong", JSON.stringify({ text: "x" }))).status, 401);
+  assert.equal((await post("wrong", JSON.stringify({ text: "x", run: "1" }))).status, 401);
   assert.equal((await post("webhook-secret", "not json")).status, 400);
-  // Nobody is owed an answer here, so the object drops it quietly: 204 all the same.
-  assert.equal((await post("webhook-secret", JSON.stringify({ text: "bdfl, 3 min" }))).status, 204);
-  assert.deepEqual(setup.typing, ["https://typing.invalid/draft", "https://typing.invalid/draft"]);
+  assert.equal(
+    (await post("webhook-secret", JSON.stringify({ text: "bdfl, 3 min" }))).status,
+    400,
+    "a draft names its run",
+  );
+  // Nobody is owed an answer here; the run's words show all the same (#742).
+  assert.equal((await post("webhook-secret", JSON.stringify({ text: "bdfl, 3 min", run: "1" }))).status, 204);
+  assert.deepEqual(setup.typing, [
+    "https://typing.invalid/draft",
+    "https://typing.invalid/draft",
+    "https://typing.invalid/draft",
+  ]);
 });
 
 // The database id lives in two files by platform requirement: wrangler.toml
