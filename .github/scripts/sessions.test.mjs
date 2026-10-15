@@ -170,6 +170,17 @@ test("roles rejects a window past the calendar with the usage line, not a traceb
   }
 });
 
+// Year 1 and year 9999 parse with a zone, and the shift to UTC then leaves the
+// calendar: the third overflow in since_of, the usage line again (#1029).
+test("roles rejects an ISO date whose UTC shift leaves the calendar with the usage line, not a traceback", async () => {
+  for (const spec of ["0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00"]) {
+    const r = await run(["roles", "--since", spec], { D1_API_BASE: "http://127.0.0.1:9" });
+    assert.notEqual(r.code, 0, spec);
+    assert.match(r.err, /--since takes Nd or an ISO date/, spec);
+    assert.doesNotMatch(r.err, /Traceback|OverflowError/, spec);
+  }
+});
+
 test("show prints one run vertically, or says which run is missing", async () => {
   await withStub(d1([{ run_id: 42, attempt: 1, role: "herald", turns: 9 }]), async (base, seen) => {
     const r = await run(["show", "42"], { D1_API_BASE: base });
