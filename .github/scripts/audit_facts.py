@@ -153,7 +153,7 @@ def allowance_rows(meta):
     The shape rule is `allowance.window_readings`; the validation is the
     consumers' union: a reading exists at all on `valid_fraction` alone
     (retrospect's footer informs on the fraction), and keeps its reset only
-    when `valid_reset` (the artifact-name index demanded both). Last wins,
+    when `valid_reset` (the guard's allowance ledger demands both). Last wins,
     in event order, because the API reports the window's current state each
     time. No run_id, no events, or none readable is an empty list, never a
     row of nulls: a run that reported nothing is absent, which is what a
