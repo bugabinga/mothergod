@@ -274,39 +274,5 @@ impl<S: Spacing> Table<S> {
     }
 }
 
-/// [`Sse`] and [`LogitSse`] in exactly the shape a generic mixer needs:
-/// both differ only in [`Spacing`], never in construction or the two public
-/// methods' own signatures. [`crate::literal::SurpriseLogisticMix`] is
-/// generic over this trait; since ADR-0063 retired its [`Sse`]
-/// instantiation, only [`LogitSse`] instantiates it.
-pub trait Calibrate: Sized {
-    /// Same contract as [`Table::new`].
-    fn new(contexts: usize) -> Self;
-    /// Same contract as `Table::try_new`.
-    fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError>;
-    /// Same contract as [`Table::refine`].
-    fn refine(&self, context: usize, p: f64) -> f64;
-    /// Same contract as [`Table::update`].
-    fn update(&mut self, context: usize, p: f64, outcome: bool);
-}
-
-impl<S: Spacing> Calibrate for Table<S> {
-    fn new(contexts: usize) -> Self {
-        Self::new(contexts)
-    }
-
-    fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
-        Self::try_new(contexts)
-    }
-
-    fn refine(&self, context: usize, p: f64) -> f64 {
-        Self::refine(self, context, p)
-    }
-
-    fn update(&mut self, context: usize, p: f64, outcome: bool) {
-        Self::update(self, context, p, outcome);
-    }
-}
-
 #[cfg(test)]
 mod tests;
