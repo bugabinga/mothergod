@@ -520,8 +520,7 @@ pub(crate) fn rescale_bank(
 }
 
 /// Codes `symbol` through `encoder` at the sub-range `freq[..symbol].sum()..
-/// +freq[symbol]` out of `denom`. `denom` is the caller's: `total`, or
-/// `total + distinct` under [`ppm::Ppm`]'s escape band.
+/// +freq[symbol]` out of `denom`, the caller's `freq.iter().sum()`.
 pub(crate) fn encode_symbol(encoder: &mut coder::Encoder, freq: &[u32], symbol: usize, denom: u64) {
     let low: u32 = freq[..symbol].iter().sum();
     let high = low + freq[symbol];
@@ -534,8 +533,8 @@ pub(crate) fn encode_symbol(encoder: &mut coder::Encoder, freq: &[u32], symbol: 
 /// of [`encode_symbol`].
 ///
 /// Never runs past the end of `freq`: callers bound `target` to
-/// `freq.iter().sum()` (for [`ppm::Ppm`], after peeling off its escape
-/// share), so the scan finds a symbol whatever bytes produced `target`.
+/// `freq.iter().sum()`, so the scan finds a symbol whatever bytes produced
+/// `target`.
 pub(crate) fn scan_for_target(freq: &[u32], target: u64) -> (usize, u64, u64) {
     let mut symbol = 0;
     let mut low = 0u64;
