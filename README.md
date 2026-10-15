@@ -59,6 +59,16 @@ cd mothergod
 cargo build --release --bin mothergod
 ```
 
+The first run needs no file of yours, because the clone ships one:
+
+```console
+$ ./target/release/mothergod -v LICENSE
+mothergod: LICENSE: 1074 -> 638 bytes (59.4%)
+```
+
+`-v` asked for that line; without it, a run that worked prints nothing. One
+1 KB file is a smoke test, not a benchmark; the tables above are the benchmark.
+
 The CLI speaks the grammar `gzip`, `xz` and `zstd` already taught you: it
 compresses, `-d` decompresses, stdin to stdout when you name no file. Round-trip
 something of yours and check the result rather than taking our word for it.

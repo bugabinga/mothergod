@@ -6,7 +6,7 @@
 //! measurement date, the
 //! reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
-//! recipe a reader is told to type, instead of
+//! recipe a reader is told to type and the line its first run prints, instead of
 //! deriving any of them, so a codec change, a report regeneration, a
 //! release or a
 //! renamed subcommand can leave any of them stale with nothing catching it
@@ -843,6 +843,42 @@ fn published_cli_recipe_names_options_the_binary_answers_to() {
         assert!(
             surface.contains(".mgdc") && help.contains(".mgdc"),
             "{surface_file} and mothergod --help disagree about the compressed-file suffix"
+        );
+    }
+}
+
+#[test]
+fn published_first_run_transcript_matches_what_the_binary_prints() {
+    // Both "Try it" sections quote one `-v` run on the clone's `LICENSE`
+    // (issue #1196). A codec change that moves its size would otherwise
+    // leave a stranger's terminal disagreeing with the page they followed.
+    // `-c` keeps the run from writing `LICENSE.mgdc` into the checkout; the
+    // line it prints names the input the same way the bare run does.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mothergod"))
+        .args(["-v", "-c", "LICENSE"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("mothergod binary should spawn");
+    assert!(
+        output.status.success(),
+        "mothergod -v -c LICENSE should exit 0"
+    );
+    let printed = String::from_utf8(output.stderr).expect("verbose line is UTF-8");
+    let truth = printed.trim_end();
+
+    for surface_file in ["README.md", "site/index.html"] {
+        let surface = read(surface_file).replace("&gt;", ">");
+        assert!(
+            surface.contains("$ ./target/release/mothergod -v LICENSE\n"),
+            "{surface_file} no longer quotes the `mothergod -v LICENSE` run this test checks"
+        );
+        // The site's `<pre>` closes on the transcript's last line.
+        let claimed = line_containing(&surface, "mothergod: LICENSE: ")
+            .trim()
+            .trim_end_matches("</pre>");
+        assert_eq!(
+            claimed, truth,
+            "{surface_file} quotes `{claimed}` for `mothergod -v LICENSE`; the binary prints `{truth}`"
         );
     }
 }
