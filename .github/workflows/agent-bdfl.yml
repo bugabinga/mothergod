@@ -490,40 +490,18 @@ jobs:
           telegram_chat_id: ${{ vars.OPERATOR_TELEGRAM_CHAT_ID }}
           cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-      # No live run, no "typing..." (PR #155 review). The worker starts
-      # the indicator when the operator's message lands and counts down
-      # as tg-send delivers answers; this settles whatever is left over
-      # from before this run started, answered or not. Unconditional on
-      # purpose, because the cases where it matters are exactly the ones
-      # a condition would miss: the pause guard skipped the session
-      # whole, the session died, the job was cancelled, the count
-      # drifted. The invariant is one sentence: the bot types while a
-      # run is alive or an answer is owed, never after. `run` ends this
-      # run's share of the draft; other seats' live runs keep theirs
-      # (#742).
-      #
-      # `since` is what keeps that from being a blunt zero: a message
-      # that arrived mid-run is the queued run's to answer, and killing
-      # its indicator here would restore the silent screen this whole
-      # change removes.
-      #
-      # It doubles as the indicator's health check, which is why it logs
-      # the status code: 204 reachable, 502 the Durable Object is not,
-      # 401 the secret is wrong. Two attempts at this indicator failed by
-      # being unobservable.
-      #
-      # The secret reaches curl as a --config file on stdin, so it never
-      # enters any argv (hard rule 10). continue-on-error because a stale
-      # indicator expires on the worker's own cap, and decoration must
-      # not redden a good run.
+      # No live run, no draft, no "typing..." (PR #155 review, #742).
+      # The invariant is one sentence: the bot types while a run is
+      # alive or an answer is owed, never after. `since` makes this the
+      # answering seat's reset: messages older than this run's start are
+      # settled, answered or not, and one that landed mid-run stays for
+      # the run the lane has queued. The action carries the rationale.
       - if: always()
         continue-on-error: true
-        env:
-          WORKER_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
-        run: |
-          printf 'url = "https://bot.mothergod.dev/typing/reset?since=%s&run=%s"\nheader = "x-mothergod-secret: %s"\n' \
-            "${TYPING_SINCE}" "${GITHUB_RUN_ID}" "${WORKER_SECRET}" |
-            curl -sS -X POST --max-time 10 --config - -o /dev/null -w 'typing/reset: %{http_code}\n'
+        uses: ./.github/actions/typing-reset
+        with:
+          secret: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          since: ${{ env.TYPING_SINCE }}
 
       - if: always() && steps.claude.outcome != 'skipped'
         continue-on-error: true

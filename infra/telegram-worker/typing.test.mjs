@@ -267,6 +267,23 @@ test("a run's reset drops its text and leaves the other run's", async () => {
   assert.ok(!bot.typing, "nobody working, nothing owed: the loop ends");
 });
 
+test("a reset naming a run and no cutoff leaves what the BDFL owes", async () => {
+  // A clock seat's workflow resets with `run` alone (typing-reset's
+  // empty `since`): it answers nobody, so the operator's message keeps
+  // the indicator for the BDFL run the lane has queued.
+  for (const query of ["?run=h1", "?since=&run=h1"]) {
+    const bot = object();
+    at(1000);
+    await bot.call("/start");
+    await bot.draft(text("heartbeat\n· building", "h1"));
+    at(2000);
+    await bot.call(`/reset${query}`);
+    assert.equal(bot.owed, 1, `the message still waits after ${query}`);
+    assert.ok(bot.typing, "an answer is owed, so the loop stays");
+    assert.deepEqual(bot.drafts, [], "the heartbeat's last words are gone");
+  }
+});
+
 test("a run that falls silent for the cap drops out while another keeps the loop", async () => {
   const bot = object();
   at(0);
