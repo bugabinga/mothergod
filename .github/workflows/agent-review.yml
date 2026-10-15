@@ -182,6 +182,10 @@ jobs:
           # such interpolation in any agent workflow.
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # The head this run reviews and merge-pr pins. The checkout is
+          # the merge ref, so `git rev-parse HEAD` names a commit no merge
+          # accepts (#1183's reviewer, first try).
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           # What post-verdict stamps into the verdict comment (the stamp
           # step's id of the diff, title and body this session was handed).
           DIFF_ID: ${{ steps.stamp.outputs.diff_id }}
@@ -269,7 +273,7 @@ jobs:
               stdin, listing what you executed and why it holds; it sets
               the label pair and stamps the comment with the diff it covers.
               Then merge as your last action:
-              `.github/scripts/merge-pr $PR_NUMBER --sha <reviewed-head>`.
+              `.github/scripts/merge-pr $PR_NUMBER --sha "$HEAD_SHA"`.
               Attempt it before predicting it will fail; an unsigned branch
               commit is not a reason to stop (GOVERNANCE.md "Merging"). Exit 2
               means required gates are still pending and the merge is armed
