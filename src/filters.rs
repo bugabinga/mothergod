@@ -458,12 +458,8 @@ pub mod base64_unwrap {
             if pad > 2 || (pad > 0 && !is_last) {
                 return None;
             }
-            let digits = &group[..4 - pad];
-            if digits.contains(&b'=') {
-                return None;
-            }
             let mut vals = [0u8; 4];
-            for (v, &b) in vals.iter_mut().zip(digits) {
+            for (v, &b) in vals.iter_mut().zip(&group[..4 - pad]) {
                 *v = decode_char(b)?;
             }
             out.push((vals[0] << 2) | (vals[1] >> 4));
@@ -511,14 +507,14 @@ pub mod base64_unwrap {
     /// otherwise. Empty `data` is not base64, so it answers `None` too.
     #[must_use]
     pub fn encode(data: &[u8]) -> Option<Vec<u8>> {
-        let looks_like_base64 = data.len().is_multiple_of(4)
-            && data[..data.len().min(SCAN_LIMIT)]
+        if !data.len().is_multiple_of(4)
+            || !data[..data.len().min(SCAN_LIMIT)]
                 .iter()
-                .all(|&b| is_base64_byte(b));
-        looks_like_base64
-            .then(|| strict_decode(data))
-            .flatten()
-            .filter(|decoded| b64_encode(decoded) == data)
+                .all(|&b| is_base64_byte(b))
+        {
+            return None;
+        }
+        strict_decode(data).filter(|decoded| b64_encode(decoded) == data)
     }
 
     /// Inverts [`encode`]: the padded base64 text of `data`, `4 *
