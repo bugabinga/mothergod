@@ -204,3 +204,23 @@ pub(crate) fn record_text(lines: usize) -> Vec<u8> {
         .flat_map(|i| format!("{{\"id\":{i},\"score\":{}}}\n", i * 37 % 1000).into_bytes())
         .collect()
 }
+
+/// `rows` fixed-width rows of a little-endian `i64` timestamp, a 4-byte
+/// category and a little-endian `f64` measurement, 20 bytes each: input on
+/// which the trial encode prefers `Candidate::Reverse` to every other
+/// filter (`JOURNAL` S2-A119).
+pub(crate) fn le_rows(rows: usize) -> Vec<u8> {
+    const CATEGORIES: [&[u8; 4]; 3] = [b"temp", b"hum\0", b"pres"];
+    let mut noise = Xorshift32::new(0x9E37_79B9);
+    let mut out = Vec::with_capacity(rows * 20);
+    let mut timestamp = 1_700_000_000_i64;
+    for _ in 0..rows {
+        let pick = noise.next().expect("infinite") as usize % CATEGORIES.len();
+        let value = 20.0 + f64::from(noise.next().expect("infinite") % 6000) / 1000.0;
+        out.extend_from_slice(&timestamp.to_le_bytes());
+        timestamp += 60;
+        out.extend_from_slice(CATEGORIES[pick]);
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
+}

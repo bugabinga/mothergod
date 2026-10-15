@@ -557,6 +557,46 @@ fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     ));
     stream.extend(base64);
     assert_eq!(decodes_incrementally(&stream), Ok(false));
+
+    let (mut stream, _) = test_support::mixed_stream();
+    let reverse = lz_frame(&test_support::lz_payload(
+        filters::select::Candidate::Reverse.to_header_bytes(),
+        test_support::floor_declared_len(),
+        0,
+        &[],
+    ));
+    stream.extend(reverse);
+    assert_eq!(decodes_incrementally(&stream), Ok(false));
+}
+
+#[test]
+fn a_reverse_frame_round_trips_through_every_entry_point() {
+    use std::io::Read as _;
+
+    let rows = test_support::le_rows(2500);
+    let frame = compress(&rows);
+    assert_eq!(frame[HEADER_LEN..HEADER_LEN + 2], [5, 0], "picks Reverse");
+
+    assert_eq!(decompress(&frame).as_deref(), Ok(rows.as_slice()));
+    let len = u32::try_from(rows.len()).expect("small");
+    assert_eq!(
+        decompress_bounded(&frame, len).as_deref(),
+        Ok(rows.as_slice())
+    );
+    assert_eq!(
+        decompress_bounded(&frame, len - 1),
+        Err(Error::TooLarge { len, max: len - 1 })
+    );
+    let mut written = Vec::new();
+    decompress_to_writer(&frame, len, &mut written).expect("writes");
+    assert_eq!(written, rows);
+    assert_eq!(decodes_incrementally(&frame), Ok(false));
+
+    let mut read = Vec::new();
+    read::Decoder::new(frame.as_slice())
+        .read_to_end(&mut read)
+        .expect("reads");
+    assert_eq!(read, rows);
 }
 
 #[test]

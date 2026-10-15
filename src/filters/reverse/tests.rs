@@ -36,3 +36,14 @@ fn palindrome_is_a_fixed_point() {
     let data = vec![1, 2, 3, 2, 1];
     assert_eq!(encode(&data), data);
 }
+
+#[test]
+fn try_decode_agrees_with_decode() {
+    let data: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+    for len in [0usize, 1, 2, 255, 1000] {
+        assert_eq!(
+            try_decode(&data[..len]).as_deref(),
+            Ok(&*decode(&data[..len]))
+        );
+    }
+}

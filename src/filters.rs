@@ -5,9 +5,9 @@
 //! `crate::codec` trial-encodes each, keeping the smallest (`JOURNAL` S1-A1,
 //! ADR-0028).
 //!
-//! `delta`, `transpose`, `bcj` and `base64_unwrap`, the four filters
-//! `crate::codec` selects, each invert in two forms. The public `decode` aborts if the allocator
-//! cannot satisfy its output buffer. The `pub(crate)` `try_decode`, and each
+//! `delta`, `transpose`, `bcj`, `base64_unwrap` and `reverse`, the five
+//! filters `crate::codec` selects, each invert in two forms. The public
+//! `decode` aborts if the allocator cannot satisfy its output buffer. The `pub(crate)` `try_decode`, and each
 //! streaming `Undo::try_new`, return `Err` instead, because the decode path
 //! must not abort on untrusted input (hard rule 2, `tests/torture.rs`, #453).
 //! A pair differs only in how the buffer is built, never in the scan run
@@ -539,9 +539,10 @@ pub mod base64_unwrap {
 
 /// Byte-order reversal.
 ///
-/// Wins when structure is right-anchored (a fixed suffix, a length-prefixed
-/// tail): reversing moves the anchor to where the downstream LZ/model's
-/// forward context reaches it (`JOURNAL` S1-A2). Its own inverse, so
+/// Wins when a byte is better predicted by the bytes after it than by the
+/// bytes before it, which no count over n-grams can see: every such entropy
+/// reads the same backwards, so only the trial encode decides
+/// (`JOURNAL` S1-A2, S2-A119). Its own inverse, so
 /// [`decode`](reverse::decode) is [`encode`](reverse::encode) under the
 /// module's encode/decode-pair shape.
 pub mod reverse {
@@ -559,6 +560,13 @@ pub mod reverse {
         encode(data)
     }
 
+    /// Fallible [`decode`] (module docs of [`crate::filters`]).
+    pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
+        let mut out = crate::try_vec_from_slice(data)?;
+        out.reverse();
+        Ok(out)
+    }
+
     #[cfg(test)]
     mod tests;
 }
@@ -568,7 +576,7 @@ pub mod reverse {
 /// [`select::pick`] narrows the menu with an order-1 entropy proxy on a
 /// bounded probe, so the expensive trial encode runs only on candidates
 /// worth it (`JOURNAL` S1-A1). It shortlists [`delta`], [`bcj`],
-/// [`transpose`] and [`base64_unwrap`]; [`reverse`] is not wired in.
+/// [`transpose`], [`base64_unwrap`] and, for every input, [`reverse`].
 pub mod select {
     use super::delta;
     use std::collections::HashMap;
@@ -635,14 +643,16 @@ pub mod select {
         /// bytes are the decoded binary, three for every four of the
         /// original.
         Base64,
+        /// [`super::reverse::encode`].
+        Reverse,
     }
 
     impl Candidate {
         /// Serializes this candidate into the 2-byte filter selector
         /// `[kind, param]` that opens `Method::Lz`'s payload
         /// (`docs/format/SPEC.md`). `param` is the delta stride or transpose
-        /// column count, zero for [`Self::Identity`], [`Self::Bcj`] and
-        /// [`Self::Base64`].
+        /// column count, zero for [`Self::Identity`], [`Self::Bcj`],
+        /// [`Self::Base64`] and [`Self::Reverse`].
         ///
         /// # Panics
         ///
@@ -666,6 +676,7 @@ pub mod select {
                     ),
                 ],
                 Self::Base64 => [4, 0],
+                Self::Reverse => [5, 0],
             }
         }
 
@@ -684,6 +695,7 @@ pub mod select {
                 [2, 0] => Some(Self::Bcj),
                 [3, param] => NonZeroUsize::new(usize::from(param)).map(Self::Transpose),
                 [4, 0] => Some(Self::Base64),
+                [5, 0] => Some(Self::Reverse),
                 _ => None,
             }
         }
@@ -699,9 +711,11 @@ pub mod select {
         pub fn output_len(self, filtered_len: u32) -> u64 {
             match self {
                 Self::Base64 => u64::from(filtered_len).div_ceil(3) * 4,
-                Self::Identity | Self::Delta(_) | Self::Bcj | Self::Transpose(_) => {
-                    u64::from(filtered_len)
-                }
+                Self::Identity
+                | Self::Delta(_)
+                | Self::Bcj
+                | Self::Transpose(_)
+                | Self::Reverse => u64::from(filtered_len),
             }
         }
     }
@@ -821,6 +835,8 @@ pub mod select {
         if super::base64_unwrap::encode(data).is_some() {
             candidates.push(Candidate::Base64);
         }
+
+        candidates.push(Candidate::Reverse);
 
         if data.len() >= MIN_TRANSPOSE_LEN {
             let baseline = column_entropy(probe, 1);
