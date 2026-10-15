@@ -1065,23 +1065,22 @@ impl DpState {
     ) {
         let mut new_cache = reps;
         new_cache.push_front(distance_here);
-        let offset_cost = prices.offset[bucket(distance_here.get())]
-            + extra_bits(bucket(distance_here.get()))
-            + EXTRA_HEADER_BITS_PRICE;
+        let offset_bucket = bucket(distance_here.get());
+        let offset_cost =
+            prices.offset[offset_bucket] + extra_bits(offset_bucket) + EXTRA_HEADER_BITS_PRICE;
+        let mut relax_len = |len: u32| {
+            let cost = base + prices.length_price(len) + offset_cost;
+            let mv = Move::Match {
+                len,
+                distance: distance_here,
+            };
+            self.relax(cost, i + len as usize, mv, new_cache);
+        };
 
         if match_len_here == SHORT_MATCH_LEN as usize
             && distance_here.get() < SHORT_MATCH_MAX_DISTANCE
         {
-            let cost = base + prices.length_price(SHORT_MATCH_LEN) + offset_cost;
-            self.relax(
-                cost,
-                i + SHORT_MATCH_LEN as usize,
-                Move::Match {
-                    len: SHORT_MATCH_LEN,
-                    distance: distance_here,
-                },
-                new_cache,
-            );
+            relax_len(SHORT_MATCH_LEN);
         }
 
         if match_len_here < MIN_MATCH_LEN {
@@ -1093,28 +1092,10 @@ impl DpState {
                 if len > full_len {
                     break;
                 }
-                let cost = base + prices.length_price(len) + offset_cost;
-                self.relax(
-                    cost,
-                    i + len as usize,
-                    Move::Match {
-                        len,
-                        distance: distance_here,
-                    },
-                    new_cache,
-                );
+                relax_len(len);
             }
         }
-        let cost = base + prices.length_price(full_len) + offset_cost;
-        self.relax(
-            cost,
-            i + full_len as usize,
-            Move::Match {
-                len: full_len,
-                distance: distance_here,
-            },
-            new_cache,
-        );
+        relax_len(full_len);
     }
 }
 
