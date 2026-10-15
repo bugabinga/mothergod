@@ -157,3 +157,12 @@ fn strict_decode_rejects_padding_in_a_non_final_group() {
     // that only observes `encode`'s output.
     assert_eq!(strict_decode(b"AB==CDEF"), None);
 }
+
+#[test]
+fn strict_decode_rejects_padding_inside_a_group() {
+    // '=' that is not the group's trailing run: the alphabet lookup, not a
+    // separate scan, is what refuses it.
+    for data in [b"=ABC", b"A=BC", b"AB=C", b"A=B="] {
+        assert_eq!(strict_decode(data), None, "{data:?}");
+    }
+}
