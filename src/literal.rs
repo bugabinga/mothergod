@@ -11,29 +11,23 @@
 //! experts after a match than after a run of literals.
 //!
 //! The `ideal_cost_bits*` methods price a byte without driving an
-//! [`crate::coder::Encoder`]. The coding paths, each taking the blend one
-//! step past the last:
+//! [`crate::coder::Encoder`]. The coding paths every frame this build
+//! decodes takes:
 //!
-//! - [`Literal::encode_sse`]/[`Literal::decode_sse`]: the blended `cum`
-//!   table coded as 8 binary decisions through [`crate::bittree`], each
-//!   calibrated by [`Literal`]'s own [`Sse`] table. No frame this build
-//!   decodes uses it; it stays as the pricing baseline and as the
-//!   calibration [`Literal::encode_column`] reuses.
-//! - [`Literal::encode_logistic`]/[`Literal::decode_logistic`]: the
-//!   experts' estimates [`crate::logistic::stretch`]ed into the logit
-//!   domain and blended by [`LogisticMix`], whose own [`Sse`] calibrates
-//!   the result. Not wired.
-//! - [`Literal::encode_logistic_surprise`]/
-//!   [`Literal::decode_logistic_surprise`]: the same walk, with
-//!   [`SurpriseLogisticMix`] taking its step size from a fast EMA of a
-//!   key's squared error against a slower one. Not wired.
-//! - [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`]: the same
-//!   again, calibrating through [`SurpriseLogisticMixLogitSse`], whose bins
-//!   are even in [`crate::logistic::stretch`]-space. The wire path of every
-//!   frame this build decodes, except a transposed one.
+//! - [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`]: each
+//!   expert's estimate [`crate::logistic::stretch`]ed into the logit domain
+//!   and blended by [`SurpriseLogisticMix`], whose step size comes from a
+//!   fast EMA of a key's squared error against a slower one, the result
+//!   calibrated through [`SurpriseLogisticMixLogitSse`]'s bins, even in
+//!   [`crate::logistic::stretch`]-space. The wire path of every frame
+//!   except a transposed one.
 //! - [`Literal::encode_column`]/[`Literal::decode_column`]: a seventh,
 //!   column-keyed expert ([`ColumnExpertState`]) blended into the six
 //!   before [`Sse`] calibration. The wire path of a transposed frame.
+//!
+//! [`Literal::ideal_cost_bits_sse`] prices the blended `cum` table as 8
+//! calibrated binary decisions and is no frame's wire path; the benchmark
+//! harness keeps it as the pricing baseline.
 //!
 //! Determinism: the weight update runs on the encode and the decode path,
 //! so everything it calls must be bit-identical on every platform, or the
@@ -424,20 +418,15 @@ fn fixed_point_contribution_from_probability(
     }
 }
 
-/// [`LogisticMix`]'s step size at the start of a weight vector's life:
+/// [`SurpriseLogisticMix`]'s step size at maximum surprise:
 /// `research/JOURNAL.md` S2-R25's train-optimal constant rate.
 const LOGISTIC_INITIAL_RATE: f64 = 0.006;
 
-/// The step size [`logistic_rate`] decays toward: `research/JOURNAL.md`
+/// The step size [`surprise_rate`] decays toward: `research/JOURNAL.md`
 /// S2-R25's 0.002 sweep point (S2-A101 names why).
 const LOGISTIC_FLOOR_RATE: f64 = 0.002;
 
-/// [`LogisticMix`]'s rate schedule's `decay`, fixed at the train-only sweep
-/// optimum [`Literal::encode_logistic`]/`decode_logistic` code every byte
-/// under (`research/JOURNAL.md` S2-A101).
-const LOGISTIC_RATE_DECAY: f64 = 4e-4;
-
-/// Every probability [`LogisticMix`] stretches or codes is clamped to
+/// Every probability [`SurpriseLogisticMix`] stretches or codes is clamped to
 /// `[LOGISTIC_PROBABILITY_FLOOR, 1 - LOGISTIC_PROBABILITY_FLOOR]`: an
 /// expert's upper-half probability before [`stretch`], bounding each
 /// stretch to `ln(4095)` in magnitude, and the squashed mix before the
@@ -450,27 +439,12 @@ fn clamp_logistic_probability(p: f64) -> f64 {
     p.clamp(LOGISTIC_PROBABILITY_FLOOR, 1.0 - LOGISTIC_PROBABILITY_FLOOR)
 }
 
-/// Starting weight of every expert in every [`LogisticMix`] weight vector:
-/// the six weights sum to one, so a fresh mixer squashes the experts'
-/// mean stretch.
+/// Starting weight of every expert in every [`SurpriseLogisticMix`] weight
+/// vector: the six weights sum to one, so a fresh mixer squashes the
+/// experts' mean stretch.
 const LOGISTIC_INITIAL_WEIGHT: f64 = 1.0 / 6.0;
 
-/// [`LogisticMix`]'s step size for a weight vector that has already taken
-/// `steps` gradient steps: `FLOOR + (INITIAL - FLOOR) / (1 + steps *
-/// decay)`, [`LOGISTIC_INITIAL_RATE`] at `steps = 0`, falling
-/// monotonically toward [`LOGISTIC_FLOOR_RATE`] for any `decay > 0`, and
-/// constant at the initial rate for `decay = 0` (`research/JOURNAL.md`
-/// S2-A101).
-fn logistic_rate(steps: u64, decay: f64) -> f64 {
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "a step count far below 2^53 per measured stream; precision past that changes the rate by under one ulp"
-    )]
-    let steps = steps as f64;
-    LOGISTIC_FLOOR_RATE + (LOGISTIC_INITIAL_RATE - LOGISTIC_FLOOR_RATE) / steps.mul_add(decay, 1.0)
-}
-
-/// One gradient step of [`LogisticMix`]'s weight vector for a single
+/// One gradient step of [`SurpriseLogisticMix`]'s weight vector for a single
 /// bit-tree node: the node's error, target bit minus the pre-refine mix
 /// `p`, nudges each expert's weight by `rate` scaled by that expert's own
 /// stretched input. Split out of [`Literal::logistic_cost_bits`] so this
@@ -540,9 +514,8 @@ fn surprise_error_tracking_step(
 }
 
 /// A fresh weight vector, one per [`WEIGHT_CONTEXTS`] key, every expert at
-/// [`LOGISTIC_INITIAL_WEIGHT`]: the shape [`LogisticMix::new`] and
-/// [`SurpriseLogisticMix::new`] both start from, named once so a future
-/// change to either constant cannot update one copy and miss the other.
+/// [`LOGISTIC_INITIAL_WEIGHT`]: the shape [`SurpriseLogisticMix::new`]
+/// starts from.
 fn fresh_logistic_weights() -> Vec<[f64; EXPERTS]> {
     vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
 }
@@ -552,47 +525,6 @@ fn fresh_logistic_weights() -> Vec<[f64; EXPERTS]> {
 /// this crate: [`SurpriseLogisticMix::try_new`] starts from this.
 fn try_fresh_logistic_weights() -> Result<Vec<[f64; EXPERTS]>, std::collections::TryReserveError> {
     crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])
-}
-
-/// Logit-domain mixer over [`Literal`]'s own six expert banks
-/// (`research/JOURNAL.md` S1-P8, S2-A101): per bit-tree node, each expert's
-/// probability of the upper half is [`stretch`]ed, the stretches are
-/// summed under one weight vector per `WEIGHT_CONTEXTS` key (the same
-/// key `banks` selects [`Literal`]'s linear weights by), and the sum is
-/// [`squash`]ed back, then refined through this mixer's own [`Sse`] over
-/// the same [`bittree::SSE_CONTEXTS`] contexts the shipped coder uses.
-/// Reads [`Literal`]'s banks, never writes them: [`Literal::encode_logistic`]/
-/// `decode_logistic` were the `FORMAT_VERSION` 5 coding path, retired
-/// (ADR-0063).
-#[derive(Debug, Clone)]
-pub struct LogisticMix {
-    /// One weight vector per [`WEIGHT_CONTEXTS`] key.
-    weights: Vec<[f64; EXPERTS]>,
-    /// Gradient steps each key's weight vector has taken, one per
-    /// bit-tree node coded under that key: [`logistic_rate`]'s `steps`.
-    update_count: Vec<u64>,
-    /// This mixer's own calibration table, keyed by
-    /// [`bittree::sse_context`].
-    sse: Sse,
-}
-
-impl LogisticMix {
-    /// A fresh mixer: every weight at [`LOGISTIC_INITIAL_WEIGHT`], every
-    /// step count at zero, its [`Sse`] at the identity mapping.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            weights: fresh_logistic_weights(),
-            update_count: vec![0; WEIGHT_CONTEXTS],
-            sse: Sse::new(bittree::SSE_CONTEXTS),
-        }
-    }
-}
-
-impl Default for LogisticMix {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// [`SurpriseLogisticMix`]'s slow timescale: the EMA decay its per-key
@@ -605,9 +537,8 @@ const SURPRISE_BASELINE_DECAY: f64 = 0.9995;
 
 /// [`SurpriseLogisticMix`]'s per-key step size reads `recent_sq_error`
 /// against `baseline_sq_error` at this decay: `research/JOURNAL.md`
-/// S2-A104's own accept point (mirrors [`LOGISTIC_RATE_DECAY`]'s role for
-/// the champion), the best-supported point of the nine-value sweep that
-/// entry's own scratch binary ran (train mean best at 0.98, both sealed
+/// S2-A104's own accept point, the best-supported point of the
+/// nine-value sweep that entry's own scratch binary ran (train mean best at 0.98, both sealed
 /// cases improving well inside the qualifying range).
 const SURPRISE_RECENT_DECAY: f64 = 0.98;
 
@@ -615,8 +546,8 @@ const SURPRISE_RECENT_DECAY: f64 = 0.98;
 /// "not yet established" rather than dividing by a near-zero number.
 const SURPRISE_BASELINE_EPSILON: f64 = 1e-12;
 
-/// [`SurpriseLogisticMix`]'s step size: unlike [`logistic_rate`]'s step
-/// count, this schedule reads `recent_sq_error` against `baseline_sq_error`,
+/// [`SurpriseLogisticMix`]'s step size: reads `recent_sq_error` against
+/// `baseline_sq_error`,
 /// the same key's own slower EMA of the identical signal, so a converged
 /// context's stable residual noise (`recent` tracking `baseline`, ratio
 /// near 1) decays toward [`LOGISTIC_FLOOR_RATE`] while a real shift
@@ -626,7 +557,7 @@ const SURPRISE_BASELINE_EPSILON: f64 = 1e-12;
 /// to that entry's own rejected mechanism, one shared
 /// `ERROR_RATE_MAX_VARIANCE` normalizer). `baseline_sq_error <=
 /// SURPRISE_BASELINE_EPSILON` (a fresh key, nothing observed yet) reads as
-/// maximum surprise, matching `logistic_rate`'s own `steps = 0` behavior.
+/// maximum surprise.
 fn surprise_rate(recent_sq_error: f64, baseline_sq_error: f64) -> f64 {
     let fraction = if baseline_sq_error <= SURPRISE_BASELINE_EPSILON {
         1.0
@@ -643,54 +574,52 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
     decay.mul_add(previous, (1.0 - decay) * error_sq)
 }
 
-/// A second rate schedule for a logit-domain literal mixer's per-key step
-/// size, replacing [`LogisticMix`]'s step-count-derived
-/// `logistic_rate` (`research/JOURNAL.md` S2-A104, S2-R26's own
-/// remaining-scope note fixed): separates a context's stable residual
+/// Logit-domain mixer over [`Literal`]'s own six expert banks
+/// (`research/JOURNAL.md` S1-P8, S2-A101, S2-A104): per bit-tree node,
+/// each expert's probability of the upper half is [`stretch`]ed, the
+/// stretches are summed under one weight vector per `WEIGHT_CONTEXTS`
+/// key (the same key `banks` selects [`Literal`]'s linear weights by), and
+/// the sum is [`squash`]ed back and refined through the calibration table
+/// `C`. The per-key step size separates a context's stable residual
 /// uncertainty from genuine drift by comparing a fast EMA of squared
 /// prediction error (`recent_sq_error`) against a slow EMA of the
 /// identical signal (`baseline_sq_error`, that key's own learned floor),
 /// through `surprise_rate`, rather than reading magnitude against one
-/// shared constant the way S2-R26's own rejected mechanism did. With
-/// `C = `[`Sse`], [`Literal::encode_logistic_surprise`]/
-/// `decode_logistic_surprise` were the `FORMAT_VERSION` 6 coding path,
-/// retired (ADR-0063).
+/// shared constant the way S2-R26's own rejected mechanism did. Reads
+/// [`Literal`]'s banks, never writes them.
 ///
 /// Generic over its own calibration table `C` ([`Calibrate`]): the mixing
 /// weights, error EMAs and rate schedule never depend on which table
 /// calibrates them, only the walk's `refine`/`update` calls do.
-/// [`SurpriseLogisticMixLogitSse`] is this same type with
-/// [`crate::sse::LogitSse`] in `C`'s place (`research/JOURNAL.md` S2-A106):
-/// isolates the bin-spacing change that type measures without a second
-/// struct and a second walk that would differ from this one in exactly one
-/// line. With `C = `[`crate::sse::LogitSse`] it is the real coding path
-/// (`research/JOURNAL.md` S2-A108,
+/// [`SurpriseLogisticMixLogitSse`] is the instantiation with
+/// [`crate::sse::LogitSse`] in `C`'s place, the real coding path
+/// (`research/JOURNAL.md` S2-A106, S2-A108,
 /// `docs/adr/0055-wire-logit-domain-sse-bins-into-the-literal-model.md`):
-/// [`Literal::encode_logit_sse`]/`decode_logit_sse`.
+/// [`Literal::encode_logit_sse`]/`decode_logit_sse`. The `C = `[`Sse`]
+/// instantiation was the `FORMAT_VERSION` 6 coding path, retired
+/// (ADR-0063).
 #[derive(Debug, Clone)]
-pub struct SurpriseLogisticMix<C = Sse> {
-    /// One weight vector per [`WEIGHT_CONTEXTS`] key, same shape and
-    /// starting point as [`LogisticMix::weights`].
+pub struct SurpriseLogisticMix<C> {
+    /// One weight vector per [`WEIGHT_CONTEXTS`] key.
     weights: Vec<[f64; EXPERTS]>,
     /// Each key's fast EMA of squared prediction error.
     recent_sq_error: Vec<f64>,
     /// Each key's slow EMA of the identical signal: its own learned
     /// baseline.
     baseline_sq_error: Vec<f64>,
-    /// This mixer's own calibration table, same shape as
-    /// [`LogisticMix::sse`].
+    /// This mixer's own calibration table, keyed by
+    /// [`bittree::sse_context`].
     sse: C,
 }
 
-/// [`SurpriseLogisticMix`] over [`crate::sse::LogitSse`] instead of
-/// [`Sse`]'s default: see [`SurpriseLogisticMix`]'s own docs.
+/// [`SurpriseLogisticMix`] over [`crate::sse::LogitSse`]: see
+/// [`SurpriseLogisticMix`]'s own docs.
 pub type SurpriseLogisticMixLogitSse = SurpriseLogisticMix<crate::sse::LogitSse>;
 
 impl<C: Calibrate> SurpriseLogisticMix<C> {
     /// A fresh mixer: every weight at [`LOGISTIC_INITIAL_WEIGHT`], every
     /// error EMA at zero (read by [`surprise_rate`] as "not yet
-    /// established," the same maximum-surprise starting point
-    /// [`logistic_rate`]'s `steps = 0` gives the champion).
+    /// established," the maximum-surprise starting point).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -724,10 +653,8 @@ impl<C: Calibrate> Default for SurpriseLogisticMix<C> {
 }
 
 /// [`Literal::code_bit_walk`]'s per-mixer interface: the weight vector and
-/// calibration table both mixers keep per [`WEIGHT_CONTEXTS`] key, plus the
-/// one place [`LogisticMix`]'s step-count rate and [`SurpriseLogisticMix`]'s
-/// error-EMA rate diverge ([`logistic_mix_node`]'s own docs), named once so
-/// the walk between them is not duplicated.
+/// calibration table the mixer keeps per [`WEIGHT_CONTEXTS`] key, plus its
+/// rate schedule ([`logistic_mix_node`]'s own docs).
 trait LogisticMixer {
     /// This mixer's own calibration table type.
     type Calibrator: Calibrate;
@@ -745,26 +672,6 @@ trait LogisticMixer {
     /// Bookkeeping once the node's bit and pre-refine probability are
     /// known.
     fn advance(&mut self, weight_index: usize, bit: bool, p: f64);
-}
-
-impl LogisticMixer for LogisticMix {
-    type Calibrator = Sse;
-
-    fn weights_mut(&mut self, weight_index: usize) -> &mut [f64; EXPERTS] {
-        &mut self.weights[weight_index]
-    }
-
-    fn sse_mut(&mut self) -> &mut Sse {
-        &mut self.sse
-    }
-
-    fn rate(&self, weight_index: usize) -> f64 {
-        logistic_rate(self.update_count[weight_index], LOGISTIC_RATE_DECAY)
-    }
-
-    fn advance(&mut self, weight_index: usize, _bit: bool, _p: f64) {
-        self.update_count[weight_index] += 1;
-    }
 }
 
 impl<C: Calibrate> LogisticMixer for SurpriseLogisticMix<C> {
@@ -809,9 +716,9 @@ pub struct Literal {
     /// Per-weight-context mixing weights, one `[f64; EXPERTS]` per
     /// [`WEIGHT_CONTEXTS`] key.
     weights: Vec<[f64; EXPERTS]>,
-    /// Calibrates [`Self::encode_sse`]/[`Self::decode_sse`]'s per-node
-    /// binary decisions, keyed by [`bittree::sse_context`]
-    /// (`research/JOURNAL.md` S1-P1's remaining scope, `FORMAT_VERSION` 3).
+    /// Calibrates [`Self::ideal_cost_bits_sse`]'s per-node binary
+    /// decisions, keyed by [`bittree::sse_context`]
+    /// (`research/JOURNAL.md` S1-P1's remaining scope).
     sse: Sse,
 }
 
@@ -972,37 +879,10 @@ impl Literal {
         }
     }
 
-    /// Codes `byte` through `encoder` under `context`, the mixed `cum`
-    /// table coded as 8 chained binary decisions through
-    /// [`bittree::encode_symbol_sse`], each calibrated by this model's own
-    /// [`Sse`] table (`research/JOURNAL.md` S1-P1, `FORMAT_VERSION` 3),
-    /// then updates every expert bank and the mixing weights.
-    pub fn encode_sse(&mut self, encoder: &mut Encoder, context: Context, byte: u8) {
-        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
-        bittree::encode_symbol_sse(encoder, &cum, byte, &mut self.sse);
-        self.update(&bank_indices, weight_index, usize::from(byte), exp);
-    }
-
-    /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_sse`], then updates every expert bank and the
-    /// mixing weights.
-    ///
-    /// Never panics on adversarial `decoder` state: [`bittree::decode_symbol_sse`]
-    /// is total over any coded bit pattern (its own `Decoder::decode_bit`
-    /// calls are), and `cum`'s shape is this model's own invariant
-    /// (`mix`'s Laplace floor), never derived from `decoder`'s bytes.
-    #[must_use]
-    pub fn decode_sse(&mut self, decoder: &mut Decoder, context: Context) -> u8 {
-        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
-        let byte = bittree::decode_symbol_sse(decoder, &cum, &mut self.sse);
-        self.update(&bank_indices, weight_index, usize::from(byte), exp);
-        byte
-    }
-
     /// Bits it would cost to code `byte` under `context`'s current mixed
     /// distribution — `-log2((cum[symbol+1] - cum[symbol]) /
     /// cum[ALPHABET])` — then updates every expert bank and the mixing
-    /// weights, exactly as [`Self::encode_sse`] does. No [`Encoder`]
+    /// weights, exactly as [`Self::ideal_cost_bits_sse`] does. No [`Encoder`]
     /// involved: this is
     /// [`crate::model::Model::ideal_cost_bits`]'s counterpart for the
     /// six-expert mixer, the remaining scope `JOURNAL` S2-A30 flagged for
@@ -1016,15 +896,14 @@ impl Literal {
         bits
     }
 
-    /// [`Self::ideal_cost_bits`]'s counterpart for [`Self::encode_sse`]:
-    /// sums the ideal cost of `byte`'s 8 `sse`-refined binary decisions
-    /// through [`bittree::ideal_cost_bits_sse`] instead of pricing the
-    /// direct 256-way division, so a caller pricing a whole stream this way
-    /// reflects what `Self::encode_sse` actually pays, including this
-    /// model's own [`Sse`] table adapting call over call
-    /// (`crate::codec`'s `CostSink`/`EncodeSink` must price and code the
-    /// same thing, per that module's docs). Updates the mixer state the
-    /// same way [`Self::ideal_cost_bits`] does.
+    /// [`Self::ideal_cost_bits`]'s counterpart over the blended `cum`
+    /// table coded as 8 binary decisions: sums the ideal cost of `byte`'s
+    /// 8 `sse`-refined decisions through [`bittree::ideal_cost_bits_sse`]
+    /// instead of pricing the direct 256-way division, including this
+    /// model's own [`Sse`] table adapting call over call. No frame this
+    /// build decodes codes this way; the benchmark harness prices it as a
+    /// baseline. Updates the mixer state the same way
+    /// [`Self::ideal_cost_bits`] does.
     #[must_use]
     pub fn ideal_cost_bits_sse(&mut self, context: Context, byte: u8) -> f64 {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
@@ -1055,17 +934,6 @@ impl Literal {
         debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
         self.update(&bank_indices, weight_index, symbol, exp);
         bits
-    }
-
-    /// What [`Self::encode_logistic_surprise`] would pay for `byte`.
-    #[must_use]
-    pub fn ideal_cost_bits_logistic_surprise(
-        &mut self,
-        context: Context,
-        byte: u8,
-        mixer: &mut SurpriseLogisticMix,
-    ) -> f64 {
-        self.ideal_cost_bits_mix(context, byte, mixer)
     }
 
     /// What [`Self::encode_logit_sse`] would pay for `byte`.
@@ -1241,7 +1109,7 @@ impl Literal {
     /// coding the result through the SSE-calibrated bittree decomposition
     /// against `column_state`'s own [`Sse`] table (`research/JOURNAL.md`
     /// S1-P5's real-wiring slice, `FORMAT_VERSION` 4). The six real
-    /// experts adapt exactly as [`Self::encode_sse`] leaves them —
+    /// experts adapt exactly as [`Self::ideal_cost_bits_sse`] leaves them —
     /// [`Self::update`] still runs, on the same six-way `mixed` estimate
     /// it always has, unperturbed by the column expert — the same
     /// layering [`bittree`]'s own SSE stage already uses on top of the
@@ -1278,9 +1146,9 @@ impl Literal {
     /// of [`Self::encode_column`]; see that method's docs for the coding
     /// and update shape.
     ///
-    /// Never panics on adversarial `decoder` state, the same argument
-    /// [`Self::decode_sse`]'s docs give: [`bittree::decode_symbol_sse`] is
-    /// total over any coded bit pattern, and [`Self::mix7`]'s `cum7` is
+    /// Never panics on adversarial `decoder` state:
+    /// [`bittree::decode_symbol_sse`] is total over any coded bit pattern
+    /// (its own `Decoder::decode_bit` calls are), and [`Self::mix7`]'s `cum7` is
     /// this model's own invariant (both banks' Laplace floors), never
     /// derived from `decoder`'s bytes.
     #[must_use]
@@ -1459,10 +1327,8 @@ impl Literal {
         })
     }
 
-    /// The shared body of [`Self::encode_logistic`],
-    /// [`Self::encode_logistic_surprise`] and [`Self::encode_logit_sse`]:
-    /// the six expert banks update the same way whichever mixer refined the
-    /// probabilities.
+    /// The body of [`Self::encode_logit_sse`]: the six expert banks update
+    /// by `update` whichever mixer refined the probabilities.
     fn encode_mix<M: LogisticMixer>(
         &mut self,
         encoder: &mut Encoder,
@@ -1481,9 +1347,8 @@ impl Literal {
         self.update(&bank_indices, weight_index, symbol, exp);
     }
 
-    /// The shared body of [`Self::decode_logistic`],
-    /// [`Self::decode_logistic_surprise`] and [`Self::decode_logit_sse`],
-    /// the inverse of [`Self::encode_mix`].
+    /// The body of [`Self::decode_logit_sse`], the inverse of
+    /// [`Self::encode_mix`].
     fn decode_mix<M: LogisticMixer>(
         &mut self,
         decoder: &mut Decoder,
@@ -1498,39 +1363,9 @@ impl Literal {
         byte
     }
 
-    /// [`Self::encode_logistic`] under [`SurpriseLogisticMix`]'s
-    /// learned-baseline rate schedule instead of a step-count-derived one
-    /// (`research/JOURNAL.md` S2-A104).
-    pub fn encode_logistic_surprise(
-        &mut self,
-        encoder: &mut Encoder,
-        context: Context,
-        byte: u8,
-        mixer: &mut SurpriseLogisticMix,
-    ) {
-        self.encode_mix(encoder, context, byte, mixer);
-    }
-
-    /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_logistic_surprise`].
-    ///
-    /// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`]
-    /// is total over any coded bit pattern, and every probability is this
-    /// model's and `mixer`'s own invariant, never derived from `decoder`'s
-    /// bytes.
-    #[must_use]
-    pub fn decode_logistic_surprise(
-        &mut self,
-        decoder: &mut Decoder,
-        context: Context,
-        mixer: &mut SurpriseLogisticMix,
-    ) -> u8 {
-        self.decode_mix(decoder, context, mixer)
-    }
-
-    /// [`Self::encode_logistic_surprise`] refined through
-    /// [`crate::sse::LogitSse`] instead of [`Sse`] (`research/JOURNAL.md`
-    /// S2-A106, S2-A108).
+    /// Codes `byte` through `encoder` under `context`, mixed by `mixer`'s
+    /// logit-domain walk and refined through [`crate::sse::LogitSse`]
+    /// (`research/JOURNAL.md` S2-A106, S2-A108).
     pub fn encode_logit_sse(
         &mut self,
         encoder: &mut Encoder,
@@ -1556,38 +1391,6 @@ impl Literal {
         mixer: &mut SurpriseLogisticMixLogitSse,
     ) -> u8 {
         self.decode_mix(decoder, context, mixer)
-    }
-
-    /// Codes `byte` through `encoder` under `context`, blending the six
-    /// expert banks through `logistic`'s logit-domain mix instead of
-    /// [`Self::mix`]'s linear blend (`research/JOURNAL.md` S1-P8, S2-A101).
-    /// [`Self::update`] still adapts the six real weights on the linear
-    /// `mixed` estimate, unperturbed by `logistic`.
-    pub fn encode_logistic(
-        &mut self,
-        encoder: &mut Encoder,
-        context: Context,
-        byte: u8,
-        logistic: &mut LogisticMix,
-    ) {
-        self.encode_mix(encoder, context, byte, logistic);
-    }
-
-    /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_logistic`].
-    ///
-    /// Never panics on adversarial `decoder` state: [`Decoder::decode_bit`]
-    /// is total over any coded bit pattern, and every probability is this
-    /// model's and `logistic`'s own invariant, never derived from `decoder`'s
-    /// bytes.
-    #[must_use]
-    pub fn decode_logistic(
-        &mut self,
-        decoder: &mut Decoder,
-        context: Context,
-        logistic: &mut LogisticMix,
-    ) -> u8 {
-        self.decode_mix(decoder, context, logistic)
     }
 }
 

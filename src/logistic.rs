@@ -1,7 +1,7 @@
 //! The logit-domain transfer pair a logistic mixer is built on:
 //! [`stretch`] `= ln(p / (1 - p))` and its inverse [`squash`]
 //! `= 1 / (1 + e^-x)` (PAQ7 onward, Mahoney 2005), for
-//! [`crate::literal::LogisticMix`] (`research/JOURNAL.md` S1-P8, S2-A101).
+//! [`crate::literal::SurpriseLogisticMix`] (`research/JOURNAL.md` S1-P8, S2-A101).
 //!
 //! `clippy.toml` forbids the libm transcendental family crate-wide
 //! (ADR-0024), so both are built from IEEE-754 basic operations only:

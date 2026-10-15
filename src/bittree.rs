@@ -13,8 +13,8 @@
 //! [`encode_symbol`]/[`decode_symbol`] code the raw probability and are
 //! exercised only by this module's tests. The `_sse` pair refines each level
 //! through a [`crate::sse::Sse`] keyed by [`sse_context`] and updates it on
-//! the raw probability; `crate::literal::Literal::encode_sse`/`decode_sse`
-//! are its callers (`research/JOURNAL.md` S2-A60, ADR-0038).
+//! the raw probability; `crate::literal::Literal::encode_column`/
+//! `decode_column` are its callers (`research/JOURNAL.md` S2-A60, ADR-0038).
 
 use crate::coder::{Decoder, Encoder};
 use crate::sse::Sse;
@@ -94,7 +94,7 @@ fn upper_half_probability(cum: &[u64], lo: usize, hi: usize) -> f64 {
 /// The tree traversal under [`walk`] and [`walk_sse`], with no cumulative
 /// table: hands `node` each level's `depth`, `prefix` (`lo / width`) and
 /// `[lo, mid, hi)` split, and follows the bit it returns. A caller pricing
-/// from its own probabilities ([`crate::literal::LogisticMix`],
+/// from its own probabilities ([`crate::literal::SurpriseLogisticMix`],
 /// `research/JOURNAL.md` S2-A101) walks the identical tree the coder does.
 ///
 /// Returns the symbol the decisions resolved to.
