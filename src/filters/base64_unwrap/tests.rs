@@ -102,6 +102,21 @@ fn try_decode_matches_decode() {
 }
 
 #[test]
+fn try_decode_reserves_exactly_the_padded_length() {
+    // The reservation is invisible in the bytes, so only the capacity shows
+    // it: a short reservation regrows by doubling past the exact size, which
+    // is what these lengths tell apart from `4 * ceil(len / 3)`.
+    for len in [1, 2, 3, 100, 301] {
+        let filtered: Vec<u8> = (0..=255u8).cycle().take(len).collect();
+        assert_eq!(
+            try_decode(&filtered).unwrap().capacity(),
+            len.div_ceil(3) * 4,
+            "len {len}"
+        );
+    }
+}
+
+#[test]
 fn is_base64_byte_rejects_non_alphabet_characters() {
     assert!(is_base64_byte(b'A'));
     assert!(is_base64_byte(b'='));
