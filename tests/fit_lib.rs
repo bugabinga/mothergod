@@ -14,6 +14,7 @@
 #[path = "fit/matrix.rs"]
 mod matrix;
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -85,6 +86,33 @@ fn built_crate() -> Option<(PathBuf, PathBuf)> {
     Some((deps, rlib))
 }
 
+fn rustc() -> OsString {
+    std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())
+}
+
+/// The triple `cargo test --target <triple>` built for, or `None` on a host
+/// build. A cross build lays out `<target_dir>/<triple>/<profile>/deps` where a
+/// host build has `<target_dir>/<profile>/deps`, so the candidate is the name
+/// two levels above `deps`; only a name `rustc` lists as a target counts, so a
+/// target directory that happens to be called `musl` is never passed as one.
+/// A probe against a cross rlib needs the same `--target`, or `rustc` looks for
+/// a host-triple crate and refuses with E0461.
+fn cross_target(deps: &Path) -> Option<&str> {
+    static TARGETS: OnceLock<String> = OnceLock::new();
+    let candidate = deps.parent()?.parent()?.file_name()?.to_str()?;
+    let listed = TARGETS.get_or_init(|| {
+        let output = Command::new(rustc())
+            .args(["--print", "target-list"])
+            .output()
+            .expect("run rustc --print target-list");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    });
+    listed
+        .lines()
+        .any(|line| line == candidate)
+        .then_some(candidate)
+}
+
 /// `rustc`'s verdict on `source` as a library that links the built crate, or
 /// the diagnostics when it refuses.
 fn compile(name: &str, source: &str) -> Option<Result<(), String>> {
@@ -92,8 +120,11 @@ fn compile(name: &str, source: &str) -> Option<Result<(), String>> {
     let dir = Scratch::new(name);
     let file = dir.0.join("probe.rs");
     fs::write(&file, source).expect("write probe source");
-    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let output = Command::new(rustc)
+    let mut command = Command::new(rustc());
+    if let Some(triple) = cross_target(&deps) {
+        command.args(["--target", triple]);
+    }
+    let output = command
         .args([
             "--edition",
             "2024",
