@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Run the published crate's own `cargo test` from the tarball `cargo package`
+# writes, in a directory that holds nothing else, so the tree cannot leak in.
+#
+# Cargo.toml's `include` allowlist decides what ships, and `cargo package`
+# verifies only that the library compiles from it: a packaged test that reads
+# a path outside the allowlist passes in the tree and fails in the crate, and
+# a published version cannot be deleted (#1025; #1023 proved the shipped
+# tests once, by hand). The extracted crate is a plain package, not a
+# workspace member, so no `-p` is passed. CARGO_TARGET_DIR points at the
+# workspace's target so the dev-dependency build is shared with whatever the
+# caller has cached; a target directory is a build cache, never a test input.
+#
+# Usage: package-test            from anywhere inside the repository
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+rm -f target/package/mothergod-*.crate
+# --allow-dirty: the script tests the tree as it stands, like every other
+# gate run before a push; a CI checkout is clean, so there it changes nothing.
+cargo package -p mothergod --allow-dirty
+crate=$(ls -t target/package/mothergod-*.crate | head -n 1)
+scratch=$(mktemp -d)
+tar -xzf "$crate" -C "$scratch"
+cd "$scratch"/mothergod-*/
+echo "package-test: $(pwd)"
+CARGO_TARGET_DIR="$root/target" cargo test --release

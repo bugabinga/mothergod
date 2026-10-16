@@ -735,3 +735,8 @@ fn compress_refuses_a_terminal_and_decompress_does_not() {
     assert!(shown.status.success());
     assert!(String::from_utf8_lossy(&shown.stdout).contains("hello"));
 }
+
+#[test]
+fn package_repro_reads_a_tree_only_path() {
+    std::fs::metadata("docs/TESTING.md").expect("docs/ is in the tree, not in the crate");
+}
