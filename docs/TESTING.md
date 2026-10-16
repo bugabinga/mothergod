@@ -233,16 +233,15 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   gate) counts every allocator call one decode makes, then re-runs it once
   per call in a fresh child process with that one call sabotaged, and
   checks the child's exit status for a signal or a panic rather than a
-  graceful `Err`. `MOTHERGOD_TORTURE=1` opts in to the real sweep. Landed:
-  `codec::decode`'s `output` buffer (`Error::OutOfMemory`), the one
-  allocation whose size is attacker-controlled rather than fixed by the
-  model tables. Still infallible: `Models::new`'s fixed-size tables and the
-  `Delta`/`Transpose` filters' undo buffers, both found by the sweep, and
-  `Bcj`'s undo buffer, the same shape by code inspection but not swept by
-  any current fixture (none selects the `Bcj` candidate) — separable
-  follow-up on #453, which stays open. Scheduled: the advisory
-  `torture-check` workflow runs the sweep nightly at 01:31 UTC and on
-  manual dispatch, red on any abort and alarmed to the BDFL (#791).
+  graceful `Err`. `MOTHERGOD_TORTURE=1` opts in to the real sweep. Covered:
+  every golden fixture and adversarial seed through `decompress`,
+  `decompress_to_writer` and `read::Decoder`, so `codec::decode`'s
+  `output` buffer, `Models::try_new`'s tables and the `Delta`/`Transpose`
+  undo buffers are all fallible and swept. No fixture selects the `Bcj`
+  candidate (filter selector kind 2), so `Bcj`'s undo buffer is fallible
+  by code inspection and unswept. Scheduled: the advisory `torture-check`
+  workflow runs the sweep nightly at 01:31 UTC and on manual dispatch,
+  red on any abort and alarmed to the BDFL (#791).
 
 ## 3. Fuzzing (scheduled: `fuzz-check`, nightly)
 
@@ -394,13 +393,14 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   committed reports, not a regeneration: those two reports fetch real
   corpora over the network, too slow and non-hermetic to run on every PR.
 
-## 8. Allocation torture (planned, #453)
+## 8. Allocation torture (landed, #453)
 
 - The curl/SQLite mechanism: count a passing decode's allocations,
   re-run failing the k-th allocation for every k, assert graceful `Err`,
   never a panic or abort. A test-only `#[global_allocator]` in its own
-  integration-test binary. Every abort the sweep finds is a place decode
-  grows memory before validating input, which is hard rule 2's audit.
+  integration-test binary, `tests/torture.rs`. Every abort the sweep finds
+  is a place decode grows memory before validating input, which is hard
+  rule 2's audit.
 
 ## 9. Coverage map (scheduled: `coverage-check`, weekly)
 
@@ -409,9 +409,10 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   manufactures assertions. It feeds triage: a stalled number sends the
   worst-covered module to the heartbeat as one scoped issue.
 
-## 10. UB insurance (planned, #456)
+## 10. UB insurance (landed, #456)
 
-- Weekly `cargo miri test` lane in monster. The crate forbids unsafe,
+- Weekly `cargo miri test` lane, the `miri` job in
+  `.github/workflows/monster.yml`. The crate forbids unsafe,
   so Miri is insurance that the claim stays true transitively, priced
   by test selection (`cfg(miri)` excludes the slow storms).
 
