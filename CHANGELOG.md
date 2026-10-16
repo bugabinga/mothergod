@@ -8,6 +8,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
+  status first, each superseded decision linked to the one that replaced
+  it, searchable in the browser, so a reader learns what is decided today
+  without cloning the repository (#1229).
 - library: `mothergod::write::Encoder` wraps any `std::io::Write` and
   compresses what is written through it, so a `tar` builder, `io::copy` or an
   HTTP body can write into a compressor without the caller collecting the whole

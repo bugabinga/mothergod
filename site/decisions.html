@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Decisions — mothergod</title>
+    <meta
+      name="description"
+      content="Every architecturally significant decision mothergod has made, current and superseded, rendered from the project's own ADR series and searchable in the browser."
+    >
+    <link rel="canonical" href="https://mothergod.dev/decisions">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="mothergod">
+    <meta property="og:url" content="https://mothergod.dev/decisions">
+    <meta property="og:title" content="Decisions — mothergod">
+    <meta
+      property="og:description"
+      content="Every architecturally significant decision mothergod has made, current and superseded, rendered from the project's own ADR series and searchable in the browser."
+    >
+    <meta name="twitter:card" content="summary">
+    <link rel="icon" href="/logo.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Albert+Sans:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+    >
+    <style>
+    :root {
+      --void: #0b0618;
+      --nebula: #1c1136;
+      --raised: #251646;
+      --line: #382a5e;
+      --starlight: #f2ecff;
+      --muted: #a396c9;
+      --gold: #ffd76a;
+      --gold-deep: #e0a12f;
+      --green: #8fd6a8;
+      --dim: #6b5f8f;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      background:
+        radial-gradient(120% 90% at 50% 0%, #241548 0%, var(--void) 62%) fixed,
+        var(--void);
+      color: var(--starlight);
+      font-family: "Albert Sans", "Segoe UI", system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.65;
+      padding: 1.6rem 1.25rem 5rem;
+    }
+    main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 2.4rem; }
+
+    /* The frame (issue #604 item 4, extended to a fifth link by #443): the
+       same links, in the same order, in the same place on every page.
+       Duplicated inline because the site has no build step; tests/claims.rs
+       fails if any copy drifts from the rest. */
+    .frame {
+      max-width: 720px; margin: 0 auto 2.6rem;
+      display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem 1.4rem;
+      font-family: "JetBrains Mono", monospace; font-size: .8rem;
+    }
+    .frame a {
+      color: var(--muted); text-decoration: none;
+      padding-bottom: .15rem; border-bottom: 1px solid transparent;
+    }
+    .frame a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+    .frame a:focus-visible {
+      color: var(--gold); outline: 2px solid var(--gold); outline-offset: 3px;
+    }
+    .frame a[aria-current="page"] {
+      color: var(--starlight); font-weight: 500; border-bottom-color: var(--gold);
+    }
+
+    header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+    h1 {
+      font-family: "Unbounded", "Albert Sans", sans-serif;
+      font-weight: 600; font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+      letter-spacing: .02em;
+    }
+    .tagline { color: var(--muted); max-width: 50ch; text-align: center; }
+
+    a { color: var(--gold); }
+    a:hover, a:focus-visible { color: var(--gold-deep); }
+    a:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+    code {
+      font-family: "JetBrains Mono", monospace; font-size: .85em;
+      background: var(--raised); padding: .1em .35em; border-radius: 4px;
+    }
+    .asof { color: var(--dim); font-size: .78rem; font-family: "JetBrains Mono", monospace; }
+
+    /* Index (left/top) and reading pane (right/bottom) as two flex items
+       that wrap into a stack once both can't fit: the same row-not-media-
+       query technique the verdict strip uses on "/", so the narrow layout
+       falls out of the same rule as the wide one instead of a breakpoint. */
+    .decisions-layout { display: flex; flex-wrap: wrap; gap: 1.6rem; align-items: flex-start; }
+    .decisions-index-pane { flex: 1 1 220px; display: flex; flex-direction: column; gap: .7rem; }
+    .decisions-content { flex: 2 1 320px; min-width: 0; }
+
+    .decisions-count { font-size: .8rem; color: var(--muted); }
+    .decisions-search-label {
+      font-family: "JetBrains Mono", monospace; font-size: .72rem; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .decisions-search {
+      background: var(--nebula); border: 1px solid var(--line); border-radius: 8px;
+      padding: .5rem .7rem; color: var(--starlight); font: inherit; font-size: .9rem;
+      width: 100%;
+    }
+    .decisions-search:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+    .decisions-search-status { font-size: .75rem; color: var(--dim); min-height: 1em; }
+
+    .decisions-index {
+      list-style: none; padding: 0; margin: 0;
+      display: flex; flex-direction: column; gap: .3rem;
+      max-height: 32rem; overflow-y: auto;
+      border: 1px solid var(--line); border-radius: 10px; padding: .4rem;
+    }
+    .decisions-index a {
+      display: flex; align-items: baseline; gap: .5rem;
+      text-decoration: none; padding: .4rem .5rem; border-radius: 8px;
+      color: var(--starlight);
+    }
+    .decisions-index a:hover { background: var(--raised); }
+    .decisions-index a:focus-visible {
+      outline: 2px solid var(--gold); outline-offset: -2px; color: var(--starlight);
+    }
+    .decisions-index a[aria-current="true"] {
+      background: var(--raised); box-shadow: inset 2px 0 0 var(--gold);
+    }
+    .decisions-index .n {
+      font-family: "JetBrains Mono", monospace; font-size: .72rem; color: var(--dim);
+      flex-shrink: 0;
+    }
+    .decisions-index .t { font-size: .85rem; flex: 1; }
+    .decisions-index .badge {
+      font-family: "JetBrains Mono", monospace; font-size: .65rem; letter-spacing: .04em;
+      text-transform: uppercase; flex-shrink: 0; padding: .1rem .4rem; border-radius: 999px;
+      border: 1px solid var(--line); color: var(--dim);
+    }
+    .decisions-index .badge[data-status="accepted"] { color: var(--green); border-color: var(--green); }
+    .decisions-index li[hidden] { display: none; }
+
+    .decisions-placeholder { color: var(--muted); font-size: .92rem; }
+
+    .decisions-eyebrow {
+      font-family: "JetBrains Mono", monospace; font-size: .78rem; color: var(--gold);
+      letter-spacing: .08em; text-transform: uppercase;
+    }
+    .decisions-content h2 {
+      font-family: "Unbounded", "Albert Sans", sans-serif; font-weight: 600;
+      font-size: 1.15rem; margin: .3rem 0 .6rem; color: var(--starlight);
+    }
+    .decisions-content:focus-visible { outline: none; }
+    .decisions-meta { font-size: .8rem; color: var(--muted); margin-bottom: 1.1rem; }
+    .decisions-meta a { color: var(--gold); }
+
+    .decisions-body { display: flex; flex-direction: column; gap: .9rem; font-size: .95rem; }
+    .decisions-body h2 {
+      font-family: "Unbounded", "Albert Sans", sans-serif; font-weight: 400;
+      font-size: .78rem; letter-spacing: .16em; text-transform: uppercase;
+      color: var(--gold); margin-top: .5rem;
+    }
+    .decisions-body h3 {
+      font-size: .88rem; color: var(--starlight); font-weight: 600; margin-top: .2rem;
+    }
+    .decisions-body p { color: var(--muted); }
+    .decisions-body strong { color: var(--starlight); font-weight: 500; }
+    .decisions-body ul, .decisions-body ol { color: var(--muted); padding-left: 1.3rem; display: flex; flex-direction: column; gap: .4rem; }
+    .decisions-body li > ul, .decisions-body li > ol { margin-top: .4rem; }
+    .decisions-body pre {
+      background: var(--nebula); border: 1px solid var(--line); border-radius: 10px;
+      padding: 1rem 1.1rem; overflow-x: auto;
+      font-family: "JetBrains Mono", monospace; font-size: .8rem; line-height: 1.7;
+      color: var(--starlight);
+    }
+    .decisions-body pre code { background: none; padding: 0; }
+    .decisions-body table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    .decisions-body th, .decisions-body td {
+      text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .decisions-body th { color: var(--muted); font-weight: 500; }
+    .decisions-body td { color: var(--muted); }
+
+    .decisions-pager {
+      display: flex; justify-content: space-between; gap: 1rem; margin-top: 1.6rem;
+      padding-top: 1rem; border-top: 1px solid var(--line);
+      font-size: .82rem;
+    }
+    .decisions-pager a { max-width: 48%; }
+    .decisions-pager .next { text-align: right; margin-left: auto; }
+
+    footer { text-align: center; color: var(--muted); font-size: .85rem; }
+    </style>
+  </head>
+  <body>
+    <nav class="frame" aria-label="Site">
+      <a href="/">mothergod</a>
+      <a href="/status">Status</a>
+      <a href="/agents">Agents</a>
+      <a href="/decisions" aria-current="page">Decisions</a>
+      <a href="https://github.com/bugabinga/mothergod">Source</a>
+    </nav>
+    <main>
+      <header>
+        <h1>Decisions</h1>
+        <p class="tagline">
+          The record of every architecturally significant choice this project
+          has made, in the order it was made: one page each, immutable once
+          accepted, superseded rather than edited when the answer changes.
+          Rendered fresh from <code>docs/adr/</code> on every deploy, which
+          stays the only copy.
+        </p>
+      </header>
+
+      <div class="decisions-layout">
+        <div class="decisions-index-pane">
+          <p class="decisions-count" id="decisions-count"></p>
+          <div>
+            <label class="decisions-search-label" for="decisions-search"
+            >Search decisions</label>
+            <input
+              type="search"
+              id="decisions-search"
+              class="decisions-search"
+              placeholder="word, number, or ADR-NNNN"
+              autocomplete="off"
+              disabled
+            >
+          </div>
+          <p
+            class="decisions-search-status"
+            id="decisions-search-status"
+            aria-live="polite"
+          >
+          </p>
+          <nav aria-label="ADR index">
+            <ul class="decisions-index" id="decisions-index"></ul>
+          </nav>
+        </div>
+        <div class="decisions-content" id="decisions-content" tabindex="-1">
+          <p class="decisions-placeholder">
+            Pick a decision from the list, or search, to read it. Numbers run in
+            the order they were made; the badge shows whether it still governs
+            today or was superseded by a later one.
+          </p>
+        </div>
+      </div>
+
+      <noscript>
+        <p class="asof">
+          This page renders adr-data.json, generated from
+          <code>docs/adr/</code>, with JavaScript. Without it, read the series
+          directly:
+          <a href="https://github.com/bugabinga/mothergod/tree/main/docs/adr"
+          >docs/adr/</a> on GitHub.
+        </p>
+      </noscript>
+
+      <p class="asof" id="asof-line"></p>
+
+      <footer>
+        <a href="/">mothergod</a> ·
+        <a href="/status">Status</a> ·
+        <a
+          href="https://github.com/bugabinga/mothergod/blob/main/docs/adr/0030-stable-architecture-decision-records.md"
+        >what an ADR is</a>
+      </footer>
+    </main>
+
+    <script>
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+
+    async function main() {
+      const indexEl = document.getElementById('decisions-index');
+      const countEl = document.getElementById('decisions-count');
+      const searchEl = document.getElementById('decisions-search');
+      const searchStatusEl = document.getElementById('decisions-search-status');
+      const contentEl = document.getElementById('decisions-content');
+      const asofEl = document.getElementById('asof-line');
+
+      countEl.textContent = 'Loading…';
+      let data;
+      try {
+        const res = await fetch('/adr-data.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`adr-data.json: HTTP ${res.status}`);
+        data = await res.json();
+      } catch (err) {
+        countEl.textContent = `Could not load adr-data.json (${err.message}).`;
+        return;
+      }
+
+      const adrs = data.adrs ?? [];
+      const byNumber = Object.fromEntries(adrs.map((a) => [a.number, a]));
+      const corpus = adrs.map((a) => [
+        a.number, a.title, a.status_kind,
+        (a.relations_html ?? []).join(' '), a.body_text,
+      ].join(' ').toLowerCase());
+
+      countEl.textContent =
+        `${data.total} decisions on record, ${data.accepted} current, ` +
+        `${data.superseded} superseded.`;
+
+      indexEl.innerHTML = adrs.map((a) => `
+        <li>
+          <a href="#${a.number}" data-number="${a.number}">
+            <span class="n">${a.number}</span>
+            <span class="t">${escapeHtml(a.title)}</span>
+            <span class="badge" data-status="${a.status_kind}">${a.status_kind}</span>
+          </a>
+        </li>
+      `).join('');
+      const indexLinks = Array.from(indexEl.querySelectorAll('a'));
+
+      searchEl.disabled = false;
+      searchEl.addEventListener('input', () => {
+        const term = searchEl.value.trim().toLowerCase();
+        let shown = 0;
+        indexLinks.forEach((link, i) => {
+          const match = !term || corpus[i].includes(term);
+          link.closest('li').hidden = !match;
+          if (match) shown += 1;
+        });
+        searchStatusEl.textContent = term
+          ? `${shown} of ${adrs.length} match "${searchEl.value.trim()}".`
+          : '';
+      });
+
+      function renderAdr(number) {
+        const adr = byNumber[number];
+        indexLinks.forEach((link) => {
+          link.toggleAttribute('aria-current', link.dataset.number === number);
+        });
+        if (!adr) {
+          contentEl.innerHTML = number
+            ? `<p class="decisions-placeholder">No decision numbered ${escapeHtml(number)}.</p>`
+            : `<p class="decisions-placeholder">
+                Pick a decision from the list, or search, to read it. Numbers
+                run in the order they were made; the badge shows whether it
+                still governs today or was superseded by a later one.
+              </p>`;
+          document.title = 'Decisions — mothergod';
+          return;
+        }
+        const idx = adrs.indexOf(adr);
+        const prev = adrs[idx - 1];
+        const next = adrs[idx + 1];
+        const relations = (adr.relations_html ?? []).length
+          ? ' · ' + adr.relations_html.join(' · ')
+          : '';
+        contentEl.innerHTML = `
+          <p class="decisions-eyebrow">ADR-${adr.number}</p>
+          <h2 id="decisions-heading">${escapeHtml(adr.title)}</h2>
+          <p class="decisions-meta">${adr.status_html} · ${escapeHtml(adr.date ?? '')}${relations}</p>
+          <div class="decisions-body">${adr.body_html}</div>
+          <nav class="decisions-pager" aria-label="Adjacent decisions">
+            ${prev ? `<a href="#${prev.number}" class="prev">← ADR-${prev.number}: ${escapeHtml(prev.title)}</a>` : '<span></span>'}
+            ${next ? `<a href="#${next.number}" class="next">ADR-${next.number}: ${escapeHtml(next.title)} →</a>` : ''}
+          </nav>
+        `;
+        document.title = `ADR-${adr.number}: ${adr.title} — Decisions — mothergod`;
+        contentEl.focus();
+        const activeLink = indexEl.querySelector(`a[data-number="${number}"]`);
+        activeLink?.scrollIntoView({ block: 'nearest' });
+      }
+
+      function openFromHash() {
+        renderAdr(decodeURIComponent(location.hash.replace('#', '')));
+      }
+      window.addEventListener('hashchange', openFromHash);
+      if (location.hash) openFromHash();
+
+      const problems = (data.problems ?? []).length
+        ? ` ${data.problems.length} file(s) failed to parse; the deploy log has the diagnosis.`
+        : '';
+      asofEl.textContent =
+        `${data.total} ADRs, regenerated by ` +
+        '.github/scripts/adr-data.py on every site deploy from docs/adr/.' +
+        problems;
+    }
+
+    main();
+    </script>
+  </body>
+</html>

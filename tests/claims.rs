@@ -1082,6 +1082,7 @@ fn social_preview_tags_match_each_pages_own_title_and_description() {
         ("site/index.html", "https://mothergod.dev/"),
         ("site/status.html", "https://mothergod.dev/status"),
         ("site/agents.html", "https://mothergod.dev/agents"),
+        ("site/decisions.html", "https://mothergod.dev/decisions"),
     ];
 
     for (file, canonical) in pages {
@@ -1147,11 +1148,11 @@ fn frame_links(nav: &str) -> Vec<(String, String, bool)> {
 
 #[test]
 fn shared_frame_offers_the_same_links_on_every_page() {
-    // The frame (issue #604 item 4) is four inline copies of one nav,
+    // The frame (issue #604 item 4) is one nav copied inline into every page,
     // because the site has no build step to share a stylesheet or a partial.
     // A copy is a synchronization debt: a page gains a destination and the
-    // other two silently keep the old map, which on a three-page site means
-    // a reader who can reach a page from one place and not from another.
+    // others silently keep the old map, which means a reader who can reach a
+    // page from one place and not from another.
     // This is that debt, paid by a test: same destinations in the same order
     // everywhere, and exactly one of them marked as where the reader is.
     // 404.html (issue #753 item 3) carries the same frame but marks none of
@@ -1161,6 +1162,7 @@ fn shared_frame_offers_the_same_links_on_every_page() {
         ("site/index.html", Some("/")),
         ("site/status.html", Some("/status")),
         ("site/agents.html", Some("/agents")),
+        ("site/decisions.html", Some("/decisions")),
         ("site/404.html", None),
     ];
 
@@ -1211,7 +1213,12 @@ fn sitemap_lists_exactly_the_pages_with_a_canonical_tag() {
     // one it does, teaches a crawler the wrong map. Read each page's own
     // canonical tag rather than a hardcoded literal, so this stays tied to
     // the pages' actual source instead of a copy of it.
-    let pages = ["site/index.html", "site/status.html", "site/agents.html"];
+    let pages = [
+        "site/index.html",
+        "site/status.html",
+        "site/agents.html",
+        "site/decisions.html",
+    ];
     let canonical_urls: Vec<String> = pages
         .iter()
         .map(|file| canonical_href(&read(file)).to_owned())

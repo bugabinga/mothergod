@@ -51,12 +51,12 @@
     }
     main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 3rem; }
 
-    /* The frame (issue #604 item 4): the same four links, in the same order,
-       in the same place on all three pages, so "what else is here" is
+    /* The frame (issue #604 item 4): the same links, in the same order,
+       in the same place on every page, so "what else is here" is
        answered before the first scroll instead of in the footer. The current
        page is marked by weight and a rule, never by color alone. Duplicated
        inline in each page because the site has no build step and no shared
-       stylesheet; tests/claims.rs fails if the three copies drift apart. */
+       stylesheet; tests/claims.rs fails if any copy drifts apart. */
     .frame {
       max-width: 720px; margin: 0 auto 2.6rem;
       display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem 1.4rem;
@@ -190,6 +190,7 @@
       <a href="/">mothergod</a>
       <a href="/status" aria-current="page">Status</a>
       <a href="/agents">Agents</a>
+      <a href="/decisions">Decisions</a>
       <a href="https://github.com/bugabinga/mothergod">Source</a>
     </nav>
     <main>
