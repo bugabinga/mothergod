@@ -1245,7 +1245,7 @@ fn decode_tokens<S: DecodeSink>(
 struct VecSink<'a> {
     output: &'a mut Vec<u8>,
     declared_len: usize,
-    column: Option<(NonZeroUsize, &'a mut ColumnExpertState)>,
+    column: Option<(NonZeroUsize, ColumnExpertState)>,
 }
 
 impl DecodeSink for VecSink<'_> {
@@ -1279,15 +1279,9 @@ impl DecodeSink for VecSink<'_> {
         Ok(byte)
     }
 
-    fn copy(
-        &mut self,
-        len: u32,
-        distance: NonZeroU32,
-        mut context: Context,
-    ) -> Result<Context, Error> {
+    fn copy(&mut self, len: u32, distance: NonZeroU32, context: Context) -> Result<Context, Error> {
         copy_checked(self.output, len, distance)?;
-        context = context.after_copy(&self.output[self.output.len() - len as usize..]);
-        Ok(context)
+        Ok(context.after_copy(&self.output[self.output.len() - len as usize..]))
     }
 }
 
@@ -1345,14 +1339,15 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new()?;
     let mut reps = RepCache::initial();
-    // Some exactly when this frame's candidate is Candidate::Transpose:
-    // mirrors encode_tokens's ColumnCoding, but `state` is owned here
-    // (there is no per-candidate trial to share it across).
-    let mut column_state: Option<(NonZeroUsize, ColumnExpertState)> = match candidate {
+    let column = match candidate {
         Candidate::Transpose(columns) => {
             Some((columns, ColumnExpertState::try_new(MAX_COLUMN_BANKS)?))
         }
-        _ => None,
+        Candidate::Identity
+        | Candidate::Delta(_)
+        | Candidate::Bcj
+        | Candidate::Base64
+        | Candidate::Reverse => None,
     };
     // Reserved fallibly and exactly up front, not left to grow through
     // `push`/`extend`'s doubling: `declared_len` is already bounded above,
@@ -1367,9 +1362,7 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let mut sink = VecSink {
         output: &mut output,
         declared_len,
-        column: column_state
-            .as_mut()
-            .map(|(columns, state)| (*columns, state)),
+        column,
     };
     decode_tokens(
         token_count,
