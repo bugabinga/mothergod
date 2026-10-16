@@ -1392,19 +1392,14 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
 /// Streaming counterpart to [`decode`], reached only through
 /// [`crate::decompress_to_writer`].
 ///
-/// [`filters::select::Candidate::Identity`]'s undo step (`undo_filter`) is
-/// the identity transform, [`filters::select::Candidate::Delta`]'s is a
-/// small fixed-lookback accumulate ([`filters::delta::Undo`]), and
-/// [`filters::select::Candidate::Bcj`]'s is a small fixed-lookahead rewrite
-/// ([`filters::bcj::Undo`]): all three undo the LZ token stream one filtered
-/// byte at a time as it is produced, so [`decode_undoable_streaming`] takes
-/// that path for any of them, bounding resident memory to [`lz::WINDOW`] via
-/// [`lz::Window`] regardless of `declared_len` (`research/JOURNAL.md`
-/// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee).
-/// `Transpose` needs its filter undone over the complete buffer regardless
-/// of how the LZ loop itself is decoded (`research/JOURNAL.md` S2-D4), so
-/// this function falls back to [`decode`]'s whole-buffer path for it,
-/// unchanged from what a caller who ignored streaming entirely would get.
+/// A candidate [`StreamUndo`] has a variant for (`Identity`, `Delta`, `Bcj`)
+/// undoes the LZ token stream one filtered byte at a time as it is produced,
+/// so [`decode_undoable_streaming`] bounds resident memory to [`lz::WINDOW`]
+/// via [`lz::Window`] regardless of `declared_len` (`research/JOURNAL.md`
+/// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee). The
+/// rest (`Transpose`, `Base64`, `Reverse`, `ReverseDelta`) need their filter
+/// undone over the complete buffer (`research/JOURNAL.md` S2-D4), so they
+/// take [`decode`]'s whole-buffer path and one bulk write.
 ///
 /// # Errors
 ///
@@ -1485,9 +1480,8 @@ impl StreamUndo {
 /// [`DecodeSink`] for [`decode_undoable_streaming`]'s path: a literal byte
 /// (and a copy's replayed bytes) land in `window`, then are undone through
 /// `undo` and written to `writer` immediately. Never carries column-expert
-/// state: [`decode_to_writer`] never builds this sink for
-/// [`Candidate::Transpose`], which falls back to [`decode`]'s whole-buffer
-/// path instead (see that function's docs).
+/// state: [`decode_to_writer`] builds this sink only for candidates
+/// [`StreamUndo`] covers, and [`Candidate::Transpose`] is not one.
 struct StreamingSink<'a, W: std::io::Write> {
     window: &'a mut lz::Window,
     undo: &'a mut StreamUndo,
@@ -1575,21 +1569,14 @@ fn decode_undoable_streaming<W: std::io::Write>(
 
 /// Replays a match/rep copy of `len` bytes from `distance` bytes back
 /// through `window` (the filtered stream), undoing each byte through `undo`
-/// and writing the result to `writer` as it is produced, returning the
-/// context updated the same way [`decode`]'s batch
-/// `context.after_copy(&output[start..])` does: `context` folds over the
-/// *filtered* bytes `window` holds, never `undo`'s output, matching
-/// [`decode_undoable_streaming`]'s own split. Splitting the run into
-/// per-byte [`Context::after_copy`] calls instead of one batch call is
-/// exactly equivalent: each call folds `word_hash` over its slice and sets
-/// `prev1`/`prev2` from its last (up to) two bytes, so chaining single-byte
-/// calls reproduces the same final state a single multi-byte call would;
-/// `window`'s ring buffer never holds the whole run contiguously when it
-/// wraps, so a batch call is not an option here the way it is in [`decode`].
+/// and writing the result to `writer` as it is produced.
 ///
-/// Mirrors [`copy_checked`]'s distance-before-the-start rejection: even a
-/// zero-length copy validates `distance` against what has actually been
-/// written so far.
+/// `context` folds over the *filtered* bytes `window` holds, never `undo`'s
+/// output. One [`Context::after_copy`] per byte equals [`decode`]'s one call
+/// over the whole run, which is not available here: `window`'s ring buffer
+/// does not hold the run contiguously when it wraps. A zero-length copy
+/// still validates `distance` against what has been written
+/// ([`copy_checked`]'s rejection) and still marks the context as after a copy.
 fn copy_streamed<W: std::io::Write>(
     window: &mut lz::Window,
     undo: &mut StreamUndo,

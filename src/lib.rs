@@ -848,25 +848,17 @@ pub fn decompress_to_writer<W: std::io::Write>(
     Ok(())
 }
 
-/// Reports whether every frame of `input` can decode with the output
-/// produced in address order and bounded lookback, without doing any of that
-/// decode work itself. The answer is not uniform across frames, hence the
-/// check.
+/// Reports whether every frame of `input` streams under
+/// [`decompress_to_writer`] (the filters it lists), without doing any of
+/// that decode work itself. The answer is not uniform across frames, hence
+/// the check.
 ///
 /// [`Method::Stored`] always answers `true`: there is no filter step, so
 /// nothing about a bound on resident memory depends on its content.
-/// [`Method::Lz`]'s answer depends on which filter its encoder picked:
-/// [`filters::select::Candidate::Identity`], `Delta`, and `Bcj` all undo
-/// sequentially with small fixed lookback or lookahead (a no-op, a stride,
-/// or a 5-byte call/jmp instruction), and [`decompress_to_writer`] streams
-/// all three, but `Candidate::Transpose`'s decode writes scattered across
-/// the *entire* buffer in column-major order, `Candidate::Base64` has no
-/// per-byte undo, and `Candidate::Reverse` and `Candidate::ReverseDelta`
-/// emit the last byte first, so all four need the whole buffer resident. This predicate does not share
-/// [`decompress_to_writer`]'s own
-/// dispatch: a caller can ask before committing to either API. No test runs
-/// [`decompress_to_writer`] against the answer, so the two agreeing is
-/// unchecked.
+/// [`Method::Lz`]'s answer depends on which filter its encoder picked.
+/// `Transpose` writes scattered across the *entire* buffer in column-major
+/// order, `Base64` has no per-byte undo, and `Reverse` and `ReverseDelta`
+/// emit the last byte first, so those need the whole buffer resident.
 ///
 /// # Errors
 ///
