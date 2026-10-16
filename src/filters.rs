@@ -574,7 +574,6 @@ pub mod reverse {
 /// followed by that [`delta`].
 pub mod select {
     use super::delta;
-    use std::collections::HashMap;
     use std::num::NonZeroUsize;
 
     /// How much of `data` [`pick`] examines when scoring delta strides and
@@ -729,8 +728,7 @@ pub mod select {
 
     /// One `(from, to)` pair's contribution to an order-1 entropy sum:
     /// `-count * log2(count / total)`, `total` being how often `from`
-    /// occurred as the first byte of a pair. Shared by [`order1_entropy`]
-    /// and [`column_entropy`], which differ only in how they count pairs.
+    /// occurred as the first byte of a pair. Used by [`Order1::bits`].
     #[allow(
         clippy::disallowed_methods,
         reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
@@ -740,80 +738,85 @@ pub mod select {
         -f64::from(count) * p.log2()
     }
 
-    /// Order-1 entropy in bits per byte: `data`, conditioned on each byte's
-    /// immediate predecessor, estimated from `data`'s own pair frequencies.
-    /// The proxy [`pick`] ranks delta candidates by: not a compressibility
-    /// measurement, but it separates structure from noise well enough to
-    /// shortlist (`JOURNAL` S1-L3).
-    fn order1_entropy(data: &[u8]) -> f64 {
-        let mut pair_counts = vec![0u32; 256 * 256];
-        let mut byte_counts = [0u32; 256];
-        for window in data.windows(2) {
-            let (a, b) = (usize::from(window[0]), usize::from(window[1]));
-            pair_counts[(a << 8) | b] += 1;
-            byte_counts[a] += 1;
-        }
-        let mut bits = 0f64;
-        for a in 0..256 {
-            let total = byte_counts[a];
-            if total == 0 {
-                continue;
-            }
-            for b in 0..256 {
-                let count = pair_counts[(a << 8) | b];
-                if count > 0 {
-                    bits += surprisal_bits(count, total);
-                }
-            }
-        }
-        // data.len() is bounded by PROBE_LEN (16384): exact in f64.
-        #[allow(clippy::cast_precision_loss)]
-        let transitions = (data.len().max(2) - 1) as f64;
-        bits / transitions
+    /// Pair-count scratch for the order-1 entropy proxies, allocated once
+    /// per [`pick`] and left all-zero between calls, so scoring a stream
+    /// costs its length, not the table's 256 KiB.
+    struct Order1 {
+        /// `pairs[(a << 8) | b]`: how often byte `b` followed byte `a`.
+        pairs: Vec<u32>,
+        /// `firsts[a]`: how often byte `a` was the first byte of a pair.
+        firsts: [u32; 256],
     }
 
-    /// Order-1 entropy of `data` reinterpreted as `columns` interleaved
-    /// streams (column `j` is `data[j], data[j + columns], ...`), weighted
-    /// by each column's own transition count. The scoring proxy for
-    /// [`Candidate::Transpose`]: low when each column of a fixed-width
-    /// record is internally predictable.
-    fn column_entropy(data: &[u8], columns: usize) -> f64 {
-        let mut bits = 0f64;
-        let mut transitions = 0usize;
-        for start in 0..columns {
-            let column: Vec<u8> = data[start..].iter().copied().step_by(columns).collect();
-            if column.len() < 2 {
-                continue;
+    impl Order1 {
+        fn new() -> Self {
+            Self {
+                pairs: vec![0; 256 * 256],
+                firsts: [0; 256],
             }
-            let mut pair_counts: HashMap<(u8, u8), u32> = HashMap::new();
-            let mut byte_counts: HashMap<u8, u32> = HashMap::new();
-            for window in column.windows(2) {
-                *pair_counts.entry((window[0], window[1])).or_insert(0) += 1;
-                *byte_counts.entry(window[0]).or_insert(0) += 1;
-            }
-            for (&(from, _), &count) in &pair_counts {
-                let total = byte_counts[&from];
-                bits += surprisal_bits(count, total);
-            }
-            transitions += column.len() - 1;
         }
-        // transitions <= PROBE_LEN (16384): exact in f64.
-        #[allow(clippy::cast_precision_loss)]
-        let transitions = transitions.max(1) as f64;
-        bits / transitions
+
+        /// Order-1 entropy in bits per byte of `data` reinterpreted as
+        /// `columns` interleaved streams (column `j` is `data[j],
+        /// data[j + columns], ...`), each byte conditioned on its
+        /// predecessor in its column, estimated from the column's own pair
+        /// frequencies and weighted by each column's transition count. One
+        /// column is plain order-1 entropy, the proxy [`pick`] ranks delta
+        /// candidates by; several score [`Candidate::Transpose`], low when
+        /// each column of a fixed-width record is internally predictable.
+        /// Not a compressibility measurement, but it separates structure
+        /// from noise well enough to shortlist (`JOURNAL` S1-L3).
+        fn entropy(&mut self, data: &[u8], columns: NonZeroUsize) -> f64 {
+            let (bits, transitions) = self.bits(data, columns.get());
+            // transitions <= PROBE_LEN (16384): exact in f64.
+            #[allow(clippy::cast_precision_loss)]
+            let transitions = transitions.max(1) as f64;
+            bits / transitions
+        }
+
+        /// Total pair surprisal in bits and transition count over the
+        /// `columns` interleaved streams of `data`. Each pair is summed at
+        /// its first appearance in its column, so the float sum has one
+        /// order for one input; a hash map's iteration order is seeded per
+        /// process and would let two runs pick different filters on a
+        /// near-tie. The same walk zeroes the scratch again.
+        fn bits(&mut self, data: &[u8], columns: usize) -> (f64, usize) {
+            let mut bits = 0f64;
+            let mut transitions = 0usize;
+            for start in 0..columns.min(data.len()) {
+                let column = || data[start..].iter().step_by(columns);
+                for (&a, &b) in column().zip(column().skip(1)) {
+                    self.pairs[(usize::from(a) << 8) | usize::from(b)] += 1;
+                    self.firsts[usize::from(a)] += 1;
+                    transitions += 1;
+                }
+                for (&a, &b) in column().zip(column().skip(1)) {
+                    let slot = &mut self.pairs[(usize::from(a) << 8) | usize::from(b)];
+                    if *slot > 0 {
+                        bits += surprisal_bits(*slot, self.firsts[usize::from(a)]);
+                        *slot = 0;
+                    }
+                }
+                self.firsts.fill(0);
+            }
+            (bits, transitions)
+        }
     }
 
     /// [`Candidate::Identity`] and every [`Candidate::Delta`] stride up to
-    /// [`MAX_DELTA_STRIDE`], scored by [`order1_entropy`] of `probe` after
+    /// [`MAX_DELTA_STRIDE`], scored by [`Order1::entropy`] of `probe` after
     /// the filter, lowest first.
-    fn rank_by_delta(probe: &[u8]) -> Vec<(f64, Candidate)> {
+    fn rank_by_delta(probe: &[u8], order1: &mut Order1) -> Vec<(f64, Candidate)> {
         let mut scored: Vec<(f64, Candidate)> =
             Vec::with_capacity(usize::from(MAX_DELTA_STRIDE) + 1);
-        scored.push((order1_entropy(probe), Candidate::Identity));
+        scored.push((
+            order1.entropy(probe, NonZeroUsize::MIN),
+            Candidate::Identity,
+        ));
         for stride in 1..=MAX_DELTA_STRIDE {
             let stride = NonZeroUsize::new(usize::from(stride)).unwrap_or(NonZeroUsize::MIN);
             scored.push((
-                order1_entropy(&delta::encode(probe, stride)),
+                order1.entropy(&delta::encode(probe, stride), NonZeroUsize::MIN),
                 Candidate::Delta(stride),
             ));
         }
@@ -829,7 +832,8 @@ pub mod select {
     pub fn pick(data: &[u8]) -> Vec<Candidate> {
         let probe = &data[..data.len().min(PROBE_LEN)];
 
-        let scored = rank_by_delta(probe);
+        let mut order1 = Order1::new();
+        let scored = rank_by_delta(probe, &mut order1);
 
         let mut candidates = vec![scored[0].1];
         candidates.push(if scored[0].1 == Candidate::Identity {
@@ -859,15 +863,20 @@ pub mod select {
         // end of the block can rank another stride first.
         let tail = &data[data.len().saturating_sub(PROBE_LEN)..];
         let reversed_tail: Vec<u8> = tail.iter().rev().copied().collect();
-        if let (_, Candidate::Delta(stride)) = rank_by_delta(&reversed_tail)[0] {
+        if let (_, Candidate::Delta(stride)) = rank_by_delta(&reversed_tail, &mut order1)[0] {
             candidates.push(Candidate::ReverseDelta(stride));
         }
 
         if data.len() >= MIN_TRANSPOSE_LEN {
-            let baseline = column_entropy(probe, 1);
+            // rank_by_delta's Identity score is the one-column entropy of
+            // `probe`, the baseline a transpose has to beat.
+            let baseline = scored
+                .iter()
+                .find_map(|&(entropy, c)| (c == Candidate::Identity).then_some(entropy))
+                .unwrap_or(f64::INFINITY);
             let best = TRANSPOSE_COLUMNS
                 .iter()
-                .map(|&columns| (columns, column_entropy(probe, columns.get())))
+                .map(|&columns| (columns, order1.entropy(probe, columns)))
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((columns, entropy)) = best
                 && entropy < baseline - TRANSPOSE_ENTROPY_MARGIN

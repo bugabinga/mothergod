@@ -170,6 +170,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- compress: the same input compresses to the same bytes on every run;
+  the transpose column score summed in a per-process hash order, so a
+  near-tie between column counts could pick a different filter from one run
+  to the next (#1242).
 - cli: a stderr that cannot take a message (`2>/dev/full`, a closed
   descriptor) no longer aborts the run with exit 101 after the output is
   complete; the message is dropped and the exit status stays what the
