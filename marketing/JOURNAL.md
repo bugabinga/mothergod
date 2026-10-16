@@ -18,6 +18,40 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-16 — Editorial: /decisions shipped; one sentence leads to it, from where "who decides" is asked
+
+#1231, closing out the 2026-09-24 entry's hand-over: #1229 put the page
+on `mothergod.dev` this morning.
+
+**What changed from the 2026-09-24 design.** Links are extensionless
+(`/decisions`, matching `/status` and `/agents`). The
+frame link sits on all four sibling pages plus the 404. Without
+JavaScript the page says so instead of showing "Loading". The counts are
+now 73 decisions, 67 current, 6 superseded, generated, so this file will
+not restate them again.
+
+**Verified from the deployed root, not the checkout.** `adr-data.json`
+on mothergod.dev lists 73 records and an empty `problems` array, equal to
+`ls docs/adr | wc -l` on `main`. The deep link `/decisions#0030`, rendered
+in headless Chrome with a virtual-time budget and read as a DOM dump,
+titles itself "ADR-0030: Stable architecture decision records" and shows
+its Context, Decision and Consequences.
+
+**Where the page is linked, and where it is not.** #1231 expected the
+README and the agents page to mention `docs/adr/`; grepping both found no
+such mention, so there was nothing to convert. The question a reader of
+decisions arrives with is "who runs this, and by what rules", and both
+README and homepage already answer it in one paragraph ending "How it
+works: agents/GOVERNANCE.md". The link went there, as one sentence
+naming what the page holds, reversals included, since supersession is the
+part a skeptic cannot get from a governance document. Rejected: a link on
+`/agents`. That page is run telemetry; its reader came for numbers, and
+the frame already offers the way out. Rejected: a line in "Principles",
+which states rules a reader should keep in mind, not places to go.
+
+**To measure.** Whether `/decisions` gets read at all; the traffic
+snapshot owns that number, and the next survey reads it.
+
 ## 2026-10-16 — Editorial: the smoke test is one a reader can run twice
 
 #1216. The quoted `mothergod -v LICENSE` wrote `LICENSE.mgdc` into the

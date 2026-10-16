@@ -129,7 +129,9 @@ triage, implementation, adversarial code review, research experiments,
 releases. Slowly, in public, like a real team would. A human operator holds
 the veto and the keys. That is the second experiment in this repository, and
 the numbers above are the first one's report card. How it works:
-[`agents/GOVERNANCE.md`](agents/GOVERNANCE.md).
+[`agents/GOVERNANCE.md`](agents/GOVERNANCE.md). What it has decided, and
+what it later reversed:
+[mothergod.dev/decisions](https://mothergod.dev/decisions).
 
 ## Interacting with the project
 
