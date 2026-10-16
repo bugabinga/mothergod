@@ -65,14 +65,14 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Every bump is a bitstream format change (CLAUDE.md hard rule 5); the
 /// history of what each version changed lives in `docs/format/SPEC.md` and
 /// the ADRs it cites. This build decodes exactly this version for both
-/// methods: versions 1 through 14 were retired outright, no release having
+/// methods: versions 1 through 15 were retired outright, no release having
 /// written any of them
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
 /// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a frame
 /// naming any other version is rejected as `UnsupportedVersion` before its
 /// payload is read (`tests/golden/` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 15;
+pub const FORMAT_VERSION: u8 = 16;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -811,8 +811,9 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// [`Method::Stored`] writes its payload slice of `input` through the same
 /// bounded writer and allocates no decoded buffer, so resident memory is the
 /// input plus the write buffer. [`filters::select::Candidate::Transpose`],
-/// [`filters::select::Candidate::Base64`] and
-/// [`filters::select::Candidate::Reverse`] fall back to a whole-buffer
+/// [`filters::select::Candidate::Base64`],
+/// [`filters::select::Candidate::Reverse`] and
+/// [`filters::select::Candidate::ReverseDelta`] fall back to a whole-buffer
 /// decode followed by one bulk write: no worse than [`decompress_bounded`],
 /// just never streamed.
 /// [`decodes_incrementally`] tells a caller which case a frame is without
@@ -860,8 +861,8 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// or a 5-byte call/jmp instruction), and [`decompress_to_writer`] streams
 /// all three, but `Candidate::Transpose`'s decode writes scattered across
 /// the *entire* buffer in column-major order, `Candidate::Base64` has no
-/// per-byte undo and `Candidate::Reverse` emits the last byte first, so all
-/// three need the whole buffer resident. This predicate does not share
+/// per-byte undo, and `Candidate::Reverse` and `Candidate::ReverseDelta`
+/// emit the last byte first, so all four need the whole buffer resident. This predicate does not share
 /// [`decompress_to_writer`]'s own
 /// dispatch: a caller can ask before committing to either API. No test runs
 /// [`decompress_to_writer`] against the answer, so the two agreeing is
@@ -888,6 +889,7 @@ pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
                 filters::select::Candidate::Transpose(_)
                     | filters::select::Candidate::Base64
                     | filters::select::Candidate::Reverse
+                    | filters::select::Candidate::ReverseDelta(_)
             );
         }
     }

@@ -365,6 +365,9 @@ fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
         Candidate::Base64 => filters::base64_unwrap::encode(data)
             .expect("pick() shortlists Base64 only for data base64_unwrap::encode accepted"),
         Candidate::Reverse => filters::reverse::encode(data),
+        Candidate::ReverseDelta(stride) => {
+            filters::delta::encode(&filters::reverse::encode(data), stride)
+        }
     }
 }
 
@@ -389,6 +392,11 @@ fn undo_filter(candidate: Candidate, mut data: Vec<u8>) -> Result<Vec<u8>, Error
             // buffer in place and allocates nothing.
             data.reverse();
             Ok(data)
+        }
+        Candidate::ReverseDelta(stride) => {
+            let mut undone = filters::delta::try_decode(&data, stride)?;
+            undone.reverse();
+            Ok(undone)
         }
     }
 }
@@ -923,8 +931,8 @@ impl ResidualTree {
 /// filter [`filters::select::pick`] shortlists, keeps whichever produces
 /// the smallest `encode_tokens` body, and prefixes that body with the
 /// winning candidate's 2-byte selector (see the module docs' "Payload
-/// layout"). Filters are trialed against the raw input directly, never
-/// stacked.
+/// layout"). Each candidate is applied to the raw input: one filter, or
+/// [`Candidate::ReverseDelta`], the one fixed composition.
 ///
 /// # Panics
 ///
@@ -941,7 +949,8 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
             | Candidate::Delta(_)
             | Candidate::Bcj
             | Candidate::Base64
-            | Candidate::Reverse => None,
+            | Candidate::Reverse
+            | Candidate::ReverseDelta(_) => None,
         };
         let body = encode_tokens(&filtered, columns);
         if best.as_ref().is_none_or(|(_, existing)| {
@@ -1318,8 +1327,8 @@ impl DecodeSink for VecSink<'_> {
 /// - [`Error::OutOfMemory`] if the allocator cannot satisfy `output`'s
 ///   reservation, one of the model's fixed-size tables, or (for
 ///   [`Candidate::Delta`], [`Candidate::Bcj`], [`Candidate::Transpose`],
-///   [`Candidate::Base64`] and [`Candidate::Reverse`]) the filter's undo
-///   buffer.
+///   [`Candidate::Base64`], [`Candidate::Reverse`] and
+///   [`Candidate::ReverseDelta`]) the filter's undo buffer.
 /// - [`Error::Corrupt`] if the filter selector names no [`Candidate`]; bytes
 ///   follow the stream; a match distance exceeds [`lz::WINDOW`] (the
 ///   encoder's match finder never searches past it, so a wider one is never
@@ -1347,7 +1356,8 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
         | Candidate::Delta(_)
         | Candidate::Bcj
         | Candidate::Base64
-        | Candidate::Reverse => None,
+        | Candidate::Reverse
+        | Candidate::ReverseDelta(_) => None,
     };
     // Reserved fallibly and exactly up front, not left to grow through
     // `push`/`extend`'s doubling: `declared_len` is already bounded above,
@@ -1415,7 +1425,10 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             StreamUndo::Delta(filters::delta::Undo::try_new(stride).map_err(Error::from)?)
         }
         Candidate::Bcj => StreamUndo::Bcj(filters::bcj::Undo::try_new().map_err(Error::from)?),
-        Candidate::Transpose(_) | Candidate::Base64 | Candidate::Reverse => {
+        Candidate::Transpose(_)
+        | Candidate::Base64
+        | Candidate::Reverse
+        | Candidate::ReverseDelta(_) => {
             writer.write_all(&decode(payload, max_len)?)?;
             return Ok(());
         }

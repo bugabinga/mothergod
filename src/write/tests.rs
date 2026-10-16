@@ -2,7 +2,7 @@ use std::io::ErrorKind;
 
 use super::*;
 use crate::test_support::{
-    Xorshift32, bcj_call_dense_data, columnar_drift_data, tabular_columns_data,
+    Xorshift32, bcj_call_dense_data, columnar_drift_data, repeated_sentence, tabular_columns_data,
 };
 use crate::{compress, compress_blocks, decompress};
 
@@ -43,13 +43,14 @@ fn encode(input: &[u8], chunk: usize, block_len: usize) -> Vec<u8> {
 
 #[test]
 fn every_method_and_filter_class_writes_the_bytes_compress_returns() {
-    let classes: [(&str, Vec<u8>); 5] = [
+    let classes: [(&str, Vec<u8>); 6] = [
         ("stored", b"hi".to_vec()),
         (
             "identity",
             include_bytes!("../../research/imports/session-1/mothergod.rs").to_vec(),
         ),
-        ("delta", columnar_drift_data()),
+        ("delta", repeated_sentence()),
+        ("reverse-delta", columnar_drift_data()),
         ("bcj", bcj_call_dense_data()),
         ("transpose", tabular_columns_data(8, 2000, 1)),
     ];

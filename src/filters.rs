@@ -569,7 +569,9 @@ pub mod reverse {
 /// [`select::pick`] narrows the menu with an order-1 entropy proxy on a
 /// bounded probe, so the expensive trial encode runs only on candidates
 /// worth it (`JOURNAL` S1-A1). It shortlists [`delta`], [`bcj`],
-/// [`transpose`], [`base64_unwrap`] and, for every input, [`reverse`].
+/// [`transpose`], [`base64_unwrap`] and, for every input, [`reverse`]; and,
+/// when the reversed input's best delta stride beats none, [`reverse`]
+/// followed by that [`delta`].
 pub mod select {
     use super::delta;
     use std::collections::HashMap;
@@ -638,6 +640,10 @@ pub mod select {
         Base64,
         /// [`super::reverse::encode`].
         Reverse,
+        /// [`super::reverse::encode`], then [`delta::encode`] with this
+        /// stride over the reversed bytes: the composition a single
+        /// [`Self::Delta`] or [`Self::Reverse`] cannot write.
+        ReverseDelta(NonZeroUsize),
     }
 
     impl Candidate {
@@ -645,7 +651,8 @@ pub mod select {
         /// `[kind, param]` that opens `Method::Lz`'s payload
         /// (`docs/format/SPEC.md`). `param` is the delta stride or transpose
         /// column count, zero for [`Self::Identity`], [`Self::Bcj`],
-        /// [`Self::Base64`] and [`Self::Reverse`].
+        /// [`Self::Base64`] and [`Self::Reverse`]; for
+        /// [`Self::ReverseDelta`] it is the delta stride.
         ///
         /// # Panics
         ///
@@ -670,6 +677,11 @@ pub mod select {
                 ],
                 Self::Base64 => [4, 0],
                 Self::Reverse => [5, 0],
+                Self::ReverseDelta(stride) => [
+                    6,
+                    u8::try_from(stride.get())
+                        .expect("pick() bounds delta strides to MAX_DELTA_STRIDE (96), fits u8"),
+                ],
             }
         }
 
@@ -689,6 +701,7 @@ pub mod select {
                 [3, param] => NonZeroUsize::new(usize::from(param)).map(Self::Transpose),
                 [4, 0] => Some(Self::Base64),
                 [5, 0] => Some(Self::Reverse),
+                [6, param] => NonZeroUsize::new(usize::from(param)).map(Self::ReverseDelta),
                 _ => None,
             }
         }
@@ -708,7 +721,8 @@ pub mod select {
                 | Self::Delta(_)
                 | Self::Bcj
                 | Self::Transpose(_)
-                | Self::Reverse => u64::from(filtered_len),
+                | Self::Reverse
+                | Self::ReverseDelta(_) => u64::from(filtered_len),
             }
         }
     }
@@ -789,14 +803,10 @@ pub mod select {
         bits / transitions
     }
 
-    /// Shortlists filters worth a full trial encode against `data`.
-    ///
-    /// [`Candidate::Identity`] is always included, as the top-scored
-    /// candidate or alongside it, so every trial has a baseline.
-    #[must_use]
-    pub fn pick(data: &[u8]) -> Vec<Candidate> {
-        let probe = &data[..data.len().min(PROBE_LEN)];
-
+    /// [`Candidate::Identity`] and every [`Candidate::Delta`] stride up to
+    /// [`MAX_DELTA_STRIDE`], scored by [`order1_entropy`] of `probe` after
+    /// the filter, lowest first.
+    fn rank_by_delta(probe: &[u8]) -> Vec<(f64, Candidate)> {
         let mut scored: Vec<(f64, Candidate)> =
             Vec::with_capacity(usize::from(MAX_DELTA_STRIDE) + 1);
         scored.push((order1_entropy(probe), Candidate::Identity));
@@ -808,6 +818,18 @@ pub mod select {
             ));
         }
         scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+        scored
+    }
+
+    /// Shortlists filters worth a full trial encode against `data`.
+    ///
+    /// [`Candidate::Identity`] is always included, as the top-scored
+    /// candidate or alongside it, so every trial has a baseline.
+    #[must_use]
+    pub fn pick(data: &[u8]) -> Vec<Candidate> {
+        let probe = &data[..data.len().min(PROBE_LEN)];
+
+        let scored = rank_by_delta(probe);
 
         let mut candidates = vec![scored[0].1];
         candidates.push(if scored[0].1 == Candidate::Identity {
@@ -830,6 +852,16 @@ pub mod select {
         }
 
         candidates.push(Candidate::Reverse);
+
+        // The reversed input's first PROBE_LEN bytes are the original's last
+        // PROBE_LEN bytes, reversed, so that window is what a trial of
+        // ReverseDelta codes first. Ranked on its own: a window at the other
+        // end of the block can rank another stride first.
+        let tail = &data[data.len().saturating_sub(PROBE_LEN)..];
+        let reversed_tail: Vec<u8> = tail.iter().rev().copied().collect();
+        if let (_, Candidate::Delta(stride)) = rank_by_delta(&reversed_tail)[0] {
+            candidates.push(Candidate::ReverseDelta(stride));
+        }
 
         if data.len() >= MIN_TRANSPOSE_LEN {
             let baseline = column_entropy(probe, 1);

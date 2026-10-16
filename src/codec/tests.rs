@@ -112,22 +112,32 @@ fn roundtrip_founding_archive_source() {
 }
 
 #[test]
-fn roundtrip_columnar_drift_data_selects_delta_and_streams_it() {
+fn roundtrip_repeated_sentence_selects_delta_and_streams_it() {
     // Proves encode() actually wires a trial-selected filter into the
     // frame, not just plumbs pick() through unused; pins the kind byte
     // to 1 (Delta) rather than just non-identity, since this fixture is
-    // also decode_undoable_streaming's only regression coverage for
-    // Candidate::Delta (`research/JOURNAL.md` S1-P7) — a future trial-
-    // cost change that made encode() prefer a different candidate here
-    // would silently drop that coverage without this pin.
-    let data = columnar_drift_data();
+    // also decode_undoable_streaming's regression coverage for the
+    // trial-selected Candidate::Delta (`research/JOURNAL.md` S1-P7) — a
+    // future trial-cost change that made encode() prefer a different
+    // candidate here would silently drop that coverage without this pin.
+    let data = crate::test_support::repeated_sentence();
     let encoded = encode(&data);
     assert_eq!(
         encoded[0], 1,
-        "columnar drift data should select Delta, got kind byte {}",
+        "repeated sentence should select Delta, got kind byte {}",
         encoded[0]
     );
     assert_decode_matches(&encoded, &data, "decode_undoable_streaming's Delta path");
+}
+
+#[test]
+fn columnar_drift_data_streams_through_a_forced_delta() {
+    // encode() no longer picks Delta for this random walk: ReverseDelta(4)
+    // codes it a few bytes smaller (`JOURNAL` S2-A120). Forced, it stays the
+    // literal-only coverage of decode_undoable_streaming's Delta path.
+    let data = columnar_drift_data();
+    let forced = forced_payload(Candidate::Delta(crate::test_support::nz(4)), &data);
+    assert_decode_matches(&forced, &data, "decode_undoable_streaming's Delta path");
 }
 
 #[test]
@@ -150,7 +160,7 @@ fn decode_undoable_streaming_delta_path_covers_copy_streamed_too() {
 
 #[test]
 fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
-    // Same shape as roundtrip_columnar_drift_data_selects_delta_and_
+    // Same shape as roundtrip_repeated_sentence_selects_delta_and_
     // streams_it: proves encode() actually selects Candidate::Bcj for a
     // real fixture (kind byte 2), not just that filters::bcj round-trips
     // in isolation, and that decode_to_writer's Bcj path
@@ -167,7 +177,7 @@ fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
 
 #[test]
 fn roundtrip_tabular_columns_data_selects_transpose_and_streams_it() {
-    // Same shape as roundtrip_columnar_drift_data_selects_delta_and_
+    // Same shape as roundtrip_repeated_sentence_selects_delta_and_
     // streams_it and roundtrip_bcj_call_dense_data_selects_bcj_and_
     // streams_it: proves encode() actually selects Candidate::Transpose
     // for real data (kind byte 3), and that both decode() and
@@ -1355,6 +1365,66 @@ fn reverse_roundtrips_at_every_short_length_when_forced() {
 fn reverse_output_past_max_len_is_rejected() {
     let rows = crate::test_support::le_rows(100);
     let forced = forced_payload(Candidate::Reverse, &rows);
+    let len = u32::try_from(rows.len()).expect("small");
+    assert_eq!(decode(&forced, len).as_deref(), Ok(rows.as_slice()));
+    let expected = Error::TooLarge { len, max: len - 1 };
+    assert_eq!(decode(&forced, len - 1), Err(expected.clone()));
+    let err = decode_streaming(&forced, len - 1).expect_err("output past max_len");
+    assert_eq!(as_codec_error(&err), Some(&expected));
+}
+
+#[test]
+fn le_rows_pick_reverse_delta_and_beat_every_single_filter() {
+    let rows = crate::test_support::le_rows(100);
+    let encoded = encode(&rows);
+    let picked = Candidate::from_header_bytes([encoded[0], encoded[1]]);
+    assert!(
+        matches!(picked, Some(Candidate::ReverseDelta(_))),
+        "picked {picked:?}"
+    );
+    assert!(
+        encoded.len() < SELECTOR_LEN + encode_tokens(&rows, None).len(),
+        "reversing then differencing must beat coding the rows as they stand"
+    );
+    assert_decode_matches(&encoded, &rows, "picked ReverseDelta");
+}
+
+#[test]
+fn reverse_delta_roundtrips_at_every_short_length_when_forced() {
+    let rows = crate::test_support::le_rows(2);
+    let stride = crate::test_support::nz(20);
+    for len in 0..=rows.len() {
+        let forced = forced_payload(Candidate::ReverseDelta(stride), &rows[..len]);
+        assert_decode_matches(
+            &forced,
+            &rows[..len],
+            &format!("forced ReverseDelta, {len} bytes"),
+        );
+        let Extent { output_len, .. } = declared_extent(&forced).expect("a real payload");
+        assert_eq!(output_len, len as u64, "{len} bytes");
+    }
+}
+
+#[test]
+fn reverse_delta_is_the_delta_of_the_reversed_bytes() {
+    // Pins the composition order: reverse first, then delta over the
+    // reversed bytes. The other order is a different filter with the same
+    // selector bytes, and a decoder that undid in the wrong order would
+    // still round-trip its own output.
+    let data: Vec<u8> = (0..=40u8).map(|i| i.wrapping_mul(7)).collect();
+    let stride = crate::test_support::nz(3);
+    let mut reversed = data.clone();
+    reversed.reverse();
+    assert_eq!(
+        apply_filter(Candidate::ReverseDelta(stride), &data),
+        filters::delta::encode(&reversed, stride)
+    );
+}
+
+#[test]
+fn reverse_delta_output_past_max_len_is_rejected() {
+    let rows = crate::test_support::le_rows(100);
+    let forced = forced_payload(Candidate::ReverseDelta(crate::test_support::nz(20)), &rows);
     let len = u32::try_from(rows.len()).expect("small");
     assert_eq!(decode(&forced, len).as_deref(), Ok(rows.as_slice()));
     let expected = Error::TooLarge { len, max: len - 1 };

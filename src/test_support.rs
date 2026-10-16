@@ -175,14 +175,17 @@ pub(crate) fn tabular_columns_data(columns: usize, rows: usize, seed: u32) -> Ve
     data
 }
 
+/// One 45-byte sentence repeated 50 times: input on which the trial encode
+/// prefers `Candidate::Delta(45)` to every other filter, the one class here
+/// `Candidate::ReverseDelta` does not take (`JOURNAL` S2-A120).
+pub(crate) fn repeated_sentence() -> Vec<u8> {
+    b"the quick brown fox jumps over the lazy dog. ".repeat(50)
+}
+
 /// A stream of a `Stored` frame, an `Lz` frame and a `Stored` frame, with
 /// the bytes it decodes to.
 pub(crate) fn mixed_stream() -> (Vec<u8>, Vec<u8>) {
-    let parts: [Vec<u8>; 3] = [
-        b"hi".to_vec(),
-        b"the quick brown fox jumps over the lazy dog. ".repeat(50),
-        Vec::new(),
-    ];
+    let parts: [Vec<u8>; 3] = [b"hi".to_vec(), repeated_sentence(), Vec::new()];
     let methods = [
         crate::Method::Stored,
         crate::Method::Lz,

@@ -56,6 +56,7 @@ pub fn preimages() -> Vec<(&'static str, Vec<u8>)> {
         ("transpose_columnar", columnar_drift(8, 2000)),
         ("base64_records", base64_records(60)),
         ("le_rows", le_rows(20)),
+        ("le_rows_reverse_delta", le_rows(60)),
         (
             "pseudo_random_incompressible",
             pseudo_random(0xdead_beef, 2048),
@@ -165,7 +166,8 @@ fn base64_records(rows: usize) -> Vec<u8> {
 
 /// `rows` 20-byte rows of a little-endian timestamp, a 4-byte category and
 /// a little-endian `f64`: at 20 rows `compress` selects `Candidate::Reverse`
-/// for it (`JOURNAL` S2-A119), the one filter whose frame no other preimage
+/// for it (`JOURNAL` S2-A119) and at 60 `Candidate::ReverseDelta`
+/// (`JOURNAL` S2-A120), the two filters whose frames no other preimage
 /// reaches.
 fn le_rows(rows: usize) -> Vec<u8> {
     const CATEGORIES: [[u8; 4]; 3] = [*b"temp", *b"hum\0", *b"pres"];
@@ -420,6 +422,16 @@ mod tests {
         let frame = mothergod::compress(&le_rows(20));
         // Past the 4-byte magic, the version and the method: the selector.
         assert_eq!(frame[6..8], [5, 0], "le_rows should win as Reverse");
+    }
+
+    #[test]
+    fn le_rows_compress_with_the_reverse_delta_filter() {
+        let frame = mothergod::compress(&le_rows(60));
+        assert_eq!(
+            frame[6..8],
+            [6, 80],
+            "le_rows(60) should win as ReverseDelta"
+        );
     }
 
     #[test]
