@@ -149,12 +149,16 @@ jobs:
 
   # Ratio regression gate (docs/TESTING.md layer 7, JOURNAL S2-D1, #284):
   # a PR fails when measured bits/byte on the fixed gate cases regresses
-  # past `baseline::TOLERANCE_BITS` vs the committed `bench/baseline.json`.
-  # Fixed seeds through a deterministic codec: a red here is a real ratio
-  # regression, never noise. Runs the gate binary directly, not through x:
-  # the ratio gate is not a stage of x's quality gate (ADR-0029), and its
-  # own error output teaches the accepted-trade path (a hand edit of
-  # `bench/baseline.json`; `-- write` holds a grown case, #1230).
+  # past `baseline::TOLERANCE_BITS` vs the committed `bench/baseline.json`,
+  # or when any case compresses to different bytes than the digest that
+  # file commits, equal size included (#1254). Fixed seeds through a
+  # deterministic codec: a red here is a real ratio regression or a real
+  # output change, never noise. Runs the gate binary directly, not through
+  # x: the ratio gate is not a stage of x's quality gate (ADR-0029), and
+  # its own error output teaches each accepted path: a regression is a
+  # hand edit of `bench/baseline.json` (`-- write` holds a grown case,
+  # #1230); an intended output change is `-- write`, which regenerates
+  # the digests.
   ratio:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
