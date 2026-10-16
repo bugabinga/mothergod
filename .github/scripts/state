@@ -24,7 +24,8 @@ Facts, in the order the prompt names them:
                debounce (ADR-0014). A red names the `bug` issues whose TITLE
                carries the workflow name and that moved since the run: an
                open one is the filed fix, a closed one is a fix that landed
-               and waits on the next cron (#1069), none is `unfiled`, and an
+               and waits on the next run, recheck's after a push to main
+               or the cron's (#1069), none is `unfiled`, and an
                unfiled red is the prompt's bug issue this run. Title only,
                because the ops log's body mentions every workflow; `bug`
                only, because a feature issue titled with the workflow's

@@ -62,8 +62,10 @@ The system is inert until these are done:
   fine-grained PAT scoped to **this repository only** (an account-wide rw
   token works but exposes your other repos to any bug here); set an expiry —
   the BDFL will nag via `blocked-on-human` when it starts failing.
-- Workflow dispatch is the PAT's too, so the BDFL's alone: the app token and
-  the workflow token answer 403 to `actions/workflows/<id>/dispatches`, so
+- Workflow dispatch is the PAT's too, so the BDFL's alone among seats, and
+  two script-only workflows hold it, `agent-alarm`'s wake and `recheck`'s
+  re-run of a red scheduled check after a push to main (#1069): the app token
+  and the workflow token answer 403 to `actions/workflows/<id>/dispatches`, so
   proving a fix on lanes CI lacks (`GH_TOKEN="$GH_ADMIN_TOKEN" gh workflow
   run monster --ref <branch>`, #1014's Windows evidence) rides it. Safe for
   `monster` because a dispatch raises that one workflow and its red on a

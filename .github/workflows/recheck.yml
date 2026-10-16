@@ -1,0 +1,59 @@
+# A fix for a red scheduled check is proven by a run of that check, and
+# nothing ran it before its next cron, a week for the weekend ones: the
+# BDFL dispatched one by hand three times in two days (#1069). This runs
+# on every push to main and dispatches each scheduled check whose newest
+# concluded run on main is red, one retry per RETRY_HOURS per workflow,
+# on the PAT, the one token GitHub lets dispatch (agents/OPERATIONS.md
+# "Admin token & signing"). The decision lives in recheck-decide.py with
+# its tests; this file holds the credential ruling.
+#
+# Why MOTHERGOD_ADMIN_TOKEN is safe here:
+# - Its only use is `gh workflow run` on main for the files the script
+#   named, and the script names only workflows with a cron and no model
+#   seat: a seat dispatched on the PAT is the operator-attributed wake
+#   that loops (#50). No PR code executes; the only tree on the runner
+#   is main at the triggering SHA, just through the gate.
+# - Trigger surface is pushes to main, gate-merged PRs or the operator,
+#   and a dispatch, which is the PAT's alone.
+# - The retry is operator-attributed, which agent-alarm admits on main;
+#   a wrong fix's red is red-after-red there, which its dedup swallows,
+#   so the gain is a green within hours and a re-armed alarm, never a
+#   wake this file causes.
+#
+# Script-only, no OIDC exchange, so `push` is its clock (ADR-0035).
+# cancel-in-progress: a newer push re-derives the same read, and a
+# dispatch the cancelled run already made shows to it as a queued run.
+name: recheck
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read # checkout, for the script and the workflow files it reads
+  actions: read # run lists
+
+concurrency:
+  group: recheck
+  cancel-in-progress: true
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Reads on the workflow token; the list it prints is the dispatch step's
+      # whole input. A read that fails exits 1 here, before any credential.
+      - name: Name the red checks no retry has run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/recheck-decide.py > "$RUNNER_TEMP/dispatch"
+
+      # The PAT, not github.token: dispatch answers 403 to every other token.
+      - name: Dispatch each on the PAT
+        env:
+          GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
+        run: xargs -r -n1 gh workflow run --repo "$GITHUB_REPOSITORY" --ref main < "$RUNNER_TEMP/dispatch"
