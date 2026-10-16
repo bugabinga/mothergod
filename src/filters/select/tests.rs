@@ -14,6 +14,38 @@ fn next_step(seed: &mut u32) -> u8 {
     WALK_STEPS[index]
 }
 
+const TWO: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+
+#[test]
+fn entropy_counts_each_pair_once_per_first_byte() {
+    // Pairs (0,0), (0,1), (1,1): byte 0 leads two pairs, byte 1 one, so
+    // 1 + 1 + 0 bits over 3 transitions.
+    let got = Order1::new().entropy(&[0, 0, 1, 1], NonZeroUsize::MIN);
+    assert!((got - 2.0 / 3.0).abs() < 1e-12, "{got}");
+}
+
+#[test]
+fn entropy_per_column_sees_what_one_column_does_not() {
+    // Column 0 is constant and column 1 alternates: each column is
+    // predictable on its own, the interleaved stream is not.
+    let rows = [7, 0, 7, 1].repeat(100);
+    let mut order1 = Order1::new();
+    assert!(order1.entropy(&rows, NonZeroUsize::MIN) > 0.4);
+    assert!(order1.entropy(&rows, TWO).abs() < 1e-12);
+}
+
+#[test]
+fn entropy_scratch_is_all_zero_after_every_call() {
+    let mut seed = 7u32;
+    let noise: Vec<u8> = (0..4096).map(|_| next_step(&mut seed)).collect();
+    let mut order1 = Order1::new();
+    let first = order1.entropy(&noise, TWO);
+    assert!(order1.pairs.iter().all(|&c| c == 0));
+    assert!(order1.firsts.iter().all(|&c| c == 0));
+    // A reused scratch scores exactly as a fresh one does.
+    assert_eq!(order1.entropy(&noise, TWO).to_bits(), first.to_bits());
+}
+
 #[test]
 fn pick_always_includes_identity() {
     for data in [&b""[..], b"x", b"abababababababab", &[0u8; 5000]] {
