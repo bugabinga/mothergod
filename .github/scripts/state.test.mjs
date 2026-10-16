@@ -61,7 +61,7 @@ const facts = (over = {}) => ({
   prs: { error: null, rows: [] },
   issues: { error: null, open: 0, counts: { product: 0, "agent-system": 0 }, unrouted: [] },
   ops_log: { error: null, total: 0, rows: [] },
-  commits: { error: null, since: "2026-10-15T20:11:13Z", run: 1, rows: [] },
+  commits: { error: null, since: "2026-10-15T20:11:13Z", run: 1, truncated: false, rows: [] },
   ...over,
 });
 
@@ -100,7 +100,7 @@ test("a red nobody filed says unfiled and the footer counts it", () => {
   );
   assert.match(out, /monster  failure  6d \(2026-10-10, schedule\)  unfiled: a bug issue this run/);
   assert.match(out, /https:\/\/github.com\/o\/r\/actions\/runs\/1/);
-  assert.match(out, /checks 1 \(red 1, unfiled 1\)/);
+  assert.match(out, /checks 1 \(red 1, unfiled 1, unreadable 0\)/);
 });
 
 test("a red whose only citing issue is closed waits on the next cron", () => {
@@ -115,7 +115,7 @@ test("a red whose only citing issue is closed waits on the next cron", () => {
     }),
   );
   assert.match(out, /#1013 closed 2026-10-10: fix landed, the next cron tells/);
-  assert.match(out, /checks 1 \(red 1, unfiled 0\)/);
+  assert.match(out, /checks 1 \(red 1, unfiled 0, unreadable 0\)/);
 });
 
 test("a red with an open citing issue is filed, nothing more to say", () => {
@@ -167,7 +167,35 @@ test("a check with no concluded run and one that cannot be read each get their o
   );
   assert.match(out, /monster  no concluded run among the newest 50 on main/);
   assert.match(out, /gone  UNREADABLE \(no workflow of that name\)/);
-  assert.match(out, /checks 2 \(red 0, unfiled 0\)/);
+  assert.match(out, /checks 2 \(red 0, unfiled 0, unreadable 1\)/);
+});
+
+test("a red whose citations cannot be read is counted unreadable, not filed", () => {
+  const out = call(
+    "render",
+    facts({
+      checks: { error: null, rows: [check({ conclusion: "failure", cited: null })], unfiled: 0 },
+    }),
+  );
+  assert.match(out, /citations UNREADABLE/);
+  assert.match(out, /checks 1 \(red 1, unfiled 0, unreadable 1\)/);
+});
+
+test("a full commits page prints 100+, never a count that looks whole", () => {
+  const out = call(
+    "render",
+    facts({
+      commits: {
+        error: null,
+        since: "2026-10-12T00:00:00Z",
+        run: null,
+        truncated: true,
+        rows: Array.from({ length: 100 }, (_, i) => ({ sha: `c${i}`, subject: "s" })),
+      },
+    }),
+  );
+  assert.match(out, /commits: 100\+ on main/);
+  assert.match(out, /\| commits 100\+ since/);
 });
 
 test("PRs print verdict, draft and age, oldest first", () => {
@@ -229,6 +257,7 @@ test("the ops log prints seat and first line, the commits sha and subject", () =
         error: null,
         since: "2026-10-15T20:11:13Z",
         run: 42,
+        truncated: false,
         rows: [{ sha: "dd06127", subject: "filters: wire reverse" }],
       },
     }),
@@ -365,7 +394,7 @@ test("end to end: the checks are read per workflow, a red is cited, the rest cou
   assert.match(out, /commits: 1 on main since 2026-10-15T20:11:13Z\n    dd06127  filters: wire reverse/);
   assert.match(
     out,
-    /state: checks 2 \(red 1, unfiled 0\) \| prs 1 \| issues 2 \(unrouted 1\) \| ops-log #3 \| commits 1 since 2026-10-15T20:11:13Z/,
+    /state: checks 2 \(red 1, unfiled 0, unreadable 0\) \| prs 1 \| issues 2 \(unrouted 1\) \| ops-log #3 \| commits 1 since 2026-10-15T20:11:13Z/,
   );
 });
 
@@ -407,6 +436,67 @@ test("end to end: one workflow's runs unreadable does not take the board down", 
   );
   assert.match(
     proc.stdout,
-    /state: checks 2 \(red 0, unfiled 0\) \| prs 0 \| issues 1 \(unrouted 0\) \| ops-log #3 \| commits 0/,
+    /state: checks 2 \(red 0, unfiled 0, unreadable 1\) | prs 0 \| issues 1 \(unrouted 0\) \| ops-log #3 \| commits 0/,
   );
+});
+
+// The stub answers the first needle contained in argv, so order is the test:
+// the `label:bug` row is the only one a bug-scoped query reaches, and the
+// bare `search/issues` row is what a title-only query would have returned.
+test("end to end: a feature issue titled with the workflow's name does not file its red", () => {
+  const run = {
+    id: 1,
+    created_at: "2026-10-10T09:46:00Z",
+    conclusion: "failure",
+    event: "schedule",
+    html_url: "https://github.com/o/r/actions/runs/1",
+  };
+  const proc = withGh(
+    {
+      "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
+      "workflows/11/runs": { workflow_runs: [run] },
+      "workflows/12/runs": { workflow_runs: [] },
+      "label:bug": { items: [] },
+      "search/issues": { items: [{ number: 980, state: "open" }] },
+      "pr list": [],
+      "issue list": [ISSUE],
+      "issues/3/comments": [],
+      "issues/3": { comments: 0 },
+      "commits?": [],
+    },
+    ["--since", "2026-10-15T20:11:13Z"],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /monster  failure  \d+d \(2026-10-10, schedule\)  unfiled: a bug issue this run/);
+  assert.doesNotMatch(proc.stdout, /#980/);
+  assert.match(proc.stdout, /checks 2 \(red 1, unfiled 1, unreadable 0\)/);
+});
+
+test("end to end: a PR-branch failure is never read for a workflow with no run on main", () => {
+  const failure = {
+    id: 9,
+    created_at: "2026-10-15T20:37:50Z",
+    conclusion: "failure",
+    event: "pull_request",
+    html_url: "https://github.com/o/r/actions/runs/9",
+    head_branch: "claude/x",
+  };
+  const proc = withGh(
+    {
+      "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
+      "branch=main": { workflow_runs: [] },
+      "workflows/11/runs": { workflow_runs: [failure] },
+      "workflows/12/runs": { workflow_runs: [failure] },
+      "pr list": [],
+      "issue list": [ISSUE],
+      "issues/3/comments": [],
+      "issues/3": { comments: 0 },
+      "commits?": [],
+    },
+    ["--since", "2026-10-15T20:11:13Z"],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /monster  no concluded run among the newest 50 on main/);
+  assert.doesNotMatch(proc.stdout, /unfiled:|claude\/x/);
+  assert.match(proc.stdout, /checks 2 \(red 0, unfiled 0, unreadable 0\)/);
 });
