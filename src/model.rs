@@ -75,7 +75,11 @@ impl Model {
     /// here is our own bug, not adversarial input (nothing on the decode
     /// path calls this method).
     pub fn encode(&mut self, encoder: &mut Encoder, symbol: usize) {
-        crate::encode_symbol(encoder, &self.freq, symbol, u64::from(self.total));
+        // The cumulative range [low, low + freq[symbol]) out of `total`;
+        // `decode` scans for the same range.
+        let low: u32 = self.freq[..symbol].iter().sum();
+        let high = low + self.freq[symbol];
+        encoder.encode(u64::from(low), u64::from(high), u64::from(self.total));
         self.update(symbol);
     }
 
@@ -108,9 +112,15 @@ impl Model {
     /// bytes produced `decoder`'s internal value.
     #[must_use]
     pub fn decode(&mut self, decoder: &mut Decoder) -> usize {
-        let target = decoder.target(u64::from(self.total));
-        let (symbol, low, high) = crate::scan_for_target(&self.freq, target);
-        decoder.decode(low, high, u64::from(self.total));
+        let total = u64::from(self.total);
+        let target = decoder.target(total);
+        let mut symbol = 0;
+        let mut low = 0u64;
+        while low + u64::from(self.freq[symbol]) <= target {
+            low += u64::from(self.freq[symbol]);
+            symbol += 1;
+        }
+        decoder.decode(low, low + u64::from(self.freq[symbol]), total);
         self.update(symbol);
         symbol
     }
