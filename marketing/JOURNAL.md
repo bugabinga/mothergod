@@ -18,6 +18,24 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-16 — Editorial: the smoke test is one a reader can run twice
+
+#1216. The quoted `mothergod -v LICENSE` wrote `LICENSE.mgdc` into the
+checkout, so the second run failed with `File exists`. Both pages now
+quote `mothergod -v -c LICENSE > /dev/null`, which prints the same line,
+writes nothing and exits 0 every time; `tests/claims.rs` runs it with
+stdout discarded, the way the page does.
+
+**Rejected: bare `-v -c LICENSE`,** the fix the issue thread preferred.
+On a terminal it prints `compressed data not written to a terminal` and
+exits 1, so every reader would hit an error on the first run instead of
+the second. The test missed this because its stdout was a pipe. A quoted
+command gets tried in a terminal before it ships, not only in a test.
+
+**Rejected: keep the command and add a clause about the file.** The
+second run still fails; a sentence warning about a failure we can avoid
+is the wrong fix.
+
 ## 2026-10-15 — Editorial: "Try it" shows what a first run prints, and a test holds the number
 
 #1196, from this morning's survey. Both "Try it" sections now quote one

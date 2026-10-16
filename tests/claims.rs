@@ -852,11 +852,13 @@ fn published_first_run_transcript_matches_what_the_binary_prints() {
     // Both "Try it" sections quote one `-v` run on the clone's `LICENSE`
     // (issue #1196). A codec change that moves its size would otherwise
     // leave a stranger's terminal disagreeing with the page they followed.
-    // `-c` keeps the run from writing `LICENSE.mgdc` into the checkout; the
-    // line it prints names the input the same way the bare run does.
+    // The quoted run is `-v -c LICENSE > /dev/null`: it writes no
+    // `LICENSE.mgdc`, so a reader can repeat it (issue #1216), and stdout is
+    // not a terminal, which `-c` would refuse. The test runs it the same way.
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_mothergod"))
         .args(["-v", "-c", "LICENSE"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdout(std::process::Stdio::null())
         .output()
         .expect("mothergod binary should spawn");
     assert!(
@@ -869,8 +871,8 @@ fn published_first_run_transcript_matches_what_the_binary_prints() {
     for surface_file in ["README.md", "site/index.html"] {
         let surface = read(surface_file).replace("&gt;", ">");
         assert!(
-            surface.contains("$ ./target/release/mothergod -v LICENSE\n"),
-            "{surface_file} no longer quotes the `mothergod -v LICENSE` run this test checks"
+            surface.contains("$ ./target/release/mothergod -v -c LICENSE > /dev/null\n"),
+            "{surface_file} no longer quotes the `mothergod -v -c LICENSE > /dev/null` run this test checks"
         );
         // The site's `<pre>` closes on the transcript's last line.
         let claimed = line_containing(&surface, "mothergod: LICENSE: ")
@@ -878,7 +880,7 @@ fn published_first_run_transcript_matches_what_the_binary_prints() {
             .trim_end_matches("</pre>");
         assert_eq!(
             claimed, truth,
-            "{surface_file} quotes `{claimed}` for `mothergod -v LICENSE`; the binary prints `{truth}`"
+            "{surface_file} quotes `{claimed}` for `mothergod -v -c LICENSE`; the binary prints `{truth}`"
         );
     }
 }
