@@ -160,7 +160,7 @@ test("dedup ignores labeled non-bot issues", () => {
         title: "🐛 Monster CI failure",
         body: ISSUE_MARKER,
         author: { login: "octocat" },
-        labels: [{ name: "bug" }, { name: "agent-system" }],
+        labels: [{ name: "bug" }, { name: "product" }],
       },
     ]),
     null,
