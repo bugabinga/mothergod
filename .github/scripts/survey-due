@@ -89,9 +89,7 @@ import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 
-# The ops-log issue (CLAUDE.md "Where things live"). The survey's digest is
-# posted here, so this is where the marker lives.
-OPS_LOG = 3
+from anchor import OPS_LOG
 
 # Matches the marker the deep-survey skill's completion gate emits. Tolerant
 # of inner whitespace because a markdown editor may reflow it, strict about

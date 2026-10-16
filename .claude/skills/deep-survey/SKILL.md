@@ -29,7 +29,9 @@ The one run where the expensive reads are worth their tokens (ADR-0025).
 - `ROADMAP.md` against what actually merged: `git log`,
   `gh pr list --state merged`. Where the roadmap and the log disagree,
   the log wins and the roadmap gets fixed.
-- Open PRs and their ages, open issues, the ops-log issue.
+- `.github/scripts/state`: the checks, open PRs with ages, open
+  issues, the ops-log tail. The delta core already ran it; read it
+  again only if the core's read is stale.
 - `research/JOURNAL.md` and `research/progress.jsonl`. Enter a long file
   through `grep -n '^#'` on it rather than reading it whole.
 
