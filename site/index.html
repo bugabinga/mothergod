@@ -280,7 +280,7 @@
             <tbody>
               <tr>
                 <th scope="row">Canterbury</th>
-                <td class="ours">1.350</td>
+                <td class="ours">1.347</td>
                 <td>2.081</td>
                 <td>1.470</td>
                 <td>1.403</td>
@@ -317,7 +317,7 @@
         <p>
           Slow, and that is the honest headline. mothergod's codec has no
           internal parallelism; the reports measure it one thread per file,
-          several files at once, on one CI machine (AMD EPYC 7763, 4 logical
+          several files at once, on one CI machine (AMD EPYC 9V45, 4 logical
           cores), more threads than cores, so the rate is a lower bound on what
           an isolated single-file run would show.
         </p>
@@ -336,27 +336,27 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.087</td>
-              <td>2.826</td>
+              <td>0.129</td>
+              <td>3.616</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.036</td>
-              <td>1.304</td>
+              <td>0.040</td>
+              <td>1.819</td>
             </tr>
           </tbody>
         </table>
         <p>
           Silesia's 212 MB took about an hour and a half to compress and about
-          three minutes to read back. Encoding carries the optimal parse, so it
-          runs roughly thirty-six times slower than decoding.
+          two minutes to read back. Encoding carries the optimal parse, so it
+          runs roughly forty-five times slower than decoding.
         </p>
         <p>
           One caveat the reports state themselves: these are single-run figures
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.2 to 22.0 MB/s</span>. Speed is measured on every
+          <span class="rate">0.2 to 33.1 MB/s</span>. Speed is measured on every
           benchmark run and becomes a target of its own at the speed-tiers
           milestone on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
