@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+"""Print the BDFL's state read: one line per fact, UNREADABLE per fact it could not read.
+
+Extensionless and executable because agents type it as a command mid-session,
+like operator-sweep, stalled-prs, security-alerts and agent-queue.
+
+Step 3 of the BDFL's delta core was the one duty without a script. Every wake
+assembled the same read by hand: `gh run list`, then once more per scheduled
+check because the weekly ones fall off a 40-row list on a busy afternoon,
+`gh pr list`, `gh issue list`, the ops log's last page by comment count,
+`git log`. Nine calls and 12 KB of output on 2026-10-11 to learn that nothing
+had changed (#1076), while the trend block's bdfl row read turns p50 61
+against 41 the week before and every other seat's halved. A read nobody
+scripted is also a read nobody can audit: corpus-fetch-check sat red seven
+days because its row was never on the page a wake happened to scan (#1058).
+
+Facts, in the order the prompt names them:
+
+    checks     every workflow agent-alarm.yml watches, read from its
+               `on.workflow_run.workflows` so the list lives there and
+               nowhere else, with the newest completed run on main that
+               concluded. `skipped` and `cancelled` are routine, not
+               conclusions: bot events the actor filter rejects, and the
+               debounce (ADR-0014). A red names the issues whose TITLE
+               carries the workflow name and that moved since the run: an
+               open one is the filed fix, a closed one is a fix that landed
+               and waits on the next cron (#1069), none is `unfiled`, and an
+               unfiled red is the prompt's bug issue this run. Title only,
+               because the ops log's body mentions every workflow.
+    prs        open pull requests, each with its verdict label and age.
+    issues     open issues by realm label, unrouted first, and the counts of
+               the labels the queues filter on.
+    ops-log    the last three comments on the ops-log issue, seat and first
+               line each, read from the last page by comment count.
+    commits    on main since the previous BDFL run that held a session
+               (anchor.py, the window every per-run duty shares).
+
+Every fact is read through `gh` on the session's own token, like agent-queue;
+none needs the security scopes security-alerts swaps in. Two invariants
+matter more than any line this prints:
+
+    A FACT THIS CANNOT READ PRINTS UNREADABLE, NEVER EMPTY. An empty fact
+    answers "nothing here", and a run that stops on a false nothing hides a
+    red or leaves a stalled PR for the next wake.
+
+    THE CHECKS ARE READ PER WORKFLOW, NEVER FROM ONE RUN LIST. A weekly
+    check's newest run is forty rows back by Friday.
+
+Liveness: the footer counts every fact and names each one that was
+unreadable, so a reader can tell a quiet repository from a reader that has
+silently stopped working.
+
+Usage: state [--since <ISO8601>] [--alarm <path>] [--repo <owner/name>]
+
+    --since   the commits window; default is the previous BDFL session's start.
+    --alarm   the workflow whose watch list names the checks; default is
+              agent-alarm.yml beside this script's workflows. For tests.
+
+Exits 0 whichever way it answers. A red check is a finding, not an error.
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+from anchor import OPS_LOG, iso, previous_run_start, stamp_to_dt
+
+# Runs read per workflow. A seat's runs on main are mostly `skipped` (every
+# bot event creates a run the actor filter then rejects; agent-bdfl.yml says
+# why), so the newest one that concluded sits some rows back.
+RUN_PAGE = 50
+
+# Conclusions that say nothing about health, agent-alarm's own exclusions.
+ROUTINE = {"skipped", "cancelled"}
+
+# The reviewer's verdict labels (CLAUDE.md "Issue/PR conventions"): a
+# completed review applies exactly one.
+VERDICTS = ("agent-approved", "changes-requested")
+
+# Realm labels. The queue scripts rank inside a realm; an issue carrying none
+# sits in nobody's queue, which is why it prints before every count.
+REALMS = ("product", "agent-system", "marketing")
+
+# The labels a queue filters on, counted so the reader learns what each
+# excludes or promotes without a second call.
+FILTERS = ("ready-to-ship", "blocked-on-human", "ledger", "bug")
+
+# The role footer gh-comment appends (footer.py): the seat a comment speaks for.
+SEAT = re.compile(r"^_([\w-]+) · \[Claude Code\]")
+
+# Width of an ops-log or PR line on the screen a wake reads it on.
+LINE = 140
+
+ALARM = Path(__file__).resolve().parent.parent / "workflows" / "agent-alarm.yml"
+
+
+def gh(*args):
+    """Run gh. Returns (parsed JSON, None) or (None, reason). Never raises, never exits.
+
+    Not `anchor.gh`, which dies on failure: dying here would print neither
+    the fact nor UNREADABLE, and the caller would fall back to reading by eye,
+    which is the failure mode.
+    """
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        reason = proc.stderr.strip().splitlines()
+        return None, (reason[-1] if reason else f"gh exited {proc.returncode}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "response was not JSON"
+
+
+def days(stamp, now):
+    """Whole days since a GitHub timestamp."""
+    return (now - stamp_to_dt(iso(stamp))).days
+
+
+def watched(path):
+    """The workflow names agent-alarm watches. Returns (names, None) or (None, reason)."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            doc = yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError) as err:
+        return None, f"{path}: {err}"
+    # PyYAML reads a bare `on` key as the boolean True (YAML 1.1).
+    triggers = doc.get("on", doc.get(True)) or {}
+    names = (triggers.get("workflow_run") or {}).get("workflows") or []
+    if not names:
+        return None, f"{path}: no on.workflow_run.workflows list"
+    return list(names), None
+
+
+def newest_run(runs):
+    """The newest run that concluded, or None. Newest is sorted here, not trusted (#902)."""
+    ordered = sorted(runs, key=lambda run: iso(run["created_at"]), reverse=True)
+    for run in ordered:
+        if run.get("conclusion") not in ROUTINE:
+            return run
+    return None
+
+
+def cite(items):
+    """Issue citations for a red, open first: `#12 open`, `#13 closed 2026-10-10`."""
+    rows = []
+    for item in sorted(items, key=lambda i: (i.get("state") != "open", -int(i["number"]))):
+        if item.get("state") == "open":
+            rows.append(f"#{item['number']} open")
+        else:
+            rows.append(f"#{item['number']} closed {iso(item['closed_at'])[:10]}")
+    return rows
+
+
+def read_checks(repo, alarm, now):
+    """Fact 1: the newest concluded run on main per watched workflow."""
+    names, error = watched(alarm)
+    if error:
+        return {"error": error, "rows": [], "unfiled": 0}
+    listing, error = gh("api", f"repos/{repo}/actions/workflows?per_page=100")
+    if error:
+        return {"error": error, "rows": [], "unfiled": 0}
+    ids = {w["name"]: w["id"] for w in listing.get("workflows", [])}
+    rows = []
+    for name in names:
+        row = {"name": name, "conclusion": None, "age": None, "created": None,
+               "event": None, "url": None, "cited": None, "error": None}
+        if name not in ids:
+            row["error"] = "no workflow of that name"
+            rows.append(row)
+            continue
+        # Main first; a workflow that never concludes on main (agent-review
+        # runs on PR branches, where stalled-prs reads its reds) is read on
+        # any branch instead, and the row names the branch.
+        run = None
+        for branch in ("main", None):
+            query = f"branch={branch}&" if branch else ""
+            page, error = gh(
+                "api",
+                f"repos/{repo}/actions/workflows/{ids[name]}/runs"
+                f"?{query}status=completed&per_page={RUN_PAGE}",
+            )
+            if error:
+                row["error"] = error
+                break
+            run = newest_run(page.get("workflow_runs", []))
+            if run is not None:
+                row["branch"] = None if branch else run.get("head_branch", "?")
+                break
+        if row["error"]:
+            rows.append(row)
+            continue
+        if run is None:
+            rows.append(row)
+            continue
+        row.update(
+            conclusion=run.get("conclusion"),
+            age=days(run["created_at"], now),
+            created=iso(run["created_at"])[:10],
+            event=run.get("event"),
+            url=run.get("html_url"),
+        )
+        if row["conclusion"] != "success":
+            found, error = gh(
+                "api", "-X", "GET", "search/issues",
+                "-f", f"q=repo:{repo} is:issue in:title {name} updated:>={row['created']}",
+                "-f", "per_page=10",
+            )
+            row["cited"] = None if error else cite(found.get("items", []))
+        rows.append(row)
+    unfiled = sum(1 for r in rows if r["conclusion"] not in (None, "success") and r["cited"] == [])
+    return {"error": None, "rows": rows, "unfiled": unfiled}
+
+
+def read_prs(repo, now):
+    """Fact 2: open PRs with verdict and age."""
+    rows, error = gh(
+        "pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
+        "--json", "number,title,labels,createdAt,isDraft,headRefName,author",
+    )
+    if error:
+        return {"error": error, "rows": []}
+    out = []
+    for pr in rows:
+        names = {label["name"] for label in pr.get("labels") or []}
+        verdict = next((v for v in VERDICTS if v in names), "no-verdict")
+        out.append({
+            "number": pr["number"],
+            "age": days(pr["createdAt"], now),
+            "verdict": verdict,
+            "draft": bool(pr.get("isDraft")),
+            "author": (pr.get("author") or {}).get("login", "?"),
+            "branch": pr.get("headRefName", "?"),
+            "title": pr.get("title", ""),
+        })
+    return {"error": None, "rows": out}
+
+
+def read_issues(repo):
+    """Fact 3: open issues by realm, unrouted first, plus the queue labels' counts."""
+    rows, error = gh(
+        "issue", "list", "--repo", repo, "--state", "open", "--limit", "500",
+        "--json", "number,title,labels",
+    )
+    if error:
+        return {"error": error, "open": 0, "counts": {}, "unrouted": []}
+    counts = {label: 0 for label in (*REALMS, *FILTERS)}
+    unrouted = []
+    for issue in rows:
+        names = {label["name"] for label in issue.get("labels") or []}
+        for label in counts:
+            counts[label] += label in names
+        if names.isdisjoint(REALMS):
+            unrouted.append({"number": issue["number"], "title": issue.get("title", "")})
+    return {"error": None, "open": len(rows), "counts": counts, "unrouted": unrouted}
+
+
+def seat_of(comment):
+    """The seat a comment speaks for: its role footer, else the login that posted it."""
+    for line in reversed(comment.get("body", "").splitlines()):
+        match = SEAT.match(line.strip())
+        if match:
+            return match.group(1)
+    return (comment.get("user") or {}).get("login", "?")
+
+
+def first_line(body):
+    """The first non-empty line of a comment, cut to the screen."""
+    for line in body.splitlines():
+        if line.strip():
+            return line.strip()[:LINE]
+    return ""
+
+
+def read_ops_log(repo):
+    """Fact 4: the ops log's last three comments, from its last page by count."""
+    issue, error = gh("api", f"repos/{repo}/issues/{OPS_LOG}")
+    if error:
+        return {"error": error, "total": 0, "rows": []}
+    total = int(issue.get("comments") or 0)
+    last = max(1, math.ceil(total / 100))
+    comments = []
+    for page in (last - 1, last) if last > 1 else (last,):
+        rows, error = gh("api", f"repos/{repo}/issues/{OPS_LOG}/comments?per_page=100&page={page}")
+        if error:
+            return {"error": error, "total": total, "rows": []}
+        comments.extend(rows)
+    comments.sort(key=lambda c: iso(c["created_at"]))
+    return {
+        "error": None,
+        "total": total,
+        "rows": [
+            {"created": iso(c["created_at"]), "seat": seat_of(c), "line": first_line(c.get("body", ""))}
+            for c in comments[-3:]
+        ],
+    }
+
+
+def read_commits(repo, since, run_id):
+    """Fact 5: commits on main since the anchor."""
+    rows, error = gh("api", f"repos/{repo}/commits?sha=main&since={since}&per_page=100")
+    if error:
+        return {"error": error, "since": since, "run": run_id, "rows": []}
+    return {
+        "error": None,
+        "since": since,
+        "run": run_id,
+        "rows": [
+            {"sha": c["sha"][:7], "subject": (c.get("commit") or {}).get("message", "").splitlines()[0]}
+            for c in rows
+        ],
+    }
+
+
+def render(facts, out=sys.stdout):
+    """Print the five facts and the liveness footer. Returns the footer."""
+    checks, prs, issues, ops, commits = (facts[k] for k in ("checks", "prs", "issues", "ops_log", "commits"))
+
+    if checks["error"]:
+        print(f"checks: UNREADABLE ({checks['error']})", file=out)
+    else:
+        rows = checks["rows"]
+        green = sorted((r for r in rows if r["conclusion"] == "success"), key=lambda r: -r["age"])
+        loud = [r for r in rows if r["conclusion"] != "success"]
+        print(f"checks: {len(rows)} watched, {len(green)} green on main", file=out)
+        if green:
+            print("    green  " + ", ".join(f"{r['name']} {r['age']}d" for r in green), file=out)
+        for row in loud:
+            if row["error"]:
+                print(f"    {row['name']}  UNREADABLE ({row['error']})", file=out)
+            elif row["conclusion"] is None:
+                print(f"    {row['name']}  no concluded run among the newest {RUN_PAGE} on main", file=out)
+            else:
+                if row["cited"] is None:
+                    cited = "citations UNREADABLE"
+                elif not row["cited"]:
+                    cited = "unfiled: a bug issue this run"
+                else:
+                    cited = ", ".join(row["cited"])
+                    if not any(c.endswith(" open") for c in row["cited"]):
+                        cited += ": fix landed, the next cron tells"
+                where = f", {row['branch']}" if row.get("branch") else ""
+                print(
+                    f"    {row['name']}  {row['conclusion']}  {row['age']}d"
+                    f" ({row['created']}, {row['event']}{where})  {cited}",
+                    file=out,
+                )
+                print(f"        {row['url']}", file=out)
+
+    if prs["error"]:
+        print(f"\nprs: UNREADABLE ({prs['error']})", file=out)
+    else:
+        print(f"\nprs: {len(prs['rows'])} open", file=out)
+        for pr in sorted(prs["rows"], key=lambda p: -p["age"]):
+            draft = "  DRAFT" if pr["draft"] else ""
+            print(
+                f"    #{pr['number']}  {pr['age']}d  {pr['verdict']}{draft}  {pr['author']}"
+                f"  {pr['branch']} :: {pr['title']}"[:LINE],
+                file=out,
+            )
+
+    if issues["error"]:
+        print(f"\nissues: UNREADABLE ({issues['error']})", file=out)
+    else:
+        counts = " | ".join(f"{label} {n}" for label, n in issues["counts"].items())
+        print(f"\nissues: {issues['open']} open | unrouted {len(issues['unrouted'])} | {counts}", file=out)
+        for issue in issues["unrouted"]:
+            print(f"    unrouted  #{issue['number']}  {issue['title']}"[:LINE], file=out)
+
+    if ops["error"]:
+        print(f"\nops-log: UNREADABLE ({ops['error']})", file=out)
+    else:
+        print(f"\nops-log: #{OPS_LOG}, last {len(ops['rows'])} of {ops['total']}", file=out)
+        for row in ops["rows"]:
+            print(f"    {row['created']}  {row['seat']}  {row['line']}", file=out)
+
+    if commits["error"]:
+        print(f"\ncommits: UNREADABLE ({commits['error']})", file=out)
+    else:
+        run = f" (run {commits['run']})" if commits["run"] else ""
+        print(f"\ncommits: {len(commits['rows'])} on main since {commits['since']}{run}", file=out)
+        for commit in commits["rows"]:
+            print(f"    {commit['sha']}  {commit['subject']}"[:LINE], file=out)
+
+    def count(fact, value):
+        return "unreadable" if fact["error"] else value
+
+    red = sum(1 for r in checks["rows"] if r["conclusion"] not in (None, "success"))
+    checks_count = f"{len(checks['rows'])} (red {red}, unfiled {checks['unfiled']})"
+    issues_count = f"{issues['open']} (unrouted {len(issues['unrouted'])})"
+    footer = (
+        f"state: checks {count(checks, checks_count)}"
+        f" | prs {count(prs, len(prs['rows']))}"
+        f" | issues {count(issues, issues_count)}"
+        f" | ops-log {count(ops, f'#{OPS_LOG}')}"
+        f" | commits {count(commits, len(commits['rows']))} since {commits['since'] or 'no anchor'}"
+    )
+    print(f"\n{footer}", file=out)
+    return footer
+
+
+def main():
+    parser = argparse.ArgumentParser(description="The BDFL's state read, one line per fact.")
+    parser.add_argument("--since", help="ISO8601 start of the commits window; default is the previous BDFL session's start")
+    parser.add_argument("--alarm", default=str(ALARM), help="workflow file whose watch list names the checks")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod"), help="owner/name")
+    args = parser.parse_args()
+    now = datetime.now(timezone.utc)
+
+    if args.since:
+        since, run_id = iso(args.since), None
+        anchor_error = None
+    else:
+        try:
+            since, run_id = previous_run_start(args.repo, os.environ.get("GITHUB_RUN_ID"), now)
+            anchor_error = None
+        except SystemExit:
+            since, run_id, anchor_error = None, None, "no anchor; anchor.py said why on stderr"
+
+    facts = {
+        "checks": read_checks(args.repo, args.alarm, now),
+        "prs": read_prs(args.repo, now),
+        "issues": read_issues(args.repo),
+        "ops_log": read_ops_log(args.repo),
+        "commits": (
+            {"error": anchor_error, "since": None, "run": None, "rows": []}
+            if anchor_error
+            else read_commits(args.repo, since, run_id)
+        ),
+    }
+    render(facts)
+
+
+if __name__ == "__main__":
+    main()

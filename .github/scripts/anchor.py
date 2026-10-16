@@ -17,6 +17,11 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
+# The ops-log issue (CLAUDE.md "Where things live"): where the survey's
+# marker lives (survey-due) and where the state read takes its last three
+# comments from (state). One number here, so the two readers cannot drift.
+OPS_LOG = 3
+
 # The workflow whose previous session anchors both duties. Hardcoded rather
 # than a flag: these are the BDFL's duties, and a --since flag on the caller
 # overrides the whole derivation anyway.
