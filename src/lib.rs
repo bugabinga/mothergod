@@ -519,33 +519,6 @@ pub(crate) fn rescale_bank(
     }
 }
 
-/// Codes `symbol` through `encoder` at the sub-range `freq[..symbol].sum()..
-/// +freq[symbol]` out of `denom`, the caller's `freq.iter().sum()`.
-pub(crate) fn encode_symbol(encoder: &mut coder::Encoder, freq: &[u32], symbol: usize, denom: u64) {
-    let low: u32 = freq[..symbol].iter().sum();
-    let high = low + freq[symbol];
-    encoder.encode(u64::from(low), u64::from(high), denom);
-}
-
-/// Finds the symbol whose cumulative-frequency range in `freq` contains
-/// `target` (from [`coder::Decoder::target`]), returning it with the
-/// `[low, high)` range [`coder::Decoder::decode`] must consume: the inverse
-/// of [`encode_symbol`].
-///
-/// Never runs past the end of `freq`: callers bound `target` to
-/// `freq.iter().sum()`, so the scan finds a symbol whatever bytes produced
-/// `target`.
-pub(crate) fn scan_for_target(freq: &[u32], target: u64) -> (usize, u64, u64) {
-    let mut symbol = 0;
-    let mut low = 0u64;
-    while low + u64::from(freq[symbol]) <= target {
-        low += u64::from(freq[symbol]);
-        symbol += 1;
-    }
-    let high = low + u64::from(freq[symbol]);
-    (symbol, low, high)
-}
-
 /// Builds a `Vec<T>` of `n` clones of `value`, returning `Err` instead of
 /// aborting if the allocator cannot satisfy `n` (hard rule 2, `rust-craft`
 /// skill's allocation-discipline, #453). `resize` after `try_reserve_exact`
