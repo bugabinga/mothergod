@@ -19,20 +19,31 @@
 //! measures the cost in calibration steps per decoded byte and fails past
 //! `BASELINE_DECODE_COST`'s margin, with the CPU printed beside the number.
 //!
+//! `measure` and `delta <file>` are the research loop's arithmetic
+//! (issue #1169): `measure` prints the gate cases' bits/byte in
+//! `bench/baseline.json`'s own format, so a champion measured in the
+//! session is a file; `delta <file>` prints every case's move against such
+//! a file and the train mean, and exits 0 whatever the sign, because it
+//! reports and `check` gates. Neither touches `bench/baseline.json`, and
+//! both measure [`mothergod_bench::baseline::cases`] only, never a sealed
+//! case.
+//!
 //! Usage: `cargo run -p mothergod-bench --release --bin baseline_gate --
 //! check` (the default) or `... -- write` (after an accepted ratio change,
 //! to commit the new numbers alongside it) or `... -- speed` (print the
 //! decode cost, to commit as `BASELINE_DECODE_COST` after an accepted
-//! slowdown).
+//! slowdown) or `... -- measure` or `... -- delta <file>`.
 
 use mothergod_bench::baseline::{
-    fingerprint, format_baseline, measure_all, parse_baseline, regressions,
+    deltas, fingerprint, format_baseline, mean_delta, measure_all, parse_baseline, regressions,
 };
 use mothergod_bench::finals::stale_reason;
 use mothergod_bench::reference::cpu_model;
 use mothergod_bench::repo_root;
 use mothergod_bench::speed;
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// `bench/baseline.json`, located relative to this crate's manifest so the
@@ -96,17 +107,141 @@ fn report_slowdown(slow: &speed::Slowdown) {
     );
 }
 
+/// Every case's move of `measured` against the baseline file at `path`,
+/// one line per case, then the train mean. `Err` only when the file cannot
+/// be read or parsed: a regression is a line in the report, never an `Err`,
+/// because `delta` reports and `check` gates.
+fn delta_report(path: &Path, measured: &BTreeMap<String, f64>) -> Result<String, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let baseline = parse_baseline(&text).map_err(|err| format!("{}: {err}", path.display()))?;
+    let found = deltas(&baseline, measured);
+    let mut out = String::new();
+    for case in &found {
+        writeln!(
+            out,
+            "{}: {:.6} -> {:.6} bits/byte ({:+.6})",
+            case.name,
+            case.baseline_bpb,
+            case.measured_bpb,
+            case.delta()
+        )
+        .expect("writing to a String never fails");
+    }
+    writeln!(
+        out,
+        "train mean {:+.6} bits/byte over {} cases",
+        mean_delta(&found),
+        found.len()
+    )
+    .expect("writing to a String never fails");
+    Ok(out)
+}
+
+/// The `check` mode: gates `measured` against the committed baseline, the
+/// decode speed and the finals reports, naming each failure and its fix.
+fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
+    let text = match std::fs::read_to_string(baseline_path()) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("failed to read {}: {err}", baseline_path().display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let baseline = match parse_baseline(&text) {
+        Ok(baseline) => baseline,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let regs = regressions(&baseline, measured);
+    let slow = speed::slowdown(
+        speed::BASELINE_DECODE_COST,
+        measure_decode_cost(),
+        speed::MAX_SLOWDOWN,
+    );
+    let stale = stale_finals_reports(&baseline);
+
+    if !regs.is_empty() {
+        eprintln!("bench baseline gate: {} case(s) regressed:", regs.len());
+        for reg in &regs {
+            eprintln!(
+                "  {}: {:.6} -> {:.6} bits/byte (+{:.6})",
+                reg.name,
+                reg.baseline_bpb,
+                reg.measured_bpb,
+                reg.delta()
+            );
+        }
+        eprintln!(
+            "if this regression is an accepted trade, update bench/baseline.json \
+             (`cargo run -p mothergod-bench --release --bin baseline_gate -- write`, \
+             then `cargo x fmt -- bench/baseline.json`) in the same PR and say why in \
+             the PR body."
+        );
+    }
+    if let Some(slow) = &slow {
+        report_slowdown(slow);
+    }
+    if !stale.is_empty() {
+        eprintln!(
+            "bench baseline gate: {} held-out-final report(s) stale (issue #327):",
+            stale.len()
+        );
+        for reason in &stale {
+            eprintln!("  {reason}");
+        }
+        eprintln!(
+            "regenerate the stale report(s) in this PR:\n\
+             \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report\n\
+             \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report"
+        );
+    }
+
+    if regs.is_empty() && slow.is_none() && stale.is_empty() {
+        println!(
+            "bench baseline gate: {} cases, no regression, decode speed within margin, finals reports fresh",
+            measured.len()
+        );
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
 fn main() -> ExitCode {
-    let mode = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "check".to_string());
+    let mut args = std::env::args().skip(1);
+    let mode = args.next().unwrap_or_else(|| "check".to_string());
     if mode == "speed" {
         measure_decode_cost();
         return ExitCode::SUCCESS;
     }
+    let baseline_file = args.next().map(PathBuf::from);
+    if mode == "delta" && baseline_file.is_none() {
+        eprintln!("usage: baseline_gate delta <baseline file>");
+        return ExitCode::FAILURE;
+    }
     let measured = measure_all();
 
     match mode.as_str() {
+        "measure" => {
+            print!("{}", format_baseline(&measured));
+            ExitCode::SUCCESS
+        }
+        "delta" => {
+            let path = baseline_file.expect("checked above");
+            match delta_report(&path, &measured) {
+                Ok(report) => {
+                    print!("{report}");
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "write" => {
             let text = format_baseline(&measured);
             if let Err(err) = std::fs::write(baseline_path(), &text) {
@@ -120,78 +255,49 @@ fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        "check" => {
-            let text = match std::fs::read_to_string(baseline_path()) {
-                Ok(text) => text,
-                Err(err) => {
-                    eprintln!("failed to read {}: {err}", baseline_path().display());
-                    return ExitCode::FAILURE;
-                }
-            };
-            let baseline = match parse_baseline(&text) {
-                Ok(baseline) => baseline,
-                Err(err) => {
-                    eprintln!("{err}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let regs = regressions(&baseline, &measured);
-            let slow = speed::slowdown(
-                speed::BASELINE_DECODE_COST,
-                measure_decode_cost(),
-                speed::MAX_SLOWDOWN,
-            );
-            let stale = stale_finals_reports(&baseline);
-
-            if !regs.is_empty() {
-                eprintln!("bench baseline gate: {} case(s) regressed:", regs.len());
-                for reg in &regs {
-                    eprintln!(
-                        "  {}: {:.6} -> {:.6} bits/byte (+{:.6})",
-                        reg.name,
-                        reg.baseline_bpb,
-                        reg.measured_bpb,
-                        reg.delta()
-                    );
-                }
-                eprintln!(
-                    "if this regression is an accepted trade, update bench/baseline.json \
-                     (`cargo run -p mothergod-bench --release --bin baseline_gate -- write`, \
-                     then `cargo x fmt -- bench/baseline.json`) in the same PR and say why in \
-                     the PR body."
-                );
-            }
-            if let Some(slow) = &slow {
-                report_slowdown(slow);
-            }
-            if !stale.is_empty() {
-                eprintln!(
-                    "bench baseline gate: {} held-out-final report(s) stale (issue #327):",
-                    stale.len()
-                );
-                for reason in &stale {
-                    eprintln!("  {reason}");
-                }
-                eprintln!(
-                    "regenerate the stale report(s) in this PR:\n\
-                     \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report\n\
-                     \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report"
-                );
-            }
-
-            if regs.is_empty() && slow.is_none() && stale.is_empty() {
-                println!(
-                    "bench baseline gate: {} cases, no regression, decode speed within margin, finals reports fresh",
-                    measured.len()
-                );
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            }
-        }
+        "check" => check(&measured),
         other => {
-            eprintln!("unknown mode {other:?}, expected \"check\", \"write\" or \"speed\"");
+            eprintln!(
+                "unknown mode {other:?}, expected \"check\", \"write\", \"speed\", \"measure\" or \"delta\""
+            );
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BTreeMap, PathBuf, delta_report};
+
+    fn scratch_baseline(name: &str, text: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("mothergod-delta-{}-{name}", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn delta_report_is_ok_on_a_regression_past_the_gate_tolerance() {
+        let path = scratch_baseline("regression", "{\n  \"a\": 1,\n  \"b\": 2\n}\n");
+        let measured = BTreeMap::from([("a".to_string(), 5.0), ("b".to_string(), 1.0)]);
+        let report =
+            delta_report(&path, &measured).expect("a regression is a report, not an error");
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            report,
+            "a: 1.000000 -> 5.000000 bits/byte (+4.000000)\n\
+             b: 2.000000 -> 1.000000 bits/byte (-1.000000)\n\
+             train mean +1.500000 bits/byte over 2 cases\n"
+        );
+    }
+
+    #[test]
+    fn delta_report_errs_on_an_unreadable_or_malformed_file() {
+        let missing = std::env::temp_dir().join("mothergod-delta-no-such-file");
+        assert!(delta_report(&missing, &BTreeMap::new()).is_err());
+        let path = scratch_baseline("malformed", "{\n  not valid\n}\n");
+        let result = delta_report(&path, &BTreeMap::new());
+        std::fs::remove_file(&path).unwrap();
+        assert!(result.is_err());
     }
 }

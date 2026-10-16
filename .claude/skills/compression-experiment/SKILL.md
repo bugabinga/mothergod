@@ -103,8 +103,10 @@ Per try:
 1. State the change and its expected train effect in one sentence.
 2. Apply it and measure its train delta against the champion through the
    bench crate, in the foreground: `literal_pairing::case_delta_bpb` over
-   `baseline::cases()` for a model variant, `baseline::measure_all` on
-   champion and try in the same session for an encoder-only change.
+   `baseline::cases()` for a model variant; for an encoder-only change
+   `baseline_gate -- measure > <champion file>` on the champion, then
+   `baseline_gate -- delta <champion file>` on the try, which prints each
+   case's move and the train mean and never writes `bench/baseline.json`.
    No try generates a sealed case.
 3. Keep the try when the train mean falls; otherwise revert it whole.
 4. Append its `research/progress.jsonl` line now: `train_delta_bpb`

@@ -348,11 +348,68 @@ pub fn regressions(
         .collect()
 }
 
+/// One case's move between a baseline and a measurement, whatever its
+/// sign: [`regressions`] reports only the growth past
+/// [`TOLERANCE_BITS`], this is every case's number.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaseDelta {
+    /// The case's name, [`Case::name`].
+    pub name: String,
+    /// Bits/byte in the baseline.
+    pub baseline_bpb: f64,
+    /// Bits/byte just measured.
+    pub measured_bpb: f64,
+}
+
+impl CaseDelta {
+    /// `measured_bpb - baseline_bpb`; negative is better.
+    #[must_use]
+    pub fn delta(&self) -> f64 {
+        self.measured_bpb - self.baseline_bpb
+    }
+}
+
+/// Every case present in both `baseline` and `measured`, in name order. A
+/// case on one side only has no number to subtract, the same scope
+/// [`regressions`] takes.
+#[must_use]
+pub fn deltas(
+    baseline: &BTreeMap<String, f64>,
+    measured: &BTreeMap<String, f64>,
+) -> Vec<CaseDelta> {
+    measured
+        .iter()
+        .filter_map(|(name, &measured_bpb)| {
+            let &baseline_bpb = baseline.get(name)?;
+            Some(CaseDelta {
+                name: name.clone(),
+                baseline_bpb,
+                measured_bpb,
+            })
+        })
+        .collect()
+}
+
+/// The train mean of `deltas`, the denominator `research/README.md`
+/// fixes: every case's whole [`CASE_LEN`]-byte input counts once, so the
+/// mean of the per-case bits/byte deltas. `0.0` for no cases.
+#[must_use]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "a case count stays far below 2^53"
+)]
+pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
+    if deltas.is_empty() {
+        return 0.0;
+    }
+    deltas.iter().map(CaseDelta::delta).sum::<f64>() / deltas.len() as f64
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, TOLERANCE_BITS, bits_per_byte, cases, fingerprint,
-        format_baseline, parse_baseline, regressions,
+        BaselineParseError, CASE_LEN, TOLERANCE_BITS, bits_per_byte, cases, deltas, fingerprint,
+        format_baseline, mean_delta, parse_baseline, regressions,
     };
     use std::collections::BTreeMap;
 
@@ -570,5 +627,29 @@ mod tests {
         let mut after = BTreeMap::new();
         after.insert("z".to_string(), 1.5);
         assert_ne!(fingerprint(&before), fingerprint(&after));
+    }
+
+    fn map(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
+        pairs.iter().map(|&(n, v)| (n.to_string(), v)).collect()
+    }
+
+    #[test]
+    fn deltas_reports_both_signs_and_skips_one_sided_cases() {
+        let baseline = map(&[("better", 2.0), ("worse", 2.0), ("old_only", 1.0)]);
+        let measured = map(&[("better", 1.5), ("worse", 2.5), ("new_only", 9.0)]);
+        let found = deltas(&baseline, &measured);
+        let names: Vec<&str> = found.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["better", "worse"]);
+        assert!((found[0].delta() + 0.5).abs() < 1e-9);
+        assert!((found[1].delta() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mean_delta_is_the_per_case_mean_and_zero_for_no_cases() {
+        let baseline = map(&[("a", 2.0), ("b", 2.0), ("c", 2.0)]);
+        let measured = map(&[("a", 1.0), ("b", 2.0), ("c", 2.5)]);
+        let mean = mean_delta(&deltas(&baseline, &measured));
+        assert!((mean + 0.5 / 3.0).abs() < 1e-9, "got {mean}");
+        assert!(mean_delta(&[]).abs() < f64::EPSILON);
     }
 }
