@@ -2,9 +2,9 @@
 
 # Baseline snapshot
 
-As of 2026-10-15T18:35:20Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
+As of 2026-10-16T03:24:28Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
 
-![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-10-15T18:35:20Z](baseline.svg)
+![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-10-16T03:24:28Z](baseline.svg)
 
 | case | bits/byte |
 |---|---|
@@ -16,6 +16,6 @@ As of 2026-10-15T18:35:20Z. Source: `bench/baseline.json`, measured by `mothergo
 | `x86_dense_code` | 2.651840 |
 | `sqlite_like_records` | 3.338240 |
 | `entropy_ladder_h4` | 4.365120 |
-| `interleaved_audio16` | 5.757440 |
+| `interleaved_audio16` | 5.754400 |
 | `entropy_ladder_h6` | 6.145920 |
 | `entropy_ladder_h8` | 8.002880 |

@@ -5,7 +5,7 @@
   "entropy_ladder_h4": 4.36512,
   "entropy_ladder_h6": 6.14592,
   "entropy_ladder_h8": 8.00288,
-  "interleaved_audio16": 5.75744,
+  "interleaved_audio16": 5.7544,
   "json_records": 0.51936,
   "markov_h8_2_trap": 2.37264,
   "sqlite_like_records": 3.33824,
