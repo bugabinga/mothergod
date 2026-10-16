@@ -6,8 +6,7 @@ without a second home for the text. docs/adr/ stays the single source; this
 script parses it fresh on every deploy and never gets committed, the same
 pattern status-data.py and trust-telemetry.py already use for their JSON.
 
-Every ADR in this repository has one exact shape (51 for 51 on
-2026-09-24): `# ADR-NNNN: Title`, a blank line, then
+Every ADR in this repository has one exact shape: `# ADR-NNNN: Title`, a blank line, then
 `Status: <accepted|superseded by ADR-NNNN> · Date: <ISO date>` optionally
 followed by more ` · `-separated relation notes, a blank line, then the body
 in `## Heading` sections. ADR-0030 (the format ADR itself) is the source for
@@ -57,6 +56,13 @@ def linkify_adrs(escaped_text, known):
 
 # --- inline markdown: code spans, links, bold, italic, ADR cross-refs -----
 
+# A link target is attacker-controlled text that lands inside `href="..."` on
+# the site origin, where decisions.html assigns the result through innerHTML.
+# Only in-page, site-relative and web targets become anchors; the whitespace,
+# NUL and quote exclusions keep the target one attribute value, and anything
+# else (`javascript:`, `data:`) stays literal text.
+LINK_TARGET_RE = re.compile(r'(?:#|/|https?:)[^\x00-\x20"]*')
+
 
 def render_inline(text, known):
     escaped = html.escape(text, quote=False)
@@ -71,15 +77,26 @@ def render_inline(text, known):
 
     escaped = re.sub(r"`([^`]+)`", stash_code, escaped)
 
-    escaped = re.sub(
-        r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', escaped
-    )
+    # Targets are stashed like code spans and restored last, so the emphasis
+    # and ADR-reference passes below never rewrite the inside of an attribute.
+    hrefs = []
+
+    def stash_link(m):
+        text, target = m.groups()
+        if not LINK_TARGET_RE.fullmatch(target):
+            return m.group(0)
+        hrefs.append(target)
+        return f'<a href="\x01{len(hrefs) - 1}\x01">{text}</a>'
+
+    escaped = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", stash_link, escaped)
     escaped = re.sub(r"\*\*(\S(?:[^*]*\S)?)\*\*", r"<strong>\1</strong>", escaped)
     escaped = re.sub(
         r"(?<![\w*])[*_](\S(?:[^*_]*\S)?)[*_](?![\w*])", r"<em>\1</em>", escaped
     )
     escaped = linkify_adrs(escaped, known)
 
+    for i, href in enumerate(hrefs):
+        escaped = escaped.replace(f"\x01{i}\x01", href)
     for i, code in enumerate(codes):
         escaped = escaped.replace(f"\x00{i}\x00", f"<code>{code}</code>")
     return escaped
@@ -212,8 +229,8 @@ def parse_adr(path, known):
     sm = STATUS_RE.match(lines[2])
     if not sm:
         raise ValueError(f"{path.name}: line 3 is not a `Status:` line")
-    # The status line sometimes soft-wraps onto following lines (4 of 51 on
-    # 2026-09-24, e.g. ADR-0004's amendment note); join up to the first
+    # The status line sometimes soft-wraps onto following lines (ADR-0004's
+    # amendment note is one); join up to the first
     # blank line before splitting into · -separated segments, or a wrapped
     # relation note gets truncated at the line break instead of the marker.
     i = 2
@@ -273,7 +290,10 @@ def main(out_path, adr_dir=ADR_DIR):
 
     known = set()
     for p in paths:
-        m = HEADING_RE.match(p.read_text(encoding="utf-8").splitlines()[0])
+        # `[:1]`, not `[0]`: an empty file is that file's problem below, not a
+        # crash here that writes no JSON at all.
+        first = p.read_text(encoding="utf-8").splitlines()[:1]
+        m = HEADING_RE.match(first[0]) if first else None
         if m:
             known.add(m.group(1))
 

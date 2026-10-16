@@ -102,3 +102,43 @@ test("a malformed status line is reported as a problem, not a crash", () => {
   assert.equal(out.problems.length, 1);
   assert.match(out.problems[0], /unrecognised status/);
 });
+
+function fixture(files) {
+  const dir = mkdtempSync(join(tmpdir(), "adr-data-fixture-"));
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  return generate(dir);
+}
+
+const adr = (body) => `# ADR-0001: Fixture\n\nStatus: accepted · Date: 2026-01-01\n\n## Context\n\n${body}\n`;
+
+test("a link target cannot end the href attribute or carry a script scheme", () => {
+  // The page assigns body_html through innerHTML on the site origin, so a
+  // merged ADR's link target is stored script injection unless confined.
+  const out = fixture({
+    "0001-evil.md": adr(
+      "[a](x\" onmouseover=\"alert(1)) [b](javascript:alert(1)) [c](https://ok.example/p?q=1&r=2) [d](`\" onmouseover=\"`)",
+    ),
+  });
+  const html = out.adrs[0].body_html;
+  assert.doesNotMatch(html, /<a [^>]*onmouseover/);
+  assert.doesNotMatch(html, /href="javascript:/);
+  assert.match(html, /<a href="https:\/\/ok\.example\/p\?q=1&amp;r=2">c<\/a>/);
+});
+
+test("a link target is not rewritten by the emphasis and ADR-reference passes", () => {
+  const out = fixture({
+    "0001-a.md": adr("[x](https://ok.example/_a_/ADR-0001/_b_) and ADR-0001"),
+  });
+  assert.match(out.adrs[0].body_html, /<a href="https:\/\/ok\.example\/_a_\/ADR-0001\/_b_">x<\/a>/);
+  assert.match(out.adrs[0].body_html, /and <a href="#0001">ADR-0001<\/a>/);
+});
+
+test("an empty file is reported as a problem and the rest still render", () => {
+  const out = fixture({
+    "0001-ok.md": adr("Text."),
+    "0002-empty.md": "",
+  });
+  assert.equal(out.total, 1);
+  assert.equal(out.problems.length, 1);
+  assert.match(out.problems[0], /0002-empty\.md/);
+});
