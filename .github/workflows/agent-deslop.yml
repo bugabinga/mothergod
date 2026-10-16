@@ -104,8 +104,10 @@ jobs:
             The PR body is your only report. State: the scope in one
             sentence and why that scope; each defect removed and which
             taxonomy rule it violated; how behaviour preservation was
-            proved, naming the commands you ran; any second scope you
-            found and deliberately left. No severity ratings, no status
+            proved, naming the commands you ran; the number of the issue
+            you filed for any second scope you found (`gh-comment --new`,
+            label product), never the scope as a sentence, because a
+            body is not a queue. No severity ratings, no status
             headers. CHANGELOG.md only for a user-visible change, which
             most desloppings are not.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes".

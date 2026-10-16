@@ -88,5 +88,9 @@ idioms at once, which is worse than either idiom alone.
 - Read the project's lifecycle from `ROADMAP.md`, `FORMAT_VERSION`, and
   `CHANGELOG.md`'s `[Unreleased]` section before arguing that a
   compatibility shim is or is not needed. Do not assume.
-- One PR, one scope. If you find a second scope, note it in the PR body
-  and leave it.
+- One PR, one scope. A second scope you find is an issue before the run
+  ends (`.github/scripts/gh-comment --new "<title>" --label product`),
+  named by number in the PR body, never described there: queues read
+  labels and nobody reads a body back (CLAUDE.md "Issue/PR
+  conventions"; #1234's second scope reached a queue only because the
+  reviewer filed #1235 for it).
