@@ -5,6 +5,13 @@
 //! today's measurements, holding any case that grew at its old value. Wired into `.github/workflows/ci.yml` as the
 //! required `ratio` check.
 //!
+//! `check` also fails when a case compresses to different bytes than the
+//! digest `bench/baseline.json` commits (issue #1182), whatever the size:
+//! a refactor's "output unchanged" is this check's result, and an output
+//! change is declared by regenerating the baseline in the same PR, the
+//! rule `tests/golden.rs` sets for an encoder-only change. The digests stay
+//! out of the fingerprint below.
+//!
 //! `check` also verifies the held-out-final reports
 //! (`docs/benchmarks/canterbury.md`, `docs/benchmarks/silesia.md`) still
 //! embed this exact `bench/baseline.json`'s fingerprint (issue #327): a
@@ -36,8 +43,8 @@
 //! slowdown) or `... -- measure` or `... -- delta <file>`.
 
 use mothergod_bench::baseline::{
-    deltas, fingerprint, format_baseline, hold_at_best, mean_delta, measure_all, parse_baseline,
-    regressions,
+    Snapshot, deltas, fingerprint, format_baseline, hold_at_best, mean_delta, measure_all,
+    output_changes, parse_baseline, regressions,
 };
 use mothergod_bench::finals::stale_reason;
 use mothergod_bench::reference::cpu_model;
@@ -117,7 +124,7 @@ fn delta_report(path: &Path, measured: &BTreeMap<String, f64>) -> Result<String,
     let text = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let baseline = parse_baseline(&text).map_err(|err| format!("{}: {err}", path.display()))?;
-    let found = deltas(&baseline, measured);
+    let found = deltas(&baseline.bpb(), measured);
     let mut out = String::new();
     for case in &found {
         writeln!(
@@ -142,7 +149,7 @@ fn delta_report(path: &Path, measured: &BTreeMap<String, f64>) -> Result<String,
 
 /// The `check` mode: gates `measured` against the committed baseline, the
 /// decode speed and the finals reports, naming each failure and its fix.
-fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
+fn check(measured: &Snapshot) -> ExitCode {
     let text = match std::fs::read_to_string(baseline_path()) {
         Ok(text) => text,
         Err(err) => {
@@ -157,13 +164,14 @@ fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let regs = regressions(&baseline, measured);
+    let regs = regressions(&baseline.bpb(), &measured.bpb());
+    let changed = output_changes(&baseline, measured);
     let slow = speed::slowdown(
         speed::BASELINE_DECODE_COST,
         measure_decode_cost(),
         speed::MAX_SLOWDOWN,
     );
-    let stale = stale_finals_reports(&baseline);
+    let stale = stale_finals_reports(&baseline.bpb());
 
     if !regs.is_empty() {
         eprintln!("bench baseline gate: {} case(s) regressed:", regs.len());
@@ -180,6 +188,18 @@ fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
             "if this regression is an accepted trade, raise the case's value in \
              bench/baseline.json by hand in the same PR and say why in the PR body \
              (`-- write` holds a grown case at its old value, issue #1230)."
+        );
+    }
+    if !changed.is_empty() {
+        eprintln!(
+            "bench baseline gate: {} case(s) compress to different bytes than bench/baseline.json \
+             commits: {}",
+            changed.len(),
+            changed.join(", ")
+        );
+        eprintln!(
+            "an intended output change regenerates the baseline in this PR and says so in the PR body:\n\
+             \x20 cargo run -p mothergod-bench --release --bin baseline_gate -- write"
         );
     }
     if let Some(slow) = &slow {
@@ -200,10 +220,10 @@ fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
         );
     }
 
-    if regs.is_empty() && slow.is_none() && stale.is_empty() {
+    if regs.is_empty() && changed.is_empty() && slow.is_none() && stale.is_empty() {
         println!(
-            "bench baseline gate: {} cases, no regression, decode speed within margin, finals reports fresh",
-            measured.len()
+            "bench baseline gate: {} cases, no regression, output unchanged, decode speed within margin, finals reports fresh",
+            measured.cases.len()
         );
         ExitCode::SUCCESS
     } else {
@@ -215,7 +235,7 @@ fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
 /// every case that grew at its old value (issue #1230) and naming each with
 /// both numbers. A deliberate loosening is a hand edit of the JSON, never
 /// this mode.
-fn write(measured: &BTreeMap<String, f64>) -> ExitCode {
+fn write(measured: &Snapshot) -> ExitCode {
     let path = baseline_path();
     let baseline = match std::fs::read_to_string(&path) {
         Ok(text) => match parse_baseline(&text) {
@@ -230,7 +250,8 @@ fn write(measured: &BTreeMap<String, f64>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (written, held) = hold_at_best(&baseline, measured);
+    let (bpb, held) = hold_at_best(&baseline.bpb(), &measured.bpb());
+    let written = measured.with_bpb(&bpb);
     if let Err(err) = std::fs::write(&path, format_baseline(&written)) {
         eprintln!("failed to write {}: {err}", path.display());
         return ExitCode::FAILURE;
@@ -246,7 +267,7 @@ fn write(measured: &BTreeMap<String, f64>) -> ExitCode {
     }
     println!(
         "wrote {} cases to {}, held {} at the old value",
-        written.len(),
+        written.cases.len(),
         path.display(),
         held.len()
     );
@@ -274,7 +295,7 @@ fn main() -> ExitCode {
         }
         "delta" => {
             let path = baseline_file.expect("checked above");
-            match delta_report(&path, &measured) {
+            match delta_report(&path, &measured.bpb()) {
                 Ok(report) => {
                     print!("{report}");
                     ExitCode::SUCCESS
@@ -298,7 +319,8 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{BTreeMap, PathBuf, delta_report};
+    use super::{BTreeMap, PathBuf, Snapshot, delta_report, format_baseline};
+    use mothergod_bench::baseline::Entry;
 
     fn scratch_baseline(name: &str, text: &str) -> PathBuf {
         let path =
@@ -307,9 +329,26 @@ mod tests {
         path
     }
 
+    /// A baseline file of `(name, bpb)` rows in the shape `write` emits.
+    fn baseline_text(rows: &[(&str, u32)]) -> String {
+        let cases = rows
+            .iter()
+            .map(|&(name, bpb)| {
+                (
+                    name.to_string(),
+                    Entry {
+                        bpb: f64::from(bpb),
+                        digest: 0,
+                    },
+                )
+            })
+            .collect();
+        format_baseline(&Snapshot { cases })
+    }
+
     #[test]
     fn delta_report_is_ok_on_a_regression_past_the_gate_tolerance() {
-        let path = scratch_baseline("regression", "{\n  \"a\": 1,\n  \"b\": 2\n}\n");
+        let path = scratch_baseline("regression", &baseline_text(&[("a", 1), ("b", 2)]));
         let measured = BTreeMap::from([("a".to_string(), 5.0), ("b".to_string(), 1.0)]);
         let report =
             delta_report(&path, &measured).expect("a regression is a report, not an error");

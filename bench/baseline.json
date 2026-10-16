@@ -1,13 +1,46 @@
 {
-  "base64_wrapped": 0.39536,
-  "entropy_ladder_h1": 1.25312,
-  "entropy_ladder_h2": 2.37248,
-  "entropy_ladder_h4": 4.36512,
-  "entropy_ladder_h6": 6.14592,
-  "entropy_ladder_h8": 8.00288,
-  "interleaved_audio16": 5.7544,
-  "json_records": 0.51936,
-  "markov_h8_2_trap": 2.37264,
-  "sqlite_like_records": 3.24672,
-  "x86_dense_code": 2.65184
+  "base64_wrapped": {
+    "bpb": 0.39536,
+    "digest": "be716f2102dc881d"
+  },
+  "entropy_ladder_h1": {
+    "bpb": 1.25312,
+    "digest": "f21fc9985e2fe3b5"
+  },
+  "entropy_ladder_h2": {
+    "bpb": 2.37248,
+    "digest": "a69b454014c3f859"
+  },
+  "entropy_ladder_h4": {
+    "bpb": 4.36512,
+    "digest": "6c6528cf32d7b443"
+  },
+  "entropy_ladder_h6": {
+    "bpb": 6.14592,
+    "digest": "54afe7738937415a"
+  },
+  "entropy_ladder_h8": {
+    "bpb": 8.00288,
+    "digest": "c5927eae836d11e5"
+  },
+  "interleaved_audio16": {
+    "bpb": 5.7544,
+    "digest": "9b713992d2335dcf"
+  },
+  "json_records": {
+    "bpb": 0.51936,
+    "digest": "c0eb489d14326949"
+  },
+  "markov_h8_2_trap": {
+    "bpb": 2.37264,
+    "digest": "d023d0cad307dec9"
+  },
+  "sqlite_like_records": {
+    "bpb": 3.24672,
+    "digest": "8e50cf6c24af7858"
+  },
+  "x86_dense_code": {
+    "bpb": 2.65184,
+    "digest": "30f31edcdda27b6a"
+  }
 }
