@@ -390,6 +390,33 @@ pub fn deltas(
         .collect()
 }
 
+/// The map [`format_baseline`] should write over `baseline` after a
+/// measurement, and the cases it held back. Each case takes
+/// `min(baseline, measured)` compared at the six decimals the file stores,
+/// so a case that grew keeps its old, better value and the next
+/// [`regressions`] pass still measures the growth against the best known
+/// size; a case absent from `baseline` is written as measured. A
+/// regeneration built on this cannot loosen the gate (hard rule 3): a
+/// deliberate loosening is a hand edit of the JSON that a reviewer reads.
+/// The held cases come back as [`CaseDelta`]s so the caller can name both
+/// numbers.
+#[must_use]
+pub fn hold_at_best(
+    baseline: &BTreeMap<String, f64>,
+    measured: &BTreeMap<String, f64>,
+) -> (BTreeMap<String, f64>, Vec<CaseDelta>) {
+    let mut written = measured.clone();
+    let mut held = Vec::new();
+    for case in deltas(baseline, measured) {
+        let as_written = (case.measured_bpb * 1e6).round() / 1e6;
+        if as_written > case.baseline_bpb {
+            written.insert(case.name.clone(), case.baseline_bpb);
+            held.push(case);
+        }
+    }
+    (written, held)
+}
+
 /// The train mean of `deltas`, the denominator `research/README.md`
 /// fixes: every case's whole [`CASE_LEN`]-byte input counts once, so the
 /// mean of the per-case bits/byte deltas. `0.0` for no cases.
@@ -409,7 +436,7 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 mod tests {
     use super::{
         BaselineParseError, CASE_LEN, TOLERANCE_BITS, bits_per_byte, cases, deltas, fingerprint,
-        format_baseline, mean_delta, parse_baseline, regressions,
+        format_baseline, hold_at_best, mean_delta, parse_baseline, regressions,
     };
     use std::collections::BTreeMap;
 
@@ -651,5 +678,34 @@ mod tests {
         let mean = mean_delta(&deltas(&baseline, &measured));
         assert!((mean + 0.5 / 3.0).abs() < 1e-9, "got {mean}");
         assert!(mean_delta(&[]).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hold_at_best_keeps_a_grown_case_and_takes_a_shrunk_or_new_one() {
+        let baseline = map(&[
+            ("grown", 2.0),
+            ("shrunk", 2.0),
+            ("same", 2.0),
+            ("old_only", 1.0),
+        ]);
+        let measured = map(&[
+            ("grown", 2.01),
+            ("shrunk", 1.5),
+            ("same", 2.000_000_04),
+            ("new_only", 9.0),
+        ]);
+        let (written, held) = hold_at_best(&baseline, &measured);
+        assert_eq!(
+            format_baseline(&written),
+            "{\n  \"grown\": 2,\n  \"new_only\": 9,\n  \"same\": 2,\n  \"shrunk\": 1.5\n}\n"
+        );
+        assert_eq!(
+            held.len(),
+            1,
+            "only a case growing past the file's six decimals is held"
+        );
+        assert_eq!(held[0].name, "grown");
+        assert!((held[0].baseline_bpb - 2.0).abs() < f64::EPSILON);
+        assert!((held[0].measured_bpb - 2.01).abs() < f64::EPSILON);
     }
 }

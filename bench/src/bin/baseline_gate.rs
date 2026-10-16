@@ -1,8 +1,8 @@
 //! CI entry point for [`mothergod_bench::baseline`]: measures mothergod's
 //! bits/byte on the fixed regression-gate cases and either checks them
 //! against the committed `bench/baseline.json` (exit non-zero on a
-//! regression past `baseline::TOLERANCE_BITS`) or overwrites that file with
-//! today's measurements. Wired into `.github/workflows/ci.yml` as the
+//! regression past `baseline::TOLERANCE_BITS`) or rewrites that file with
+//! today's measurements, holding any case that grew at its old value. Wired into `.github/workflows/ci.yml` as the
 //! required `ratio` check.
 //!
 //! `check` also verifies the held-out-final reports
@@ -29,13 +29,15 @@
 //! case.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --bin baseline_gate --
-//! check` (the default) or `... -- write` (after an accepted ratio change,
-//! to commit the new numbers alongside it) or `... -- speed` (print the
+//! check` (the default) or `... -- write` (after a codec change, to
+//! record the shrunk and new cases; a grown case is held at its old value,
+//! so an accepted loosening is a hand edit of the JSON) or `... -- speed` (print the
 //! decode cost, to commit as `BASELINE_DECODE_COST` after an accepted
 //! slowdown) or `... -- measure` or `... -- delta <file>`.
 
 use mothergod_bench::baseline::{
-    deltas, fingerprint, format_baseline, mean_delta, measure_all, parse_baseline, regressions,
+    deltas, fingerprint, format_baseline, hold_at_best, mean_delta, measure_all, parse_baseline,
+    regressions,
 };
 use mothergod_bench::finals::stale_reason;
 use mothergod_bench::reference::cpu_model;
@@ -175,10 +177,9 @@ fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
             );
         }
         eprintln!(
-            "if this regression is an accepted trade, update bench/baseline.json \
-             (`cargo run -p mothergod-bench --release --bin baseline_gate -- write`, \
-             then `cargo x fmt -- bench/baseline.json`) in the same PR and say why in \
-             the PR body."
+            "if this regression is an accepted trade, raise the case's value in \
+             bench/baseline.json by hand in the same PR and say why in the PR body \
+             (`-- write` holds a grown case at its old value, issue #1230)."
         );
     }
     if let Some(slow) = &slow {
@@ -208,6 +209,48 @@ fn check(measured: &BTreeMap<String, f64>) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// The `write` mode: records `measured` over the committed baseline, holding
+/// every case that grew at its old value (issue #1230) and naming each with
+/// both numbers. A deliberate loosening is a hand edit of the JSON, never
+/// this mode.
+fn write(measured: &BTreeMap<String, f64>) -> ExitCode {
+    let path = baseline_path();
+    let baseline = match std::fs::read_to_string(&path) {
+        Ok(text) => match parse_baseline(&text) {
+            Ok(baseline) => baseline,
+            Err(err) => {
+                eprintln!("{err}");
+                return ExitCode::FAILURE;
+            }
+        },
+        Err(err) => {
+            eprintln!("failed to read {}: {err}", path.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let (written, held) = hold_at_best(&baseline, measured);
+    if let Err(err) = std::fs::write(&path, format_baseline(&written)) {
+        eprintln!("failed to write {}: {err}", path.display());
+        return ExitCode::FAILURE;
+    }
+    for case in &held {
+        println!(
+            "held {}: kept {:.6}, measured {:.6} bits/byte ({:+.6})",
+            case.name,
+            case.baseline_bpb,
+            case.measured_bpb,
+            case.delta()
+        );
+    }
+    println!(
+        "wrote {} cases to {}, held {} at the old value",
+        written.len(),
+        path.display(),
+        held.len()
+    );
+    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
@@ -242,19 +285,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-        "write" => {
-            let text = format_baseline(&measured);
-            if let Err(err) = std::fs::write(baseline_path(), &text) {
-                eprintln!("failed to write {}: {err}", baseline_path().display());
-                return ExitCode::FAILURE;
-            }
-            println!(
-                "wrote {} cases to {}",
-                measured.len(),
-                baseline_path().display()
-            );
-            ExitCode::SUCCESS
-        }
+        "write" => write(&measured),
         "check" => check(&measured),
         other => {
             eprintln!(
