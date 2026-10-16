@@ -136,7 +136,7 @@ All notable changes to this project are documented here. Format follows
   re-compressed.
 - Ratio, on the held-out finals ([`bench/corpus.toml`](bench/corpus.toml),
   pinned by URL and SHA-256): beats both `zstd -19` and `xz -9e` in
-  aggregate on Canterbury (1.350 bits/byte vs 1.470 and 1.403); trails both
+  aggregate on Canterbury (1.347 bits/byte vs 1.470 and 1.403); trails both
   in aggregate on Silesia (2.029 vs 1.997 and 1.829). Per-file tables and
   the reproduction command: [`docs/benchmarks/`](docs/benchmarks/).
 - Trust: a frame of incompressible data cut short is now an error with

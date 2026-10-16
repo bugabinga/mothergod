@@ -24,7 +24,7 @@ measurement time and never committed. Measured 2026-10-16 against
 
 | corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
 |---|---|---|---|---|
-| Canterbury | **1.350** | 2.081 | 1.470 | 1.403 |
+| Canterbury | **1.347** | 2.081 | 1.470 | 1.403 |
 | Silesia | **2.029** | 2.553 | 1.997 | 1.829 |
 
 mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and
@@ -35,8 +35,8 @@ Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
-0.087 MB/s and decoded it at 2.826 MB/s; it encoded Silesia at 0.036 MB/s and
-decoded it at 1.304 MB/s. Methodology, per-file rates, and the regeneration
+0.129 MB/s and decoded it at 3.616 MB/s; it encoded Silesia at 0.040 MB/s and
+decoded it at 1.819 MB/s. Methodology, per-file rates, and the regeneration
 command: [`docs/benchmarks/`](docs/benchmarks/).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
