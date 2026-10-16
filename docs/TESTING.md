@@ -8,7 +8,9 @@ What "tested" means for this project, in layers. Corpus rules live in
 Tests form a cost-tiered, number-audited portfolio. The required PR
 gate stays fast and deterministic; everything expensive or statistical
 runs on a schedule and alarms the fixer on red (ADR-0036) instead of
-blocking PRs.
+blocking PRs. A red scheduled check re-runs after the next push to main
+(`recheck`, one retry per six hours, #1069), so a fix proves itself within
+hours rather than at the next cron.
 
 | Tier | When | Blocks PRs | What runs |
 |---|---|---|---|

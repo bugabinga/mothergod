@@ -77,6 +77,11 @@ on:
       - monster
       - docs-watch
       - deploy-site
+      # Nor this: it re-runs a red scheduled check after a push to main
+      # (#1069) on the PAT, and its red is a run list it could not read
+      # or a dispatch the PAT refused, which nothing else reads: the
+      # state check lists what this block lists.
+      - recheck
     types: [completed]
 
 permissions:
