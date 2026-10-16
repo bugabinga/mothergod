@@ -513,20 +513,6 @@ fn surprise_error_tracking_step(
     *baseline = surprise_ema_update(*baseline, error_sq, SURPRISE_BASELINE_DECAY);
 }
 
-/// A fresh weight vector, one per [`WEIGHT_CONTEXTS`] key, every expert at
-/// [`LOGISTIC_INITIAL_WEIGHT`]: the shape [`SurpriseLogisticMix::new`]
-/// starts from.
-fn fresh_logistic_weights() -> Vec<[f64; EXPERTS]> {
-    vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
-}
-
-/// Fallible counterpart to [`fresh_logistic_weights`], the same relationship
-/// [`crate::try_filled_vec`] bears to a plain `vec![]` everywhere else in
-/// this crate: [`SurpriseLogisticMix::try_new`] starts from this.
-fn try_fresh_logistic_weights() -> Result<Vec<[f64; EXPERTS]>, std::collections::TryReserveError> {
-    crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])
-}
-
 /// [`SurpriseLogisticMix`]'s slow timescale: the EMA decay its per-key
 /// `baseline_sq_error` uses, fixed rather than swept. This is the
 /// "learned floor" `research/JOURNAL.md` S2-R26's own remaining-scope note
@@ -614,7 +600,7 @@ impl SurpriseLogisticMix {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            weights: fresh_logistic_weights(),
+            weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
             recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
             sse: LogitSse::new(bittree::SSE_CONTEXTS),
@@ -629,7 +615,7 @@ impl SurpriseLogisticMix {
     /// abort.
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
-            weights: try_fresh_logistic_weights()?,
+            weights: crate::try_filled_vec(WEIGHT_CONTEXTS, [LOGISTIC_INITIAL_WEIGHT; EXPERTS])?,
             recent_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
             baseline_sq_error: crate::try_filled_vec(WEIGHT_CONTEXTS, 0.0)?,
             sse: LogitSse::try_new(bittree::SSE_CONTEXTS)?,
