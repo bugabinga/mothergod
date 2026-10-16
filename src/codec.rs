@@ -1397,9 +1397,10 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
 /// so [`decode_undoable_streaming`] bounds resident memory to [`lz::WINDOW`]
 /// via [`lz::Window`] regardless of `declared_len` (`research/JOURNAL.md`
 /// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee). The
-/// rest (`Transpose`, `Base64`, `Reverse`, `ReverseDelta`) need their filter
-/// undone over the complete buffer (`research/JOURNAL.md` S2-D4), so they
-/// take [`decode`]'s whole-buffer path and one bulk write.
+/// rest need their filter undone over the complete buffer, so they take
+/// [`decode`]'s whole-buffer path and one bulk write: `Transpose` scatters
+/// across the whole buffer (`research/JOURNAL.md` S2-D4), `Base64` has no
+/// per-byte undo, `Reverse` and `ReverseDelta` emit the last byte first.
 ///
 /// # Errors
 ///

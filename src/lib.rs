@@ -858,7 +858,8 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// [`Method::Lz`]'s answer depends on which filter its encoder picked.
 /// `Transpose` writes scattered across the *entire* buffer in column-major
 /// order, `Base64` has no per-byte undo, and `Reverse` and `ReverseDelta`
-/// emit the last byte first, so those need the whole buffer resident.
+/// emit the last byte first, so those need the whole buffer resident. The
+/// `matches!` below is a second copy of `decompress_to_writer`'s own dispatch.
 ///
 /// # Errors
 ///
