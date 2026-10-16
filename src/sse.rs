@@ -27,6 +27,11 @@ use crate::logistic::{squash, stretch};
 /// APM count), so under [`Linear`] bin `i` starts at exactly `i / 32.0`.
 const BINS: usize = 33;
 
+/// Index of the last bin as a float: the span `[0.0, 1.0]` covers in bin
+/// units.
+#[allow(clippy::cast_precision_loss, reason = "BINS - 1 is 32: exact in f64")]
+const LAST_BIN: f64 = (BINS - 1) as f64;
+
 /// How far a bin moves toward each observed outcome per update: an
 /// exponential moving average, favoring recent evidence over a lifetime mean
 /// because compressible data is rarely stationary.
@@ -77,14 +82,11 @@ fn split_position(scaled: f64) -> (usize, f64) {
     (lower, fraction)
 }
 
-/// `bin / (BINS - 1)`: bin `bin`'s position as a fraction of `[0.0, 1.0]`.
+/// `bin / LAST_BIN`: bin `bin`'s position as a fraction of `[0.0, 1.0]`.
 fn bin_fraction(bin: usize) -> f64 {
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "bin < BINS (33) and BINS - 1 (32): both exact in f64"
-    )]
+    #[allow(clippy::cast_precision_loss, reason = "bin < BINS (33): exact in f64")]
     {
-        bin as f64 / (BINS - 1) as f64
+        bin as f64 / LAST_BIN
     }
 }
 
@@ -96,12 +98,7 @@ impl Spacing for Linear {
     const NAME: &'static str = "Sse";
 
     fn position(p: f64) -> (usize, f64) {
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "BINS is 33: exact in f64 well inside its 53-bit mantissa"
-        )]
-        let scaled = p.clamp(0.0, 1.0) * (BINS - 1) as f64;
-        split_position(scaled)
+        split_position(p.clamp(0.0, 1.0) * LAST_BIN)
     }
 
     fn identity() -> [f64; BINS] {
@@ -133,12 +130,7 @@ impl Spacing for Logit {
     fn position(p: f64) -> (usize, f64) {
         let bound = stretch_bound();
         let s = stretch(p.clamp(MIN_PROBABILITY, MAX_PROBABILITY)).clamp(-bound, bound);
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "BINS is 33: exact in f64 well inside its 53-bit mantissa"
-        )]
-        let scaled = (s + bound) / (2.0 * bound) * (BINS - 1) as f64;
-        split_position(scaled)
+        split_position((s + bound) / (2.0 * bound) * LAST_BIN)
     }
 
     /// Bin `i` starts at [`squash`] of the evenly spaced *stretch*-domain
@@ -182,7 +174,6 @@ impl<S: Spacing> Table<S> {
     /// never something adversarial input can trigger.
     #[must_use]
     pub fn new(contexts: usize) -> Self {
-        assert!(contexts > 0, "{} must have at least one context", S::NAME);
         Self::filled(vec![0.0; contexts * BINS], contexts)
     }
 
@@ -199,7 +190,6 @@ impl<S: Spacing> Table<S> {
     /// Same as [`Self::new`]: `contexts` zero is a caller bug, never
     /// something adversarial input can trigger.
     pub(crate) fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
-        assert!(contexts > 0, "{} must have at least one context", S::NAME);
         Ok(Self::filled(
             crate::try_filled_vec(contexts * BINS, 0.0)?,
             contexts,
@@ -208,8 +198,10 @@ impl<S: Spacing> Table<S> {
 
     /// Writes `S`'s identity row into every context of `table`, already
     /// sized to `contexts * BINS`. [`Self::new`] and [`Self::try_new`]
-    /// differ only in how `table` was allocated, never in what fills it.
+    /// differ only in how `table` was allocated, never in what fills it or
+    /// refuses zero `contexts`.
     fn filled(mut table: Vec<f64>, contexts: usize) -> Self {
+        assert!(contexts > 0, "{} must have at least one context", S::NAME);
         let identity = S::identity();
         for row in table.as_chunks_mut::<BINS>().0 {
             *row = identity;
@@ -232,6 +224,14 @@ impl<S: Spacing> Table<S> {
         S::position(p)
     }
 
+    /// `context`'s lower bin index for `p` into `self.bins`, and the
+    /// fraction past it.
+    fn locate(&self, context: usize, p: f64) -> (usize, f64) {
+        assert!(context < self.contexts, "{} context out of range", S::NAME);
+        let (lower, fraction) = Self::position(p);
+        (context * BINS + lower, fraction)
+    }
+
     /// Calibrated probability for `context`'s current table at input
     /// probability `p`: linear interpolation between the two bins `p`
     /// falls between, clamped to `[MIN_PROBABILITY, MAX_PROBABILITY]`.
@@ -244,9 +244,7 @@ impl<S: Spacing> Table<S> {
     /// symbols, not from adversarial input.
     #[must_use]
     pub fn refine(&self, context: usize, p: f64) -> f64 {
-        assert!(context < self.contexts, "{} context out of range", S::NAME);
-        let (lower_index, fraction) = Self::position(p);
-        let lower = context * BINS + lower_index;
+        let (lower, fraction) = self.locate(context, p);
         self.bins[lower]
             .mul_add(1.0 - fraction, self.bins[lower + 1] * fraction)
             .clamp(MIN_PROBABILITY, MAX_PROBABILITY)
@@ -265,10 +263,8 @@ impl<S: Spacing> Table<S> {
     /// Panics if `context >= self.contexts()`, same bound as
     /// [`Self::refine`].
     pub fn update(&mut self, context: usize, p: f64, outcome: bool) {
-        assert!(context < self.contexts, "{} context out of range", S::NAME);
-        let (lower_index, fraction) = Self::position(p);
+        let (lower, fraction) = self.locate(context, p);
         let target = if outcome { 1.0 } else { 0.0 };
-        let lower = context * BINS + lower_index;
         self.bins[lower] += LEARNING_RATE * (1.0 - fraction) * (target - self.bins[lower]);
         self.bins[lower + 1] += LEARNING_RATE * fraction * (target - self.bins[lower + 1]);
     }
