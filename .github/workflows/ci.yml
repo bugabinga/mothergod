@@ -153,7 +153,8 @@ jobs:
   # Fixed seeds through a deterministic codec: a red here is a real ratio
   # regression, never noise. Runs the gate binary directly, not through x:
   # the ratio gate is not a stage of x's quality gate (ADR-0029), and its
-  # own error output teaches the accepted-trade path (`-- write`).
+  # own error output teaches the accepted-trade path (a hand edit of
+  # `bench/baseline.json`; `-- write` holds a grown case, #1230).
   ratio:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -165,6 +166,29 @@ jobs:
         with:
           checks: setup
       - run: cargo run -p mothergod-bench --release --bin baseline_gate -- check
+
+  # The crate ships what Cargo.toml's `include` allowlist names, and
+  # `cargo package` verifies only that the library compiles from it, so a
+  # packaged test that reads a path outside the allowlist (the tree has
+  # docs/ and site/, the crate does not) passes `test` above and fails for
+  # whoever runs the published crate's tests, where nothing can be fixed
+  # because a published version cannot be deleted (#1025; #1023 ran the
+  # shipped tests once, by hand). This runs them from the tarball on every
+  # change to the `rust` class, which holds every packaged path. Not a
+  # required check yet: a gate goes into the ruleset after it has reported
+  # on real PRs, the way worker did on 2026-10-09, and until then a red
+  # here is the reviewer's to read like adr-numbers below.
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: changes
+    if: ${{ always() && needs.changes.outputs.rust != 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      - run: .github/scripts/package-test
 
   # The Telegram worker is the one piece of logic here that cannot be Rust:
   # it runs on Cloudflare's edge (ADR-0006 covers what produces published
