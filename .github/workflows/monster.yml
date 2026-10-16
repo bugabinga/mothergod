@@ -238,18 +238,20 @@ jobs:
           number="$(jq -r '.number // empty' "$RUNNER_TEMP/selected.json")"
           state="$(jq -r '.state // empty' "$RUNNER_TEMP/selected.json")"
 
-          # `product`: the matrix tests the crate on platforms, so the usual
-          # cause is in the crate or its tests, and the maintainer's bug
-          # ladder takes a product bug on its next run. A runner or workflow
-          # cause is relabeled agent-system by whoever reads it; the old
-          # agent-system default cost #1253 a hop the other way.
+          # `product`, on create alone: the matrix tests the crate on
+          # platforms, so the usual cause is in the crate or its tests, and
+          # the maintainer's bug ladder takes a product bug on its next run.
+          # A runner or workflow cause is relabeled agent-system by whoever
+          # reads it, and a rerun must not add the realm back (`--add-label`
+          # is additive, and an issue with two realms is in two queues); the
+          # old agent-system default cost #1253 a hop the other way.
           if [ -n "$number" ]; then
             if [ "$state" = CLOSED ]; then
               gh issue reopen "$number" --repo "$GITHUB_REPOSITORY"
             fi
             gh issue edit "$number" --repo "$GITHUB_REPOSITORY" \
               --title "$title" --body-file "$body" \
-              --add-label bug --add-label product
+              --add-label bug
           else
             gh issue create --repo "$GITHUB_REPOSITORY" \
               --title "$title" --body-file "$body" \
