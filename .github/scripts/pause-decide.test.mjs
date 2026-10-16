@@ -123,6 +123,13 @@ test("a 429 with no rung and no resolved model falls through to the marker and p
   assert.deepEqual(decide({ entries: [entry] }), ["pause", "rolling", "usage limit", ""]);
 });
 
+test("a 404 with no rung and no resolved model falls through to the marker and pauses (#1097)", () => {
+  // Without a key there is nothing to ledger: `if status == 404:` alone
+  // would write an empty-key row and swallow the limit the text names.
+  const entry = failed({ api_error_status: 404, result: "Claude usage limit hit" });
+  assert.deepEqual(decide({ entries: [entry] }), ["pause", "rolling", "usage limit", ""]);
+});
+
 test("a reset named for the current minute means tomorrow, a later minute today", () => {
   const now = failed({ result: "usage limit, resets 10:00am (UTC)" });
   assert.equal(decide({ entries: [now] })[3], "2026-10-13T10:00:00Z");
