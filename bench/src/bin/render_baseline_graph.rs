@@ -32,10 +32,11 @@ fn main() -> ExitCode {
         }
     };
     let bars: Vec<Bar> = baseline
+        .cases
         .into_iter()
-        .map(|(name, bits_per_byte)| Bar {
+        .map(|(name, entry)| Bar {
             name,
-            bits_per_byte,
+            bits_per_byte: entry.bpb,
         })
         .collect();
 

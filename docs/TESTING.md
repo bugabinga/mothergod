@@ -377,6 +377,14 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `bench/baseline.json` in the same PR with the reason in the PR body.
   Ratio improvements that break layers 1–2 are rejected regardless — a
   faster-shrinking codec that panics on truncated input is a worse codec.
+- The same `baseline_gate check` invocation also fails when a gate case
+  compresses to different bytes than the digest `bench/baseline.json`
+  commits (issue #1182), whatever the size: it is the CI pin on
+  `compress()`'s output over the 11 fixed inputs, so a refactor's
+  "bitstream unchanged" is a green check and an output change is declared
+  by `baseline_gate -- write` in the same PR, the rule an encoder-only
+  change already follows for `tests/golden.rs`. The digests stay out of
+  the fingerprint below.
 - The same `baseline_gate check` invocation also fails when
   `docs/benchmarks/canterbury.md` or `docs/benchmarks/silesia.md` embeds a
   `bench/baseline.json` fingerprint (`crate::baseline::fingerprint`) that

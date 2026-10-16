@@ -200,7 +200,10 @@ def _methods():
 @field("benchmarks")
 def _benchmarks():
     baseline = json.loads((ROOT / "bench" / "baseline.json").read_text())
-    return {"source": "bench/baseline.json", "bits_per_byte": baseline}
+    # Each case is {"bpb", "digest"}; the page shows bits/byte, and the
+    # digest pins the stream for the ratio gate alone.
+    bits_per_byte = {name: case["bpb"] for name, case in baseline.items()}
+    return {"source": "bench/baseline.json", "bits_per_byte": bits_per_byte}
 
 
 @field("ratio")

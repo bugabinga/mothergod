@@ -82,6 +82,19 @@ test("an unreadable tracker nulls the field and says so, never guesses", () => {
   );
 });
 
+test("benchmarks publishes bits/byte per case, never the gate's digest objects", () => {
+  const baseline = JSON.parse(
+    readFileSync(new URL("../../bench/baseline.json", import.meta.url).pathname, "utf-8"),
+  );
+  const published = up.benchmarks.bits_per_byte;
+  assert.deepEqual(Object.keys(published), Object.keys(baseline));
+  for (const [name, bpb] of Object.entries(published)) {
+    assert.equal(typeof bpb, "number", name);
+    assert.equal(bpb, baseline[name].bpb, name);
+  }
+  assert.ok(!up.problems.some((p) => p.startsWith("benchmarks:")), up.problems.join("\n"));
+});
+
 for (const half of ["cli", "lib"]) {
   test(`fit_${half} counts the matrix's holds rows over every row, declined included`, () => {
     const matrix = new URL(`../../tests/fit/${half}.txt`, import.meta.url).pathname;

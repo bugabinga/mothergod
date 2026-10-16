@@ -11,9 +11,13 @@
 //! case per entropy-ladder target since a single [`crate::DatasetKind::EntropyLadder`]
 //! case cannot name which of the ladder's five points it measured.
 //! [`measure_all`] compresses every case with `mothergod::compress` and
-//! reports bits/byte; [`format_baseline`]/[`parse_baseline`] round-trip that
-//! map through `bench/baseline.json`; [`regressions`] compares a freshly
-//! measured map against the committed baseline.
+//! records, per case, its bits/byte and a digest of the compressed bytes
+//! (an [`Entry`]); [`format_baseline`]/[`parse_baseline`] round-trip that
+//! [`Snapshot`] through `bench/baseline.json`; [`regressions`] compares a
+//! freshly measured bits/byte map against the committed baseline, and
+//! [`output_changes`] names the cases whose compressed bytes differ from the
+//! committed digest, the one pin on `compress()`'s output over a broad fixed
+//! input set (issue #1182).
 
 use crate::DatasetKind;
 use std::collections::BTreeMap;
@@ -139,57 +143,114 @@ pub fn bits_per_byte(compressed_len: usize, original_len: usize) -> f64 {
     (compressed_len as f64) * 8.0 / (original_len as f64)
 }
 
+/// 64-bit FNV-1a of `bytes`. Not cryptographic: [`fingerprint`] and
+/// [`Entry::digest`] only detect an honest accidental change, never resist a
+/// deliberate one (the reasoning on [`fingerprint`]).
+fn fnv1a(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+    bytes.iter().fold(FNV_OFFSET_BASIS, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
+    })
+}
+
+/// One case's record: its bits/byte and the digest of the compressed bytes
+/// that produced it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Entry {
+    /// Bits/byte of the case's compressed form.
+    pub bpb: f64,
+    /// FNV-1a of the compressed bytes: unchanged output, not merely
+    /// unchanged size.
+    pub digest: u64,
+}
+
+/// Every case's [`Entry`], keyed by [`Case::name`]: what one
+/// [`measure_all`] run or one `bench/baseline.json` holds.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Snapshot {
+    /// Entries in name order, the order the file is written in.
+    pub cases: BTreeMap<String, Entry>,
+}
+
+impl Snapshot {
+    /// The bits/byte of every case, the map [`regressions`], [`deltas`],
+    /// [`hold_at_best`] and [`fingerprint`] work over.
+    #[must_use]
+    pub fn bpb(&self) -> BTreeMap<String, f64> {
+        self.cases
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.bpb))
+            .collect()
+    }
+
+    /// This snapshot with each case's bits/byte replaced by its value in
+    /// `bpb`, digests kept; a case absent from `bpb` keeps its own. How a
+    /// [`hold_at_best`] result becomes the snapshot to write.
+    #[must_use]
+    pub fn with_bpb(&self, bpb: &BTreeMap<String, f64>) -> Snapshot {
+        let cases = self
+            .cases
+            .iter()
+            .map(|(name, entry)| {
+                let entry = Entry {
+                    bpb: bpb.get(name).copied().unwrap_or(entry.bpb),
+                    digest: entry.digest,
+                };
+                (name.clone(), entry)
+            })
+            .collect();
+        Snapshot { cases }
+    }
+}
+
 /// Compresses every [`cases`] entry through `mothergod::compress` and
-/// reports each one's bits/byte, keyed by [`Case::name`].
+/// records each one's bits/byte and output digest, keyed by [`Case::name`].
 #[must_use]
-pub fn measure_all() -> BTreeMap<String, f64> {
-    cases()
+pub fn measure_all() -> Snapshot {
+    let cases = cases()
         .iter()
         .map(|case| {
             let compressed = mothergod::compress(&case.data);
-            (
-                case.name.to_string(),
-                bits_per_byte(compressed.len(), case.data.len()),
-            )
+            let entry = Entry {
+                bpb: bits_per_byte(compressed.len(), case.data.len()),
+                digest: fnv1a(&compressed),
+            };
+            (case.name.to_string(), entry)
         })
-        .collect()
+        .collect();
+    Snapshot { cases }
 }
 
-/// Writes `measurements` as the `bench/baseline.json` this module reads
-/// back with [`parse_baseline`]: a flat JSON object, keys sorted (`measurements`
-/// is a [`BTreeMap`]), each value rounded to six decimal places with the
-/// trailing zeros trimmed (`8.0` prints `8`). That is the form `cargo x fmt`
-/// leaves a number in, so a freshly written file already passes
+/// Writes `snapshot` as the `bench/baseline.json` this module reads back
+/// with [`parse_baseline`]: an object keyed by case name, keys sorted
+/// (`snapshot.cases` is a [`BTreeMap`]), each value an object of `bpb`
+/// rounded to six decimal places with the trailing zeros trimmed (`8.0`
+/// prints `8`) and `digest` as 16 lowercase hex digits. That is the form
+/// `cargo x fmt` leaves the file in, so a freshly written one already passes
 /// `cargo x fmt --check` (issue #943). Not a general JSON writer: it only
 /// needs to round-trip its own output, the same scope the `corpus` module's
 /// manual TOML reader (behind the `corpus-fetch` feature) takes for
 /// `bench/corpus.toml`.
 #[must_use]
-pub fn format_baseline(measurements: &BTreeMap<String, f64>) -> String {
-    render(measurements, |bpb| {
-        let fixed = format!("{bpb:.6}");
-        if fixed.contains('.') {
-            fixed
-                .trim_end_matches('0')
-                .trim_end_matches('.')
-                .to_string()
-        } else {
-            fixed
-        }
-    })
-}
-
-/// The one object layout, with each value rendered by `value`:
-/// [`format_baseline`] writes the trimmed form, [`fingerprint`] hashes the
-/// fixed six-decimal one.
-fn render(measurements: &BTreeMap<String, f64>, value: fn(f64) -> String) -> String {
+pub fn format_baseline(snapshot: &Snapshot) -> String {
     let mut out = String::from("{\n");
-    let mut remaining = measurements.len();
-    for (name, &bpb) in measurements {
+    let mut remaining = snapshot.cases.len();
+    for (name, entry) in &snapshot.cases {
         remaining -= 1;
         let comma = if remaining == 0 { "" } else { "," };
-        writeln!(out, "  \"{name}\": {}{comma}", value(bpb))
-            .expect("writing to a String never fails");
+        let fixed = format!("{:.6}", entry.bpb);
+        let bpb = if fixed.contains('.') {
+            fixed.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            &fixed
+        };
+        writeln!(
+            out,
+            "  \"{name}\": {{\n    \"bpb\": {bpb},\n    \"digest\": \"{:016x}\"\n  }}{comma}",
+            entry.digest
+        )
+        .expect("writing to a String never fails");
     }
     out.push_str("}\n");
     out
@@ -208,7 +269,7 @@ impl fmt::Display for BaselineParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "bench/baseline.json line {}: expected `\"name\": bpb`, got `{}`",
+            "bench/baseline.json line {}: not a case in the shape `baseline_gate write` emits, got `{}`",
             self.line, self.content
         )
     }
@@ -217,38 +278,94 @@ impl fmt::Display for BaselineParseError {
 impl std::error::Error for BaselineParseError {}
 
 /// Parses text in the shape [`format_baseline`] writes back into a
-/// name-to-bits/byte map. Not a general JSON reader: it understands exactly
-/// one object-of-numbers shape (an opening `{`, one `"name": number` pair
-/// per line with an optional trailing comma, a closing `}`) and rejects
-/// anything else line by line, the same deliberate scope limit
-/// the `corpus` module's manual TOML reader (behind the `corpus-fetch`
-/// feature) takes for `bench/corpus.toml`.
+/// [`Snapshot`]. Not a general JSON reader: it understands exactly one
+/// shape (an opening `{`, per case a `"name": {` line, a `"bpb": number`
+/// line, a `"digest": "<16 hex digits>"` line and a closing `}`, an
+/// optional trailing comma on any line, a closing `}`) and rejects anything
+/// else line by line, the same deliberate scope limit the `corpus`
+/// module's manual TOML reader (behind the `corpus-fetch` feature) takes
+/// for `bench/corpus.toml`.
 ///
 /// # Errors
 ///
 /// Returns [`BaselineParseError`] naming the first line that is not blank,
-/// `{`, `}`, or a `"name": number` pair.
-pub fn parse_baseline(text: &str) -> Result<BTreeMap<String, f64>, BaselineParseError> {
-    let mut out = BTreeMap::new();
+/// `{`, `}`, or part of a case in that shape, a case missing its `bpb` or
+/// its `digest`, or the line that opened a case the text never closes.
+pub fn parse_baseline(text: &str) -> Result<Snapshot, BaselineParseError> {
+    /// The case being read: its name, the line that opened it, and the
+    /// fields seen so far.
+    struct Open {
+        name: String,
+        line: usize,
+        bpb: Option<f64>,
+        digest: Option<u64>,
+    }
+    let mut cases = BTreeMap::new();
+    let mut open: Option<Open> = None;
+    let mut opened_at = String::new();
     for (idx, raw_line) in text.lines().enumerate() {
         let line = raw_line.trim().trim_end_matches(',');
-        if line.is_empty() || line == "{" || line == "}" {
-            continue;
-        }
         let err = || BaselineParseError {
             line: idx + 1,
             content: raw_line.to_string(),
         };
-        let (key_part, value_part) = line.split_once(':').ok_or_else(err)?;
-        let key = key_part.trim();
-        let key = key
-            .strip_prefix('"')
-            .and_then(|k| k.strip_suffix('"'))
-            .ok_or_else(err)?;
-        let value: f64 = value_part.trim().parse().map_err(|_| err())?;
-        out.insert(key.to_string(), value);
+        if line.is_empty() {
+            continue;
+        }
+        let Some(case) = open.as_mut() else {
+            if line == "{" || line == "}" {
+                continue;
+            }
+            let (key, value) = split_pair(line).ok_or_else(err)?;
+            if value != "{" {
+                return Err(err());
+            }
+            opened_at = raw_line.to_string();
+            open = Some(Open {
+                name: key.to_string(),
+                line: idx + 1,
+                bpb: None,
+                digest: None,
+            });
+            continue;
+        };
+        if line == "}" {
+            let (Some(bpb), Some(digest)) = (case.bpb, case.digest) else {
+                return Err(err());
+            };
+            cases.insert(case.name.clone(), Entry { bpb, digest });
+            open = None;
+            continue;
+        }
+        let (key, value) = split_pair(line).ok_or_else(err)?;
+        match key {
+            "bpb" => case.bpb = Some(value.parse().map_err(|_| err())?),
+            "digest" => {
+                let hex = value
+                    .strip_prefix('"')
+                    .and_then(|v| v.strip_suffix('"'))
+                    .filter(|hex| hex.len() == 16 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+                    .ok_or_else(err)?;
+                case.digest = Some(u64::from_str_radix(hex, 16).map_err(|_| err())?);
+            }
+            _ => return Err(err()),
+        }
     }
-    Ok(out)
+    match open {
+        Some(case) => Err(BaselineParseError {
+            line: case.line,
+            content: opened_at,
+        }),
+        None => Ok(Snapshot { cases }),
+    }
+}
+
+/// `"key": value` as the unquoted key and the trimmed value text; `None`
+/// when the line has no colon or its key is not quoted.
+fn split_pair(line: &str) -> Option<(&str, &str)> {
+    let (key, value) = line.split_once(':')?;
+    let key = key.trim().strip_prefix('"')?.strip_suffix('"')?;
+    Some((key, value.trim()))
 }
 
 /// A case whose measured bits/byte regressed past [`TOLERANCE_BITS`] above
@@ -279,6 +396,9 @@ impl Regression {
 /// bytes (key order, whitespace), since both go through the same layout
 /// first.
 ///
+/// Digests stay out of it, so a change of output at equal bits/byte never
+/// marks the finals reports stale on its own (issue #1182).
+///
 /// The hash input is frozen at the fixed six-decimal form, not
 /// [`format_baseline`]'s trimmed one: the committed finals reports embed
 /// this digest, and a different input moves it without the baseline moving.
@@ -297,15 +417,16 @@ impl Regression {
 /// never needed).
 #[must_use]
 pub fn fingerprint(measurements: &BTreeMap<String, f64>) -> String {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
-    let canonical = render(measurements, |bpb| format!("{bpb:.6}"));
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in canonical.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
+    let mut canonical = String::from("{\n");
+    let mut remaining = measurements.len();
+    for (name, &bpb) in measurements {
+        remaining -= 1;
+        let comma = if remaining == 0 { "" } else { "," };
+        writeln!(canonical, "  \"{name}\": {bpb:.6}{comma}")
+            .expect("writing to a String never fails");
     }
-    format!("{hash:016x}")
+    canonical.push_str("}\n");
+    format!("{:016x}", fnv1a(canonical.as_bytes()))
 }
 
 /// Reads `bench/baseline.json` under `root`, parses it, and fingerprints
@@ -321,7 +442,7 @@ pub fn load_and_fingerprint(root: &Path) -> Result<String, String> {
     let text = std::fs::read_to_string(root.join("bench/baseline.json"))
         .map_err(|err| format!("failed to read bench/baseline.json: {err}"))?;
     let baseline = parse_baseline(&text).map_err(|err| err.to_string())?;
-    Ok(fingerprint(&baseline))
+    Ok(fingerprint(&baseline.bpb()))
 }
 
 /// Compares `measured` against `baseline`, reporting every case that grew
@@ -390,6 +511,27 @@ pub fn deltas(
         .collect()
 }
 
+/// The cases of `measured` whose compressed bytes differ from the digest
+/// `baseline` commits, in name order: a changed stream of equal size, an
+/// improvement, a regression within [`TOLERANCE_BITS`] all land here, which
+/// [`regressions`] sees none of. A case with no committed digest is listed
+/// (nothing pins its output yet); a case only in `baseline` is not, the
+/// scope [`regressions`] takes.
+#[must_use]
+pub fn output_changes(baseline: &Snapshot, measured: &Snapshot) -> Vec<String> {
+    measured
+        .cases
+        .iter()
+        .filter(|(name, entry)| {
+            baseline
+                .cases
+                .get(*name)
+                .is_none_or(|committed| committed.digest != entry.digest)
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 /// The map [`format_baseline`] should write over `baseline` after a
 /// measurement, and the cases it held back. Each case takes
 /// `min(baseline, measured)` compared at the six decimals the file stores,
@@ -435,10 +577,20 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, TOLERANCE_BITS, bits_per_byte, cases, deltas, fingerprint,
-        format_baseline, hold_at_best, mean_delta, parse_baseline, regressions,
+        BaselineParseError, CASE_LEN, Entry, Snapshot, TOLERANCE_BITS, bits_per_byte, cases,
+        deltas, fingerprint, fnv1a, format_baseline, hold_at_best, mean_delta, output_changes,
+        parse_baseline, regressions,
     };
     use std::collections::BTreeMap;
+
+    /// A snapshot of `(name, bpb, digest)` rows.
+    fn snapshot(rows: &[(&str, f64, u64)]) -> Snapshot {
+        let cases = rows
+            .iter()
+            .map(|&(name, bpb, digest)| (name.to_string(), Entry { bpb, digest }))
+            .collect();
+        Snapshot { cases }
+    }
 
     #[test]
     fn cases_covers_every_train_eligible_kind_and_the_full_ladder() {
@@ -491,18 +643,10 @@ mod tests {
 
     #[test]
     fn baseline_round_trips_through_format_and_parse() {
-        let mut measurements = BTreeMap::new();
-        measurements.insert("a".to_string(), 1.5);
-        measurements.insert("b".to_string(), 7.999_999);
-        let text = format_baseline(&measurements);
+        let original = snapshot(&[("a", 1.5, 0), ("b", 7.999_999, u64::MAX)]);
+        let text = format_baseline(&original);
         let parsed = parse_baseline(&text).expect("format_baseline's own output must parse");
-        assert_eq!(parsed.len(), measurements.len());
-        for (name, &value) in &measurements {
-            assert!(
-                (parsed[name] - value).abs() < 1e-6,
-                "{name} did not round-trip"
-            );
-        }
+        assert_eq!(parsed, original);
     }
 
     #[test]
@@ -518,23 +662,24 @@ mod tests {
 
     #[test]
     fn format_baseline_trims_zeros_and_rounds_to_six_places() {
-        let mut measurements = BTreeMap::new();
-        measurements.insert("a".to_string(), 0.530_56);
-        measurements.insert("b".to_string(), 8.0);
-        measurements.insert("c".to_string(), 10.0);
-        measurements.insert("d".to_string(), 2.370_564_9);
+        let text = format_baseline(&snapshot(&[
+            ("a", 0.530_56, 1),
+            ("b", 8.0, 2),
+            ("c", 10.0, 3),
+            ("d", 2.370_564_9, 255),
+        ]));
         assert_eq!(
-            format_baseline(&measurements),
-            "{\n  \"a\": 0.53056,\n  \"b\": 8,\n  \"c\": 10,\n  \"d\": 2.370565\n}\n"
+            text,
+            "{\n  \"a\": {\n    \"bpb\": 0.53056,\n    \"digest\": \"0000000000000001\"\n  },\n  \
+             \"b\": {\n    \"bpb\": 8,\n    \"digest\": \"0000000000000002\"\n  },\n  \
+             \"c\": {\n    \"bpb\": 10,\n    \"digest\": \"0000000000000003\"\n  },\n  \
+             \"d\": {\n    \"bpb\": 2.370565,\n    \"digest\": \"00000000000000ff\"\n  }\n}\n"
         );
     }
 
     #[test]
     fn format_baseline_sorts_keys() {
-        let mut measurements = BTreeMap::new();
-        measurements.insert("zebra".to_string(), 1.0);
-        measurements.insert("apple".to_string(), 2.0);
-        let text = format_baseline(&measurements);
+        let text = format_baseline(&snapshot(&[("zebra", 1.0, 0), ("apple", 2.0, 0)]));
         assert!(text.find("apple").unwrap() < text.find("zebra").unwrap());
     }
 
@@ -551,15 +696,74 @@ mod tests {
     }
 
     #[test]
+    fn parse_baseline_rejects_the_flat_form_this_file_used_to_have() {
+        assert!(parse_baseline("{\n  \"a\": 1.5\n}\n").is_err());
+    }
+
+    /// One well-formed case to damage.
+    const CASE: &str =
+        "{\n  \"a\": {\n    \"bpb\": 1,\n    \"digest\": \"00000000000000ff\"\n  }\n}\n";
+
+    #[test]
+    fn parse_baseline_rejects_a_case_missing_a_field_or_with_a_bad_one() {
+        for damaged in [
+            CASE.replace("    \"bpb\": 1,\n", ""),
+            CASE.replace(",\n    \"digest\": \"00000000000000ff\"", ""),
+            CASE.replace("00000000000000ff", "ff"),
+            CASE.replace("00000000000000ff", "000000000000000g"),
+            CASE.replace("\"bpb\": 1", "\"bpb\": one"),
+            CASE.replace("\"bpb\"", "\"size\""),
+        ] {
+            assert!(parse_baseline(&damaged).is_err(), "accepted {damaged}");
+        }
+    }
+
+    #[test]
+    fn parse_baseline_names_the_line_of_a_case_the_text_never_closes() {
+        let unclosed = CASE.replace("\n  }\n}\n", "\n");
+        let err = parse_baseline(&unclosed).unwrap_err();
+        assert_eq!(err.line, 2);
+        assert_eq!(err.content, "  \"a\": {");
+    }
+
+    #[test]
     fn parse_baseline_accepts_a_trailing_comma_or_not() {
-        let with_comma = parse_baseline("{\n  \"a\": 1.0,\n  \"b\": 2.0\n}\n").unwrap();
-        let without_comma = parse_baseline("{\n  \"a\": 1.0,\n  \"b\": 2.0,\n}\n").unwrap();
-        assert_eq!(with_comma, without_comma);
+        let with_comma = CASE.replace("\n  }\n", ",\n  },\n");
+        assert_eq!(
+            parse_baseline(&with_comma).unwrap(),
+            parse_baseline(CASE).unwrap()
+        );
     }
 
     #[test]
     fn parse_baseline_accepts_the_empty_object() {
-        assert!(parse_baseline("{\n}\n").unwrap().is_empty());
+        assert!(parse_baseline("{\n}\n").unwrap().cases.is_empty());
+    }
+
+    #[test]
+    fn fnv1a_matches_the_published_vectors() {
+        assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a(b"foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    #[test]
+    fn output_changes_names_a_new_digest_at_equal_bits_per_byte() {
+        let baseline = snapshot(&[("same", 2.0, 1), ("moved", 2.0, 2), ("gone", 2.0, 3)]);
+        let measured = snapshot(&[("same", 2.0, 1), ("moved", 2.0, 9), ("new", 2.0, 4)]);
+        assert_eq!(output_changes(&baseline, &measured), ["moved", "new"]);
+        assert_eq!(output_changes(&baseline, &baseline), Vec::<String>::new());
+    }
+
+    #[test]
+    fn snapshot_with_bpb_replaces_numbers_and_keeps_digests() {
+        let measured = snapshot(&[("a", 2.0, 7), ("b", 3.0, 8)]);
+        let held = BTreeMap::from([("a".to_string(), 1.5)]);
+        assert_eq!(
+            measured.with_bpb(&held),
+            snapshot(&[("a", 1.5, 7), ("b", 3.0, 8)])
+        );
+        assert_eq!(measured.bpb(), map(&[("a", 2.0), ("b", 3.0)]));
     }
 
     #[test]
@@ -696,8 +900,13 @@ mod tests {
         ]);
         let (written, held) = hold_at_best(&baseline, &measured);
         assert_eq!(
-            format_baseline(&written),
-            "{\n  \"grown\": 2,\n  \"new_only\": 9,\n  \"same\": 2,\n  \"shrunk\": 1.5\n}\n"
+            written,
+            map(&[
+                ("grown", 2.0),
+                ("new_only", 9.0),
+                ("same", 2.000_000_04),
+                ("shrunk", 1.5)
+            ])
         );
         assert_eq!(
             held.len(),
