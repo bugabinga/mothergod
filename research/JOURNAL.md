@@ -8683,3 +8683,61 @@ record.
   (policy: never inside the loop), any real file, a gated shortlist, and
   decode on the pool's other CPU models. `bench/baseline.json` is not
   regenerated, #1223 carries it. `research/progress.jsonl` it194.
+- S2-A120 | ACCEPTED | Issue #1222, the composed selector S2-A119 left
+  untried: kind 6 (`Candidate::ReverseDelta`, `[6, stride]`), the frame data
+  reversed and then differenced at `stride`, `FORMAT_VERSION` 16, ADR-0073.
+  Hypothesis: trial-encoding the delta of the reversed input at the stride
+  the reversed tail ranks first lowers real bits/byte on
+  `sqlite_like_records` and regresses no train or sealed case. `select::pick`
+  ranks strides on the reversed input's first 16,384 bytes (the original's
+  last, reversed) and shortlists the candidate when a stride beats identity.
+  Whole-buffer decode, like kinds 3 to 5. | Measured, release build, one AMD
+  EPYC 9V74 runner, real `mothergod::compress` bitstreams, main
+  (`FORMAT_VERSION` 15, `c1d869b`) against the branch, through `baseline_gate
+  -- measure` and `-- delta`, on the 11 train cases of `baseline::cases()` at
+  `CASE_LEN` 50,000 / `CASE_SEED` 0xBA5E11E5BA5E11E5 and on `access_log` and
+  `gradient_image` at `sealed_seed(CASE_SEED)`, same length.
+  `sqlite_like_records` 20,864 to 20,292 bytes, 3.338240 to 3.246720 b/B
+  (-0.091520); the other ten train cases are the same bytes, so the train
+  mean is -0.008320 b/B over 11 cases. Sealed `access_log` 5,340 and
+  `gradient_image` 36,594 bytes on both sides, delta 0.000000. Decode cost,
+  `baseline_gate -- speed`, five alternating runs per side: median 114.05
+  main, 112.87 branch calibration steps/byte, spreads 12% and 3%, no
+  measurable change. Encode, best of five over the 11 train cases, two
+  alternating rounds: main 4.110 and 4.433 s, branch 4.669 and 4.690 s, +14%
+  and +6%. | Mechanism: the reversed delta's residues are the forward
+  residues read backwards and negated, so the information is the same and
+  the coder sees it in a different order: most-significant byte first within
+  a field, and the last row first. No order-1 entropy tells the two apart
+  (`sqlite_like_records`: 2.516 forward, 2.514 reversed at stride 80, where
+  the coded sizes differ by 2.7%), so the trial decides. Not all of the
+  effect is direction: the selector takes the smallest of N codings, and
+  on the 8,000-byte `columnar_drift_data` fixture kind 6 beat `Delta(4)` by 4
+  of 2,770 bytes, a random walk with no byte order to exploit. The gain also
+  depends on the field's entropy shape: the test suite's `le_rows`
+  generator, uniform thousandths in the `f64`, keeps kind 5 at 50,000 bytes
+  where the benchmark generator's gaussian `f64` takes kind 6. Observed on
+  real files, not a benchmark: the first 65,536 bytes of the `.rela.dyn`
+  section of the `rustup` binary (`objcopy -O binary --only-section=.rela.dyn`,
+  24-byte little-endian relocation records) 6,669 to 6,168 bytes (-7.5%); the
+  2,064-byte `.rela.dyn` of `libc.so.6` 353 to 348; the first 65,536 bytes of
+  `src/codec.rs` 17,215 to 17,156; the `libc.so.6` `.dynsym` section,
+  `/var/log/wtmp`, the first 65,536 bytes of `/usr/bin/objcopy`, `LICENSE` and
+  `README.md` the same bytes. | Sub-experiment, REJECTED (`research/progress.jsonl`
+  it196): the per-field byte-order candidate #1222's curator comment asked for,
+  here reversing each `S`-byte group in place, `S` from 2 to 32, kept as a
+  per-case oracle over those 31 strides. `sqlite_like_records` 20,310 at
+  `S` 20 (554 of the 572 bytes whole-input reversal wins; swapping only the
+  timestamp and the `f64`, row and field order kept, 20,333: 531), and
+  -7, -55, -31, -3 and -20 bytes on the four entropy ladders `h1` to `h6` and
+  `interleaved_audio16`, each a best-of-31 draw on noise, oracle train mean
+  -0.009745 b/B. On the real record data above it won at most 0.5% at its best
+  `S`, and that `S` was not the record width (16 for the 24-byte `.dynsym`, 8
+  for `.rela.dyn`): `.rela.dyn` 6,669 to 6,639 against 6,168 composed. Not
+  wired: 31 trials is not a price a selector pays, and the single-trial
+  variant at a ranked `S` is unmeasured. | **Not measured:** the held-out
+  finals (policy: never inside the loop); a record file from outside this
+  machine's toolchain; a gate on the reversed-tail ranking; decode on the
+  pool's other CPU models; encode on them either. `bench/baseline.json` is
+  not regenerated, a new baseline retires both finals reports' fingerprint,
+  which needs their network fetches. `research/progress.jsonl` it195, it196.

@@ -118,6 +118,8 @@ fn header_bytes_round_trip_every_candidate_kind() {
         Candidate::Transpose(NonZeroUsize::new(96).unwrap()),
         Candidate::Base64,
         Candidate::Reverse,
+        Candidate::ReverseDelta(NonZeroUsize::new(1).unwrap()),
+        Candidate::ReverseDelta(NonZeroUsize::new(96).unwrap()),
     ] {
         let bytes = candidate.to_header_bytes();
         assert_eq!(
@@ -130,7 +132,7 @@ fn header_bytes_round_trip_every_candidate_kind() {
 
 #[test]
 fn header_bytes_reject_unknown_kind() {
-    assert_eq!(Candidate::from_header_bytes([6, 0]), None);
+    assert_eq!(Candidate::from_header_bytes([7, 0]), None);
     assert_eq!(Candidate::from_header_bytes([255, 255]), None);
 }
 
@@ -138,6 +140,7 @@ fn header_bytes_reject_unknown_kind() {
 fn header_bytes_reject_zero_param_for_parameterized_kinds() {
     assert_eq!(Candidate::from_header_bytes([1, 0]), None);
     assert_eq!(Candidate::from_header_bytes([3, 0]), None);
+    assert_eq!(Candidate::from_header_bytes([6, 0]), None);
 }
 
 #[test]
@@ -159,6 +162,7 @@ fn header_bytes_pin_each_kind_byte() {
     assert_eq!(Candidate::Transpose(one).to_header_bytes(), [3, 1]);
     assert_eq!(Candidate::Base64.to_header_bytes(), [4, 0]);
     assert_eq!(Candidate::Reverse.to_header_bytes(), [5, 0]);
+    assert_eq!(Candidate::ReverseDelta(one).to_header_bytes(), [6, 1]);
 }
 
 #[test]
@@ -169,6 +173,7 @@ fn output_len_is_the_filtered_length_except_for_base64() {
         Candidate::Bcj,
         Candidate::Transpose(NonZeroUsize::MIN),
         Candidate::Reverse,
+        Candidate::ReverseDelta(NonZeroUsize::MIN),
     ] {
         assert_eq!(candidate.output_len(1234), 1234, "{candidate:?}");
     }
@@ -198,6 +203,36 @@ fn pick_shortlists_reverse_for_every_input() {
     for data in [&[][..], b"x", b"not base64 data!", &[0u8; 5000]] {
         assert!(
             pick(data).contains(&Candidate::Reverse),
+            "{} bytes",
+            data.len()
+        );
+    }
+}
+
+#[test]
+fn pick_shortlists_reverse_delta_at_the_stride_the_reversed_tail_ranks_first() {
+    // 4 interleaved random walks, as in pick_selects_delta_for_columnar_drift.
+    let mut seeds = [0x1234_5678u32, 0x9abc_def0, 0x0f0f_f0f0, 0x1357_9bdf];
+    let mut walk = [64u8, 96, 160, 200];
+    let mut data = Vec::new();
+    for _ in 0..2000 {
+        for col in 0..4 {
+            walk[col] = walk[col].wrapping_add(next_step(&mut seeds[col]));
+            data.push(walk[col]);
+        }
+    }
+    assert!(pick(&data).contains(&Candidate::ReverseDelta(NonZeroUsize::new(4).unwrap())));
+}
+
+#[test]
+fn pick_skips_reverse_delta_where_no_stride_beats_identity() {
+    // Identity ties every stride on constant bytes and ranks first, as it
+    // does on an empty or one-byte input.
+    for data in [&[][..], b"x", &[0u8; 5000]] {
+        assert!(
+            !pick(data)
+                .iter()
+                .any(|c| matches!(c, Candidate::ReverseDelta(_))),
             "{} bytes",
             data.len()
         );

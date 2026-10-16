@@ -67,6 +67,15 @@ All notable changes to this project are documented here. Format follows
   reported before any of the frame is decoded, so a damaged frame writes
   nothing. The price is 4 bytes on each frame and one pass over it at decode,
   measured at 380 MB/s, where `Lz` decode of Rust source runs at 11 MB/s.
+- compress: the encoder also tries the input reversed and then differenced at
+  the stride the reversed bytes rank first, so fixed-width little-endian
+  records are coded most-significant byte first. On the `sqlite_like_records`
+  generator, 50,000 bytes: 20,864 to 20,292 bytes, 2.7% smaller; on the first
+  64 KiB of a PIE binary's `.rela.dyn` relocation section, 7.5% smaller; no
+  other benchmark case moves. Encode takes 6 to 14% longer on the benchmark
+  cases, one more trial encode where a stride ranks; decode cost does not
+  measurably change (#1222, ADR-0073). Format change: `FORMAT_VERSION` 16,
+  files written by 15 do not decode.
 - compress: the encoder also tries the input in reverse byte order, so a
   block coded better backwards is stored that way. On the sealed
   `access_log` generator, 50,000 bytes: 5,377 to 5,340 bytes, 0.69% smaller;

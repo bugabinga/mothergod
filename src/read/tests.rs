@@ -2,7 +2,7 @@ use std::io::ErrorKind;
 
 use super::*;
 use crate::test_support::{
-    bcj_call_dense_data, columnar_drift_data, forge_floor_extent, mixed_stream,
+    bcj_call_dense_data, columnar_drift_data, forge_floor_extent, mixed_stream, repeated_sentence,
     tabular_columns_data,
 };
 use crate::{FORMAT_VERSION, MAGIC, METHOD_OFFSET, WriteError, compress, decompress_to_writer};
@@ -45,8 +45,8 @@ fn drain_to_writer(stream: &[u8]) -> (Vec<u8>, Option<ErrorKind>) {
 #[test]
 fn every_method_and_filter_class_round_trips_through_the_reader() {
     // The selector's first byte is the filter kind: 0 identity, 1 delta,
-    // 2 bcj, 3 transpose (`codec` tests pin the same bytes).
-    let classes: [(&str, Method, u8, Vec<u8>); 5] = [
+    // 2 bcj, 3 transpose, 6 reverse-delta (`codec` tests pin the same bytes).
+    let classes: [(&str, Method, u8, Vec<u8>); 6] = [
         ("stored", Method::Stored, 0, b"hi".to_vec()),
         (
             "identity",
@@ -54,7 +54,8 @@ fn every_method_and_filter_class_round_trips_through_the_reader() {
             0,
             include_bytes!("../../research/imports/session-1/mothergod.rs").to_vec(),
         ),
-        ("delta", Method::Lz, 1, columnar_drift_data()),
+        ("delta", Method::Lz, 1, repeated_sentence()),
+        ("reverse-delta", Method::Lz, 6, columnar_drift_data()),
         ("bcj", Method::Lz, 2, bcj_call_dense_data()),
         ("transpose", Method::Lz, 3, tabular_columns_data(8, 2000, 1)),
     ];
