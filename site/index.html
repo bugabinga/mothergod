@@ -386,11 +386,13 @@ cargo build --release --bin mothergod</pre>
           tabindex="0"
           role="region"
           aria-label="A first run on the clone's LICENSE file, and what it prints"
-        >$ ./target/release/mothergod -v LICENSE
+        >$ ./target/release/mothergod -v -c LICENSE &gt; /dev/null
 mothergod: LICENSE: 1074 -&gt; 630 bytes (58.6%)</pre>
         <p>
           <code>-v</code> asked for that line; without it, a run that worked
-          prints nothing. One 1 KB file is a smoke test, not a benchmark; the
+          prints nothing. <code>-c</code> sent the compressed bytes to stdout,
+          which <code>/dev/null</code> swallowed, so the run writes no file and
+          repeats cleanly. One 1 KB file is a smoke test, not a benchmark; the
           tables above are the benchmark. Then round-trip something of yours:
         </p>
         <pre

@@ -62,12 +62,14 @@ cargo build --release --bin mothergod
 The first run needs no file of yours, because the clone ships one:
 
 ```console
-$ ./target/release/mothergod -v LICENSE
+$ ./target/release/mothergod -v -c LICENSE > /dev/null
 mothergod: LICENSE: 1074 -> 630 bytes (58.6%)
 ```
 
-`-v` asked for that line; without it, a run that worked prints nothing. One
-1 KB file is a smoke test, not a benchmark; the tables above are the benchmark.
+`-v` asked for that line; without it, a run that worked prints nothing. `-c`
+sent the compressed bytes to stdout, which `/dev/null` swallowed, so the run
+writes no file and repeats cleanly. One 1 KB file is a smoke test, not a
+benchmark; the tables above are the benchmark.
 
 The CLI speaks the grammar `gzip`, `xz` and `zstd` already taught you: it
 compresses, `-d` decompresses, stdin to stdout when you name no file. Round-trip
