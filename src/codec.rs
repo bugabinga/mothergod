@@ -211,7 +211,7 @@ impl Models {
 
     /// Fallible counterpart to [`Self::new`]: the same fresh tables, but
     /// returns `Err` instead of aborting if the allocator cannot satisfy
-    /// one of them. [`decode`] and [`decode_undoable_streaming`] use this
+    /// one of them. [`decode`] and [`decode_to_writer`] use this
     /// (hard rule 2, `rust-craft` skill's allocation-discipline,
     /// `tests/torture.rs`, #453); every encode path keeps [`Self::new`],
     /// where an allocator failure this small is already a fatal condition
@@ -1131,7 +1131,7 @@ fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<
 
 /// Where a decoded token's literal byte and match/rep copy land: real
 /// output for [`decode`]'s [`VecSink`], undone-and-written-immediately
-/// output for [`decode_undoable_streaming`]'s `StreamingSink`. The two
+/// output for [`decode_to_writer`]'s `StreamingSink`. The two
 /// walks must decode the same flag/length/offset/slot symbols, in the same
 /// order, off the same token stream, or one silently drifts from what the
 /// other produces; routing both through [`decode_tokens`] makes that a
@@ -1186,11 +1186,11 @@ fn decode_offset(models: &mut Models, ac: &mut Decoder, len: u32) -> u32 {
     decode_bucketed(&mut models.offset_len[offset_len_state(len)], ac)
 }
 
-/// The shared skeleton behind [`decode`] and [`decode_undoable_streaming`]:
+/// The shared skeleton behind [`decode`] and [`decode_to_writer`]:
 /// decodes `token_count` tokens off `ac` in coding order, routing every
 /// literal byte and copy through `sink`, and advancing the literal-model
-/// context and `reps` exactly as [`decode`] and [`decode_undoable_streaming`]
-/// both require. See [`DecodeSink`]'s docs for why this exists.
+/// context and `reps` exactly as [`decode`] and [`decode_to_writer`] both
+/// require. See [`DecodeSink`]'s docs for why this exists.
 fn decode_tokens<S: DecodeSink>(
     token_count: u32,
     declared_len: usize,
@@ -1378,8 +1378,8 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
 ///
 /// A candidate [`StreamUndo`] has a variant for (`Identity`, `Delta`, `Bcj`)
 /// undoes the LZ token stream one filtered byte at a time as it is produced,
-/// so [`decode_undoable_streaming`] bounds resident memory to [`lz::WINDOW`]
-/// via [`lz::Window`] regardless of `declared_len` (`research/JOURNAL.md`
+/// so it bounds resident memory to [`lz::WINDOW`] via [`lz::Window`]
+/// regardless of `declared_len` (`research/JOURNAL.md`
 /// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee). The
 /// rest need their filter undone over the complete buffer, so they take
 /// [`decode`]'s whole-buffer path and one bulk write: `Transpose` scatters
@@ -1413,10 +1413,36 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
             return Ok(());
         }
     };
-    decode_undoable_streaming(filtered_payload, max_len, candidate, writer, &mut undo)
+    let (declared_len, token_count, ac_bytes) = read_header(filtered_payload, max_len, candidate)?;
+
+    let mut ac = Decoder::new(ac_bytes);
+    let mut models = Models::try_new().map_err(Error::from)?;
+    let mut reps = RepCache::initial();
+    let mut window = lz::Window::try_new().map_err(Error::from)?;
+
+    let mut sink = StreamingSink {
+        window: &mut window,
+        undo: &mut undo,
+        writer: &mut *writer,
+    };
+    decode_tokens(
+        token_count,
+        declared_len,
+        &mut models,
+        &mut ac,
+        &mut reps,
+        &mut sink,
+    )?;
+
+    undo.finish(writer)?;
+
+    if window.written_len() != declared_len {
+        return Err(Error::Corrupt.into());
+    }
+    Ok(())
 }
 
-/// Per-byte filter undo for [`decode_undoable_streaming`], one variant per
+/// Per-byte filter undo for [`decode_to_writer`], one variant per
 /// [`filters::select::Candidate`] this function's caller streams.
 enum StreamUndo {
     /// `undo_filter` is the identity transform: pass the byte through.
@@ -1462,10 +1488,14 @@ impl StreamUndo {
     }
 }
 
-/// [`DecodeSink`] for [`decode_undoable_streaming`]'s path: a literal byte
-/// (and a copy's replayed bytes) land in `window`, then are undone through
-/// `undo` and written to `writer` immediately. Never carries column-expert
-/// state: [`decode_to_writer`] builds this sink only for candidates
+/// [`DecodeSink`] for [`decode_to_writer`]'s path: a literal byte (and a
+/// copy's replayed bytes) land in `window`, then are undone through `undo`
+/// and written to `writer` immediately. `window` holds the *filtered* byte
+/// stream throughout: matches and reps reference positions in what the
+/// encoder's LZ pass actually saw, which is filtered data (`apply_filter`
+/// runs before `encode_tokens`), so only the byte handed to `writer` differs
+/// per candidate, never what goes into `window` or `context`. Never carries
+/// column-expert state: [`decode_to_writer`] builds this sink only for candidates
 /// [`StreamUndo`] covers, and [`Candidate::Transpose`] is not one.
 struct StreamingSink<'a, W: std::io::Write> {
     window: &'a mut lz::Window,
@@ -1494,97 +1524,35 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
         Ok(byte)
     }
 
+    /// `context` folds over the *filtered* bytes `window` holds, never
+    /// `undo`'s output. One [`Context::after_copy`] per byte equals
+    /// [`VecSink::copy`]'s one call over the whole run, which is not
+    /// available here: `window`'s ring buffer does not hold the run
+    /// contiguously when it wraps. A zero-length copy still validates
+    /// `distance` against what has been written ([`copy_checked`]'s
+    /// rejection) and still marks the context as after a copy.
     fn copy(
         &mut self,
         len: u32,
         distance: NonZeroU32,
-        context: Context,
+        mut context: Context,
     ) -> Result<Context, crate::WriteError> {
-        copy_streamed(self.window, self.undo, self.writer, len, distance, context)
+        let distance = distance.get() as usize;
+        self.window
+            .written_len()
+            .checked_sub(distance)
+            .ok_or(Error::Corrupt)?;
+        if len == 0 {
+            return Ok(context.after_copy(&[]));
+        }
+        for _ in 0..len {
+            let byte = self.window.get(distance);
+            self.window.push(byte);
+            self.undo.apply(byte, self.writer)?;
+            context = context.after_copy(std::slice::from_ref(&byte));
+        }
+        Ok(context)
     }
-}
-
-/// [`decode_to_writer`]'s streaming path for candidates whose `undo_filter`
-/// step can run one byte at a time ([`StreamUndo`]): the same token loop as
-/// [`decode`], replaying matches and reps through a fixed-capacity
-/// [`lz::Window`] instead of a fully-resident `Vec<u8>`, undoing each byte
-/// through `undo` and writing the result to `writer` the instant it is
-/// produced. `window` holds the *filtered* byte stream throughout: matches
-/// and reps reference positions in what the encoder's LZ pass actually saw,
-/// which is filtered data (`apply_filter` runs before `encode_tokens`), so
-/// only the byte handed to `writer` differs per candidate, never what goes
-/// into `window` or `context`. `payload` here has already had its 2-byte
-/// filter selector stripped by [`decode_to_writer`], matching
-/// [`read_header`]'s expected input.
-fn decode_undoable_streaming<W: std::io::Write>(
-    payload: &[u8],
-    max_len: u32,
-    candidate: Candidate,
-    writer: &mut W,
-    undo: &mut StreamUndo,
-) -> Result<(), crate::WriteError> {
-    let (declared_len, token_count, ac_bytes) = read_header(payload, max_len, candidate)?;
-
-    let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new().map_err(Error::from)?;
-    let mut reps = RepCache::initial();
-    let mut window = lz::Window::try_new().map_err(Error::from)?;
-
-    let mut sink = StreamingSink {
-        window: &mut window,
-        undo: &mut *undo,
-        writer: &mut *writer,
-    };
-    decode_tokens(
-        token_count,
-        declared_len,
-        &mut models,
-        &mut ac,
-        &mut reps,
-        &mut sink,
-    )?;
-
-    undo.finish(writer)?;
-
-    if window.written_len() != declared_len {
-        return Err(Error::Corrupt.into());
-    }
-    Ok(())
-}
-
-/// Replays a match/rep copy of `len` bytes from `distance` bytes back
-/// through `window` (the filtered stream), undoing each byte through `undo`
-/// and writing the result to `writer` as it is produced.
-///
-/// `context` folds over the *filtered* bytes `window` holds, never `undo`'s
-/// output. One [`Context::after_copy`] per byte equals [`decode`]'s one call
-/// over the whole run, which is not available here: `window`'s ring buffer
-/// does not hold the run contiguously when it wraps. A zero-length copy
-/// still validates `distance` against what has been written
-/// ([`copy_checked`]'s rejection) and still marks the context as after a copy.
-fn copy_streamed<W: std::io::Write>(
-    window: &mut lz::Window,
-    undo: &mut StreamUndo,
-    writer: &mut W,
-    len: u32,
-    distance: NonZeroU32,
-    mut context: Context,
-) -> Result<Context, crate::WriteError> {
-    let distance = distance.get() as usize;
-    window
-        .written_len()
-        .checked_sub(distance)
-        .ok_or(Error::Corrupt)?;
-    if len == 0 {
-        return Ok(context.after_copy(&[]));
-    }
-    for _ in 0..len {
-        let byte = window.get(distance);
-        window.push(byte);
-        undo.apply(byte, writer)?;
-        context = context.after_copy(std::slice::from_ref(&byte));
-    }
-    Ok(context)
 }
 
 #[cfg(test)]
