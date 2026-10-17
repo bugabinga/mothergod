@@ -622,11 +622,14 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
 }
 
 /// Compresses everything `source` yields into `sink` as a stream of frames,
-/// holding one block of 16 MiB at a time: the encoder's memory is bounded by
-/// the block and not by the input, which [`compress`] cannot offer because it
-/// takes the whole input as a slice. It is [`io::copy`](std::io::copy) into a
-/// [`write::Encoder`], which a caller who produces the bytes instead of
-/// pulling them uses directly.
+/// holding one block of 16 MiB at a time: the encoder's memory follows the
+/// block and not the input, which [`compress`] cannot offer because it
+/// takes the whole input as a slice. The block is not the peak: encoding one
+/// needs far more working memory, and a stream of 256 MiB of zeros encodes
+/// in under 1 GiB, a bound `.github/scripts/memory-check` asserts weekly and
+/// `tests/fit/cli.txt` records as `streaming-memory`. It is
+/// [`io::copy`](std::io::copy) into a [`write::Encoder`], which a caller who
+/// produces the bytes instead of pulling them uses directly.
 ///
 /// An input of at most [`codec::MAX_DECODED_LEN`] bytes writes the bytes
 /// [`compress`] returns. A longer one writes `Lz` frames [`compress`] would

@@ -11,9 +11,11 @@ use super::{BLOCK_LEN, compress_block};
 /// Bytes collect in a block of 16 MiB. A full block becomes one frame
 /// written to `W`, so memory follows the block and not the total written;
 /// the buffer is up to twice the block in capacity because a growing `Vec`
-/// doubles, and the compressor's working set comes on top of it
-/// ([`copy_encode`](crate::copy_encode) has the same bound and is built on
-/// this type). Nothing reaches `W` until a block fills, `flush` is called
+/// doubles, and the compressor's working set comes on top of it. That
+/// working set, not the block, sets the peak: a stream of 256 MiB of zeros
+/// encodes in under 1 GiB, a bound `.github/scripts/memory-check` asserts
+/// weekly ([`copy_encode`](crate::copy_encode) has the same bound and is
+/// built on this type). Nothing reaches `W` until a block fills, `flush` is called
 /// or [`finish`](Self::finish) runs. Written without a `flush`, the stream
 /// is byte for byte what [`copy_encode`](crate::copy_encode) writes for the
 /// same input, however the writes were cut.
