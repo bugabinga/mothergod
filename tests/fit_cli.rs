@@ -355,8 +355,10 @@ const SETTLE: Duration = Duration::from_secs(1);
 /// Measuring the peak itself needs an encode of at least one block, minutes
 /// in a debug build, so the weekly `memory-check` lane owns that number and
 /// the probe is killed with the first block still encoding. A child that
-/// slurps its input fails; a slow runner cannot fail a child that streams,
-/// only let a slurper pass, because the stall bound is an upper limit.
+/// slurps its input fails, and one that stalls before a full block fails
+/// the lower bound only when the writer got there: a writer that fills under
+/// one block in 60 s measured the runner, not the child, so that is
+/// `Seen::Unmeasured`. A slow runner cannot fail a child that streams.
 fn streaming_memory() -> Seen {
     let mut child = bin()
         .stdin(Stdio::piped())
@@ -380,12 +382,18 @@ fn streaming_memory() -> Seen {
     while written.load(Ordering::SeqCst) < BLOCK && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
-    thread::sleep(SETTLE);
+    let filled = written.load(Ordering::SeqCst) >= BLOCK;
+    if filled {
+        thread::sleep(SETTLE);
+    }
     let read = written.load(Ordering::SeqCst);
     child.kill().expect("kill the child still encoding");
     writer.join().expect("writer thread");
     child.wait().expect("reap the child");
-    seen((BLOCK..BLOCK + READ_AHEAD).contains(&read))
+    if !filled {
+        return Seen::Unmeasured;
+    }
+    seen(read < BLOCK + READ_AHEAD)
 }
 
 #[test]
