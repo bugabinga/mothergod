@@ -419,13 +419,14 @@ test("an execution log without an init entry records the offered set as unknown"
 
 // Issue #896 item 5: a run that changed nothing is a count of zero, so a
 // seat's no-op share is a query over the session table and not a posture.
-// A write is one of the four posting and shipping scripts, or `gh issue
-// edit` or `gh pr edit` (the curator and the reviewer act by label and
-// milestone), at command position, or a github_file_ops commit or delete,
-// whose result was not an error. Reading a script, naming its test file, a
-// denied call and a non-zero exit are not writes; a call that never got a
-// result is counted, because it may have landed. The command text never
-// reaches the record.
+// A write is one of the five posting and shipping scripts (post-verdict
+// among them: a verdict is a comment, and a reviewer run that posted one
+// is not a no-op), or `gh issue edit` or `gh pr edit` (the curator and
+// the reviewer act by label and milestone), at command position, or a
+// github_file_ops commit or delete, whose result was not an error.
+// Reading a script, naming its test file, a denied call and a non-zero
+// exit are not writes; a call that never got a result is counted, because
+// it may have landed. The command text never reaches the record.
 test("write-shaped tool calls are counted, errored and denied ones are not, inputs never leak", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
   try {
@@ -495,6 +496,8 @@ test("write-shaped tool calls are counted, errored and denied ones are not, inpu
         bash("c4", "env X=1 .github/scripts/gh-comment 3"),
         result("c4", false),
         bash("k1", ".github/scripts/push-branch"),
+        bash("v1", "DIFF_ID=\"$DIFF_ID\" .github/scripts/post-verdict 7 pass <<'EOF'\nsecret-looking verdict\nEOF"),
+        result("v1", false),
         // A quoted-assignment run with no script after it backtracked
         // exponentially; the spawn timeout below turns a regression into a failure.
         bash("q1", `;${"A=\"x\" ".repeat(40)}notwrite`),
@@ -519,8 +522,8 @@ test("write-shaped tool calls are counted, errored and denied ones are not, inpu
     assert.equal(r.status, 0, r.stderr || r.stdout || String(r.error));
     const metadata = readFileSync(join(out, "metadata.json"), "utf8");
     const tools = JSON.parse(metadata).telemetry.tools;
-    assert.equal(tools.writes, 13, JSON.stringify(tools));
-    assert.deepEqual(tools.used, { Bash: 19, mcp__github_file_ops__commit_files: 1 });
+    assert.equal(tools.writes, 14, JSON.stringify(tools));
+    assert.deepEqual(tools.used, { Bash: 20, mcp__github_file_ops__commit_files: 1 });
     assert.ok(!metadata.includes("secret-looking"), "a tool input or result leaked into the record");
   } finally {
     rmSync(directory, { recursive: true, force: true });
