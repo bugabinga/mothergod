@@ -181,6 +181,22 @@ test("roles rejects an ISO date whose UTC shift leaves the calendar with the usa
   }
 });
 
+// Year 1 in UTC sits inside the calendar, and glibc's `%Y` printed it as
+// `1-01-01T...`, a string that sorts before every row in `at` (#1203). The
+// stamp carries four year digits, the column's shape, so the window is whole.
+test("roles stamps a year-1 window with four year digits, the at column's shape", async () => {
+  const rows = [
+    { role: "bdfl", measured: 1, turns: 10, out_tokens: 100, denials: 0, error: 0, cost_usd: 1, writes: 0 },
+    { role: "reviewer", measured: 1, turns: 5, out_tokens: 50, denials: 0, error: 0, cost_usd: null, writes: null },
+  ];
+  await withStub(d1(rows), async (base, seen) => {
+    const r = await run(["roles", "--since", "0001-01-01T00:00:00Z"], { D1_API_BASE: base });
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(seen[0].body.params, ["0001-01-01T00:00:00Z"]);
+    assert.match(r.out, /^sessions since 0001-01-01T00:00:00Z: 2$/m);
+  });
+});
+
 test("show prints one run vertically, or says which run is missing", async () => {
   await withStub(d1([{ run_id: 42, attempt: 1, role: "herald", turns: 9 }]), async (base, seen) => {
     const r = await run(["show", "42"], { D1_API_BASE: base });
