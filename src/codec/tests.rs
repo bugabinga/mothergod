@@ -116,7 +116,7 @@ fn roundtrip_repeated_sentence_selects_delta_and_streams_it() {
     // Proves encode() actually wires a trial-selected filter into the
     // frame, not just plumbs pick() through unused; pins the kind byte
     // to 1 (Delta) rather than just non-identity, since this fixture is
-    // also decode_undoable_streaming's regression coverage for the
+    // also decode_to_writer's regression coverage for the
     // trial-selected Candidate::Delta (`research/JOURNAL.md` S1-P7) — a
     // future trial-cost change that made encode() prefer a different
     // candidate here would silently drop that coverage without this pin.
@@ -127,26 +127,26 @@ fn roundtrip_repeated_sentence_selects_delta_and_streams_it() {
         "repeated sentence should select Delta, got kind byte {}",
         encoded[0]
     );
-    assert_decode_matches(&encoded, &data, "decode_undoable_streaming's Delta path");
+    assert_decode_matches(&encoded, &data, "decode_to_writer's Delta path");
 }
 
 #[test]
 fn columnar_drift_data_streams_through_a_forced_delta() {
     // encode() no longer picks Delta for this random walk: ReverseDelta(4)
     // codes it a few bytes smaller (`JOURNAL` S2-A120). Forced, it stays the
-    // literal-only coverage of decode_undoable_streaming's Delta path.
+    // literal-only coverage of decode_to_writer's Delta path.
     let data = columnar_drift_data();
     let forced = forced_payload(Candidate::Delta(crate::test_support::nz(4)), &data);
-    assert_decode_matches(&forced, &data, "decode_undoable_streaming's Delta path");
+    assert_decode_matches(&forced, &data, "decode_to_writer's Delta path");
 }
 
 #[test]
-fn decode_undoable_streaming_delta_path_covers_copy_streamed_too() {
-    // columnar_drift_data's random walk gives decode_undoable_streaming's
+fn decode_to_writer_delta_path_covers_match_copies_too() {
+    // columnar_drift_data's random walk gives decode_to_writer's
     // Delta path literal-only coverage: no fixed-distance repeat in that
     // fixture is long enough for lz::parse_optimal to price a match over
     // literals. Crafted directly against Candidate::Delta (bypassing
-    // encode()'s trial selection) so copy_streamed's own undo call gets
+    // encode()'s trial selection) so StreamingSink::copy's own undo call gets
     // exercised: a filtered stream built from a short repeating pattern
     // guarantees parse_optimal finds match/rep tokens for the repeats.
     let stride = crate::test_support::nz(4);
@@ -172,7 +172,7 @@ fn roundtrip_bcj_call_dense_data_selects_bcj_and_streams_it() {
         "call-dense data should select Bcj, got kind byte {}",
         encoded[0]
     );
-    assert_decode_matches(&encoded, &data, "decode_undoable_streaming's Bcj path");
+    assert_decode_matches(&encoded, &data, "decode_to_writer's Bcj path");
 }
 
 #[test]
@@ -344,10 +344,10 @@ fn offset_len_state_saturates_on_a_long_match() {
 }
 
 #[test]
-fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
+fn decode_to_writer_bcj_path_covers_match_copies_too() {
     // A run of identical 5-byte instructions in the *filtered* stream
     // gives lz::parse_optimal real match/rep tokens to find, exercising
-    // copy_streamed's own undo call — the raw (pre-filter) bytes this
+    // StreamingSink::copy's own undo call — the raw (pre-filter) bytes this
     // decodes to are not themselves repetitive, since each instance's
     // absolute-to-relative rewrite depends on its own position, proving
     // filters::bcj::Undo recomputes that per position rather than
@@ -362,7 +362,7 @@ fn decode_undoable_streaming_bcj_path_covers_copy_streamed_too() {
 }
 
 #[test]
-fn decode_undoable_streaming_bcj_path_flushes_a_trailing_opcode_on_finish() {
+fn decode_to_writer_bcj_path_flushes_a_trailing_opcode_on_finish() {
     // The filtered stream ends on an 0xE8 opcode byte followed by only
     // 3 more bytes: one short of INSTRUCTION_LEN (5), so
     // filters::bcj::Undo::apply never resolves it and StreamUndo::Bcj's
