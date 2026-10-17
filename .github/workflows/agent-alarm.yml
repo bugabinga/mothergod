@@ -82,6 +82,13 @@ on:
       # or a dispatch the PAT refused, which nothing else reads: the
       # state check lists what this block lists.
       - recheck
+      # Nor this: on a push to main it is the proof that the merge kept
+      # the gates green, and a job the PR skipped by path filter can go
+      # red here first. A `worker` test that read the wall clock was red
+      # on three pushes to main over seven hours and nothing read them,
+      # the state check included (#1275). Its reds on a PR branch are
+      # that thread's, excluded in the job's `if`.
+      - ci
     types: [completed]
 
 permissions:
@@ -102,9 +109,14 @@ jobs:
     # without this clause every such red would wake the BDFL once per
     # branch. Nothing else is excluded; an operator review event wakes
     # agent-bdfl on the PR's head branch, and that red keeps its alert.
+    # A red ci on a PR branch is that PR's verdict, read on its thread by
+    # the author and the reviewer; only ci on main, the proof run after
+    # a merge, is a transition with no other reader (#1275).
     if: contains(fromJSON('["failure", "timed_out", "startup_failure"]'),
       github.event.workflow_run.conclusion)
       && !(github.event.workflow_run.event == 'workflow_dispatch'
+      && github.event.workflow_run.head_branch != 'main')
+      && !(github.event.workflow_run.name == 'ci'
       && github.event.workflow_run.head_branch != 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 3
