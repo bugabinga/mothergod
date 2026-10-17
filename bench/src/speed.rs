@@ -49,10 +49,11 @@ pub const BASELINE_DECODE_COST: f64 = 120.0;
 /// to 126.76), main's code changes included, so that figure bounds the noise
 /// from above. The kernel therefore does not track the decoder across
 /// models (the 8370C holds 130.39 to 132.95 across the window while the
-/// 7763 sits near 100 to 115); within one model it is unresolved. A margin under about 0.11 would redden main on the
-/// Intel Xeon Platinum 8370C alone. The margin stays wide until the
-/// calibration kernel is replaced by one closer to the decoder's access
-/// pattern; `baseline_gate` prints the CPU beside every cost.
+/// 7763 sits near 100 to 115); within one model it is unresolved. A margin
+/// under about 0.11 would redden main on the Intel Xeon Platinum 8370C
+/// alone. The margin stays wide until the calibration kernel is replaced by
+/// one closer to the decoder's access pattern; `baseline_gate` prints the
+/// CPU beside every cost.
 pub const MAX_SLOWDOWN: f64 = 0.25;
 
 /// Wall time of a fixed dependent-load kernel: `CALIBRATION_STEPS` steps of

@@ -560,9 +560,10 @@ impl TokenSink for CostSink {
 }
 
 /// Encodes already-filtered `data` through the LZ + context-mixing
-/// pipeline: [`encode`]'s per-candidate trial body. `columns` is `Some` exactly when this trial's candidate is
-/// [`Candidate::Transpose`] with that column count, selecting the
-/// column-expert literal path for the whole trial (see [`EncodeSink`]).
+/// pipeline: [`encode`]'s per-candidate trial body. `columns` is `Some`
+/// exactly when this trial's candidate is [`Candidate::Transpose`] with that
+/// column count, selecting the column-expert literal path for the whole
+/// trial (see [`EncodeSink`]).
 /// Panics under the same condition as [`encode_tokens_with`], which this
 /// delegates to.
 fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>) -> Vec<u8> {

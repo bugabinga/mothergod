@@ -306,8 +306,9 @@ fn offset_models_adapt_independently_by_length_state() {
     // Guards against a future refactor collapsing Models::offset_len's
     // four entries back onto fewer states (which would still round-trip
     // correctly, since encode and decode would agree either way, so
-    // offsets_through_length_keyed_models_roundtrip can't catch it): trains offset_len[0] (a length-MIN_MATCH_LEN match)
-    // on distance 10 many times through the real EncodeSink path, then
+    // offsets_through_length_keyed_models_roundtrip can't catch it): trains
+    // offset_len[0] (a length-MIN_MATCH_LEN match) on distance 10 many times
+    // through the real EncodeSink path, then
     // checks that a fresh offset_len[OFFSET_LEN_STATES - 1] (never
     // trained, a far longer match's own state) still prices 10 at its
     // untrained, higher cost — proving the four entries are genuinely

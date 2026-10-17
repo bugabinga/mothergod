@@ -2,8 +2,8 @@
 //! bits/byte on the fixed regression-gate cases and either checks them
 //! against the committed `bench/baseline.json` (exit non-zero on a
 //! regression past `baseline::TOLERANCE_BITS`) or rewrites that file with
-//! today's measurements, holding any case that grew at its old value. Wired into `.github/workflows/ci.yml` as the
-//! required `ratio` check.
+//! today's measurements, holding any case that grew at its old value. Wired
+//! into `.github/workflows/ci.yml` as the required `ratio` check.
 //!
 //! `check` also fails when a case compresses to different bytes than the
 //! digest `bench/baseline.json` commits (issue #1182), whatever the size:
