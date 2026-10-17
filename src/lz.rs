@@ -6,7 +6,6 @@
 //! match with zero distance cannot be represented (`rust-craft` skill,
 //! type-precision).
 
-use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 /// Largest backward distance a match may reference: 1 MiB. The wired parse
@@ -1280,13 +1279,11 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
     parse_optimal_with_seed_and_search_window(data, WINDOW, window)
 }
 
-/// Shared body of [`parse_optimal_with_window`] and
-/// [`parse_optimal_adaptive_window`]: [`DP_ROUNDS`] `dp_round` rounds at
-/// `search_window`, seeded by [`parse_greedy_with_window`] at
-/// `seed_window`. [`parse_optimal_with_window`] always passes
-/// [`WINDOW`] as `seed_window`; the adaptive gate passes the same value for
-/// both, because a seed narrower than the search measured as the cause of
-/// S2-R9's regression (`research/JOURNAL.md` S1-P4).
+/// [`parse_optimal_with_window`] with the seed pass's window a parameter
+/// too: [`DP_ROUNDS`] `dp_round` rounds at `search_window`, seeded by
+/// [`parse_greedy_with_window`] at `seed_window`. A seed narrower than the
+/// search measured as the cause of S2-R9's regression (`research/JOURNAL.md`
+/// S1-P4).
 ///
 /// `pub(crate)` for [`crate::codec::compressed_len_with_seed_and_search_window`],
 /// which measures both seed policies.
@@ -1311,153 +1308,6 @@ pub(crate) fn parse_optimal_with_seed_and_search_window(
 /// the sealed split, so the count stays three until new evidence reopens it
 /// (`research/JOURNAL.md` S1-P2).
 const DP_ROUNDS: usize = 3;
-
-/// Exact-match byte width an anchor in
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`] must
-/// share before two positions count as recurring. Compared byte-for-byte,
-/// not hashed, so a hash collision cannot produce a false positive.
-pub const DETECTOR_ANCHOR_LEN: usize = 8;
-
-/// Selects roughly one anchor in every `DETECTOR_STRIDE` candidate windows
-/// (the low bits of `is_content_defined_anchor`'s hash). Coarser than a
-/// match finder's per-byte insertion on purpose: a recurrence entirely
-/// between two sampled anchors goes unseen, in exchange for a cost close to
-/// a linear scan.
-pub const DETECTOR_STRIDE: usize = 64;
-
-/// Multiplier for [`is_content_defined_anchor`]'s polynomial hash: the
-/// Fibonacci-hashing multiplier, not tuned against any corpus.
-const CONTENT_HASH_BASE: u64 = 0x9E37_79B9_7F4A_7C15;
-
-/// True when the [`DETECTOR_ANCHOR_LEN`]-byte window at `data[i..]` is a
-/// content-defined anchor: a pure function of that window's own bytes, true
-/// for roughly one window in [`DETECTOR_STRIDE`] on average, independent of
-/// `i` itself. Two equal windows anywhere in `data` always agree on this
-/// result, which is the property
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`] needs
-/// and a fixed absolute stride cannot offer: a fixed-stride sampler only
-/// samples a recurrence whose distance is a multiple of the stride
-/// (`research/JOURNAL.md` S2-R9).
-///
-/// Recomputes the hash from scratch per call rather than rolling it.
-///
-/// # Panics
-///
-/// Panics if `i + DETECTOR_ANCHOR_LEN > data.len()`.
-fn is_content_defined_anchor(data: &[u8], i: usize) -> bool {
-    let window = &data[i..i + DETECTOR_ANCHOR_LEN];
-    let mut hash: u64 = 0;
-    for &byte in window {
-        hash = hash
-            .wrapping_mul(CONTENT_HASH_BASE)
-            .wrapping_add(u64::from(byte));
-    }
-    hash & (DETECTOR_STRIDE as u64 - 1) == 0
-}
-
-/// Extra bytes, beyond [`DETECTOR_ANCHOR_LEN`], that two candidate
-/// occurrences of the same anchor must also agree on before
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`] reports
-/// `true`. An anchor-only agreement recurs often enough on structured text
-/// (`access_log`'s request lines and timestamp prefixes) to fire with no
-/// long match behind it (`research/JOURNAL.md` S2-R9, measured at 4,000,000
-/// bytes); agreement past the anchor tests whether the recurrence goes on
-/// long enough to matter. 24, a 32-byte total run, is not tuned against any
-/// corpus.
-const DETECTOR_CONFIRM_LEN: usize = 24;
-
-/// True when the [`DETECTOR_CONFIRM_LEN`] bytes immediately following each
-/// of two equal [`DETECTOR_ANCHOR_LEN`]-byte anchors (already known equal,
-/// at `prev` and `i`) also agree byte-for-byte. `false`, not a panic, when
-/// either confirmation window would run past `data`'s end: there is
-/// nothing there to compare, and a candidate this close to the end of
-/// `data` cannot be confirmed one way or the other, so it is treated the
-/// same as a failed confirmation.
-fn confirms_past_anchor(data: &[u8], prev: usize, i: usize) -> bool {
-    let prev_start = prev + DETECTOR_ANCHOR_LEN;
-    let i_start = i + DETECTOR_ANCHOR_LEN;
-    let Some(prev_end) = prev_start.checked_add(DETECTOR_CONFIRM_LEN) else {
-        return false;
-    };
-    let Some(i_end) = i_start.checked_add(DETECTOR_CONFIRM_LEN) else {
-        return false;
-    };
-    if prev_end > data.len() || i_end > data.len() {
-        return false;
-    }
-    data[prev_start..prev_end] == data[i_start..i_end]
-}
-
-/// Cheap pre-pass answering whether growing the match window might pay off
-/// on `data` (`research/JOURNAL.md` S1-P4): S2-R7 measured that growing
-/// [`WINDOW`] unconditionally regresses data without recurrence past it.
-///
-/// Samples anchors at `is_content_defined_anchor` positions and remembers
-/// the most recent position each exact anchor was seen at, reporting `true`
-/// the first time two occurrences of the same anchor sit more than
-/// `base_window` bytes apart AND the `DETECTOR_CONFIRM_LEN` bytes
-/// immediately past each occurrence also agree (`confirms_past_anchor`).
-/// Never measures the match's actual length or cost, which is `dp_round`'s
-/// job. Used by [`parse_optimal_adaptive_window`] only.
-///
-/// Returns `false` immediately when `data` cannot contain a gap wider than
-/// `base_window` (`data.len() <= base_window`).
-#[must_use]
-pub fn likely_benefits_from_larger_window_content_defined_confirmed(
-    data: &[u8],
-    base_window: usize,
-) -> bool {
-    if data.len() <= base_window {
-        return false;
-    }
-    let mut last_seen: HashMap<&[u8], usize> = HashMap::new();
-    let mut i = 0;
-    while i + DETECTOR_ANCHOR_LEN <= data.len() {
-        if !is_content_defined_anchor(data, i) {
-            i += 1;
-            continue;
-        }
-        let anchor = &data[i..i + DETECTOR_ANCHOR_LEN];
-        if let Some(&prev) = last_seen.get(anchor)
-            && i - prev > base_window
-            && confirms_past_anchor(data, prev, i)
-        {
-            return true;
-        }
-        last_seen.insert(anchor, i);
-        i += 1;
-    }
-    false
-}
-
-/// Window [`parse_optimal_adaptive_window`] grows to when its gate fires.
-/// The largest window `bucket` can price without widening
-/// `OFFSET_BUCKETS` or bumping `FORMAT_VERSION` (`research/JOURNAL.md`
-/// S1-P4, the ceiling S2-A63 proved free of format cost): `2^21 - 1`.
-pub const ADAPTIVE_WINDOW: usize = (1 << OFFSET_BUCKETS) - 1;
-
-/// [`parse_optimal`], but grows its window from the wired [`WINDOW`] to
-/// [`ADAPTIVE_WINDOW`] when
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`] finds a
-/// real recurrence past [`WINDOW`] (`research/JOURNAL.md` S1-P4). The seed
-/// pass and every `dp_round` round are bound to the same chosen window,
-/// unlike [`parse_optimal_with_window`]: a seed narrower than the search
-/// measured as the cause of S2-R9's regression. Not wired to
-/// [`parse_optimal`] or `compress`/`encode`: a sealed-set measurement on a
-/// real bitstream is owed first.
-///
-/// # Panics
-///
-/// Same as [`parse_optimal`].
-#[must_use]
-pub fn parse_optimal_adaptive_window(data: &[u8]) -> Vec<Token> {
-    let window = if likely_benefits_from_larger_window_content_defined_confirmed(data, WINDOW) {
-        ADAPTIVE_WINDOW
-    } else {
-        WINDOW
-    };
-    parse_optimal_with_seed_and_search_window(data, window, window)
-}
 
 #[cfg(test)]
 mod tests;

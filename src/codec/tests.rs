@@ -925,30 +925,6 @@ fn ideal_cost_bits_with_window_drops_once_a_repeat_becomes_reachable() {
 }
 
 #[test]
-#[allow(
-    clippy::float_cmp,
-    reason = "both sides run the identical token stream through the identical models \
-              (lz::parse_optimal_adaptive_window's gate is unconditionally false for \
-              data.len() <= lz::WINDOW), so exact equality, not tolerance, is the claim"
-)]
-fn ideal_cost_bits_adaptive_window_matches_wired_window_within_window() {
-    // research/JOURNAL.md S1-P4's next slice after S2-A92:
-    // lz::parse_optimal_adaptive_window's own gate is unconditionally
-    // false for data.len() <= lz::WINDOW (lz::tests::
-    // adaptive_window_matches_wired_window_within_window proves the
-    // token streams are identical at that scale), so the models-wired
-    // cost through this codec-layer entry point must match the wired
-    // one exactly too, not just approximately.
-    let data: Vec<u8> = (0..5000u32)
-        .map(|i| u8::try_from(i % 251).unwrap())
-        .collect();
-    assert_eq!(
-        ideal_cost_bits_adaptive_window(&data),
-        ideal_cost_bits(&data)
-    );
-}
-
-#[test]
 fn compressed_len_with_window_matches_wired_encode_tokens_at_wired_window() {
     // Real-Encoder counterpart to the fixed-window ideal-cost test
     // above: lz::parse_optimal(data) is defined as
@@ -961,29 +937,6 @@ fn compressed_len_with_window_matches_wired_encode_tokens_at_wired_window() {
         .collect();
     assert_eq!(
         compressed_len_with_window(&data, lz::WINDOW),
-        encode_tokens(&data, None).len()
-    );
-}
-
-#[test]
-fn compressed_len_adaptive_window_matches_wired_encode_tokens_within_window() {
-    // Real-Encoder counterpart to
-    // ideal_cost_bits_adaptive_window_matches_wired_window_within_window,
-    // same reason: lz::parse_optimal_adaptive_window's gate is
-    // unconditionally false for data.len() <= lz::WINDOW, so this
-    // capability's real compressed length must match encode_tokens's
-    // own wired length exactly, not just approximately, below that
-    // scale. Not yet a decode()-level round-trip test: the whole point
-    // of this capability (research/JOURNAL.md S1-P4) is measuring a
-    // window past lz::WINDOW, and encode_tokens is not wired to use
-    // one, so ensure_within_window still rejects a payload that
-    // exercises it — the same caveat ideal_cost_bits_adaptive_window
-    // has always carried.
-    let data: Vec<u8> = (0..5000u32)
-        .map(|i| u8::try_from(i % 251).unwrap())
-        .collect();
-    assert_eq!(
-        compressed_len_adaptive_window(&data),
         encode_tokens(&data, None).len()
     );
 }
