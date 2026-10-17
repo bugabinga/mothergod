@@ -119,11 +119,12 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// separately remeasured. The length and distance model selection costs
 /// a cheap `FlagKind` branch or array index per copy token, strictly
 /// cheaper than the per-byte literal cost this bound is measured against.
-/// Provisional either way: `ROADMAP.md` M4's streaming/block API is the
-/// real fix (bounded-memory decode without a single hardcoded file-size
-/// ceiling), and should widen or remove this once it lands; the constant
-/// itself is a `research/JOURNAL.md` S1-P6 speed-tier target, not
-/// something to chase down here.
+/// It bounds one `Lz` frame's output and the total `Lz` output of a stream
+/// [`crate::decompress`] buffers; it is no file-size ceiling, because
+/// [`crate::compress`] cuts its input into 16 MiB frames and
+/// [`crate::decompress_to_writer`] carries a stream of any length
+/// (ADR-0067). The constant itself is a `research/JOURNAL.md` S1-P6
+/// speed-tier target, not something to chase down here.
 pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 
 /// Which of the three kinds a token codes as: the flag symbol coded

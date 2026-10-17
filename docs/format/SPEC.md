@@ -246,14 +246,15 @@ founding port bug this section's invariant exists to rule out.
   indistinguishable by size alone (measured: a real encode already reaches
   a ~3,158:1 ratio at 60,000 input bytes, with the encoded size barely
   moving as input grows past that). The ceiling is a decoder policy, not a
-  wire-format field, so raising it is not a `FORMAT_VERSION` bump; it is
-  provisional pending `ROADMAP.md` M4's streaming/block API, the intended
-  real fix for bounded-memory decode without a single hardcoded ceiling.
-  `mothergod::decompress_bounded` lets a caller tighten this ceiling to its
-  own memory budget (clamped, never raised, since 256 MiB is the only value
-  this decoder's worst-case decode time has been measured against) — a
-  first, additive slice of M4's bounded-memory decode guarantee, not the
-  streaming/block API itself (`research/JOURNAL.md` S1-P7, S2-A71).
+  wire-format field, so raising it is not a `FORMAT_VERSION` bump. It bounds
+  one `Lz` frame's output and the total `Lz` output of a stream the buffered
+  `mothergod::decompress` holds in memory; it is no file-size limit, because
+  `mothergod::compress` cuts its input into 16 MiB frames and
+  `mothergod::decompress_to_writer` carries a stream of any length
+  (ADR-0067). `mothergod::decompress_bounded` lets a caller tighten this
+  ceiling to its own memory budget (clamped, never raised, since 256 MiB is
+  the only value this decoder's worst-case decode time has been measured
+  against; `research/JOURNAL.md` S1-P7, S2-A71).
 - Bit-identical output across platforms for the same input and version:
   IEEE-754 basic float operations (`+ - * /`) are correctly rounded and
   reproducible, but libm transcendentals are not, so nothing on the decode
