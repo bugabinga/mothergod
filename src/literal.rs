@@ -565,8 +565,9 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 /// each expert's probability of the upper half is [`stretch`]ed, the
 /// stretches are summed under one weight vector per `WEIGHT_CONTEXTS`
 /// key (the same key `banks` selects [`Literal`]'s linear weights by), and
-/// the sum is [`squash`]ed back and refined through [`LogitSse`]. The per-key step size separates a context's stable residual
-/// uncertainty from genuine drift by comparing a fast EMA of squared
+/// the sum is [`squash`]ed back and refined through [`LogitSse`]. The per-key
+/// step size separates a context's stable residual uncertainty from genuine
+/// drift by comparing a fast EMA of squared
 /// prediction error (`recent_sq_error`) against a slow EMA of the
 /// identical signal (`baseline_sq_error`, that key's own learned floor),
 /// through `surprise_rate`, rather than reading magnitude against one

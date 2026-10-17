@@ -761,8 +761,9 @@ const SHORT_MATCH_LEN: u32 = 3;
 const SHORT_MATCH_MAX_DISTANCE: u32 = 4096;
 
 /// Length candidates [`dp_round`] prices at each position instead of every
-/// length up to the longest available match: log2-ish spaced breakpoints, cheap to price exhaustively, plus the
-/// longest available length itself so a long match is never left
+/// length up to the longest available match: log2-ish spaced breakpoints,
+/// cheap to price exhaustively, plus the longest available length itself so
+/// a long match is never left
 /// unpriced merely for falling between two breakpoints.
 const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63];
 
