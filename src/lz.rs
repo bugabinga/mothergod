@@ -614,8 +614,8 @@ impl<'d> BinaryTreeMatchFinder<'d> {
 ///
 /// Panics if `data` is longer than `u32::MAX` bytes: match positions are
 /// stored as `u32` in the hash-chain match finder. Nothing in this crate
-/// exceeds that yet; a future streaming/block API will chunk input well
-/// under this bound rather than lift it.
+/// exceeds that: [`crate::compress`] and `write::Encoder` chunk input into
+/// 16 MiB blocks, well under this bound, rather than lift it.
 #[must_use]
 pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
     parse_greedy_with_window(data, WINDOW)
