@@ -107,7 +107,13 @@ def flag(args, name):
 
 
 def stamp(when):
-    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+    """A UTC instant in the shape the `at` column holds, year zero-padded.
+
+    `%Y` does not pad on glibc, so year 1 printed as `1-01-01T00:00:00Z`,
+    and `at >= ?` compares strings: that one sorts before every four-digit
+    year and the window reads empty instead of whole (#1203).
+    """
+    return f"{when.year:04d}" + when.strftime("-%m-%dT%H:%M:%SZ")
 
 
 def since_of(spec, now):
