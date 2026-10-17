@@ -95,7 +95,10 @@ jobs:
                issue whose fix lands on README, the site, release notes
                or positioning also gets `marketing`, the herald's queue
                (ADR-0040); nothing else routes it there (#1216 named
-               the herald as owner and reached no queue).
+               the herald as owner and reached no queue). It routes the
+               whole issue, so a fix spanning that surface and src/ is
+               split by seat, the surface half filed as its own
+               `marketing` issue (#1145's rustdoc half had no owner).
             2. Replies: where an author answered your critique,
                respond this run: converge or concede. A disagreement
                that will not converge gets one comment naming it, and
