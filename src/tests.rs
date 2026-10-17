@@ -536,6 +536,24 @@ fn only_a_collecting_budget_caps_the_lz_total() {
 }
 
 #[test]
+fn a_streamed_lz_total_past_max_decoded_len_is_written_not_rejected() {
+    // Pins `decompress_to_writer`'s call site of `Budget::new` (#1088),
+    // which `only_a_collecting_budget_caps_the_lz_total` cannot: the
+    // concatenation of two large `Lz` outputs (ADR-0067) decodes through
+    // the writer, one frame past the cap `admit` tests with `>`. Decode
+    // work scales with output, so this costs about a minute in the test
+    // profile whatever the frame size; it runs beside the rest of the lib
+    // tests, which take longer in total.
+    const FRAME_LEN: usize = 1 << 20;
+    let frame = compress(&vec![0u8; FRAME_LEN]);
+    assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+    let frames = (codec::MAX_DECODED_LEN as usize) / FRAME_LEN + 1;
+    let stream = frame.repeat(frames);
+    let mut out = std::io::sink();
+    assert!(decompress_to_writer(&stream, u32::MAX, &mut out).is_ok());
+}
+
+#[test]
 fn a_stream_decodes_incrementally_only_if_every_frame_does() {
     let (mut stream, _) = test_support::mixed_stream();
     assert_eq!(decodes_incrementally(&stream), Ok(true));
