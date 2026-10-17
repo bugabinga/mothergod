@@ -589,29 +589,13 @@ pub fn compressed_len_with_window(data: &[u8], window: usize) -> usize {
     encode_tokens_with(data, None, &lz::parse_optimal_with_window(data, window)).len()
 }
 
-/// Same as [`compressed_len_with_window`], but parsed with
-/// [`lz::parse_optimal_adaptive_window`] instead of a fixed candidate
-/// `window`: the real-`Encoder` counterpart to
-/// [`ideal_cost_bits_adaptive_window`], which prices the same parse
-/// through modeled cost only. Not wired to `encode_tokens` itself
-/// (`research/JOURNAL.md` S1-P4's own remaining-scope note on that lead):
-/// a real-bitstream measurement first, the same shape every earlier S1-P4
-/// slice took before any wiring decision.
-#[must_use]
-pub fn compressed_len_adaptive_window(data: &[u8]) -> usize {
-    encode_tokens_with(data, None, &lz::parse_optimal_adaptive_window(data)).len()
-}
-
 /// Same as [`compressed_len_with_window`], but exposes both of
 /// `lz::parse_optimal_with_seed_and_search_window`'s windows as
 /// independent parameters instead of fixing the seed pass to [`lz::WINDOW`]
-/// (`research/JOURNAL.md` S1-P4). [`compressed_len_adaptive_window`] always
-/// passes the same value for both (the matched-window contract its own
-/// gate relies on); this entry point lets a mismatch be re-measured on a
-/// new candidate data class without touching that wired caller. S2-R9
-/// found a mismatch (seed capped at [`lz::WINDOW`] while every `dp_round`
-/// searched past it) that regressed `access_log`/`json_records`; S2-A93
-/// fixed it by matching the windows. Whether the same mismatch helps or
+/// (`research/JOURNAL.md` S1-P4), so a mismatch can be re-measured on a new
+/// candidate data class. S2-R9 found a mismatch (seed capped at
+/// [`lz::WINDOW`] while every `dp_round` searched past it) that regressed
+/// `access_log`/`json_records`; S2-A93 fixed it by matching the windows. Whether the same mismatch helps or
 /// hurts `Base64Wrapped`, whose far matches are S1-P4's current open
 /// failure (S2-R11/S2-A95), is exactly what this measures.
 #[must_use]
@@ -628,9 +612,10 @@ pub fn compressed_len_with_seed_and_search_window(
     .len()
 }
 
-/// Shared body of [`encode_tokens`], [`compressed_len_with_window`], and
-/// [`compressed_len_adaptive_window`]: encodes already-parsed `tokens`
-/// through the context-mixing pipeline and returns the real payload bytes.
+/// Shared body of [`encode_tokens`], [`compressed_len_with_window`] and
+/// [`compressed_len_with_seed_and_search_window`]: encodes already-parsed
+/// `tokens` through the context-mixing pipeline and returns the real payload
+/// bytes.
 ///
 /// # Panics
 ///
@@ -701,28 +686,14 @@ pub fn ideal_cost_bits(data: &[u8]) -> f64 {
 /// `window` must stay under.
 #[must_use]
 pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
-    ideal_cost_for_tokens(data, &lz::parse_optimal_with_window(data, window))
-}
-
-/// Same as [`ideal_cost_bits`], but parses `data` with
-/// [`lz::parse_optimal_adaptive_window`] instead of the wired
-/// [`lz::WINDOW`] (`research/JOURNAL.md` S1-P4): measures the gated
-/// window's real coding-cost effect through this crate's actual adaptive
-/// models, without wiring it into [`encode`] or bumping `FORMAT_VERSION`.
-#[must_use]
-pub fn ideal_cost_bits_adaptive_window(data: &[u8]) -> f64 {
-    ideal_cost_for_tokens(data, &lz::parse_optimal_adaptive_window(data))
-}
-
-/// Shared body of [`ideal_cost_bits_with_window`] and
-/// [`ideal_cost_bits_adaptive_window`]: prices already-parsed `tokens`
-/// through [`CostSink`] and returns the total. Mirrors
-/// [`encode_tokens_with`], the same already-parsed-tokens-in shape on the
-/// real-`Encoder` side of this same pair of measurements.
-fn ideal_cost_for_tokens(data: &[u8], tokens: &[Token]) -> f64 {
     let mut models = Models::new();
     let mut sink = CostSink::default();
-    walk_tokens(tokens, data, &mut models, &mut sink);
+    walk_tokens(
+        &lz::parse_optimal_with_window(data, window),
+        data,
+        &mut models,
+        &mut sink,
+    );
     sink.bits
 }
 

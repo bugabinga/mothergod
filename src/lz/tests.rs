@@ -816,189 +816,30 @@ fn price_counts_observe_matches_tally_for_the_same_sequence() {
     assert_eq!(via_tally.rep, via_observe.rep);
 }
 
-/// Finds an [`DETECTOR_ANCHOR_LEN`]-byte value whose own window
-/// satisfies [`is_content_defined_anchor`] at position 0, so tests can
-/// plant a repeat that the content-defined detector is actually able to
-/// select (an arbitrary literal like `b"anchor42"` has no reason to
-/// satisfy a hash condition). Also excludes the all-zero value so it
-/// stays distinguishable from the zero-filled padding
-/// `planted_repeat_content_defined` uses elsewhere.
-fn find_content_defined_anchor_value() -> [u8; DETECTOR_ANCHOR_LEN] {
-    for n in 1u64.. {
-        let candidate = n.to_le_bytes();
-        if is_content_defined_anchor(&candidate, 0) {
-            return candidate;
-        }
-    }
-    unreachable!("density ~1/DETECTOR_STRIDE guarantees a hit well before u64 exhausts")
-}
-
-/// Finds a single filler byte whose repeated [`DETECTOR_ANCHOR_LEN`]-byte
-/// window is never itself a content-defined anchor, so padding built
-/// from it contributes zero entries to
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`]'s
-/// `last_seen` map regardless of how often it repeats — isolating a
-/// planted anchor as the only detectable recurrence.
-fn find_non_anchor_filler_byte() -> u8 {
-    for byte in 0u8..=255 {
-        if !is_content_defined_anchor(&[byte; DETECTOR_ANCHOR_LEN], 0) {
-            return byte;
-        }
-    }
-    unreachable!("density ~1/DETECTOR_STRIDE guarantees most byte values are non-anchors")
-}
-
-/// Builds `far_offset + DETECTOR_ANCHOR_LEN` bytes of a single
-/// non-anchor filler byte ([`find_non_anchor_filler_byte`], so no
-/// unrelated recurrence in the padding can produce a spurious
-/// detection), then stamps a content-defined anchor value
-/// ([`find_content_defined_anchor_value`]) at position 0 and again at
-/// `far_offset`. `far_offset` is not required to be any particular
-/// alignment: anchor selection is a pure function of a window's own
-/// bytes ([`is_content_defined_anchor`]), so this can plant a repeat at
-/// any distance and still have both occurrences sampled.
-fn planted_repeat_content_defined(anchor: [u8; DETECTOR_ANCHOR_LEN], far_offset: usize) -> Vec<u8> {
-    let filler = find_non_anchor_filler_byte();
-    let mut data = vec![filler; far_offset + DETECTOR_ANCHOR_LEN];
-    data[..DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
-    data[far_offset..].copy_from_slice(&anchor);
-    data
-}
-
 #[test]
-fn confirmed_detector_does_not_underflow_below_anchor_len() {
-    // Regression for the reviewer-caught panic on PR #634: data.len() <
-    // DETECTOR_ANCHOR_LEN but > base_window skipped the early return and
-    // underflowed `data.len() - DETECTOR_ANCHOR_LEN` in a bare `for`
-    // loop. This detector's `while i + ANCHOR_LEN <= len` shape degrades
-    // to zero iterations instead, which this proves does not panic.
-    // DETECTOR_ANCHOR_LEN is 8, so 3 bytes is short of it by construction.
-    assert!(!likely_benefits_from_larger_window_content_defined_confirmed(&[1, 2, 3], 0));
-}
-
-/// Same shape as [`planted_repeat_content_defined`], but plants
-/// [`DETECTOR_ANCHOR_LEN`] + [`DETECTOR_CONFIRM_LEN`] matching bytes
-/// (`anchor` then `tail`) at both occurrences, giving
-/// [`likely_benefits_from_larger_window_content_defined_confirmed`]'s
-/// extra confirmation step a real run to agree on.
-fn planted_repeat_content_defined_confirmed(
-    anchor: [u8; DETECTOR_ANCHOR_LEN],
-    tail: [u8; DETECTOR_CONFIRM_LEN],
-    far_offset: usize,
-) -> Vec<u8> {
-    let filler = find_non_anchor_filler_byte();
-    let run_len = DETECTOR_ANCHOR_LEN + DETECTOR_CONFIRM_LEN;
-    let mut data = vec![filler; far_offset + run_len];
-    data[..DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
-    data[DETECTOR_ANCHOR_LEN..run_len].copy_from_slice(&tail);
-    data[far_offset..far_offset + DETECTOR_ANCHOR_LEN].copy_from_slice(&anchor);
-    data[far_offset + DETECTOR_ANCHOR_LEN..far_offset + run_len].copy_from_slice(&tail);
-    data
-}
-
-#[test]
-fn confirmed_detector_is_true_when_the_repeat_extends_past_the_anchor() {
-    // A real long-range recurrence: both occurrences agree on the
-    // anchor AND the confirmation run past it, so requiring that
-    // agreement must not cost the true positive the unconfirmed
-    // detector already finds.
-    let anchor = find_content_defined_anchor_value();
-    let tail = [0xAAu8; DETECTOR_CONFIRM_LEN];
-    let far_offset = 5 * DETECTOR_STRIDE + 7;
-    let base_window = far_offset - 1;
-    let data = planted_repeat_content_defined_confirmed(anchor, tail, far_offset);
-    assert!(likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window));
-}
-
-#[test]
-fn confirmed_detector_is_false_on_an_anchor_match_that_does_not_extend() {
-    // The exact failure mode research/JOURNAL.md S2-R9's second finding
-    // named: the anchor recurs (a real 8-byte match, not a hash
-    // collision) but the bytes past it differ, so there is no long
-    // match behind it. S2-R9 measured an anchor-only check firing
-    // `true` on `access_log` for exactly this shape; the confirmation
-    // step exists to reject it.
-    let anchor = find_content_defined_anchor_value();
-    let far_offset = 5 * DETECTOR_STRIDE + 7;
-    let base_window = far_offset - 1;
-    let mut data = planted_repeat_content_defined_confirmed(
-        anchor,
-        [0xAAu8; DETECTOR_CONFIRM_LEN],
-        far_offset,
-    );
-    // Diverge only the far occurrence's confirmation run so the anchor
-    // itself still matches at both positions.
-    let tail_start = far_offset + DETECTOR_ANCHOR_LEN;
-    data[tail_start..tail_start + DETECTOR_CONFIRM_LEN].fill(0xBBu8);
-
-    assert!(
-        !likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window),
-        "confirmed detector must reject an anchor match that does not extend"
-    );
-}
-
-#[test]
-fn confirmed_detector_is_false_when_confirmation_would_run_past_data_end() {
-    // A candidate whose confirmation window would read past data's end
-    // cannot be confirmed either way; it must be treated as a miss,
-    // not panic on an out-of-bounds slice.
-    let anchor = find_content_defined_anchor_value();
-    let far_offset = 5 * DETECTOR_STRIDE + 7;
-    let base_window = far_offset - 1;
-    // planted_repeat_content_defined only lays down the anchor itself
-    // at far_offset, so data ends right after it: the far occurrence's
-    // confirmation window necessarily runs past the end.
-    let data = planted_repeat_content_defined(anchor, far_offset);
-    assert_eq!(data.len(), far_offset + DETECTOR_ANCHOR_LEN);
-
-    assert!(!likely_benefits_from_larger_window_content_defined_confirmed(&data, base_window));
-}
-
-#[test]
-fn adaptive_window_matches_wired_window_within_window() {
-    // data.len() <= WINDOW makes the gate's own base_window early
-    // return unconditional (research/JOURNAL.md S1-P4's next slice
-    // after S2-A92), so the adaptive parse must be byte-for-byte the
-    // wired parse: this is the branch every real input at or under
-    // today's WINDOW takes.
-    let data: Vec<u8> = (0..5000u32)
-        .map(|i| u8::try_from(i % 251).unwrap())
+fn optimal_with_window_roundtrips_a_repeat_past_the_wired_window() {
+    // A window past WINDOW carries a match distance beyond it through all
+    // three dp_round rounds and must stay lossless (hard rule 1). Disjoint
+    // template and filler byte ranges, as above, keep the planted repeat
+    // the only structure in `data`.
+    let template: Vec<u8> = (0u8..80).collect();
+    let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
+        .take(WINDOW + 4096)
+        .map(|s| 128 + u8::try_from(s % 128).unwrap())
         .collect();
-    assert_eq!(parse_optimal_adaptive_window(&data), parse_optimal(&data));
-}
+    let mut data = template.clone();
+    data.extend_from_slice(&filler);
+    data.extend_from_slice(&template);
+    let distance = filler.len() + template.len();
 
-#[test]
-fn adaptive_window_roundtrips_a_confirmed_repeat_past_window() {
-    // The scenario this slice exists for: a real recurrence whose
-    // distance exceeds the wired WINDOW but stays under
-    // ADAPTIVE_WINDOW. First proves the gate actually fires on this
-    // input (the precondition the rest of the test depends on), then
-    // proves CLAUDE.md hard rule 1 holds through the grown window: the
-    // token stream this produces is the first in this crate to carry a
-    // real match distance beyond WINDOW end to end through
-    // parse_optimal's real three-round DP, not just dp_round called
-    // directly with a wider window parameter.
-    let anchor = find_content_defined_anchor_value();
-    let tail = [0xAAu8; DETECTOR_CONFIRM_LEN];
-    let far_offset = WINDOW + 5 * DETECTOR_STRIDE + 7;
-    let data = planted_repeat_content_defined_confirmed(anchor, tail, far_offset);
-    assert!(
-        far_offset < ADAPTIVE_WINDOW,
-        "planted distance must stay reachable at ADAPTIVE_WINDOW"
-    );
-    assert!(
-        likely_benefits_from_larger_window_content_defined_confirmed(&data, WINDOW),
-        "gate must fire so this test exercises the grown-window branch"
-    );
-
-    let tokens = parse_optimal_adaptive_window(&data);
+    let tokens = parse_optimal_with_window(&data, distance);
     assert_eq!(replay(&tokens), data, "roundtrip mismatch");
     assert!(
-        tokens.iter().any(|token| matches!(
-            *token,
-            Token::Match { distance, .. } if distance.get() as usize > WINDOW
+        tokens.iter().any(|t| matches!(
+            t,
+            Token::Match { distance: d, .. } if d.get() as usize == distance
         )),
-        "expected at least one match reaching past WINDOW, proving the grown window was searched"
+        "a window of {distance} must find the planted repeat past WINDOW"
     );
 }
 
