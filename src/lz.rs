@@ -808,7 +808,7 @@ const EXTRA_HEADER_BITS_PRICE: f64 = 1.6;
 ///
 /// [`crate::codec`] buckets the same two quantities on both the encode and
 /// decode path through this function: a second implementation is the drift
-/// the S1-A3 rep-symbol/offset-bucket collision came from.
+/// the session-1 port bug (a rep-symbol/offset-bucket collision) came from.
 pub(crate) fn bucket(v: u32) -> usize {
     debug_assert!(
         v > 0,
