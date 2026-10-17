@@ -658,32 +658,30 @@ pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
             }
         }
 
-        if rep_len >= MIN_REP_LEN && rep_len + 1 >= match_len {
-            for k in i + 1..i + rep_len {
-                finder.insert(k);
-            }
+        let advance = if rep_len >= MIN_REP_LEN && rep_len + 1 >= match_len {
             tokens.push(Token::Rep {
                 len: to_u32(rep_len),
                 slot: rep_slot,
             });
             reps.promote(rep_slot);
-            i += rep_len;
-        } else if match_len >= MIN_MATCH_LEN {
-            let (_, distance) =
-                found.expect("match_len >= MIN_MATCH_LEN only when find_best found one");
-            for k in i + 1..i + match_len {
-                finder.insert(k);
-            }
+            rep_len
+        } else if let Some((len, distance)) = found.filter(|&(len, _)| len >= MIN_MATCH_LEN) {
             tokens.push(Token::Match {
-                len: to_u32(match_len),
+                len: to_u32(len),
                 distance,
             });
             reps.push_front(distance);
-            i += match_len;
+            len
         } else {
             tokens.push(Token::Literal(data[i]));
-            i += 1;
+            1
+        };
+        // The token's covered positions, after `i` (already inserted), become
+        // match candidates; a literal covers none.
+        for k in i + 1..i + advance {
+            finder.insert(k);
         }
+        i += advance;
     }
     tokens
 }
