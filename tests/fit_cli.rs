@@ -24,7 +24,7 @@ mod matrix;
 use std::fs::{self, File};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
@@ -350,20 +350,30 @@ const READ_AHEAD: usize = 1024 * 1024;
 /// How long the probe lets a child that has read one block keep reading.
 const SETTLE: Duration = Duration::from_secs(1);
 
+/// How long the writer gets to push one block into the child.
+const FILL: Duration = Duration::from_secs(60);
+
 /// The encoder stops reading while it encodes a block, so a writer feeding
 /// three blocks stalls near one: input is not buffered ahead of the work.
 /// Measuring the peak itself needs an encode of at least one block, minutes
 /// in a debug build, so the weekly `memory-check` lane owns that number and
 /// the probe is killed with the first block still encoding. A child that
-/// slurps its input fails; a slow runner cannot fail a child that streams,
-/// only let a slurper pass, because the stall bound is an upper limit.
+/// slurps its input fails, and so does one that exits before a full block
+/// arrived: a crash is what the row exists to see. A child still alive when
+/// `FILL` ends has a writer that filled under one block, which measured the
+/// runner, not the child, so that is `Seen::Unmeasured`. A slow runner cannot
+/// fail a child that streams.
 fn streaming_memory() -> Seen {
-    let mut child = bin()
+    stream_probe(bin(), FILL)
+}
+
+fn stream_probe(mut command: Command, fill: Duration) -> Seen {
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("mothergod binary should spawn");
+        .expect("command should spawn");
     let mut stdin = child.stdin.take().expect("piped stdin");
     let written = Arc::new(AtomicUsize::new(0));
     let progress = Arc::clone(&written);
@@ -376,16 +386,27 @@ fn streaming_memory() -> Seen {
             progress.fetch_add(chunk.len(), Ordering::SeqCst);
         }
     });
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while written.load(Ordering::SeqCst) < BLOCK && Instant::now() < deadline {
+    let deadline = Instant::now() + fill;
+    let mut exited = false;
+    while written.load(Ordering::SeqCst) < BLOCK && Instant::now() < deadline && !exited {
         thread::sleep(Duration::from_millis(10));
+        exited = child.try_wait().expect("poll the child").is_some();
     }
-    thread::sleep(SETTLE);
+    let filled = written.load(Ordering::SeqCst) >= BLOCK;
+    if filled {
+        thread::sleep(SETTLE);
+    }
     let read = written.load(Ordering::SeqCst);
     child.kill().expect("kill the child still encoding");
     writer.join().expect("writer thread");
     child.wait().expect("reap the child");
-    seen((BLOCK..BLOCK + READ_AHEAD).contains(&read))
+    if exited && !filled {
+        return Seen::Fails;
+    }
+    if !filled {
+        return Seen::Unmeasured;
+    }
+    seen(read < BLOCK + READ_AHEAD)
 }
 
 #[test]
@@ -396,4 +417,46 @@ fn every_row_is_probed_exactly_once_and_declined_rows_are_not() {
 #[test]
 fn the_record_matches_the_binary() {
     matrix::check_record("tests/fit/cli.txt", MATRIX, PROBES);
+}
+
+/// The three ways a child leaves `stream_probe` short of one block, on a
+/// short `fill` so the stalled case costs milliseconds, not the real 60 s.
+#[cfg(unix)]
+mod stream_probe_cases {
+    use super::*;
+
+    fn sh(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[test]
+    fn a_child_that_exits_before_one_block_fails() {
+        let seen = stream_probe(Command::new("false"), Duration::from_secs(30));
+        assert!(matches!(seen, Seen::Fails));
+    }
+
+    #[test]
+    fn a_child_alive_but_stalled_is_unmeasured() {
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        let seen = stream_probe(command, Duration::from_millis(200));
+        assert!(matches!(seen, Seen::Unmeasured));
+    }
+
+    #[test]
+    fn a_child_that_slurps_its_input_fails() {
+        let seen = stream_probe(sh("cat >/dev/null"), Duration::from_secs(30));
+        assert!(matches!(seen, Seen::Fails));
+    }
+
+    #[test]
+    fn a_child_that_stops_after_one_block_holds() {
+        let seen = stream_probe(
+            sh("head -c 16777216 >/dev/null; exec sleep 30"),
+            Duration::from_secs(30),
+        );
+        assert!(matches!(seen, Seen::Holds));
+    }
 }
