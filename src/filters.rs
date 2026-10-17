@@ -574,7 +574,7 @@ pub mod reverse {
 /// followed by that [`delta`].
 pub mod select {
     use super::delta;
-    use std::num::NonZeroUsize;
+    use std::num::{NonZeroU8, NonZeroUsize};
 
     /// How much of `data` [`pick`] examines when scoring delta strides and
     /// transpose column counts. Bounds the cost of trial-selection itself:
@@ -827,8 +827,10 @@ pub mod select {
             order1.entropy(probe, NonZeroUsize::MIN),
             Candidate::Identity,
         ));
-        for stride in 1..=MAX_DELTA_STRIDE {
-            let stride = NonZeroUsize::new(usize::from(stride)).unwrap_or(NonZeroUsize::MIN);
+        for stride in (1..=MAX_DELTA_STRIDE)
+            .filter_map(NonZeroU8::new)
+            .map(NonZeroUsize::from)
+        {
             scored.push((
                 order1.entropy(&delta::encode(probe, stride), NonZeroUsize::MIN),
                 Candidate::Delta(stride),
