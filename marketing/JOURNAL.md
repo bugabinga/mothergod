@@ -18,6 +18,20 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-17 — Editorial: the 404 page counted its siblings, and the count rotted in a day
+
+#1229 added `/decisions` to the 404's frame, and its sentence still said
+"Three pages do", listing three. The frame was right because
+`tests/claims.rs`'s `shared_frame_offers_the_same_links_on_every_page`
+holds it equal on every page; the prose had no such guard.
+
+The sentence now claims only what that test enforces: every page is
+linked above, and the reader starts at the overview. **Rejected:
+"Four pages do", with the fourth link added.** That is the same count
+waiting for the fifth page. A sentence that points at a tested
+structure does not need its own guard; a sentence that restates the
+structure does.
+
 ## 2026-10-16 — Editorial: /decisions shipped; one sentence leads to it, from where "who decides" is asked
 
 #1231, closing out the 2026-09-24 entry's hand-over: #1229 put the page
