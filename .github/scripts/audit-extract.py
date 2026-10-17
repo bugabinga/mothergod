@@ -254,15 +254,17 @@ for _, name, _ in uses:
 # Writes (#896 item 5): how many of the run's tool calls changed the
 # project's shared state, so "a wake that changed nothing" is a column of
 # the session row and a seat's no-op share is a query (trend.py), not a
-# posture. A write is a Bash call that runs one of the four posting and
-# shipping scripts, or `gh issue edit` or `gh pr edit` (a label, milestone
-# or title is how the curator and the reviewer act without a post), at
-# command position, or a github_file_ops commit or delete, whose result was
-# not an error: a hook denial and a script that exited non-zero both come
-# back as a tool_result with is_error. tg-send is not a write, because
-# every BDFL wake sends its status line, no-op included. The command text
-# is matched and never kept: the count is the whole record, the keys-only
-# rule above.
+# posture. A write is a Bash call that runs one of the five posting and
+# shipping scripts (post-verdict counts as the comment it posts: the
+# reviewer's verdict rode it uncounted for a week, and 39 of its 149
+# measured runs read as no-ops while each had judged a PR), or `gh issue
+# edit` or `gh pr edit` (a label, milestone or title is how the curator and
+# the reviewer act without a post), at command position, or a
+# github_file_ops commit or delete, whose result was not an error: a hook
+# denial and a script that exited non-zero both come back as a tool_result
+# with is_error. tg-send is not a write, because every BDFL wake sends its
+# status line, no-op included. The command text is matched and never kept:
+# the count is the whole record, the keys-only rule above.
 WRITE_TOOLS = {"mcp__github_file_ops__commit_files", "mcp__github_file_ops__delete_files"}
 # Command position: the start, or after `;`, `&`, `|`, `(`, `{` or a newline,
 # then an optional `then`, `do`, `else` or `!`, then any run of `VAR=value`
@@ -278,7 +280,7 @@ WRITE_SCRIPT = re.compile(
     r"(?:^|[;&|({\n])\s*(?:(?:then|do|else|!)\s+)?"
     r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|[^\s\"']*)|env|bash|sh"
     r"|timeout(?:\s+-\S+(?:\s+\d\S*)?)*\s+\d\S*)\s+)*"
-    r"(?:(?:\S*/)?(?:gh-comment|gh-pr|merge-pr|push-branch)"
+    r"(?:(?:\S*/)?(?:gh-comment|gh-pr|merge-pr|post-verdict|push-branch)"
     r"|gh\s+(?:issue|pr)\s+edit)(?=\s|$)")
 
 

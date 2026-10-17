@@ -39,8 +39,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_role_at ON sessions (role, at);
 CREATE INDEX IF NOT EXISTS sessions_at ON sessions (at);
 -- writes (#896 item 5): the run's tool calls that changed the project's
--- shared state, a post through gh-comment, a PR through gh-pr or
--- push-branch, a merge through merge-pr, a label, milestone or title edit
+-- shared state, a post through gh-comment, a verdict through
+-- post-verdict, a PR through gh-pr or push-branch, a merge through
+-- merge-pr, a label, milestone or title edit
 -- through gh issue edit or gh pr edit, a github_file_ops commit or delete,
 -- each counted when its result was not an error; audit-extract.py
 -- names the set. 0 is a run that changed nothing. NULL is an artifact
