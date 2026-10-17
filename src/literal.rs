@@ -18,7 +18,7 @@
 //!   expert's estimate [`crate::logistic::stretch`]ed into the logit domain
 //!   and blended by [`SurpriseLogisticMix`], whose step size comes from a
 //!   fast EMA of a key's squared error against a slower one, the result
-//!   calibrated through [`SurpriseLogisticMixLogitSse`]'s bins, even in
+//!   calibrated through [`SurpriseLogisticMix`]'s bins, even in
 //!   [`crate::logistic::stretch`]-space. The wire path of every frame
 //!   except a transposed one.
 //! - [`Literal::encode_column`]/[`Literal::decode_column`]: a seventh,
@@ -590,9 +590,6 @@ pub struct SurpriseLogisticMix {
     /// [`bittree::sse_context`].
     sse: LogitSse,
 }
-
-/// [`SurpriseLogisticMix`] by its older, longer name.
-pub type SurpriseLogisticMixLogitSse = SurpriseLogisticMix;
 
 impl SurpriseLogisticMix {
     /// A fresh mixer: every weight at [`LOGISTIC_INITIAL_WEIGHT`], every

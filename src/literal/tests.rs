@@ -7,7 +7,7 @@ fn copy_tokens_interleave_with_literals_round_trip() {
     // `after_copy` and re-deriving `prev1`/`prev2` from the copied
     // bytes rather than from `after_literal`'s single-byte update.
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context = Context::default();
     let mut enc = Encoder::new();
     let literal_runs: &[&[u8]] = &[b"hello ", b"world", b" repeat repeat repeat"];
@@ -23,7 +23,7 @@ fn copy_tokens_interleave_with_literals_round_trip() {
     let total_literals: usize = literal_runs.iter().map(|r| r.len()).sum();
 
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context = Context::default();
     let mut dec = Decoder::new(&encoded);
     let mut got = Vec::with_capacity(total_literals);
@@ -612,7 +612,7 @@ fn surprise_error_tracking_step_matches_hand_computed_error_sq() {
 
 #[test]
 fn surprise_logistic_mix_logit_sse_new_starts_at_uniform_weights_and_zero_error_state() {
-    let mix = SurpriseLogisticMixLogitSse::new();
+    let mix = SurpriseLogisticMix::new();
     assert_eq!(
         mix.weights,
         vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS]
@@ -633,11 +633,11 @@ fn ideal_cost_bits_logistic_surprise_logit_sse_steps_only_its_own_weight_key_onc
         let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(
             context,
             b'x',
-            &mut SurpriseLogisticMixLogitSse::new(),
+            &mut SurpriseLogisticMix::new(),
         );
     }
     let (_, weight_index) = banks(context);
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(context, b'x', &mut mixer);
     for key in 0..WEIGHT_CONTEXTS {
         if key == weight_index {
@@ -668,7 +668,7 @@ fn ideal_cost_bits_logistic_surprise_logit_sse_steps_only_its_own_weight_key_onc
 
 fn roundtrip_bytes_logit_sse(bytes: &[u8]) {
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context = Context::default();
     let mut enc = Encoder::new();
     for &b in bytes {
@@ -678,7 +678,7 @@ fn roundtrip_bytes_logit_sse(bytes: &[u8]) {
     let encoded = enc.finish();
 
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context = Context::default();
     let mut dec = Decoder::new(&encoded);
     let mut got = Vec::with_capacity(bytes.len());
@@ -730,7 +730,7 @@ fn pseudo_random_bytes_round_trip_through_logit_sse() {
 fn decoding_truncated_stream_does_not_panic_through_logit_sse() {
     let bytes: Vec<u8> = (0..200).map(|i| u8::try_from(i % 5).unwrap()).collect();
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context = Context::default();
     let mut enc = Encoder::new();
     for &b in &bytes {
@@ -741,7 +741,7 @@ fn decoding_truncated_stream_does_not_panic_through_logit_sse() {
     let truncated = &encoded[..encoded.len() / 2];
 
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context = Context::default();
     let mut dec = Decoder::new(truncated);
     for _ in &bytes {
@@ -761,7 +761,7 @@ fn decoding_truncated_stream_does_not_panic_through_logit_sse() {
 fn encode_logit_sse_updates_the_six_real_experts_same_as_ideal_cost_bits() {
     let bytes = b"hello world hello again";
     let mut via_logit_sse = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let mut context_logit_sse = Context::default();
     let mut enc_logit_sse = Encoder::new();
     for &b in bytes {
@@ -784,7 +784,7 @@ fn encode_logit_sse_updates_the_six_real_experts_same_as_ideal_cost_bits() {
 #[test]
 fn encode_logit_sse_steps_only_its_own_weight_key_once_per_node() {
     let mut model = Literal::new();
-    let mut mixer = SurpriseLogisticMixLogitSse::new();
+    let mut mixer = SurpriseLogisticMix::new();
     let context = Context {
         prev1: 0x25,
         ..Context::default()
@@ -796,7 +796,7 @@ fn encode_logit_sse_steps_only_its_own_weight_key_once_per_node() {
             &mut Encoder::new(),
             context,
             b'x',
-            &mut SurpriseLogisticMixLogitSse::new(),
+            &mut SurpriseLogisticMix::new(),
         );
     }
     let (_, weight_index) = banks(context);
