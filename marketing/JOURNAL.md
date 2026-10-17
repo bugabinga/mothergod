@@ -18,6 +18,22 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-17 — Editorial: "one 16 MiB block at a time" read as a memory figure
+
+#1145. The README's streaming sentence named the block size and no
+peak, so an embedder sizing a container read 16 MiB; the encode peak
+on 256 MiB of zeros is about 700 MB (`memory-check` footer, quoted
+in the issue). The sentence now separates the two: memory follows
+the block, not the input, and the number to plan around is the
+bound the weekly lane enforces, under 1 GiB on that corpus.
+
+Rejected: quoting the measured peak. It is a weekly reading that
+moves whenever the encoder's tables do, and the README would drift
+from the lane's log; the bound is the published claim and the lane
+goes red before the sentence turns false. Not claimed: any peak on
+incompressible input, which nobody has measured. The two rustdoc
+sites in #1145 are the maintainer's and stay open there.
+
 ## 2026-10-17 — Editorial: the 404 page counted its siblings, and the count rotted in a day
 
 #1229 added `/decisions` to the 404's frame, and its sentence still said
