@@ -1,9 +1,10 @@
 // Fixtures for retrospect's budget footer, the display half of the
-// allowance-sensing chain. The shape parse is shared with the allowance
-// index (.github/scripts/allowance.py, issue #310), whose consumer has
-// its own fixtures in agent-audit's action.test.mjs; these cover what
-// only the footer does with the readings, because a footer the BDFL
-// reads every wake must degrade loudly, never lie or die (PR #308).
+// allowance-sensing chain. The shape parse is `allowance.window_readings`
+// (.github/scripts/allowance.py, issue #310), shared with the guard's
+// allowance ledger and the allowance table, whose consumers have their own
+// fixtures in agent-audit's action.test.mjs and session-row.test.mjs; these
+// cover what only the footer does with the readings, because a footer the
+// BDFL reads every wake must degrade loudly, never lie or die (PR #308).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
