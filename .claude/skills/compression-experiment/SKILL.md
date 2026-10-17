@@ -20,7 +20,14 @@ This skill coordinates one run without copying those rules.
 2. Inspect open PRs and `claude/*` branches.
    Do not duplicate work already in flight.
 3. Confirm the codec and benchmark harness can measure the next candidate.
-4. Note the clock: the loop's end is measured from here.
+4. Read the job's start, the anchor of the loop's 60% mark (ADR-0070):
+
+   ```
+   gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
+     --jq ".jobs[] | select(.name == \"$GITHUB_JOB\") | .started_at"
+   ```
+
+   No `GITHUB_RUN_ID` means no job timeout and no mark.
 
 ## Capability route
 
@@ -109,25 +116,31 @@ Per try:
    case's move and the train mean and never writes `bench/baseline.json`.
    No try generates a sealed case.
 3. Keep the try when the train mean falls; otherwise revert it whole.
-4. Append its `research/progress.jsonl` line now: `train_delta_bpb`
-   against the champion it was applied to, `val_delta_bpb` null, verdict
-   `rejected` when reverted, the mechanism in one sentence.
+4. Append a reverted try's `research/progress.jsonl` line now:
+   `train_delta_bpb` against the champion it was applied to,
+   `val_delta_bpb` null, verdict `rejected`, the mechanism in one sentence.
+   A kept try's line waits for step 5, where its verdict exists; note its
+   train delta and mechanism with the try. The file is append-only
+   (`research/README.md`): a line is written once, with a verdict the
+   schema admits, never turned later.
 
-No try starts past 60% of the heartbeat's `timeout-minutes` from the
-preflight clock; that mark or the idea's last try ends the loop, and the
-session lands:
+No try starts past 60% of the heartbeat's `timeout-minutes` from the job's
+start (preflight step 4); that mark or the idea's last try ends the loop,
+and the session lands:
 
 5. Measure the keeper, main plus every kept try, once on the sealed set:
    `literal_pairing::train_and_sealed_delta_bpb` for a model variant, the
    two sealed kinds at `sealed_seed(CASE_SEED)` on real bitstreams for an
    encoder-only change.
    The corpus policy's verdict applies to the keeper whole: a sealed
-   regression reverts every kept try and turns its line `rejected`;
-   otherwise every kept line turns `accepted`; both carry the keeper's
-   `val_delta_bpb`.
+   regression reverts every kept try. Then append every kept try's line,
+   in the order the tries ran: its own train delta, the keeper's
+   `val_delta_bpb`, verdict `rejected` after a regression and `accepted`
+   otherwise.
 6. Record one journal entry for the idea: the keeper's mechanism and
-   sealed verdict, then its tries by progress id with their train deltas;
-   the lead's bullet gets its one pointer sentence.
+   sealed verdict, then its tries in the order they ran, by progress id
+   with their train deltas; the lead's bullet gets its one pointer
+   sentence.
    The route's record step governs what of the keeper stays on main.
 7. Open the session's one PR: the keeper with both research records, or
    the records alone when nothing was kept, under the route's gates.

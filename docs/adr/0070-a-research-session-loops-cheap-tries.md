@@ -23,7 +23,7 @@ A research session on an idea made of cheap tries runs a loop and lands one PR.
   Keep-or-revert on validation is the Goodhart loop S1-L5 and S1-L7 forbid, and autoresearch runs it because it has one set.
 - Every try is a `research/progress.jsonl` line, a reverted one with `val_delta_bpb` null: the one null the schema admits beyond a capability patch.
   The journal gets one entry per idea with its tries by id, and the lead's bullet one pointer sentence.
-- No try starts past 60% of the heartbeat's `timeout-minutes`; that mark or the idea's last try ends the loop, and the session lands with the rest.
+- No try starts past 60% of the heartbeat's `timeout-minutes` from the job's start, the moment that timeout counts from; that mark or the idea's last try ends the loop, and the session lands with the rest.
   Every try runs in the foreground to completion (CLAUDE.md hard rule 12).
 - One PR per session: the keeper's code with both research records, or the records alone when nothing was kept.
   The reviewer re-measures the keeper, as it re-measures a candidate now, never the tries.
