@@ -8,7 +8,8 @@ A bit flip inside a frame can decode to wrong bytes with exit status 0 (#1020).
 On a `Stored` frame it always does: the data is verbatim and nothing checks it.
 On an `Lz` frame the arithmetic coder caught most flips in one run (of 294 single-byte writes into a 314-byte frame, 291 decoded to a typed error and 3 to the input itself), and nothing rules out the flip it does not catch.
 ADR-0065 and ADR-0067 each recorded the gap and deferred it to this decision.
-The genre splits three to three (`tests/fit/lib.txt`, row `integrity-check`): gzip, xz and snap return an error on a flipped stream, while zstd, brotli and lz4_flex at their defaults decode wrong bytes for 1669 to 2073 of about 2200 single-bit flips.
+The genre splits two to one to three (`tests/fit/lib.txt`, row `integrity-check`): gzip and xz never return wrong bytes on a flipped stream, snap once in 2879 flips, while zstd, brotli and lz4_flex at their defaults decode wrong bytes for 1669 to 2073 of about 2200 single-bit flips.
+Correction (#1119): this paragraph first read "three to three" and put snap with gzip and xz; the row's own measurement has snap decoding wrong bytes once in 2879.
 
 ## Decision
 
