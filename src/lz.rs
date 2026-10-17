@@ -1143,15 +1143,9 @@ fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
 
     for i in 0..n {
         let match_candidate = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL);
-        if !state.dp[i].is_finite() {
-            // Never actually reached: dp[0] = 0 and the literal transition
-            // below always advances dp[i] -> dp[i+1] when dp[i] is finite,
-            // so every position is reachable by induction. Kept as a
-            // defensive guard. `insert_and_find` runs unconditionally
-            // above: every position must enter the tree regardless of
-            // dp[i]'s state.
-            continue;
-        }
+        // Every `dp[i]` is finite: `dp[0]` is 0, the literal transition
+        // below reaches `i + 1` from a finite `dp[i]`, and `prices` are
+        // finite (every count starts at 1).
         let base = state.dp[i];
         let reps = state.cache[i];
 
