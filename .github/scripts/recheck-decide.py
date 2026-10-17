@@ -35,7 +35,7 @@ count line; every check green is that line alone. A run list that cannot
 be read exits 1 with the workflow named and nothing on stdout, never as a
 green: a false nothing here is a red that waits for its cron again.
 
-Usage: recheck-decide.py [workflows-dir]
+Usage: recheck-decide.py [workflows-dir [epoch-seconds]]
 """
 import json
 import os
@@ -153,6 +153,11 @@ def gh_runs(file):
 
 def main():
     workflows = Path(sys.argv[1]) if len(sys.argv) > 1 else WORKFLOWS
+    # The clock is an argument so the end-to-end test can freeze it. With
+    # time.time() read here and the fixtures stamped against a frozen NOW,
+    # the test's held retry crossed RETRY_HOURS at 2026-10-16T21:00Z and
+    # `worker` went red on every push to main with no diff behind it (#1275).
+    now = float(sys.argv[2]) if len(sys.argv) > 2 else time.time()
     files, error = candidates(workflows)
     if error:
         print(f"recheck: UNREADABLE {error}", file=sys.stderr)
@@ -164,7 +169,7 @@ def main():
             print(f"recheck: UNREADABLE {file}: {error}", file=sys.stderr)
             return 1
         runs[file] = rows
-    verdicts = decide(runs, time.time())
+    verdicts = decide(runs, now)
     counts = {"dispatch": 0, "held": 0}
     for file, verdict, why in verdicts:
         if verdict == "green":

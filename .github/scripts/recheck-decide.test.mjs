@@ -174,6 +174,9 @@ test("in this tree every cron workflow is a candidate and no seat is", () => {
 
 // The stdout contract recheck.yml pipes into `xargs gh workflow run`: one
 // file per line, nothing else, and nothing at all when a read failed.
+// The script gets NOW as its clock, the same one the fixtures are stamped
+// against; on the wall clock the held retry below aged past RETRY_HOURS six
+// hours after this file landed and `worker` went red on main (#1275).
 function run(table, dir) {
   const bin = mkdtempSync(join(tmpdir(), "recheck-gh-"));
   const tablePath = join(bin, "table.json");
@@ -191,7 +194,7 @@ process.stdout.write(JSON.stringify(table[wf]));
   );
   writeFileSync(join(bin, "gh"), `#!/bin/sh\nexec node ${stub} "$@"\n`);
   chmodSync(join(bin, "gh"), 0o755);
-  return spawnSync("python3", [script, dir], {
+  return spawnSync("python3", [script, dir, String(NOW)], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RECHECK_TABLE: tablePath },
   });
