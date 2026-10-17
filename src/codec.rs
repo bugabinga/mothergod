@@ -61,9 +61,7 @@ use crate::Error;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
-use crate::literal::{
-    ColumnExpertState, Context, Literal, PpmExpertState, SurpriseLogisticMixLogitSse,
-};
+use crate::literal::{ColumnExpertState, Context, Literal, PpmExpertState, SurpriseLogisticMix};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
 
@@ -169,7 +167,7 @@ struct Models {
     /// code every non-`Candidate::Transpose` literal through this mixer:
     /// its own weights, error EMAs and `LogitSse` table, one per
     /// frame/trial, the same lifetime as `literal`'s six real banks.
-    logit_sse: SurpriseLogisticMixLogitSse,
+    logit_sse: SurpriseLogisticMix,
     /// One flag table per "was the previous token a copy" state: a literal
     /// run and a post-copy position have different flag distributions worth
     /// modeling separately. Indexed by [`Context::after_copy`].
@@ -199,7 +197,7 @@ impl Models {
     fn new() -> Self {
         Self {
             literal: Literal::new(),
-            logit_sse: SurpriseLogisticMixLogitSse::new(),
+            logit_sse: SurpriseLogisticMix::new(),
             flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
             length_match: Model::new(lz::LENGTH_BUCKETS),
             length_rep: Model::new(lz::LENGTH_BUCKETS),
@@ -220,7 +218,7 @@ impl Models {
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             literal: Literal::try_new()?,
-            logit_sse: SurpriseLogisticMixLogitSse::try_new()?,
+            logit_sse: SurpriseLogisticMix::try_new()?,
             flag: [
                 Model::try_new(FLAG_ALPHABET)?,
                 Model::try_new(FLAG_ALPHABET)?,
