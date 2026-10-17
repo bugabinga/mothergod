@@ -36,8 +36,9 @@
 # skipped, three per PR on #683, issue #590), stamped with the id of the
 # diff, title and body it judged. The `stamp` step below computes that
 # id before the model starts and skips the run when the newest verdict
-# already covers it (#953, #1050): a cancelled run's late post, or a
-# propagate-review merge of main, no longer buys a second round.
+# already covers it (#953, #1050, #1246): a cancelled run's late post, a
+# propagate-review merge of main, or a wording edit after a PASS, no
+# longer buys a second round.
 name: agent-review
 
 on:
@@ -153,14 +154,19 @@ jobs:
       # the diff, title and body (DIFF_ID below, which post-verdict stamps
       # into the verdict) and `stands=true` when the newest reviewer
       # comment is a fail stamped with that same id under a standing
-      # `changes-requested`. It fails open toward reviewing: an unreadable
-      # PR or diff prints an empty id and reviews.
+      # `changes-requested`, or a pass stamped with the id this diff had
+      # under the title and body before an `edited` event, under a
+      # standing `agent-approved` (#1246). CHANGES is the event's
+      # `changes` payload, the pre-edit text, `null` on every other
+      # action. It fails open toward reviewing: an unreadable PR, diff or
+      # payload prints an empty id and reviews.
       - id: stamp
         if: steps.guard.outputs.paused != 'true'
         env:
           PR: ${{ github.event.pull_request.number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGES: ${{ toJSON(github.event.changes) }}
         run: .github/scripts/verdict-stands "$PR" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
