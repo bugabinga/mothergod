@@ -705,6 +705,20 @@ pub mod select {
             }
         }
 
+        /// The column count of [`Self::Transpose`], the one candidate whose
+        /// literals are coded by a column-keyed expert.
+        pub(crate) fn columns(self) -> Option<NonZeroUsize> {
+            match self {
+                Self::Transpose(columns) => Some(columns),
+                Self::Identity
+                | Self::Delta(_)
+                | Self::Bcj
+                | Self::Base64
+                | Self::Reverse
+                | Self::ReverseDelta(_) => None,
+            }
+        }
+
         /// The length of the frame data this candidate reconstructs from
         /// `filtered_len` filtered bytes: the same length for every filter
         /// but [`Self::Base64`], which re-wraps three bytes into four

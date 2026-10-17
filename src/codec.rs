@@ -943,16 +943,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     let mut best: Option<(Candidate, Vec<u8>)> = None;
     for candidate in filters::select::pick(data) {
         let filtered = apply_filter(candidate, data);
-        let columns = match candidate {
-            Candidate::Transpose(columns) => Some(columns),
-            Candidate::Identity
-            | Candidate::Delta(_)
-            | Candidate::Bcj
-            | Candidate::Base64
-            | Candidate::Reverse
-            | Candidate::ReverseDelta(_) => None,
-        };
-        let body = encode_tokens(&filtered, columns);
+        let body = encode_tokens(&filtered, candidate.columns());
         if best.as_ref().is_none_or(|(_, existing)| {
             crate::candidate_beats_incumbent(body.len(), existing.len())
         }) {
@@ -1348,17 +1339,10 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new()?;
     let mut reps = RepCache::initial();
-    let column = match candidate {
-        Candidate::Transpose(columns) => {
-            Some((columns, ColumnExpertState::try_new(MAX_COLUMN_BANKS)?))
-        }
-        Candidate::Identity
-        | Candidate::Delta(_)
-        | Candidate::Bcj
-        | Candidate::Base64
-        | Candidate::Reverse
-        | Candidate::ReverseDelta(_) => None,
-    };
+    let column = candidate
+        .columns()
+        .map(|columns| ColumnExpertState::try_new(MAX_COLUMN_BANKS).map(|state| (columns, state)))
+        .transpose()?;
     // Reserved fallibly and exactly up front, not left to grow through
     // `push`/`extend`'s doubling: `declared_len` is already bounded above,
     // so nothing past this point ever asks `output` to grow past what it
