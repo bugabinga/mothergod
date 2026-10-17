@@ -1,10 +1,13 @@
 // Fixtures for verdict-stands, the guard that skips a review run whose diff,
-// title and body the reviewer already returned (#953, #1050).
+// title and body the reviewer already returned (#953, #1050), or whose
+// title or body edit follows a PASS on the same head (#1246).
 //
 // decide() is pure and pinned per route. digest() runs against a real git
 // repository in a temp dir, because the claim that matters is which pushes
-// change the id: a merge of main that touches no PR file keeps it, an
-// indentation-only fix changes it, a body edit changes it.
+// and edits change the id: a merge of main that touches no PR file keeps
+// it, an indentation-only fix changes it, a body edit changes it, and an
+// edit after a PASS stands only on the pre-edit text GitHub's `changes`
+// payload carries.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -23,7 +26,7 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 call = json.loads(sys.argv[2])
 if call["fn"] == "decide":
-    print(json.dumps(mod.decide(call["labels"], call["comments"], call["id"])))
+    print(json.dumps(mod.decide(call["labels"], call["comments"], call["id"], call.get("before", ""))))
 else:
     print(json.dumps(mod.digest(call["diff"], call["title"], call["body"])))
 `;
@@ -36,7 +39,7 @@ function call(payload) {
   return JSON.parse(res.stdout);
 }
 
-const decide = (labels, comments, id) => call({ fn: "decide", labels, comments, id });
+const decide = (labels, comments, id, before = "") => call({ fn: "decide", labels, comments, id, before });
 const ID = "a".repeat(64);
 const OTHER = "b".repeat(64);
 const reviewer = (body, createdAt, stamp) => ({
@@ -65,10 +68,60 @@ test("a different id reviews: the author changed what the reviewer reads", () =>
   assert.equal(stands, false);
 });
 
-test("no changes-requested label reviews, whatever the stamp says", () => {
+test("a fail stamp without changes-requested reviews: no verdict is standing", () => {
+  const [stands, why] = decide(["agent-approved"], [reviewer("one [must]", "2026-10-12T00:45:37Z", ["fail", ID])], ID);
+  assert.equal(stands, false);
+  assert.match(why, /without changes-requested/);
+});
+
+test("a standing pass on the pre-edit id with agent-approved stands: the edit answered no [must]", () => {
+  const [stands, why] = decide(
+    ["agent-approved"],
+    [reviewer("holds", "2026-10-12T00:45:37Z", ["pass", ID])],
+    OTHER,
+    ID,
+  );
+  assert.equal(stands, true);
+  assert.match(why, /answered no \[must\]/);
+});
+
+test("a pass stamp with nothing edited reviews, agent-approved or not (#1041's refresh)", () => {
   const [stands, why] = decide(["agent-approved"], [reviewer("holds", "2026-10-12T00:45:37Z", ["pass", ID])], ID);
   assert.equal(stands, false);
-  assert.match(why, /no changes-requested/);
+  assert.match(why, /no title or body was edited/);
+});
+
+test("a pass stamp without agent-approved reviews, even on the pre-edit id", () => {
+  const [stands, why] = decide(
+    ["changes-requested"],
+    [reviewer("holds", "2026-10-12T00:45:37Z", ["pass", ID])],
+    OTHER,
+    ID,
+  );
+  assert.equal(stands, false);
+  assert.match(why, /without agent-approved/);
+});
+
+test("a pass stamped with another pre-edit id reviews: the second edit after one stood", () => {
+  const [stands, why] = decide(
+    ["agent-approved"],
+    [reviewer("holds", "2026-10-12T00:45:37Z", ["pass", ID])],
+    OTHER,
+    "c".repeat(64),
+  );
+  assert.equal(stands, false);
+  assert.match(why, /text before this edit/);
+});
+
+test("a fail stamp is matched against the current text, never the pre-edit text", () => {
+  const [stands, why] = decide(
+    ["changes-requested"],
+    [reviewer("one [must]", "2026-10-12T00:45:37Z", ["fail", ID])],
+    OTHER,
+    ID,
+  );
+  assert.equal(stands, false);
+  assert.match(why, /standing fail covers/);
 });
 
 test("a pass stamp under changes-requested reviews: the two disagree", () => {
@@ -139,14 +192,14 @@ function repo() {
   return { dir, git };
 }
 
-function stands(dir, number, base, head, pr) {
+function stands(dir, number, base, head, pr, changes = "null") {
   const stub = mkdtempSync(join(tmpdir(), "verdict-stands-gh-"));
   writeFileSync(join(stub, "gh"), `#!/bin/sh\ncat <<'JSON'\n${JSON.stringify(pr)}\nJSON\n`);
   chmodSync(join(stub, "gh"), 0o755);
   const res = spawnSync("python3", [script, number, base, head], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${stub}:${process.env.PATH}` },
+    env: { ...process.env, PATH: `${stub}:${process.env.PATH}`, CHANGES: changes },
   });
   assert.equal(res.status, 0, res.stderr);
   const out = Object.fromEntries(res.stdout.trim().split("\n").map((line) => line.split("=", 2)));
@@ -159,6 +212,22 @@ const failedOn = (id) => ({
   labels: [{ name: "changes-requested" }],
   comments: [reviewer("one [must]", "2026-10-12T00:45:37Z", ["fail", id])],
 });
+const passedOn = (id) => ({
+  title: "a: b",
+  body: "why",
+  labels: [{ name: "agent-approved" }],
+  comments: [reviewer("holds", "2026-10-12T00:45:37Z", ["pass", id])],
+});
+
+// A PR branch one commit off main, the shape every edit test starts from.
+function prBranch() {
+  const { dir, git } = repo();
+  const base = git("rev-parse", "HEAD");
+  git("checkout", "-q", "-b", "pr");
+  writeFileSync(join(dir, "a.py"), "def f():\n    return 2\n");
+  git("commit", "-qam", "pr change");
+  return { dir, git, base, head: git("rev-parse", "HEAD") };
+}
 
 test("end to end: a merge of main that touches no PR file keeps the id and stands", () => {
   const { dir, git } = repo();
@@ -221,6 +290,57 @@ test("end to end: an unreadable PR or diff prints an empty id and reviews", () =
   assert.equal(out.diff_id, "");
   assert.equal(out.stands, "false");
   assert.match(out.stderr, /merge-base .* failed/);
+});
+
+test("end to end: a body edit after a pass stands on the pre-edit body (#1243's shape)", () => {
+  const { dir, base, head } = prBranch();
+  const first = stands(dir, "1", base, head, passedOn(""));
+  assert.equal(first.stands, "false");
+  const edited = { ...passedOn(first.diff_id), body: "why, reworded seconds after opening" };
+  const second = stands(dir, "1", base, head, edited, JSON.stringify({ body: { from: "why" } }));
+  assert.notEqual(second.diff_id, first.diff_id);
+  assert.equal(second.stands, "true");
+  assert.match(second.stderr, /answered no \[must\]/);
+});
+
+test("end to end: a title-only edit after a pass stands, the body falling back to its current value", () => {
+  const { dir, base, head } = prBranch();
+  const first = stands(dir, "1", base, head, passedOn(""));
+  const edited = { ...passedOn(first.diff_id), title: "a: c" };
+  const second = stands(dir, "1", base, head, edited, JSON.stringify({ title: { from: "a: b" } }));
+  assert.equal(second.stands, "true");
+});
+
+test("end to end: a refresh under a pass reviews, the diff unchanged and nothing edited (#1041)", () => {
+  const { dir, git, base, head } = prBranch();
+  const first = stands(dir, "1", base, head, passedOn(""));
+  git("checkout", "-q", "main");
+  writeFileSync(join(dir, "other.md"), "one\ntwo\n");
+  git("commit", "-qam", "main moves");
+  const base2 = git("rev-parse", "HEAD");
+  git("checkout", "-q", "pr");
+  git("merge", "-q", "--no-edit", "main");
+  const second = stands(dir, "1", base2, git("rev-parse", "HEAD"), passedOn(first.diff_id));
+  assert.equal(second.diff_id, first.diff_id);
+  assert.equal(second.stands, "false");
+  assert.match(second.stderr, /no title or body was edited/);
+});
+
+test("end to end: a base change under a pass carries no pre-edit text and reviews", () => {
+  const { dir, base, head } = prBranch();
+  const first = stands(dir, "1", base, head, passedOn(""));
+  const payload = JSON.stringify({ base: { ref: { from: "old" }, sha: { from: "0".repeat(40) } } });
+  const second = stands(dir, "1", base, head, passedOn(first.diff_id), payload);
+  assert.equal(second.stands, "false");
+});
+
+test("end to end: an unreadable CHANGES reviews and says so", () => {
+  const { dir, base, head } = prBranch();
+  const first = stands(dir, "1", base, head, passedOn(""));
+  const edited = { ...passedOn(first.diff_id), body: "why, reworded" };
+  const second = stands(dir, "1", base, head, edited, "{not json");
+  assert.equal(second.stands, "false");
+  assert.match(second.stderr, /CHANGES did not parse/);
 });
 
 test("a usage error exits nonzero and prints nothing for GITHUB_OUTPUT", () => {

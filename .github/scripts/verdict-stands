@@ -5,61 +5,84 @@ Run by agent-review.yml's `stamp` step, before the model starts; tested by
 `verdict-stands.test.mjs`. Extensionless and executable because a workflow
 step types it as a command, like guard-decide.py's callers and stalled-prs.
 
-The class this compiles (#953, #1050): a review run that re-judges a diff
-the reviewer already returned. Two triggers produce it. A cancelled run
-whose Claude step outlives the cancel by a minute posts its FAIL, and the
-run that replaced it reads that verdict and re-posts it as round 2 (PR
-#950, 69 seconds apart). And propagate-review merges main into every open
-PR after agent-review.yml changes, a new head whose PR diff is
-byte-identical to the one already judged (PRs #956, #1038, #1045: a full
-review, the same [must] re-posted as a new round). Nothing told a run that
-the current diff already carried this seat's verdict, because the comment
-named the head only by habit ("PASS at `7ca9bef`"), not by contract.
+The class this compiles (#953, #1050, #1246): a review run that re-judges a
+diff the reviewer already returned. Three triggers produce it. A cancelled
+run whose Claude step outlives the cancel by a minute posts its FAIL, and
+the run that replaced it reads that verdict and re-posts it as round 2 (PR
+#950, 69 seconds apart). propagate-review merges main into every open PR
+after agent-review.yml changes, a new head whose PR diff is byte-identical
+to the one already judged (PRs #956, #1038, #1045: a full review, the same
+[must] re-posted as a new round). And a wording edit seconds after `opened`
+fires `edited` against a PASS already posted on the head, its auto-merge
+already armed (PRs #1243, #1189: two reviewer sessions on one head, two
+PASS verdicts on the thread). Nothing told a run that the current diff
+already carried this seat's verdict, because the comment named the head
+only by habit ("PASS at `7ca9bef`"), not by contract.
 
-The contract: `post-verdict` writes `<!-- verdict fail <id> -->` into
-every verdict comment, where `<id>` is the sha256 of what the reviewer
+The contract: `post-verdict` writes `<!-- verdict <pass|fail> <id> -->`
+into every verdict comment, where `<id>` is the sha256 of what the reviewer
 judged: the PR's three-dot diff against its base, its title and its body.
 This script computes the same id from the event's base and head, reads the
 PR's newest reviewer comment, and prints two GITHUB_OUTPUT lines:
 
     diff_id=<64 hex chars, or empty when the diff could not be read>
-    stands=<true when the newest reviewer comment carries a `fail` stamp
-            equal to diff_id and the PR carries `changes-requested`>
+    stands=<true when the newest reviewer comment's stamp covers this run,
+            by one of the two routes below>
 
-`stands=true` skips the model: the standing verdict covers this exact
-diff and body, the author has changed nothing the reviewer reads, so a
-second run would post the same items and cost a review. Every other
-state reviews. The decision never fails closed toward skipping: an
-unreadable PR, an unreadable diff, an unstamped newest comment, a stamp
-from a different id, or a PASS stamp all print `stands=false`, because a
-skipped review that was owed is a merge with no judgment behind it and a
-duplicate review is only a wasted run.
+Two routes stand, and `stands=true` skips the model on either:
+
+    a fail    stamped with diff_id, under `changes-requested`: the author
+              has changed nothing the reviewer reads, so a second run would
+              post the same items and cost a review.
+    a pass    stamped with the id of this same diff under the title and
+              body as they were BEFORE this `edited` event, under
+              `agent-approved`: the edit touched nothing the merge depends
+              on, the head is the one that round reviewed, and the
+              auto-merge that round armed lands it. The pre-edit text is
+              GitHub's `changes` payload, handed in as CHANGES in the
+              environment. `changes.title.from` rides only when the title
+              changed and `changes.body.from` only when the body did, so
+              each falls back to its current value; an event carrying
+              neither (every other action, and a base change, which
+              `edited` also fires for) has no pre-edit text and reviews.
+
+Every other state reviews. The decision never fails closed toward
+skipping: an unreadable PR, an unreadable diff, an unreadable CHANGES, an
+unstamped newest comment, or a stamp from a different id all print
+`stands=false`, because a skipped review that was owed is a merge with no
+judgment behind it and a duplicate review is only a wasted run.
 
 Why the body is in the id: `edited` is a review trigger precisely so a
 body edit answering a [must] gets its round (agent-review.yml, 2026-09-25).
 A diff-only stamp would call that answer "unchanged" and skip it forever.
-The price is that #950's own instance, a body correction nine seconds
-after `opened`, still reviews twice: the second run is judging a different
-body, which is the round `edited` exists to give.
+The pass route keeps that round: a fail stamp is matched against the
+current text only, so an edit under `changes-requested` always reviews.
+The price that remains is a second edit after the first one stood: the
+pass stamp names the text the reviewer saw, the chain of edits is not
+walked, and that second edit reviews.
 
 Why sha256 over the raw diff and not `git patch-id`: patch-id ignores
 whitespace, and whitespace is the program in YAML and Python, the two
 languages under `.github/`. An indentation fix answering a [must] would
 read as the same patch and stand unreviewed.
 
-Only `changes-requested` skips. An `agent-approved` PR re-reviews on a
-refresh because `merge-pr --wait` and the stalled-prs rescue both test
-that the approval postdates the head's review round (verdict.py); a skip
-there would leave a label that vouches for no head, and the armed
-auto-merge already lands the refreshed head on the standing PASS (#1041).
+Why the pass route is keyed on the edit payload and never on the diff
+alone: an `agent-approved` PR re-reviews on a refresh, a new head whose
+diff is byte-identical, because `merge-pr --wait` and the stalled-prs
+rescue both test that the approval postdates the head's review round
+(verdict.py); a skip there would leave a label that vouches for no head,
+and the armed auto-merge already lands the refreshed head on the standing
+PASS (#1041). An edit moves no head, so the label still vouches for it.
 
-Usage: verdict-stands <pr> <base-sha> <head-sha> >> "$GITHUB_OUTPUT"
+Usage: CHANGES="$(toJSON of github.event.changes)" \\
+       verdict-stands <pr> <base-sha> <head-sha> >> "$GITHUB_OUTPUT"
 Stderr says which case fired. Exit 0 on every readable or unreadable
 state; nonzero only on a usage error.
 """
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -86,12 +109,44 @@ def stamp_of(text):
     return (found.group(1), found.group(2)) if found else None
 
 
-def decide(labels, comments, diff_id):
-    """Pure. (stands, why): does the newest reviewer comment's stamp cover this id?"""
+def before_edit(changes, title, body):
+    """(title, body) as they were before this `edited` event, or None.
+
+    GitHub's payload carries `changes.title.from` only when the title changed
+    and `changes.body.from` only when the body did; a field that did not
+    change keeps its current value (the curator's finding on #1246). Neither
+    present: the event edited no text, so there is nothing a pass could
+    stand on.
+    """
+    title_from = (changes.get("title") or {}).get("from")
+    body_from = (changes.get("body") or {}).get("from")
+    if title_from is None and body_from is None:
+        return None
+    return (title if title_from is None else title_from,
+            body if body_from is None else body_from)
+
+
+def changes_of(raw):
+    """GitHub's `changes` payload from CHANGES, or {} when absent or unreadable."""
+    if not raw or raw == "null":
+        return {}
+    try:
+        changes = json.loads(raw)
+    except ValueError as err:
+        print(f"verdict-stands: CHANGES did not parse: {err}", file=sys.stderr)
+        return {}
+    return changes if isinstance(changes, dict) else {}
+
+
+def decide(labels, comments, diff_id, before_id=""):
+    """Pure. (stands, why): does the newest reviewer comment's stamp cover this run?
+
+    `diff_id` is the id of the diff with the current title and body;
+    `before_id` the id of the same diff with the title and body before this
+    `edited` event, empty when the event edited neither.
+    """
     if not diff_id:
         return False, "no diff id, so no stamp can match; reviewing"
-    if "changes-requested" not in labels:
-        return False, "no changes-requested label, so no verdict is standing; reviewing"
     reviewer = [
         comment for comment in sorted(comments, key=lambda item: item.get("createdAt") or "")
         if footer(comment.get("body") or "").startswith(REVIEWER_FOOTER)
@@ -102,11 +157,20 @@ def decide(labels, comments, diff_id):
     if stamp is None:
         return False, "the newest reviewer comment carries no stamp; reviewing"
     verdict, stamped = stamp
-    if verdict != "fail":
-        return False, f"the newest reviewer comment is a {verdict} stamp; reviewing"
-    if stamped != diff_id:
-        return False, f"the standing fail covers {stamped[:12]}, this diff is {diff_id[:12]}; reviewing"
-    return True, f"the standing fail covers {diff_id[:12]}: the diff, title and body are unchanged"
+    if verdict == "fail":
+        if "changes-requested" not in labels:
+            return False, "a fail stamp without changes-requested, so no verdict is standing; reviewing"
+        if stamped != diff_id:
+            return False, f"the standing fail covers {stamped[:12]}, this diff is {diff_id[:12]}; reviewing"
+        return True, f"the standing fail covers {diff_id[:12]}: the diff, title and body are unchanged"
+    if not before_id:
+        return False, "the newest reviewer comment is a pass stamp and no title or body was edited; reviewing"
+    if "agent-approved" not in labels:
+        return False, "a pass stamp without agent-approved, so no approval is standing; reviewing"
+    if stamped != before_id:
+        return False, (f"the standing pass covers {stamped[:12]}, the text before this edit "
+                       f"was {before_id[:12]}; reviewing")
+    return True, f"the standing pass covers {before_id[:12]}: the diff is unchanged and the edit answered no [must]"
 
 
 def run(args):
@@ -131,7 +195,7 @@ def main(argv):
         print('usage: verdict-stands <pr> <base-sha> <head-sha> >> "$GITHUB_OUTPUT"', file=sys.stderr)
         return 2
     _, number, base, head = argv
-    diff_id = ""
+    diff_id = before_id = ""
     labels, comments = [], []
     raw = run(["gh", "pr", "view", number, "--json", "title,body,labels,comments"])
     if raw is not None:
@@ -141,10 +205,14 @@ def main(argv):
             comments = pr.get("comments") or []
             diff = diff_of(base, head)
             if diff is not None:
-                diff_id = digest(diff, pr.get("title") or "", pr.get("body") or "")
+                title, body = pr.get("title") or "", pr.get("body") or ""
+                diff_id = digest(diff, title, body)
+                previous = before_edit(changes_of(os.environ.get("CHANGES")), title, body)
+                if previous is not None:
+                    before_id = digest(diff, *previous)
         except (AttributeError, KeyError, TypeError, ValueError) as err:
             print(f"verdict-stands: PR #{number} did not read: {err}", file=sys.stderr)
-    stands, why = decide(labels, comments, diff_id)
+    stands, why = decide(labels, comments, diff_id, before_id)
     print(f"verdict-stands: {why}", file=sys.stderr)
     print(f"diff_id={diff_id}")
     print(f"stands={'true' if stands else 'false'}")
