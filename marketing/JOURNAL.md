@@ -18,6 +18,21 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-18 — Editorial: the release notes named a format three versions old
+
+`CHANGELOG.md`'s summary said the bitstream is `FORMAT_VERSION` 13 and
+that versions below 13 no longer decode. The build writes 16 and
+decodes only 16 (`src/lib.rs`), so a reader of the first release's
+notes would have kept 13, 14 and 15 files expecting them to decode.
+Three format bumps (#1123, #1206, #1222) each added their own bullet
+and none touched the summary, because `tests/claims.rs` held README
+and site to the constant and skipped the changelog.
+
+Both numbers now read 16, and the same test holds them. **Rejected:
+dropping the number from the summary.** The release notes are where
+a packager looks for which files decode; the number belongs there,
+guarded, rather than nowhere.
+
 ## 2026-10-17 — Editorial: "one 16 MiB block at a time" read as a memory figure
 
 #1145. The README's streaming sentence named the block size and no

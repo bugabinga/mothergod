@@ -135,6 +135,21 @@ fn format_version_is_current_everywhere_it_is_restated() {
         site_claim, true_version,
         "site/index.html claims container format version {site_claim}, src/lib.rs's FORMAT_VERSION is {true_version}"
     );
+
+    // The release notes state the version twice: the format a release
+    // writes, and the floor below which nothing decodes. The decoder reads
+    // exactly one version, so both are the current one.
+    let changelog = read("CHANGELOG.md");
+    for marker in [
+        "Bitstream format at `FORMAT_VERSION`",
+        "Format versions below",
+    ] {
+        let changelog_claim = digits_after(&changelog, marker);
+        assert_eq!(
+            changelog_claim, true_version,
+            "CHANGELOG.md's {marker:?} claims {changelog_claim}, src/lib.rs's FORMAT_VERSION is {true_version}"
+        );
+    }
 }
 
 #[test]
