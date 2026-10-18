@@ -12,14 +12,14 @@ const linesDriver = `
 import json, sys
 sys.path.insert(0, sys.argv[1])
 import trend
-recent, prior, gates = (json.loads(a) for a in sys.argv[2:5])
-print("\\n".join(trend.lines(recent, prior, gates)))
+recent, prior, gates, walls = (json.loads(a) for a in sys.argv[2:6])
+print("\\n".join(trend.lines(recent, prior, gates, walls)))
 `;
 
-function block(recent, prior, gates = []) {
+function block(recent, prior, gates = [], walls = []) {
   const r = spawnSync(
     "python3",
-    ["-c", linesDriver, scriptsDir, JSON.stringify(recent), JSON.stringify(prior), JSON.stringify(gates)],
+    ["-c", linesDriver, scriptsDir, ...[recent, prior, gates, walls].map((a) => JSON.stringify(a))],
     { encoding: "utf8" },
   );
   assert.equal(r.status, 0, r.stderr || r.stdout);
@@ -223,6 +223,37 @@ test("an error appearing prints, and so does one vanishing", () => {
   assert.match(back, /errors 0 vs 1 .*moved: errors$/m);
 });
 
+// #1241: a denials row that moved names the walls under it, so the reader
+// goes to the guard instead of a shrug. The unit is runs that hit each
+// wall, because a run's reasons are distinct triples (walls.py); a seat
+// whose artifacts predate the reasons record (#1110) prints the absence,
+// and a seat whose denials held still prints no walls line at all.
+test("a denials row that moved names its walls, most runs first, its own role's only", () => {
+  const out = block(
+    runs("reviewer", 10, 12, { denials: 6 }),
+    runs("reviewer", 10, 12, { denials: 1 }),
+    [],
+    [
+      { role: "reviewer", wall: "deny-unpushed-work", runs: 3 },
+      { role: "bdfl", wall: "rule", runs: 1 },
+      { role: "reviewer", wall: "deny-em-dash", runs: 9 },
+    ],
+  );
+  assert.match(
+    out,
+    /^ {4}reviewer .*moved: denials\n {16}walls, runs that hit each: deny-em-dash 9, deny-unpushed-work 3$/m,
+  );
+  assert.doesNotMatch(out, /rule/);
+});
+
+test("a denials row that moved with no wall recorded says so; a steady one prints no walls line", () => {
+  const moved = block(runs("reviewer", 10, 12, { denials: 6 }), runs("reviewer", 10, 12, { denials: 1 }));
+  assert.match(moved, /^ {4}reviewer .*moved: denials\n {16}walls: none recorded/m);
+  const steady = block(runs("reviewer", 10, 14, { denials: 2 }), runs("reviewer", 10, 9, { denials: 2 }));
+  assert.match(steady, /moved: turns_p50$/m);
+  assert.doesNotMatch(steady, /walls/);
+});
+
 const reportDriver = `
 import json, sys
 from datetime import datetime, timezone
@@ -234,7 +265,7 @@ def query(sql, params=()):
     calls.append([sql, list(params)])
     if mode == "unreadable":
         raise d1.Unreadable("HTTP 500: edge")
-    if "FROM guard" in sql:
+    if "FROM guard" in sql or "FROM walls" in sql:
         return []
     row = lambda at: {"role": "bdfl", "at": at, "measured": 1, "turns": 10, "out_tokens": 1, "denials": 0, "error": 0, "cost_usd": 1}
     return [row("2026-10-04T12:00:00Z")] * 4 + [row("2026-10-04T11:59:59Z")]
@@ -248,14 +279,16 @@ function reportWith(mode) {
   return r.stdout;
 }
 
-test("report asks two weeks of sessions and one of gates, and splits at the week boundary inclusive", () => {
+test("report asks two weeks of sessions and one of gates and walls, and splits at the week boundary inclusive", () => {
   const out = reportWith("rows");
   const calls = JSON.parse(out.trim().split("\n").pop());
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.match(calls[0][0], /FROM sessions WHERE at >= \?/);
   assert.deepEqual(calls[0][1], ["2026-09-27T12:00:00Z"]);
   assert.match(calls[1][0], /FROM guard WHERE at >= \?/);
   assert.deepEqual(calls[1][1], ["2026-10-04T12:00:00Z"]);
+  assert.match(calls[2][0], /FROM walls w JOIN sessions s ON .* WHERE s\.at >= \? GROUP BY s\.role, w\.wall$/);
+  assert.deepEqual(calls[2][1], ["2026-10-04T12:00:00Z"]);
   // Four rows at the boundary instant are this week's, the one before it is prior's.
   assert.match(out, /^ {4}bdfl {8}runs 4 vs 1 .*moved: runs$/m);
 });

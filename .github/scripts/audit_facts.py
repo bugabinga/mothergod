@@ -16,7 +16,8 @@ archive, now when the run itself is writing.
 
 The allowance table's rows (#891 slice 2) come from the same metadata by
 `allowance_rows`, so the two writers that share `row` share them too; the
-tools table's rows (#891 slice 5) by `tools_rows`, the same way.
+tools table's rows (#891 slice 5) by `tools_rows`, and the walls table's
+(#1241) by `walls_rows`, the same way.
 """
 
 import collections
@@ -250,14 +251,79 @@ def tools_rows(meta):
     return rows
 
 
-def statements(values, readings, tool_rows):
+# The walls table's row: one wall one run hit, the guard or harness rule
+# that refused a tool (#1241). `at` and `role` are the session's, joined
+# on (run_id, attempt), never repeated here.
+WALLS_COLUMNS = ("run_id", "attempt", "tool", "wall")
+# A run's reasons are distinct triples, a handful at most; past MAX_WALLS
+# the artifact is not a run's. Chunked under the bind cap like the tools.
+MAX_WALLS = 100
+WALLS_PER_STATEMENT = MAX_BOUND_PARAMETERS // len(WALLS_COLUMNS)
+# A wall's name is a hook's file name or the harness's decision type, both
+# fixed vocabulary; a longer one is not a name and is cut, never stored.
+WALL_NAME_CAP = 64
+
+
+def walls_insert(rows):
+    values = f"({', '.join('?' * len(WALLS_COLUMNS))})"
+    return (f"INSERT OR REPLACE INTO walls ({', '.join(WALLS_COLUMNS)}) "
+            f"VALUES {', '.join([values] * len(rows))}")
+
+
+def walls_statements(rows):
+    """(sql, params) per statement, each binding at most MAX_BOUND_PARAMETERS."""
+    for start in range(0, len(rows), WALLS_PER_STATEMENT):
+        chunk = rows[start:start + WALLS_PER_STATEMENT]
+        yield walls_insert(chunk), [v for r in chunk for v in r]
+
+
+def wall_of(entry):
+    """(tool, wall) for one reasons entry, or None for one of another shape.
+
+    A hook-path denial's reason is `hook: line` (walls.py), the hook being
+    the wall; a denial the harness decided itself carries its
+    decision_reason_type (mode, rule) as `type`, which is the wall. Fixed
+    vocabulary both ways, so the name is an identifier, never the model's
+    text, and the keys-only rule for model prose (ADR-0019) holds.
+    """
+    if not isinstance(entry, dict):
+        return None
+    tool, kind, why = entry.get("tool"), entry.get("type"), entry.get("reason")
+    if not all(isinstance(v, str) for v in (tool, kind, why)) or not tool:
+        return None
+    wall = why.split(":", 1)[0].strip() if kind == "hook" else kind
+    return (tool, wall[:WALL_NAME_CAP]) if wall else None
+
+
+def walls_rows(meta):
+    """One row per wall the run hit, sorted, from `permission_denials.reasons`.
+
+    Rows exist only where the reasons record does (#1110): an older
+    artifact counts its denials and names no wall, and gets no row, the
+    absence the tools table keeps for an artifact before #946. An entry of
+    another shape is skipped, not raised on: a skipped entry loses one
+    row and invents nothing, where a tools count of the wrong shape would
+    have invented a zero.
+    """
+    run_id = as_int(meta.get("run_id"))
+    tele = meta.get("telemetry") if isinstance(meta.get("telemetry"), dict) else {}
+    refused = tele.get("permission_denials")
+    reasons = refused.get("reasons") if isinstance(refused, dict) else None
+    if run_id is None or not isinstance(reasons, list):
+        return []
+    attempt = as_int(meta.get("run_attempt")) or 1
+    hits = {(run_id, attempt) + named for named in map(wall_of, reasons) if named}
+    return sorted(hits)[:MAX_WALLS]
+
+
+def statements(values, readings, tool_rows, wall_rows):
     """Every write of one run's rows as (sql, params), the session row LAST.
 
     `sessions backfill` walks the artifacts whose (run_id, attempt) the
     sessions table lacks, so a session row present is the mark that the
-    run's allowance and tools rows are in. Written last, a derived write
-    that fails leaves the run absent and the next walk writes all three
-    from the artifact; written first, as before #1102, the miss was one
+    run's allowance, tools and walls rows are in. Written last, a derived
+    write that fails leaves the run absent and the next walk writes all
+    four from the artifact; written first, as before #1102, the miss was one
     warning and then a gap for good, past the artifact's 90 days with
     nothing left to repair it from. Both writers, session-row.py live and
     backfill from the archive, take their order from here and nowhere else.
@@ -265,6 +331,7 @@ def statements(values, readings, tool_rows):
     if readings:
         yield allowance_insert(readings), [v for r in readings for v in r]
     yield from tools_statements(tool_rows)
+    yield from walls_statements(wall_rows)
     yield INSERT, list(values)
 
 

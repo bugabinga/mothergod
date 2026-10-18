@@ -199,8 +199,8 @@ def backfill(repo, since, rebuild=False):
     Oldest first, as `archive` lists them, so a walk that dies midway has
     written what the 90-day expiry was about to take. Idempotent: a second
     run finds every row present and downloads nothing. Each artifact's
-    allowance readings and tool counts are written before its session row,
-    from the same download, in audit_facts.statements' order; the census
+    allowance readings, tool counts and walls are written before its
+    session row, from the same download, in audit_facts.statements' order; the census
     stays on sessions, because a run that reported no reading has no
     allowance row to count, and because the session row, written last,
     marks its derived rows in: a write that fails mid-artifact leaves the
@@ -235,6 +235,7 @@ def backfill(repo, since, rebuild=False):
             values = audit_facts.row(read.meta, read.sizes.get)
             readings = audit_facts.allowance_rows(read.meta)
             tool_rows = audit_facts.tools_rows(read.meta)
+            wall_rows = audit_facts.walls_rows(read.meta)
         except Exception as error:  # noqa: BLE001, the invariant above
             unreadable.append(f"{read.artifact.name}: metadata has a malformed field "
                               f"({type(error).__name__}: {error})")
@@ -242,7 +243,7 @@ def backfill(repo, since, rebuild=False):
         if values[0] is None:
             unreadable.append(f"{read.artifact.name}: metadata carries no run_id")
             continue
-        for sql, params in audit_facts.statements(values, readings, tool_rows):
+        for sql, params in audit_facts.statements(values, readings, tool_rows, wall_rows):
             d1.query(sql, params)
         keys[read.artifact.name] = (values[0], values[1])
         written += 1

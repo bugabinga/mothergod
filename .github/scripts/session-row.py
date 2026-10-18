@@ -8,11 +8,11 @@ identifiers only, through audit_facts.row(), the one whitelist every reader
 of an artifact shares; no prose reaches the table (ADR-0019). The same row
 written from the archive is `sessions backfill`.
 
-The run's allowance readings (#891 slice 2) and tool counts (slice 5) are
-written before the session row, in audit_facts.statements' order, the one
+The run's allowance readings (#891 slice 2), tool counts (slice 5) and
+walls (#1241) are written before the session row, in audit_facts.statements' order, the one
 `sessions backfill` writes from the archive too: a derived write that fails
 leaves the run absent from `sessions`, and the Sunday walk rewrites all
-three from the artifact (#1102). A reading or count the metadata cannot
+four from the artifact (#1102). A reading or count the metadata cannot
 yield is a `::warning::` and that table alone stays empty, because the walk
 would raise on the same field and has nothing to heal.
 
@@ -31,7 +31,7 @@ import sys
 from datetime import datetime, timezone
 
 import d1
-from audit_facts import allowance_rows, row, statements, tools_rows
+from audit_facts import allowance_rows, row, statements, tools_rows, walls_rows
 
 
 def size_in(audit_dir):
@@ -55,8 +55,8 @@ def derive(label, rows):
 
 
 def write(audit_dir):
-    """Write the run's allowance readings, tool counts and row, in that
-    order; print the status line.
+    """Write the run's allowance readings, tool counts, walls and row, in
+    that order; print the status line.
 
     Raises on anything that stops the row: a missing or malformed
     metadata.json, a field row() cannot turn into a number, a database that
@@ -72,10 +72,12 @@ def write(audit_dir):
         raise ValueError("metadata carries no run_id")
     readings = derive("allowance", lambda: allowance_rows(meta))
     tool_rows = derive("tools", lambda: tools_rows(meta))
-    for sql, params in statements(values, readings, tool_rows):
+    wall_rows = derive("walls", lambda: walls_rows(meta))
+    for sql, params in statements(values, readings, tool_rows, wall_rows):
         d1.query(sql, params)
     suffix = ", allowance " + " ".join(r[2] for r in readings) if readings else ""
     suffix += f", tools {len(tool_rows)}" if tool_rows else ""
+    suffix += f", walls {len(wall_rows)}" if wall_rows else ""
     print(f"session-row: wrote run {values[0]} attempt {values[1]} for {values[3]}{suffix}")
 
 

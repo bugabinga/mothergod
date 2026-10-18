@@ -33,6 +33,12 @@ The guard table (#891 slice 3) holds the wakes that never became
 sessions, so "skipped" is read there and only for this week: its first
 row is 2026-10-11, and a prior week of zeros would read as every seat
 newly throttled.
+
+A denials row that moved names the walls under it (#1241): the walls
+table holds which guard or harness rule refused each run, and a trend
+row that said only "denials 23 vs 4" left the reader one action, a
+shrug. The unit is runs that hit the wall, because a run's reasons are
+distinct triples (walls.py), never a count of denials.
 """
 
 import statistics
@@ -127,8 +133,19 @@ def fmt(value):
     return "-" if value is None else f"{value:.1f}"
 
 
-def lines(recent_rows, prior_rows, gate_rows):
-    """The block's lines, from two weeks of session rows and this week's gate rows."""
+def walls_line(hits):
+    """The line under a denials row that moved: each wall with the runs that
+    hit it, most first, or the absence; never nothing, because a moved row
+    with no line reads as a wall nobody recorded rather than none hit."""
+    if not hits:
+        return "walls: none recorded"
+    ordered = sorted(hits, key=lambda h: (-h[1], h[0]))
+    return "walls, runs that hit each: " + ", ".join(f"{wall} {runs}" for wall, runs in ordered)
+
+
+def lines(recent_rows, prior_rows, gate_rows, wall_rows):
+    """The block's lines, from two weeks of session rows and this week's
+    gate rows and wall hits."""
     new = {s["role"]: s for s in summarize_roles(recent_rows)}
     old = {s["role"]: s for s in summarize_roles(prior_rows)}
     held = {}
@@ -136,6 +153,9 @@ def lines(recent_rows, prior_rows, gate_rows):
         if g.get("decision") in HELD:
             role = g.get("role") or "?"
             held[role] = held.get(role, 0) + 1
+    hits = {}
+    for w in wall_rows:
+        hits.setdefault(w.get("role") or "?", []).append((w.get("wall") or "?", w.get("runs") or 0))
     roles = sorted(set(new) | set(old) | set(held),
                    key=lambda r: (-new.get(r, EMPTY)["runs"], r))
     if not roles:
@@ -159,6 +179,8 @@ def lines(recent_rows, prior_rows, gate_rows):
             f"skipped {skips} of {a['runs'] + skips}   "
             f"moved: {', '.join(tripped)}"
         )
+        if "denials" in tripped:
+            rows.append(f"    {'':<11} {walls_line(hits.get(role, []))}")
     if not rows:
         return [f"trend: quiet, {len(quiet)} roles within thresholds, 7d vs the prior 7d (trend.py)"]
     head = ["trend, 7d vs the prior 7d, per role, the rows past a threshold in trend.py:"]
@@ -177,10 +199,13 @@ def report(now=None, query=None):
         rows = query("SELECT role, at, measured, turns, out_tokens, denials, error, "
                      "cost_usd, writes FROM sessions WHERE at >= ?", [prior_from])
         gates = query("SELECT role, decision FROM guard WHERE at >= ?", [recent_from])
+        walls = query("SELECT s.role, w.wall, COUNT(DISTINCT w.run_id) AS runs "
+                      "FROM walls w JOIN sessions s ON s.run_id = w.run_id AND s.attempt = w.attempt "
+                      "WHERE s.at >= ? GROUP BY s.role, w.wall", [recent_from])
     except d1.Unreadable as error:
         print(f"trend: UNREADABLE ({error}); the session table could not be read, "
               "so no week is compared.")
         return
     recent = [r for r in rows if (r.get("at") or "") >= recent_from]
     prior = [r for r in rows if (r.get("at") or "") < recent_from]
-    print("\n".join(lines(recent, prior, gates)))
+    print("\n".join(lines(recent, prior, gates, walls)))

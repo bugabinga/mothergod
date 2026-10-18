@@ -718,3 +718,43 @@ test("a flag without its value prints the usage line and exits 2", async () => {
     assert.match(r.out, /^Usage: sessions /m);
   }
 });
+
+// #1241: the walls ride the same download as the session row, before it;
+// an artifact whose denials carry no reasons record gets no walls row.
+test("backfill writes an artifact's walls beside its row, none for an artifact without reasons", async () => {
+  const base_meta = metadata(100, "bdfl");
+  const meta = {
+    ...base_meta,
+    telemetry: {
+      ...base_meta.telemetry,
+      permission_denials: {
+        count: 2,
+        tools: ["Bash"],
+        by_tool: { Bash: 2 },
+        reasons: [
+          { tool: "Bash", type: "hook", reason: "deny-em-dash: denied" },
+          { tool: "Bash", type: "mode", reason: "plan mode" },
+        ],
+      },
+    },
+  };
+  const files = (m) => ({ "metadata.json": JSON.stringify(m), "input-prompt.md": "p", "output-response.md": "r" });
+  const gh = stubGh(listing.slice(0, 2), { 1: files(meta), 2: files(metadata(200, "reviewer")) });
+  await withStub([keys([]), d1([]), d1([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 5);
+    assert.equal(
+      seen[1].body.sql,
+      "INSERT OR REPLACE INTO walls (run_id, attempt, tool, wall) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+    );
+    assert.deepEqual(seen[1].body.params, [100, 1, "Bash", "deny-em-dash", 100, 1, "Bash", "mode"]);
+    assert.match(seen[2].body.sql, /^INSERT OR REPLACE INTO sessions /); // the bdfl row, after its walls
+    assert.match(seen[3].body.sql, /^INSERT OR REPLACE INTO sessions /); // the reviewer artifact: a row, no walls
+    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+  });
+});
