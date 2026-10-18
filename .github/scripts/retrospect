@@ -238,11 +238,13 @@ def hollow(repo, run_id):
     "phantom": GitHub raised the run and scheduled no job at all (#553), so
     there is no step, no session and no log; agent-alarm learned this class
     first and this is the same test, a job count of zero.
-    "script": the run had jobs and none of them a Claude step, a workflow
+    "script": every job ran steps and none of them a Claude step, a workflow
     with no session by design (agent-alarm, agent-model-intel); `state`
     grades it as a check, so the retrospect only counts it.
-    None: a real session that died before its audit step; it stays in the
-    no-artifact list, where the URL is the story.
+    None: a real session that died before its audit step, or a job that got
+    no runner and so has no steps to tell its workflow by (agent-deslop run
+    37370936150, cancelled, `steps: []`); it stays in the no-artifact list,
+    where the URL is the story.
 
     Asked only about a run with no artifact, so an ordinary window spends no
     extra call.
@@ -250,15 +252,17 @@ def hollow(repo, run_id):
     jobs = json.loads(
         gh(
             "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
-            "--jq", '{jobs: (.jobs | length), claude: [.jobs[].steps[] '
+            "--jq", '{jobs: (.jobs | length), '
+                    'stepless: ([.jobs[] | select(.steps | length == 0)] | length), '
+                    'claude: [.jobs[].steps[] '
                     '| select(.name | test("claude-code-action")) | .conclusion]}',
         )
     )
     if jobs["jobs"] == 0:
         return "phantom"
-    if not jobs["claude"]:
+    if not jobs["claude"] and jobs["stepless"] == 0:
         return "script"
-    if all(c == "skipped" for c in jobs["claude"]):
+    if jobs["claude"] and all(c == "skipped" for c in jobs["claude"]):
         return "skipped"
     return None
 

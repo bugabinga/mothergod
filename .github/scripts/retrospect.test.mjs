@@ -265,10 +265,10 @@ loader.exec_module(mod)
 print(json.dumps(mod.hollow("o/r", 1)))
 `;
 
-function hollow(conclusions, jobs = 1) {
+function hollow(conclusions, jobs = 1, stepless = 0) {
   const dir = mkdtempSync(join(tmpdir(), "retrospect-gh-"));
   // gh api ... --jq already applied the selector; the stub prints its answer.
-  const answer = JSON.stringify({ jobs, claude: conclusions });
+  const answer = JSON.stringify({ jobs, stepless, claude: conclusions });
   writeFileSync(join(dir, "gh"), `#!/bin/sh\necho '${answer}'\n`);
   chmodSync(join(dir, "gh"), 0o755);
   const proc = spawnSync("python3", ["-c", skipDriver, scriptsDir], {
@@ -289,6 +289,10 @@ test("a session that died is not skipped, whatever its post step says", () => {
 
 test("a run with jobs and no Claude step is a script workflow, not a death", () => {
   assert.equal(hollow([], 3), "script");
+});
+
+test("run 37370936150: a job with no steps tells nothing, so it stays a death", () => {
+  assert.equal(hollow([], 1, 1), null);
 });
 
 test("run 35205833235: zero jobs is a phantom, not a death with a log to read", () => {
