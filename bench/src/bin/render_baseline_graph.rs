@@ -1,8 +1,7 @@
 //! Regenerates `docs/benchmarks/baseline.svg` and `docs/benchmarks/baseline.md`
 //! from `bench/baseline.json` (`mothergod_bench::graph`, `research/JOURNAL.md`
-//! S2-D1's remaining "progress-graph rendering" line). Not yet wired into a
-//! scheduled workflow — that needs `GH_ADMIN_TOKEN` (`research/JOURNAL.md`
-//! S2-A35); run by hand until it is: `cargo run
+//! S2-D1's remaining "progress-graph rendering" line). Run on a runner by
+//! `.github/workflows/bench-report.yml`, or by hand: `cargo run
 //! -p mothergod-bench --release --bin render_baseline_graph`, then `cargo x
 //! fmt -- docs/benchmarks/baseline.svg` to pick up the canonical SVG
 //! indentation `cargo x fmt --check` expects (this binary doesn't reproduce

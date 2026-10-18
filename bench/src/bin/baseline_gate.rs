@@ -214,9 +214,12 @@ fn check(measured: &Snapshot) -> ExitCode {
             eprintln!("  {reason}");
         }
         eprintln!(
-            "regenerate the stale report(s) in this PR:\n\
+            "regenerate the stale report(s) in this PR, locally:\n\
              \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report\n\
-             \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report"
+             \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report\n\
+             or on a runner, silesia_report being about 35 minutes (docs/benchmarks/README.md):\n\
+             \x20 GH_TOKEN=\"$GH_WORKFLOW_TOKEN\" gh workflow run bench-report.yml --ref <branch>\n\
+             \x20 gh run download <run-id> -n bench-report"
         );
     }
 

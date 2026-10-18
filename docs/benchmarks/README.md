@@ -60,7 +60,7 @@ On a runner, all four at once, because the Silesia pass outgrew a
 session's 30 minute foreground command (#1324):
 
 ```
-gh workflow run bench-report.yml --ref <branch>
+GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref <branch>
 ```
 
 `.github/workflows/bench-report.yml` runs `baseline_gate -- write` and
