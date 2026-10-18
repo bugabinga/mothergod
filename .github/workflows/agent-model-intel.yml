@@ -140,7 +140,6 @@ jobs:
 
           gh label create model-intel --repo "$GITHUB_REPOSITORY" \
             --color 1D76DB --description "Model and effort evidence for ADR-0031/0021 decisions" 2>/dev/null || true
-          gh label create triage --repo "$GITHUB_REPOSITORY" --color FBCA04 2>/dev/null || true
 
           # State versus event (ADR-0023). Run economics is STATE: the body
           # is rewritten every week and the issue's own edit history is the
@@ -167,7 +166,7 @@ jobs:
           fi
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "📊 Model intel: capability and run economics" \
-            --label model-intel --label triage \
+            --label model-intel \
             --body-file "$out/body.md"
           echo "Opened a new model-intel issue."
 

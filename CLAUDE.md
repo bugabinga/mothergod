@@ -242,7 +242,7 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 ## Issue/PR conventions
 
 - Branches: `claude/<short-slug>`. Conventional-ish commit subjects, imperative.
-- Labels agents maintain: `triage`, `bug`, `enhancement`, `research`,
+- Labels agents maintain: `bug`, `enhancement`, `research`,
   `marketing`, `blocked-on-human`, `agents-paused`, `ops-log`, `ledger`,
   `ready-to-ship`, `agent-approved`, `changes-requested`. The last two are the reviewer's
   verdict, typed: exactly one of them, never both, flipped by
