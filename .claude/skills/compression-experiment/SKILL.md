@@ -27,7 +27,12 @@ This skill coordinates one run without copying those rules.
      --jq ".jobs[] | select(.name == \"$GITHUB_JOB\") | .started_at"
    ```
 
-   No `GITHUB_RUN_ID` means no job timeout and no mark.
+   The match holds while `agent-heartbeat.yml` gives the job no `name:`:
+   `GITHUB_JOB` is the job's key and the API's `.name` its display name.
+   No `GITHUB_RUN_ID`, an empty line, or a non-zero exit is no mark, and
+   no mark means no loop: a single candidate (experiment route, steps 4
+   to 8 once) or the capability route, with the empty read named under
+   Environmental failure.
 
 ## Capability route
 
