@@ -1,0 +1,70 @@
+# Regenerates the published benchmark files on a runner and hands them back
+# as an artifact, because the measurement outgrew a session (#1324):
+# `silesia_report` times `mothergod` one file at a time (#1321, #1325), about
+# 35 minutes for 212 MB, and a session's foreground command caps at 30 with
+# background execution denied (CLAUDE.md rule 12). Every output-changing
+# codec PR needs the pass since the ratio gate pins compress() bytes
+# (#1254): the baseline moves, both finals reports embed its fingerprint
+# (#327), and `baseline_gate check` demands them regenerated in the same
+# PR. By hand three times in the week before this file (#1214, #1228,
+# #1248), the last time the cap allowed it.
+#
+# Dispatch it on the ref that needs the pass, a PR branch or main:
+#   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref <branch>
+# It never pushes: a push on the workflow token to a PR branch holds every
+# run it triggers at GitHub's approval gate (GOVERNANCE "Push identity"),
+# and a script-only workflow carries no other credential. The seat that
+# dispatched downloads at its next wake, the one shape rule 12 allows for
+# a run no session can wait on:
+#   gh run download <run-id> -n bench-report
+# then copies the five files in and pushes with push-branch on its own
+# token. The run id comes from
+#   gh run list --workflow bench-report.yml --branch <branch>
+name: bench-report
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One pass per ref; a re-dispatch supersedes the one still running.
+concurrency:
+  group: bench-report-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-24.04
+    # Release build about 3 minutes, baseline and graph 2, Canterbury 3,
+    # Silesia about 40 at ~0.1 MB/s serial; the runner CPU moves it by a
+    # quarter either way (JOURNAL S2-A121).
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      # The four commands `docs/benchmarks/README.md` "Regenerating" lists,
+      # in its order: the baseline first, because both finals reports embed
+      # its fingerprint.
+      - run: cargo run -p mothergod-bench --release --bin baseline_gate -- write
+      - run: cargo run -p mothergod-bench --release --bin render_baseline_graph
+      - run: cargo x fmt -- docs/benchmarks/baseline.svg
+      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report
+      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report
+      - run: git --no-pager diff --stat >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bench-report
+          path: |
+            bench/baseline.json
+            docs/benchmarks/baseline.md
+            docs/benchmarks/baseline.svg
+            docs/benchmarks/canterbury.md
+            docs/benchmarks/silesia.md
+          retention-days: 14
+          if-no-files-found: error
