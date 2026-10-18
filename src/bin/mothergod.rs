@@ -251,30 +251,36 @@ fn convert(direction: Direction, operand: Option<&Path>, options: Options) -> Ex
         existing,
         verbose,
     } = options;
-    let target = match operand.filter(|_| !to_stdout) {
-        Some(source) => match output_name(direction, source) {
-            Ok(out_path) => Some((source, out_path)),
-            Err(err) => return fail(&err),
-        },
-        None => None,
-    };
+    let source = operand.filter(|_| !to_stdout);
     let input_name = input_name(operand);
-    if matches!(direction, Direction::Compress) {
-        let reader = match open_input(operand) {
-            Ok(reader) => reader,
-            Err(err) => return fail(&err),
-        };
-        return write_to(target, existing, |sink, dest_name| {
-            compress_into(reader, sink, dest_name, &input_name, verbose)
-        });
+    match direction {
+        Direction::Compress => {
+            let target = source.map(|source| (source, add_suffix(source)));
+            let reader = match open_input(operand) {
+                Ok(reader) => reader,
+                Err(err) => return fail(&err),
+            };
+            write_to(target, existing, |sink, dest_name| {
+                compress_into(reader, sink, dest_name, &input_name, verbose)
+            })
+        }
+        Direction::Decompress => {
+            let target = match source {
+                Some(source) => match strip_suffix(source) {
+                    Ok(out_path) => Some((source, out_path)),
+                    Err(err) => return fail(&err),
+                },
+                None => None,
+            };
+            let input = match read_input(operand) {
+                Ok(input) => input,
+                Err(err) => return fail(&err),
+            };
+            write_to(target, existing, |sink, dest_name| {
+                decompress_into(&input, sink, dest_name, &input_name, verbose)
+            })
+        }
     }
-    let input = match read_input(operand) {
-        Ok(input) => input,
-        Err(err) => return fail(&err),
-    };
-    write_to(target, existing, |sink, dest_name| {
-        decompress_into(&input, sink, dest_name, &input_name, verbose)
-    })
 }
 
 /// Runs `write` against stdout when `target` is `None`, else against the new
@@ -290,14 +296,6 @@ fn write_to(
         Some((source, out_path)) => write_new_file_with(&out_path, source, existing, |file| {
             write(file, &out_path.display().to_string())
         }),
-    }
-}
-
-/// The file `direction` writes for `source`.
-fn output_name(direction: Direction, source: &Path) -> Result<PathBuf, String> {
-    match direction {
-        Direction::Compress => Ok(add_suffix(source)),
-        Direction::Decompress => strip_suffix(source),
     }
 }
 
