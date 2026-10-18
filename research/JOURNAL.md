@@ -3683,6 +3683,9 @@ record.
   (issue #908); the last tree carrying them is cfdc5e2 ("deslop: collapse
   sse.rs's Sse/LogitSse twins onto one Table (#944)"), so a reopening
   starts from `git show cfdc5e2:src/tans.rs`. The measurements above stay.
+  Encode's own second was profiled for #1309: S2-A121 (stage split, the
+  published figure is a contended wall-clock), S2-A122 (independent blocks,
+  measured, not wired).
 - S2-A103 | REJECTED | Re-checked S2-A80/it129's explicit-SIMD blocker
   against an external claim (operator-forwarded article, "State of SIMD
   in Rust 2026") that Rust 1.87 stabilized calling platform intrinsics
@@ -8741,3 +8744,76 @@ record.
   pool's other CPU models; encode on them either. `bench/baseline.json` is
   not regenerated, a new baseline retires both finals reports' fingerprint,
   which needs their network fetches. `research/progress.jsonl` it195, it196.
+- S2-A121 | REJECTED | Issue #1309 step 1, where the encode second goes.
+  Hypothesis, from the issue: the published 0.022 MB/s `dickens` encode is the
+  single-thread rate, and context-mixing pricing inside the optimal-parse DP is
+  one of its stages. Neither holds. Journal only, no codec change. | Measured,
+  release build, AMD EPYC 7763, 4 logical cores, CI runner (not the EPYC 9V45
+  of `docs/benchmarks/silesia.md`), `dickens` from the `bench/corpus.toml` pin
+  (10,192,446 bytes, download hash checked), one process, one thread, timers
+  around the public stages (`select::pick`, `filters::*::encode`,
+  `lz::parse_greedy`, `lz::parse_optimal`, `codec::compressed_len_with_window`;
+  coder is the last minus `parse_optimal`) and, in a scratch copy of the crate,
+  a match-finder-only loop (`BinaryTreeMatchFinder::insert_and_find` at every
+  position, one round, times three). The real CLI, `mothergod -v` on the whole
+  file: 97.9 s wall, 0.104 MB/s, 563 MB peak RSS, 2,956,893 bytes. The report's
+  0.022 is 4.7 times slower. `pick` shortlists four candidates on `dickens`,
+  each a full trial encode (seconds, one process):
+
+  | candidate | greedy seed | `parse_optimal` | coder | trial | payload bytes |
+  |---|---|---|---|---|---|
+  | Identity | 5.7 | 19.9 | 4.1 | 24.0 | 2,958,554 |
+  | Delta(1) | 4.8 | 17.7 | 1.8 | 19.6 | 3,321,231 |
+  | Reverse | 5.6 | 19.2 | 3.4 | 22.7 | 2,956,881 |
+  | Transpose(96) | 8.5 | 23.2 | 11.1 | 34.3 | 6,193,757 |
+
+  Trials sum to 100.6 s, `pick` and the filters to under 0.1 s. A trial's cost
+  per MiB grows with size, Identity at 0.25, 1, 4 and 9.7 MiB: 1.5, 2.0, 2.2,
+  2.5 s/MiB. Inside `parse_optimal` (Identity, two further full-file runs):
+  the greedy seed is 29%, the three DP rounds 71%, of which the binary-tree
+  match finder is 77 to 81% (56 to 58% of `parse_optimal`) and the rest
+  (relax, tally, reconstruct) 13 to 16%. | Mechanism: three findings.
+  (1) The published figure is not a single-thread rate: `reference::measure_all`
+  times each file's `compress` wall-clock while 12 threads and the reference
+  compressors share 4 cores, so it carries oversubscription and memory
+  contention, a different amount per file (`mozilla`: 0.071 published against
+  0.107 isolated, S2-A122). (2) The DP prices from `PriceCounts`, a tally of
+  the previous round's tokens, so no context-mixing model runs inside it; the
+  mixing is the coder, 9 to 32% of a trial. The time is the optimal parse, 83%
+  of the Identity trial, 47% of it the match finder and 24% the greedy seed
+  that only primes round one's prices. (3) `encode` multiplies all of it by the
+  trial count: `Delta(1)` loses by 12% and `Transpose(96)` by 109% on
+  `dickens` and are 54% of the time, `Reverse` wins by 0.06%. The critical path
+  of the four independent trials is the 34.3 s `Transpose` trial, so running
+  them in parallel is bounded at 2.9 times before contention (bound from the
+  table, not measured). | **Not measured:** a sampling profile (`perf` is
+  refused on the runner, `perf_event_paranoid` is 4, so the split is timers and
+  one differential loop), anything inside the match finder, other corpora, the
+  EPYC 9V45, decode. Absolute times moved 25% between processes on the same
+  input (`parse_optimal` 19.9 s, then 24.5 and 25.0 s), so read the shares, not
+  the seconds. Leads, unrun: parallel trials, and skipping a trial a cheap
+  probe shows losing, an encoder-only trade. `research/progress.jsonl` it197.
+- S2-A122 | ACCEPTED | Issue #1309 step 2, independent blocks. Hypothesis:
+  four worker threads over the 16 MiB blocks `compress` already cuts
+  (S2-A116) cut encode wall-clock on a file of several blocks, bytes
+  unchanged, bounded by the longest block. Journal only, nothing wired. |
+  Measured, release build, AMD EPYC 7763, 4 logical cores, CI runner, `mozilla`
+  from the `bench/corpus.toml` pin (51,220,480 bytes: blocks of 16,777,216,
+  16,777,216, 16,777,216 and 888,832), a scratch harness calling
+  `mothergod::compress` per block under `std::thread::scope`, workers taking
+  the next block off an atomic counter. One thread: 480.1 s wall, 0.107 MB/s,
+  blocks 199.8, 146.8, 127.6 and 6.0 s. Four threads: 238.3 s wall, 0.215 MB/s,
+  blocks 238.3, 180.0, 147.1 and 8.6 s, 2.02 times faster. Output is
+  15,488,699 bytes both ways with equal FNV-1a hashes, and `decompress` of the
+  four-thread stream equals the input. | Mechanism: blocks are independent
+  frames with fresh models, so the bytes are identical by construction and the
+  wall-clock floor is the longest block, 199.8 s, a ceiling of 2.40 times here.
+  The run reached 2.02: block 0 took 19% longer under four-way load and total
+  CPU went from 467 to 596 s (+28%), memory-bound work contending for the
+  shared cache and bandwidth. Only a file over 16 MiB gains; of Silesia that
+  is `samba`, `nci`, `webster` and `mozilla`, and `dickens` is one block.
+  | **Not measured:** peak RSS with four blocks live (one block is about 700
+  MB by `BLOCK_LEN`'s doc, so about 2.8 GB, unmeasured), the other three large
+  files, fewer cores, parallel decode, a worker-count policy. Wiring is a
+  design with a memory bound against `memory-check`'s 1 GiB streaming figure,
+  not a slice. `research/progress.jsonl` it198.
