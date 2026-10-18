@@ -965,35 +965,78 @@ enum Move {
 /// cache that move leaves behind (`cache`) — carried alongside `dp`/
 /// `parent` because later positions' rep candidates need to know it
 /// without re-deriving it from the whole path so far.
+///
+/// `parent` is one entry per position, because [`reconstruct`] walks it
+/// backward from the end. `dp` and `cache` are rings of `ring_len` entries:
+/// no move reaches more than [`MAX_MATCH_LEN`] past the position being
+/// expanded, and a position's price and cache are final once it is
+/// expanded, so [`Self::retire`] frees its slot for the position
+/// `ring_len` ahead. That is 12 bytes per position in `parent` where the
+/// three arrays held 32 (`research/JOURNAL.md` S2-A123).
 struct DpState {
     dp: Vec<f64>,
     parent: Vec<Option<Move>>,
     cache: Vec<RepCache>,
+    /// `ring_len - 1`; `ring_len` is a power of two, so `position & mask`
+    /// is the slot.
+    mask: usize,
 }
 
+/// [`DpState`]'s ring length for an input long enough to need it: the
+/// smallest power of two above [`MAX_MATCH_LEN`], so a move's target never
+/// lands on the slot of the position it starts from.
+const RING_LEN: usize = (MAX_MATCH_LEN + 1).next_power_of_two();
+
 impl DpState {
-    fn new(n: usize) -> Self {
-        let mut dp = vec![f64::INFINITY; n + 1];
+    /// State for an `n`-byte input, rings capped at `ring_cap` (a power of
+    /// two above [`MAX_MATCH_LEN`]; [`RING_LEN`] outside tests). The ring
+    /// holds all `n + 1` positions when that is under the cap, so a short
+    /// input never reuses a slot.
+    fn new(n: usize, ring_cap: usize) -> Self {
+        let ring_len = (n + 1).next_power_of_two().min(ring_cap);
+        let mut dp = vec![f64::INFINITY; ring_len];
         dp[0] = 0.0;
         Self {
             dp,
             parent: vec![None; n + 1],
-            cache: vec![RepCache::initial(); n + 1],
+            cache: vec![RepCache::initial(); ring_len],
+            mask: ring_len - 1,
         }
+    }
+
+    /// Cheapest price known to reach `position`, which must be no more than
+    /// [`MAX_MATCH_LEN`] past the last position [`Self::retire`] saw.
+    fn price_at(&self, position: usize) -> f64 {
+        self.dp[position & self.mask]
+    }
+
+    /// The repeat-offset cache of the path [`Self::price_at`] prices.
+    fn cache_at(&self, position: usize) -> RepCache {
+        self.cache[position & self.mask]
+    }
+
+    /// Frees `position`'s slot for the position `ring_len` ahead. Called
+    /// once `position` is expanded, after which nothing reads it again.
+    /// Only the price resets: the cache is read only at a position whose
+    /// price is finite, and the first [`Self::relax`] into a slot
+    /// overwrites the stale cache.
+    fn retire(&mut self, position: usize) {
+        self.dp[position & self.mask] = f64::INFINITY;
     }
 
     /// Records reaching `target` via `mv` with total price `cost`, if
     /// that beats the best price already known for `target`.
     fn relax(&mut self, cost: f64, target: usize, mv: Move, new_cache: RepCache) {
-        if cost < self.dp[target] {
-            self.dp[target] = cost;
+        let slot = target & self.mask;
+        if cost < self.dp[slot] {
+            self.dp[slot] = cost;
             self.parent[target] = Some(mv);
-            self.cache[target] = new_cache;
+            self.cache[slot] = new_cache;
         }
     }
 
     /// [`Self::relax`] for a [`Token::Rep`] candidate of `len` at `slot`,
-    /// starting from position `i` with base price `base` (`self.dp[i]`,
+    /// starting from position `i` with base price `base` (`self.price_at(i)`,
     /// passed in rather than re-read so callers can loop over several
     /// candidate lengths without re-borrowing `self` immutably each time).
     fn relax_rep(
@@ -1123,12 +1166,27 @@ impl DpState {
 /// ceiling too, until a window past it is wired behind its own
 /// `FORMAT_VERSION` bump.
 fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
+    dp_round_with_ring(data, prices, window, RING_LEN)
+}
+
+/// [`dp_round`] with [`DpState`]'s ring cap a parameter, so a test can
+/// compare the wrapped ring against one that never wraps.
+fn dp_round_with_ring(
+    data: &[u8],
+    prices: &PriceTable,
+    window: usize,
+    ring_cap: usize,
+) -> Vec<Token> {
+    debug_assert!(
+        ring_cap.is_power_of_two() && ring_cap > MAX_MATCH_LEN,
+        "a ring of MAX_MATCH_LEN or fewer lets a move's target land on its own start's slot"
+    );
     debug_assert!(
         window < (1usize << OFFSET_BUCKETS),
         "window's bucket must stay within OFFSET_BUCKETS or offset pricing indexes out of range"
     );
     let n = data.len();
-    let mut state = DpState::new(n);
+    let mut state = DpState::new(n, ring_cap);
     let mut finder = BinaryTreeMatchFinder::new(data, window);
     // Per-slot carry for `relax_rep_candidates`' match_len scan (issue
     // #179): unlike parse_greedy, which jumps ahead by a chosen token's
@@ -1145,8 +1203,8 @@ fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
         // Every `dp[i]` is finite: `dp[0]` is 0, the literal transition
         // below reaches `i + 1` from a finite `dp[i]`, and `prices` are
         // finite (every count starts at 1).
-        let base = state.dp[i];
-        let reps = state.cache[i];
+        let base = state.price_at(i);
+        let reps = state.cache_at(i);
 
         let prev_byte = if i > 0 { Some(data[i - 1]) } else { None };
         let literal_cost =
@@ -1158,6 +1216,7 @@ fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
         if let Some((match_len_here, distance_here)) = match_candidate {
             state.relax_match_candidate(prices, i, base, reps, match_len_here, distance_here);
         }
+        state.retire(i);
     }
 
     reconstruct(data, &state.parent)

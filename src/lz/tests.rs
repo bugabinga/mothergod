@@ -875,3 +875,33 @@ fn parse_greedy_defers_a_short_match_to_a_longer_one_a_byte_later() {
     assert_eq!(*a, Token::Literal(b'a'), "{tokens:?}");
     assert!(matches!(tail, Token::Match { len: 10, .. }), "{tokens:?}");
 }
+
+#[test]
+fn dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks() {
+    // `DpState`'s `dp` and `cache` are rings; the parse must not depend on
+    // their length (JOURNAL S2-A123). Over twice RING_LEN, with a run past
+    // MAX_MATCH_LEN, repeats at several distances and noise between them,
+    // every slot is reused and a move's target wraps past its start's slot.
+    let mut noise = crate::test_support::Xorshift32::new(0xD9);
+    let mut data = Vec::new();
+    let template: Vec<u8> = (0u8..64).collect();
+    while data.len() < 2 * RING_LEN + 5000 {
+        data.extend(
+            noise
+                .by_ref()
+                .take(300)
+                .map(|s| u8::try_from(s % 251).unwrap()),
+        );
+        data.extend_from_slice(&template);
+        data.extend(std::iter::repeat_n(b'r', MAX_MATCH_LEN / 2));
+        let from = data.len() - 400;
+        data.extend_from_within(from..from + 200);
+    }
+    let seed = parse_greedy(&data);
+    let prices = PriceCounts::tally(&seed, &data).prices(seed.len());
+    let wrapped = dp_round_with_ring(&data, &prices, WINDOW, RING_LEN);
+    assert_eq!(replay(&wrapped), data, "roundtrip mismatch");
+    let unwrapped =
+        dp_round_with_ring(&data, &prices, WINDOW, (data.len() + 1).next_power_of_two());
+    assert_eq!(wrapped, unwrapped);
+}

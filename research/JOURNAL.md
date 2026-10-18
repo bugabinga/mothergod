@@ -8817,3 +8817,40 @@ record.
   files, fewer cores, parallel decode, a worker-count policy. Wiring is a
   design with a memory bound against `memory-check`'s 1 GiB streaming figure,
   not a slice. `research/progress.jsonl` it198.
+- S2-A123 | ACCEPTED | Issue #1341, the parse state budget. Hypothesis: the
+  DP pass's `dp` and `cache` arrays need only the positions a move can still
+  reach, so they are rings of 64 Ki entries instead of one entry per input
+  byte, and the parse's per-position state falls from 41 bytes to 21, encoder
+  only, bytes unchanged. | Budget before, by array: `dp` 8, `parent` 12,
+  `cache` 12, match finder `left` 4 and `right` 4, input 1, 41 in all
+  (`size_of::<Option<Move>>()` and `size_of::<RepCache>()` are 12; 16 MiB of
+  zeros peaked at 691 MB in S2-A116, 41.2 per byte). After: `parent` 12,
+  `left` 4, `right` 4, input 1, 21, plus 1.25 MiB of rings. Measured,
+  release build, AMD EPYC 7763 4 logical cores runner, `mothergod -c` on
+  four files, peak RSS from `/usr/bin/time`, before and after on the same
+  runner: 16 MiB of zeros 700,144 -> 372,404 KiB (-47%), 40.0 -> 41.3 s;
+  Silesia `dickens` at the `bench/corpus.toml` pin (10,192,446 bytes, sha256
+  checked) 562,400 -> 363,728 KiB (-35%), 86.8 -> 86.2 s; the repository's
+  own markdown and Rust text, 1,588,876 bytes (not a published corpus),
+  92,756 -> 67,992 KiB, 10.7 -> 10.5 s; that text twice around 300,000
+  random bytes, 3,477,752 bytes, 195,624 -> 128,096 KiB, 24.8 -> 25.5 s.
+  Output is byte identical on all four (`cmp`), and `dickens` decodes back to
+  the input. | Mechanism: no move reaches more than `MAX_MATCH_LEN` (65,535)
+  past the position being expanded and a position's price and cache are
+  final once it is expanded, so a ring of 65,536 slots, each price reset as
+  its position retires, holds every live entry; the cache needs no reset
+  because it is read only at a finite price and the first relax into a slot
+  overwrites it. `parent` stays full length because `reconstruct` walks it
+  backward. The loop reads the same entries in the same order, only the slot
+  differs, and encode time moved between -1.9% and +3.3% on the four files
+  above (a reviewer rerun of the zeros: +4.1%). The
+  output is pinned by a test, `dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks`:
+  over 2 x RING_LEN with a run past `MAX_MATCH_LEN`, the wrapped ring's
+  tokens equal a ring that never wraps, and the test fails with the price
+  reset in `retire` deleted. | **Not measured:** four blocks live (about 4 x 372 MB, 1.5 GB
+  against the 1 GiB `memory-check` pins, is #1322's to bound), `parent`
+  packed from 12 to 8 bytes (a manual encoding of `Option<Move>`, 4 bytes per
+  position, untried), what the 2.3 bytes per position above the 21 on
+  zeros are (input copies in the filter trials are the first suspect, not
+  isolated), the 256 MiB `memory-check` peak (946 MB in S2-A116, weekly
+  lane). `research/progress.jsonl` it199.
