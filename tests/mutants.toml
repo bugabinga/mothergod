@@ -32,7 +32,10 @@ exclude_re = [
   # Equivalent: every renorm branch ends in `(x << 1) & MASK`, so the
   # preceding `-= HALF` vs `+= HALF` differ by 2*HALF = TOP, which the
   # mask erases; QUARTER likewise (the shift doubles the 2*QUARTER gap
-  # to TOP). Proof in #391. 10 mutants.
+  # to TOP). The decoder's `-= offset` is HALF or QUARTER, so the same
+  # argument covers it. Proof in #391. 7 mutants: 4 in the encoder, 3
+  # in the decoder (it was 10 until #991 folded six `-= HALF` and
+  # `-= QUARTER` lines into three `-= offset`).
   "replace -= with \\+= in Encoder::encode$",
   "replace -= with \\+= in Decoder<'a>::decode$",
 
