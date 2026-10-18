@@ -46,7 +46,11 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-      actions: read
+      # write, not read: `gh workflow run bench-report.yml --ref <branch>`
+      # on GH_WORKFLOW_TOKEN is how a codec PR gets its finals reports
+      # regenerated, a pass no session can run in the foreground
+      # (bench-report.yml's header, #1324).
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

@@ -56,6 +56,20 @@ so this takes about half an hour for ~200 MB; only the untimed
 gzip/zstd/xz runs share cores. Also by hand, re-run under the same
 conditions as `finals_report`.
 
+On a runner, all four at once, because the Silesia pass outgrew a
+session's 30 minute foreground command (#1324):
+
+```
+gh workflow run bench-report.yml --ref <branch>
+```
+
+`.github/workflows/bench-report.yml` runs `baseline_gate -- write` and
+then the commands above, in that order on that ref, and uploads the five
+files they write as the `bench-report` artifact, kept 14 days; it pushes
+nothing. Download with
+`gh run download <run-id> -n bench-report`, copy the files in, and push
+them with the rest of the change.
+
 Both `canterbury.md` and `silesia.md` embed the `bench/baseline.json`
 fingerprint (`<!-- baseline-fingerprint: ... -->`) they were generated
 against; `baseline_gate check` (the required `ratio` job) fails when a
