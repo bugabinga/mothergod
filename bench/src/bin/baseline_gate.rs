@@ -35,12 +35,19 @@
 //! both measure [`mothergod_bench::baseline::cases`] only, never a sealed
 //! case.
 //!
+//! `spread` is the table #1184 validates on (issue #1186): it reads CI log
+//! text on stdin and prints per-CPU runs, min, median, max and range of the
+//! cost lines `speed` prints, so a claim about the pool's spread cites a
+//! command a reviewer reruns. The line format is owned by
+//! [`mothergod_bench::speed::cost_line`], which the parser sits beside.
+//!
 //! Usage: `cargo run -p mothergod-bench --release --bin baseline_gate --
 //! check` (the default) or `... -- write` (after a codec change, to
 //! record the shrunk and new cases; a grown case is held at its old value,
 //! so an accepted loosening is a hand edit of the JSON) or `... -- speed` (print the
 //! decode cost, to commit as `BASELINE_DECODE_COST` after an accepted
-//! slowdown) or `... -- measure` or `... -- delta <file>`.
+//! slowdown) or `... -- measure` or `... -- delta <file>` or
+//! `... -- spread < logs` (see [`SPREAD_USAGE`]).
 
 use mothergod_bench::baseline::{
     Snapshot, deltas, fingerprint, format_baseline, hold_at_best, mean_delta, measure_all,
@@ -52,6 +59,7 @@ use mothergod_bench::repo_root;
 use mothergod_bench::speed;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -94,8 +102,11 @@ fn measure_decode_cost() -> f64 {
     let (seconds, bytes) = speed::decode_seconds(&mothergod_bench::baseline::cases());
     let cost = speed::decode_cost(seconds, bytes, speed::calibration_seconds());
     println!(
-        "bench speed gate: decode cost {cost:.2} calibration steps/byte on {}",
-        cpu_model().unwrap_or_else(|| "unknown CPU".to_string())
+        "{}",
+        speed::cost_line(
+            cost,
+            &cpu_model().unwrap_or_else(|| "unknown CPU".to_string())
+        )
     );
     cost
 }
@@ -277,9 +288,43 @@ fn write(measured: &Snapshot) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `spread`'s `--help`: what it reads and the pipe that fetches it.
+const SPREAD_USAGE: &str = "\
+usage: baseline_gate spread < logs
+
+Reads CI log text on stdin, keeps the `bench speed gate: decode cost ...` lines
+`baseline_gate speed` prints, and prints runs, min, median, max and range
+((max - min) / min) of the cost per CPU model.
+
+The `ratio` job's log of every `ci.yml` push run on main:
+
+  gh run list --workflow ci.yml --branch main --event push --limit 200 \\
+      --json databaseId --jq '.[].databaseId' \\
+    | while read -r id; do gh run view \"$id\" --log; done \\
+    | cargo run -p mothergod-bench --release --bin baseline_gate -- spread
+";
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "check".to_string());
+    if mode == "spread" {
+        if matches!(args.next().as_deref(), Some("--help" | "-h")) {
+            print!("{SPREAD_USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        let mut log = String::new();
+        if let Err(err) = std::io::stdin().read_to_string(&mut log) {
+            eprintln!("failed to read stdin: {err}");
+            return ExitCode::FAILURE;
+        }
+        let rows = speed::spread(&log);
+        if rows.is_empty() {
+            eprintln!("no `bench speed gate: decode cost` line on stdin; see `spread --help`");
+            return ExitCode::FAILURE;
+        }
+        print!("{}", speed::format_spread(&rows));
+        return ExitCode::SUCCESS;
+    }
     if mode == "speed" {
         measure_decode_cost();
         return ExitCode::SUCCESS;
@@ -313,7 +358,7 @@ fn main() -> ExitCode {
         "check" => check(&measured),
         other => {
             eprintln!(
-                "unknown mode {other:?}, expected \"check\", \"write\", \"speed\", \"measure\" or \"delta\""
+                "unknown mode {other:?}, expected \"check\", \"write\", \"speed\", \"spread\", \"measure\" or \"delta\""
             );
             ExitCode::FAILURE
         }

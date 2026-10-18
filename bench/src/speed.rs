@@ -19,6 +19,8 @@
 //! constant and saying why.
 
 use crate::baseline::Case;
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -53,7 +55,8 @@ pub const BASELINE_DECODE_COST: f64 = 120.0;
 /// under about 0.11 would redden main on the Intel Xeon Platinum 8370C
 /// alone. The margin stays wide until the calibration kernel is replaced by
 /// one closer to the decoder's access pattern; `baseline_gate` prints the
-/// CPU beside every cost.
+/// CPU beside every cost, and `baseline_gate -- spread` rebuilds the
+/// per-CPU table above from the logs of those runs.
 pub const MAX_SLOWDOWN: f64 = 0.25;
 
 /// Wall time of a fixed dependent-load kernel: `CALIBRATION_STEPS` steps of
@@ -144,6 +147,119 @@ pub fn slowdown(baseline: f64, measured: f64, max_slowdown: f64) -> Option<Slowd
     (measured > baseline * (1.0 + max_slowdown)).then_some(Slowdown { baseline, measured })
 }
 
+/// Text before the cost in the line [`cost_line`] prints and
+/// [`parse_cost_line`] reads; the two share these constants so the format
+/// has one owner.
+const COST_LINE_PREFIX: &str = "bench speed gate: decode cost ";
+
+/// Text between the cost and the CPU name in a cost line.
+const COST_LINE_INFIX: &str = " calibration steps/byte on ";
+
+/// The line `baseline_gate` prints once per run: `cost` in calibration steps
+/// per byte, then the CPU it was measured on.
+#[must_use]
+pub fn cost_line(cost: f64, cpu: &str) -> String {
+    format!("{COST_LINE_PREFIX}{cost:.2}{COST_LINE_INFIX}{cpu}")
+}
+
+/// The cost and CPU of a [`cost_line`] inside `line`, or `None` when `line`
+/// holds none. A CI log prefixes each line with a job, step and timestamp,
+/// so the line is found anywhere in `line`, not only at its start. The
+/// slowdown report shares the prefix and carries an arrow where the cost
+/// ends, so it does not match.
+#[must_use]
+pub fn parse_cost_line(line: &str) -> Option<(f64, &str)> {
+    let (_, rest) = line.split_once(COST_LINE_PREFIX)?;
+    let (cost, cpu) = rest.split_once(COST_LINE_INFIX)?;
+    let cost: f64 = cost.parse().ok().filter(|cost: &f64| cost.is_finite())?;
+    let cpu = cpu.trim();
+    (!cpu.is_empty()).then_some((cost, cpu))
+}
+
+/// One CPU model's costs over many runs, from [`spread`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpuSpread {
+    /// The CPU model name as the cost lines print it.
+    pub cpu: String,
+    /// Number of cost lines for this CPU.
+    pub runs: usize,
+    /// Smallest cost.
+    pub min: f64,
+    /// Median cost; the mean of the two middle costs when `runs` is even.
+    pub median: f64,
+    /// Largest cost.
+    pub max: f64,
+}
+
+impl CpuSpread {
+    /// The within-model range as a fraction of the smallest cost, the
+    /// figure #1184 finishes on.
+    #[must_use]
+    pub fn range(&self) -> f64 {
+        self.max / self.min - 1.0
+    }
+}
+
+/// Groups every [`parse_cost_line`] match in `text` by CPU, sorted by CPU
+/// name.
+#[must_use]
+pub fn spread(text: &str) -> Vec<CpuSpread> {
+    let mut by_cpu: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    for (cost, cpu) in text.lines().filter_map(parse_cost_line) {
+        by_cpu.entry(cpu).or_default().push(cost);
+    }
+    by_cpu
+        .into_iter()
+        .map(|(cpu, mut costs)| {
+            costs.sort_by(f64::total_cmp);
+            let runs = costs.len();
+            let median = if runs % 2 == 1 {
+                costs[runs / 2]
+            } else {
+                f64::midpoint(costs[runs / 2 - 1], costs[runs / 2])
+            };
+            CpuSpread {
+                cpu: cpu.to_string(),
+                runs,
+                min: costs[0],
+                median,
+                max: costs[runs - 1],
+            }
+        })
+        .collect()
+}
+
+/// The [`spread`] table as text, one line per CPU after a header, columns
+/// aligned.
+#[must_use]
+pub fn format_spread(rows: &[CpuSpread]) -> String {
+    let width = rows
+        .iter()
+        .map(|row| row.cpu.len())
+        .fold("cpu".len(), usize::max);
+    let mut out = String::new();
+    writeln!(
+        out,
+        "{:<width$}  {:>5}  {:>8}  {:>8}  {:>8}  {:>7}",
+        "cpu", "runs", "min", "median", "max", "range"
+    )
+    .expect("writing to a String never fails");
+    for row in rows {
+        writeln!(
+            out,
+            "{:<width$}  {:>5}  {:>8.2}  {:>8.2}  {:>8.2}  {:>+6.1}%",
+            row.cpu,
+            row.runs,
+            row.min,
+            row.median,
+            row.max,
+            row.range() * 100.0
+        )
+        .expect("writing to a String never fails");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +300,77 @@ mod tests {
         let (seconds, bytes) = decode_seconds(&cases);
         assert_eq!(bytes, 1000);
         assert!(seconds > 0.0);
+    }
+
+    #[test]
+    fn a_cost_line_parses_back_to_its_cost_and_cpu() {
+        let line = cost_line(132.28, "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz");
+        assert_eq!(
+            parse_cost_line(&line),
+            Some((132.28, "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz"))
+        );
+    }
+
+    #[test]
+    fn a_ci_log_prefix_and_other_lines_do_not_hide_or_fake_a_cost_line() {
+        let logged = "ratio\tRun gate\t2026-10-08T12:00:00.0000000Z \
+                      bench speed gate: decode cost 99.50 calibration steps/byte on AMD EPYC 7763\r";
+        assert_eq!(parse_cost_line(logged), Some((99.5, "AMD EPYC 7763")));
+        for other in [
+            "bench speed gate: decode cost 120.00 -> 130.00 calibration steps/byte (+8.3%, margin 25%)",
+            "bench speed gate: decode cost NaN calibration steps/byte on AMD EPYC 7763",
+            "bench speed gate: decode cost 99.50 calibration steps/byte on ",
+            "bench baseline gate: 12 cases, no regression",
+        ] {
+            assert_eq!(parse_cost_line(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn spread_averages_the_two_middle_costs_of_an_even_run_count() {
+        // The pairs #1186 names: the lower middle value, 132.17 and 111.64,
+        // was the wrong median.
+        let log = "\
+bench speed gate: decode cost 132.95 calibration steps/byte on Xeon 8370C
+bench speed gate: decode cost 132.17 calibration steps/byte on Xeon 8370C
+bench speed gate: decode cost 111.80 calibration steps/byte on EPYC 9V45
+bench speed gate: decode cost 130.39 calibration steps/byte on Xeon 8370C
+bench speed gate: decode cost 132.39 calibration steps/byte on Xeon 8370C
+bench speed gate: decode cost 111.64 calibration steps/byte on EPYC 9V45
+unrelated line
+";
+        let rows = spread(log);
+        assert_eq!(rows.len(), 2);
+        let (epyc, xeon) = (&rows[0], &rows[1]);
+        assert_eq!((epyc.cpu.as_str(), epyc.runs), ("EPYC 9V45", 2));
+        assert!((epyc.median - 111.72).abs() < 1e-9, "{}", epyc.median);
+        assert_eq!((xeon.cpu.as_str(), xeon.runs), ("Xeon 8370C", 4));
+        assert!((xeon.median - 132.28).abs() < 1e-9, "{}", xeon.median);
+        assert_eq!((xeon.min, xeon.max), (130.39, 132.95));
+        assert!((xeon.range() - (132.95 / 130.39 - 1.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn spread_takes_the_middle_cost_of_an_odd_run_count() {
+        let log = "\
+bench speed gate: decode cost 3.00 calibration steps/byte on A
+bench speed gate: decode cost 1.00 calibration steps/byte on A
+bench speed gate: decode cost 2.00 calibration steps/byte on A
+";
+        assert_eq!(spread(log)[0].median, 2.0);
+        assert_eq!(spread("no cost lines here\n").len(), 0);
+    }
+
+    #[test]
+    fn format_spread_prints_one_aligned_line_per_cpu() {
+        let rows = spread(
+            "bench speed gate: decode cost 100.00 calibration steps/byte on AMD EPYC 7763\n\
+             bench speed gate: decode cost 125.00 calibration steps/byte on AMD EPYC 7763\n",
+        );
+        assert_eq!(
+            format_spread(&rows),
+            "cpu             runs       min    median       max    range\n\
+             AMD EPYC 7763      2    100.00    112.50    125.00   +25.0%\n"
+        );
     }
 }
