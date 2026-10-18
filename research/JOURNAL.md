@@ -8837,14 +8837,17 @@ record.
   Output is byte identical on all four (`cmp`), and `dickens` decodes back to
   the input. | Mechanism: no move reaches more than `MAX_MATCH_LEN` (65,535)
   past the position being expanded and a position's price and cache are
-  final once it is expanded, so a ring of 65,536 slots, each reset as its
-  position retires, holds every live entry; `parent` stays full length
-  because `reconstruct` walks it backward. Time is unchanged because the
-  loop reads the same entries in the same order, only the slot differs. The
+  final once it is expanded, so a ring of 65,536 slots, each price reset as
+  its position retires, holds every live entry; the cache needs no reset
+  because it is read only at a finite price and the first relax into a slot
+  overwrites it. `parent` stays full length because `reconstruct` walks it
+  backward. The loop reads the same entries in the same order, only the slot
+  differs, and encode time moved between -1.9% and +3.3% on the four files
+  above (a reviewer rerun of the zeros: +4.1%). The
   output is pinned by a test, `dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks`:
   over 2 x RING_LEN with a run past `MAX_MATCH_LEN`, the wrapped ring's
-  tokens equal a ring that never wraps, and the test fails with `retire`
-  emptied. | **Not measured:** four blocks live (about 4 x 372 MB, 1.5 GB
+  tokens equal a ring that never wraps, and the test fails with the price
+  reset in `retire` deleted. | **Not measured:** four blocks live (about 4 x 372 MB, 1.5 GB
   against the 1 GiB `memory-check` pins, is #1322's to bound), `parent`
   packed from 12 to 8 bytes (a manual encoding of `Option<Move>`, 4 bytes per
   position, untried), what the 2.3 bytes per position above the 21 on

@@ -970,7 +970,7 @@ enum Move {
 /// backward from the end. `dp` and `cache` are rings of `ring_len` entries:
 /// no move reaches more than [`MAX_MATCH_LEN`] past the position being
 /// expanded, and a position's price and cache are final once it is
-/// expanded, so [`Self::retire`] resets its slot for the position
+/// expanded, so [`Self::retire`] frees its slot for the position
 /// `ring_len` ahead. That is 12 bytes per position in `parent` where the
 /// three arrays held 32 (`research/JOURNAL.md` S2-A123).
 struct DpState {
@@ -1017,10 +1017,11 @@ impl DpState {
 
     /// Frees `position`'s slot for the position `ring_len` ahead. Called
     /// once `position` is expanded, after which nothing reads it again.
+    /// Only the price resets: the cache is read only at a position whose
+    /// price is finite, and the first [`Self::relax`] into a slot
+    /// overwrites the stale cache.
     fn retire(&mut self, position: usize) {
-        let slot = position & self.mask;
-        self.dp[slot] = f64::INFINITY;
-        self.cache[slot] = RepCache::initial();
+        self.dp[position & self.mask] = f64::INFINITY;
     }
 
     /// Records reaching `target` via `mv` with total price `cost`, if
