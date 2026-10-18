@@ -108,6 +108,11 @@ lacks:
   - a run that died before its audit step, which has no artifact. Reported by
     name with its URL, because that is the one case where `gh run view --log`
     still earns its cost.
+  - a run of an agent workflow that has no Claude step by design (agent-alarm,
+    agent-model-intel): a check, graded green or red by `state`, never a
+    session. Counted on the last line, never listed: model-intel's Sunday run
+    printed as a death with a log to read every week (39115453807,
+    2026-10-18), and the log had nothing behind it to judge.
   - a phantom: a run GitHub raised and never gave a job, concluding `failure`
     in seconds with nothing behind it (#553; a bot-attributed pull_request
     event does this now and then, 33233523131 and 35205833235). Counted on
@@ -129,7 +134,7 @@ a gap costs the finding.
 
 Liveness: the last line always prints how many sessions were read, how many
 opened with an announcement, how many runs were skipped, had no artifact,
-were phantoms or still pending, how many artifacts and comments the window
+were script workflows, phantoms or still pending, how many artifacts and comments the window
 held and how many comments bypassed gh-comment, and the anchor, so a
 retrospect that returns nothing forever is distinguishable from a quiet
 hour.
@@ -233,8 +238,12 @@ def hollow(repo, run_id):
     "phantom": GitHub raised the run and scheduled no job at all (#553), so
     there is no step, no session and no log; agent-alarm learned this class
     first and this is the same test, a job count of zero.
-    None: a real session that died before its audit step, or a run with no
-    Claude step by design (agent-alarm); both stay in the no-artifact list,
+    "script": every job ran steps and none of them a Claude step, a workflow
+    with no session by design (agent-alarm, agent-model-intel); `state`
+    grades it as a check, so the retrospect only counts it.
+    None: a real session that died before its audit step, or a job that got
+    no runner and so has no steps to tell its workflow by (agent-deslop run
+    37370936150, cancelled, `steps: []`); it stays in the no-artifact list,
     where the URL is the story.
 
     Asked only about a run with no artifact, so an ordinary window spends no
@@ -243,12 +252,16 @@ def hollow(repo, run_id):
     jobs = json.loads(
         gh(
             "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
-            "--jq", '{jobs: (.jobs | length), claude: [.jobs[].steps[] '
+            "--jq", '{jobs: (.jobs | length), '
+                    'stepless: ([.jobs[] | select(.steps | length == 0)] | length), '
+                    'claude: [.jobs[].steps[] '
                     '| select(.name | test("claude-code-action")) | .conclusion]}',
         )
     )
     if jobs["jobs"] == 0:
         return "phantom"
+    if not jobs["claude"] and jobs["stepless"] == 0:
+        return "script"
     if jobs["claude"] and all(c == "skipped" for c in jobs["claude"]):
         return "skipped"
     return None
@@ -604,7 +617,8 @@ def main():
     window.sort(key=lambda r: r["updatedAt"])
 
     workspace = tempfile.mkdtemp(prefix="retrospect-")
-    read, skipped, openers, orphans, phantoms, samples, spent = 0, 0, 0, [], [], [], []
+    read, skipped, scripts, openers = 0, 0, 0, 0
+    orphans, phantoms, samples, spent = [], [], [], []
     try:
         for run in window:
             directory = download(run["databaseId"], workspace)
@@ -612,6 +626,8 @@ def main():
                 why = hollow(repo, run["databaseId"])
                 if why == "skipped":
                     skipped += 1
+                elif why == "script":
+                    scripts += 1
                 elif why == "phantom":
                     phantoms.append(run)
                 else:
@@ -660,7 +676,7 @@ def main():
     trend_report()
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
-        f"| no-artifact {len(orphans)} | phantom {len(phantoms)} | pending {len(pending)} "
+        f"| no-artifact {len(orphans)} | script {scripts} | phantom {len(phantoms)} | pending {len(pending)} "
         f"| artifacts {artifacts} | comments {len(comments)} | bypassed {bypassed} | since {anchor}"
     )
 
