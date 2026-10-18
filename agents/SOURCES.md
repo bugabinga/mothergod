@@ -154,8 +154,8 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   stays. The translations and the auto-mode classifier page do not
   apply: every seat runs `claude -p` under hooks, never auto mode.
   hooks re-read: `onFailure: "block"` ADOPTED on the four PreToolUse
-  deny hooks (#1310), the 2026-10-11 watch item, because the action now
-  installs CLI 2.1.296 and 2.1.295 is the floor; a command hook's
+  deny hooks (#1310, merged 2026-10-18), the 2026-10-11 watch item,
+  because the action now installs CLI 2.1.296 and 2.1.295 is the floor; a command hook's
   `timeout` defaults to 600 s, the window the field closes;
   `PermissionDenied` still fires for auto-mode denials only (now with a
   `retry` field), so #990's record stays the hooks' own job.
@@ -163,14 +163,17 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   `--disallowedTools` with a bare name removes a tool from context, the
   two levers #1307 names for the herald's 22 unused built-ins;
   `--fallback-model` rejected, the ladder with the model-limits ledger
-  does the same and records why (#110 carried fable's limit from
-  2026-10-14 20:18 to 10-15 02:00; two director runs took opus).
+  does the same and records why (the `guard` table in `sessions`:
+  fable limited on the director's 2026-10-14T20:18Z and
+  2026-10-15T00:11Z wakes, both run on opus, until #110's expiry at
+  2026-10-15 02:00).
   env-vars and settings re-read: the two timeout keys stand with the
   meaning `.claude/settings.json` relies on. skills: nothing this fleet
   lacks.
   Ladders (`agents/models.json`): reviewed, unchanged. #164's
   2026-10-11 snapshot has the same top rungs; no seat's retrospect read
-  its tier or effort wrong: the reviewer's returns were real musts
+  its tier or effort wrong (`sessions roles --since 7d` on 2026-10-18,
+  the window from 2026-10-11): the reviewer's returns were real musts
   (#1299's dead child reported as Unmeasured), the maintainer's 92 runs
   shipped three format versions at p50 22 turns, the director's 43 at
   p50 56 each shipped or surveyed. No Cloudflare work.
