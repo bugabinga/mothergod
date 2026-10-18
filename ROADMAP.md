@@ -134,73 +134,26 @@ A program, not a milestone: no checklist, because there is no state in which
 beating the field is finished. Progress reads off the Scorecard's RATIO ladder
 and `research/progress.jsonl`, never a checkbox.
 
-Work the journal's standing leads. Resolved: SSE (S1-P1), per-column
-modeling (S1-P5), more experts via a logit-domain mixer (S1-P8, JOURNAL
-S2-A102, ADR-0052, `FORMAT_VERSION` 5). Exhausted under every mechanism
-tried so far, pending a genuinely new one, not a variant (JOURNAL S2-L1):
-btultra2-class parse (S1-P2), PPM escape (S1-P3), large windows (S1-P4 —
-every pricing/gating signal since S2-R11 has failed, JOURNAL S2-R14's own
-remaining-scope note; what is left is a deliberate large-file mode, M5
-territory, not a parse heuristic). S2-A102's own remaining-scope note had
-two threads: a rate schedule keyed on something other than a step count,
-and a from-scratch GLN gating architecture. The first tried an error-EMA
-schedule and REJECTED it (JOURNAL S2-R26), which conflated a context's
-stable residual uncertainty with genuine drift; the fix S2-R26's own
-diagnosis named was tried next and ACCEPTED (JOURNAL S2-A104: a learned
-baseline instead of one shared constant), then wired into a real
-bitstream (JOURNAL S2-A105, ADR-0054, `FORMAT_VERSION` 6), closing that
-thread. The other thread, the from-scratch GLN gating architecture, was
-promoted next and tried at its smallest testable slice: per-expert
-learning-rate gating, each of the six experts' own weight stepping at a
-rate read from that expert's own prediction error instead of one shared
-per-key rate. REJECTED (JOURNAL S2-R33): train regressed by a hair even
-though both sealed cases improved, the same improving-sealed/
-regressing-train split S2-R29 and S2-R30 already hit. No standing lead
-is open: the next candidate is a literature idea or a cheap wild swing
-per the `compression-experiment` skill; what remains of the gating
-thread is deeper than a rate tweak (real gating on which expert's
-signal counts, not merely how fast one shared weight set moves) and is
-not itself a standing lead until a genuinely new mechanism for it
-exists. Picked next: a different stage than the literal mixer every
-S2-R2x/S2-R3x slice above worked. LZMA's own length coding splits match
-lengths and repeated-offset lengths into two independent tables; this
-project's shared, unconditioned length model never had that split.
-ACCEPTED (JOURNAL S2-A109): train mean -0.002514 b/B, 7 of 11 cases
-improved (`sqlite_like_records` -0.015901 the largest move), both
-sealed cases cleared the bar. Wired next (JOURNAL S2-A110, ADR-0057,
-`FORMAT_VERSION` 8): `Models::length` split into independent
-`length_match`/`length_rep` for real, closing that thread; the real
-bitstream moved less than the ideal-cost pairing predicted (train mean
--0.000727 b/B, 5 of 11 improved), S2-A110's own diagnosis being that
-the ideal-cost pass walked the raw byte stream while the real encoder
-parses the filtered one. Picked next: the same literature source's
-other split, on the offset model instead of the length model. LZMA
-also conditions a match's distance-slot coding on a coarse bucket of
-that match's own length (`len_to_pos_state`); this project's offset
-model has never been conditioned on anything. ACCEPTED (JOURNAL
-S2-A111): train mean -0.003526 b/B, 10 of 11 cases improved
-(`x86_dense_code` -0.016795 the largest move) and the eleventh flat at
-exactly 0.0, both sealed cases improved too (`access_log` -0.009795).
-Wired next (JOURNAL S2-A112, ADR-0058, `FORMAT_VERSION` 9):
-`Models::offset` split into four length-state-keyed models for real,
-closing that thread; unlike the length split, the real bitstream tracked
-the ideal-cost prediction fairly closely (train mean -0.002836 b/B,
-every one of the 11 cases improved or flat, none regressed;
-`x86_dense_code` -0.011200 against its own predicted -0.016795, same
-direction, about two-thirds the magnitude). The same specification's
-coarsest `state` axis came next: the flag symbol keyed on the previous
-token's kind (literal/match/rep-last) instead of today's two-way
-literal/copy-last split. REJECTED (JOURNAL S2-R34): train mean
--0.000876 b/B, carried by `sqlite_like_records` alone while 9 of the
-other 10 cases and sealed `access_log` regressed, because a post-rep
-position only differs from a post-match one where reps are dense.
-A different stage again: LZMA models the bits below a length's or
-distance's bucket instead of sending them raw. ACCEPTED (JOURNAL
-S2-A114), then wired for lengths only (JOURNAL S2-A115, ADR-0061,
-`FORMAT_VERSION` 10): the distance trees lost on train and stay raw.
-No standing lead is open: the next candidate is a literature idea or a
-cheap wild swing per the `compression-experiment` skill. Target: beat zstd -19 per-file on all of
-Silesia/Canterbury with real bitstreams; then xz -9e.
+The journal is the record (`research/JOURNAL.md`): what was tried, what it
+measured and how it failed live there once, under their ids, and this
+section names only the live thread, because a recital copied here drifts
+(on 2026-10-18 it still read "no standing lead is open" after three filter
+wirings had shipped under #1123 and #1222 in one week). Resolved, by id:
+SSE (S1-P1), per-column modeling (S1-P5), the logit-domain mixer (S1-P8,
+S2-A102), the learned baseline (S2-A104, S2-A105), the length split
+(S2-A109, S2-A110), the offset split (S2-A111, S2-A112), the low-bit
+length models (S2-A114, S2-A115). Exhausted under JOURNAL S2-L1, pending a
+genuinely new mechanism and not a variant: btultra2-class parse (S1-P2),
+PPM escape (S1-P3), large windows (S1-P4), per-expert rate gating
+(S2-R33), the previous-token flag state (S2-R34).
+
+Live thread: the filter bank. Base64 unwrap, reverse and reverse-then-delta
+are wired as selector kinds 4 to 6 (`FORMAT_VERSION` 14 to 16, it193 to
+it195); the per-field byte-order candidate was rejected (it196). No
+standing lead is open after it: the next candidate is a literature idea or
+a cheap wild swing per the `compression-experiment` skill, or a charter
+issue labeled research + product (ADR-0062). Target: beat zstd -19
+per-file on all of Silesia/Canterbury with real bitstreams; then xz -9e.
 
 ## M4: Production hardening ✅
 
@@ -241,15 +194,12 @@ compounds, and ahead of the programs because it has a finish line: the
 genre is finite. The scorecard's FIT line is what it moves.
 
 Items, in [milestone M8](https://github.com/bugabinga/mothergod/milestone/3):
-the CLI genre matrix, its conformance suite and the FIT publisher (#981);
-the library idiom matrix (#982); and the gaps known before any matrix
-existed, measured on 2026-10-09: a broken pipe reported as an error
-(#976), no `--version` (#977), concatenated frames dropped in silence and
-a whole-input encode (#978), no `Read`/`Write` adapter (#979), the genre's
-flag grammar absent (#983), and no BSD lane to measure the BSD third of
-"unix, bsd, win32" (#980). The matrix comes first: a gap closed before its
-row exists is a FIT number nobody can reproduce. The matrix files the
-rest, one issue per gap cluster.
+the CLI genre matrix with its conformance suite (#981) and the library
+idiom matrix (#982) landed, and every gap measured before a matrix existed
+(#976 to #979, #983) closed through them. What remains is the BSD lane
+(#980), without which "fits BSD" is a claim no run has made. A new gap is
+a row the suite flips in `tests/fit/*.txt`, then an issue; the count is on
+/status.
 
 ## M5: Speed tiers
 
@@ -261,9 +211,12 @@ own constraints: bit-decomposed coding shipped without reaching the SPEED
 floor, tANS-as-fast-path loses on bits/byte (S2-A88/S2-A90), and explicit
 SIMD is closed on the decode path permanently and elsewhere pending a
 candidate with a measured win (ADR-0053, re-checked S2-A103). Reopening
-it needs a genuinely new idea, not a variant. The one open thread: S1-A6's
-block-parallel encode/decode is correct but its scaling is unmeasured
-beyond CI's 1-core container.
+it needs a genuinely new idea, not a variant. S1-A6's block-parallel mode
+is the founding harness's, not the crate's: `src/` has no parallel path,
+and the runner now has four cores (`docs/benchmarks/` headers), so the
+first measurable slice is chartered as #1309, a profile of where the
+encode second goes, then worker threads over the CLI's independent 16 MiB
+frames.
 
 The floor is enforced as a ratchet, not as 1 MB/s on Silesia. Same-CPU
 Silesia decode snapshots (`docs/benchmarks/silesia.md`, CPU on each) fell
