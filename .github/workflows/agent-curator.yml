@@ -80,7 +80,7 @@ jobs:
             Work in priority order. A run with nothing to do is a
             good run; stop when the pass is done.
 
-            1. Triage every issue missing a triage response, newest
+            1. Triage every issue missing a triage response, oldest
                first, up to 5 this run. Triage DECIDES, it does not
                just label. Every issue you touch leaves with exactly
                one realm label AND one of three fates: closed (done
