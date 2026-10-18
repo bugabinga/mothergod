@@ -41,7 +41,7 @@ use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
 use crate::ppm::Ppm;
-use crate::sse::{LogitSse, Sse};
+use crate::sse::{LogitSse, MIN_PROBABILITY, Sse};
 
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
@@ -50,8 +50,8 @@ const EXPERTS: usize = 6;
 /// after-copy)` key.
 const WEIGHT_CONTEXTS: usize = 32;
 
-/// Byte alphabet every context bank models.
-const ALPHABET: usize = 256;
+/// Byte alphabet every context bank models: the one [`bittree`] walks.
+const ALPHABET: usize = bittree::ALPHABET;
 /// [`ALPHABET`] as a `u32`, spelled as its own literal instead of a cast
 /// so no truncation lint applies to a compile-time-obvious value.
 const ALPHABET_U32: u32 = 256;
@@ -445,8 +445,8 @@ const LOGISTIC_FLOOR_RATE: f64 = 0.002;
 /// expert's upper-half probability before [`stretch`], bounding each
 /// stretch to `ln(4095)` in magnitude, and the squashed mix before the
 /// [`Sse`] and the gradient, so a saturated mix still leaves an error to
-/// learn from. The same bound [`Sse::refine`] clamps its own output to.
-const LOGISTIC_PROBABILITY_FLOOR: f64 = 1.0 / 4096.0;
+/// learn from. [`Sse::refine`]'s own floor, [`MIN_PROBABILITY`].
+const LOGISTIC_PROBABILITY_FLOOR: f64 = MIN_PROBABILITY;
 
 /// `p` clamped to [`LOGISTIC_PROBABILITY_FLOOR`]'s range.
 fn clamp_logistic_probability(p: f64) -> f64 {
