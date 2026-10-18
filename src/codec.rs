@@ -252,28 +252,7 @@ fn bucket_bits(b: usize) -> u32 {
     u32::try_from(b).expect("bucket index is small, always fits u32")
 }
 
-/// Codes `value` (a match/rep length, or a match distance) as a
-/// [`lz::bucket`] symbol through `model`, then the residual low bits of
-/// `value` within that bucket as raw, unmodeled bits.
-fn encode_bucketed(model: &mut Model, ac: &mut Encoder, value: u32) {
-    let b = lz::bucket(value);
-    model.encode(ac, b);
-    ac.encode_bits(value, bucket_bits(b));
-}
-
-/// Inverse of [`encode_bucketed`]: decodes a bucket symbol, then the
-/// residual bits, and reconstructs `value` as `(1 << bucket) |
-/// residual_bits`. Never panics on adversarial `ac` state: `model.decode`
-/// and `ac.decode_bits` are both panic-free on any input (see their own
-/// docs), and the shift below is bounded by the same small-alphabet
-/// argument as [`encode_bucketed`].
-fn decode_bucketed(model: &mut Model, ac: &mut Decoder) -> u32 {
-    let b = model.decode(ac);
-    let bits = bucket_bits(b);
-    (1u32 << bits) | ac.decode_bits(bits)
-}
-
-/// [`ideal_cost_bits`]'s counterpart to [`encode_bucketed`]: the bucket
+/// [`ideal_cost_bits`]'s counterpart to [`EncodeSink::offset`]: the bucket
 /// symbol's modeled `-log2(p)` cost plus the residual low bits' cost, which
 /// is their count: [`crate::coder::Encoder::encode_bits`] emits them raw and
 /// unmodeled, so there is no `Model` lookup to price.
@@ -513,12 +492,13 @@ impl TokenSink for EncodeSink<'_> {
         residual.encode(self.ac, value);
     }
 
+    /// The [`lz::bucket`] symbol through the model [`offset_len_state`]
+    /// selects, then `value`'s residual low bits within that bucket as raw,
+    /// unmodeled bits.
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        encode_bucketed(
-            &mut models.offset_len[offset_len_state(len)],
-            self.ac,
-            value,
-        );
+        let b = lz::bucket(value);
+        models.offset_len[offset_len_state(len)].encode(self.ac, b);
+        self.ac.encode_bits(value, bucket_bits(b));
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
@@ -1061,7 +1041,7 @@ fn ensure_room(output_len: usize, additional: usize, declared_len: usize) -> Res
     }
 }
 
-/// Rejects a match distance past [`lz::WINDOW`]. `decode_bucketed` can
+/// Rejects a match distance past [`lz::WINDOW`]. [`decode_offset`] can
 /// return distances up to `2 * WINDOW - 1` (`OFFSET_BUCKETS`'s docs, bucket
 /// 20's residual bits), but the encoder's match finder never searches past
 /// `WINDOW`: a wider distance is adversarial, and rejecting it here, before
@@ -1150,11 +1130,17 @@ fn decode_length(models: &mut Models, ac: &mut Decoder, kind: FlagKind) -> u32 {
     residual.decode(ac, b)
 }
 
-/// Decodes a match's distance symbol through whichever of
+/// Decodes a match's distance: the bucket symbol through whichever of
 /// [`Models::offset_len`]'s [`OFFSET_LEN_STATES`] models [`offset_len_state`]
-/// of the already-decoded `len` selects. Mirrors [`EncodeSink::offset`].
+/// of the already-decoded `len` selects, then the residual bits, as
+/// `(1 << bucket) | residual_bits`, so never zero. Mirrors
+/// [`EncodeSink::offset`]. Never panics on adversarial `ac` state:
+/// `Model::decode` and `Decoder::decode_bits` are both panic-free on any
+/// input (see their own docs), and the shift is bounded by the same
+/// small-alphabet argument as [`bucket_bits`].
 fn decode_offset(models: &mut Models, ac: &mut Decoder, len: u32) -> u32 {
-    decode_bucketed(&mut models.offset_len[offset_len_state(len)], ac)
+    let bits = bucket_bits(models.offset_len[offset_len_state(len)].decode(ac));
+    (1u32 << bits) | ac.decode_bits(bits)
 }
 
 /// The shared skeleton behind [`decode`] and [`decode_to_writer`]:
@@ -1182,10 +1168,8 @@ fn decode_tokens<S: DecodeSink>(
             FlagKind::Match => {
                 let len = decode_length(models, ac, FlagKind::Match);
                 let distance = decode_offset(models, ac, len);
-                // decode_bucketed always ORs in `1 << bits`, which is >= 1
-                // regardless of the residual bits: never zero.
                 let distance =
-                    NonZeroU32::new(distance).expect("decode_bucketed's result is always >= 1");
+                    NonZeroU32::new(distance).expect("decode_offset's result is always >= 1");
                 ensure_within_window(distance)?;
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;

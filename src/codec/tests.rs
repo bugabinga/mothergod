@@ -515,7 +515,7 @@ fn ensure_room_rejects_growth_past_declared_len() {
 
 #[test]
 fn match_distance_beyond_window_is_rejected() {
-    // OFFSET_BUCKETS (21) lets decode_bucketed represent distances up
+    // OFFSET_BUCKETS (21) lets decode_offset represent distances up
     // to 2 * lz::WINDOW - 1, wider than any real encoder ever emits
     // (its match finder never searches past lz::WINDOW): a distance
     // one past the window must be rejected on its own, before
