@@ -207,18 +207,22 @@ a row the suite flips in `tests/fit/*.txt`, then an issue; the count is on
 
 ## M5: Parse engine (ADR-0074)
 
-Numbered by creation order, placed after M8 because the genre is finite
-and this is not, and ahead of M6 because the 0.1 release promises what M0
-to M4 delivered and nothing here. The Speed tiers program until
+Numbered by creation order, four items, done when the last closes
+(ADR-0047); placed after M8 because M8's finish line is nearer, and
+ahead of M6 because the 0.1 release promises what M0 to M4 delivered and
+nothing here. The Speed tiers program until
 2026-10-18, when the operator's question (when to tackle speed, ratio on
 large files and memory) got one answer because the three are one
 mechanism: the optimal parse holds about 42 bytes of state per input byte
 (`src/lib.rs`, `BLOCK_LEN`'s doc; JOURNAL S2-A116). That sets the 16 MiB
 block and its 700 MB; the block bounds the parallel encode, four live
 being about 2.8 GB against the 1 GiB `memory-check` pins, so S2-A122's
-measured 2x is unwired; and inside it the 1 MiB `lz::WINDOW` is where
-every Silesia loss to zstd -19 sits while every Canterbury file under it
-wins.
+measured 2x is unwired; and the 1 MiB `lz::WINDOW` is #1342's
+hypothesis for the Silesia losses, not a measured cause: all 12 Silesia
+files exceed it and 7 lose to zstd -19, all 11 Canterbury files sit under
+it and win; a blanket bump (JOURNAL S2-R7) and an adaptive window
+(S2-R11) are already rejected, so what remains is reach where a file has
+long-range structure, read on the finals.
 
 Items, in [milestone M5](https://github.com/bugabinga/mothergod/milestone/4),
 in order: the field measured at every level, gzip 1 to 9, zstd 1 to 22,
