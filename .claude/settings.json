@@ -20,7 +20,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-ci-background"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-ci-background",
+            "onFailure": "block"
           }
         ]
       },
@@ -29,15 +30,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-review-recompute"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-review-recompute",
+            "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-em-dash"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-em-dash",
+            "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-unpushed-work"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.github/scripts/deny-unpushed-work",
+            "onFailure": "block"
           }
         ]
       },
