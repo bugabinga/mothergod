@@ -175,10 +175,13 @@ jobs:
             You cannot push `.github/workflows/`: push-branch needs the
             admin PAT for those paths and this seat holds none
             (GOVERNANCE.md "Push identity"). Know it before designing,
-            not after: prefer the fix that needs no workflow edit, and
-            when none exists, swap the issue's realm label to
-            agent-system with a comment naming the edit, then take the
-            next item.
+            not after: prefer the fix that needs no workflow edit. When
+            none exists, the edit is its own issue, `gh-comment --new
+            --label agent-system --label ready-to-ship`, diff and
+            verification in the body, which heads the BDFL's queue; the
+            rest stays yours. An item that is only the edit swaps its
+            realm instead. A sentence in a PR body files nothing (#750,
+            #1260, #1356 each cost a round).
 
             Hard rules: at most ONE new PR per heartbeat, and you merge
             nothing but a green dependabot PR (duty 3).
