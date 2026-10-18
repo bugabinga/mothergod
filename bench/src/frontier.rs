@@ -100,17 +100,23 @@ fn mib(kib: u64) -> f64 {
 ///
 /// Ties resolve to the row better on the other axis, so equal speed picks
 /// the smaller output and equal ratio the faster encode; a remaining tie
-/// keeps the first in `field`'s order.
+/// keeps the first in `field`'s order. A row over no bytes has no ratio
+/// and is never a neighbour.
 #[must_use]
 pub fn neighbours<'a>(mothergod: &Row, field: &'a [Row]) -> Neighbours<'a> {
     let (bpb, rate) = (mothergod.bpb(), mothergod.encode_mbps());
-    let as_good = field.iter().filter(|row| row.bpb() <= bpb).max_by(|a, b| {
-        a.encode_mbps()
-            .total_cmp(&b.encode_mbps())
-            .then_with(|| b.bpb().total_cmp(&a.bpb()))
-    });
-    let as_fast = field
-        .iter()
+    let measured = || field.iter().filter(|row| row.original_len > 0);
+    // `max_by` keeps the last of equal elements and `min_by` the first, so
+    // `as_good` walks `field` backwards to keep the first as well.
+    let as_good = measured()
+        .rev()
+        .filter(|row| row.bpb() <= bpb)
+        .max_by(|a, b| {
+            a.encode_mbps()
+                .total_cmp(&b.encode_mbps())
+                .then_with(|| b.bpb().total_cmp(&a.bpb()))
+        });
+    let as_fast = measured()
         .filter(|row| row.encode_mbps() >= rate)
         .min_by(|a, b| {
             a.bpb()
@@ -266,6 +272,28 @@ mod tests {
         let n = neighbours(&mg, &field);
         assert_eq!(n.as_good.map(|r| r.label.as_str()), Some("c"));
         assert_eq!(n.as_fast.map(|r| r.label.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn a_full_tie_keeps_the_first_row_on_both_neighbours() {
+        let mg = row("mothergod", 250_000, 25.0);
+        let field = [row("first", 250_000, 25.0), row("second", 250_000, 25.0)];
+        let n = neighbours(&mg, &field);
+        assert_eq!(n.as_good.map(|r| r.label.as_str()), Some("first"));
+        assert_eq!(n.as_fast.map(|r| r.label.as_str()), Some("first"));
+    }
+
+    #[test]
+    fn a_row_over_no_bytes_is_never_a_neighbour() {
+        let mg = row("mothergod", 250_000, 25.0);
+        let field = [Row::aggregate("empty", &[])];
+        assert_eq!(
+            neighbours(&mg, &field),
+            Neighbours {
+                as_good: None,
+                as_fast: None
+            }
+        );
     }
 
     #[test]
