@@ -213,11 +213,11 @@ ahead of M6 because the 0.1 release promises what M0 to M4 delivered and
 nothing here. The Speed tiers program until
 2026-10-18, when the operator's question (when to tackle speed, ratio on
 large files and memory) got one answer because the three are one
-mechanism: the optimal parse holds about 42 bytes of state per input byte
-(`src/lib.rs`, `BLOCK_LEN`'s doc; JOURNAL S2-A116). That sets the 16 MiB
-block and its 700 MB; the block bounds the parallel encode, four live
-being about 2.8 GB against the 1 GiB `memory-check` pins, so S2-A122's
-measured 2x is unwired; and the 1 MiB `lz::WINDOW` is #1342's
+mechanism: the optimal parse holds state per input byte (21 bytes, 41
+before #1341; `src/lib.rs`, `BLOCK_LEN`'s doc; JOURNAL S2-A116, S2-A123).
+That sets the 16 MiB block and its 370 MB; the block bounds the parallel
+encode, four live being about 1.5 GB against the 1 GiB `memory-check`
+pins, so S2-A122's measured 2x is unwired; and the 1 MiB `lz::WINDOW` is #1342's
 hypothesis for the Silesia losses, not a measured cause: all 12 Silesia
 files exceed it and 7 lose to zstd -19, all 11 Canterbury files sit under
 it and win; a blanket bump (JOURNAL S2-R7) and an adaptive window

@@ -580,10 +580,26 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 }
 
 /// The input bytes one [`compress`] frame covers. The optimal parse holds
-/// about 42 bytes of state per input byte (#1094), so this sets the encoder's
-/// peak memory at roughly 700 MB whatever the input length; the ratio a
-/// block gives up by restarting its models is priced in `research/JOURNAL.md`
+/// 21 bytes of state per input byte, so this sets the encoder's peak memory
+/// at roughly 370 MB whatever the input length (#1341); the ratio a block
+/// gives up by restarting its models is priced in `research/JOURNAL.md`
 /// S2-A116.
+///
+/// The 21 bytes, by array of the DP pass (`lz::dp_round`):
+///
+/// | bytes | array | why it is that wide |
+/// |---|---|---|
+/// | 12 | `parent` | one `Option<Move>` per position: a tag, a length and a distance, walked backward by `reconstruct`, so it cannot be a ring |
+/// | 4 | match finder `left` | one `u32` tree link per position, the window's candidates |
+/// | 4 | match finder `right` | the other link |
+/// | 1 | the input | borrowed, counted because the block holds it |
+///
+/// `dp` and `cache` are rings of 64 Ki entries, 1.25 MiB whatever the
+/// block, because no move reaches more than `MAX_MATCH_LEN` past the
+/// position being expanded; they were 8 and 12 bytes per position until
+/// S2-A123. The token lists between rounds, the greedy seed's `prev` array
+/// and the models sit on top and are not per-position constants: 16 MiB of
+/// zeros peaks at 372 MB (S2-A123).
 const BLOCK_LEN: usize = 16 * 1024 * 1024;
 
 /// Compresses `input` into a self-describing stream of frames.
