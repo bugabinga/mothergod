@@ -17,9 +17,9 @@
 use crate::coder::{Decoder, Encoder};
 use crate::sse::Sse;
 
-/// Byte alphabet a cumulative table spans, matching
+/// Byte alphabet a cumulative table spans, and
 /// [`crate::literal::Literal`]'s own alphabet size.
-const ALPHABET: usize = 256;
+pub(crate) const ALPHABET: usize = 256;
 
 /// `log2(ALPHABET)`: number of binary decisions that pin down one
 /// symbol out of 256.

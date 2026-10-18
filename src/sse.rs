@@ -40,7 +40,7 @@ const LEARNING_RATE: f64 = 1.0 / 32.0;
 /// The smallest probability [`Table::refine`] returns; `1.0` minus this is
 /// the largest. Exactly `0.0` or `1.0` costs infinite bits when wrong, a
 /// claim no table fed by finite evidence may make.
-const MIN_PROBABILITY: f64 = 1.0 / 4096.0;
+pub(crate) const MIN_PROBABILITY: f64 = 1.0 / 4096.0;
 const MAX_PROBABILITY: f64 = 1.0 - MIN_PROBABILITY;
 
 /// How a calibration table spaces its `BINS` bins across `[0.0, 1.0]`:
