@@ -22,15 +22,19 @@ Verbs:
                                   with writes recorded, projected cost
     show <run-id>                 one run's row, one field per line
     migrate                       apply infra/sessions/schema.sql one statement
-                                  at a time; a column already present is
-                                  counted, not an error
-    backfill [--since 7d|DATE]    one row per archived audit artifact the table
-             [--rebuild]          lacks, `at` the artifact's creation, and its
-                                  allowance readings and tool counts beside
-                                  it; prints the census and exits non-zero
-                                  on a gap.
-                                  --rebuild walks the present rows too: how a
-                                  new derived table gets its history, once
+                                  at a time and name what the database lacked;
+                                  a column already present is skipped, not an
+                                  error
+    backfill [--since 7d|DATE]    migrate, then one row per archived audit
+             [--rebuild]          artifact the table lacks, `at` the artifact's
+                                  creation, with its allowance readings, tool
+                                  counts and walls beside it, eight runs a
+                                  call; prints the census and exits non-zero
+                                  on a gap. A statement that created a table
+                                  or added a column makes the walk whole,
+                                  present rows too: how a derived table gets
+                                  its history, no hand needed (#1355).
+                                  --rebuild forces that walk
 
 The table holds identifiers and API-authored numbers only (schema.sql names
 each column); a run's prose stays in its audit artifact for 90 days, linked
@@ -149,38 +153,60 @@ def since_of(spec, now):
 NAME = re.compile(r"^audit-[a-z-]+-(\d+)-(\d+)(?:-u\d+-r\d+)?$")
 
 
-def statements(schema):
+def statements(text):
     """The schema file's statements in file order, `--` comments stripped first.
 
     Stripped first because a comment may hold a `;` (the header's does), and
     the file has no string literal that holds `--`.
     """
-    bare = "\n".join(line.split("--", 1)[0] for line in schema.splitlines())
+    bare = "\n".join(line.split("--", 1)[0] for line in text.splitlines())
     return [s.strip() for s in bare.split(";") if s.strip()]
 
 
-def migrate(schema):
-    """Apply the schema one statement at a time; returns (applied, present).
+def schema():
+    with open(SCHEMA, encoding="utf-8") as fh:
+        return fh.read()
+
+
+TABLES = "SELECT name FROM sqlite_master WHERE type = 'table'"
+ADDED = re.compile(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", re.IGNORECASE)
+
+
+def tables():
+    return {r["name"] for r in d1.query(TABLES)}
+
+
+def migrate(text):
+    """Apply the schema text one statement at a time; returns what the database lacked.
 
     One statement per call because an ALTER TABLE ADD COLUMN is not
     idempotent in SQLite: its second run answers "duplicate column name",
     which in a one-batch call would stop every statement after it. Here that
-    answer is the column being present, counted and skipped, so the file
-    replays on an existing database as its header promises. Any other
-    failure is Unreadable, the caller's exit.
+    answer is the column being present, skipped, so the file replays on an
+    existing database as its header promises. Any other failure is
+    Unreadable, the caller's exit.
+
+    The return names each table the file created, from the table list
+    before and after, and each column it added, as `table.column`: a CREATE
+    IF NOT EXISTS answers the same either way, so the list is the one read
+    that says. `backfill` walks the whole archive when it is not empty,
+    which is how a derived table added after the archive began gets its
+    history without a hand (#1355).
     """
-    applied = present = 0
-    for statement in statements(schema):
+    before = tables()
+    added = []
+    for statement in statements(text):
         try:
             d1.query(statement)
-            applied += 1
         except d1.Unreadable as error:
             if (statement.upper().startswith("ALTER TABLE")
                     and "duplicate column" in str(error).lower()):
-                present += 1
                 continue
             raise
-    return applied, present
+        match = ADDED.match(statement)
+        if match:
+            added.append(".".join(match.groups()))
+    return sorted(tables() - before) + added
 
 
 def key_of(name):
@@ -193,27 +219,46 @@ def keys_in_table():
             for r in d1.query("SELECT run_id, attempt FROM sessions")}
 
 
+# Runs per write call. The archive held 1,773 artifacts on 2026-10-09 and
+# the API allows 1,200 calls per five minutes, which a whole walk at one
+# run per call reaches in four minutes at the 0.17 s a call measured on
+# 2026-10-18; at eight runs a call the walk is some 225 calls, under a
+# minute of writes. D1's limits are per statement inside a call (100 KB
+# of text, where a run's largest statement is its tools insert at a few
+# kilobytes) and 30 s for the call, so eight is pacing, not a ceiling.
+RUNS_PER_CALL = 8
+
+
 def backfill(repo, since, rebuild=False):
-    """Write the archive's rows the table lacks; print the census; 1 on a gap.
+    """Migrate, write the archive's rows the table lacks, print the census; 1 on a gap.
+
+    The schema goes first, so a table or column merged during the week
+    exists before the walk writes it, and a statement that created or added
+    one makes the walk whole, as `rebuild` does by hand: every artifact,
+    present rows included, which is how a derived table gets its history
+    (#1355). The allowance, tools and walls tables each got theirs by a
+    hand migrate and a hand rebuild, three times the same two steps. The
+    signal is the migrate's alone: a walk that dies after it created a
+    table finds nothing new next Sunday, so its red exit wakes the BDFL
+    and `--rebuild` is the hand that finishes it.
 
     Oldest first, as `archive` lists them, so a walk that dies midway has
     written what the 90-day expiry was about to take. Idempotent: a second
     run finds every row present and downloads nothing. Each artifact's
-    allowance readings, tool counts and walls are written before its
-    session row, from the same download, in audit_facts.statements' order; the census
-    stays on sessions, because a run that reported no reading has no
-    allowance row to count, and because the session row, written last,
-    marks its derived rows in: a write that fails mid-artifact leaves the
-    run absent for the next walk, never present without them (#1102).
+    allowance readings, tool counts and walls precede its session row in
+    one script, from the same download, in audit_facts.script's order, and
+    RUNS_PER_CALL scripts ride one call; the census stays on sessions,
+    because a run that reported no reading has no allowance row to count,
+    and because the session row, written last, marks its derived rows in:
+    a call that fails midway leaves each run in it whole or absent for the
+    next walk, never present without them (#1102).
 
-    `rebuild` walks every artifact, present rows included: the way a table
-    added after the archive began gets its history, once, after `migrate`.
-    The allowance table got its 2026-08-22 floor this way, the tools table
-    its 2026-10-09 one. The table is
-    read once either way, so the census's `present` counts the rows it held
-    before the walk; deriving it from the walk printed `present 0` over a
-    full table on that very rebuild (#1012).
+    The table is read once either way, so the census's `present` counts
+    the rows it held before the walk; deriving it from the walk printed
+    `present 0` over a full table on that very rebuild (#1012).
     """
+    new = migrate(schema())
+    rebuild = rebuild or bool(new)
     present = keys_in_table()
     artifacts = audit_facts.archive(repo, since)
     keys = {a.name: key_of(a.name) for a in artifacts}
@@ -223,6 +268,16 @@ def backfill(repo, since, rebuild=False):
     # keyed by name like `todo` (#1016).
     held = sum(key in present for key in keys.values())
     written, unreadable = 0, []
+    pending = []  # (name, key, script) of the runs the next call writes
+
+    def flush():
+        nonlocal written
+        d1.query(";\n".join(text for _, _, text in pending))
+        for name, key, _ in pending:
+            keys[name] = key
+        written += len(pending)
+        pending.clear()
+
     for read in audit_facts.walk(repo, todo):
         if read.error:
             unreadable.append(f"{read.artifact.name}: {read.error}")
@@ -236,6 +291,7 @@ def backfill(repo, since, rebuild=False):
             readings = audit_facts.allowance_rows(read.meta)
             tool_rows = audit_facts.tools_rows(read.meta)
             wall_rows = audit_facts.walls_rows(read.meta)
+            text = audit_facts.script(values, readings, tool_rows, wall_rows)
         except Exception as error:  # noqa: BLE001, the invariant above
             unreadable.append(f"{read.artifact.name}: metadata has a malformed field "
                               f"({type(error).__name__}: {error})")
@@ -243,16 +299,18 @@ def backfill(repo, since, rebuild=False):
         if values[0] is None:
             unreadable.append(f"{read.artifact.name}: metadata carries no run_id")
             continue
-        for sql, params in audit_facts.statements(values, readings, tool_rows, wall_rows):
-            d1.query(sql, params)
-        keys[read.artifact.name] = (values[0], values[1])
-        written += 1
+        pending.append((read.artifact.name, (values[0], values[1]), text))
+        if len(pending) == RUNS_PER_CALL:
+            flush()
+    if pending:
+        flush()
     have = keys_in_table()
     missing = [name for name, key in keys.items() if key not in have]
     for line in unreadable:
         print(f"  unreadable {line}")
     floor = stamp(artifacts[0].made) if artifacts else "none"
-    print(f"sessions backfill: artifacts {len(artifacts)} since {floor}"
+    print(f"sessions backfill: schema new {', '.join(new) or 'none'}"
+          f" | artifacts {len(artifacts)} since {floor}"
           f" | present {held} | written {written}"
           f" | unreadable {len(unreadable)} | missing {len(missing)}")
     return 1 if missing else 0
@@ -282,10 +340,9 @@ def main(argv):
                             [int(args[0])])
             print("\n".join(render_show(rows, args[0])))
         elif verb == "migrate":
-            with open(SCHEMA, encoding="utf-8") as fh:
-                applied, present = migrate(fh.read())
+            new = migrate(schema())
             print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}: "
-                  f"{applied} statements, {present} columns already present")
+                  f"new {', '.join(new) or 'none'}")
         elif verb == "backfill":
             spec = flag(args, "--since")
             since = since_of(spec, datetime.now(timezone.utc)) if spec else None

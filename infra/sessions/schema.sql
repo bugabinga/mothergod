@@ -4,10 +4,12 @@
 -- its writer and its reader: delete the reader, drop the table in the
 -- same PR.
 --
--- Applied with `.github/scripts/sessions migrate`, idempotent. A new
--- column is an ALTER TABLE line appended below its table and a new
--- table a CREATE appended at the end, never an edit above, so the file
--- replays on an existing database.
+-- Applied by `sessions backfill` before every Sunday walk and by
+-- `sessions migrate` by hand, idempotent: a new column is an ALTER TABLE
+-- line appended below its table and a new table a CREATE appended at the
+-- end, never an edit above, so the file replays on an existing database.
+-- A statement that created a table or added a column makes that walk a
+-- whole one, so the new table gets its history with nobody typing (#1355).
 
 -- sessions: one row per agent run. Written by .github/actions/agent-audit
 -- through session-row.py as the run ends and by `sessions backfill` from
