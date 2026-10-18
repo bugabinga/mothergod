@@ -49,11 +49,12 @@ worth re-measuring.
 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report
 ```
 
-Silesia's counterpart, writes `silesia.md`. Measurement is parallel
-(`mothergod_bench::reference::measure_all` runs one thread per file), so
-this finishes in single-digit minutes on a multi-core machine rather than
-the roughly half hour a serial pass over ~200 MB would take; also by
-hand, re-run under the same conditions as `finals_report`.
+Silesia's counterpart, writes `silesia.md`. `mothergod` is timed one file
+at a time (`mothergod_bench::reference::measure_all`), because the MB/s
+columns are a rate only if nothing runs beside the encode (issue #1321),
+so this takes about half an hour for ~200 MB; only the untimed
+gzip/zstd/xz runs share cores. Also by hand, re-run under the same
+conditions as `finals_report`.
 
 Both `canterbury.md` and `silesia.md` embed the `bench/baseline.json`
 fingerprint (`<!-- baseline-fingerprint: ... -->`) they were generated

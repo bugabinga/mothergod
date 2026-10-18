@@ -32,9 +32,9 @@ pub struct FileMeasurement {
     pub zstd_len: usize,
     /// Compressed length under `xz -9e`.
     pub xz_len: usize,
-    /// Wall-clock seconds `mothergod::compress(data)` took, single-thread
-    /// (the measurement thread itself; `measure_all` parallelizes across
-    /// files, not within one). SPEED scorecard input (ROADMAP.md).
+    /// Wall-clock seconds `mothergod::compress(data)` took with nothing
+    /// else running (`measure_all` times one file at a time). SPEED
+    /// scorecard input (ROADMAP.md).
     pub encode_secs: f64,
     /// Wall-clock seconds `mothergod::decompress` took on the bytes
     /// `mothergod::compress` produced. Below-floor decode (ROADMAP.md:
