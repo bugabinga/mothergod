@@ -57,6 +57,7 @@
 pub mod baseline;
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
+pub mod field;
 pub mod finals;
 pub mod graph;
 pub mod literal_pairing;
