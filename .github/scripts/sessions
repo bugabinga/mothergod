@@ -237,7 +237,10 @@ def backfill(repo, since, rebuild=False):
     one makes the walk whole, as `rebuild` does by hand: every artifact,
     present rows included, which is how a derived table gets its history
     (#1355). The allowance, tools and walls tables each got theirs by a
-    hand migrate and a hand rebuild, three times the same two steps.
+    hand migrate and a hand rebuild, three times the same two steps. The
+    signal is the migrate's alone: a walk that dies after it created a
+    table finds nothing new next Sunday, so its red exit wakes the BDFL
+    and `--rebuild` is the hand that finishes it.
 
     Oldest first, as `archive` lists them, so a walk that dies midway has
     written what the 90-day expiry was about to take. Idempotent: a second

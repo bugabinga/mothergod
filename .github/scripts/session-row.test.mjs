@@ -398,6 +398,26 @@ test("a field row() cannot price is a warning and exit 0, no write attempted", a
   }
 });
 
+// A text column rides inline, so one past MAX_STATEMENT_BYTES is the
+// statement D1 would refuse: a warning, exit 0, and no call made.
+test("a text past the statement cap is a warning and exit 0, no write attempted", async () => {
+  const telemetry = { ...metadata.telemetry, stop_reason: "x".repeat(150000) };
+  const dir = auditDir({ ...metadata, telemetry });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.match(
+        r.out,
+        /^::warning::session-row: not written: ValueError: a statement of 15\d{4} bytes, over 50000$/m,
+      );
+      assert.equal(seen.length, 0);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // #1241: a wall the run hit is a row, named from the reasons the audit
 // kept (#1110): the hook before the colon for a hook-path denial, the
 // harness's decision type for one it decided itself. An entry of another

@@ -725,6 +725,30 @@ test("a value D1 cannot bind becomes null in its row, never a dead walk", async 
   });
 });
 
+// A text column rides inline now, so a hostile one is the statement: past
+// MAX_STATEMENT_BYTES, `script` raises and the artifact costs one
+// unreadable line, never a call that fails with the seven runs beside it.
+test("a text past the statement cap costs its artifact one unreadable line, never the walk", async () => {
+  const bloated = JSON.parse(JSON.stringify(metadata(800, "herald")));
+  bloated.telemetry.stop_reason = "x".repeat(150000);
+  const gh = stubGh(
+    [artifact(8, "audit-herald-800-1", "2026-08-28T00:00:00Z"), listing[1]],
+    { 8: { "metadata.json": JSON.stringify(bloated) }, 2: zips[2] },
+  );
+  await withStub([keys([]), d1([]), keys([[200, 1]])], async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(seen.length, 3);
+    assert.match(seen[1].body.sql, /VALUES \(200, 1, /, "the valid artifact after it is written");
+    assert.ok(seen[1].body.sql.length < 10000, "nothing of the bloated artifact reached the call");
+    assert.match(
+      r.out,
+      /^  unreadable audit-herald-800-1: metadata has a malformed field \(ValueError: a statement of 15\d{4} bytes, over 50000\)$/m,
+    );
+    assert.match(r.out, /written 1 \| unreadable 1 \| missing 1$/m);
+  });
+});
+
 test("backfill on an unreadable table stops before any download", async () => {
   const gh = stubGh(listing, zips);
   await withStub({ status: 500, payload: { success: false, errors: [{ message: "edge down" }] } }, async (base) => {

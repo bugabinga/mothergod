@@ -319,6 +319,15 @@ def statements(values, readings, tool_rows, wall_rows):
     yield INSERT, list(values)
 
 
+# D1 reads at most 100 KB of text per statement, in a batch or alone. A
+# run's largest statement, its tools insert, is a few kilobytes; past this
+# cap the artifact is not a run's, and `script` raises, so the walk counts
+# it unreadable and the live writer warns, never a call that fails and
+# takes the runs beside it (#995 round 6's class, in literal form: a bound
+# text left the statement small, an inlined one is the statement).
+MAX_STATEMENT_BYTES = 50_000
+
+
 def literal(value):
     """`value`, one `bindable` returned, as the SQL literal D1 parses back to it.
 
@@ -351,7 +360,11 @@ def script(values, readings, tool_rows, wall_rows):
         holes = sql.split("?")
         if len(holes) != len(params) + 1:
             raise ValueError(f"{len(holes) - 1} placeholders for {len(params)} values")
-        parts.append("".join(h + literal(p) for h, p in zip(holes, params)) + holes[-1])
+        text = "".join(h + literal(p) for h, p in zip(holes, params)) + holes[-1]
+        size = len(text.encode("utf-8"))
+        if size > MAX_STATEMENT_BYTES:
+            raise ValueError(f"a statement of {size} bytes, over {MAX_STATEMENT_BYTES}")
+        parts.append(text)
     return ";\n".join(parts)
 
 
