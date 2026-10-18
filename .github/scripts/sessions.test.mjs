@@ -10,38 +10,64 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
 const script = `${scriptsDir}/sessions`;
+const schemaSql = readFileSync(join(scriptsDir, "..", "..", "infra", "sessions", "schema.sql"), "utf8");
+
+const d1 = (rows) => ({ payload: { success: true, result: [{ success: true, results: rows }] } });
+const TABLES = "SELECT name FROM sqlite_master WHERE type = 'table'";
+const present = {
+  payload: { success: false, errors: [{ message: "D1_ERROR: duplicate column name: writes: SQLITE_ERROR" }] },
+};
+// A database that holds the whole schema: a CREATE IF NOT EXISTS answers
+// applied, the ALTER answers the column present.
+const whole = (sql) => (sql.startsWith("ALTER ") ? present : d1([]));
 
 // Serve programmed D1 answers, one per request in order with the last
-// repeating, record what the script sent, run `fn`.
-async function withStub(answer, fn) {
+// repeating, record what the script sent, run `fn`. The schema's own
+// traffic, which every backfill sends first (#1355), is answered apart so
+// the ordered answers stay the walk's: a CREATE or ALTER by `ddl`, a
+// function of the statement (`whole` by default) or answers in order, the
+// table list before and after from `tables` (nothing new, by default),
+// both recorded in `schema`. Every record carries `n`, its place in the
+// one sequence.
+async function withStub(answer, fn, { ddl = whole, tables = [[]] } = {}) {
   const answers = Array.isArray(answer) ? answer : [answer];
   const seen = [];
+  const schema = [];
+  let n = 0;
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
-      const a = answers[Math.min(seen.length, answers.length - 1)];
       // Strict, as Cloudflare's parser is: a body that is not JSON (Python's
       // `Infinity`) is a 400 and a null body in `seen`, never a lenient read.
       let parsed = null;
       try {
         parsed = JSON.parse(body || "{}");
       } catch {
-        seen.push({ url: req.url, auth: req.headers.authorization, body: null });
+        seen.push({ url: req.url, auth: req.headers.authorization, body: null, n: n++ });
         res.writeHead(400, { "content-type": "application/json" });
         res.end("{}");
         return;
       }
-      seen.push({ url: req.url, auth: req.headers.authorization, body: parsed });
-      // D1's documented limit: a statement binding more than 100 parameters fails.
-      if ((parsed.params ?? []).length > 100) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ success: false, errors: [{ message: "too many SQL variables" }] }));
-        return;
+      const record = { url: req.url, auth: req.headers.authorization, body: parsed, n: n++ };
+      let a;
+      if (/^(CREATE|ALTER) /.test(parsed.sql)) {
+        a = typeof ddl === "function"
+          ? ddl(parsed.sql)
+          : ddl[Math.min(schema.filter((q) => q.body.sql !== TABLES).length, ddl.length - 1)];
+        schema.push(record);
+      } else if (parsed.sql === TABLES) {
+        const nth = schema.filter((q) => q.body.sql === TABLES).length;
+        a = d1(tables[Math.min(nth, tables.length - 1)].map((name) => ({ name })));
+        schema.push(record);
+      } else {
+        a = answers[Math.min(seen.length, answers.length - 1)];
+        seen.push(record);
       }
       res.writeHead(a.status ?? 200, { "content-type": "application/json" });
       res.end(JSON.stringify(a.payload ?? {}));
@@ -49,11 +75,25 @@ async function withStub(answer, fn) {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    return await fn(`http://127.0.0.1:${server.address().port}`, seen);
+    return await fn(`http://127.0.0.1:${server.address().port}`, seen, schema);
   } finally {
     server.close();
   }
 }
+
+// The rows the writes the stub saw produce, by the parser D1 runs: every
+// INSERT script executed against the real schema in an in-memory SQLite,
+// then `rows("sessions")`, in insertion order. A literal rendered wrong
+// fails here, where a regex over the script's text would read it as fine.
+function applied(seen) {
+  const db = new DatabaseSync(":memory:");
+  db.exec(schemaSql);
+  for (const { body } of seen) if (body?.sql.startsWith("INSERT")) db.exec(body.sql);
+  return (table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r }));
+}
+
+// The statements of one call's script, each cut at its column list.
+const heads = (sql) => sql.split(";\n").map((s) => s.replace(/ \(.*$/s, ""));
 
 function run(args, env) {
   return new Promise((resolve) => {
@@ -67,8 +107,6 @@ function run(args, env) {
     child.on("close", (code) => resolve({ code, out, err }));
   });
 }
-
-const d1 = (rows) => ({ payload: { success: true, result: [{ success: true, results: rows }] } });
 
 test("an unreadable database prints UNREADABLE and exits non-zero, never a table", async () => {
   await withStub(
@@ -216,45 +254,67 @@ test("show prints one run vertically, or says which run is missing", async () =>
 // idempotent in SQLite and a one-batch replay would stop at its "duplicate
 // column name" with every statement after it unapplied. The schema file's
 // header promises a replay on an existing database; this is what keeps it.
-test("migrate posts the schema one statement at a time, comments stripped", async () => {
-  await withStub(d1([]), async (base, seen) => {
+// The table list is read before and after, the one read that says what a
+// CREATE IF NOT EXISTS created (#1355).
+test("migrate posts the schema one statement at a time, comments stripped, between two reads of the table list", async () => {
+  await withStub(d1([]), async (base, seen, schema) => {
     const r = await run(["migrate"], { D1_API_BASE: base });
     assert.equal(r.code, 0, r.err);
-    assert.ok(seen.length > 4, `${seen.length} statements`);
-    assert.match(seen[0].body.sql, /^CREATE TABLE IF NOT EXISTS sessions \(/);
-    assert.match(seen[1].body.sql, /^CREATE INDEX IF NOT EXISTS sessions_role_at/);
-    for (const { body } of seen) {
+    assert.equal(seen.length, 0);
+    assert.equal(schema[0].body.sql, TABLES);
+    assert.equal(schema.at(-1).body.sql, TABLES);
+    const ddl = schema.slice(1, -1);
+    assert.ok(ddl.length > 4, `${ddl.length} statements`);
+    assert.match(ddl[0].body.sql, /^CREATE TABLE IF NOT EXISTS sessions \(/);
+    assert.match(ddl[1].body.sql, /^CREATE INDEX IF NOT EXISTS sessions_role_at/);
+    for (const { body } of ddl) {
       assert.doesNotMatch(body.sql, /;|--/, body.sql);
       assert.deepEqual(body.params, []);
     }
-    assert.match(
-      r.out,
-      new RegExp(`schema applied from .*schema\\.sql: ${seen.length} statements, 0 columns already present`),
-    );
+    assert.match(r.out, /schema applied from .*schema\.sql: new none$/m);
   });
 });
 
-test("migrate counts a column already present and applies the statements after it", async () => {
-  const present = {
-    payload: { success: false, errors: [{ message: "D1_ERROR: duplicate column name: writes: SQLITE_ERROR" }] },
-  };
+test("migrate skips a column already present, applies the statements after it, and names it not new", async () => {
   // The ALTER is the fourth statement of the file: sessions, its two indexes, then the column.
-  await withStub([d1([]), d1([]), d1([]), present, d1([])], async (base, seen) => {
-    const r = await run(["migrate"], { D1_API_BASE: base });
-    assert.equal(r.code, 0, r.out + r.err);
-    assert.match(seen[3].body.sql, /^ALTER TABLE sessions ADD COLUMN writes INTEGER$/);
-    assert.ok(seen.length > 4, "the statements after the present column were applied");
-    assert.match(r.out, new RegExp(`${seen.length - 1} statements, 1 columns already present`));
-  });
+  await withStub(
+    d1([]),
+    async (base, seen, schema) => {
+      const r = await run(["migrate"], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.out + r.err);
+      const ddl = schema.slice(1, -1);
+      assert.match(ddl[3].body.sql, /^ALTER TABLE sessions ADD COLUMN writes INTEGER$/);
+      assert.ok(ddl.length > 4, "the statements after the present column were applied");
+      assert.match(r.out, /schema applied from .*schema\.sql: new none$/m);
+    },
+    { ddl: [d1([]), d1([]), d1([]), present, d1([])] },
+  );
+});
+
+test("migrate names the table the database lacked and the column it added", async () => {
+  const before = ["sessions", "allowance", "guard", "trust", "tools"];
+  await withStub(
+    d1([]),
+    async (base) => {
+      const r = await run(["migrate"], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.out + r.err);
+      assert.match(r.out, /schema applied from .*schema\.sql: new walls, sessions\.writes$/m);
+    },
+    { ddl: [d1([])], tables: [before, [...before, "walls"]] },
+  );
 });
 
 test("migrate on any other refusal is unreadable, with the message", async () => {
   const refused = { payload: { success: false, errors: [{ message: "no such table: nowhere" }] } };
-  await withStub([d1([]), refused], async (base) => {
-    const r = await run(["migrate"], { D1_API_BASE: base });
-    assert.notEqual(r.code, 0);
-    assert.match(r.out + r.err, /UNREADABLE.*no such table: nowhere/);
-  });
+  await withStub(
+    d1([]),
+    async (base) => {
+      const r = await run(["migrate"], { D1_API_BASE: base });
+      assert.notEqual(r.code, 0);
+      assert.match(r.out + r.err, /UNREADABLE.*no such table: nowhere/);
+    },
+    { ddl: [d1([]), refused] },
+  );
 });
 
 test("an unknown verb prints the usage line and exits 2", async () => {
@@ -371,10 +431,11 @@ test("backfill writes the rows the archive has and the table lacks, and names th
     assert.equal(r.code, 1, r.out + r.err);
     assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
     assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
-    const p = seen[1].body.params;
-    assert.equal(p.length, 22);
-    assert.deepEqual(p.slice(0, 4), [200, 1, "2026-09-01T00:00:00Z", "reviewer"]); // at is the artifact's creation
-    assert.deepEqual(p.slice(19), [1234, 567, null]); // sizes read from the zip; writes null, the artifact predates the count
+    assert.deepEqual(seen[1].body.params, []); // literals inlined: one call carries many statements (#1355)
+    const [row] = applied(seen)("sessions");
+    assert.equal(Object.keys(row).length, 22);
+    assert.deepEqual([row.run_id, row.attempt, row.at, row.role], [200, 1, "2026-09-01T00:00:00Z", "reviewer"]); // at is the artifact's creation
+    assert.deepEqual([row.prompt_bytes, row.response_bytes, row.writes], [1234, 567, null]); // sizes read from the zip; writes null, the artifact predates the count
     assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
     assert.equal(seen.length, 3);
     // Sorted: eight workers download concurrently, so the stub's log holds no order.
@@ -382,7 +443,7 @@ test("backfill writes the rows the archive has and the table lacks, and names th
     assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
     assert.match(
       r.out,
-      /^sessions backfill: artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 1 \| missing 1$/m,
+      /^sessions backfill: schema new none \\| artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 1 \| missing 1$/m,
     );
   });
 });
@@ -398,7 +459,7 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
     1: { "metadata.json": JSON.stringify(meta), "input-prompt.md": "p", "output-response.md": "r" },
   });
   // The table is read under --rebuild too, so the census can count what it held (#1012).
-  await withStub([keys([[100, 1]]), d1([]), d1([]), keys([[100, 1]])], async (base, seen) => {
+  await withStub([keys([[100, 1]]), d1([]), keys([[100, 1]])], async (base, seen) => {
     const r = await run(["backfill", "--rebuild"], {
       D1_API_BASE: base,
       GITHUB_REPOSITORY: "o/r",
@@ -406,19 +467,20 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
     });
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(downloads(gh), ["1"]); // the row the table already holds, read again
-    assert.equal(seen.length, 4);
+    assert.equal(seen.length, 3);
     assert.equal(seen[0].body.sql, "SELECT run_id, attempt FROM sessions");
-    assert.equal(
+    assert.match(
       seen[1].body.sql,
-      "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) VALUES (?, ?, ?, ?, ?, ?)",
-    );
-    assert.deepEqual(seen[1].body.params, [100, 1, "seven_day", 0.24, 1792029600, 0]);
-    assert.match(seen[2].body.sql, /^INSERT OR REPLACE INTO sessions /); // last: the mark that the derived rows are in (#1102)
-    assert.equal(seen[3].body.sql, "SELECT run_id, attempt FROM sessions");
+      /^INSERT OR REPLACE INTO allowance \(run_id, attempt, window, utilization, resets_at, overage\) VALUES \(100, 1, 'seven_day', 0\.24, 1792029600, 0\);\nINSERT OR REPLACE INTO sessions /,
+    ); // the session row last: the mark that the derived rows are in (#1102)
+    assert.deepEqual(applied(seen)("allowance"), [
+      { run_id: 100, attempt: 1, window: "seven_day", utilization: 0.24, resets_at: 1792029600, overage: 0 },
+    ]);
+    assert.equal(seen[2].body.sql, "SELECT run_id, attempt FROM sessions");
     // present 1, not 0: the row the table held before the walk counts, rewritten or not.
     assert.match(
       r.out,
-      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 0 \| missing 0$/m,
+      /^sessions backfill: schema new none \\| artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 0 \| missing 0$/m,
     );
   });
 });
@@ -434,30 +496,33 @@ test("backfill writes an artifact's tool counts beside its row, none for an arti
   };
   const files = (m) => ({ "metadata.json": JSON.stringify(m), "input-prompt.md": "p", "output-response.md": "r" });
   const gh = stubGh(listing.slice(0, 2), { 1: files(meta), 2: files(metadata(200, "reviewer")) });
-  await withStub([keys([]), d1([]), d1([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+  await withStub([keys([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
     const r = await run(["backfill"], {
       D1_API_BASE: base,
       GITHUB_REPOSITORY: "o/r",
       PATH: `${gh}:${process.env.PATH}`,
     });
     assert.equal(r.code, 0, r.out + r.err);
-    assert.equal(seen.length, 5);
-    assert.equal(
-      seen[1].body.sql,
-      "INSERT OR REPLACE INTO tools (run_id, attempt, tool, uses, denials) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
-    );
-    assert.deepEqual(seen[1].body.params, [100, 1, "Bash", 7, 0, 100, 1, "Edit", 0, null, 100, 1, "Write", 0, null]);
-    assert.match(seen[2].body.sql, /^INSERT OR REPLACE INTO sessions /); // the bdfl row, after its tools
-    assert.match(seen[3].body.sql, /^INSERT OR REPLACE INTO sessions /); // the reviewer artifact: a row, no tools
+    assert.equal(seen.length, 3); // both runs in one call
+    assert.deepEqual(heads(seen[1].body.sql), [
+      "INSERT OR REPLACE INTO tools",
+      "INSERT OR REPLACE INTO sessions", // the bdfl row, after its tools
+      "INSERT OR REPLACE INTO sessions", // the reviewer artifact: a row, no tools
+    ]);
+    assert.deepEqual(applied(seen)("tools"), [
+      { run_id: 100, attempt: 1, tool: "Bash", uses: 7, denials: 0 },
+      { run_id: 100, attempt: 1, tool: "Edit", uses: 0, denials: null },
+      { run_id: 100, attempt: 1, tool: "Write", uses: 0, denials: null },
+    ]);
     assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
   });
 });
 
-// #1102: the session row is the last of a run's writes, so a derived write
-// that fails leaves the run absent and the next walk writes all three from
-// the artifact. Session row first, the run read as present and the gap
-// outlived the artifact.
-test("a derived write that fails leaves the run absent for the next walk, never a row without its tables", async () => {
+// #1102: the session row is the last statement of a run's script, so a
+// call that fails midway leaves the run absent and the next walk writes
+// all four tables from the artifact. Session row first, the run read as
+// present and the gap outlived the artifact.
+test("a write that fails leaves the run absent for the next walk, its session row the script's last statement", async () => {
   const meta = {
     ...metadata(100, "bdfl"),
     rate_limit_events: [
@@ -476,12 +541,8 @@ test("a derived write that fails leaves the run absent for the next walk, never 
     });
     assert.equal(r.code, 1, r.out + r.err);
     assert.match(r.out, /^sessions: UNREADABLE: HTTP 500/m);
-    assert.equal(seen.length, 2); // the read, then the allowance write that failed
-    assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO allowance /);
-    assert.ok(
-      !seen.some((q) => q.body.sql.startsWith("INSERT OR REPLACE INTO sessions")),
-      "no session row without its allowance row",
-    );
+    assert.equal(seen.length, 2); // the read, then the one write that failed
+    assert.deepEqual(heads(seen[1].body.sql), ["INSERT OR REPLACE INTO allowance", "INSERT OR REPLACE INTO sessions"]);
   });
 });
 
@@ -509,7 +570,7 @@ test("a tool count that is not a count makes its artifact unreadable, never the 
   });
 });
 
-test("an artifact with more windows than D1 binds in one statement costs rows, never the walk", async () => {
+test("an artifact with more windows than the API reports is cut at sixteen rows, never the walk", async () => {
   const windows = Object.fromEntries(
     Array.from({ length: 20 }, (_, i) => [`w${String(i).padStart(2, "0")}`, { utilization: 0.1 }]),
   );
@@ -520,16 +581,16 @@ test("an artifact with more windows than D1 binds in one statement costs rows, n
     "output-response.md": "r",
   });
   const gh = stubGh(listing.slice(0, 2), { 1: files(hostile), 2: files(metadata(200, "reviewer")) });
-  await withStub([keys([]), d1([]), d1([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+  await withStub([keys([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
     const r = await run(["backfill"], {
       D1_API_BASE: base,
       GITHUB_REPOSITORY: "o/r",
       PATH: `${gh}:${process.env.PATH}`,
     });
     assert.equal(r.code, 0, r.out + r.err);
-    const allowance = seen.find((q) => q.body.sql.startsWith("INSERT OR REPLACE INTO allowance"));
-    assert.equal(allowance.body.params.length, 96); // 16 windows of 6: the most a statement may bind
-    assert.equal(seen.filter((q) => q.body.sql.startsWith("INSERT OR REPLACE INTO sessions")).length, 2); // the next artifact was still written
+    const rows = applied(seen);
+    assert.equal(rows("allowance").length, 16); // the first sixteen by name
+    assert.equal(rows("sessions").length, 2); // the next artifact was still written
     assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
   });
 });
@@ -554,10 +615,10 @@ test("backfill counts present by name before the walk rewrites keys from metadat
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(downloads(gh), ["1"]);
     assert.equal(seen.length, 3);
-    assert.deepEqual(seen[1].body.params.slice(0, 2), [100, 2]); // written under the metadata key
+    assert.match(seen[1].body.sql, /INTO sessions \([^)]*\) VALUES \(100, 2, /); // written under the metadata key
     assert.match(
       r.out,
-      /^sessions backfill: artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+      /^sessions backfill: schema new none \\| artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
     );
   });
 });
@@ -590,7 +651,7 @@ test("backfill --since keeps the artifacts created from that instant", async () 
     });
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(downloads(gh), ["2"]);
-    assert.equal(seen[1].body.params[0], 200);
+    assert.match(seen[1].body.sql, /VALUES \(200, 1, /);
     assert.match(
       r.out,
       /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
@@ -622,7 +683,7 @@ test("one artifact costs one unreadable line whatever broke it, never the walk",
     const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
     assert.equal(r.code, 1, r.out + r.err);
     assert.doesNotMatch(r.err, /Traceback/);
-    assert.equal(seen[1].body.params[0], 200, "the valid artifact after both poisons is written");
+    assert.match(seen[1].body.sql, /VALUES \(200, 1, /, "the valid artifact after both poisons is written");
     assert.match(r.out, /^  unreadable audit-herald-800-1: metadata carries no run_id$/m);
     assert.match(r.out, /^  unreadable audit-curator-900-1: RuntimeError: .*encrypted/m);
     assert.match(
@@ -650,16 +711,16 @@ test("a value D1 cannot bind becomes null in its row, never a dead walk", async 
     [artifact(8, "audit-herald-800-1", "2026-08-28T00:00:00Z"), listing[1]],
     { 8: { "metadata.json": text }, 2: zips[2] },
   );
-  await withStub([keys([]), d1([]), d1([]), keys([[800, 1], [200, 1]])], async (base, seen) => {
+  await withStub([keys([]), d1([]), keys([[800, 1], [200, 1]])], async (base, seen) => {
     const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
     assert.equal(r.code, 0, r.out + r.err);
-    assert.equal(seen.length, 4, "both artifacts reached the INSERT");
-    const [id, , , role, , , , , , , , , cost, turns] = seen[1].body.params;
-    assert.equal(id, 800);
-    assert.equal(role, "?");
-    assert.equal(cost, null);
-    assert.equal(turns, null);
-    assert.equal(seen[2].body.params[0], 200, "the valid artifact after it is written");
+    assert.equal(seen.length, 3, "both artifacts reached the one write");
+    const [poisoned_row, valid] = applied(seen)("sessions");
+    assert.equal(poisoned_row.run_id, 800);
+    assert.equal(poisoned_row.role, "?");
+    assert.equal(poisoned_row.cost_usd, null);
+    assert.equal(poisoned_row.turns, null);
+    assert.equal(valid.run_id, 200, "the valid artifact after it is written");
     assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
   });
 });
@@ -700,7 +761,7 @@ test("backfill counts a malformed or hostile artifact unreadable and writes the 
       PATH: `${gh}:${process.env.PATH}`,
     });
     assert.equal(r.code, 1, r.out + r.err);
-    assert.equal(seen[1].body.params[0], 200);
+    assert.match(seen[1].body.sql, /VALUES \(200, 1, /);
     assert.match(r.out, /^  unreadable audit-bdfl-100-1: metadata has a malformed field/m);
     assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
     assert.match(
@@ -740,21 +801,93 @@ test("backfill writes an artifact's walls beside its row, none for an artifact w
   };
   const files = (m) => ({ "metadata.json": JSON.stringify(m), "input-prompt.md": "p", "output-response.md": "r" });
   const gh = stubGh(listing.slice(0, 2), { 1: files(meta), 2: files(metadata(200, "reviewer")) });
-  await withStub([keys([]), d1([]), d1([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
+  await withStub([keys([]), d1([]), keys([[100, 1], [200, 1]])], async (base, seen) => {
     const r = await run(["backfill"], {
       D1_API_BASE: base,
       GITHUB_REPOSITORY: "o/r",
       PATH: `${gh}:${process.env.PATH}`,
     });
     assert.equal(r.code, 0, r.out + r.err);
-    assert.equal(seen.length, 5);
-    assert.equal(
-      seen[1].body.sql,
-      "INSERT OR REPLACE INTO walls (run_id, attempt, tool, wall) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
-    );
-    assert.deepEqual(seen[1].body.params, [100, 1, "Bash", "deny-em-dash", 100, 1, "Bash", "mode"]);
-    assert.match(seen[2].body.sql, /^INSERT OR REPLACE INTO sessions /); // the bdfl row, after its walls
-    assert.match(seen[3].body.sql, /^INSERT OR REPLACE INTO sessions /); // the reviewer artifact: a row, no walls
+    assert.equal(seen.length, 3);
+    assert.deepEqual(heads(seen[1].body.sql), [
+      "INSERT OR REPLACE INTO walls",
+      "INSERT OR REPLACE INTO sessions", // the bdfl row, after its walls
+      "INSERT OR REPLACE INTO sessions", // the reviewer artifact: a row, no walls
+    ]);
+    assert.deepEqual(applied(seen)("walls"), [
+      { run_id: 100, attempt: 1, tool: "Bash", wall: "deny-em-dash" },
+      { run_id: 100, attempt: 1, tool: "Bash", wall: "mode" },
+    ]);
     assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+// #1355: the allowance, tools and walls tables each got their history by a
+// hand `migrate` then a hand `backfill --rebuild`, and the third rebuild
+// outran a wake. The Sunday walk applies the schema itself, before it reads
+// the table, and a statement that created a table makes the walk whole.
+test("backfill applies the schema before reading the table, and a created table makes the walk whole", async () => {
+  const gh = stubGh(listing.slice(0, 1), {
+    1: { "metadata.json": JSON.stringify(metadata(100, "bdfl")), "input-prompt.md": "p", "output-response.md": "r" },
+  });
+  await withStub(
+    [keys([[100, 1]]), d1([]), keys([[100, 1]])],
+    async (base, seen, schema) => {
+      const r = await run(["backfill"], {
+        D1_API_BASE: base,
+        GITHUB_REPOSITORY: "o/r",
+        PATH: `${gh}:${process.env.PATH}`,
+      });
+      assert.equal(r.code, 0, r.out + r.err);
+      assert.ok(schema.at(-1).n < seen[0].n, "the schema is applied before the table is read");
+      assert.deepEqual(downloads(gh), ["1"]); // the row the table already holds, read again
+      assert.equal(seen.length, 3);
+      assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions /);
+      assert.match(
+        r.out,
+        /^sessions backfill: schema new walls \| artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 0 \| missing 0$/m,
+      );
+    },
+    { tables: [["sessions"], ["sessions", "walls"]] },
+  );
+});
+
+// Eight runs ride one call (RUNS_PER_CALL), each run's statements in
+// `script`'s order with its session row last, so a whole walk stays under
+// the API's calls per five minutes and a call cut short leaves every run
+// in it whole or absent.
+test("backfill writes eight runs a call, oldest first, each run's session row last in its slice", async () => {
+  const many = Array.from(
+    { length: 9 },
+    (_, i) => artifact(10 + i, `audit-bdfl-${1000 + i}-1`, `2026-09-${String(10 + i).padStart(2, "0")}T00:00:00Z`),
+  );
+  const reading = [{ unifiedWindows: { seven_day: { utilization: 0.1 } } }];
+  const gh = stubGh(
+    many,
+    Object.fromEntries(
+      many.map((a, i) => [
+        a.id,
+        { "metadata.json": JSON.stringify({ ...metadata(1000 + i, "bdfl"), rate_limit_events: reading }) },
+      ]),
+    ),
+  );
+  await withStub([keys([]), d1([]), d1([]), keys(many.map((_, i) => [1000 + i, 1]))], async (base, seen) => {
+    const r = await run(["backfill"], {
+      D1_API_BASE: base,
+      GITHUB_REPOSITORY: "o/r",
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(seen.length, 4); // the read, eight runs, the ninth, the read
+    const slice = ["INSERT OR REPLACE INTO allowance", "INSERT OR REPLACE INTO sessions"];
+    assert.deepEqual(heads(seen[1].body.sql), Array(8).fill(slice).flat());
+    assert.deepEqual(heads(seen[2].body.sql), slice);
+    const rows = applied(seen);
+    assert.deepEqual(
+      rows("sessions").map((row) => row.run_id),
+      many.map((_, i) => 1000 + i),
+    );
+    assert.equal(rows("allowance").length, 9);
+    assert.match(r.out, /written 9 \| unreadable 0 \| missing 0$/m);
   });
 });

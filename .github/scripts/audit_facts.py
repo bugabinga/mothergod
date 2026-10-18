@@ -17,7 +17,8 @@ archive, now when the run itself is writing.
 The allowance table's rows (#891 slice 2) come from the same metadata by
 `allowance_rows`, so the two writers that share `row` share them too; the
 tools table's rows (#891 slice 5) by `tools_rows`, and the walls table's
-(#1241) by `walls_rows`, the same way.
+(#1241) by `walls_rows`, the same way. Both send one run's rows as one
+`script`, one call per run (#1355).
 """
 
 import collections
@@ -132,17 +133,14 @@ INSERT = (f"INSERT OR REPLACE INTO sessions ({', '.join(COLUMNS)}) "
 # never repeated here.
 ALLOWANCE_COLUMNS = ("run_id", "attempt", "window", "utilization", "resets_at", "overage")
 
-# D1 binds at most 100 parameters per statement and `allowance_insert` binds
-# one row's worth per window, so a hostile artifact with many window keys
-# would fail the statement, and oldest first makes that failure permanent
-# (#995 round 6). The cap lives here, where the rows are made, so both
-# writers inherit it; the API reports a handful of windows, never near it.
-MAX_BOUND_PARAMETERS = 100
-MAX_WINDOWS = MAX_BOUND_PARAMETERS // len(ALLOWANCE_COLUMNS)
+# The API reports three windows; past MAX_WINDOWS the artifact is not a
+# run's and its rows are cut here, where they are made, so both writers
+# inherit the cap (#995 round 6).
+MAX_WINDOWS = 16
 
 
 def allowance_insert(rows):
-    """One INSERT OR REPLACE for every row in `rows`: one round trip per artifact."""
+    """One INSERT OR REPLACE for every row in `rows`, one statement of the run's script."""
     values = f"({', '.join('?' * len(ALLOWANCE_COLUMNS))})"
     return (f"INSERT OR REPLACE INTO allowance ({', '.join(ALLOWANCE_COLUMNS)}) "
             f"VALUES {', '.join([values] * len(rows))}")
@@ -184,23 +182,14 @@ def allowance_rows(meta):
 # (run_id, attempt), never repeated here.
 TOOLS_COLUMNS = ("run_id", "attempt", "tool", "uses", "denials")
 # A run names the tools it used, a dozen against an offered set of 28 on
-# 2026-10-12; past MAX_TOOLS the artifact is not a run's. The statements
-# are chunked under the bind cap, so a real run never loses a row to it.
+# 2026-10-12; past MAX_TOOLS the artifact is not a run's.
 MAX_TOOLS = 100
-TOOLS_PER_STATEMENT = MAX_BOUND_PARAMETERS // len(TOOLS_COLUMNS)
 
 
 def tools_insert(rows):
     values = f"({', '.join('?' * len(TOOLS_COLUMNS))})"
     return (f"INSERT OR REPLACE INTO tools ({', '.join(TOOLS_COLUMNS)}) "
             f"VALUES {', '.join([values] * len(rows))}")
-
-
-def tools_statements(rows):
-    """(sql, params) per statement, each binding at most MAX_BOUND_PARAMETERS."""
-    for start in range(0, len(rows), TOOLS_PER_STATEMENT):
-        chunk = rows[start:start + TOOLS_PER_STATEMENT]
-        yield tools_insert(chunk), [v for r in chunk for v in r]
 
 
 def count(value):
@@ -256,9 +245,8 @@ def tools_rows(meta):
 # on (run_id, attempt), never repeated here.
 WALLS_COLUMNS = ("run_id", "attempt", "tool", "wall")
 # A run's reasons are distinct triples, a handful at most; past MAX_WALLS
-# the artifact is not a run's. Chunked under the bind cap like the tools.
+# the artifact is not a run's.
 MAX_WALLS = 100
-WALLS_PER_STATEMENT = MAX_BOUND_PARAMETERS // len(WALLS_COLUMNS)
 # A wall's name is a hook's file name or the harness's decision type, both
 # fixed vocabulary; a longer one is not a name and is cut, never stored.
 WALL_NAME_CAP = 64
@@ -268,13 +256,6 @@ def walls_insert(rows):
     values = f"({', '.join('?' * len(WALLS_COLUMNS))})"
     return (f"INSERT OR REPLACE INTO walls ({', '.join(WALLS_COLUMNS)}) "
             f"VALUES {', '.join([values] * len(rows))}")
-
-
-def walls_statements(rows):
-    """(sql, params) per statement, each binding at most MAX_BOUND_PARAMETERS."""
-    for start in range(0, len(rows), WALLS_PER_STATEMENT):
-        chunk = rows[start:start + WALLS_PER_STATEMENT]
-        yield walls_insert(chunk), [v for r in chunk for v in r]
 
 
 def wall_of(entry):
@@ -326,13 +307,52 @@ def statements(values, readings, tool_rows, wall_rows):
     four from the artifact; written first, as before #1102, the miss was one
     warning and then a gap for good, past the artifact's 90 days with
     nothing left to repair it from. Both writers, session-row.py live and
-    backfill from the archive, take their order from here and nowhere else.
+    backfill from the archive, take their order from here and nowhere else,
+    through `script`.
     """
     if readings:
         yield allowance_insert(readings), [v for r in readings for v in r]
-    yield from tools_statements(tool_rows)
-    yield from walls_statements(wall_rows)
+    if tool_rows:
+        yield tools_insert(tool_rows), [v for r in tool_rows for v in r]
+    if wall_rows:
+        yield walls_insert(wall_rows), [v for r in wall_rows for v in r]
     yield INSERT, list(values)
+
+
+def literal(value):
+    """`value`, one `bindable` returned, as the SQL literal D1 parses back to it.
+
+    Inlined because the endpoint refuses params on a call of more than one
+    statement ("params with multiple statements is not supported", probed
+    2026-10-18), and one call per run is what a walk of the archive can
+    afford (#1355). A string's quote doubles, the one escape SQLite's
+    literal has; a NUL is cut, because the parser reads it as the end of
+    the text and every statement after it would go unexecuted. A float is
+    finite (`bindable`), so its `repr` is a literal SQLite reads back.
+    """
+    if value is None:
+        return "NULL"
+    if isinstance(value, str):
+        return "'" + value.replace("\x00", "").replace("'", "''") + "'"
+    if isinstance(value, float):
+        return repr(value)
+    return str(int(value))
+
+
+def script(values, readings, tool_rows, wall_rows):
+    """One run's `statements` as one `;`-joined text, their params inlined.
+
+    The one write both writers send, one call per run (#1355). The order is
+    `statements`' own, the session row last, so a call that fails midway
+    leaves the run absent, never present without its derived rows.
+    """
+    parts = []
+    for sql, params in statements(values, readings, tool_rows, wall_rows):
+        holes = sql.split("?")
+        if len(holes) != len(params) + 1:
+            raise ValueError(f"{len(holes) - 1} placeholders for {len(params)} values")
+        parts.append("".join(h + literal(p) for h, p in zip(holes, params)) + holes[-1])
+    return ";\n".join(parts)
 
 
 def as_int(value):

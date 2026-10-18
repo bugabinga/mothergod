@@ -179,8 +179,11 @@ jobs:
       # verb's own exit code: it exits 1 naming every artifact without a
       # row, agent-alarm wakes the fixer on the first red of a streak, and
       # a transient miss heals the next Sunday because the walk writes
-      # only what is absent. Steady state is the listing: 1,791 artifacts,
-      # 0 downloads, 9 s on 2026-10-10.
+      # only what is absent. The walk applies schema.sql first, and a
+      # statement that created a table or added a column makes it whole,
+      # eight runs a call, so a derived table merged during the week gets
+      # its history here and not by hand (#1355). Steady state is the
+      # listing: 1,791 artifacts, 0 downloads, 9 s on 2026-10-10.
       - id: backfill
         if: ${{ !cancelled() }}
         shell: bash

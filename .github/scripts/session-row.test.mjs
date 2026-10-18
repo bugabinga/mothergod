@@ -3,14 +3,30 @@
 // else, and nothing here can fail the run it observes.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
 const script = `${scriptsDir}/session-row.py`;
+const schemaSql = readFileSync(join(scriptsDir, "..", "..", "infra", "sessions", "schema.sql"), "utf8");
+
+// The rows the write the stub saw produces, by the parser D1 runs: the
+// script executed against the real schema in an in-memory SQLite, then
+// `rows("sessions")`, in insertion order. A literal rendered wrong fails
+// here, where a regex over the script's text would read it as fine.
+function applied(seen) {
+  const db = new DatabaseSync(":memory:");
+  db.exec(schemaSql);
+  for (const body of seen) if (body.sql.startsWith("INSERT")) db.exec(body.sql);
+  return (table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r }));
+}
+
+// The statements of the script, each cut at its column list.
+const heads = (sql) => sql.split(";\n").map((s) => s.replace(/ \(.*$/s, ""));
 
 const metadata = {
   role: "reviewer",
@@ -81,28 +97,35 @@ function run(args, env) {
   });
 }
 
-test("writes the whitelist as one INSERT OR REPLACE, in column order", async () => {
+test("writes the whitelist as one INSERT OR REPLACE, in column order, one call for the run", async () => {
   const dir = auditDir(metadata);
   try {
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
       assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3$/m);
-      assert.equal(seen.length, 2); // the tools rows, then the session row, last (#1102)
-      assert.match(seen[1].sql, /^INSERT OR REPLACE INTO sessions \(run_id, attempt, at, role, /);
-      const p = seen[1].params;
-      assert.equal(p.length, 22);
-      assert.equal(p[0], 37148994173);
-      assert.equal(p[1], 2);
-      assert.match(p[2], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-      assert.deepEqual(p.slice(3, 8), ["reviewer", "pull_request", "claude[bot]", 893, metadata.commit]);
-      assert.equal(p[8], 1); // measured
-      assert.equal(p[9], "claude-sonnet-5-5"); // the model that did the work, not the 17-token one
-      assert.equal(p[10], 5000); // out_tokens, summed over modelUsage
-      assert.equal(p[11], 20); // think_pct
-      assert.equal(p[12], 0.43); // cost_usd, list-basis entries summed
-      assert.deepEqual(p.slice(13, 19), [23, 420000, 2, 0, "end_turn", "abc123"]);
-      assert.deepEqual(p.slice(19), [1234, 567, 3]); // sizes, then writes (#896 item 5)
+      assert.equal(seen.length, 1); // one call (#1355): the tools rows, then the session row, last (#1102)
+      assert.deepEqual(heads(seen[0].sql), ["INSERT OR REPLACE INTO tools", "INSERT OR REPLACE INTO sessions"]);
+      assert.deepEqual(seen[0].params, []); // literals inlined: the endpoint binds none across statements
+      const [row] = applied(seen)("sessions");
+      assert.equal(Object.keys(row).length, 22);
+      assert.equal(row.run_id, 37148994173);
+      assert.equal(row.attempt, 2);
+      assert.match(row.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      assert.deepEqual(
+        [row.role, row.event, row.actor, row.number, row.commit_sha],
+        ["reviewer", "pull_request", "claude[bot]", 893, metadata.commit],
+      );
+      assert.equal(row.measured, 1);
+      assert.equal(row.model, "claude-sonnet-5-5"); // the model that did the work, not the 17-token one
+      assert.equal(row.out_tokens, 5000); // summed over modelUsage
+      assert.equal(row.think_pct, 20);
+      assert.equal(row.cost_usd, 0.43); // list-basis entries summed
+      assert.deepEqual(
+        [row.turns, row.duration_ms, row.denials, row.error, row.stop_reason, row.persona_sha],
+        [23, 420000, 2, 0, "end_turn", "abc123"],
+      );
+      assert.deepEqual([row.prompt_bytes, row.response_bytes, row.writes], [1234, 567, 3]); // sizes, then writes (#896 item 5)
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -119,8 +142,7 @@ test("an artifact without a writes count writes null, not zero", async () => {
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      assert.equal(seen[0].params.length, 22);
-      assert.equal(seen[0].params[21], null);
+      assert.equal(applied(seen)("sessions")[0].writes, null);
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -152,32 +174,24 @@ test("the last valid reading per allowance window precedes the session row, one 
         r.out,
         /^session-row: wrote run 37148994173 attempt 2 for reviewer, allowance five_hour seven_day seven_day_overage_included, tools 3$/m,
       );
-      assert.equal(seen.length, 3);
-      assert.match(seen[2].sql, /^INSERT OR REPLACE INTO sessions /); // last, after both derived tables
-      assert.equal(
-        seen[0].sql,
-        "INSERT OR REPLACE INTO allowance (run_id, attempt, window, utilization, resets_at, overage) "
-          + "VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)",
-      );
-      assert.deepEqual(seen[0].params, [
-        37148994173,
-        2,
-        "five_hour",
-        0.07,
-        null,
-        null, // the nested reading replaced the flat one
-        37148994173,
-        2,
-        "seven_day",
-        0.28,
-        1792029600,
-        0,
-        37148994173,
-        2,
-        "seven_day_overage_included",
-        0.36,
-        1792029600,
-        1,
+      assert.equal(seen.length, 1);
+      assert.deepEqual(heads(seen[0].sql), [
+        "INSERT OR REPLACE INTO allowance",
+        "INSERT OR REPLACE INTO tools",
+        "INSERT OR REPLACE INTO sessions", // last, after both derived tables
+      ]);
+      assert.deepEqual(applied(seen)("allowance"), [
+        // the nested reading replaced the flat one
+        { run_id: 37148994173, attempt: 2, window: "five_hour", utilization: 0.07, resets_at: null, overage: null },
+        { run_id: 37148994173, attempt: 2, window: "seven_day", utilization: 0.28, resets_at: 1792029600, overage: 0 },
+        {
+          run_id: 37148994173,
+          attempt: 2,
+          window: "seven_day_overage_included",
+          utilization: 0.36,
+          resets_at: 1792029600,
+          overage: 1,
+        },
       ]);
     });
   } finally {
@@ -185,11 +199,11 @@ test("the last valid reading per allowance window precedes the session row, one 
   }
 });
 
-// #1102: a derived write that fails leaves the session row unwritten, so
-// `sessions backfill`, which walks the runs absent from `sessions`, writes
-// all three from the artifact on Sunday. Written first, the session row
-// hid the gap for good.
-test("a failed allowance write leaves the session row unwritten for the backfill to heal, exit 0", async () => {
+// #1102: the session row is the script's last statement, so a call that
+// fails midway leaves it unwritten and `sessions backfill`, which walks the
+// runs absent from `sessions`, writes all four tables from the artifact on
+// Sunday. Written first, the session row hid the gap for good.
+test("a failed write leaves the session row unwritten for the backfill to heal, exit 0", async () => {
   const dir = auditDir({ ...metadata, rate_limit_events: readings });
   try {
     await withStub(
@@ -197,8 +211,8 @@ test("a failed allowance write leaves the session row unwritten for the backfill
       async (base, seen) => {
         const r = await run([dir], { D1_API_BASE: base });
         assert.equal(r.code, 0, r.err);
-        assert.equal(seen.length, 1); // the allowance write that failed, nothing after it
-        assert.match(seen[0].sql, /^INSERT OR REPLACE INTO allowance /);
+        assert.equal(seen.length, 1); // the one write, which failed
+        assert.equal(heads(seen[0].sql).at(-1), "INSERT OR REPLACE INTO sessions");
         assert.match(r.out, /^::warning::session-row: not written: Unreadable: HTTP 500/m);
         assert.doesNotMatch(r.out, /wrote run/);
       },
@@ -218,27 +232,11 @@ test("one row per tool called or refused precedes the session row", async () => 
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      assert.equal(
-        seen[0].sql,
-        "INSERT OR REPLACE INTO tools (run_id, attempt, tool, uses, denials) "
-          + "VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
-      );
-      assert.deepEqual(seen[0].params, [
-        37148994173,
-        2,
-        "Bash",
-        20,
-        0,
-        37148994173,
-        2,
-        "Edit",
-        3,
-        null,
-        37148994173,
-        2,
-        "Write",
-        0,
-        null,
+      assert.deepEqual(heads(seen[0].sql), ["INSERT OR REPLACE INTO tools", "INSERT OR REPLACE INTO sessions"]);
+      assert.deepEqual(applied(seen)("tools"), [
+        { run_id: 37148994173, attempt: 2, tool: "Bash", uses: 20, denials: 0 },
+        { run_id: 37148994173, attempt: 2, tool: "Edit", uses: 3, denials: null },
+        { run_id: 37148994173, attempt: 2, tool: "Write", uses: 0, denials: null },
       ]);
     });
   } finally {
@@ -256,22 +254,10 @@ test("a per-tool denial count fills the column where the artifact carries one", 
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      assert.deepEqual(seen[0].params, [
-        37148994173,
-        2,
-        "Bash",
-        20,
-        0,
-        37148994173,
-        2,
-        "Edit",
-        3,
-        1,
-        37148994173,
-        2,
-        "Write",
-        0,
-        1,
+      assert.deepEqual(applied(seen)("tools"), [
+        { run_id: 37148994173, attempt: 2, tool: "Bash", uses: 20, denials: 0 },
+        { run_id: 37148994173, attempt: 2, tool: "Edit", uses: 3, denials: 1 },
+        { run_id: 37148994173, attempt: 2, tool: "Write", uses: 0, denials: 1 },
       ]);
     });
   } finally {
@@ -279,10 +265,10 @@ test("a per-tool denial count fills the column where the artifact carries one", 
   }
 });
 
-// The bind cap is 100 parameters a statement; a run's tools are written in
-// statements of 20 rows, capped at 100 names, so a real run never loses a
-// row to the cap and a hostile artifact costs at most five statements.
-test("tools rows are chunked under the bind cap and capped at 100 names", async () => {
+// A run's tools are capped at 100 names, the first by name, in one
+// statement: a real run names a dozen, and a hostile artifact costs at most
+// a hundred rows.
+test("tools rows are capped at 100 names, one statement", async () => {
   const used = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`t${String(i).padStart(3, "0")}`, i]));
   const telemetry = {
     ...metadata.telemetry,
@@ -295,11 +281,11 @@ test("tools rows are chunked under the bind cap and capped at 100 names", async 
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
       assert.match(r.out, /for reviewer, tools 100$/m);
-      const tools = seen.filter((q) => q.sql.startsWith("INSERT OR REPLACE INTO tools"));
-      assert.equal(tools.length, 5);
-      assert.ok(tools.every((q) => q.params.length === 100));
-      assert.equal(tools[0].params[2], "t000");
-      assert.equal(tools[4].params[97], "t099"); // the first 100 by name
+      assert.equal(heads(seen[0].sql).filter((h) => h === "INSERT OR REPLACE INTO tools").length, 1);
+      const rows = applied(seen)("tools");
+      assert.equal(rows.length, 100);
+      assert.equal(rows[0].tool, "t000");
+      assert.equal(rows[99].tool, "t099"); // the first 100 by name
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -332,10 +318,13 @@ test("an unmeasured run keeps its numbers absent, not zero", async () => {
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      const p = seen[0].params;
-      assert.equal(p[8], 0); // measured
-      assert.deepEqual(p.slice(9, 16), [null, null, null, null, null, null, 0]);
-      assert.deepEqual(p.slice(19), [null, null, null]); // placeholder texts are not sizes; no count, no writes
+      const [row] = applied(seen)("sessions");
+      assert.equal(row.measured, 0);
+      assert.deepEqual(
+        [row.model, row.out_tokens, row.think_pct, row.cost_usd, row.turns, row.duration_ms, row.denials],
+        [null, null, null, null, null, null, 0],
+      );
+      assert.deepEqual([row.prompt_bytes, row.response_bytes, row.writes], [null, null, null]); // placeholder texts are not sizes; no count, no writes
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -440,26 +429,39 @@ test("one row per wall hit precedes the session row, named from the reasons", as
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
       assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3, walls 3$/m);
-      assert.equal(seen.length, 3); // tools, walls, then the session row, last
-      assert.equal(
-        seen[1].sql,
-        "INSERT OR REPLACE INTO walls (run_id, attempt, tool, wall) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
-      );
-      assert.deepEqual(seen[1].params, [
-        37148994173,
-        2,
-        "Bash",
-        "deny-em-dash",
-        37148994173,
-        2,
-        "Bash",
-        "deny-unpushed-work",
-        37148994173,
-        2,
-        "Edit",
-        "rule",
+      assert.equal(seen.length, 1);
+      assert.deepEqual(heads(seen[0].sql), [
+        "INSERT OR REPLACE INTO tools",
+        "INSERT OR REPLACE INTO walls",
+        "INSERT OR REPLACE INTO sessions", // last
       ]);
-      assert.match(seen[2].sql, /^INSERT OR REPLACE INTO sessions /);
+      assert.deepEqual(applied(seen)("walls"), [
+        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-em-dash" },
+        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-unpushed-work" },
+        { run_id: 37148994173, attempt: 2, tool: "Edit", wall: "rule" },
+      ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #1355: the literals ride inline, and SQLite's string literal has one
+// escape, the doubled quote. A `;` and a newline inside the text are text,
+// not a statement boundary; a NUL is cut, because the parser reads it as
+// the end of the whole script.
+test("a text with a quote, a semicolon, a newline and a NUL is written as typed, the NUL cut", async () => {
+  const telemetry = { ...metadata.telemetry, stop_reason: "it's; done\nnow\u0000" };
+  const dir = auditDir({ ...metadata, role: "re'viewer", telemetry });
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for re'viewer, tools 3$/m);
+      assert.equal(seen.length, 1);
+      const [row] = applied(seen)("sessions");
+      assert.equal(row.role, "re'viewer");
+      assert.equal(row.stop_reason, "it's; done\nnow");
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
