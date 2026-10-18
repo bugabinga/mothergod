@@ -408,3 +408,60 @@ test("a field row() cannot price is a warning and exit 0, no write attempted", a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// #1241: a wall the run hit is a row, named from the reasons the audit
+// kept (#1110): the hook before the colon for a hook-path denial, the
+// harness's decision type for one it decided itself. An entry of another
+// shape is skipped, never a row of unknowns; two hits of one wall are one row.
+test("one row per wall hit precedes the session row, named from the reasons", async () => {
+  const meta = {
+    ...metadata,
+    telemetry: {
+      ...metadata.telemetry,
+      permission_denials: {
+        count: 5,
+        tools: ["Bash", "Edit", "Write"],
+        by_tool: { Bash: 3, Edit: 1, Write: 1 },
+        reasons: [
+          { tool: "Bash", type: "hook", reason: "deny-unpushed-work: denied gh pr create with 2 files unpushed" },
+          { tool: "Bash", type: "hook", reason: "deny-em-dash: denied" },
+          { tool: "Edit", type: "rule", reason: "protected path .cargo/" },
+          { tool: "Bash", type: "hook", reason: "deny-em-dash: denied again" },
+          { tool: "Bash", type: "hook" },
+          { tool: "Bash", type: "hook", reason: "" },
+          { tool: 7, type: "mode", reason: "plan" },
+        ],
+      },
+    },
+  };
+  const dir = auditDir(meta);
+  try {
+    await withStub({}, async (base, seen) => {
+      const r = await run([dir], { D1_API_BASE: base });
+      assert.equal(r.code, 0, r.err);
+      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3, walls 3$/m);
+      assert.equal(seen.length, 3); // tools, walls, then the session row, last
+      assert.equal(
+        seen[1].sql,
+        "INSERT OR REPLACE INTO walls (run_id, attempt, tool, wall) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
+      );
+      assert.deepEqual(seen[1].params, [
+        37148994173,
+        2,
+        "Bash",
+        "deny-em-dash",
+        37148994173,
+        2,
+        "Bash",
+        "deny-unpushed-work",
+        37148994173,
+        2,
+        "Edit",
+        "rule",
+      ]);
+      assert.match(seen[2].sql, /^INSERT OR REPLACE INTO sessions /);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

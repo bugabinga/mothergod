@@ -127,3 +127,22 @@ CREATE TABLE IF NOT EXISTS tools (
   denials  INTEGER,            -- permission denials of that tool; NULL where the artifact named the tool refused and carried no per-tool count
   PRIMARY KEY (run_id, attempt, tool)
 );
+
+-- walls: one row per wall a run hit, the guard or harness rule that
+-- refused a tool call (#1241). The question is the trend block's: when
+-- a seat's denials move, which wall moved them, so the reader goes to
+-- the guard or the prompt instead of a shrug. Same writers as sessions,
+-- from `permission_denials.reasons` in the same metadata (#1110); `at`
+-- and `role` live in sessions once, joined on (run_id, attempt). The
+-- reasons list holds distinct triples, so a row says the wall was hit,
+-- never how often: count runs from here, denials from sessions. Rows
+-- exist from the first artifact that recorded reasons (2026-10-12): an
+-- older one counts its denials and names no wall, and gets no row.
+-- Read by trend.py under a denials row that moved.
+CREATE TABLE IF NOT EXISTS walls (
+  run_id   INTEGER NOT NULL,
+  attempt  INTEGER NOT NULL,
+  tool     TEXT    NOT NULL,   -- the tool refused: Bash, Edit, or Stop for a Stop hook's block
+  wall     TEXT    NOT NULL,   -- the hook's name (deny-em-dash, deny-unpushed-work, ...) or the harness's decision type (mode, rule)
+  PRIMARY KEY (run_id, attempt, tool, wall)
+);
