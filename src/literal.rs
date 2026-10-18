@@ -170,6 +170,20 @@ fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
     }
 }
 
+/// The cumulative-frequency table over `mixed`, one [`FIXED_POINT_SCALE`]
+/// fixed-point mass per symbol: each symbol's count is its mass shifted down
+/// 16 bits, plus a Laplace floor of 1 so no symbol is impossible to code.
+/// The tail of every blend ([`Literal::mix`], [`Literal::cum_with_extra`]).
+fn cumulate(mixed: impl IntoIterator<Item = u64>) -> [u64; ALPHABET + 1] {
+    let mut cum = [0u64; ALPHABET + 1];
+    let mut acc = 0u64;
+    for (symbol, mass) in mixed.into_iter().enumerate() {
+        acc += (mass >> 16) + 1;
+        cum[symbol + 1] = acc;
+    }
+    cum
+}
+
 /// Exponentiated-gradient weight update (Mahoney 2005): how far `weight`
 /// moves given `estimate` (this expert's own prediction) versus `mixed`
 /// (the blend's prediction), clamped to `[MIN_WEIGHT, MAX_WEIGHT]`.
@@ -701,19 +715,15 @@ impl Literal {
     /// dependency. This changes only *when* each addition happens, never
     /// its value: pass one still sums the same six per-expert terms for a
     /// given symbol in the same expert order (0..EXPERTS) the old fused
-    /// loop did, and pass two performs the identical `(mixed >> 16) + 1`
-    /// running sum. `mix`'s output is therefore bit-for-bit identical to
+    /// loop did, and pass two, [`cumulate`], performs the identical
+    /// `(mixed >> 16) + 1` running sum. `mix`'s output is therefore bit-for-bit identical to
     /// the pre-split version; this is a speed change, not a format change
     /// (hard rule 5), so no golden fixture or `FORMAT_VERSION` bump is
     /// needed.
     fn mix(&self, bank_indices: &[usize; EXPERTS], weight_index: usize) -> [u64; ALPHABET + 1] {
         let weights = &self.weights[weight_index];
         let weight_sum: f64 = weights.iter().sum();
-        let mut scale = [0u64; EXPERTS];
-        for (expert, &bank) in bank_indices.iter().enumerate() {
-            let bank_total = f64::from(self.total[bank]);
-            scale[expert] = fixed_point_scale(weights[expert], weight_sum, bank_total);
-        }
+        let scale = self.scale6(bank_indices, weights, weight_sum);
 
         let mut mixed = [0u64; ALPHABET];
         for (&bank, &s) in bank_indices.iter().zip(scale.iter()) {
@@ -723,13 +733,7 @@ impl Literal {
             }
         }
 
-        let mut cum = [0u64; ALPHABET + 1];
-        let mut acc = 0u64;
-        for (symbol, &m) in mixed.iter().enumerate() {
-            acc += (m >> 16) + 1;
-            cum[symbol + 1] = acc;
-        }
-        cum
+        cumulate(mixed)
     }
 
     /// [`banks`] plus [`Self::mix`] in one call: every coding/pricing method
@@ -872,9 +876,9 @@ impl Literal {
     }
 
     /// The six real experts' fixed-point scale factors under `weights6`
-    /// and `weight_sum`: the shared middle step [`Self::mix7`] and
-    /// [`Self::mix_ppm`] both compute identically before folding in
-    /// their own seventh/eighth term.
+    /// and `weight_sum`: the shared middle step [`Self::mix`],
+    /// [`Self::mix7`] and [`Self::mix_ppm`] compute identically, the last
+    /// two before folding in their own seventh/eighth term.
     fn scale6(
         &self,
         bank_indices: &[usize; EXPERTS],
@@ -917,14 +921,10 @@ impl Literal {
         scale6: &[u64; EXPERTS],
         extra: impl Fn(usize) -> u64,
     ) -> [u64; ALPHABET + 1] {
-        let mut cum = [0u64; ALPHABET + 1];
-        let mut acc = 0u64;
-        for symbol in 0..ALPHABET {
-            let mixed = self.six_expert_mixed(bank_indices, scale6, symbol) + extra(symbol);
-            acc += (mixed >> 16) + 1;
-            cum[symbol + 1] = acc;
-        }
-        cum
+        cumulate(
+            (0..ALPHABET)
+                .map(|symbol| self.six_expert_mixed(bank_indices, scale6, symbol) + extra(symbol)),
+        )
     }
 
     /// The extra expert's own weight, adapted toward how well
