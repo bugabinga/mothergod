@@ -104,7 +104,7 @@ fn aggregate_bpb(
     clippy::cast_precision_loss,
     reason = "byte counts here stay far below 2^53"
 )]
-fn mb_per_sec(bytes: usize, secs: f64) -> f64 {
+pub(crate) fn mb_per_sec(bytes: usize, secs: f64) -> f64 {
     if secs <= 0.0 {
         0.0
     } else {
