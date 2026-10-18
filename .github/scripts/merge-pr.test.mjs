@@ -336,6 +336,45 @@ const files = (...paths) => ({
 });
 const GATES_ONLY = [...WAIT, "--gates-only"];
 
+// The workflow carve-out (GOVERNANCE "Merging"): on 2026-10-18 the reviewer
+// seat merged #1363, a workflow-touching PR, against its own verdict, the
+// platform 403 that once stopped it long gone. The seat is ROLE, which every
+// agent workflow exports; a shell without one is a human's.
+test("ROLE other than bdfl refuses a PR touching .github/workflows/ before any merge", () => {
+  const { status, stderr, merges, calls } = run(["42"], {
+    env: { ROLE: "reviewer" },
+    responses: [files(".github/workflows/agent-model-intel.yml", ".github/scripts/sessions")],
+  });
+  assert.equal(status, 1);
+  assert.match(stderr, /#42 touches \.github\/workflows\/, the BDFL's to merge and not the reviewer seat's/);
+  assert.deepEqual(merges, []);
+  assert.equal(calls.length, 1); // the file list, nothing after it
+});
+
+test("ROLE other than bdfl on a PR touching no workflow file goes on to the merge", () => {
+  const { status, stdout, merges } = run(["42"], {
+    env: { ROLE: "reviewer" },
+    responses: [files(".github/scripts/merge-pr"), { match: "^api repos/o/r/pulls/42$", responses: [pr([])] }, merge],
+  });
+  assert.equal(status, 0, stdout);
+  assert.equal(merges.length, 1);
+});
+
+test("ROLE bdfl, and a shell with no ROLE, merge a workflow-touching PR", () => {
+  for (const env of [{ ROLE: "bdfl" }, {}]) {
+    const { status, stdout, merges } = run(["42"], {
+      env,
+      responses: [
+        files(".github/workflows/agent-bdfl.yml"),
+        { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+        merge,
+      ],
+    });
+    assert.equal(status, 0, JSON.stringify(env) + stdout);
+    assert.equal(merges.length, 1);
+  }
+});
+
 test("--wait --gates-only: a failed review on a PR editing agent-review.yml lands on green gates", () => {
   const { status, stdout, merges, calls } = run(GATES_ONLY, {
     responses: [

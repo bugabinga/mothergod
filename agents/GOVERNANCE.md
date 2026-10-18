@@ -150,9 +150,12 @@ happens and still matters: the reviewer reads the diff, posts its
 verdict through `post-verdict` (the pair flips with the comment), says
 the merge is the BDFL's, and stops. The BDFL lands it on its next sweep, at most one cadence away;
 `merge-pr` performs the PAT escalation itself. The admin token is the
-BDFL's alone
-(`OPERATIONS.md`, "Admin token & signing"), so no other seat can do
-this even by mistake.
+BDFL's alone (`OPERATIONS.md`, "Admin token & signing"), and
+`merge-pr` refuses a workflow-touching PR from any seat but the BDFL's,
+read from the `ROLE` every agent workflow exports, so no other seat
+can do this even by mistake: on 2026-10-18 the reviewer seat landed
+#1363 on the app token against its own verdict, when the rule held by
+prompt discipline alone.
 
 Two independent mechanisms sit under that one rule, and both survive if
 either is fixed:
@@ -164,7 +167,7 @@ either is fixed:
   until at latest 2026-08-28, when PRs #287 and #288, both
   workflow-touching, merged on the app token with no 403. The
   platform refusal is not currently a control; the rule above holds
-  by prompt discipline and by `GH_ADMIN_TOKEN` living only in the
+  by `merge-pr`'s seat gate and by `GH_ADMIN_TOKEN` living only in the
   BDFL seat. `merge-pr` attempts before predicting, so neither state
   breaks it: if the 403 returns, it escalates; while the 403 stays
   gone, the escalation is idle. Distinct from app-token *pushes* to

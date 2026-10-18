@@ -52,6 +52,13 @@ moves:
   variables before either resolving the real bug: the check belongs
   where the number is already a concrete string, not where it is still
   shell syntax an adversarial-shaped matcher can never fully parse.
+- A PR touching `.github/workflows/` is the BDFL's to merge (GOVERNANCE
+  "Merging", the operator's ruling in #136), and the seat is read from
+  ROLE, which every agent workflow exports: any other seat is refused
+  before any wait or merge, a shell with no ROLE being a human's. The
+  platform 403 that once enforced the rule is gone, and on 2026-10-18
+  the reviewer seat landed #1363 on the app token against its own
+  verdict, so the rule lives here and not in a prompt line.
 
 - `--wait` is the foreground wait that GOVERNANCE "Merging" and the BDFL
   prompt demanded and no tool performed, so each landing hand-rolled a poll
@@ -364,14 +371,11 @@ def changed_files(pr, refusal):
     return [entry["filename"] for entry in json.loads(proc.stdout)]
 
 
-def touches_workflows(pr):
+def touches_workflows(pr, refusal="refusing to escalate without knowing why the 403 happened"):
     """Whether the PR changes any path under `.github/workflows/`: the one 403
-    cause the admin PAT exists to absorb (issues #24, #136)."""
-    return any(
-        path.startswith(".github/workflows/")
-        for path in changed_files(
-            pr, "refusing to escalate without knowing why the 403 happened")
-    )
+    cause the admin PAT exists to absorb (issues #24, #136), and the
+    carve-out main() refuses every seat but the BDFL's on."""
+    return any(path.startswith(".github/workflows/") for path in changed_files(pr, refusal))
 
 
 def edits_review_workflow(pr):
@@ -456,6 +460,11 @@ def main():
         die(f"target #{pr} does not match PR_NUMBER={scope} from the "
             "environment; a review session merges only the PR it was "
             "scoped to (issue #771)")
+    seat = os.environ.get("ROLE")
+    if seat and seat != "bdfl" and touches_workflows(
+            pr, "refusing to merge without knowing whether the carve-out applies"):
+        die(f"#{pr} touches .github/workflows/, the BDFL's to merge and not the "
+            f"{seat} seat's (agents/GOVERNANCE.md, Merging); post the verdict and stop")
 
     info = None
     if wait:
