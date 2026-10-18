@@ -154,9 +154,11 @@ jobs:
                   or the journal's top standing lead, the last two worked
                   through `compression-experiment`,
                d. the oldest product issue that is not blocked-on-human,
-                  labeled enhancement or untyped: filed nits and deslop
-                  second scopes arrive with the realm label alone, and
-                  an issue no step names is nobody's (#1258).
+                  labeled enhancement or untyped, where untyped means
+                  no bug, research, marketing or ledger label either:
+                  filed nits and deslop second scopes arrive with the
+                  realm label alone, and an issue no step names is
+                  nobody's (#1258).
                Claim check first, because agents run concurrently
                (ADR-0014): an item an open PR or claude/* branch already
                covers is claimed, take the next one. Implement the
