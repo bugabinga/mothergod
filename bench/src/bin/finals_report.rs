@@ -11,10 +11,10 @@
 //! differently. Measured throughput on this codec's optimal-parse LZ:
 //! `xml`, the smallest Silesia file (5.3 MB), took 39s (~0.14 MB/s)
 //! single-threaded. Canterbury (~2.7 MB total across 11 files) finishes
-//! in under a minute either way; Silesia's ~200 MB would take on the
-//! order of half an hour run file-after-file, which is why
-//! `mothergod_bench::reference::measure_all` (shared by both binaries)
-//! spreads the per-file measurements across a thread each instead.
+//! in under a minute; Silesia's ~200 MB takes on the order of half an
+//! hour, because `mothergod_bench::reference::measure_all` (shared by
+//! both binaries) times `mothergod` one file at a time: the published
+//! MB/s is a rate only if nothing runs beside it (issue #1321).
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin finals_report`. Markdown is linted, not formatted (`cargo x lint

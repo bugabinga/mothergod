@@ -16,12 +16,12 @@
 //!
 //! `finals_report`'s module doc measured `xml`, Silesia's smallest file
 //! (5.3 MB), at 39s (~0.14 MB/s) single-threaded under this codec's
-//! optimal-parse LZ; run one file after another, the full ~200 MB corpus
-//! is on the order of half an hour, too slow for one PR's by-hand run.
-//! `mothergod_bench::reference::measure_all` spreads the 12 independent
-//! files across a thread per file instead, so the wall-clock cost is that
-//! half hour divided by however many cores the runner has, not paid
-//! serially.
+//! optimal-parse LZ; the full ~200 MB corpus is on the order of half an
+//! hour. `mothergod_bench::reference::measure_all` pays it serially on
+//! purpose: it times `mothergod` one file at a time, because the encode
+//! MB/s published in `silesia.md` is a rate only if nothing runs beside
+//! it (issue #1321). Only the untimed reference compressors run one
+//! thread per file.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint

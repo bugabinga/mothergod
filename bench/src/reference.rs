@@ -89,7 +89,7 @@ pub fn generated_at() -> io::Result<String> {
 
 /// Best-effort description of the machine [`measure_all`] ran on: CPU
 /// model, logical core count, whether the process looks like it ran on a
-/// CI runner, and the one-thread-per-file measurement shape. Named in the
+/// CI runner, and the timing shape. Named in the
 /// report next to the throughput columns (issue #432): an MB/s number
 /// without its hardware is the same defect CLAUDE.md rule 4 already
 /// forbids for a bits/byte number without its corpus, so a reader compares
@@ -109,8 +109,8 @@ pub fn machine_info() -> String {
         "non-CI machine"
     };
     format!(
-        "{cpu}, {cores} logical core(s), {runner}, one thread per file \
-         (`reference::measure_all`)"
+        "{cpu}, {cores} logical core(s), {runner}, mothergod timed one file at a time, \
+         no other measurement running (`reference::measure_all`)"
     )
 }
 
@@ -177,18 +177,26 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
         .ok_or_else(|| io::Error::other(format!("{cmd} --version produced no output")))
 }
 
-/// Measures one held-out-final file against `mothergod::compress` and the
-/// three pinned reference compressors, all on the exact same bytes.
+/// What [`time_mothergod`] measures on one file: the compressed bytes'
+/// length and the two wall-clock times the report publishes.
+struct Timed {
+    mothergod_len: usize,
+    encode_secs: f64,
+    decode_secs: f64,
+}
+
+/// Times `mothergod::compress` and `mothergod::decompress` on `data` and
+/// checks the round trip. The wall-clock is only a rate if nothing else
+/// runs beside it, so [`measure_all`] calls this for one file at a time.
 ///
 /// # Errors
 ///
-/// Returns an error naming `name` if any reference compressor fails on it.
-fn measure_one(name: &str, data: &[u8]) -> Result<FileMeasurement, String> {
+/// Returns an error naming `name` if the round trip fails or mismatches.
+fn time_mothergod(name: &str, data: &[u8]) -> Result<Timed, String> {
     println!("measuring {name} ({} bytes)...", data.len());
     let encode_start = std::time::Instant::now();
     let mothergod_compressed = mothergod::compress(data);
     let encode_secs = encode_start.elapsed().as_secs_f64();
-    let mothergod_len = mothergod_compressed.len();
 
     let decode_start = std::time::Instant::now();
     let decoded = mothergod::decompress(&mothergod_compressed)
@@ -199,48 +207,59 @@ fn measure_one(name: &str, data: &[u8]) -> Result<FileMeasurement, String> {
             "mothergod round-trip mismatch on {name}: decompress(compress(x)) != x"
         ));
     }
+    Ok(Timed {
+        mothergod_len: mothergod_compressed.len(),
+        encode_secs,
+        decode_secs,
+    })
+}
 
+/// Compressed lengths of `data` under the three pinned reference
+/// compressors, `(gzip, zstd, xz)`. Untimed, so it may share the machine.
+///
+/// # Errors
+///
+/// Returns an error naming `name` if any reference compressor fails on it.
+fn reference_lens(name: &str, data: &[u8]) -> Result<(usize, usize, usize), String> {
     let gzip_len = compressed_len("gzip", &["-9", "-c"], data)
         .map_err(|err| format!("gzip failed on {name}: {err}"))?;
     let zstd_len = compressed_len("zstd", &["-19", "-c"], data)
         .map_err(|err| format!("zstd failed on {name}: {err}"))?;
     let xz_len = compressed_len("xz", &["-9e", "-c"], data)
         .map_err(|err| format!("xz failed on {name}: {err}"))?;
-    Ok(FileMeasurement {
-        name: name.to_string(),
-        original_len: data.len(),
-        mothergod_len,
-        gzip_len,
-        zstd_len,
-        xz_len,
-        encode_secs,
-        decode_secs,
-    })
+    Ok((gzip_len, zstd_len, xz_len))
 }
 
-/// Measures every `(name, data)` pair, one OS thread per file, joining
-/// before returning.
+/// Measures every `(name, data)` pair against `mothergod::compress` and the
+/// three pinned reference compressors, all on the exact same bytes.
 ///
-/// `mothergod::compress`'s optimal-parse LZ is the dominant, strictly
-/// single-threaded cost per file (measured on Silesia's smallest file,
-/// `xml` at 5.3 MB: ~39s, ~0.14 MB/s); run one file after another and the
-/// full ~200 MB Silesia corpus takes on the order of half an hour, too
-/// slow for a single CI or by-hand turn. Every file is independent (no
-/// shared mutable state, no cross-file model), so spawning a thread per
-/// file lets the OS scheduler spread the work across every available
-/// core instead — the same total CPU time, in wall-clock time divided by
-/// core count. `finals_report` and `silesia_report` both call this so
-/// the parallel measurement loop exists in exactly one place.
+/// Two phases, because the report publishes `mothergod`'s wall-clock as a
+/// rate (issue #1321). First, `mothergod` is timed on one file after
+/// another with nothing else running: timed under a thread per file on 4
+/// cores, `dickens` read 0.022 MB/s against 0.104 alone (S2-A121), each
+/// file carrying a different share of oversubscription and memory
+/// contention. Second, the reference compressors, whose times nobody
+/// publishes, run one thread per file and join before returning, spreading
+/// their size runs over every core. `finals_report` and `silesia_report`
+/// both call this so the measurement loop exists in exactly one place.
+///
+/// The first phase is the cost: `mothergod::compress` ran 0.10 MB/s on
+/// `dickens` and `mozilla` on one core (S2-A121, S2-A122), so Silesia's
+/// ~200 MB takes about half an hour of encode, serial, plus the decodes.
 ///
 /// # Errors
 ///
-/// Returns the first per-file error encountered, by input order, if any
-/// reference compressor fails on any file.
+/// Returns the first per-file error encountered, by input order, if the
+/// round trip fails or any reference compressor fails on any file.
 pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, String> {
-    std::thread::scope(|scope| {
+    let timed = files
+        .iter()
+        .map(|(name, data)| time_mothergod(name, data))
+        .collect::<Result<Vec<_>, _>>()?;
+    let references: Vec<Result<(usize, usize, usize), String>> = std::thread::scope(|scope| {
         let handles: Vec<_> = files
             .iter()
-            .map(|(name, data)| scope.spawn(move || measure_one(name, data)))
+            .map(|(name, data)| scope.spawn(move || reference_lens(name, data)))
             .collect();
         handles
             .into_iter()
@@ -250,7 +269,25 @@ pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, 
                     .unwrap_or_else(|_| Err("measurement thread panicked".to_string()))
             })
             .collect()
-    })
+    });
+    files
+        .iter()
+        .zip(timed)
+        .zip(references)
+        .map(|(((name, data), timed), reference)| {
+            let (gzip_len, zstd_len, xz_len) = reference?;
+            Ok(FileMeasurement {
+                name: name.clone(),
+                original_len: data.len(),
+                mothergod_len: timed.mothergod_len,
+                gzip_len,
+                zstd_len,
+                xz_len,
+                encode_secs: timed.encode_secs,
+                decode_secs: timed.decode_secs,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -382,8 +419,8 @@ mod tests {
             "expected a logical core count, got {info:?}"
         );
         assert!(
-            info.contains("measure_all"),
-            "expected the one-thread-per-file shape named, got {info:?}"
+            info.contains("one file at a time"),
+            "expected the timing shape named, got {info:?}"
         );
     }
 
