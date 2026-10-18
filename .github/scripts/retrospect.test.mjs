@@ -243,9 +243,9 @@ test("retrospect budget footer fixtures", async (t) => {
   }
 });
 
-// hollow() separates the runs that held no session, a guard-skipped run and a
-// phantom GitHub never gave a job (#553), from one that died before its audit
-// step; all three have no artifact. The shapes are real, probed on
+// hollow() separates the runs that held no session, a guard-skipped run, a
+// phantom GitHub never gave a job (#553) and a script workflow with no Claude
+// step, from one that died before its audit step; all four have no artifact. The shapes are real, probed on
 // 2026-09-17: a skipped BDFL run (35165527435), a session that died (the
 // reviewer on #564, 34970585258), an alarm run with no Claude step at all
 // (34970888339) and a zero-job phantom on PR #571 (35205833235). Before this,
@@ -287,8 +287,8 @@ test("a session that died is not skipped, whatever its post step says", () => {
   assert.equal(hollow(["failure", "success"]), null);
 });
 
-test("a run with no Claude step at all is not skipped either", () => {
-  assert.equal(hollow([], 3), null);
+test("a run with jobs and no Claude step is a script workflow, not a death", () => {
+  assert.equal(hollow([], 3), "script");
 });
 
 test("run 35205833235: zero jobs is a phantom, not a death with a log to read", () => {
