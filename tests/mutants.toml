@@ -71,6 +71,13 @@ exclude_re = [
   # 1 mutant.
   "replace \\| with \\^ in ResidualTree::decode$",
 
+  # Equivalent: decode_offset ORs `1 << bits` with `decode_bits(bits)`,
+  # which sets only the low `bits` bits, below the one the shift sets, so
+  # `|` and `^` agree. Function scope: this is the function's only `|`,
+  # and a later one must repeat this proof or narrow to file:line:col
+  # (#1334). 1 mutant.
+  "replace \\| with \\^ in decode_offset$",
+
   # Non-terminating: the renorm loops exit only when `low` and `high`
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or
   # shrinking it monotonically (`<< 1` to `>> 1` drives `high` to 1 via
