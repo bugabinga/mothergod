@@ -23,10 +23,15 @@ Outcome metrics (the product):
   fuzz CPU-hours growing week over week, whole-crate mutation score, and
   region coverage, each with trend (ADR-0043). Published: the trust ledger
   on /status, written by the test workflows themselves (#449).
-- **SPEED**: tracked, not yet optimized: encode/decode MB/s on the finals
-  each benchmark run; floor of ≥1 MB/s decode single-thread until M5 makes
-  speed a first-class target. Published: the throughput columns of
-  `docs/benchmarks/`, one machine, indicative only.
+- **SPEED**: encode and decode MB/s and peak RSS on the finals, mothergod's
+  row beside every level of pinned `gzip`, `zstd` and `xz` on the same
+  machine (ADR-0074). Success is position on the field's frontier, read as
+  two neighbours per corpus: the fastest competitor level that compresses
+  at least as well, and the best-compressing level that is at least as
+  fast; a win moves a neighbour. Decode holds a ratchet against unexplained
+  slowdown (`baseline_gate check`, M5). Published: the frontier tables in
+  `docs/benchmarks/`, one machine, indicative only, and the neighbours with
+  the date they last moved on /status, both #1340's deliverable.
 - **USERS**: evidence real humans use and like it: GitHub stars, forks and
   watchers with trend, external (non-agent, non-operator) issue and PR
   authors, crates.io downloads once published, and mentions found in the
@@ -76,12 +81,11 @@ to call this project's most-worked area "pending" (operator report,
 
 A **milestone** is a deliverable with a definition of done. Its items are
 issues in a GitHub Milestone of the same name, linked from its section
-below, and an item is done when its issue closes (ADR-0047): M6, M7 and M8
-today. A **program** is continuous work with a target but no finish line,
-so it has no tracker milestone and nothing to count: M3 (ratio) and M5
-(speed). Milestones delivered before the tracker held items (M0, M1, M2,
-M4) keep one paragraph each naming what shipped, and no retroactive
-issues. The numbering is creation order, not a dependency chain, and a
+below, and an item is done when its issue closes (ADR-0047): M5, M6, M7
+and M8 today. A **program** is continuous work with a target but no finish
+line, so it has no tracker milestone and nothing to count: M3 (ratio).
+Milestones delivered before the tracker held items (M0, M1, M2, M4) keep
+one paragraph each naming what shipped, and no retroactive issues. The numbering is creation order, not a dependency chain, and a
 program gates nothing; M7 already says this of itself. Section order is
 rank, and the status page renders it top to bottom.
 
@@ -190,8 +194,8 @@ invariant fuzzing cannot, journal rules apply.
 ## M8: Genre fit (ADR-0064)
 
 Numbered by creation order, placed after M7 because correctness debt
-compounds, and ahead of the programs because it has a finish line: the
-genre is finite. The scorecard's FIT line is what it moves.
+compounds, and ahead of M5 because its finish line is nearer: the genre
+is finite. The scorecard's FIT line is what it moves.
 
 Items, in [milestone M8](https://github.com/bugabinga/mothergod/milestone/3):
 the CLI genre matrix with its conformance suite (#981) and the library
@@ -201,23 +205,38 @@ idiom matrix (#982) landed, and every gap measured before a matrix existed
 a row the suite flips in `tests/fit/*.txt`, then an issue; the count is on
 /status.
 
-## M5: Speed tiers
+## M5: Parse engine (ADR-0074)
 
-A program, not a milestone, on the same terms as M3: it is the Scorecard's
-SPEED line, worked continuously.
+Numbered by creation order, placed after M8 because the genre is finite
+and this is not, and ahead of M6 because the 0.1 release promises what M0
+to M4 delivered and nothing here. The Speed tiers program until
+2026-10-18, when the operator's question (when to tackle speed, ratio on
+large files and memory) got one answer because the three are one
+mechanism: the optimal parse holds about 42 bytes of state per input byte
+(`src/lib.rs`, `BLOCK_LEN`'s doc; JOURNAL S2-A116). That sets the 16 MiB
+block and its 700 MB; the block bounds the parallel encode, four live
+being about 2.8 GB against the 1 GiB `memory-check` pins, so S2-A122's
+measured 2x is unwired; and inside it the 1 MiB `lz::WINDOW` is where
+every Silesia loss to zstd -19 sits while every Canterbury file under it
+wins.
 
-S1-P6 is exhausted at every small-slice avenue that respects the crate's
-own constraints: bit-decomposed coding shipped without reaching the SPEED
-floor, tANS-as-fast-path loses on bits/byte (S2-A88/S2-A90), and explicit
-SIMD is closed on the decode path permanently and elsewhere pending a
-candidate with a measured win (ADR-0053, re-checked S2-A103). Reopening
-it needs a genuinely new idea, not a variant. S1-A6's block-parallel mode
-is the founding harness's, not the crate's: `src/` has no parallel path.
-#1309 measured encode's two multipliers: its four independent filter
-trials (JOURNAL S2-A121) and the independent 16 MiB blocks (S2-A122: 2.0
-times faster on Silesia `mozilla` at four threads, bytes identical, not
-wired). The encode MB/s on the finals reports is a wall-clock under 12
-threads on 4 cores, not a single-thread rate (S2-A121).
+Items, in [milestone M5](https://github.com/bugabinga/mothergod/milestone/4),
+in order: the field measured at every level, gzip 1 to 9, zstd 1 to 22,
+xz 0 to 9e, ratio with encode and decode MB/s and peak RSS on the finals,
+mothergod one row per level it offers, published and tracked on /status
+(#1340), with the finals' own encode MB/s regenerated uncontended (#1324);
+the parse state budget and its cut (#1341); the headroom spent, threads
+over blocks and trials under 1 GiB (#1322), then the window or block where
+a file has long-range structure, read once on the finals (#1342).
+Measurement ranks first because a win nobody can place against the field
+is a number without a comparison (CLAUDE.md rule 4).
+
+Out of M5, with its trigger written down: decode speed. S1-P6 is
+exhausted at every slice the format allows (bit-decomposed coding shipped
+under the floor, tANS loses on bits/byte, S2-A88 and S2-A90, SIMD closed
+on decode by ADR-0053), so a faster decode is a second codec path and a
+format bump, which waits for a user who asks for it on an issue they open.
+Until then the decode floor is a ratchet.
 
 The floor is enforced as a ratchet, not as 1 MB/s on Silesia. Same-CPU
 Silesia decode snapshots (`docs/benchmarks/silesia.md`, CPU on each) fell
