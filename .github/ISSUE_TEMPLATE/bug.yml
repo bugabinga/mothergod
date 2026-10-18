@@ -1,6 +1,6 @@
 name: 🐛 Bug report
 description: Something is wrong (wrong output, panic, bad ratio, broken build)
-labels: [bug, triage]
+labels: [bug]
 body:
   - type: markdown
     attributes:

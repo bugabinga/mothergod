@@ -1,6 +1,6 @@
 name: 🔬 Research proposal
 description: An idea to improve compression; once triaged, a journal slice for the heartbeat (ADR-0062)
-labels: [research, triage]
+labels: [research]
 body:
   - type: markdown
     attributes:
