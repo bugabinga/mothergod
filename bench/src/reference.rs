@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Writes `data` to a fresh file under `std::env::temp_dir()`, unique per
 /// call (an atomic counter, not a hash of `data`) so concurrent
 /// measurements on identical bytes never collide.
-fn write_temp_file(data: &[u8], label: &str) -> io::Result<PathBuf> {
+pub(crate) fn write_temp_file(data: &[u8], label: &str) -> io::Result<PathBuf> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("mothergod-bench-reference-{label}-{n}"));
