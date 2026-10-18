@@ -212,11 +212,12 @@ floor, tANS-as-fast-path loses on bits/byte (S2-A88/S2-A90), and explicit
 SIMD is closed on the decode path permanently and elsewhere pending a
 candidate with a measured win (ADR-0053, re-checked S2-A103). Reopening
 it needs a genuinely new idea, not a variant. S1-A6's block-parallel mode
-is the founding harness's, not the crate's: `src/` has no parallel path,
-and the runner now has four cores (`docs/benchmarks/` headers), so the
-first measurable slice is chartered as #1309, a profile of where the
-encode second goes, then worker threads over the CLI's independent 16 MiB
-frames.
+is the founding harness's, not the crate's: `src/` has no parallel path.
+#1309 measured encode's two multipliers: its four independent filter
+trials (JOURNAL S2-A121) and the independent 16 MiB blocks (S2-A122: 2.0
+times faster on Silesia `mozilla` at four threads, bytes identical, not
+wired). The encode MB/s on the finals reports is a wall-clock under 12
+threads on 4 cores, not a single-thread rate (S2-A121).
 
 The floor is enforced as a ratchet, not as 1 MB/s on Silesia. Same-CPU
 Silesia decode snapshots (`docs/benchmarks/silesia.md`, CPU on each) fell
