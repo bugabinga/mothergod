@@ -109,15 +109,18 @@ jobs:
     # without this clause every such red would wake the BDFL once per
     # branch. Nothing else is excluded; an operator review event wakes
     # agent-bdfl on the PR's head branch, and that red keeps its alert.
-    # A red ci on a PR branch is that PR's verdict, read on its thread by
-    # the author and the reviewer; only ci on main, the proof run after
-    # a merge, is a transition with no other reader (#1275).
+    # A red ci on a PR is that PR's verdict, read on its thread by the
+    # author and the reviewer; only ci on main, the proof run after a
+    # merge or a hand dispatch, is a transition with no other reader
+    # (#1275). Keyed on the event as well as the branch, because a fork
+    # PR's head branch can be named `main` (#1279).
     if: contains(fromJSON('["failure", "timed_out", "startup_failure"]'),
       github.event.workflow_run.conclusion)
       && !(github.event.workflow_run.event == 'workflow_dispatch'
       && github.event.workflow_run.head_branch != 'main')
       && !(github.event.workflow_run.name == 'ci'
-      && github.event.workflow_run.head_branch != 'main')
+      && (github.event.workflow_run.head_branch != 'main'
+      || github.event.workflow_run.event == 'pull_request'))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -127,7 +130,11 @@ jobs:
       # per PR (ADR-0014), and two PRs' unrelated red reviews must not
       # dedup each other (review on #270). Singleton seats run every
       # wake on the same branch, so the extra key changes nothing for
-      # them.
+      # them. For ci the list drops `pull_request` rows, the runs the
+      # `if` above excludes: a fork PR's head named `main` would
+      # otherwise sit in main's streak and suppress the next real red
+      # (#1279). Scoped to ci because agent-review's and
+      # propagate-review's own runs are `pull_request` events.
       - name: Act only on the green-to-red transition
         id: dedup
         env:
@@ -140,9 +147,10 @@ jobs:
           set -euo pipefail
           prev="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WF_NAME" \
             --branch "$HEAD_BRANCH" --status completed --limit 20 \
-            --json databaseId,conclusion,createdAt \
-            | jq -r --arg id "$THIS_ID" --arg at "$THIS_CREATED" \
-              '[.[] | select((.databaseId | tostring) != $id and .createdAt < $at)]
+            --json databaseId,conclusion,createdAt,event \
+            | jq -r --arg id "$THIS_ID" --arg at "$THIS_CREATED" --arg wf "$WF_NAME" \
+              '[.[] | select((.databaseId | tostring) != $id and .createdAt < $at
+                             and ($wf != "ci" or .event != "pull_request"))]
                | first | .conclusion // "none"')"
           echo "previous completed $WF_NAME run on $HEAD_BRANCH concluded: $prev"
           case "$prev" in
