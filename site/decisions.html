@@ -369,7 +369,16 @@
       }
 
       function openFromHash() {
-        renderAdr(decodeURIComponent(location.hash.replace('#', '')));
+        const raw = location.hash.replace('#', '');
+        let number;
+        try {
+          number = decodeURIComponent(raw);
+        } catch {
+          // A malformed escape (#%) names no decision; render the raw text
+          // as "not found" instead of rejecting main() before the footer.
+          number = raw;
+        }
+        renderAdr(number);
       }
       window.addEventListener('hashchange', openFromHash);
       if (location.hash) openFromHash();
