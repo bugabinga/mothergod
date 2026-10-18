@@ -173,8 +173,9 @@ All notable changes to this project are documented here. Format follows
 - bench: the encode and decode MB/s in `docs/benchmarks/` reports are timed
   one file at a time, so a figure compares between files; the old run
   timed 12 threads on 4 cores, and `dickens` read 0.022 MB/s against 0.104
-  alone. The published Canterbury and Silesia figures stay contended until
-  both are regenerated (#1321, #1324).
+  alone. The published figures are regenerated the same way: Canterbury
+  encodes at 0.235 MB/s, up from 0.129, and Silesia at 0.188, up from 0.040,
+  on one CI machine; bits per byte are unchanged (#1321, #1324).
 - compress: the same input compresses to the same bytes on every run;
   the transpose column score summed in a per-process hash order, so a
   near-tie between column counts could pick a different filter from one run

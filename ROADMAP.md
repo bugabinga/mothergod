@@ -228,7 +228,7 @@ Items, in [milestone M5](https://github.com/bugabinga/mothergod/milestone/4),
 in order: the field measured at every level, gzip 1 to 9, zstd 1 to 22,
 xz 0 to 9e, ratio with encode and decode MB/s and peak RSS on the finals,
 mothergod one row per level it offers, published and tracked on /status
-(#1340), with the finals' own encode MB/s regenerated uncontended (#1324);
+(#1340);
 the parse state budget and its cut (#1341); the headroom spent, threads
 over blocks and trials under 1 GiB (#1322), then the window or block where
 a file has long-range structure, read once on the finals (#1342).
