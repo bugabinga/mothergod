@@ -22,10 +22,9 @@
 // They stay `pub` for two reasons. `bench` and `fuzz` call into `lz`, `literal`
 // and `codec`. And the live codec path does not reach the research
 // primitives (`Ppm`, `Model::ideal_cost_bits`, `codec`'s `compressed_len_*`
-// and `ideal_cost_bits_*` experiment entry points, `fieldtype`,
-// `Sse::contexts`), whose callers are
-// tests: under `pub(crate)` they become `dead_code` errors with `-D
-// warnings`. Narrowing waits on wiring or removing those items. `filters` is
+// and `ideal_cost_bits_*` experiment entry points, `Sse::contexts`), whose
+// callers are tests: under `pub(crate)` they become `dead_code` errors with
+// `-D warnings`. Narrowing waits on wiring or removing those items. `filters` is
 // documented: S2-A2 judged it "a defensible standalone library surface on
 // their own merits" (`research/JOURNAL.md`). `read` and `write` are the
 // library idiom matrix's front page (ADR-0064, #979).
@@ -39,8 +38,6 @@ pub mod coder;
 pub mod column;
 #[doc(hidden)]
 pub mod crc32;
-#[doc(hidden)]
-pub mod fieldtype;
 pub mod filters;
 #[doc(hidden)]
 pub mod literal;

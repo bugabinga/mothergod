@@ -51,17 +51,14 @@ exclude_re = [
   # non-overlapping bits equals `^`. 5 mutants.
   "replace \\| with \\^ in base64_unwrap::(strict_decode|encode_into)$",
 
-  # Equivalent: field_bank ORs a 2-bit class index (bits 0-1) with
-  # in_quotes shifted to bit 2, disjoint. banks ORs four more disjoint
-  # pairs: prev1 (bits 0-7) with after_copy*ALPHABET (bit 8, ALPHABET
-  # is 256); prev1<<8 (bits 8-15) with prev2 (bits 0-7); position&3
-  # shifted to bits 4-5 with prev1>>4 (bits 0-3); and prev1>>4 (bits
-  # 0-3) with after_copy*16 (bit 4). Every `|` in both functions ORs
-  # operands whose bits cannot overlap, so `|` and `^` agree. Function
-  # scope: every current `|` in each function is proven above; a `|`
-  # added later to either function must repeat this proof or narrow to
-  # file:line:col (issue #695). 5 mutants.
-  "replace \\| with \\^ in field_bank$",
+  # Equivalent: banks ORs four disjoint pairs: prev1 (bits 0-7) with
+  # after_copy*ALPHABET (bit 8, ALPHABET is 256); prev1<<8 (bits 8-15)
+  # with prev2 (bits 0-7); position&3 shifted to bits 4-5 with prev1>>4
+  # (bits 0-3); and prev1>>4 (bits 0-3) with after_copy*16 (bit 4).
+  # Every `|` in the function ORs operands whose bits cannot overlap, so
+  # `|` and `^` agree. Function scope: every current `|` in it is proven
+  # above; a `|` added later must repeat this proof or narrow to
+  # file:line:col (issue #695). 4 mutants.
   "replace \\| with \\^ in banks$",
 
   # Equivalent: ResidualTree::decode ORs `top << raw`, whose low `raw`
