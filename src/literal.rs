@@ -73,6 +73,17 @@ const WORD_BANKS: usize = 4096;
 /// Total context banks across all six experts.
 const BANKS: usize = WORD_BASE + WORD_BANKS;
 
+/// Where `bank`'s [`ALPHABET`] frequencies sit in a bank-major `freq` table,
+/// [`Literal`]'s and [`ColumnExpertState`]'s alike.
+fn bank_row(bank: usize) -> std::ops::Range<usize> {
+    bank * ALPHABET..(bank + 1) * ALPHABET
+}
+
+/// Where `symbol`'s frequency sits in a bank-major `freq` table.
+fn bank_slot(bank: usize, symbol: usize) -> usize {
+    bank * ALPHABET + symbol
+}
+
 /// Frequency increment and rescale ceiling for the fast-rate context expert
 /// (bank 0): higher increment and lower ceiling than the other five, so it
 /// tracks recent bytes hardest and forgets fastest.
@@ -727,8 +738,7 @@ impl Literal {
 
         let mut mixed = [0u64; ALPHABET];
         for (&bank, &s) in bank_indices.iter().zip(scale.iter()) {
-            let base = bank * ALPHABET;
-            for (m, &freq) in mixed.iter_mut().zip(&self.freq[base..base + ALPHABET]) {
+            for (m, &freq) in mixed.iter_mut().zip(&self.freq[bank_row(bank)]) {
                 *m += s * u64::from(freq);
             }
         }
@@ -757,7 +767,7 @@ impl Literal {
         let mut estimate = [0f64; EXPERTS];
         for (expert, &bank) in bank_indices.iter().enumerate() {
             estimate[expert] =
-                f64::from(self.freq[bank * ALPHABET + symbol]) / f64::from(self.total[bank]);
+                f64::from(self.freq[bank_slot(bank, symbol)]) / f64::from(self.total[bank]);
         }
         estimate
     }
@@ -798,7 +808,7 @@ impl Literal {
                 )
             };
             crate::rescale_bank(
-                &mut self.freq[bank * ALPHABET..bank * ALPHABET + ALPHABET],
+                &mut self.freq[bank_row(bank)],
                 &mut self.total[bank],
                 symbol,
                 increment,
@@ -904,7 +914,7 @@ impl Literal {
     ) -> u64 {
         let mut mixed = 0u64;
         for expert in 0..EXPERTS {
-            let freq = u64::from(self.freq[bank_indices[expert] * ALPHABET + symbol]);
+            let freq = u64::from(self.freq[bank_slot(bank_indices[expert], symbol)]);
             mixed += scale6[expert] * freq;
         }
         mixed
@@ -972,7 +982,7 @@ impl Literal {
         let scale7 = fixed_point_scale(w7, weight_sum, column_total);
 
         self.cum_with_extra(bank_indices, &scale6, |symbol| {
-            scale7 * u64::from(column_state.freq[column_bank * ALPHABET + symbol])
+            scale7 * u64::from(column_state.freq[bank_slot(column_bank, symbol)])
         })
     }
 
@@ -997,7 +1007,7 @@ impl Literal {
         let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
         let column_total = f64::from(column_state.total[column_bank]);
         let column_estimate =
-            f64::from(column_state.freq[column_bank * ALPHABET + symbol]) / column_total;
+            f64::from(column_state.freq[bank_slot(column_bank, symbol)]) / column_total;
 
         column_state.weight[weight_index] = self.adapt_seventh_weight(
             bank_indices,
@@ -1009,7 +1019,7 @@ impl Literal {
         );
 
         crate::rescale_bank(
-            &mut column_state.freq[column_bank * ALPHABET..column_bank * ALPHABET + ALPHABET],
+            &mut column_state.freq[bank_row(column_bank)],
             &mut column_state.total[column_bank],
             symbol,
             crate::DEFAULT_RESCALE_INCREMENT,
@@ -1194,10 +1204,7 @@ impl Literal {
         let mut prefix = [[0u64; ALPHABET + 1]; EXPERTS];
         for (sums, &bank) in prefix.iter_mut().zip(bank_indices) {
             let mut acc = 0u64;
-            for (symbol, &freq) in self.freq[bank * ALPHABET..(bank + 1) * ALPHABET]
-                .iter()
-                .enumerate()
-            {
+            for (symbol, &freq) in self.freq[bank_row(bank)].iter().enumerate() {
                 acc += u64::from(freq);
                 sums[symbol + 1] = acc;
             }
