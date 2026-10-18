@@ -1,7 +1,7 @@
 # Regenerates the published benchmark files on a runner and hands them back
 # as an artifact, because the measurement outgrew a session (#1324):
 # `silesia_report` times `mothergod` one file at a time (#1321, #1325), about
-# 35 minutes for 212 MB, and a session's foreground command caps at 30 with
+# 20 minutes for 212 MB, and a session's foreground command caps at 30 with
 # background execution denied (CLAUDE.md rule 12). Every output-changing
 # codec PR needs the pass since the ratio gate pins compress() bytes
 # (#1254): the baseline moves, both finals reports embed its fingerprint
@@ -39,10 +39,15 @@ env:
 jobs:
   regenerate:
     runs-on: ubuntu-24.04
-    # Release build about 3 minutes, baseline and graph 2, Canterbury 3,
-    # Silesia about 40 at ~0.1 MB/s serial; the runner CPU moves it by a
-    # quarter either way (JOURNAL S2-A121).
-    timeout-minutes: 90
+    # The whole pass took 24 minutes on 2026-10-18 (run 39097554778:
+    # build, baseline, Canterbury, Silesia at 0.188 MB/s); the runner CPU
+    # moves it by a quarter either way (JOURNAL S2-A121). The competitor
+    # matrix (#1340), 42 levels timed one process at a time on both
+    # corpora, is unmeasured and serial by design; 180 is its ceiling
+    # until its first run's wall time, read with
+    #   gh run list --workflow bench-report.yml --json createdAt,updatedAt
+    # replaces this sentence.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-ci
