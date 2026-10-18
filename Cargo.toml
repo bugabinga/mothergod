@@ -54,6 +54,13 @@ name = "torture"
 path = "tests/torture.rs"
 harness = false
 
+# The decoder tests push hundreds of MiB through the codec; at opt-level 0
+# one such test took 57 s (#1276). `debug-assertions` and `overflow-checks`
+# are separate keys inherited from `dev` and stay on, so the checks hard
+# rule 2 leans on still run under `cargo test`.
+[profile.test]
+opt-level = 1
+
 [workspace.lints.rust]
 missing_docs = "warn"
 
