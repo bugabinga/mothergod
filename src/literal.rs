@@ -40,7 +40,6 @@ use std::num::NonZeroUsize;
 use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
-use crate::ppm::Ppm;
 use crate::sse::{LogitSse, MIN_PROBABILITY, Sse};
 
 /// Number of context predictors blended for every literal byte.
@@ -208,8 +207,7 @@ fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) 
 }
 
 /// Bits the cumulative table `cum` charges `symbol`: `-log2` of its share of
-/// `cum[ALPHABET]`. Shared by [`Literal::ideal_cost_bits`] and
-/// [`Literal::ideal_cost_bits_ppm_expert_pair`].
+/// `cum[ALPHABET]`.
 fn cum_cost_bits(cum: &[u64; ALPHABET + 1], symbol: usize) -> f64 {
     #[allow(
         clippy::cast_precision_loss,
@@ -374,72 +372,6 @@ impl ColumnExpertState {
             weight: crate::try_filled_vec(WEIGHT_CONTEXTS, 1.0)?,
             sse: Sse::try_new(bittree::SSE_CONTEXTS)?,
         })
-    }
-}
-
-/// Bank count for [`PpmExpertState`]: one per value of the previous byte's
-/// high nibble.
-const PPM_EXPERT_BANKS: usize = 16;
-
-/// An additive, [`Ppm`]-backed expert, never substituted into any of
-/// [`Literal`]'s six real experts' banks (`research/JOURNAL.md` S2-R6,
-/// S2-R16 and S2-R17 tried that and were rejected). Same shape as
-/// [`ColumnExpertState`]: own bank space, own adaptive weight, own additive
-/// contribution. Each bank is a [`Ppm`] table, not a Laplace-smoothed
-/// frequency bank, so a symbol it has never observed contributes exactly
-/// zero mass instead of a false floor competing with the six real experts'.
-/// Keyed by the previous byte's high nibble (`PPM_EXPERT_BANKS` contexts).
-#[derive(Debug, Clone)]
-pub struct PpmExpertState {
-    /// One [`Ppm`] table per bank ([`PPM_EXPERT_BANKS`] of them).
-    tables: Vec<Ppm>,
-    /// This expert's own mixing weight, one per [`WEIGHT_CONTEXTS`] key.
-    weight: Vec<f64>,
-}
-
-impl PpmExpertState {
-    /// A fresh PPM-expert state: every bank a fresh [`Ppm`] table (every
-    /// symbol unseen), every weight 1.0, as [`ColumnExpertState::new`].
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            tables: (0..PPM_EXPERT_BANKS).map(|_| Ppm::new(ALPHABET)).collect(),
-            weight: vec![1.0; WEIGHT_CONTEXTS],
-        }
-    }
-
-    /// Which of this state's [`PPM_EXPERT_BANKS`] tables `context` keys:
-    /// the previous byte's high nibble alone.
-    #[must_use]
-    fn bank_of(context: Context) -> usize {
-        usize::from(context.prev1) >> 4
-    }
-}
-
-impl Default for PpmExpertState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// [`fixed_point_scale`]'s own shape, but for an expert like
-/// [`PpmExpertState`] whose own per-symbol estimate is already a
-/// probability in `[0, 1]` ([`Ppm::probability`]), not a raw frequency over
-/// a bank total: an escaped symbol's probability is `0.0` by construction,
-/// so there is no bank total this could sensibly divide by.
-fn fixed_point_contribution_from_probability(
-    weight: f64,
-    weight_sum: f64,
-    probability: f64,
-) -> u64 {
-    let normalized = weight / weight_sum;
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "fixed-point contribution: normalized weight and probability are both in [0,1], the product is always non-negative and truncation is the intended floor"
-    )]
-    {
-        (normalized * probability * FIXED_POINT_SCALE) as u64
     }
 }
 
@@ -875,10 +807,9 @@ impl Literal {
     }
 
     /// `weights6`, the extra expert's own weight, and their sum: the
-    /// shared three-number prelude [`Self::mix7`]/[`Self::mix_ppm`] and
-    /// their [`Self::update_column_expert`]/[`Self::update_ppm_expert`]
-    /// counterparts each start from, keyed by the same `weight_index`
-    /// [`banks`] selected for the six real experts.
+    /// three-number prelude [`Self::mix7`] and [`Self::update_column_expert`]
+    /// each start from, keyed by the same `weight_index` [`banks`] selected
+    /// for the six real experts.
     fn weights6_and_sum(&self, weight_index: usize, w7: f64) -> ([f64; EXPERTS], f64) {
         let weights6 = self.weights[weight_index];
         let weight_sum = weights6.iter().sum::<f64>() + w7;
@@ -886,9 +817,9 @@ impl Literal {
     }
 
     /// The six real experts' fixed-point scale factors under `weights6`
-    /// and `weight_sum`: the shared middle step [`Self::mix`],
-    /// [`Self::mix7`] and [`Self::mix_ppm`] compute identically, the last
-    /// two before folding in their own seventh/eighth term.
+    /// and `weight_sum`: the shared middle step [`Self::mix`] and
+    /// [`Self::mix7`] compute identically, the latter before folding in its
+    /// seventh term.
     fn scale6(
         &self,
         bank_indices: &[usize; EXPERTS],
@@ -921,10 +852,8 @@ impl Literal {
     }
 
     /// The cumulative-frequency table over the six real experts' blend
-    /// under `scale6` plus `extra(symbol)`: the shared body of
-    /// [`Self::mix7`] and [`Self::mix_ppm`], which differ only in what the
-    /// extra expert contributes. Every symbol gets the same `+1` Laplace
-    /// floor as [`Self::mix`].
+    /// under `scale6` plus `extra(symbol)`, [`Self::mix7`]'s body. Every
+    /// symbol gets the same `+1` Laplace floor as [`Self::mix`].
     fn cum_with_extra(
         &self,
         bank_indices: &[usize; EXPERTS],
@@ -939,9 +868,7 @@ impl Literal {
 
     /// The extra expert's own weight, adapted toward how well
     /// `estimate7` did against the six-real-experts-plus-extra mixed
-    /// estimate: the shared update rule
-    /// [`Self::update_column_expert`] and [`Self::update_ppm_expert`]
-    /// each apply to their own bank.
+    /// estimate: [`Self::update_column_expert`]'s update rule.
     fn adapt_seventh_weight(
         &self,
         bank_indices: &[usize; EXPERTS],
@@ -1095,103 +1022,6 @@ impl Literal {
         );
         self.update(&bank_indices, weight_index, symbol, exp);
         byte
-    }
-
-    /// Eighth-expert-style counterpart of [`Self::mix`]/[`Self::mix7`]:
-    /// the same fixed-point blend with `ppm_state`'s bank folded in as one
-    /// more, genuinely additive term (`research/JOURNAL.md` S1-P3's own
-    /// remaining scope after S2-R17: "an escape signal that never enters
-    /// a real expert's own floor at all"). Unlike [`Self::mix7`]'s
-    /// `column_state` bank (a Laplace-smoothed frequency table, same
-    /// shape as the six real experts), `ppm_state`'s own [`Ppm`] table
-    /// starts every symbol at frequency 0: [`Ppm::probability`] reports
-    /// `0.0` for a symbol this bank has never observed, so this expert's
-    /// own contribution is silent exactly where it has nothing to say,
-    /// never a false floor competing with the six real experts' own
-    /// Laplace-smoothed ones.
-    fn mix_ppm(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        weight_index: usize,
-        ppm_bank: usize,
-        ppm_state: &PpmExpertState,
-    ) -> [u64; ALPHABET + 1] {
-        let w7 = ppm_state.weight[weight_index];
-        let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
-        let scale6 = self.scale6(bank_indices, &weights6, weight_sum);
-
-        let table = &ppm_state.tables[ppm_bank];
-
-        self.cum_with_extra(bank_indices, &scale6, |symbol| {
-            fixed_point_contribution_from_probability(w7, weight_sum, table.probability(symbol))
-        })
-    }
-
-    /// Adapts `ppm_state`'s own weight and bank toward `symbol`, the
-    /// PPM-expert counterpart of [`Self::update_column_expert`]: its
-    /// weight adapts on the same continuous-probability-space rule
-    /// [`Self::update`] uses for the six real weights, restricted to this
-    /// one component, and its bank observes `symbol` through [`Ppm::observe`]
-    /// (Method C's own bookkeeping, not [`crate::rescale_bank`] — this
-    /// bank is a [`Ppm`] table, never a plain frequency array).
-    fn update_ppm_expert(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        weight_index: usize,
-        symbol: usize,
-        ppm_bank: usize,
-        ppm_state: &mut PpmExpertState,
-    ) {
-        let w7 = ppm_state.weight[weight_index];
-        let (weights6, weight_sum) = self.weights6_and_sum(weight_index, w7);
-        let ppm_estimate = ppm_state.tables[ppm_bank].probability(symbol);
-
-        ppm_state.weight[weight_index] = self.adapt_seventh_weight(
-            bank_indices,
-            &weights6,
-            weight_sum,
-            symbol,
-            w7,
-            ppm_estimate,
-        );
-
-        ppm_state.tables[ppm_bank].observe(symbol);
-    }
-
-    /// `research/JOURNAL.md` S1-P3's before-wiring measurement, the same
-    /// paired methodology S1-P5's column expert (`JOURNAL` S2-A69) and
-    /// S1-P2's fieldtype expert (`JOURNAL` S2-R15) both used: prices
-    /// `byte` twice from the same pre-update six-expert state — once
-    /// under the shipped mix ([`Self::ideal_cost_bits`] exactly,
-    /// including its own `update` call, so the six real experts adapt on
-    /// their one real trajectory regardless of this method ever running),
-    /// once with `ppm_state`'s own [`Ppm`] table blended in as a
-    /// genuinely additive expert via [`Self::mix_ppm`], never substituted
-    /// into any of the six real experts' own banks (`JOURNAL`
-    /// S2-R6/S2-R16/S2-R17's shared failure shape). `ppm_state` adapts on
-    /// its own trajectory via [`Self::update_ppm_expert`], independent of
-    /// the six real weights.
-    ///
-    /// Returns `(baseline_bits, with_ppm_bits)`.
-    #[must_use]
-    pub fn ideal_cost_bits_ppm_expert_pair(
-        &mut self,
-        context: Context,
-        byte: u8,
-        ppm_state: &mut PpmExpertState,
-    ) -> (f64, f64) {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let ppm_bank = PpmExpertState::bank_of(context);
-
-        let cum7 = self.mix_ppm(&bank_indices, weight_index, ppm_bank, ppm_state);
-        let with_ppm_bits = cum_cost_bits(&cum7, symbol);
-
-        self.update_ppm_expert(&bank_indices, weight_index, symbol, ppm_bank, ppm_state);
-
-        let baseline_bits = self.ideal_cost_bits(context, byte);
-
-        (baseline_bits, with_ppm_bits)
     }
 
     /// Each expert's cumulative frequency table over its selected bank:
