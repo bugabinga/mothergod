@@ -4,7 +4,7 @@
 // session, and the refs file push-branch would have written.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -158,4 +158,34 @@ test("non-Bash tools, malformed JSON and a null tool_input are allowed", () => {
   assert.equal(run(env, { ...bash(dir), tool_name: "Write" }).status, 0);
   assert.equal(run(env, "{not json").status, 0);
   assert.equal(run(env, { ...bash(dir), tool_input: null }).status, 0);
+});
+
+// The hook runs under `onFailure: "block"`, so an exception is a deny of
+// every Bash call for the rest of the session (#1315). A stamp or a git
+// it cannot use is no evidence; the call is allowed and stderr says why.
+test("a stamp path squatted by a directory leaves the session untracked and allowed", () => {
+  const { dir, dirty } = repo();
+  dirty();
+  const { stamp, env } = session();
+  mkdirSync(stamp);
+  const first = run(env, bash(dir));
+  assert.equal(first.status, 0);
+  assert.match(first.stderr, /^deny-unpushed-work: .*deny-unpushed-work-s1\.json: /);
+  assert.equal(run(env, bash(dir)).status, 0);
+  assert.ok(statSync(stamp).isDirectory());
+});
+
+test("a git that cannot run is no evidence of edits: the aged, dirty session is allowed", () => {
+  const { dir, dirty } = repo();
+  dirty();
+  const { env, summary } = session(40);
+  // A PATH holding python3 and nothing else: `git` raises FileNotFoundError,
+  // the arm a hang past GIT_TIMEOUT_S also takes.
+  const bin = mkdtempSync(join(tmpdir(), "unpushed-bin-"));
+  const python = execFileSync("sh", ["-c", "command -v python3"], { encoding: "utf8" }).trim();
+  symlinkSync(python, join(bin, "python3"));
+  const res = run({ ...env, PATH: bin }, bash(dir));
+  assert.equal(res.status, 0);
+  assert.match(res.stderr, /^deny-unpushed-work: git status: /);
+  assert.equal(existsSync(summary), false);
 });
