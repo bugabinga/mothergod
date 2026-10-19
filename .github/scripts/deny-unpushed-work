@@ -42,7 +42,11 @@ threshold.
 
 Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions
 (GITHUB_ACTIONS != "true") or for any tool but Bash everything is
-allowed, as are malformed JSON and a null tool_input. Exit 2 denies;
+allowed, as are malformed JSON and a null tool_input. So is a call the
+hook cannot judge: a stamp it cannot read or write, a git that is
+missing or hangs. The hook runs under `onFailure: block`, so an
+exception here would deny every Bash call of the session (#1315); a
+guard that cannot see fails open and says so on stderr. Exit 2 denies;
 stderr is shown to the model.
 
 Liveness: the one deny per session appends a line to GITHUB_STEP_SUMMARY
@@ -66,6 +70,9 @@ DEFAULT_BASH_MAX_MS = 30 * 60 * 1000
 PUSH = "push-branch"
 REFS = "push-branch-refs.json"
 SHOWN = 6
+# Two git calls per judged call. The harness kills a command hook at 60 s
+# and `onFailure: block` reads the kill as a deny, so both must end first.
+GIT_TIMEOUT_S = 20
 
 MESSAGE = (
     "Session {age} min old, {count} edited path{plural} unpushed: {paths}. "
@@ -88,15 +95,32 @@ def threshold_s() -> int:
     return TOKEN_TTL_S - bash_max_ms // 1000 - LEAD_S
 
 
-def stamp_path(session_id: str) -> str:
-    """One stamp per session, in the temp directory, filename-safe."""
+def stamp_path(session_id: str) -> str | None:
+    """One stamp per session, in the temp directory, filename-safe; None without one.
+
+    `gettempdir` raises when no candidate directory is writable; with no
+    path there is no stamp to try, so the caller allows.
+    """
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
-    return os.path.join(tempfile.gettempdir(), f"deny-unpushed-work-{safe}.json")
+    try:
+        return os.path.join(tempfile.gettempdir(), f"deny-unpushed-work-{safe}.json")
+    except OSError as exc:
+        print(f"deny-unpushed-work: no temp directory: {exc}", file=sys.stderr)
+        return None
 
 
 def save_stamp(path: str, stamp: dict) -> None:
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(stamp, fh)
+    """Write the stamp, or name on stderr what was lost; never raise (#1315).
+
+    The stamp is advisory. One that cannot be written leaves the session
+    untracked, every call allowed, because the alternative under
+    `onFailure: block` is every call denied.
+    """
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(stamp, fh)
+    except OSError as exc:
+        print(f"deny-unpushed-work: {path}: {exc.strerror or exc}", file=sys.stderr)
 
 
 def load_stamp(path: str, now: float) -> dict:
@@ -114,9 +138,19 @@ def load_stamp(path: str, now: float) -> dict:
 
 
 def git(cwd: str, *args: str) -> str | None:
-    proc = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False
-    )
+    """stdout on success; None on a failed, missing or hung git, which is no evidence."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GIT_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"deny-unpushed-work: git {args[0]}: {exc}", file=sys.stderr)
+        return None
     return proc.stdout if proc.returncode == 0 else None
 
 
@@ -150,6 +184,8 @@ def main() -> int:
     now = time.time()
     session = call.get("session_id")
     path = stamp_path(session if isinstance(session, str) and session else "unknown")
+    if path is None:
+        return 0
     stamp = load_stamp(path, now)
     age = now - stamp["start"]
     if age < threshold_s() or stamp.get("fired") or PUSH in command:
