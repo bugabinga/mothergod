@@ -345,7 +345,7 @@ fn concatenation() -> Seen {
 const BLOCK: usize = 16 * 1024 * 1024;
 
 /// The most blocks the encoder holds unencoded or encoding: two encode at
-/// once on two cores (`write::MAX_ENCODE_BLOCKS`) while the third fills.
+/// once on two cores (`write::MAX_CONCURRENT_ENCODES`) while the third fills.
 /// One core holds one, so this is the ceiling over every machine.
 const BLOCKS_HELD: usize = 3;
 

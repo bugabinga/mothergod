@@ -2,7 +2,7 @@ use std::io::ErrorKind;
 
 use super::*;
 use crate::test_support::{
-    Xorshift32, bcj_call_dense_data, columnar_drift_data, repeated_sentence, serial_blocks,
+    Xorshift32, bcj_call_dense_data, columnar_drift_data, nz, repeated_sentence, serial_blocks,
     tabular_columns_data,
 };
 use crate::{compress, decompress};
@@ -44,7 +44,7 @@ fn encode(input: &[u8], chunk: usize, block_len: usize) -> Vec<u8> {
 
 /// [`encode`] with `workers` blocks encoding at once.
 fn encode_with(input: &[u8], block_len: usize, workers: usize) -> Vec<u8> {
-    let mut encoder = Encoder::with_workers(Vec::new(), block_len, workers);
+    let mut encoder = Encoder::with_workers(Vec::new(), block_len, nz(workers));
     encoder.write_all(input).expect("a Vec does not fail");
     encoder.finish().expect("a Vec does not fail")
 }
@@ -87,7 +87,7 @@ fn the_workers_in_flight_never_change_the_bytes() {
 fn a_flush_waits_for_every_running_block_and_the_stream_continues_in_order() {
     let (first, second) = (uneven_blocks(3), uneven_blocks(2));
     for workers in [1, 2, 3] {
-        let mut encoder = Encoder::with_workers(Vec::new(), BLOCK, workers);
+        let mut encoder = Encoder::with_workers(Vec::new(), BLOCK, nz(workers));
         encoder.write_all(&first).unwrap();
         encoder.flush().unwrap();
         // Everything written so far has reached the sink, running blocks too.
@@ -174,7 +174,7 @@ fn a_drop_writes_no_frame_and_a_full_block_is_framed_at_once_when_nothing_runs_b
     drop(encoder);
     assert!(sink.bytes.is_empty(), "a drop writes no frame");
 
-    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, 1);
+    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(1));
     encoder.write_all(&vec![b'a'; BLOCK]).unwrap();
     drop(encoder);
     assert_eq!(sink.bytes, compress(&vec![b'a'; BLOCK]), "a full block");
@@ -214,7 +214,7 @@ fn a_sink_error_ends_the_encoder_and_no_later_byte_reaches_the_sink() {
         failures: 1,
         kind: ErrorKind::BrokenPipe,
     };
-    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, 1);
+    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(1));
     let err = encoder.write_all(&vec![b'a'; BLOCK]).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::BrokenPipe);
     for result in [encoder.write(b"x").map(drop), encoder.flush()] {
@@ -233,7 +233,7 @@ fn a_sink_error_ends_a_threaded_encoder_with_the_frames_before_it_intact() {
             failures: 1,
             kind: ErrorKind::BrokenPipe,
         };
-        let mut encoder = Encoder::with_workers(&mut sink, BLOCK, workers);
+        let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(workers));
         // Six blocks: the first frame's write fails whichever call reaches it.
         let wrote = encoder.write_all(&uneven_blocks(6));
         let err = wrote

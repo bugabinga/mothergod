@@ -56,6 +56,8 @@
 //! literal bytes together, without touching an [`Encoder`].
 
 use std::num::{NonZeroU32, NonZeroUsize};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use crate::Error;
 use crate::coder::{Decoder, Encoder};
@@ -793,29 +795,88 @@ impl ResidualTree {
 /// layout"). Each candidate is applied to the raw input: one filter, or
 /// [`Candidate::ReverseDelta`], the one fixed composition.
 ///
+/// Up to `workers` trials run at once, the calling thread being one of them.
+/// The trials are independent encodes, so the payload is the one a serial
+/// search writes, a tie going to the earlier candidate; each running trial
+/// holds a working set of its own, which is what bounds the caller's choice
+/// of `workers` (`research/JOURNAL.md` S2-A126).
+///
 /// # Panics
 ///
 /// Panics if `data.len()` exceeds `u32::MAX`; see `encode_tokens`'s
 /// docs, which this delegates to per candidate.
 #[must_use]
-pub fn encode(data: &[u8]) -> Vec<u8> {
+pub fn encode(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
+    let candidates = filters::select::pick(data);
+    let (candidate, body) = best_trial(data, &candidates, workers)
+        .expect("filters::select::pick always returns at least Candidate::Identity");
+
+    let mut out = Vec::with_capacity(SELECTOR_LEN + body.len());
+    out.extend_from_slice(&candidate.to_header_bytes());
+    out.extend(body);
+    out
+}
+
+/// The winner among `candidates`, with its body, as the first candidate in
+/// the list to reach the smallest body: what a serial loop that replaces its
+/// incumbent only on a strictly smaller body keeps. Up to `workers` threads
+/// take the next untried candidate until none is left; each keeps its own
+/// winner, which is its first smallest because it takes candidates in list
+/// order, and the merge by list position then picks the global first
+/// smallest. `None` for no candidates.
+fn best_trial(
+    data: &[u8],
+    candidates: &[Candidate],
+    workers: NonZeroUsize,
+) -> Option<(Candidate, Vec<u8>)> {
+    type Winner = (usize, Candidate, Vec<u8>);
+    let next = AtomicUsize::new(0);
+    let work = || -> Option<Winner> {
+        let mut best: Option<Winner> = None;
+        loop {
+            // Relaxed: the counter hands out each index once and orders
+            // nothing else.
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(&candidate) = candidates.get(index) else {
+                return best;
+            };
+            let filtered = apply_filter(candidate, data);
+            let body = encode_tokens(&filtered, candidate.columns());
+            if best.as_ref().is_none_or(|(_, _, existing)| {
+                crate::candidate_beats_incumbent(body.len(), existing.len())
+            }) {
+                best = Some((index, candidate, body));
+            }
+        }
+    };
+
+    let mut winners: Vec<Winner> = thread::scope(|scope| {
+        // A refused spawn (the process is out of threads) leaves the work to
+        // the threads that did start, this one included.
+        let helpers: Vec<_> = (1..workers.get().min(candidates.len()))
+            .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
+            .collect();
+        let mut winners: Vec<Winner> = work().into_iter().collect();
+        for helper in helpers {
+            // A panic on a trial thread is the panic a serial encode raises.
+            winners.extend(
+                helper
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            );
+        }
+        winners
+    });
+    winners.sort_by_key(|&(index, ..)| index);
     let mut best: Option<(Candidate, Vec<u8>)> = None;
-    for candidate in filters::select::pick(data) {
-        let filtered = apply_filter(candidate, data);
-        let body = encode_tokens(&filtered, candidate.columns());
+    for (_, candidate, body) in winners {
         if best.as_ref().is_none_or(|(_, existing)| {
             crate::candidate_beats_incumbent(body.len(), existing.len())
         }) {
             best = Some((candidate, body));
         }
     }
-    let (candidate, body) =
-        best.expect("filters::select::pick always returns at least Candidate::Identity");
-
-    let mut out = Vec::with_capacity(SELECTOR_LEN + body.len());
-    out.extend_from_slice(&candidate.to_header_bytes());
-    out.extend(body);
-    out
+    best
 }
 
 /// Byte length of [`encode_tokens_with`]'s header: declared output length

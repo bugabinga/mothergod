@@ -3685,7 +3685,8 @@ record.
   starts from `git show cfdc5e2:src/tans.rs`. The measurements above stay.
   Encode's own second was profiled for #1309: S2-A121 (stage split, the
   published figure is a contended wall-clock), S2-A122 (independent blocks,
-  measured, not wired).
+  measured, not wired); S2-A125 and S2-A126 wired two blocks and then two
+  trials at once.
 - S2-A103 | REJECTED | Re-checked S2-A80/it129's explicit-SIMD blocker
   against an external claim (operator-forwarded article, "State of SIMD
   in Rust 2026") that Rust 1.87 stabilized calling platform intrinsics
@@ -8920,3 +8921,42 @@ record.
   core under `taskset` with the library `compress` (which now takes the same
   path), the trials half of #1322 (the four filter trials still run on one
   core), parallel decode. `research/progress.jsonl` it201.
+- S2-A126 | ACCEPTED | Issue #1322, the trials half, two at once. Hypothesis:
+  two threads taking the filter trials of a block's `codec::encode` cut encode
+  wall-clock on a file of one block with output bytes unchanged, and the peak
+  stays under the 1 GiB the CLI states, because the trials are independent
+  encodes and the bound S2-A125 set is two working sets. | Measured, release
+  build, AMD EPYC 7763 4 logical cores runner, `mothergod` from stdin,
+  wall-clock and peak RSS from `/usr/bin/time`, one process at a time.
+  `dickens` at the `bench/corpus.toml` pin (10,192,446 bytes, four trials):
+  main 89.36 s and 320,096 KiB, two trial threads 49.28 s (1.81 times faster)
+  and 543,628 KiB. The first 16,777,215 bytes of `webster` at the pin, one
+  byte under a block: `taskset -c 0` 136.75 s and 512,040 KiB, `taskset -c
+  1,2` 80.33 s (1.70 times) and 877,156 KiB, under the 1,048,576 KiB bound.
+  Both outputs `cmp`-identical to serial (2,956,893 and 3,768,084 bytes) and
+  the decode equals the input. Exactly 16,777,216 bytes of the same file:
+  130.26 s serial and 130.95 s on two cores, 487,640 KiB, no gain. Unit
+  tests pin the payload equal for one to nine trial workers on inputs whose
+  winner is each side of the shortlist and on tiny inputs whose trials tie,
+  where the earlier candidate must win, and the encoder equal to the serial
+  oracle for one to four workers. | Mechanism: a trial is a full encode of the
+  filtered block and shares nothing, so each thread takes the next untried
+  candidate, keeps its own first smallest, and the merge by candidate
+  position keeps the first smallest overall, which is the serial loop's
+  strictly-smaller replacement. The 1.81 is under the 1.87 S2-A121's table
+  gives for two workers because the pull order puts the 34.3 s `Transpose`
+  trial last on `dickens`. The bound is shared, not stacked: a stream's
+  blocks and one block's trials never nest, so `write::Encoder` gives trial
+  threads only to the last block when none is running, and every other
+  block's trials stay serial. A stream past one block therefore peaks as
+  S2-A125 measured, and its tail gains only when the earlier blocks are
+  joined. A block `write` fills to the byte is cut before `finish` can know
+  it is the last, which is why exactly one block gains nothing; deferring
+  that cut until the next byte arrives is unbuilt. Four trial threads on
+  `dickens` is 1.3 GB by arithmetic from the 320,096 KiB serial peak, past
+  the bound, so two stays. | **Not measured:** the tail of a multi-block
+  stream, `.github/scripts/memory-check` on the branch, a machine with one
+  core under the library `compress` (the one-core path is the old serial
+  one, pinned by the unit tests only), a trial list with `Bcj` or `Base64`
+  in it on a block this size, the skip-a-losing-trial trade
+  S2-A121 lists, decode. `research/progress.jsonl` it202.

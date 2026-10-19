@@ -13,6 +13,7 @@
 //! a second test running beside it would be in the peak.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct PeakAlloc;
@@ -83,11 +84,23 @@ fn noise(len: usize) -> Vec<u8> {
     .collect()
 }
 
-/// Bytes of peak heap per input byte an encode of [`noise`] may reach. The
+/// Bytes of peak heap per input byte one encode of [`noise`] may reach. The
 /// peak measures 37.6 with each round's tokens freed before the next DP round
 /// and 49.6 without, on the 64-bit allocator this runs under; the bound sits
 /// between, so the test fails on the regression and not on a small drift.
 const MAX_PEAK_PER_BYTE: usize = 44;
+
+/// `codec::encode` of `input` with `workers` trials at once, and the peak
+/// heap it reached, rounded up to bytes per input byte. Each running trial
+/// holds an encode's working set of its own (`research/JOURNAL.md` S2-A126).
+fn encode_peak(input: &[u8], workers: usize) -> (usize, Vec<u8>) {
+    let before = LIVE.load(Ordering::Relaxed);
+    PEAK.store(before, Ordering::Relaxed);
+    let workers = NonZeroUsize::new(workers).expect("a worker count is nonzero");
+    let payload = mothergod::codec::encode(input, workers);
+    let peak = PEAK.load(Ordering::Relaxed) - before;
+    (peak.div_ceil(input.len()), payload)
+}
 
 #[test]
 fn the_peak_heap_of_an_encode_stays_under_its_bytes_per_input_byte() {
@@ -95,13 +108,22 @@ fn the_peak_heap_of_an_encode_stays_under_its_bytes_per_input_byte() {
     // the input, and the token lists are not in it.
     const LEN: usize = 1 << 19;
     let input = noise(LEN);
-    let before = LIVE.load(Ordering::Relaxed);
-    PEAK.store(before, Ordering::Relaxed);
-    let stream = mothergod::compress(&input);
-    let peak = PEAK.load(Ordering::Relaxed) - before;
+    let (serial_peak, serial) = encode_peak(&input, 1);
     assert!(
-        peak < MAX_PEAK_PER_BYTE * LEN,
-        "peak heap {peak} bytes for {LEN} input bytes, over {MAX_PEAK_PER_BYTE} per byte"
+        serial_peak < MAX_PEAK_PER_BYTE,
+        "peak heap {serial_peak} bytes per input byte of {LEN}, over {MAX_PEAK_PER_BYTE}"
     );
-    assert_eq!(mothergod::decompress(&stream), Ok(input));
+    // A pair of trials is two working sets and no more: a third at once is
+    // what the bound the CLI states does not hold.
+    let (pair_peak, pair) = encode_peak(&input, 2);
+    assert!(
+        pair_peak < 2 * MAX_PEAK_PER_BYTE,
+        "peak heap {pair_peak} bytes per input byte of {LEN} with two trials at once, over {}",
+        2 * MAX_PEAK_PER_BYTE
+    );
+    assert_eq!(pair, serial);
+    assert_eq!(
+        mothergod::codec::decode(&serial, mothergod::codec::MAX_DECODED_LEN),
+        Ok(input)
+    );
 }
