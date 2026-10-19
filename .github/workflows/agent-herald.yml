@@ -129,13 +129,19 @@ jobs:
             violation. Update CHANGELOG.md only for user-visible
             product changes.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes".
-          # WebFetch/WebSearch: the survey's read-only instruments.
+          # `--tools` hides, `--allowedTools` only pre-approves (#725): a
+          # built-in the seat never calls is context on every turn, so the
+          # offered set is what its sessions call (#1307; retrospect's
+          # "offered N" is the liveness, `.github/scripts/sessions` the
+          # measure). Write for a new page, WebFetch and WebSearch as the
+          # survey's read-only instruments, ToolSearch to load them.
           claude_args: |
             --append-system-prompt-file agents/personas/herald.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 300
-            --allowedTools "Edit,Write,MultiEdit,Bash,WebFetch,WebSearch"
+            --tools "Bash,Edit,Write,Read,WebSearch,WebFetch,Skill,ToolSearch"
+            --allowedTools "Edit,Write,Bash,WebFetch,WebSearch"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause
