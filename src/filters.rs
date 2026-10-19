@@ -660,28 +660,19 @@ pub mod select {
         /// decoded payload.
         #[must_use]
         pub fn to_header_bytes(self) -> [u8; 2] {
-            match self {
-                Self::Identity => [0, 0],
-                Self::Delta(stride) => [
-                    1,
-                    u8::try_from(stride.get())
-                        .expect("pick() bounds delta strides to MAX_DELTA_STRIDE (96), fits u8"),
-                ],
-                Self::Bcj => [2, 0],
-                Self::Transpose(columns) => [
-                    3,
-                    u8::try_from(columns.get()).expect(
-                        "pick() only selects TRANSPOSE_COLUMNS entries, all under 100, fits u8",
-                    ),
-                ],
-                Self::Base64 => [4, 0],
-                Self::Reverse => [5, 0],
-                Self::ReverseDelta(stride) => [
-                    6,
-                    u8::try_from(stride.get())
-                        .expect("pick() bounds delta strides to MAX_DELTA_STRIDE (96), fits u8"),
-                ],
-            }
+            let (kind, param) = match self {
+                Self::Identity => (0, 0),
+                Self::Delta(stride) => (1, stride.get()),
+                Self::Bcj => (2, 0),
+                Self::Transpose(columns) => (3, columns.get()),
+                Self::Base64 => (4, 0),
+                Self::Reverse => (5, 0),
+                Self::ReverseDelta(stride) => (6, stride.get()),
+            };
+            let param = u8::try_from(param).expect(
+                "pick() bounds strides to MAX_DELTA_STRIDE and columns to TRANSPOSE_COLUMNS, under 100, fits u8",
+            );
+            [kind, param]
         }
 
         /// Inverse of [`to_header_bytes`](Self::to_header_bytes). Returns
