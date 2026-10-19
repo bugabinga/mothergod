@@ -30,9 +30,9 @@
 //! Compression streams through [`mothergod::copy_encode`], one 16 MiB block
 //! and one frame at a time, so its memory is bounded by the block and not by
 //! the input. Decompression streams through
-//! [`mothergod::decompress_to_writer`], which bounds resident memory on the
-//! output side (ROADMAP M4) for every frame kind except a `Transpose`-filtered
-//! one, which decodes whole first. Decompression reads its input whole.
+//! [`mothergod::decompress_to_writer`], whose docs name the frame kinds that
+//! bound resident memory on the output side (ROADMAP M4); the rest decode
+//! whole first. Decompression reads its input whole.
 //!
 //! A decode failure to stdout surfaces after whatever prefix was already
 //! written: `| tar x` sees truncated bytes ahead of the nonzero exit code.
