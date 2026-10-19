@@ -148,8 +148,7 @@ jobs:
                the one command it prints, run it and read on. Then a
                product issue labeled ready-to-ship: its thread holds
                the verified diff, the ship is one push and a PR, and
-               its claude/* branch is the item, not a claim; only an
-               open PR claims it (#979). Then urgency outranks
+               its claude/* branch is the item (#979). Then urgency outranks
                importance, because a
                broken thing costs someone every hour while an unbuilt
                thing costs nothing new. Take the first item nobody has
@@ -171,8 +170,11 @@ jobs:
                   realm label alone, and an issue no step names is
                   nobody's (#1258).
                Claim check first, because agents run concurrently
-               (ADR-0014): an item an open PR or claude/* branch already
-               covers is claimed, take the next one. Implement the
+               (ADR-0014): only an open PR claims an item. A claude/*
+               branch with no PR is a handoff, not a claim: its session
+               is over (rule 12), so resume from it rebased on main,
+               brief in its commit message and issue thread (#1322's
+               `claude/encode-parallel-blocks`). Implement the
                smallest useful slice, push it with
                `.github/scripts/push-branch`, and open a PR whose body
                states what, why, how it was verified, and which ROADMAP,
