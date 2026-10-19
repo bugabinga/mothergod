@@ -68,9 +68,14 @@ One signature has no PR to hang on, which is the whole point of it:
                          state, past its own grace. The session that
                          pushed it died before `gh-pr`, usually on
                          an expired app token (issue #489, first hit run
-                         33677765718). No other credential may open that
+                         33677765718), or parked unfinished work there
+                         on purpose and said so in the commit message
+                         (#1322). No other credential may open that
                          PR, which is why this is detected rather than
-                         delegated: GOVERNANCE, sixth signature.
+                         delegated: GOVERNANCE, sixth signature. The
+                         recipe reads the commit message to tell the
+                         two apart; a parked branch is the heartbeat's
+                         handoff and reports until its PR exists.
 
 A rescue of more than a command or two names its recipe by reference, and
 that recipe lives in agents/GOVERNANCE.md "Stalled auto-merge" and nowhere
@@ -559,8 +564,10 @@ def classify_branch(branch, now):
         "branch-orphaned",
         f"pushed {pushed or 'before the activity window'} and never became a PR",
         "GOVERNANCE 'Stalled auto-merge', sixth signature: confirm no session is "
-        f"still running, then `.github/scripts/gh-pr {branch['name']} \"<title>\"` "
-        "with the body from its commit message",
+        "still running, then read its commit message: finished work ships as "
+        f"`.github/scripts/gh-pr {branch['name']} \"<title>\"` with that body; "
+        "work it calls unfinished is the heartbeat's handoff through the issue "
+        "it names, leave it",
     )
 
 

@@ -330,7 +330,14 @@ found it was a prose handoff the dead one had thought to write.
 session is still running (`gh run list --status in_progress`), then
 `.github/scripts/gh-pr <branch> "<title>"` with the body taken from
 the branch's commit message, which is where a session that expects to
-die should have put its rationale.
+die should have put its rationale. The same row also catches a branch
+parked on purpose: a session that ran out of wake with the work
+unfinished pushes it, says so in the commit message, and notes it on
+the issue (#1322's `claude/encode-parallel-blocks`, over the memory
+bound until #1382). That branch is the heartbeat's handoff, not a PR
+to open: the heartbeat's claim check resumes from it, and the row
+stands every wake until its PR exists. A third parked branch makes
+the case for a commit trailer `stalled-prs` reads instead of a human.
 
 This one cannot be fixed the way the comment half was. Issue creation
 moved to the workflow token and stopped expiring; PR creation cannot
