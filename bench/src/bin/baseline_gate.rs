@@ -47,7 +47,7 @@
 //! so an accepted loosening is a hand edit of the JSON) or `... -- speed` (print the
 //! decode cost, to commit as `BASELINE_DECODE_COST` after an accepted
 //! slowdown) or `... -- measure` or `... -- delta <file>` or
-//! `... -- spread < logs` (see [`SPREAD_USAGE`]).
+//! `... -- spread [--rows] < logs` (see [`SPREAD_USAGE`]).
 
 use mothergod_bench::baseline::{
     Snapshot, deltas, fingerprint, format_baseline, hold_at_best, mean_delta, measure_all,
@@ -96,19 +96,20 @@ fn stale_finals_reports(baseline: &std::collections::BTreeMap<String, f64>) -> V
         .collect()
 }
 
-/// Measures [`speed::decode_cost`] on the gate cases, prints it with the CPU
-/// it ran on, and returns it.
+/// Measures [`speed::decode_cost`] on the gate cases once, prints it under
+/// each [`speed::Kernel`] with the CPU it ran on, and returns the gating
+/// [`speed::Kernel::Walk`] cost. The candidate's line gates nothing (#1184).
 fn measure_decode_cost() -> f64 {
     let (seconds, bytes) = speed::decode_seconds(&mothergod_bench::baseline::cases());
-    let cost = speed::decode_cost(seconds, bytes, speed::calibration_seconds());
-    println!(
-        "{}",
-        speed::cost_line(
-            cost,
-            &cpu_model().unwrap_or_else(|| "unknown CPU".to_string())
-        )
-    );
-    cost
+    let cpu = cpu_model().unwrap_or_else(|| "unknown CPU".to_string());
+    let print_cost = |kernel: speed::Kernel| {
+        let cost = speed::decode_cost(kernel, seconds, bytes, kernel.seconds());
+        println!("{}", speed::cost_line(kernel, cost, &cpu));
+        cost
+    };
+    let gating = print_cost(speed::Kernel::Walk);
+    print_cost(speed::Kernel::Rows);
+    gating
 }
 
 /// Names a speed regression and the way to accept it.
@@ -290,11 +291,13 @@ fn write(measured: &Snapshot) -> ExitCode {
 
 /// `spread`'s `--help`: what it reads and the pipe that fetches it.
 const SPREAD_USAGE: &str = "\
-usage: baseline_gate spread < logs
+usage: baseline_gate spread [--rows] < logs
 
 Reads CI log text on stdin, keeps the `bench speed gate: decode cost ...` lines
 `baseline_gate speed` prints, and prints runs, min, median, max and range
-((max - min) / min) of the cost per CPU model.
+((max - min) / min) of the cost per CPU model. `--rows` reads the
+`bench speed gate: row kernel decode cost ...` lines instead, the candidate
+kernel #1184 validates; only runs of a build that prints them carry any.
 
 The `ratio` job's log of every `ci.yml` push run on main:
 
@@ -308,18 +311,26 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mode = args.next().unwrap_or_else(|| "check".to_string());
     if mode == "spread" {
-        if matches!(args.next().as_deref(), Some("--help" | "-h")) {
-            print!("{SPREAD_USAGE}");
-            return ExitCode::SUCCESS;
-        }
+        let kernel = match args.next().as_deref() {
+            Some("--help" | "-h") => {
+                print!("{SPREAD_USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            Some("--rows") => speed::Kernel::Rows,
+            None => speed::Kernel::Walk,
+            Some(other) => {
+                eprintln!("unknown spread option {other:?}; see `spread --help`");
+                return ExitCode::FAILURE;
+            }
+        };
         let mut log = String::new();
         if let Err(err) = std::io::stdin().read_to_string(&mut log) {
             eprintln!("failed to read stdin: {err}");
             return ExitCode::FAILURE;
         }
-        let rows = speed::spread(&log);
+        let rows = speed::spread(kernel, &log);
         if rows.is_empty() {
-            eprintln!("no `bench speed gate: decode cost` line on stdin; see `spread --help`");
+            eprintln!("no cost line of that kernel on stdin; see `spread --help`");
             return ExitCode::FAILURE;
         }
         print!("{}", speed::format_spread(&rows));
