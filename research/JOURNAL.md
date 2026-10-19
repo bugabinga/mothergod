@@ -2668,7 +2668,9 @@ record.
   `update_ppm_expert`/`ideal_cost_bits_ppm_expert_pair` (S2-A100) stay on
   `main`, accepted and unwired, an ideal-cost-only primitive — real-
   bitstream wiring costs more than it saves under every coding
-  configuration measured so far. A future slice needs a coding mechanism
+  configuration measured so far (that apparatus left main in #1401,
+  dc62137 ("deslop: delete the unwired PPM expert, ppm.rs and its pricing
+  pair")). A future slice needs a coding mechanism
   this lead has not yet named, not another substitution or calibration
   variant on the ones already tried. Full record and numbers in S2-R19's
   own entry. Eighth slice, S2-R21: tried the coding mechanism `JOURNAL`
