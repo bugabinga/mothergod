@@ -32,15 +32,18 @@ pub struct FileMeasurement {
     pub zstd_len: usize,
     /// Compressed length under `xz -9e`.
     pub xz_len: usize,
-    /// Wall-clock seconds `mothergod::compress(data)` took with nothing
-    /// else running (`measure_all` times one file at a time). SPEED
-    /// scorecard input (ROADMAP.md).
+    /// Wall-clock seconds `mothergod::compress(data)` took in its own
+    /// process with nothing else running (`measure_all` times one file at
+    /// a time). SPEED scorecard input (ROADMAP.md).
     pub encode_secs: f64,
     /// Wall-clock seconds `mothergod::decompress` took on the bytes
     /// `mothergod::compress` produced. Below-floor decode (ROADMAP.md:
     /// `>=1 MB/s`) is a finding this report surfaces, not a check it
     /// enforces; the speed gate (`crate::speed`) holds the hermetic cases.
     pub decode_secs: f64,
+    /// Peak resident set, KiB, of the larger of the compress and decompress
+    /// processes, read by `/usr/bin/time -f %M` as the competitors' is.
+    pub peak_rss_kib: u64,
 }
 
 /// Reference-compressor version strings, named in the report so a reader
@@ -277,6 +280,7 @@ mod tests {
                 xz_len: 420,
                 encode_secs: 0.001,
                 decode_secs: 0.0005,
+                peak_rss_kib: 1024,
             },
             FileMeasurement {
                 name: "alpha.txt".to_string(),
@@ -287,6 +291,7 @@ mod tests {
                 xz_len: 920,
                 encode_secs: 0.002,
                 decode_secs: 0.001,
+                peak_rss_kib: 2048,
             },
         ]
     }
@@ -435,6 +440,7 @@ mod tests {
             xz_len: 6,
             encode_secs: 0.001,
             decode_secs: 0.0005,
+            peak_rss_kib: 1024,
         }];
         let report = format_report(
             "Canterbury",

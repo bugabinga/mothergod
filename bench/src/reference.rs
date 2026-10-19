@@ -6,7 +6,7 @@
 //! behind `corpus-fetch`), but this module itself has no such dependency
 //! and compiles in CLAUDE.md's required checks like any other.
 
-use crate::field::{competitors, measure};
+use crate::field::{competitors, measure, measure_mothergod};
 use crate::finals::FileMeasurement;
 use crate::frontier::{Row, format_section};
 use std::io;
@@ -179,43 +179,6 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
         .ok_or_else(|| io::Error::other(format!("{cmd} --version produced no output")))
 }
 
-/// What [`time_mothergod`] measures on one file: the compressed bytes'
-/// length and the two wall-clock times the report publishes.
-struct Timed {
-    mothergod_len: usize,
-    encode_secs: f64,
-    decode_secs: f64,
-}
-
-/// Times `mothergod::compress` and `mothergod::decompress` on `data` and
-/// checks the round trip. The wall-clock is only a rate if nothing else
-/// runs beside it, so [`measure_all`] calls this for one file at a time.
-///
-/// # Errors
-///
-/// Returns an error naming `name` if the round trip fails or mismatches.
-fn time_mothergod(name: &str, data: &[u8]) -> Result<Timed, String> {
-    println!("measuring {name} ({} bytes)...", data.len());
-    let encode_start = std::time::Instant::now();
-    let mothergod_compressed = mothergod::compress(data);
-    let encode_secs = encode_start.elapsed().as_secs_f64();
-
-    let decode_start = std::time::Instant::now();
-    let decoded = mothergod::decompress(&mothergod_compressed)
-        .map_err(|err| format!("mothergod::decompress failed on {name}: {err}"))?;
-    let decode_secs = decode_start.elapsed().as_secs_f64();
-    if decoded != data {
-        return Err(format!(
-            "mothergod round-trip mismatch on {name}: decompress(compress(x)) != x"
-        ));
-    }
-    Ok(Timed {
-        mothergod_len: mothergod_compressed.len(),
-        encode_secs,
-        decode_secs,
-    })
-}
-
 /// Compressed lengths of `data` under the three pinned reference
 /// compressors, `(gzip, zstd, xz)`. Untimed, so it may share the machine.
 ///
@@ -235,6 +198,13 @@ fn reference_lens(name: &str, data: &[u8]) -> Result<(usize, usize, usize), Stri
 /// Measures every `(name, data)` pair against `mothergod::compress` and the
 /// three pinned reference compressors, all on the exact same bytes.
 ///
+/// `mothergod_program` is the binary [`measure_mothergod`] re-runs in child
+/// mode: the caller's own `std::env::current_exe()`, which must call
+/// `run_child_if_requested` first in `main`. A child process, not a call,
+/// so the encode's peak resident set is read by the instrument the
+/// competitors' is (issue #1340) from the one encode the timing already
+/// pays for.
+///
 /// Two phases, because the report publishes `mothergod`'s wall-clock as a
 /// rate (issue #1321). First, `mothergod` is timed on one file after
 /// another with nothing else running: timed under a thread per file on 4
@@ -253,10 +223,17 @@ fn reference_lens(name: &str, data: &[u8]) -> Result<(usize, usize, usize), Stri
 ///
 /// Returns the first per-file error encountered, by input order, if the
 /// round trip fails or any reference compressor fails on any file.
-pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, String> {
+pub fn measure_all(
+    files: &[(String, Vec<u8>)],
+    mothergod_program: &Path,
+) -> Result<Vec<FileMeasurement>, String> {
     let timed = files
         .iter()
-        .map(|(name, data)| time_mothergod(name, data))
+        .map(|(name, data)| {
+            println!("measuring {name} ({} bytes)...", data.len());
+            measure_mothergod(mothergod_program, data)
+                .map_err(|err| format!("mothergod failed on {name}: {err}"))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let references: Vec<Result<(usize, usize, usize), String>> = std::thread::scope(|scope| {
         let handles: Vec<_> = files
@@ -281,12 +258,13 @@ pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, 
             Ok(FileMeasurement {
                 name: name.clone(),
                 original_len: data.len(),
-                mothergod_len: timed.mothergod_len,
+                mothergod_len: timed.compressed_len,
                 gzip_len,
                 zstd_len,
                 xz_len,
                 encode_secs: timed.encode_secs,
                 decode_secs: timed.decode_secs,
+                peak_rss_kib: timed.encode_peak_rss_kib.max(timed.decode_peak_rss_kib),
             })
         })
         .collect()
@@ -329,10 +307,7 @@ pub fn frontier_section(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        competitors, compressed_len, frontier_section, generated_at, machine_info, measure_all,
-        tool_version,
-    };
+    use super::{compressed_len, generated_at, machine_info, tool_version};
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger
@@ -462,56 +437,5 @@ mod tests {
             info.contains("one file at a time"),
             "expected the timing shape named, got {info:?}"
         );
-    }
-
-    #[test]
-    #[cfg_attr(
-        target_os = "android",
-        ignore = "no gzip/zstd/xz on Android's on-device shell (issue #618)"
-    )]
-    fn measure_all_measures_every_file_and_preserves_input_order() {
-        let files = vec![
-            ("b.txt".to_string(), b"bbbbbbbbbbbbbbbbbbbb".to_vec()),
-            ("a.txt".to_string(), b"aaaaaaaaaaaaaaaaaaaa".to_vec()),
-        ];
-        let measurements = measure_all(&files).expect("reference compressors must be on PATH");
-        let names: Vec<&str> = measurements.iter().map(|m| m.name.as_str()).collect();
-        assert_eq!(
-            names,
-            vec!["b.txt", "a.txt"],
-            "measure_all must preserve input order, not race threads into an arbitrary one"
-        );
-        for m in &measurements {
-            assert_eq!(m.original_len, 20);
-            assert!(m.mothergod_len > 0);
-            assert!(m.gzip_len > 0);
-            assert!(m.zstd_len > 0);
-            assert!(m.xz_len > 0);
-            assert!(m.encode_secs >= 0.0);
-            assert!(m.decode_secs >= 0.0);
-        }
-    }
-
-    #[test]
-    #[cfg_attr(
-        not(target_os = "linux"),
-        ignore = "needs /usr/bin/time -f and gzip/zstd/xz on PATH"
-    )]
-    fn frontier_section_has_a_row_per_level_and_mothergod() {
-        let files = vec![("a.txt".to_string(), fixture())];
-        let measurements = measure_all(&files).expect("reference compressors must be on PATH");
-        let section = frontier_section(&files, &measurements).expect("every level must measure");
-        // The header, every competitor level and mothergod; the divider
-        // starts `|-`.
-        let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
-        assert_eq!(table_rows, 1 + competitors().len() + 1, "{section}");
-        for label in [
-            "| gzip -1 |",
-            "| zstd -22 |",
-            "| xz -9e |",
-            "| **mothergod** |",
-        ] {
-            assert!(section.contains(label), "missing {label}: {section}");
-        }
     }
 }

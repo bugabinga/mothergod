@@ -31,7 +31,7 @@ pub struct Row {
     /// Total decode seconds, one process at a time.
     pub decode_secs: f64,
     /// Highest resident set of any encode or decode process, KiB; `None`
-    /// where the row's source does not measure it.
+    /// for a row over no files.
     pub peak_rss_kib: Option<u64>,
 }
 
@@ -58,9 +58,7 @@ impl Row {
     }
 
     /// mothergod's row over `measurements`, summed the way [`Row::aggregate`]
-    /// sums. Peak resident set is `None`: `reference::time_mothergod` runs in
-    /// process and reads none, and a number from another instrument would
-    /// not be comparable to the competitors' `time -f %M`.
+    /// sums, with the peak resident set a maximum as there.
     #[must_use]
     pub fn mothergod(measurements: &[FileMeasurement]) -> Self {
         Row {
@@ -69,7 +67,7 @@ impl Row {
             compressed_len: measurements.iter().map(|m| m.mothergod_len).sum(),
             encode_secs: measurements.iter().map(|m| m.encode_secs).sum(),
             decode_secs: measurements.iter().map(|m| m.decode_secs).sum(),
-            peak_rss_kib: None,
+            peak_rss_kib: measurements.iter().map(|m| m.peak_rss_kib).max(),
         }
     }
 
@@ -199,9 +197,8 @@ pub fn format_section(mothergod: &Row, field: &[Row]) -> String {
          on the machine named above, from a file on stdin: encode and decode \
          MB/s are total bytes over total wall-clock seconds, and peak MB is \
          the largest resident set of any one process (`/usr/bin/time -f %M`). \
-         mothergod's peak is `-` because it is timed in process, and no \
-         other instrument is comparable. The speed axis of the two neighbour \
-         lines is encode MB/s (issue #1340).\n\n{}",
+         The speed axis of the two neighbour lines is encode MB/s (issue \
+         #1340).\n\n{}",
         format_table(mothergod, field)
     )
 }
@@ -361,8 +358,8 @@ best level at least as fast: xz -9e
     }
 
     #[test]
-    fn mothergod_row_sums_the_files_and_reads_no_peak() {
-        let m = |original_len, mothergod_len, secs| FileMeasurement {
+    fn mothergod_row_sums_the_files_and_takes_the_peak_not_the_sum() {
+        let m = |original_len, mothergod_len, secs, peak_rss_kib| FileMeasurement {
             name: String::new(),
             original_len,
             mothergod_len,
@@ -371,13 +368,17 @@ best level at least as fast: xz -9e
             xz_len: 0,
             encode_secs: secs,
             decode_secs: secs / 2.0,
+            peak_rss_kib,
         };
-        let r = Row::mothergod(&[m(1_000_000, 400_000, 1.0), m(3_000_000, 900_000, 3.0)]);
+        let r = Row::mothergod(&[
+            m(1_000_000, 400_000, 1.0, 2048),
+            m(3_000_000, 900_000, 3.0, 4096),
+        ]);
         assert_eq!(r.label, "mothergod");
         assert_eq!((r.original_len, r.compressed_len), (4_000_000, 1_300_000));
         assert!((r.encode_mbps() - 1.0).abs() < 1e-12);
         assert!((r.decode_mbps() - 2.0).abs() < 1e-12);
-        assert_eq!(r.peak_rss_kib, None);
+        assert_eq!(r.peak_rss_kib, Some(4096));
     }
 
     #[test]

@@ -24,6 +24,7 @@
 
 use mothergod_bench::baseline::load_and_fingerprint;
 use mothergod_bench::corpus::{extract_canterbury, fetch_and_cache, parse_manifest};
+use mothergod_bench::field::run_child_if_requested;
 use mothergod_bench::finals::{Provenance, Versions, format_report};
 use mothergod_bench::reference::{
     frontier_section, generated_at, machine_info, measure_all, tool_version,
@@ -32,6 +33,10 @@ use mothergod_bench::repo_root;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    // `measure_all` re-runs this binary to time mothergod in its own process.
+    if let Some(code) = run_child_if_requested() {
+        return code;
+    }
     let root = repo_root();
 
     let baseline_fingerprint = match load_and_fingerprint(&root) {
@@ -82,7 +87,10 @@ fn main() -> ExitCode {
         }
     };
 
-    let measurements = match measure_all(&files) {
+    let measurements = match std::env::current_exe()
+        .map_err(|err| format!("failed to locate this binary to time mothergod in: {err}"))
+        .and_then(|program| measure_all(&files, &program))
+    {
         Ok(measurements) => measurements,
         Err(err) => {
             eprintln!("{err}");
