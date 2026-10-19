@@ -303,6 +303,23 @@ def read_ops_log(repo):
     }
 
 
+def read_bench(repo):
+    """The benchmark pass's state line, from `.github/scripts/bench-report` (its docstring names the states).
+
+    A subprocess, not an import: a crash there is this fact UNREADABLE, never
+    this script dead. The first line is the state and the next action.
+    """
+    script = Path(__file__).with_name("bench-report")
+    proc = subprocess.run([str(script), "--repo", repo], capture_output=True, text=True)
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    if proc.returncode != 0 or not lines:
+        reason = proc.stderr.strip().splitlines()
+        return {"error": reason[-1] if reason else f"bench-report exited {proc.returncode}", "line": None}
+    if lines[0].startswith("bench-report: UNREADABLE"):
+        return {"error": lines[0][len("bench-report: UNREADABLE "):].strip("()"), "line": None}
+    return {"error": None, "line": lines[0]}
+
+
 def read_commits(repo, since, run_id):
     """Fact 5: commits on main since the anchor, one page; a full page is flagged truncated."""
     rows, error = gh("api", f"repos/{repo}/commits?sha=main&since={since}&per_page={COMMIT_PAGE}")
@@ -321,7 +338,7 @@ def read_commits(repo, since, run_id):
 
 
 def render(facts, out=sys.stdout):
-    """Print the five facts and the liveness footer. Returns the footer."""
+    """Print the six facts and the liveness footer. Returns the footer."""
     checks, prs, issues, ops, commits = (facts[k] for k in ("checks", "prs", "issues", "ops_log", "commits"))
 
     if checks["error"]:
@@ -390,6 +407,12 @@ def render(facts, out=sys.stdout):
         for commit in commits["rows"]:
             print(f"    {commit['sha']}  {commit['subject']}"[:LINE], file=out)
 
+    bench = facts["bench"]
+    if bench["error"]:
+        print(f"\nbench-report: UNREADABLE ({bench['error']})", file=out)
+    else:
+        print(f"\nbench-report: {bench['line']}"[:LINE], file=out)
+
     def count(fact, value):
         return "unreadable" if fact["error"] else value
 
@@ -407,6 +430,7 @@ def render(facts, out=sys.stdout):
         f" | issues {count(issues, issues_count)}"
         f" | ops-log {count(ops, f'#{OPS_LOG}')}"
         f" | commits {count(commits, commit_count)} since {commits['since'] or 'no anchor'}"
+        f" | bench-report {count(bench, (bench['line'] or '').split(':')[0].split(' ')[0])}"
     )
     print(f"\n{footer}", file=out)
     return footer
@@ -435,6 +459,7 @@ def main():
         "prs": read_prs(args.repo, now),
         "issues": read_issues(args.repo),
         "ops_log": read_ops_log(args.repo),
+        "bench": read_bench(args.repo),
         "commits": (
             {"error": anchor_error, "since": None, "run": None, "rows": []}
             if anchor_error
