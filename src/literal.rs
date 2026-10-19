@@ -183,7 +183,7 @@ fn fixed_point_scale(weight: f64, weight_sum: f64, bank_total: f64) -> u64 {
 /// The cumulative-frequency table over `mixed`, one [`FIXED_POINT_SCALE`]
 /// fixed-point mass per symbol: each symbol's count is its mass shifted down
 /// 16 bits, plus a Laplace floor of 1 so no symbol is impossible to code.
-/// The tail of every blend ([`Literal::mix`], [`Literal::cum_with_extra`]).
+/// The tail of every blend ([`Literal::mix`], [`Literal::mix7`]).
 fn cumulate(mixed: impl IntoIterator<Item = u64>) -> [u64; ALPHABET + 1] {
     let mut cum = [0u64; ALPHABET + 1];
     let mut acc = 0u64;
@@ -834,38 +834,6 @@ impl Literal {
         scale6
     }
 
-    /// The six real experts' combined fixed-point contribution to
-    /// `symbol` under `scale6`: the shared inner-loop term
-    /// [`Self::cum_with_extra`] adds the extra expert's own term to.
-    fn six_expert_mixed(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        scale6: &[u64; EXPERTS],
-        symbol: usize,
-    ) -> u64 {
-        let mut mixed = 0u64;
-        for expert in 0..EXPERTS {
-            let freq = u64::from(self.freq[bank_slot(bank_indices[expert], symbol)]);
-            mixed += scale6[expert] * freq;
-        }
-        mixed
-    }
-
-    /// The cumulative-frequency table over the six real experts' blend
-    /// under `scale6` plus `extra(symbol)`, [`Self::mix7`]'s body. Every
-    /// symbol gets the same `+1` Laplace floor as [`Self::mix`].
-    fn cum_with_extra(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        scale6: &[u64; EXPERTS],
-        extra: impl Fn(usize) -> u64,
-    ) -> [u64; ALPHABET + 1] {
-        cumulate(
-            (0..ALPHABET)
-                .map(|symbol| self.six_expert_mixed(bank_indices, scale6, symbol) + extra(symbol)),
-        )
-    }
-
     /// The extra expert's own weight, adapted toward how well
     /// `estimate7` did against the six-real-experts-plus-extra mixed
     /// estimate: [`Self::update_column_expert`]'s update rule.
@@ -908,9 +876,14 @@ impl Literal {
         let column_total = f64::from(column_state.total[column_bank]);
         let scale7 = fixed_point_scale(w7, weight_sum, column_total);
 
-        self.cum_with_extra(bank_indices, &scale6, |symbol| {
-            scale7 * u64::from(column_state.freq[bank_slot(column_bank, symbol)])
-        })
+        cumulate((0..ALPHABET).map(|symbol| {
+            let mut mixed = scale7 * u64::from(column_state.freq[bank_slot(column_bank, symbol)]);
+            for expert in 0..EXPERTS {
+                let freq = u64::from(self.freq[bank_slot(bank_indices[expert], symbol)]);
+                mixed += scale6[expert] * freq;
+            }
+            mixed
+        }))
     }
 
     /// Adapts `column_state`'s own weight and bank toward `symbol`, the
