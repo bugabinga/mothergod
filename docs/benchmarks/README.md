@@ -80,6 +80,13 @@ nothing. Download with
 `gh run download <run-id> -n bench-report`, copy the files in, and push
 them with the rest of the change.
 
+The workflow also runs on every push to main under the paths it lists,
+the inputs that move what the reports print, so a change to the report
+binaries regenerates without a dispatch. `.github/scripts/bench-report`
+says where main stands, `fresh`, `running`, `publish` or `dispatch`,
+and `bench-report --publish` writes a finished pass's five files into
+the tree for the PR that publishes them.
+
 Both `canterbury.md` and `silesia.md` embed the `bench/baseline.json`
 fingerprint (`<!-- baseline-fingerprint: ... -->`) they were generated
 against; `baseline_gate check` (the required `ratio` job) fails when a

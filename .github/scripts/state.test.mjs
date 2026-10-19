@@ -61,6 +61,7 @@ const facts = (over = {}) => ({
   prs: { error: null, rows: [] },
   issues: { error: null, open: 0, counts: { product: 0, "agent-system": 0 }, unrouted: [] },
   ops_log: { error: null, total: 0, rows: [] },
+  bench: { error: null, line: "fresh: the reports are at or after the newest report-affecting commit." },
   commits: { error: null, since: "2026-10-15T20:11:13Z", run: 1, truncated: false, rows: [] },
   ...over,
 });
@@ -72,7 +73,7 @@ test("an unreadable fact prints UNREADABLE and never a zero in the footer", () =
   assert.doesNotMatch(out, /checks 0/);
 });
 
-test("every fact can be unreadable at once, and the footer says so five times", () => {
+test("every fact can be unreadable at once, and the footer says so six times", () => {
   const out = call(
     "render",
     facts({
@@ -401,10 +402,10 @@ test("end to end: the checks are read per workflow, a red is cited, the rest cou
 test("end to end: a gh that answers nothing leaves every fact UNREADABLE and exits 0", () => {
   const proc = withGh({}, ["--since", "2026-10-15T20:11:13Z"]);
   assert.equal(proc.status, 0, proc.stderr);
-  assert.equal((proc.stdout.match(/UNREADABLE/g) || []).length, 5, proc.stdout);
+  assert.equal((proc.stdout.match(/UNREADABLE/g) || []).length, 6, proc.stdout);
   assert.match(
     proc.stdout,
-    /state: checks unreadable \| prs unreadable \| issues unreadable \| ops-log unreadable \| commits unreadable/,
+    /state: checks unreadable \| prs unreadable \| issues unreadable \| ops-log unreadable \| commits unreadable[^|]*\| bench-report unreadable/,
   );
 });
 

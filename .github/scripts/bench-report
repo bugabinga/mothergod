@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Say where the published benchmark reports stand against main; publish a finished pass.
+
+Extensionless and executable because agents type it as a command mid-session,
+like survey-due, stalled-prs and state.
+
+bench-report.yml regenerates the five published benchmark files on a runner
+and hands them back as an artifact (#1324); a seat downloads it and pushes
+the files on its own token. A codec PR owes that pass to the ratio gate,
+which pins compress() bytes and both reports' baseline fingerprint (#1254,
+#327), so that path forces itself. The other path had no owner: a change to
+the report binaries themselves (#1356, #1367, #1373 and #1376 added the
+competitor frontier to both reports) lands on main and the committed reports
+stay as they were, with nothing to say so. Two maintainer runs on 2026-10-19
+named the dispatch a blocker for want of a token the seat holds
+(agent-heartbeat.yml grants `actions: write` for exactly this). A duty two
+wakes apart, dispatch then download, held in a model's memory across runs,
+is the shape ADR-0022 says to compile.
+
+Three facts decide, read from GitHub so the answer does not depend on the
+caller's checkout:
+
+    affecting   the newest commit on main under the push paths
+                bench-report.yml lists, read from that file so the trigger
+                and this detector cannot disagree: the inputs whose change
+                moves what the reports print. `src/` is not among them: a
+                codec change that moves bytes regenerates in its own PR
+                under the ratio gate, and one that only moves speed is not
+                tracked today. One list to widen, with the cost in mind:
+                every pass is serial by design (#1321) and every regenerated
+                report differs in its timing columns, so a wider list is
+                more publish PRs of runner jitter.
+    reports     the newest commit on main under REPORTS, the published pages.
+    pass        the newest bench-report.yml run on main. It covers the
+                affecting commit when its head is at or after it; main is
+                linear (squash merges), so committer dates order it, and a
+                newer run's head is never older than an older run's, so only
+                the newest run can cover.
+
+States, the first word of the first line, in the order tested:
+
+    fresh           reports is at or after affecting; nothing owed.
+    running <id>    the newest pass covers and is in progress; nothing to
+                    do this wake, the next one publishes.
+    publish <id>    the newest pass covers, succeeded, and its artifact is
+                    live: `bench-report --publish` writes the five files
+                    into the tree, then push-branch and gh-pr ship them.
+    dispatch        reports predate affecting and no live pass covers it
+                    (none, failed, cancelled, or its artifact expired):
+                    one `gh workflow run` on GH_WORKFLOW_TOKEN.
+    UNREADABLE      gh could not answer; the reason follows. Never an empty
+                    result, because a false `fresh` is the silent stale
+                    report this exists to end.
+
+bench-report.yml runs on every push to main under those paths, so `dispatch`
+is the healing state for a pass that was cancelled, failed or expired
+unpublished, not the routine one.
+
+Liveness: the footer always names the three facts it read, so a reader can
+tell fresh reports from a detector that stopped reading.
+
+Usage: bench-report              print the state and the next action
+       bench-report --publish    in state publish: download the artifact and
+                                 write its files into the tree
+
+Exits 0 whichever state it prints; a state is a duty, not an error.
+`--publish` exits 1 when the state is not publish or the download fails.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import yaml
+
+WORKFLOW = "bench-report.yml"
+ARTIFACT = "bench-report"
+REPORTS = ("docs/benchmarks/canterbury.md", "docs/benchmarks/silesia.md")
+# What the pass uploads, in bench-report.yml's `path:` order.
+FILES = (
+    "bench/baseline.json",
+    "docs/benchmarks/baseline.md",
+    "docs/benchmarks/baseline.svg",
+    "docs/benchmarks/canterbury.md",
+    "docs/benchmarks/silesia.md",
+)
+DISPATCH = f'GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run {WORKFLOW} --ref main'
+
+
+def gh(*args):
+    """Run gh; return (parsed JSON, None) or (None, reason). Never dies.
+
+    Dying would answer no state, and a caller with no answer reads the
+    reports' freshness by eye, which is the failure this replaces.
+    """
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        lines = proc.stderr.strip().splitlines()
+        return None, (lines[-1] if lines else f"gh exited {proc.returncode}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "response was not JSON"
+
+
+def report_paths():
+    """The workflow's `on.push.paths`, as commit-API path prefixes (a trailing `/**` dropped).
+
+    PyYAML reads the bare key `on` as the boolean True, so both spellings are tried.
+    """
+    doc = yaml.safe_load((Path(__file__).parents[1] / "workflows" / WORKFLOW).read_text())
+    triggers = doc.get("on") or doc.get(True) or {}
+    paths = ((triggers.get("push") or {}).get("paths")) or []
+    if not paths:
+        raise ValueError(f"{WORKFLOW} lists no push paths")
+    return tuple(p[: -len("/**")] if p.endswith("/**") else p for p in paths)
+
+
+def newest_commit(repo, paths):
+    """The newest commit on main touching any of `paths`, as {"sha", "date", "path"}."""
+    best = None
+    for path in paths:
+        rows, error = gh("api", f"repos/{repo}/commits?sha=main&path={path}&per_page=1")
+        if error:
+            return None, f"commits under {path}: {error}"
+        if not rows:
+            continue
+        row = {"sha": rows[0]["sha"], "date": rows[0]["commit"]["committer"]["date"], "path": path}
+        if best is None or row["date"] > best["date"]:
+            best = row
+    if best is None:
+        return None, f"no commit on main touches {', '.join(paths)}"
+    return best, None
+
+
+def read(repo):
+    """The facts `decide` needs, read lazily: the pass's head and artifact only when the reports are stale."""
+    try:
+        paths = report_paths()
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        return None, f"push paths of {WORKFLOW}: {exc}"
+    affecting, error = newest_commit(repo, paths)
+    if error:
+        return None, error
+    reports, error = newest_commit(repo, REPORTS)
+    if error:
+        return None, error
+    runs, error = gh(
+        "run",
+        "list",
+        "--repo",
+        repo,
+        "--workflow",
+        WORKFLOW,
+        "--branch",
+        "main",
+        "--limit",
+        "1",
+        "--json",
+        "databaseId,status,conclusion,headSha,createdAt,updatedAt,url",
+    )
+    if error:
+        return None, f"runs of {WORKFLOW} on main: {error}"
+    newest = runs[0] if runs else None
+    head = live = None
+    if newest is not None and reports["date"] < affecting["date"]:
+        row, error = gh("api", f"repos/{repo}/commits/{newest['headSha']}")
+        if error:
+            return None, f"head of run {newest['databaseId']}: {error}"
+        head = row["commit"]["committer"]["date"]
+        if head >= affecting["date"] and newest["status"] == "completed" and newest["conclusion"] == "success":
+            data, error = gh("api", f"repos/{repo}/actions/runs/{newest['databaseId']}/artifacts")
+            if error:
+                return None, f"artifacts of run {newest['databaseId']}: {error}"
+            live = any(a["name"] == ARTIFACT and not a["expired"] for a in data.get("artifacts", []))
+    return {"affecting": affecting, "reports": reports, "newest": newest, "head": head, "live": live}, None
+
+
+def decide(affecting, reports, newest, head, live):
+    """The state and its reason. Pure: every input is a fact `read` produced.
+
+    `newest` is the newest pass on main or None, `head` its head commit's
+    date (None when not read), `live` whether its artifact is still
+    downloadable (None when not read).
+    """
+    if reports["date"] >= affecting["date"]:
+        return "fresh", None
+    if newest is None or head is None or head < affecting["date"]:
+        return "dispatch", "no pass on main at or after it"
+    if newest["status"] != "completed":
+        return "running", None
+    if newest["conclusion"] != "success":
+        return "dispatch", f"the newest pass, {newest['databaseId']}, concluded {newest['conclusion']}"
+    if not live:
+        return "dispatch", f"the newest pass, {newest['databaseId']}, succeeded but its artifact expired"
+    return "publish", None
+
+
+def render(facts, error, out=sys.stdout):
+    """Print the state line, the next action, and the liveness footer. Returns the state word."""
+    if error is not None:
+        print(f"bench-report: UNREADABLE ({error})", file=out)
+        print("    Re-run once. A pass this cannot see is not a pass that ran, and reports", file=out)
+        print("    this cannot date are not fresh.", file=out)
+        return "UNREADABLE"
+
+    affecting, reports, newest = facts["affecting"], facts["reports"], facts["newest"]
+    state, reason = decide(**facts)
+    stale = (
+        f"the reports ({reports['sha'][:7]}, {reports['date']}) predate"
+        f" {affecting['sha'][:7]} ({affecting['date']}, under {affecting['path']})"
+    )
+    if state == "fresh":
+        print(
+            f"fresh: the reports ({reports['sha'][:7]}, {reports['date']}) are at or after"
+            f" the newest report-affecting commit ({affecting['sha'][:7]}, {affecting['date']}).",
+            file=out,
+        )
+    elif state == "running":
+        print(f"running {newest['databaseId']}: a pass on main started {newest['createdAt']} covers it; {stale}.", file=out)
+        print("    Nothing to do this wake. The wake after it finishes publishes.", file=out)
+        print(f"    {newest['url']}", file=out)
+    elif state == "publish":
+        print(f"publish {newest['databaseId']}: a pass on main finished {newest['updatedAt']} covers it; {stale}.", file=out)
+        print("    Next: .github/scripts/bench-report --publish, which writes the five files into the tree;", file=out)
+        print("    then push-branch and gh-pr ship them, title", file=out)
+        print(f'    "bench: publish the reports regenerated at {newest["headSha"][:7]}".', file=out)
+        print(f"    {newest['url']}", file=out)
+    else:
+        print(f"dispatch: {stale}, and {reason}.", file=out)
+        print(f"    Next: {DISPATCH}", file=out)
+        print("    One command, not a unit of work; the pass runs on the runner and a later wake publishes.", file=out)
+
+    print(
+        f"\nbench-report: {state}"
+        f" | affecting {affecting['sha'][:7]} {affecting['date']} under {affecting['path']}"
+        f" | reports {reports['sha'][:7]} {reports['date']}"
+        f" | pass {newest['databaseId'] if newest else 'none'}"
+        " | gh readable",
+        file=out,
+    )
+    return state
+
+
+def publish(repo, run_id, root, out=sys.stdout):
+    """Download the pass's artifact and write FILES into the tree under `root`. Returns the exit code."""
+    with tempfile.TemporaryDirectory() as scratch:
+        proc = subprocess.run(
+            ["gh", "run", "download", str(run_id), "--repo", repo, "-n", ARTIFACT, "-D", scratch],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            lines = proc.stderr.strip().splitlines()
+            print(f"bench-report: download of run {run_id} failed: {lines[-1] if lines else proc.returncode}", file=out)
+            return 1
+        for rel in FILES:
+            if not (Path(scratch) / rel).is_file():
+                print(f"bench-report: the artifact of run {run_id} lacks {rel}; nothing written", file=out)
+                return 1
+        for rel in FILES:
+            shutil.copyfile(Path(scratch) / rel, root / rel)
+    status = subprocess.run(["git", "-C", str(root), "status", "--short", "--", *FILES], capture_output=True, text=True)
+    print(f"published run {run_id}: {len(FILES)} files written into the tree", file=out)
+    print(status.stdout.rstrip() or "    identical to the tree: nothing to ship", file=out)
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Where the published benchmark reports stand against main.")
+    parser.add_argument("--publish", action="store_true", help="in state publish, write the pass's files into the tree")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod"), help="owner/name")
+    args = parser.parse_args()
+
+    facts, error = read(args.repo)
+    state = render(facts, error)
+    if not args.publish:
+        return 0
+    if state != "publish":
+        print(f"\nbench-report: --publish needs state publish, not {state}", file=sys.stderr)
+        return 1
+    root = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
+    return publish(args.repo, facts["newest"]["databaseId"], root)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

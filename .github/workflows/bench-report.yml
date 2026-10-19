@@ -9,7 +9,13 @@
 # PR. By hand three times in the week before this file (#1214, #1228,
 # #1248), the last time the cap allowed it.
 #
-# Dispatch it on the ref that needs the pass, a PR branch or main:
+# A push to main under the paths below runs it unasked: a change to the
+# report binaries moves what the reports print, and the committed reports
+# stayed stale behind four such merges (#1356, #1367, #1373, #1376) while
+# two maintainer runs named the dispatch a blocker. `.github/scripts/
+# bench-report` reads those paths from this file and tells the next
+# heartbeat whether the pass is owed, running, or finished and waiting
+# to be published. A codec PR still dispatches on its own branch:
 #   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref <branch>
 # It never pushes: a push on the workflow token to a PR branch holds every
 # run it triggers at GitHub's approval gate (GOVERNANCE "Push identity"),
@@ -23,6 +29,11 @@
 name: bench-report
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - bench/src/**
+      - .github/workflows/bench-report.yml
   workflow_dispatch:
 
 permissions:
