@@ -66,6 +66,10 @@ idioms at once, which is worse than either idiom alone.
    edit. A gate that was already red is not yours to hide.
 4. Change. Preserve behaviour exactly. Deletion beats addition: the
    best fix removes the code rather than improving it.
+   Deleting code `research/JOURNAL.md` names (grep the item) leaves one
+   clause on the entry that recorded it kept, `left main in #PR`,
+   because the journal is read as the record of what exists (#1360 and
+   #1401 each left a kept-on-main sentence standing).
 5. Prove it. Every change must be provably behaviour-preserving. Where
    the existing tests do not prove it, add the test that does, before
    the change, and show it passing on both sides. A change you cannot
