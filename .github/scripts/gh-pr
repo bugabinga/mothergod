@@ -33,6 +33,11 @@ name in git history, the PR-body half of #485.
 Never draft (CLAUDE.md rule 11), so there is no flag for it. Base is the
 repository's default branch; nothing here targets another.
 
+A closing line is rewritten to one keyword per issue (`Closes #1, closes
+#2`), because GitHub links a keyword to the one number after it: #1349's
+`Closes: #1321, #1324, #1327` closed #1321 on merge and left two for the
+curator, #1214's `Closes: #1205, #1163` the same with #1163.
+
 The title is checked here too, because it becomes the squash subject on
 `main` (#928): T1 caps it at TITLE_MAX characters with no trailing period,
 and 15 of the 40 PRs merged in the first week of 2026-10 broke the cap, so
@@ -53,6 +58,7 @@ Prints the PR's URL on stdout.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -62,6 +68,25 @@ from secret_scrub import scrub
 # CLAUDE.md Voice T1: the PR title is the squash subject on `main`, at most
 # 72 characters, no period. Counted in code points, the count a reader sees.
 TITLE_MAX = 72
+
+# A line that opens with a closing keyword and lists two or more issues.
+# Anchored at line start: the form GitHub documents is a line of its own,
+# both orphaning PRs wrote it so, and a quoted `Closes: #a, #b` mid-sentence
+# stays a quote.
+CLOSES_LIST = re.compile(
+    r"^(?P<kw>clos(?:e|es|ed)|fix(?:es|ed)?|resolve(?:s|d)?):?[ \t]+"
+    r"(?P<first>#\d+)(?P<rest>(?:[ \t]*,?[ \t]*(?:and[ \t]+)?#\d+)+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def expand_closes(body: str) -> tuple[str, int]:
+    """Rewrite each `Closes: #a, #b` line to `Closes #a, closes #b`; return body and count."""
+    def one(m: re.Match) -> str:
+        kw = m.group("kw")
+        rest = re.findall(r"#\d+", m.group("rest"))
+        return ", ".join([f"{kw} {m.group('first')}"] + [f"{kw.lower()} {n}" for n in rest])
+    return CLOSES_LIST.subn(one, body)
 
 
 def die(*lines):
@@ -102,6 +127,11 @@ def main() -> int:
     if redactions:
         print(f"gh-pr: redacted {redactions} credential-shaped string(s) from "
               "the body; a secret reached your text (CLAUDE.md rule 10)",
+              file=sys.stderr)
+    body, rewritten = expand_closes(body)
+    if rewritten:
+        print(f"gh-pr: rewrote {rewritten} closing line(s) to one keyword per "
+              "issue; GitHub links only the first number of a list (#1349)",
               file=sys.stderr)
     full_body, stripped = attribute(body, role)
     if stripped:

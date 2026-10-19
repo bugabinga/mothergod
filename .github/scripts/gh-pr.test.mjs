@@ -83,6 +83,21 @@ test("typed footers of every census shape come off; exactly one footer lands", (
   assert.match(stderr, /stripped 3 typed attribution line/);
 });
 
+test("a `Closes: #a, #b` line becomes one keyword per issue: GitHub links only the first (#1349)", () => {
+  const body = "Why.\n\nCloses: #1321, #1324, #1327\nFixes #5 and #6.\nSee #7, #8.\nServes #9, #10";
+  const { status, stderr, called } = run(["claude/x", "t"], { body });
+  assert.equal(status, 0);
+  assert.match(called.argv[7], /^Closes #1321, closes #1324, closes #1327$/m);
+  assert.match(called.argv[7], /^Fixes #5, fixes #6\.$/m);
+  assert.match(called.argv[7], /^See #7, #8\.$/m);
+  assert.match(called.argv[7], /^Serves #9, #10$/m);
+  assert.match(stderr, /rewrote 2 closing line/);
+  // One number per keyword is already the linked form: untouched, unannounced.
+  const single = run(["claude/x", "t"], { body: "Closes #1\nCloses: #2\nthe `Closes: #3, #4` form" });
+  assert.match(single.called.argv[7], /^Closes #1\nCloses: #2\nthe `Closes: #3, #4` form\n/);
+  assert.doesNotMatch(single.stderr, /rewrote/);
+});
+
 test("with no GH_TOKEN the session's own credential comes from gh auth token", () => {
   const { status, called } = run(["claude/x", "t"], { env: { GH_TOKEN: undefined } });
   assert.equal(status, 0);
