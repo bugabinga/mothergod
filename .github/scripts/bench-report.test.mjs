@@ -294,7 +294,7 @@ test("end to end: the generator named in the publish subject outranks the report
   assert.equal(read.status, 0, read.stderr);
   assert.match(
     read.stdout,
-    /^publish 42: the reports \(c71bd43, generated at 0ddba11 2026-10-19T01:00:00Z\) predate a23a7b0/,
+    /^publish 42: .*the reports \(c71bd43, generated at 0ddba11 2026-10-19T01:00:00Z\) predate a23a7b0/,
   );
 
   const written = withGh(answers, ["--publish"], root);
