@@ -2,7 +2,7 @@
 //! `FORMAT_VERSION`, the
 //! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
-//! encode/decode MB/s, the benchmark CPU model, the per-file win count, the
+//! encode/decode MB/s and `xz -9e`'s beside them, the benchmark CPU model, the per-file win count, the
 //! measurement date, the
 //! reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
@@ -660,6 +660,52 @@ fn published_throughput_matches_its_generated_reports() {
                 "site/index.html's {corpus} {direction} MB/s is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
             );
         }
+    }
+}
+
+/// The frontier row's encode and decode MB/s for `level`, from the
+/// generated report's every-level table.
+fn frontier_throughput(report_file: &str, level: &str) -> [f64; 2] {
+    let text = read(&format!("docs/benchmarks/{report_file}"));
+    let row = line_containing(&text, &format!("| {level} |"));
+    // Columns after the level: b/B, encode MB/s, decode MB/s, peak MB.
+    let numbers = markdown_numbers(row);
+    [numbers[1], numbers[2]]
+}
+
+/// README and site anchor "slow" against `xz -9e` on Silesia: they quote its
+/// rates from the same run and call it "more than ten times faster both
+/// ways". The rates are compared like `published_throughput_matches_its_generated_reports`
+/// compares mothergod's; the multiplier holds while both of the report's
+/// ratios stay at or above ten, so a faster encoder fails here before the
+/// sentence turns false.
+#[test]
+fn published_speed_anchor_matches_its_generated_report() {
+    let xz = frontier_throughput("silesia.md", "xz -9e");
+    let ours = throughput_from_report("silesia.md");
+    let readme = throughput_after(&read("README.md"), "`xz -9e` encoded Silesia at");
+    let site = throughput_after(
+        &read("site/index.html"),
+        "<code>xz -9e</code> encoded Silesia at",
+    );
+
+    for (index, direction) in ["encode", "decode"].iter().enumerate() {
+        let rounded = format!("{:.3}", xz[index]);
+        for (surface, claim) in [
+            ("README.md", readme[index]),
+            ("site/index.html", site[index]),
+        ] {
+            let claim = format!("{claim:.3}");
+            assert_eq!(
+                claim, rounded,
+                "{surface}'s xz -9e Silesia {direction} MB/s is {claim}, docs/benchmarks/silesia.md says {rounded}"
+            );
+        }
+        let ratio = xz[index] / ours[index];
+        assert!(
+            ratio >= 10.0,
+            "README.md and site/index.html say xz -9e is more than ten times faster to {direction} Silesia, docs/benchmarks/silesia.md says {ratio:.1} times"
+        );
     }
 }
 

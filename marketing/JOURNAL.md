@@ -18,6 +18,29 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-19 — Editorial: "slow" got its comparison, from the same run
+
+README and site said mothergod is slow and quoted its MB/s, with
+nothing to measure them against: a reader had to know what `xz -9e`
+does to read 0.134 as slow or fine. The finals reports gained an
+every-level frontier table this morning (#1373, published in #1383),
+so the competitor rates now come from the same run on the same
+machine. Both surfaces quote `xz -9e` on Silesia, 2.249 MB/s encode
+and 73.047 MB/s decode, and say "more than ten times faster both
+ways". `tests/claims.rs` holds the rates to the report and the
+multiplier to both ratios, so a faster encoder fails the test before
+the sentence turns false.
+
+**`xz -9e` on Silesia, not zstd:** it is the column the Measured table
+already names, and Silesia is where it also wins on ratio, so the
+comparison is the least flattering one available. **Rejected: an exact
+multiplier ("17 times").** Every regeneration moves it, and a
+multiplier the reader can recompute from two quoted rates adds a
+third number to rot. **Rejected: quoting mothergod's peak memory in
+this PR.** The frontier's 652.3 MB on Silesia is a reading per run;
+the 2026-10-17 entry's reasoning (publish the bound, not the reading)
+stands, and the new sentence points at the column instead.
+
 ## 2026-10-18 — Editorial: the release notes named a format three versions old
 
 `CHANGELOG.md`'s summary said the bitstream is `FORMAT_VERSION` 13 and

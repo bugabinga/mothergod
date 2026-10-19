@@ -348,7 +348,11 @@
         <p>
           Silesia's 212 MB took about twenty-six minutes to compress and about a
           minute and a half to read back. Encoding carries the optimal parse, so
-          it runs roughly seventeen times slower than decoding.
+          it runs roughly seventeen times slower than decoding. In the same run,
+          <code>xz -9e</code> encoded Silesia at 2.249 MB/s and decoded it at
+          73.047 MB/s, more than ten times faster both ways. The reports set
+          every level of gzip, zstd and xz beside mothergod, peak memory
+          included.
         </p>
         <p>
           One caveat the reports state themselves: these are single-run figures
