@@ -61,7 +61,7 @@ use crate::Error;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
-use crate::literal::{ColumnExpertState, Context, Literal, PpmExpertState, SurpriseLogisticMix};
+use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
 use crate::lz::{self, RepCache, RepSlot, Token};
 use crate::model::Model;
 
@@ -284,8 +284,7 @@ fn length_models(models: &mut Models, kind: FlagKind) -> (&mut Model, &mut Resid
 }
 
 /// `-log2(p)` cost of a flag symbol under the shared `models.flag` tables:
-/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`])
-/// must price `flag` this same way, since neither varies its coding.
+/// [`CostSink`]'s `flag` pricing.
 fn price_flag(models: &mut Models, flag_table: usize, kind: FlagKind) -> f64 {
     models.flag[flag_table].ideal_cost_bits(kind.index())
 }
@@ -301,8 +300,8 @@ fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
 
 /// `-log2(p)` cost of a copy token's length, bucket symbol through
 /// whichever bucket model [`length_models`] selects, residual bits through the
-/// [`ResidualTree`] beside it: [`CostSink`]'s and [`PairedTokenSink`]'s
-/// shared `length` pricing, matching [`EncodeSink::length`].
+/// [`ResidualTree`] beside it: [`CostSink`]'s `length` pricing, matching
+/// [`EncodeSink::length`].
 fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
     let (bucket, residual) = length_models(models, kind);
     bucket.ideal_cost_bits(lz::bucket(value)) + residual.ideal_cost_bits(value)
@@ -310,15 +309,14 @@ fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
 
 /// `-log2(p)` cost of a match's distance, through whichever of
 /// [`Models::offset_len`]'s [`OFFSET_LEN_STATES`] models [`offset_len_state`]
-/// selects from the triggering match's own `len`: [`CostSink`]'s and
-/// [`PairedTokenSink`]'s shared `offset` pricing.
+/// selects from the triggering match's own `len`: [`CostSink`]'s `offset`
+/// pricing.
 fn price_offset(models: &mut Models, len: u32, value: u32) -> f64 {
     ideal_cost_bucketed(&mut models.offset_len[offset_len_state(len)], value)
 }
 
 /// `-log2(p)` cost of a rep-slot symbol under the shared `models.slot`:
-/// every pricing-only [`TokenSink`] ([`CostSink`], [`PairedTokenSink`])
-/// must price `slot` this same way, since neither varies its coding.
+/// [`CostSink`]'s `slot` pricing.
 fn price_slot(models: &mut Models, symbol: usize) -> f64 {
     models.slot.ideal_cost_bits(symbol)
 }
@@ -673,96 +671,6 @@ pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
         &mut sink,
     );
     sink.bits
-}
-
-/// Accumulates the two totals a paired-experiment [`TokenSink`]
-/// ([`PairedTokenSink`]) prices side by side: `baseline` for the shipped
-/// model, `candidate` for the same event under the experimental change. One
-/// shared [`add`](Self::add) means a symbol can't be added to just one half
-/// of the pair by accident.
-#[derive(Default)]
-struct PairedCost {
-    baseline: f64,
-    candidate: f64,
-}
-
-impl PairedCost {
-    /// Adds `bits` to both totals, for a [`TokenSink`] event whose cost is
-    /// identical under the baseline and the candidate.
-    fn add_same(&mut self, bits: f64) {
-        self.add(bits, bits);
-    }
-
-    /// Adds `baseline`/`candidate` to their own totals, for a
-    /// [`TokenSink`] event (`literal`) where the two differ.
-    fn add(&mut self, baseline: f64, candidate: f64) {
-        self.baseline += baseline;
-        self.candidate += candidate;
-    }
-}
-
-/// `TokenSink` shared by every paired baseline/candidate experiment
-/// ([`ideal_cost_bits_ppm_expert_experiment`]): flag/length/offset/slot
-/// price identically to [`CostSink`] and add the same bits to both
-/// [`PairedCost`] halves, since only the literal model differs between an
-/// experiment's baseline and candidate. `pair_literal` supplies that one
-/// difference: the experiment-specific `(baseline_bits, candidate_bits)`
-/// pairing function.
-struct PairedTokenSink<F> {
-    cost: PairedCost,
-    pair_literal: F,
-}
-
-impl<F> TokenSink for PairedTokenSink<F>
-where
-    F: FnMut(&mut Models, Context, u8) -> (f64, f64),
-{
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.cost.add_same(price_flag(models, flag_table, kind));
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        let (baseline, candidate) = (self.pair_literal)(models, context, byte);
-        self.cost.add(baseline, candidate);
-    }
-
-    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        self.cost.add_same(price_length(models, kind, value));
-    }
-
-    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        self.cost.add_same(price_offset(models, len, value));
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.cost.add_same(price_slot(models, symbol));
-    }
-}
-
-/// `research/JOURNAL.md` S1-P3's before-wiring measurement: does blending
-/// [`crate::ppm::Ppm`] in as a genuinely additive expert help, priced
-/// through [`Literal::ideal_cost_bits_ppm_expert_pair`], the same
-/// "measure before wiring" shape S1-P5's column expert (`JOURNAL` S2-A69)
-/// and S1-P2's fieldtype expert (`JOURNAL` S2-R15) each used for their own
-/// candidate expert. Not reachable from [`encode`]/[`decode`]: no
-/// `Method`/`FORMAT_VERSION` wiring, measurement only.
-///
-/// Returns `(baseline_bits, with_ppm_bits)`.
-#[must_use]
-pub fn ideal_cost_bits_ppm_expert_experiment(data: &[u8]) -> (f64, f64) {
-    let tokens = lz::parse_optimal(data);
-    let mut models = Models::new();
-    let mut ppm_state = PpmExpertState::new();
-    let mut sink = PairedTokenSink {
-        cost: PairedCost::default(),
-        pair_literal: |models: &mut Models, context: Context, byte: u8| {
-            models
-                .literal
-                .ideal_cost_bits_ppm_expert_pair(context, byte, &mut ppm_state)
-        },
-    };
-    walk_tokens(&tokens, data, &mut models, &mut sink);
-    (sink.cost.baseline, sink.cost.candidate)
 }
 
 /// How many independent [`Model`]s [`Models::offset_len`] holds, and the

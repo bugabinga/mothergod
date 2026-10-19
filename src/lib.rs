@@ -21,7 +21,7 @@
 // internals, not a surface downstream crates are meant to call (ROADMAP M6).
 // They stay `pub` for two reasons. `bench` and `fuzz` call into `lz`, `literal`
 // and `codec`. And the live codec path does not reach the research
-// primitives (`Ppm`, `Model::ideal_cost_bits`, `codec`'s `compressed_len_*`
+// primitives (`Model::ideal_cost_bits`, `codec`'s `compressed_len_*`
 // and `ideal_cost_bits_*` experiment entry points, `Sse::contexts`), whose
 // callers are tests: under `pub(crate)` they become `dead_code` errors with
 // `-D warnings`. Narrowing waits on wiring or removing those items. `filters` is
@@ -47,8 +47,6 @@ pub mod logistic;
 pub mod lz;
 #[doc(hidden)]
 pub mod model;
-#[doc(hidden)]
-pub mod ppm;
 pub mod read;
 #[doc(hidden)]
 pub mod sse;
