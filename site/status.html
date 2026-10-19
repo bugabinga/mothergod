@@ -212,6 +212,7 @@
       <section id="benchmarks-section">
         <h2>Is it any good?</h2>
         <div class="card" id="ratio-card" data-loading>Loading…</div>
+        <div class="card" id="frontier-card" data-loading>Loading…</div>
         <div class="card" id="benchmarks-card" data-loading>Loading…</div>
       </section>
 
@@ -389,6 +390,49 @@
       } else {
         ratio.textContent =
           'docs/benchmarks/ could not be read at generation time.';
+      }
+
+      // Bits/byte alone hides that mothergod is the slowest row on the
+      // field; the two neighbours say what a user trades at the level they
+      // would otherwise pick (#1340).
+      const frontier = document.getElementById('frontier-card');
+      frontier.removeAttribute('data-loading');
+      if (data.frontier?.corpora?.length) {
+        const neighbour = (n) => n
+          ? `${escapeHtml(n.level)}: ${n.bits_per_byte.toFixed(3)} bits/byte at ${n.encode_mbps.toFixed(3)} MB/s`
+          : 'none';
+        const rows = data.frontier.corpora.map((c) => `
+          <tr>
+            <td>${escapeHtml(c.corpus)}</td>
+            <td>${c.mothergod.bits_per_byte.toFixed(3)} bits/byte at ${c.mothergod.encode_mbps.toFixed(3)} MB/s</td>
+            <td>${neighbour(c.as_good)}</td>
+            <td>${neighbour(c.as_fast)}</td>
+            <td>${escapeHtml(c.moved)}</td>
+          </tr>
+        `).join('');
+        frontier.innerHTML = `
+          <table class="bench">
+            <caption>
+              Where mothergod sits among every gzip, zstd and xz level,
+              encode speed against bits per byte, one process at a time on
+              one machine. The two neighbours are the fastest level that
+              compresses at least as well and the best-compressing level
+              that is at least as fast. From the frontier section of the
+              generated reports in <code>docs/benchmarks/</code>.
+            </caption>
+            <thead><tr>
+              <th scope="col">corpus</th>
+              <th scope="col">mothergod</th>
+              <th scope="col">fastest level at least as good</th>
+              <th scope="col">best level at least as fast</th>
+              <th scope="col">pair last moved</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+      } else {
+        frontier.textContent =
+          'The frontier sections of docs/benchmarks/ could not be read at generation time.';
       }
 
       const benchmarks = document.getElementById('benchmarks-card');

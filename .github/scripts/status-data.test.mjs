@@ -97,6 +97,39 @@ test("benchmarks publishes bits/byte per case, never the gate's digest objects",
   assert.ok(!up.problems.some((p) => p.startsWith("benchmarks:")), up.problems.join("\n"));
 });
 
+for (const [corpus, file] of [["Canterbury", "canterbury.md"], ["Silesia", "silesia.md"]]) {
+  test(`frontier names ${corpus}'s two neighbours as its report's own lines`, () => {
+    const report = readFileSync(
+      new URL(`../../docs/benchmarks/${file}`, import.meta.url).pathname,
+      "utf-8",
+    );
+    const line = (what) => report.match(new RegExp(`^${what}: (.+)$`, "m"))[1];
+    const published = up.frontier.corpora.find((c) => c.corpus === corpus);
+    assert.equal(published.source, `docs/benchmarks/${file}`);
+    for (
+      const [key, what] of [
+        ["as_good", "fastest level at least as good"],
+        ["as_fast", "best level at least as fast"],
+      ]
+    ) {
+      const level = line(what);
+      assert.equal(published[key]?.level ?? "none", level, key);
+      if (level !== "none") {
+        // The neighbour's figures are its row of the report's table.
+        const row = report
+          .split("\n")
+          .find((l) => l.startsWith(`| ${level} |`))
+          .split("|")
+          .map((c) => c.trim());
+        assert.equal(published[key].bits_per_byte, Number(row[2]), key);
+        assert.equal(published[key].encode_mbps, Number(row[3]), key);
+      }
+    }
+    assert.match(published.moved, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(!up.problems.some((p) => p.startsWith("frontier:")), up.problems.join("\n"));
+  });
+}
+
 for (const half of ["cli", "lib"]) {
   test(`fit_${half} counts the matrix's holds rows over every row, declined included`, () => {
     const matrix = new URL(`../../tests/fit/${half}.txt`, import.meta.url).pathname;
