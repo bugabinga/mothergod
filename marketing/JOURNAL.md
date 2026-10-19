@@ -32,8 +32,10 @@ multiplier to both ratios, so a faster encoder fails the test before
 the sentence turns false.
 
 **`xz -9e` on Silesia, not zstd:** it is the column the Measured table
-already names, and Silesia is where it also wins on ratio, so the
-comparison is the least flattering one available. **Rejected: an exact
+already names, and on Silesia it also beats mothergod on ratio, so the
+reader sees one competitor that wins on both axes. It is not the
+harshest anchor: `zstd -19` decodes Silesia at 601.258 MB/s, about 259
+times mothergod's 2.320, where `xz -9e` is about 31 times (#1386). **Rejected: an exact
 multiplier ("17 times").** Every regeneration moves it, and a
 multiplier the reader can recompute from two quoted rates adds a
 third number to rot. **Rejected: quoting mothergod's peak memory in
