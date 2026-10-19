@@ -6351,7 +6351,8 @@ record.
   `Literal::mix_matchbyte`/`update_matchbyte_expert`/
   `ideal_cost_bits_matchbyte_expert_pair` reuse the exact shared helpers
   `mix7`/`mix_ppm` already factored out (`weights6_and_sum`, `scale6`,
-  `six_expert_mixed`, `adapt_seventh_weight`), the same paired
+  `six_expert_mixed`, `adapt_seventh_weight`; `six_expert_mixed` left
+  main in #1415), the same paired
   before-wiring methodology S2-A69/S2-A100 both used (baseline via
   `Self::ideal_cost_bits` exactly, candidate via the ninth-expert blend).
   Unlike every prior additive expert, this one's own bank cannot be
