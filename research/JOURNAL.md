@@ -8854,3 +8854,39 @@ record.
   zeros are (input copies in the filter trials are the first suspect, not
   isolated), the 256 MiB `memory-check` peak (946 MB in S2-A116, weekly
   lane). `research/progress.jsonl` it199.
+- S2-A124 | ACCEPTED | Issue #1322's precondition, memory headroom on real
+  data. Hypothesis: the optimal parse's peak on a block of real data is not
+  the 21 bytes per position of S2-A123, because each round's token list
+  stays live across the next `dp_round`; freeing it after its prices are
+  tallied cuts the peak with output bytes unchanged. | Found by a counting
+  allocator over the first 16 MiB block of `mozilla` at the
+  `bench/corpus.toml` pin (scratch, deleted): at the peak three
+  192 MiB arrays were live, `parent`, the previous round's `Vec<Token>` and
+  the list `reconstruct` was building, with the two 64 MiB match-finder
+  links. A token list grown by
+  `push` doubles, so a block of about 8.4 million tokens holds 16.8 million
+  slots of 12 bytes, 192 MiB, and `round = dp_round(...)` drops the old
+  list only after the new one is built. Zeros hides it (a few hundred
+  tokens), which is why S2-A123's figures read 372 MB and `mozilla` peaked
+  near 630 MB serially. The fix is `drop(round)` between the tally and the
+  call. Measured, release build, AMD EPYC 7763 4 logical cores runner,
+  `mothergod` from stdin, peak RSS from `/usr/bin/time`, before and after
+  on the same runner: `mozilla` (51,220,480 bytes, three 16 MiB frames and
+  a tail, `taskset -c 0`) 631,760 -> 520,800 KiB (-17.6%), 444.5 -> 437.0 s;
+  `dickens` (10,192,446 bytes) 363,668 -> 319,840 KiB (-12.1%), 88.0 ->
+  85.8 s; 16 MiB of zeros 372,608 -> 372,656 KiB, 42.0 -> 41.9 s. Output is
+  byte identical on all three (`cmp`), `dickens` decodes back to the input,
+  and the first `mozilla` block's heap peak above its input fell from 728 to
+  536 MiB by the allocator count. The output pin is the unchanged bytes;
+  the memory pin is a test over 512 KiB of noise, whose peak is 37.6 bytes
+  per input byte with the list freed and 49.6 without, and which fails with
+  the `drop` deleted. | Why it matters: a pipeline of two blocks on two
+  threads (not on main) encoded `mozilla` in 303.9 s against 444.5 s serial
+  with identical bytes, and peaked at 1,066,180 KiB, over the 1 GiB
+  CHANGELOG claims for the CLI. The two blocks' peaks add, so each block's
+  peak is what #1322 spends. | **Not measured:** the peak of the same
+  pipeline after this change (the next slice), the 2.3 bytes per position
+  above the budget that zeros showed, `parent` packed from 12 to 8 bytes,
+  and the list `reconstruct` builds by doubling beside `parent`, which an
+  exact count of the path's tokens would size and which, by the sums and
+  not by a snapshot, is the peak's remaining 192 MiB on `mozilla`. `research/progress.jsonl` it200.

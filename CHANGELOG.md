@@ -163,6 +163,10 @@ All notable changes to this project are documented here. Format follows
   from 41, so a 16 MiB block peaks at 372 MB instead of 700 MB and
   Silesia `dickens` at 364 MB instead of 562 MB, with output bytes
   unchanged and encode time within +4% on 16 MiB of zeros (#1341).
+- encode: peak memory falls by 12% to 18% on Silesia (`mozilla` from 617 to
+  509 MiB, `dickens` from 355 to 312 MiB) because the optimal parse frees
+  each round's token list before the next round allocates; output bytes are
+  unchanged and 16 MiB of zeros stays at 364 MiB (#1382).
 - Status page: the TRUST panel's fuzz CPU-hours and crasher count are
   cumulative since the ledger's first entry (2026-09-02) instead of a
   trailing 90-day window, because each entry is now a row of a table that

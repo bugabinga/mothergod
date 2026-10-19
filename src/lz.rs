@@ -1378,6 +1378,11 @@ pub(crate) fn parse_optimal_with_seed_and_search_window(
     let mut round = parse_greedy_with_window(data, seed_window);
     for _ in 0..DP_ROUNDS {
         let prices = PriceCounts::tally(&round, data).prices(round.len());
+        // The prices are all the next round takes from these tokens, and a
+        // token list the parse grew by doubling holds up to 192 MiB of
+        // capacity for a 16 MiB block: kept, it is live beside `parent` and
+        // the match finder, the peak (`research/JOURNAL.md` S2-A124).
+        drop(round);
         round = dp_round(data, &prices, search_window);
     }
     round
