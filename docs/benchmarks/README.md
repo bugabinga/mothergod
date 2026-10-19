@@ -85,7 +85,10 @@ the inputs that move what the reports print, so a change to the report
 binaries regenerates without a dispatch. `.github/scripts/bench-report`
 says where main stands, `fresh`, `running`, `publish` or `dispatch`,
 and `bench-report --publish` writes a finished pass's five files into
-the tree for the PR that publishes them.
+the tree for the PR that publishes them, under the title it prints: the
+squash commit's subject is where the next read learns which commit the
+reports were generated at, because the commit's own date says only when
+they merged.
 
 Both `canterbury.md` and `silesia.md` embed the `bench/baseline.json`
 fingerprint (`<!-- baseline-fingerprint: ... -->`) they were generated

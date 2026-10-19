@@ -17,20 +17,28 @@ named the dispatch a blocker for want of a token the seat holds
 wakes apart, dispatch then download, held in a model's memory across runs,
 is the shape ADR-0022 says to compile.
 
-Three facts decide, read from GitHub so the answer does not depend on the
-caller's checkout:
+Three facts decide, every one read from main through gh, so the answer does
+not depend on the caller's checkout or branch:
 
     affecting   the newest commit on main under the push paths
-                bench-report.yml lists, read from that file so the trigger
-                and this detector cannot disagree: the inputs whose change
-                moves what the reports print. `src/` is not among them: a
-                codec change that moves bytes regenerates in its own PR
-                under the ratio gate, and one that only moves speed is not
+                bench-report.yml lists on main, read from that file so the
+                trigger and this detector cannot disagree: the inputs whose
+                change moves what the reports print. `src/` is not among
+                them: a codec change that moves bytes regenerates in its own
+                PR under the ratio gate, and one that only moves speed is not
                 tracked today. One list to widen, with the cost in mind:
                 every pass is serial by design (#1321) and every regenerated
                 report differs in its timing columns, so a wider list is
                 more publish PRs of runner jitter.
-    reports     the newest commit on main under REPORTS, the published pages.
+    generated   the commit on main the committed reports were generated at.
+                A publish commit names it in its subject, the title this
+                script prints for the publish PR ("regenerated at <sha>");
+                a commit that names none, a codec PR that regenerated on
+                its own branch, is its own generator. The reports commit's
+                own date would not do: a publish PR for pass P can merge
+                after a later report-affecting commit B lands, and then
+                the reports are newer than B by date while B's pass is
+                unpublished (the reviewer's sequence on #1378).
     pass        the newest bench-report.yml run on main. It covers the
                 affecting commit when its head is at or after it; main is
                 linear (squash merges), so committer dates order it, and a
@@ -39,13 +47,15 @@ caller's checkout:
 
 States, the first word of the first line, in the order tested:
 
-    fresh           reports is at or after affecting; nothing owed.
+    fresh           generated is at or after affecting; nothing owed.
     running <id>    the newest pass covers and is in progress; nothing to
                     do this wake, the next one publishes.
     publish <id>    the newest pass covers, succeeded, and its artifact is
                     live: `bench-report --publish` writes the five files
-                    into the tree, then push-branch and gh-pr ship them.
-    dispatch        reports predate affecting and no live pass covers it
+                    into the tree, then push-branch and gh-pr ship them
+                    under the title this prints, which is where the next
+                    read learns the generator.
+    dispatch        generated predates affecting and no live pass covers it
                     (none, failed, cancelled, or its artifact expired):
                     one `gh workflow run` on GH_WORKFLOW_TOKEN.
     UNREADABLE      gh could not answer; the reason follows. Never an empty
@@ -68,8 +78,10 @@ Exits 0 whichever state it prints; a state is a duty, not an error.
 """
 
 import argparse
+import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -90,6 +102,10 @@ FILES = (
     "docs/benchmarks/silesia.md",
 )
 DISPATCH = f'GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run {WORKFLOW} --ref main'
+# The publish PR's title, and so the squash commit's subject: the one place
+# the generator is recorded, and GENERATOR is how the next read finds it.
+TITLE = "bench: publish the reports regenerated at {sha}"
+GENERATOR = re.compile(r"regenerated at ([0-9a-f]{7,40})\b")
 
 
 def gh(*args):
@@ -108,21 +124,36 @@ def gh(*args):
         return None, "response was not JSON"
 
 
-def report_paths():
-    """The workflow's `on.push.paths`, as commit-API path prefixes (a trailing `/**` dropped).
+def report_paths(repo):
+    """The workflow's `on.push.paths` on main, as commit-API path prefixes (a trailing `/**` dropped).
 
-    PyYAML reads the bare key `on` as the boolean True, so both spellings are tried.
+    PyYAML reads the bare key `on` as the boolean True, so both spellings
+    are tried.
     """
-    doc = yaml.safe_load((Path(__file__).parents[1] / "workflows" / WORKFLOW).read_text())
+    row, error = gh("api", f"repos/{repo}/contents/.github/workflows/{WORKFLOW}?ref=main")
+    if error:
+        return None, f"{WORKFLOW} on main: {error}"
+    try:
+        doc = yaml.safe_load(base64.b64decode(row["content"]).decode())
+    except (KeyError, ValueError, yaml.YAMLError) as exc:
+        return None, f"{WORKFLOW} on main: {exc}"
     triggers = doc.get("on") or doc.get(True) or {}
-    paths = ((triggers.get("push") or {}).get("paths")) or []
+    paths = (triggers.get("push") or {}).get("paths") or []
     if not paths:
-        raise ValueError(f"{WORKFLOW} lists no push paths")
-    return tuple(p[: -len("/**")] if p.endswith("/**") else p for p in paths)
+        return None, f"{WORKFLOW} on main lists no push paths"
+    return tuple(p[: -len("/**")] if p.endswith("/**") else p for p in paths), None
+
+
+def commit(repo, sha):
+    """A commit on the repository as {"sha", "date"}, by sha or ref."""
+    row, error = gh("api", f"repos/{repo}/commits/{sha}")
+    if error:
+        return None, error
+    return {"sha": row["sha"], "date": row["commit"]["committer"]["date"]}, None
 
 
 def newest_commit(repo, paths):
-    """The newest commit on main touching any of `paths`, as {"sha", "date", "path"}."""
+    """The newest commit on main touching any of `paths`, as {"sha", "date", "path", "subject"}."""
     best = None
     for path in paths:
         rows, error = gh("api", f"repos/{repo}/commits?sha=main&path={path}&per_page=1")
@@ -130,7 +161,13 @@ def newest_commit(repo, paths):
             return None, f"commits under {path}: {error}"
         if not rows:
             continue
-        row = {"sha": rows[0]["sha"], "date": rows[0]["commit"]["committer"]["date"], "path": path}
+        message = rows[0]["commit"].get("message") or ""
+        row = {
+            "sha": rows[0]["sha"],
+            "date": rows[0]["commit"]["committer"]["date"],
+            "path": path,
+            "subject": message.splitlines()[0] if message else "",
+        }
         if best is None or row["date"] > best["date"]:
             best = row
     if best is None:
@@ -138,18 +175,30 @@ def newest_commit(repo, paths):
     return best, None
 
 
+def generator(subject):
+    """The pass head a publish commit names in its subject, or None when the commit is its own generator."""
+    hit = GENERATOR.search(subject or "")
+    return hit.group(1) if hit else None
+
+
 def read(repo):
     """The facts `decide` needs, read lazily: the pass's head and artifact only when the reports are stale."""
-    try:
-        paths = report_paths()
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        return None, f"push paths of {WORKFLOW}: {exc}"
+    paths, error = report_paths(repo)
+    if error:
+        return None, error
     affecting, error = newest_commit(repo, paths)
     if error:
         return None, error
     reports, error = newest_commit(repo, REPORTS)
     if error:
         return None, error
+    named = generator(reports["subject"])
+    if named is None:
+        generated = {"sha": reports["sha"], "date": reports["date"]}
+    else:
+        generated, error = commit(repo, named)
+        if error:
+            return None, f"generator {named}, named by {reports['sha'][:7]}: {error}"
     runs, error = gh(
         "run",
         "list",
@@ -168,27 +217,35 @@ def read(repo):
         return None, f"runs of {WORKFLOW} on main: {error}"
     newest = runs[0] if runs else None
     head = live = None
-    if newest is not None and reports["date"] < affecting["date"]:
-        row, error = gh("api", f"repos/{repo}/commits/{newest['headSha']}")
+    if newest is not None and generated["date"] < affecting["date"]:
+        row, error = commit(repo, newest["headSha"])
         if error:
             return None, f"head of run {newest['databaseId']}: {error}"
-        head = row["commit"]["committer"]["date"]
+        head = row["date"]
         if head >= affecting["date"] and newest["status"] == "completed" and newest["conclusion"] == "success":
             data, error = gh("api", f"repos/{repo}/actions/runs/{newest['databaseId']}/artifacts")
             if error:
                 return None, f"artifacts of run {newest['databaseId']}: {error}"
             live = any(a["name"] == ARTIFACT and not a["expired"] for a in data.get("artifacts", []))
-    return {"affecting": affecting, "reports": reports, "newest": newest, "head": head, "live": live}, None
+    return {
+        "affecting": affecting,
+        "reports": reports,
+        "generated": generated,
+        "newest": newest,
+        "head": head,
+        "live": live,
+    }, None
 
 
-def decide(affecting, reports, newest, head, live):
+def decide(affecting, generated, newest, head, live):
     """The state and its reason. Pure: every input is a fact `read` produced.
 
-    `newest` is the newest pass on main or None, `head` its head commit's
-    date (None when not read), `live` whether its artifact is still
-    downloadable (None when not read).
+    `generated` is the commit the reports were generated at, `newest` the
+    newest pass on main or None, `head` its head commit's date (None when
+    not read), `live` whether its artifact is still downloadable (None when
+    not read).
     """
-    if reports["date"] >= affecting["date"]:
+    if generated["date"] >= affecting["date"]:
         return "fresh", None
     if newest is None or head is None or head < affecting["date"]:
         return "dispatch", "no pass on main at or after it"
@@ -209,16 +266,14 @@ def render(facts, error, out=sys.stdout):
         print("    this cannot date are not fresh.", file=out)
         return "UNREADABLE"
 
-    affecting, reports, newest = facts["affecting"], facts["reports"], facts["newest"]
-    state, reason = decide(**facts)
-    stale = (
-        f"the reports ({reports['sha'][:7]}, {reports['date']}) predate"
-        f" {affecting['sha'][:7]} ({affecting['date']}, under {affecting['path']})"
-    )
+    affecting, reports, generated, newest = (facts[k] for k in ("affecting", "reports", "generated", "newest"))
+    state, reason = decide(affecting, generated, facts["newest"], facts["head"], facts["live"])
+    where = f"the reports ({reports['sha'][:7]}, generated at {generated['sha'][:7]} {generated['date']})"
+    stale = f"{where} predate {affecting['sha'][:7]} ({affecting['date']}, under {affecting['path']})"
     if state == "fresh":
         print(
-            f"fresh: the reports ({reports['sha'][:7]}, {reports['date']}) are at or after"
-            f" the newest report-affecting commit ({affecting['sha'][:7]}, {affecting['date']}).",
+            f"fresh: {where} are at or after the newest report-affecting commit"
+            f" ({affecting['sha'][:7]}, {affecting['date']}).",
             file=out,
         )
     elif state == "running":
@@ -228,8 +283,9 @@ def render(facts, error, out=sys.stdout):
     elif state == "publish":
         print(f"publish {newest['databaseId']}: a pass on main finished {newest['updatedAt']} covers it; {stale}.", file=out)
         print("    Next: .github/scripts/bench-report --publish, which writes the five files into the tree;", file=out)
-        print("    then push-branch and gh-pr ship them, title", file=out)
-        print(f'    "bench: publish the reports regenerated at {newest["headSha"][:7]}".', file=out)
+        print("    then push-branch and gh-pr ship them, under this title and no other, because the", file=out)
+        print("    next read learns the generator from it:", file=out)
+        print(f'    "{TITLE.format(sha=newest["headSha"][:7])}"', file=out)
         print(f"    {newest['url']}", file=out)
     else:
         print(f"dispatch: {stale}, and {reason}.", file=out)
@@ -239,7 +295,7 @@ def render(facts, error, out=sys.stdout):
     print(
         f"\nbench-report: {state}"
         f" | affecting {affecting['sha'][:7]} {affecting['date']} under {affecting['path']}"
-        f" | reports {reports['sha'][:7]} {reports['date']}"
+        f" | reports {reports['sha'][:7]} generated at {generated['sha'][:7]} {generated['date']}"
         f" | pass {newest['databaseId'] if newest else 'none'}"
         " | gh readable",
         file=out,
