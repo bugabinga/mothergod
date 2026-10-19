@@ -109,7 +109,8 @@ jobs:
                otherwise.
             3. Otherwise ship one improvement. Queue first: the top
                open issue labeled marketing nobody has claimed (an open
-               PR or claude/* branch covering it means claimed). Queue
+               PR covering it means claimed; a claude/* branch with no
+               PR is a handoff to resume, #1388). Queue
                empty: find the biggest reader-facing defect on the
                surface yourself, a stale or false claim, a page that
                serves no audience, a missing next step, and fix that.
