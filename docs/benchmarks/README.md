@@ -57,7 +57,10 @@ cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_rep
 Silesia's counterpart, writes `silesia.md`. `mothergod` is timed one file
 at a time (`mothergod_bench::reference::measure_all`), because the MB/s
 columns are a rate only if nothing runs beside the encode (issue #1321),
-so this takes about half an hour for ~200 MB. The frontier section then
+so this takes about half an hour for ~200 MB. Each encode and decode runs
+in a child of the binary itself under `/usr/bin/time -f %M`, the
+competitors' instrument, which is where mothergod's peak resident set in
+the frontier section comes from (issue #1340). The frontier section then
 times every competitor level one process at a time as well
 (`mothergod_bench::reference::frontier_section`), serial for the same
 reason, so its cost is added on top; the first runner pass reads it.

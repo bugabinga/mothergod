@@ -5,9 +5,12 @@
 //! [`crate::reference`] keeps the three rungs `research/corpus/POLICY.md`
 //! pins (`gzip -9`, `zstd -19`, `xz -9e`) as sizes only. This module is the
 //! primitive under the full matrix: [`competitors`] lists the levels and
-//! [`measure`] times one of them on one input. Callers run it serially, the
-//! way `reference::measure_all` times mothergod (#1321): a wall-clock taken
-//! beside another measurement is not a rate.
+//! [`measure`] times one of them on one input. [`measure_mothergod`] times
+//! mothergod the same way, by re-running the report binary itself in the
+//! child mode [`run_child_if_requested`] serves, so the codec is measured by
+//! the instrument the competitors are and its peak resident set exists at
+//! all. Callers run it serially, the way `reference::measure_all` does
+//! (#1321): a wall-clock taken beside another measurement is not a rate.
 //!
 //! Peak RSS comes from GNU `time` (`/usr/bin/time -f %M`, KiB), so
 //! [`measure`] needs Linux and reports an error elsewhere rather than a
@@ -15,9 +18,9 @@
 
 use crate::reference::write_temp_file;
 use std::fs::File;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitCode};
 use std::time::Instant;
 
 /// GNU `time`'s absolute path. Not looked up on `PATH`: the shell keyword
@@ -54,7 +57,7 @@ pub struct Competitor {
     pub tool: Tool,
     /// The level as a user types it after the dash: `"1"`, `"22"`, `"9e"`.
     pub level: String,
-    /// Arguments selecting the level, before the input and `-c`.
+    /// Arguments selecting the level, before `-c`.
     args: Vec<String>,
 }
 
@@ -145,20 +148,21 @@ fn parse_peak_rss_kib(report: &str) -> Option<u64> {
         .ok()
 }
 
-/// Runs `cmd args` with `input` as stdin under GNU `time`, stdout captured.
+/// Runs `program args` with `input` as stdin under GNU `time`, stdout
+/// captured.
 ///
 /// Stdin is the file itself, not a pipe: no write deadlock against the
 /// captured stdout, and the tool sees no file name, so gzip embeds none
 /// into its header (#1326).
-fn run_timed(cmd: &str, args: &[String], input: &Path) -> io::Result<Run> {
+fn run_timed(program: &Path, args: &[String], input: &Path) -> io::Result<Run> {
+    let cmd = program.display();
     let report = TempFile::new(b"", "time")?;
     let start = Instant::now();
     let output = Command::new(GNU_TIME)
         .args(["-f", "%M", "-o"])
         .arg(report.path())
-        .arg(cmd)
+        .arg(program)
         .args(args)
-        .arg("-c")
         .stdin(File::open(input)?)
         .output()?;
     let secs = start.elapsed().as_secs_f64();
@@ -178,23 +182,23 @@ fn run_timed(cmd: &str, args: &[String], input: &Path) -> io::Result<Run> {
     })
 }
 
-/// Compresses `data` under `competitor`, decompresses it, checks the round
-/// trip, and returns both processes' size, time and peak resident set.
-///
-/// # Errors
-///
-/// Returns an error if GNU `time` or the tool is missing, either process
-/// exits non-zero, or the decoded bytes differ from `data`.
-pub fn measure(competitor: &Competitor, data: &[u8]) -> io::Result<FieldPoint> {
-    let cmd = competitor.tool.command();
-    let input = TempFile::new(data, cmd)?;
-    let encode = run_timed(cmd, &competitor.args, input.path())?;
-    let compressed = TempFile::new(&encode.stdout, cmd)?;
-    let decode = run_timed(cmd, &["-d".to_string()], compressed.path())?;
+/// Compresses `data` with `program encode_args`, decompresses it with
+/// `program decode_args`, checks the round trip, and returns both
+/// processes' size, time and peak resident set.
+fn measure_processes(
+    label: &str,
+    program: &Path,
+    encode_args: &[String],
+    decode_args: &[String],
+    data: &[u8],
+) -> io::Result<FieldPoint> {
+    let input = TempFile::new(data, "input")?;
+    let encode = run_timed(program, encode_args, input.path())?;
+    let compressed = TempFile::new(&encode.stdout, "compressed")?;
+    let decode = run_timed(program, decode_args, compressed.path())?;
     if decode.stdout != data {
         return Err(io::Error::other(format!(
-            "{} round-trip mismatch: decompress(compress(x)) != x",
-            competitor.label()
+            "{label} round-trip mismatch: decompress(compress(x)) != x"
         )));
     }
     Ok(FieldPoint {
@@ -204,6 +208,124 @@ pub fn measure(competitor: &Competitor, data: &[u8]) -> io::Result<FieldPoint> {
         encode_peak_rss_kib: encode.peak_rss_kib,
         decode_peak_rss_kib: decode.peak_rss_kib,
     })
+}
+
+/// Compresses `data` under `competitor`, decompresses it, checks the round
+/// trip, and returns both processes' size, time and peak resident set.
+///
+/// # Errors
+///
+/// Returns an error if GNU `time` or the tool is missing, either process
+/// exits non-zero, or the decoded bytes differ from `data`.
+pub fn measure(competitor: &Competitor, data: &[u8]) -> io::Result<FieldPoint> {
+    let mut encode_args = competitor.args.clone();
+    encode_args.push("-c".to_string());
+    let decode_args = ["-d", "-c"].map(String::from);
+    measure_processes(
+        &competitor.label(),
+        Path::new(competitor.tool.command()),
+        &encode_args,
+        &decode_args,
+        data,
+    )
+}
+
+/// The first argument that puts a report binary in child mode.
+const CHILD_FLAG: &str = "--child";
+
+/// What a mothergod child process does to its stdin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Direction {
+    /// `mothergod::compress`.
+    Compress,
+    /// `mothergod::decompress`.
+    Decompress,
+}
+
+impl Direction {
+    const ALL: [Direction; 2] = [Direction::Compress, Direction::Decompress];
+
+    /// The second argument that selects it.
+    fn arg(self) -> &'static str {
+        match self {
+            Direction::Compress => "compress",
+            Direction::Decompress => "decompress",
+        }
+    }
+
+    fn child_args(self) -> Vec<String> {
+        vec![CHILD_FLAG.to_string(), self.arg().to_string()]
+    }
+
+    fn apply(self, input: &[u8]) -> Result<Vec<u8>, String> {
+        match self {
+            Direction::Compress => Ok(mothergod::compress(input)),
+            Direction::Decompress => mothergod::decompress(input).map_err(|err| err.to_string()),
+        }
+    }
+}
+
+/// Serves the child mode [`measure_mothergod`] spawns: when the process was
+/// started as `<exe> --child compress` or `<exe> --child decompress`, runs
+/// mothergod over stdin to stdout and returns the exit code the binary must
+/// end with. Returns `None` for any other command line.
+///
+/// Every binary that passes its own path to [`measure_mothergod`] calls this
+/// first in `main`: a binary that does not would run its whole report again
+/// in the child.
+#[must_use]
+pub fn run_child_if_requested() -> Option<ExitCode> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let [flag, mode] = args.as_slice() else {
+        return None;
+    };
+    if flag != CHILD_FLAG {
+        return None;
+    }
+    let result = Direction::ALL
+        .into_iter()
+        .find(|direction| direction.arg() == mode)
+        .ok_or_else(|| format!("unknown child mode {mode:?}"))
+        .and_then(|direction| {
+            let mut input = Vec::new();
+            io::stdin()
+                .lock()
+                .read_to_end(&mut input)
+                .map_err(|err| err.to_string())?;
+            let output = direction.apply(&input)?;
+            io::stdout()
+                .lock()
+                .write_all(&output)
+                .map_err(|err| err.to_string())
+        });
+    Some(match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::FAILURE
+        }
+    })
+}
+
+/// Compresses `data` with `mothergod::compress` in a child of `program`,
+/// decompresses it in another, and returns what [`measure`] returns for a
+/// competitor, so mothergod's row and the field's share one instrument.
+///
+/// `program` is a binary that calls [`run_child_if_requested`] first in
+/// `main`: a report binary's own path in production, `bench_child` in tests.
+///
+/// # Errors
+///
+/// Returns an error if GNU `time` or `program` is missing, either process
+/// exits non-zero, or the decoded bytes differ from `data`.
+pub fn measure_mothergod(program: &Path, data: &[u8]) -> io::Result<FieldPoint> {
+    measure_processes(
+        "mothergod",
+        program,
+        &Direction::Compress.child_args(),
+        &Direction::Decompress.child_args(),
+        data,
+    )
 }
 
 #[cfg(test)]
