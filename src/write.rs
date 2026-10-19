@@ -3,24 +3,28 @@
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use super::{BLOCK_LEN, compress_block};
 
-/// Blocks an [`Encoder`] encodes at once at most: two, because a block's
-/// working set is about 370 MB (`BLOCK_LEN`'s doc) and the bound the CLI
-/// and the library state is 1 GiB, which holds two and not three
-/// (`research/JOURNAL.md` S2-A124). A machine with one core encodes
-/// serially, in the calling thread, as before.
-const MAX_ENCODE_BLOCKS: usize = 2;
+/// Encodes of one block of input that run at once at most, whether the block
+/// is one of a stream's or one of the trials of a block's filter search:
+/// two, because an encode's working set is about 370 MB (`BLOCK_LEN`'s doc)
+/// and the bound the CLI and the library state is 1 GiB, which holds two
+/// and not three (`research/JOURNAL.md` S2-A125). A machine with one core
+/// encodes serially, in the calling thread, as before.
+const MAX_CONCURRENT_ENCODES: usize = 2;
 
-/// The blocks an encoder on this machine encodes at once: its cores, up to
-/// [`MAX_ENCODE_BLOCKS`].
-fn encode_blocks() -> usize {
-    thread::available_parallelism()
-        .map_or(1, usize::from)
-        .min(MAX_ENCODE_BLOCKS)
+/// The encodes of a block that run at once on this machine: its cores, up to
+/// [`MAX_CONCURRENT_ENCODES`]. A stream's blocks and one block's trials
+/// share the bound and never nest: the last block of a stream, alone, spends
+/// it on trials.
+pub(crate) fn concurrent_encodes() -> NonZeroUsize {
+    thread::available_parallelism().map_or(NonZeroUsize::MIN, |cores| {
+        cores.min(NonZeroUsize::new(MAX_CONCURRENT_ENCODES).expect("two is nonzero"))
+    })
 }
 
 /// A full block on its way to a frame, in the order the blocks were cut.
@@ -45,8 +49,10 @@ type InFlight = JoinHandle<Vec<u8>>;
 /// On a machine with two or more cores, two blocks encode at once, each on
 /// a thread of its own while the caller fills the next, so a stream of
 /// several blocks takes less wall-clock time and holds two working sets
-/// instead of one: the 1 GiB bound is for the pair. Frames reach `W` in
-/// block order and are the bytes a serial encode writes. A full block
+/// instead of one: the 1 GiB bound is for the pair. The last block, when
+/// none is running, spends the two threads on its filter search instead, so a
+/// stream of one block takes less wall-clock time at the same bound. Frames
+/// reach `W` in block order and are the bytes a serial encode writes. A full block
 /// whose predecessors are still encoding makes the `write` that filled it
 /// wait for the oldest; a sink error from that frame comes back from that
 /// call, one block later than a serial encoder would report it, and the
@@ -90,7 +96,7 @@ pub struct Encoder<W> {
     /// Blocks encoding on their own threads, oldest first; never more than
     /// `workers`. Empty when `workers` is one.
     in_flight: VecDeque<InFlight>,
-    workers: usize,
+    workers: NonZeroUsize,
     /// A stream is one or more frames (ADR-0067): an encoder that cut no
     /// block still owes one, for the empty input. Set when a block is cut,
     /// not when its frame reaches the sink, which a running block has not.
@@ -108,13 +114,12 @@ impl<W: Write> Encoder<W> {
     /// [`new`](Self::new) with the block length a parameter, so a test cuts
     /// at a length it can afford. `block_len` is nonzero.
     pub(crate) fn with_block_len(sink: W, block_len: usize) -> Self {
-        Self::with_workers(sink, block_len, encode_blocks())
+        Self::with_workers(sink, block_len, concurrent_encodes())
     }
 
     /// [`with_block_len`](Self::with_block_len) with the blocks encoded at
     /// once a parameter, so a test compares one worker against several.
-    /// `workers` is nonzero.
-    pub(crate) fn with_workers(sink: W, block_len: usize, workers: usize) -> Self {
+    pub(crate) fn with_workers(sink: W, block_len: usize, workers: NonZeroUsize) -> Self {
         Self {
             sink,
             block: Vec::new(),
@@ -138,7 +143,7 @@ impl<W: Write> Encoder<W> {
     pub fn finish(mut self) -> io::Result<W> {
         self.check()?;
         if !self.block.is_empty() || !self.cut_a_block {
-            self.emit()?;
+            self.emit(true)?;
         }
         self.drain()?;
         Ok(self.sink)
@@ -153,25 +158,32 @@ impl<W: Write> Encoder<W> {
     /// when `workers` allows more than one block at once.
     ///
     /// Waits for the oldest running block first when `workers` are already
-    /// running: the invariant behind [`MAX_ENCODE_BLOCKS`]'s memory figure.
-    fn emit(&mut self) -> io::Result<()> {
+    /// running: the invariant behind [`MAX_CONCURRENT_ENCODES`]'s memory
+    /// figure. A `last` block with none running is the only encode there is
+    /// and will be, so it runs here and spends all `workers` on its filter
+    /// trials instead (`codec::encode`); any other block's trials run
+    /// serially, because a block cut after it would encode beside them and
+    /// make three.
+    fn emit(&mut self, last: bool) -> io::Result<()> {
         self.cut_a_block = true;
-        if self.workers == 1 {
-            let frame = compress_block(&self.block);
+        if self.workers == NonZeroUsize::MIN || (last && self.in_flight.is_empty()) {
+            let frame = compress_block(&self.block, self.workers);
             self.block.clear();
             return self.write_frame(&frame);
         }
-        while self.in_flight.len() >= self.workers {
+        while self.in_flight.len() >= self.workers.get() {
             self.write_oldest()?;
         }
         // The thread and this call share the block, so a refused spawn
         // (the process is out of threads) falls back to encoding here.
         let block = Arc::new(std::mem::take(&mut self.block));
         let shared = Arc::clone(&block);
-        if let Ok(handle) = thread::Builder::new().spawn(move || compress_block(&shared)) {
+        let spawned =
+            thread::Builder::new().spawn(move || compress_block(&shared, NonZeroUsize::MIN));
+        if let Ok(handle) = spawned {
             self.in_flight.push_back(handle);
         } else {
-            let frame = compress_block(&block);
+            let frame = compress_block(&block, NonZeroUsize::MIN);
             self.drain()?;
             self.write_frame(&frame)?;
         }
@@ -214,7 +226,7 @@ impl<W: Write> Write for Encoder<W> {
         let take = buf.len().min(self.block_len - self.block.len());
         self.block.extend_from_slice(&buf[..take]);
         if self.block.len() == self.block_len {
-            self.emit()?;
+            self.emit(false)?;
         }
         Ok(take)
     }
@@ -222,7 +234,7 @@ impl<W: Write> Write for Encoder<W> {
     fn flush(&mut self) -> io::Result<()> {
         self.check()?;
         if !self.block.is_empty() {
-            self.emit()?;
+            self.emit(false)?;
         }
         self.drain()?;
         self.sink.flush()

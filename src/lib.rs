@@ -623,7 +623,7 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
         return build_stored_frame(input);
     }
     if input.len() <= block_len {
-        return compress_block(input);
+        return compress_block(input, write::concurrent_encodes());
     }
     let mut encoder = write::Encoder::with_block_len(Vec::new(), block_len);
     std::io::Write::write_all(&mut encoder, input).expect("a Vec sink does not fail");
@@ -667,9 +667,10 @@ fn copy_encode_blocks<R: std::io::Read, W: std::io::Write>(
 }
 
 /// One frame for `block`: [`Method::Lz`] if it is smaller, else
-/// [`Method::Stored`].
-fn compress_block(block: &[u8]) -> Vec<u8> {
-    let body = codec::encode(block);
+/// [`Method::Stored`]. Up to `workers` of the filter trials run at once
+/// ([`codec::encode`]); the frame is the same for any `workers`.
+fn compress_block(block: &[u8], workers: std::num::NonZeroUsize) -> Vec<u8> {
+    let body = codec::encode(block, workers);
     if candidate_beats_incumbent(body.len(), block.len()) {
         return build_frame(Method::Lz, &[&body]);
     }

@@ -3,6 +3,12 @@ use crate::test_support::{
     as_codec_error, bcj_call_dense_data, columnar_drift_data, lz_payload, tabular_columns_data,
 };
 
+/// [`super::encode`] with its trials in sequence: the search the payload is
+/// defined by, and the oracle for any number of trial threads.
+fn encode(data: &[u8]) -> Vec<u8> {
+    super::encode(data, NonZeroUsize::MIN)
+}
+
 /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
 /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
 /// compare its output byte for byte against [`decode`]'s.
@@ -1223,4 +1229,32 @@ fn reverse_delta_output_past_max_len_is_rejected() {
     assert_eq!(decode(&forced, len - 1), Err(expected.clone()));
     let err = decode_streaming(&forced, len - 1).expect_err("output past max_len");
     assert_eq!(as_codec_error(&err), Some(&expected));
+}
+
+#[test]
+fn trial_workers_never_change_the_payload() {
+    // Inputs whose winner is each side of the shortlist, and short ones whose
+    // trials tie in size, where the earlier candidate must win whichever
+    // thread finished first. More workers than candidates is allowed.
+    let inputs = [
+        Vec::new(),
+        b"a".to_vec(),
+        b"ab".to_vec(),
+        crate::test_support::repeated_sentence(),
+        bcj_call_dense_data(),
+        columnar_drift_data(),
+        tabular_columns_data(8, 200, 3),
+    ];
+    for input in inputs {
+        let serial = encode(&input);
+        for workers in 2..=9 {
+            assert_eq!(
+                super::encode(&input, crate::test_support::nz(workers)),
+                serial,
+                "{} bytes, {workers} workers",
+                input.len()
+            );
+        }
+        assert_decode_matches(&serial, &input, "serial trials");
+    }
 }
