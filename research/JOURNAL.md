@@ -2668,7 +2668,9 @@ record.
   `update_ppm_expert`/`ideal_cost_bits_ppm_expert_pair` (S2-A100) stay on
   `main`, accepted and unwired, an ideal-cost-only primitive — real-
   bitstream wiring costs more than it saves under every coding
-  configuration measured so far. A future slice needs a coding mechanism
+  configuration measured so far (that apparatus left main in #1401,
+  dc62137 ("deslop: delete the unwired PPM expert, ppm.rs and its pricing
+  pair")). A future slice needs a coding mechanism
   this lead has not yet named, not another substitution or calibration
   variant on the ones already tried. Full record and numbers in S2-R19's
   own entry. Eighth slice, S2-R21: tried the coding mechanism `JOURNAL`
@@ -2729,10 +2731,7 @@ record.
   and stays. Every named branch S2-R6 through S2-R22
   has now failed at real-SSE-coding granularity; S1-P3 reaches the same
   "unclear, no further named branch" state S1-P2 reached.
-  `research/progress.jsonl` it163. The apparatus S2-A57 and S2-A100 kept
-  on `main` (`src/ppm.rs`, `PpmExpertState`, the paired cost sink) left
-  in #1401, dc62137 ("deslop: delete the unwired PPM expert, ppm.rs and
-  its pricing pair").
+  `research/progress.jsonl` it163.
 - S1-P4 | LEAD | LZMA-class windows for large files (xz's remaining edge).
   Several Silesia finals (`mozilla`, `nci`, `samba`, `sao`, `webster`) are
   many times larger than `lz::WINDOW` (1 MiB), so long-range repeats past

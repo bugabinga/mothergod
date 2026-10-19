@@ -67,7 +67,7 @@ idioms at once, which is worse than either idiom alone.
 4. Change. Preserve behaviour exactly. Deletion beats addition: the
    best fix removes the code rather than improving it.
    Deleting code `research/JOURNAL.md` names (grep the item) leaves one
-   clause on the entry that recorded it kept, `left main in #PR`,
+   clause beside the sentence that recorded it kept, `left main in #PR`,
    because the journal is read as the record of what exists (#1360 and
    #1401 each left a kept-on-main sentence standing).
 5. Prove it. Every change must be provably behaviour-preserving. Where
