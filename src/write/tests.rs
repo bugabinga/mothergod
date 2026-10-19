@@ -2,9 +2,10 @@ use std::io::ErrorKind;
 
 use super::*;
 use crate::test_support::{
-    Xorshift32, bcj_call_dense_data, columnar_drift_data, repeated_sentence, tabular_columns_data,
+    Xorshift32, bcj_call_dense_data, columnar_drift_data, repeated_sentence, serial_blocks,
+    tabular_columns_data,
 };
-use crate::{compress, compress_blocks, decompress};
+use crate::{compress, decompress};
 
 const BLOCK: usize = 4096;
 
@@ -41,6 +42,70 @@ fn encode(input: &[u8], chunk: usize, block_len: usize) -> Vec<u8> {
     encoder.finish().expect("a Vec does not fail")
 }
 
+/// [`encode`] with `workers` blocks encoding at once.
+fn encode_with(input: &[u8], block_len: usize, workers: usize) -> Vec<u8> {
+    let mut encoder = Encoder::with_workers(Vec::new(), block_len, workers);
+    encoder.write_all(input).expect("a Vec does not fail");
+    encoder.finish().expect("a Vec does not fail")
+}
+
+/// Blocks of runs and noise, so the frames differ in method, size and time:
+/// a pipeline that wrote them in the order they finished, not the order they
+/// were cut, would not agree with the serial encode.
+fn uneven_blocks(blocks: usize) -> Vec<u8> {
+    let mut noise = Xorshift32::new(11).map(|word| word.to_le_bytes()[1]);
+    let mut input = Vec::new();
+    for index in 0..blocks {
+        match index % 3 {
+            0 => input.extend(std::iter::repeat_n(b'a', BLOCK)),
+            1 => input.extend(noise.by_ref().take(BLOCK)),
+            _ => input.extend(repeated_sentence().into_iter().cycle().take(BLOCK)),
+        }
+    }
+    input
+}
+
+#[test]
+fn the_workers_in_flight_never_change_the_bytes() {
+    for blocks in [0, 1, 2, 3, 5, 8] {
+        let input = uneven_blocks(blocks);
+        let serial = serial_blocks(&input, BLOCK);
+        for workers in [1, 2, 3, 4] {
+            // Two blocks in flight and none written when the input ends on
+            // a block edge: `finish` must add no empty frame.
+            assert_eq!(
+                encode_with(&input, BLOCK, workers),
+                serial,
+                "{blocks} blocks, {workers} workers"
+            );
+        }
+        assert_eq!(decompress(&serial), Ok(input));
+    }
+}
+
+#[test]
+fn a_flush_waits_for_every_running_block_and_the_stream_continues_in_order() {
+    let (first, second) = (uneven_blocks(3), uneven_blocks(2));
+    for workers in [1, 2, 3] {
+        let mut encoder = Encoder::with_workers(Vec::new(), BLOCK, workers);
+        encoder.write_all(&first).unwrap();
+        encoder.flush().unwrap();
+        // Everything written so far has reached the sink, running blocks too.
+        assert_eq!(
+            encoder.sink,
+            serial_blocks(&first, BLOCK),
+            "{workers} workers"
+        );
+        encoder.write_all(&second).unwrap();
+        let stream = encoder.finish().unwrap();
+        assert_eq!(
+            stream,
+            [serial_blocks(&first, BLOCK), serial_blocks(&second, BLOCK)].concat(),
+            "{workers} workers"
+        );
+    }
+}
+
 #[test]
 fn every_method_and_filter_class_writes_the_bytes_compress_returns() {
     let classes: [(&str, Vec<u8>); 6] = [
@@ -62,7 +127,7 @@ fn every_method_and_filter_class_writes_the_bytes_compress_returns() {
 }
 
 #[test]
-fn the_stream_is_compress_blocks_whatever_the_write_sizes_and_the_block_edges() {
+fn the_stream_is_the_serial_encode_whatever_the_write_sizes_and_the_block_edges() {
     let noise: Vec<u8> = Xorshift32::new(7)
         .take(BLOCK)
         .map(|word| word.to_le_bytes()[1])
@@ -82,7 +147,7 @@ fn the_stream_is_compress_blocks_whatever_the_write_sizes_and_the_block_edges() 
         for chunk in [1, 1000, BLOCK, usize::MAX] {
             assert_eq!(
                 encode(&input, chunk, BLOCK),
-                compress_blocks(&input, BLOCK),
+                serial_blocks(&input, BLOCK),
                 "input of {} bytes written {chunk} at a time",
                 input.len()
             );
@@ -98,7 +163,7 @@ fn an_encoder_written_nothing_finishes_to_the_empty_frame() {
 }
 
 #[test]
-fn a_drop_writes_no_frame_and_a_full_block_is_framed_at_once() {
+fn a_drop_writes_no_frame_and_a_full_block_is_framed_at_once_when_nothing_runs_beside_it() {
     let mut sink = Flaky {
         bytes: Vec::new(),
         failures: 0,
@@ -109,7 +174,7 @@ fn a_drop_writes_no_frame_and_a_full_block_is_framed_at_once() {
     drop(encoder);
     assert!(sink.bytes.is_empty(), "a drop writes no frame");
 
-    let mut encoder = Encoder::with_block_len(&mut sink, BLOCK);
+    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, 1);
     encoder.write_all(&vec![b'a'; BLOCK]).unwrap();
     drop(encoder);
     assert_eq!(sink.bytes, compress(&vec![b'a'; BLOCK]), "a full block");
@@ -149,7 +214,7 @@ fn a_sink_error_ends_the_encoder_and_no_later_byte_reaches_the_sink() {
         failures: 1,
         kind: ErrorKind::BrokenPipe,
     };
-    let mut encoder = Encoder::with_block_len(&mut sink, BLOCK);
+    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, 1);
     let err = encoder.write_all(&vec![b'a'; BLOCK]).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::BrokenPipe);
     for result in [encoder.write(b"x").map(drop), encoder.flush()] {
@@ -158,6 +223,25 @@ fn a_sink_error_ends_the_encoder_and_no_later_byte_reaches_the_sink() {
     let err = encoder.finish().map(drop).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::BrokenPipe);
     assert!(sink.bytes.is_empty(), "nothing after the failure");
+}
+
+#[test]
+fn a_sink_error_ends_a_threaded_encoder_with_the_frames_before_it_intact() {
+    for workers in [1, 2, 3] {
+        let mut sink = Flaky {
+            bytes: Vec::new(),
+            failures: 1,
+            kind: ErrorKind::BrokenPipe,
+        };
+        let mut encoder = Encoder::with_workers(&mut sink, BLOCK, workers);
+        // Six blocks: the first frame's write fails whichever call reaches it.
+        let wrote = encoder.write_all(&uneven_blocks(6));
+        let err = wrote
+            .and_then(|()| encoder.finish().map(drop))
+            .expect_err("the first frame fails");
+        assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{workers} workers");
+        assert!(sink.bytes.is_empty(), "{workers} workers: nothing after it");
+    }
 }
 
 #[test]

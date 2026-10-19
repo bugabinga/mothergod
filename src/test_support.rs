@@ -25,6 +25,20 @@ impl Iterator for Xorshift32 {
     }
 }
 
+/// `input` cut into blocks of `block_len`, each framed on this thread: the
+/// serial encode that `compress_blocks` and `write::Encoder` must equal
+/// whatever threads they run on. The oracle is its own loop, not either of
+/// them, so a pipeline that reorders or drops a frame cannot agree with it.
+pub(crate) fn serial_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
+    if input.len() <= block_len {
+        return super::compress_block(input);
+    }
+    input
+        .chunks(block_len)
+        .flat_map(super::compress_block)
+        .collect()
+}
+
 /// `v` as a [`std::num::NonZeroUsize`], for tests that need one as a
 /// filter parameter (a delta stride, a transpose column count) and
 /// know `v` is nonzero by construction: `filters::delta` and

@@ -627,16 +627,14 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
     if input.len() <= block_len {
         return compress_block(input);
     }
-    let mut stream = Vec::new();
-    for block in input.chunks(block_len) {
-        stream.extend_from_slice(&compress_block(block));
-    }
-    stream
+    let mut encoder = write::Encoder::with_block_len(Vec::new(), block_len);
+    std::io::Write::write_all(&mut encoder, input).expect("a Vec sink does not fail");
+    encoder.finish().expect("a Vec sink does not fail")
 }
 
 /// Compresses everything `source` yields into `sink` as a stream of frames,
-/// holding one block of 16 MiB at a time: the encoder's memory follows the
-/// block and not the input, which [`compress`] cannot offer because it
+/// holding at most two blocks of 16 MiB at a time: the encoder's memory
+/// follows the blocks and not the input, which [`compress`] cannot offer because it
 /// takes the whole input as a slice. The block is not the peak: encoding one
 /// needs far more working memory, and a stream of 256 MiB of zeros encodes
 /// in under 1 GiB, a bound `.github/scripts/memory-check` asserts weekly and

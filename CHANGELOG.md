@@ -15,8 +15,8 @@ All notable changes to this project are documented here. Format follows
 - library: `mothergod::write::Encoder` wraps any `std::io::Write` and
   compresses what is written through it, so a `tar` builder, `io::copy` or an
   HTTP body can write into a compressor without the caller collecting the whole
-  input first. It buffers one 16 MiB block at a time and writes one frame per
-  block; `finish` writes the last frame and returns the writer. Written
+  input first. It buffers one 16 MiB block and writes one frame per block,
+  encoding up to two blocks at once on two cores (#1322); `finish` writes the last frame and returns the writer. Written
   without `flush`, its stream is byte for byte what `copy_encode` writes, and
   a failing writer ends the encoder instead of leaving a stream that skips a
   block (#979).
@@ -99,8 +99,9 @@ All notable changes to this project are documented here. Format follows
   total (webster +0.44%, mozilla -0.06%): each block restarts the
   model.
 - library: `mothergod::copy_encode(reader, writer)` compresses everything a
-  `Read` yields into a `Write`, one 16 MiB block and one frame at a time, so
-  its memory is bounded by the block and not by the input (#978). The CLI
+  `Read` yields into a `Write`, one 16 MiB block and one frame at a time (two
+  blocks encode at once on two cores), so its memory is bounded by the block
+  and not by the input (#978). The CLI
   compresses through it, so a file or pipe of any length compresses in under
   1 GiB. Up to 256 MiB the bytes equal `compress`'s. Past it, `compress`
   stores the input, plus a few bytes, so that `decompress` reads back every
@@ -163,6 +164,12 @@ All notable changes to this project are documented here. Format follows
   from 41, so a 16 MiB block peaks at 372 MB instead of 700 MB and
   Silesia `dickens` at 364 MB instead of 562 MB, with output bytes
   unchanged and encode time within +4% on 16 MiB of zeros (#1341).
+- encode: on two or more cores a file or stream past 16 MiB encodes two
+  blocks at once, so Silesia `mozilla` compresses in 261 s instead of 358 s
+  (1.37 times faster, 4-core runner) with output bytes unchanged; peak memory
+  there is 879 MB against 521 MB serial, and 256 MiB of zeros peaks at 776 MB,
+  both under the 1 GiB bound. A one-core machine encodes serially as before
+  (#1322).
 - encode: peak memory falls by 12% to 18% on Silesia (`mozilla` from 617 to
   509 MiB, `dickens` from 355 to 312 MiB) because the optimal parse frees
   each round's token list before the next round allocates; output bytes are

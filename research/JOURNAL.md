@@ -8890,3 +8890,33 @@ record.
   and the list `reconstruct` builds by doubling beside `parent`, which an
   exact count of the path's tokens would size and which, by the sums and
   not by a snapshot, is the peak's remaining 192 MiB on `mozilla`. `research/progress.jsonl` it200.
+- S2-A125 | ACCEPTED | Issue #1322, the blocks half, two at once. Hypothesis:
+  `write::Encoder` encoding two full blocks at once on a thread each cuts
+  encode wall-clock on a stream past 16 MiB with output bytes unchanged, and
+  with S2-A124's token-list drop the pair peaks under the 1 GiB the CLI
+  states. | Measured, release build, AMD EPYC 7763 4 logical cores runner,
+  `mothergod` from stdin, wall-clock and peak RSS from `/usr/bin/time`,
+  `mozilla` at the `bench/corpus.toml` pin (51,220,480 bytes, three 16 MiB
+  frames and a tail): main serial (`taskset -c 0`) 358.1 s and 520,928 KiB;
+  two blocks 261.2 s (1.37 times faster) and 879,396 KiB. Output is
+  15,488,699 bytes both ways and `cmp`-identical, and the decode of it
+  equals the input. `.github/scripts/memory-check` on the branch binary,
+  256 MiB plus one byte of zeros: encode peak 775,816 KiB, decode 13,360
+  KiB, bound 1,048,576 KiB, round trip ok. Unit tests pin one worker equal
+  to two on blocks and flushes, the frames in block order, and a failing
+  sink ending the encoder at the oldest block. | Mechanism: blocks are
+  independent frames with fresh models (S2-A122), so the bytes are the
+  serial bytes by construction; the caller fills block N+1 while N and N-1
+  encode, and the oldest is joined before a third starts, which is what
+  holds the peak at two working sets. The 1.37 is under S2-A122's 2.02 at
+  four workers because `mozilla` is three full blocks and a tail: two
+  workers run block 0 beside block 1, then block 2 alone beside the tail's
+  few seconds, so the floor is two serial rounds. A pair also contends for
+  the shared cache and bandwidth, as S2-A122 saw. Two and not more
+  because a third block adds a working set of the order of the serial
+  peak, 520,928 KiB, to the pair's 879,396 KiB, past 1 GiB by arithmetic, not
+  by a run. | **Not measured:**
+  three or four workers' peak, the other Silesia files over 16 MiB, one
+  core under `taskset` with the library `compress` (which now takes the same
+  path), the trials half of #1322 (the four filter trials still run on one
+  core), parallel decode. `research/progress.jsonl` it201.
