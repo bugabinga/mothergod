@@ -749,6 +749,19 @@ const OPTIMAL_MIN_LEN: usize = 64;
 /// length; unrelated to the reuse, the two merely share the value.
 const CARRY_MIN_LEN: usize = 64;
 
+/// A rep distance's match `len` as measured at position `measured_at`, kept
+/// by [`rep_match_len`] while `len` is at least [`CARRY_MIN_LEN`].
+#[derive(Clone, Copy)]
+struct RepCarry {
+    distance: Distance,
+    len: usize,
+    measured_at: usize,
+}
+
+/// One [`RepCarry`] entry per [`REP_SLOTS`], not keyed by slot: see
+/// [`rep_match_len`].
+type RepCarries = [Option<RepCarry>; REP_SLOTS];
+
 /// Match length [`dp_round`] additionally prices as a candidate when the
 /// source distance is close (below [`SHORT_MATCH_MAX_DISTANCE`]): one
 /// byte under [`MIN_MATCH_LEN`], cheap enough at a close distance to beat
@@ -1064,7 +1077,7 @@ impl DpState {
         i: usize,
         base: f64,
         reps: RepCache,
-        rep_carry: &mut [Option<(Distance, usize, usize)>; REP_SLOTS],
+        rep_carry: &mut RepCarries,
     ) {
         for slot in RepSlot::ALL {
             let distance = reps.get(slot);
@@ -1196,7 +1209,7 @@ fn dp_round_with_ring(
     // fuses insertion with search, so every position pays for a fresh walk
     // regardless (`research/JOURNAL.md` S2-R2), bounded instead by
     // `NICE_LEN_OPTIMAL` (S2-A46).
-    let mut rep_carry: [Option<(Distance, usize, usize)>; REP_SLOTS] = [None; REP_SLOTS];
+    let mut rep_carry: RepCarries = [None; REP_SLOTS];
 
     for i in 0..n {
         let match_candidate = finder.insert_and_find(i, MAX_TREE_DEPTH_OPTIMAL, NICE_LEN_OPTIMAL);
@@ -1256,21 +1269,29 @@ fn rep_match_len(
     data: &[u8],
     i: usize,
     distance: Distance,
-    rep_carry: &mut [Option<(Distance, usize, usize)>; REP_SLOTS],
+    rep_carry: &mut RepCarries,
     store_at: usize,
 ) -> usize {
     let hit = rep_carry.iter().enumerate().find_map(|(idx, entry)| {
-        let (carried_distance, len, measured_at) = (*entry)?;
-        (carried_distance == distance).then(|| (idx, len.saturating_sub(i - measured_at)))
+        let carry = (*entry)?;
+        (carry.distance == distance).then(|| (idx, carry.len.saturating_sub(i - carry.measured_at)))
     });
     if let Some((idx, remaining)) = hit
         && remaining >= CARRY_MIN_LEN
     {
-        rep_carry[idx] = Some((distance, remaining, i));
+        rep_carry[idx] = Some(RepCarry {
+            distance,
+            len: remaining,
+            measured_at: i,
+        });
         return remaining;
     }
     let len = match_len(data, i, distance);
-    rep_carry[store_at] = (len >= CARRY_MIN_LEN).then_some((distance, len, i));
+    rep_carry[store_at] = (len >= CARRY_MIN_LEN).then_some(RepCarry {
+        distance,
+        len,
+        measured_at: i,
+    });
     len
 }
 
