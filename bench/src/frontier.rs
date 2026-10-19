@@ -4,8 +4,8 @@
 //!
 //! Pure over [`crate::field::FieldPoint`]s: no process, no file, so it
 //! builds and tests under the default features, like [`crate::finals`].
-//! The slice after this wires it to a measurement run and a
-//! `docs/benchmarks/` page.
+//! [`format_section`] is the block `reference::frontier_section` appends to
+//! each finals report.
 //!
 //! Speed on the plane is encode MB/s: it is the axis mothergod is furthest
 //! from the field on (ROADMAP M5), and decode MB/s and peak RSS ride in the
@@ -13,7 +13,7 @@
 
 use crate::baseline::bits_per_byte;
 use crate::field::FieldPoint;
-use crate::finals::mb_per_sec;
+use crate::finals::{FileMeasurement, mb_per_sec};
 use crate::graph::escape_markdown_cell;
 use std::fmt::Write as _;
 
@@ -54,6 +54,22 @@ impl Row {
                 .iter()
                 .map(|(_, p)| p.encode_peak_rss_kib.max(p.decode_peak_rss_kib))
                 .max(),
+        }
+    }
+
+    /// mothergod's row over `measurements`, summed the way [`Row::aggregate`]
+    /// sums. Peak resident set is `None`: `reference::time_mothergod` runs in
+    /// process and reads none, and a number from another instrument would
+    /// not be comparable to the competitors' `time -f %M`.
+    #[must_use]
+    pub fn mothergod(measurements: &[FileMeasurement]) -> Self {
+        Row {
+            label: "mothergod".to_string(),
+            original_len: measurements.iter().map(|m| m.original_len).sum(),
+            compressed_len: measurements.iter().map(|m| m.mothergod_len).sum(),
+            encode_secs: measurements.iter().map(|m| m.encode_secs).sum(),
+            decode_secs: measurements.iter().map(|m| m.decode_secs).sum(),
+            peak_rss_kib: None,
         }
     }
 
@@ -170,10 +186,31 @@ pub fn format_table(mothergod: &Row, field: &[Row]) -> String {
     out
 }
 
+/// [`format_table`] under a heading and the conditions that make its rates
+/// rates, for appending to a finals report.
+///
+/// Starts with a blank line, so it follows `finals::format_report`'s last
+/// row directly.
+#[must_use]
+pub fn format_section(mothergod: &Row, field: &[Row]) -> String {
+    format!(
+        "\n## Frontier: every level of gzip, zstd and xz beside mothergod\n\n\
+         Each row sums this corpus's files. Every process ran one at a time, \
+         on the machine named above, from a file on stdin: encode and decode \
+         MB/s are total bytes over total wall-clock seconds, and peak MB is \
+         the largest resident set of any one process (`/usr/bin/time -f %M`). \
+         mothergod's peak is `-` because it is timed in process, and no \
+         other instrument is comparable. The speed axis of the two neighbour \
+         lines is encode MB/s (issue #1340).\n\n{}",
+        format_table(mothergod, field)
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Neighbours, Row, format_table, neighbours};
+    use super::{Neighbours, Row, format_section, format_table, neighbours};
     use crate::field::FieldPoint;
+    use crate::finals::FileMeasurement;
 
     fn point(
         compressed_len: usize,
@@ -321,5 +358,34 @@ fastest level at least as good: xz -9e
 best level at least as fast: xz -9e
 "
         );
+    }
+
+    #[test]
+    fn mothergod_row_sums_the_files_and_reads_no_peak() {
+        let m = |original_len, mothergod_len, secs| FileMeasurement {
+            name: String::new(),
+            original_len,
+            mothergod_len,
+            gzip_len: 0,
+            zstd_len: 0,
+            xz_len: 0,
+            encode_secs: secs,
+            decode_secs: secs / 2.0,
+        };
+        let r = Row::mothergod(&[m(1_000_000, 400_000, 1.0), m(3_000_000, 900_000, 3.0)]);
+        assert_eq!(r.label, "mothergod");
+        assert_eq!((r.original_len, r.compressed_len), (4_000_000, 1_300_000));
+        assert!((r.encode_mbps() - 1.0).abs() < 1e-12);
+        assert!((r.decode_mbps() - 2.0).abs() < 1e-12);
+        assert_eq!(r.peak_rss_kib, None);
+    }
+
+    #[test]
+    fn section_is_a_heading_and_the_table_after_a_blank_line() {
+        let mg = row("mothergod", 250_000, 25.0);
+        let field = [row("xz -9e", 240_000, 10.0)];
+        let section = format_section(&mg, &field);
+        assert!(section.starts_with("\n## Frontier: "), "{section}");
+        assert!(section.ends_with(&format_table(&mg, &field)), "{section}");
     }
 }

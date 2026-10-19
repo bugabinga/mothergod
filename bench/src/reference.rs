@@ -6,7 +6,9 @@
 //! behind `corpus-fetch`), but this module itself has no such dependency
 //! and compiles in CLAUDE.md's required checks like any other.
 
+use crate::field::{competitors, measure};
 use crate::finals::FileMeasurement;
+use crate::frontier::{Row, format_section};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -290,9 +292,47 @@ pub fn measure_all(files: &[(String, Vec<u8>)]) -> Result<Vec<FileMeasurement>, 
         .collect()
 }
 
+/// The frontier section of a finals report (issue #1340): every level of
+/// gzip, zstd and xz measured on `files`, one process at a time, beside the
+/// mothergod row `measurements` already holds.
+///
+/// Serial by design, the rule [`measure_all`] states for mothergod: a
+/// wall-clock taken beside another measurement is not a rate. It is the
+/// longest part of a report run, one `field::measure` per level per file,
+/// and prints a line per level because nothing else shows it alive.
+///
+/// # Errors
+///
+/// Returns an error naming the level and file if any `field::measure` fails.
+pub fn frontier_section(
+    files: &[(String, Vec<u8>)],
+    measurements: &[FileMeasurement],
+) -> Result<String, String> {
+    let field = competitors()
+        .iter()
+        .map(|competitor| {
+            let label = competitor.label();
+            println!("measuring {label} on {} file(s)...", files.len());
+            let points = files
+                .iter()
+                .map(|(name, data)| {
+                    measure(competitor, data)
+                        .map(|point| (data.len(), point))
+                        .map_err(|err| format!("{label} failed on {name}: {err}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Row::aggregate(&label, &points))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(format_section(&Row::mothergod(measurements), &field))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{compressed_len, generated_at, machine_info, measure_all, tool_version};
+    use super::{
+        competitors, compressed_len, frontier_section, generated_at, machine_info, measure_all,
+        tool_version,
+    };
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger
@@ -449,6 +489,29 @@ mod tests {
             assert!(m.xz_len > 0);
             assert!(m.encode_secs >= 0.0);
             assert!(m.decode_secs >= 0.0);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "needs /usr/bin/time -f and gzip/zstd/xz on PATH"
+    )]
+    fn frontier_section_has_a_row_per_level_and_mothergod() {
+        let files = vec![("a.txt".to_string(), fixture())];
+        let measurements = measure_all(&files).expect("reference compressors must be on PATH");
+        let section = frontier_section(&files, &measurements).expect("every level must measure");
+        // The header, every competitor level and mothergod; the divider
+        // starts `|-`.
+        let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
+        assert_eq!(table_rows, 1 + competitors().len() + 1, "{section}");
+        for label in [
+            "| gzip -1 |",
+            "| zstd -22 |",
+            "| xz -9e |",
+            "| **mothergod** |",
+        ] {
+            assert!(section.contains(label), "missing {label}: {section}");
         }
     }
 }
