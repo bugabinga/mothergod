@@ -10,6 +10,14 @@
 //! the same machine in the same process: the result counts calibration
 //! steps per decoded byte, and a slower CPU slows both terms.
 //!
+//! Issue #1184 replaces that kernel. Its hypothesis: the decoder's time goes
+//! to streaming 256-entry frequency rows through a multiply-accumulate
+//! (`Literal::mix`), which a dependent-load walk does not model.
+//! [`Kernel::Rows`] is the candidate, measured beside the gating
+//! [`Kernel::Walk`] in the same run and gating nothing, so
+//! `baseline_gate -- spread --rows` can build its per-CPU table from CI logs
+//! before a second PR swaps the gate or drops the candidate.
+//!
 //! The committed number is [`BASELINE_DECODE_COST`]; [`slowdown`] reports a
 //! measurement more than [`MAX_SLOWDOWN`] above it. The check is a ratchet on
 //! the hermetic gate cases, not a direct test of "1 MB/s on Silesia": no
@@ -23,6 +31,51 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::hint::black_box;
 use std::time::Instant;
+
+/// A calibration kernel a decode cost divides by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kernel {
+    /// The gating kernel, [`calibration_seconds`].
+    Walk,
+    /// The #1184 candidate, [`rows_seconds`].
+    Rows,
+}
+
+impl Kernel {
+    /// Steps of this kernel per timed run.
+    const fn steps(self) -> u32 {
+        match self {
+            Self::Walk => CALIBRATION_STEPS,
+            Self::Rows => ROW_STEPS,
+        }
+    }
+
+    /// Wall time of one run of this kernel, best of `REPEATS`.
+    #[must_use]
+    pub fn seconds(self) -> f64 {
+        match self {
+            Self::Walk => calibration_seconds(),
+            Self::Rows => rows_seconds(),
+        }
+    }
+
+    /// Text before the cost in this kernel's cost line. The walk's is the
+    /// format the CI logs of main already hold, so it stays as it was.
+    const fn line_prefix(self) -> &'static str {
+        match self {
+            Self::Walk => "bench speed gate: decode cost ",
+            Self::Rows => "bench speed gate: row kernel decode cost ",
+        }
+    }
+
+    /// Text between the cost and the CPU name in this kernel's cost line.
+    const fn line_infix(self) -> &'static str {
+        match self {
+            Self::Walk => " calibration steps/byte on ",
+            Self::Rows => " row steps/byte on ",
+        }
+    }
+}
 
 /// Steps of the [`calibration_seconds`] kernel per run.
 const CALIBRATION_STEPS: u32 = 4_000_000;
@@ -84,6 +137,97 @@ pub fn calibration_seconds() -> f64 {
     best
 }
 
+/// Entries per row of the [`rows_seconds`] table: the literal model's
+/// alphabet, one `u16` frequency per symbol.
+const ROW_LEN: usize = 256;
+
+/// Rows in the [`rows_seconds`] table, 4.6 MiB of `u16`: the literal model's
+/// bank count (`literal::BANKS`) at the time of writing. The kernel is a
+/// ruler, so it keeps this figure when the model's moves; a change here
+/// moves every cost and retires the baseline.
+const ROW_COUNT: usize = 9281;
+
+/// Experts blended per step of [`row_walk`], the literal model's `EXPERTS`.
+const ROW_EXPERTS: u32 = 6;
+
+/// Blends per [`rows_seconds`] run; a step is one row accumulated, so a run
+/// is `ROW_BLENDS * ROW_EXPERTS` steps.
+const ROW_BLENDS: u32 = 20_000;
+
+/// Steps of the [`rows_seconds`] kernel per run.
+const ROW_STEPS: u32 = ROW_BLENDS * ROW_EXPERTS;
+
+/// The [`rows_seconds`] table: each `u16` a pseudorandom frequency.
+fn row_table() -> Vec<u16> {
+    (0..ROW_COUNT * ROW_LEN)
+        .map(|index| {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "the shift keeps the top 16 bits of a u32"
+            )]
+            let frequency = ((index as u32).wrapping_mul(0x9E37_79B1) >> 16) as u16;
+            frequency
+        })
+        .collect()
+}
+
+/// `value` reduced into `0..modulus`.
+fn reduce(value: u64, modulus: usize) -> usize {
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "the remainder is below `modulus`, a usize"
+    )]
+    let reduced = (value % modulus as u64) as usize;
+    reduced
+}
+
+/// `blends` steps of a `Literal::mix`-shaped walk over `table`, returning
+/// its final state. Each blend accumulates [`ROW_EXPERTS`] rows, chosen from
+/// the state, into 256 `u64` masses weighted by a state-derived scale, takes
+/// their running sum as the cumulative table, bumps one frequency the way
+/// `rescale_bank` does, and folds the total into the state, so the next
+/// blend's rows depend on this one's result.
+fn row_walk(table: &mut [u16], blends: u32) -> u64 {
+    let mut state = 1u64;
+    for _ in 0..blends {
+        let mut mixed = [0u64; ROW_LEN];
+        for expert in 0..ROW_EXPERTS {
+            let draw = state.rotate_left(expert * 9);
+            let row = reduce(draw, ROW_COUNT) * ROW_LEN;
+            let scale = (draw >> 40) | 1;
+            for (mass, &frequency) in mixed.iter_mut().zip(&table[row..row + ROW_LEN]) {
+                *mass += scale * u64::from(frequency);
+            }
+        }
+        let mut total = 0u64;
+        for mass in mixed {
+            total += (mass >> 16) + 1;
+        }
+        let bumped = reduce(state, ROW_COUNT) * ROW_LEN + reduce(total, ROW_LEN);
+        table[bumped] = table[bumped].wrapping_add(32);
+        state = state
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(total);
+    }
+    state
+}
+
+/// Wall time of the candidate kernel, `row_walk` over a fresh
+/// `row_table`: the access pattern of the decoder's mix, rows streamed
+/// from a table past L2 and a multiply-accumulate across them. Best of
+/// `REPEATS`.
+#[must_use]
+pub fn rows_seconds() -> f64 {
+    let mut table = row_table();
+    let mut best = f64::MAX;
+    for _ in 0..REPEATS {
+        let start = Instant::now();
+        black_box(row_walk(&mut table, ROW_BLENDS));
+        best = best.min(start.elapsed().as_secs_f64());
+    }
+    best
+}
+
 /// Decode time summed over `cases`, each compressed once outside the timer
 /// and decoded `REPEATS` times with the minimum kept, plus the total
 /// original bytes.
@@ -112,15 +256,15 @@ pub fn decode_seconds(cases: &[Case]) -> (f64, usize) {
     (seconds, bytes)
 }
 
-/// Calibration steps per decoded byte: decode seconds per byte over
-/// calibration seconds per step. Lower is faster.
+/// `kernel` steps per decoded byte: decode seconds per byte over
+/// `kernel_seconds` per step. Lower is faster.
 #[must_use]
 #[allow(
     clippy::cast_precision_loss,
     reason = "byte counts here stay far below 2^53"
 )]
-pub fn decode_cost(decode_seconds: f64, bytes: usize, calibration_seconds: f64) -> f64 {
-    (decode_seconds / bytes as f64) / (calibration_seconds / f64::from(CALIBRATION_STEPS))
+pub fn decode_cost(kernel: Kernel, decode_seconds: f64, bytes: usize, kernel_seconds: f64) -> f64 {
+    (decode_seconds / bytes as f64) / (kernel_seconds / f64::from(kernel.steps()))
 }
 
 /// A cost past [`BASELINE_DECODE_COST`]'s margin.
@@ -147,30 +291,28 @@ pub fn slowdown(baseline: f64, measured: f64, max_slowdown: f64) -> Option<Slowd
     (measured > baseline * (1.0 + max_slowdown)).then_some(Slowdown { baseline, measured })
 }
 
-/// Text before the cost in the line [`cost_line`] prints and
-/// [`parse_cost_line`] reads; the two share these constants so the format
-/// has one owner.
-const COST_LINE_PREFIX: &str = "bench speed gate: decode cost ";
-
-/// Text between the cost and the CPU name in a cost line.
-const COST_LINE_INFIX: &str = " calibration steps/byte on ";
-
-/// The line `baseline_gate` prints once per run: `cost` in calibration steps
-/// per byte, then the CPU it was measured on.
+/// The line `baseline_gate` prints once per kernel per run: `cost` in
+/// `kernel` steps per byte, then the CPU it was measured on. [`Kernel`]
+/// owns the text around the cost, so [`parse_cost_line`] reads what this
+/// prints.
 #[must_use]
-pub fn cost_line(cost: f64, cpu: &str) -> String {
-    format!("{COST_LINE_PREFIX}{cost:.2}{COST_LINE_INFIX}{cpu}")
+pub fn cost_line(kernel: Kernel, cost: f64, cpu: &str) -> String {
+    format!(
+        "{}{cost:.2}{}{cpu}",
+        kernel.line_prefix(),
+        kernel.line_infix()
+    )
 }
 
-/// The cost and CPU of a [`cost_line`] inside `line`, or `None` when `line`
-/// holds none. A CI log prefixes each line with a job, step and timestamp,
-/// so the line is found anywhere in `line`, not only at its start. The
-/// slowdown report shares the prefix and carries an arrow where the cost
-/// ends, so it does not match.
+/// The cost and CPU of a [`cost_line`] for `kernel` inside `line`, or `None`
+/// when `line` holds none. A CI log prefixes each line with a job, step and
+/// timestamp, so the line is found anywhere in `line`, not only at its
+/// start. The slowdown report shares the walk's prefix and carries an arrow
+/// where the cost ends, so it does not match.
 #[must_use]
-pub fn parse_cost_line(line: &str) -> Option<(f64, &str)> {
-    let (_, rest) = line.split_once(COST_LINE_PREFIX)?;
-    let (cost, cpu) = rest.split_once(COST_LINE_INFIX)?;
+pub fn parse_cost_line(kernel: Kernel, line: &str) -> Option<(f64, &str)> {
+    let (_, rest) = line.split_once(kernel.line_prefix())?;
+    let (cost, cpu) = rest.split_once(kernel.line_infix())?;
     let cost: f64 = cost.parse().ok().filter(|cost: &f64| cost.is_finite())?;
     let cpu = cpu.trim();
     (!cpu.is_empty()).then_some((cost, cpu))
@@ -200,12 +342,15 @@ impl CpuSpread {
     }
 }
 
-/// Groups every [`parse_cost_line`] match in `text` by CPU, sorted by CPU
-/// name.
+/// Groups every [`parse_cost_line`] match for `kernel` in `text` by CPU,
+/// sorted by CPU name.
 #[must_use]
-pub fn spread(text: &str) -> Vec<CpuSpread> {
+pub fn spread(kernel: Kernel, text: &str) -> Vec<CpuSpread> {
     let mut by_cpu: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
-    for (cost, cpu) in text.lines().filter_map(parse_cost_line) {
+    for (cost, cpu) in text
+        .lines()
+        .filter_map(|line| parse_cost_line(kernel, line))
+    {
         by_cpu.entry(cpu).or_default().push(cost);
     }
     by_cpu
@@ -268,14 +413,14 @@ mod tests {
     fn cost_is_calibration_steps_per_decoded_byte() {
         // 2 s for 1000 bytes is 2 ms per byte; a 4 s calibration of
         // 4_000_000 steps is 1 us per step; 2000 us per byte / 1 us = 2000.
-        let cost = decode_cost(2.0, 1000, 4.0);
+        let cost = decode_cost(Kernel::Walk, 2.0, 1000, 4.0);
         assert!((cost - 2000.0).abs() < 1e-9, "{cost}");
     }
 
     #[test]
     fn a_slower_machine_leaves_the_cost_unchanged() {
-        let fast = decode_cost(1.0, 1000, 1.0);
-        let slow = decode_cost(3.0, 1000, 3.0);
+        let fast = decode_cost(Kernel::Walk, 1.0, 1000, 1.0);
+        let slow = decode_cost(Kernel::Walk, 3.0, 1000, 3.0);
         assert!((fast - slow).abs() < 1e-9, "{fast} vs {slow}");
     }
 
@@ -304,10 +449,44 @@ mod tests {
 
     #[test]
     fn a_cost_line_parses_back_to_its_cost_and_cpu() {
-        let line = cost_line(132.28, "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz");
+        let cpu = "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz";
+        for kernel in [Kernel::Walk, Kernel::Rows] {
+            let line = cost_line(kernel, 132.28, cpu);
+            assert_eq!(parse_cost_line(kernel, &line), Some((132.28, cpu)));
+        }
+    }
+
+    #[test]
+    fn a_cost_line_is_read_by_its_own_kernel_only() {
+        let walk = cost_line(Kernel::Walk, 120.0, "A");
+        let rows = cost_line(Kernel::Rows, 9.5, "A");
+        assert_eq!(parse_cost_line(Kernel::Rows, &walk), None);
+        assert_eq!(parse_cost_line(Kernel::Walk, &rows), None);
+    }
+
+    #[test]
+    fn the_walk_line_keeps_the_format_main_s_ci_logs_hold() {
         assert_eq!(
-            parse_cost_line(&line),
-            Some((132.28, "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz"))
+            cost_line(Kernel::Walk, 99.5, "AMD EPYC 7763"),
+            "bench speed gate: decode cost 99.50 calibration steps/byte on AMD EPYC 7763"
+        );
+    }
+
+    #[test]
+    fn a_row_walk_is_deterministic_and_reads_its_table() {
+        let mut first = row_table();
+        let mut second = row_table();
+        let state = row_walk(&mut first, 8);
+        assert_eq!(state, row_walk(&mut second, 8));
+        assert_ne!(state, row_walk(&mut row_table(), 9), "blends fold in");
+        let mut flipped = row_table();
+        for frequency in &mut flipped {
+            *frequency ^= 0x8000;
+        }
+        assert_ne!(
+            state,
+            row_walk(&mut flipped, 8),
+            "the walk reads the table, not only its own state"
         );
     }
 
@@ -315,14 +494,17 @@ mod tests {
     fn a_ci_log_prefix_and_other_lines_do_not_hide_or_fake_a_cost_line() {
         let logged = "ratio\tRun gate\t2026-10-08T12:00:00.0000000Z \
                       bench speed gate: decode cost 99.50 calibration steps/byte on AMD EPYC 7763\r";
-        assert_eq!(parse_cost_line(logged), Some((99.5, "AMD EPYC 7763")));
+        assert_eq!(
+            parse_cost_line(Kernel::Walk, logged),
+            Some((99.5, "AMD EPYC 7763"))
+        );
         for other in [
             "bench speed gate: decode cost 120.00 -> 130.00 calibration steps/byte (+8.3%, margin 25%)",
             "bench speed gate: decode cost NaN calibration steps/byte on AMD EPYC 7763",
             "bench speed gate: decode cost 99.50 calibration steps/byte on ",
             "bench baseline gate: 12 cases, no regression",
         ] {
-            assert_eq!(parse_cost_line(other), None, "{other}");
+            assert_eq!(parse_cost_line(Kernel::Walk, other), None, "{other}");
         }
     }
 
@@ -339,7 +521,7 @@ bench speed gate: decode cost 132.39 calibration steps/byte on Xeon 8370C
 bench speed gate: decode cost 111.64 calibration steps/byte on EPYC 9V45
 unrelated line
 ";
-        let rows = spread(log);
+        let rows = spread(Kernel::Walk, log);
         assert_eq!(rows.len(), 2);
         let (epyc, xeon) = (&rows[0], &rows[1]);
         assert_eq!((epyc.cpu.as_str(), epyc.runs), ("EPYC 9V45", 2));
@@ -351,19 +533,32 @@ unrelated line
     }
 
     #[test]
+    fn spread_groups_the_row_kernel_lines_apart_from_the_walk_lines() {
+        let log = "\
+bench speed gate: decode cost 120.00 calibration steps/byte on A
+bench speed gate: row kernel decode cost 9.00 row steps/byte on A
+bench speed gate: row kernel decode cost 10.00 row steps/byte on A
+";
+        assert_eq!(spread(Kernel::Walk, log)[0].runs, 1);
+        let rows = spread(Kernel::Rows, log);
+        assert_eq!((rows[0].runs, rows[0].min, rows[0].max), (2, 9.0, 10.0));
+    }
+
+    #[test]
     fn spread_takes_the_middle_cost_of_an_odd_run_count() {
         let log = "\
 bench speed gate: decode cost 3.00 calibration steps/byte on A
 bench speed gate: decode cost 1.00 calibration steps/byte on A
 bench speed gate: decode cost 2.00 calibration steps/byte on A
 ";
-        assert_eq!(spread(log)[0].median, 2.0);
-        assert_eq!(spread("no cost lines here\n").len(), 0);
+        assert_eq!(spread(Kernel::Walk, log)[0].median, 2.0);
+        assert_eq!(spread(Kernel::Walk, "no cost lines here\n").len(), 0);
     }
 
     #[test]
     fn format_spread_prints_one_aligned_line_per_cpu() {
         let rows = spread(
+            Kernel::Walk,
             "bench speed gate: decode cost 100.00 calibration steps/byte on AMD EPYC 7763\n\
              bench speed gate: decode cost 125.00 calibration steps/byte on AMD EPYC 7763\n",
         );
