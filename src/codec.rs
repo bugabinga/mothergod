@@ -285,44 +285,6 @@ fn length_models(models: &mut Models, kind: FlagKind) -> (&mut Model, &mut Resid
     }
 }
 
-/// `-log2(p)` cost of a flag symbol under the shared `models.flag` tables:
-/// [`CostSink`]'s `flag` pricing.
-fn price_flag(models: &mut Models, flag_table: usize, kind: FlagKind) -> f64 {
-    models.flag[flag_table].ideal_cost_bits(kind.index())
-}
-
-/// `-log2(p)` cost of a literal byte under the shared, no-column-expert
-/// literal path: [`CostSink`]'s own `literal` pricing (it never trials
-/// [`Candidate::Transpose`]; see its own docs).
-fn price_literal(models: &mut Models, context: Context, byte: u8) -> f64 {
-    models
-        .literal
-        .ideal_cost_bits_logistic_surprise_logit_sse(context, byte, &mut models.logit_sse)
-}
-
-/// `-log2(p)` cost of a copy token's length, bucket symbol through
-/// whichever bucket model [`length_models`] selects, residual bits through the
-/// [`ResidualTree`] beside it: [`CostSink`]'s `length` pricing, matching
-/// [`EncodeSink::length`].
-fn price_length(models: &mut Models, kind: FlagKind, value: u32) -> f64 {
-    let (bucket, residual) = length_models(models, kind);
-    bucket.ideal_cost_bits(lz::bucket(value)) + residual.ideal_cost_bits(value)
-}
-
-/// `-log2(p)` cost of a match's distance, through whichever of
-/// [`Models::offset_len`]'s [`OFFSET_LEN_STATES`] models [`offset_len_state`]
-/// selects from the triggering match's own `len`: [`CostSink`]'s `offset`
-/// pricing.
-fn price_offset(models: &mut Models, len: u32, value: u32) -> f64 {
-    ideal_cost_bucketed(&mut models.offset_len[offset_len_state(len)], value)
-}
-
-/// `-log2(p)` cost of a rep-slot symbol under the shared `models.slot`:
-/// [`CostSink`]'s `slot` pricing.
-fn price_slot(models: &mut Models, symbol: usize) -> f64 {
-    models.slot.ideal_cost_bits(symbol)
-}
-
 /// Applies `candidate`'s filter to `data`, or returns a copy of it
 /// unchanged for [`Candidate::Identity`]. Every filter but
 /// [`Candidate::Base64`] preserves length, so the result is `data.len()`
@@ -507,7 +469,8 @@ impl TokenSink for EncodeSink<'_> {
 }
 
 /// [`TokenSink`] that sums `-log2(p)` instead of coding, [`walk_tokens`]'s
-/// use in [`ideal_cost_bits`].
+/// use in [`ideal_cost_bits`]. Each method prices through the same models as
+/// [`EncodeSink`]'s method of that name codes through.
 #[derive(Default)]
 struct CostSink {
     bits: f64,
@@ -515,26 +478,31 @@ struct CostSink {
 
 impl TokenSink for CostSink {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.bits += price_flag(models, flag_table, kind);
+        self.bits += models.flag[flag_table].ideal_cost_bits(kind.index());
     }
 
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
         // No filter selection here, so `Candidate::Transpose`'s
         // `encode_column` never arises: this prices `EncodeSink::literal`'s
         // `None` branch.
-        self.bits += price_literal(models, context, byte);
+        self.bits += models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
+            context,
+            byte,
+            &mut models.logit_sse,
+        );
     }
 
     fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
-        self.bits += price_length(models, kind, value);
+        let (bucket, residual) = length_models(models, kind);
+        self.bits += bucket.ideal_cost_bits(lz::bucket(value)) + residual.ideal_cost_bits(value);
     }
 
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        self.bits += price_offset(models, len, value);
+        self.bits += ideal_cost_bucketed(&mut models.offset_len[offset_len_state(len)], value);
     }
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.bits += price_slot(models, symbol);
+        self.bits += models.slot.ideal_cost_bits(symbol);
     }
 }
 
