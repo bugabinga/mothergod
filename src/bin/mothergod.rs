@@ -28,9 +28,9 @@
 //! once with status 141.
 //!
 //! Compression streams through [`mothergod::copy_encode`], one 16 MiB block
-//! and one frame at a time, so its memory is bounded by the block and not by
-//! the input. Decompression streams through
-//! [`mothergod::decompress_to_writer`], whose docs name the frame kinds that
+//! and one frame at a time, two blocks encoding at once on two cores, so its
+//! memory is bounded by the blocks and not by the input. Decompression streams
+//! through [`mothergod::decompress_to_writer`], whose docs name the frame kinds that
 //! bound resident memory on the output side (ROADMAP M4); the rest decode
 //! whole first. Decompression reads its input whole.
 //!

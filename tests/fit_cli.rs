@@ -341,10 +341,19 @@ fn concatenation() -> Seen {
     seen(code == 0 && out == both)
 }
 
-/// The block `copy_encode` holds at a time (its doc names 16 MiB).
+/// The block `copy_encode` cuts (its doc names 16 MiB).
 const BLOCK: usize = 16 * 1024 * 1024;
 
-/// Past one block, a read-ahead beyond what the pipe itself buffers.
+/// The most blocks the encoder holds unencoded or encoding: two encode at
+/// once on two cores (`write::MAX_ENCODE_BLOCKS`) while the third fills.
+/// One core holds one, so this is the ceiling over every machine.
+const BLOCKS_HELD: usize = 3;
+
+/// Blocks the writer offers: more than the child may hold, so a child that
+/// slurps its input reads them all.
+const BLOCKS_OFFERED: usize = BLOCKS_HELD + 2;
+
+/// Past `BLOCKS_HELD` blocks, a read-ahead beyond what the pipe itself buffers.
 const READ_AHEAD: usize = 1024 * 1024;
 
 /// How long the probe lets a child that has read one block keep reading.
@@ -353,11 +362,12 @@ const SETTLE: Duration = Duration::from_secs(1);
 /// How long the writer gets to push one block into the child.
 const FILL: Duration = Duration::from_secs(60);
 
-/// The encoder stops reading while it encodes a block, so a writer feeding
-/// three blocks stalls near one: input is not buffered ahead of the work.
-/// Measuring the peak itself needs an encode of at least one block, minutes
-/// in a debug build, so the weekly `memory-check` lane owns that number and
-/// the probe is killed with the first block still encoding. A child that
+/// The encoder stops reading once its running blocks and the one filling
+/// are held, so a writer feeding five blocks stalls within three: input is
+/// not buffered ahead of the work. Measuring the peak itself needs an encode
+/// of at least one block, minutes in a debug build, so the weekly
+/// `memory-check` lane owns that number and the probe is killed with the
+/// first block still encoding. A child that
 /// slurps its input fails, and so does one that exits before a full block
 /// arrived: a crash is what the row exists to see. A child still alive when
 /// `FILL` ends has a writer that filled under one block, which measured the
@@ -379,7 +389,7 @@ fn stream_probe(mut command: Command, fill: Duration) -> Seen {
     let progress = Arc::clone(&written);
     let writer = thread::spawn(move || {
         let chunk = vec![0u8; 64 * 1024];
-        for _ in 0..3 * BLOCK / chunk.len() {
+        for _ in 0..BLOCKS_OFFERED * BLOCK / chunk.len() {
             if stdin.write_all(&chunk).is_err() {
                 return;
             }
@@ -406,7 +416,7 @@ fn stream_probe(mut command: Command, fill: Duration) -> Seen {
     if !filled {
         return Seen::Unmeasured;
     }
-    seen(read < BLOCK + READ_AHEAD)
+    seen(read < BLOCKS_HELD * BLOCK + READ_AHEAD)
 }
 
 #[test]
@@ -419,8 +429,8 @@ fn the_record_matches_the_binary() {
     matrix::check_record("tests/fit/cli.txt", MATRIX, PROBES);
 }
 
-/// The three ways a child leaves `stream_probe` short of one block, on a
-/// short `fill` so the stalled case costs milliseconds, not the real 60 s.
+/// The ways a child leaves `stream_probe` short of one block or past the
+/// held blocks, on a short `fill` so the stalled case costs milliseconds, not the real 60 s.
 #[cfg(unix)]
 mod stream_probe_cases {
     use super::*;
@@ -448,6 +458,15 @@ mod stream_probe_cases {
     #[test]
     fn a_child_that_slurps_its_input_fails() {
         let seen = stream_probe(sh("cat >/dev/null"), Duration::from_secs(30));
+        assert!(matches!(seen, Seen::Fails));
+    }
+
+    #[test]
+    fn a_child_that_reads_a_block_past_the_held_blocks_fails() {
+        let seen = stream_probe(
+            sh("head -c 67108864 >/dev/null; exec sleep 30"),
+            Duration::from_secs(30),
+        );
         assert!(matches!(seen, Seen::Fails));
     }
 

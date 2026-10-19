@@ -230,7 +230,7 @@ fn copy_encode_writes_the_bytes_compress_returns_at_every_block_boundary() {
             .expect("a slice and a Vec do not fail");
             assert_eq!(
                 sink,
-                compress_blocks(&input, BLOCK),
+                test_support::serial_blocks(&input, BLOCK),
                 "input of {} bytes read {chunk} at a time",
                 input.len()
             );

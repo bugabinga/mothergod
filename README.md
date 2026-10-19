@@ -98,9 +98,10 @@ assert_eq!(mothergod::decompress(&frame).unwrap(), b"hello");
 
 Those two hold the whole input and output in memory. A file or stream of any
 length goes through `std::io` instead, in 16 MiB blocks, so memory follows the
-block and not the input. The block is not the peak: encoding one needs far
-more working memory, and a 256 MiB stream of zeros encodes in under 1 GiB, a
-bound [checked weekly](.github/workflows/memory-check.yml).
+blocks and not the input. A block is not the peak: encoding one needs far
+more working memory, and two encode at once on two cores. A 256 MiB stream of
+zeros encodes in under 1 GiB, a bound
+[checked weekly](.github/workflows/memory-check.yml).
 
 ```rust
 use std::{fs::File, io};
