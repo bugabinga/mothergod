@@ -79,6 +79,7 @@ function pr(overrides = {}) {
     createdAt: "2026-08-30T10:49:32Z",
     isDraft: false,
     isCrossRepository: false,
+    author: { is_bot: true, login: "app/claude" },
     statusCheckRollup: [...GREEN_GATES],
     ...overrides,
   };
@@ -284,6 +285,54 @@ test("a review mid-flight on the red head waits: a new head would throw it away"
   assert.equal(classify(inFlight, NOW, { drift: DRIFT }), null);
 });
 
+// workflow-bump (#1369): dependabot's weekly actions group edits
+// .github/workflows/. The reviewer skips dependabot by construction, and since
+// #1368 merge-pr refuses the maintainer's seat on a workflow file, so a green
+// bump matched no signature and sat while every heartbeat was refused on it.
+// PR #1208 (2026-10-15) is the shape: ten workflow files, review SKIPPED.
+const BUMP_HEAD = "c0ffee5545ed62ea7278b844801ba351fe4015a1";
+const bump = (overrides = {}) =>
+  pr({
+    number: 1208,
+    title: "Bump the actions group across 1 directory with 3 updates",
+    headRefName: "dependabot/github_actions/actions-0a1b2c3d4e",
+    headRefOid: BUMP_HEAD,
+    author: { is_bot: true, login: "app/dependabot" },
+    statusCheckRollup: [...GREEN_GATES, review("SKIPPED")],
+    ...overrides,
+  });
+
+test("PR #1208: a green dependabot bump of a workflow file is the BDFL's to land", () => {
+  const found = classify(bump(), NOW, {
+    files: [".github/workflows/agent-bdfl.yml", ".github/workflows/ci.yml", ".github/actions/agent-audit/action.yml"],
+  });
+  assert.equal(found.kind, "workflow-bump");
+  assert.match(found.detail, /2 file\(s\) under \.github\/workflows\//);
+  assert.match(found.rescue, new RegExp(`merge-pr 1208 --sha ${BUMP_HEAD}`));
+});
+
+test("a green dependabot bump touching no workflow file is the heartbeat's, not a stall", () => {
+  const found = classify(bump(), NOW, { files: ["Cargo.lock", ".github/actions/agent-audit/action.yml"] });
+  assert.equal(found, null);
+});
+
+test("a dependabot bump whose file list did not read stays inert, never wrong", () => {
+  assert.equal(classify(bump()), null);
+});
+
+test("a red dependabot bump is its author's, not a workflow-bump", () => {
+  const found = classify(bump({ statusCheckRollup: redClippy("SKIPPED") }), NOW, {
+    files: [".github/workflows/ci.yml"],
+  });
+  assert.equal(found, null);
+});
+
+test("a workflow-bump has no mechanical rescue: the read is judgement", () => {
+  const { found, plan } = planFor(bump(), { files: [".github/workflows/ci.yml"] });
+  assert.equal(found.kind, "workflow-bump");
+  assert.equal(plan, null);
+});
+
 for (
   const [why, overrides] of [
     ["blocked-on-human is parked on purpose", { labels: [{ name: "blocked-on-human" }] }],
@@ -388,7 +437,7 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
-found = mod.classify(case["pr"], now, case.get("drift"))
+found = mod.classify(case["pr"], now, case.get("drift"), case.get("files"))
 print(json.dumps({"found": found, "plan": mod.plan(case["pr"], found, now, case.get("files"), case.get("approved_at"))}))
 `;
 

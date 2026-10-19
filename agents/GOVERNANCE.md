@@ -155,7 +155,10 @@ BDFL's alone (`OPERATIONS.md`, "Admin token & signing"), and
 read from the `ROLE` every agent workflow exports, so no other seat
 can do this even by mistake: on 2026-10-18 the reviewer seat landed
 #1363 on the app token against its own verdict, when the rule held by
-prompt discipline alone.
+prompt discipline alone. Dependabot's weekly actions group is such a
+PR: the reviewer skips dependabot by construction and the maintainer's
+seat is refused, so `stalled-prs` reports it as `workflow-bump` and
+the BDFL lands it on the sweep, release notes read on a major (#1369).
 
 Two independent mechanisms sit under that one rule, and both survive if
 either is fixed:

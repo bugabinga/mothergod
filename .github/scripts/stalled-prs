@@ -52,6 +52,15 @@ Signatures, most specific first, at most one reported per PR:
                          that never fires again (first hit PR #843,
                          three hours red behind the main that carried
                          its fix, dependabot's #844 beside it).
+    workflow-bump        a dependabot bump touching `.github/workflows/`,
+                         every required gate green, no verdict label. The
+                         reviewer skips dependabot by construction and
+                         `merge-pr` refuses the maintainer's seat on a
+                         workflow file (#1368), so no seat's merge command
+                         fires and the PR matched nothing here while every
+                         heartbeat was refused on it (#1369). Report only:
+                         the BDFL reads the bump, release notes on a major,
+                         and lands it on its sweep.
 
 One signature has no PR to hang on, which is the whole point of it:
 
@@ -112,7 +121,9 @@ clutter, not stalled work, and a branch outside that prefix belongs to
 somebody who is not this machinery. A PR labeled `blocked-on-human` is parked on purpose, and suppressing
 it is what that label is for. A draft is a human's work-in-progress signal
 (CLAUDE.md rule 11); agent-review's `undraft` job owns bot drafts. A fork PR
-carries no secrets and belongs to the heartbeat. A PR with a still running
+carries no secrets and belongs to the heartbeat. A green dependabot bump
+touching no workflow file is the heartbeat's duty 3 and lands within its
+cadence. A PR with a still running
 gate is not stalled, and neither is a red one whose red is its own (a head
 that carries main, or a changes-requested verdict): its author owns the
 next move. An open PR that is simply old and abandoned is a different
@@ -176,7 +187,7 @@ BRANCH_GRACE = timedelta(minutes=30)
 
 FIELDS = (
     "number,title,labels,mergeStateStatus,headRefName,headRefOid,createdAt,"
-    "isDraft,isCrossRepository,statusCheckRollup"
+    "isDraft,isCrossRepository,statusCheckRollup,author"
 )
 
 # The signatures --rescue applies, and how. Refire is a close then a reopen:
@@ -197,6 +208,9 @@ DRIFT_GRACE = timedelta(hours=1)
 # (issue #136; GOVERNANCE "Merging"). Same constant push-branch keys its
 # credential on; a PR under it is never landed by this script.
 WORKFLOW_PREFIX = ".github/workflows/"
+
+# gh prefixes a bot's login with `app/`; dependabot's PRs carry this one.
+DEPENDABOT = "app/dependabot"
 
 # merge-pr, by path, so --rescue runs the sibling this checkout carries.
 MERGE_PR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "merge-pr")
@@ -246,12 +260,14 @@ def suppress(pr):
     return PARKED_LABEL in labels or pr["isDraft"] or pr["isCrossRepository"]
 
 
-def classify(pr, now, drift=None):
+def classify(pr, now, drift=None, files=None):
     """Return the one finding for this PR, or None. Pure: no network, no clock.
 
     `drift` is the caller's one network read for a red head, {"sha", "behind_by"}
     against main's newest green push run, or None when unread, which keeps
-    red-from-drift inert rather than wrong.
+    red-from-drift inert rather than wrong. `files` is the caller's one read
+    of a dependabot PR's changed paths, or None when unread, which keeps
+    workflow-bump inert the same way.
 
     Order is specificity, not severity. A dirty PR whose reviewer also died
     needs the merge first; reporting both would be two lines describing one
@@ -320,6 +336,25 @@ def classify(pr, now, drift=None):
             f"required gate(s) absent on the head SHA: {missing}",
             "confirm the gate was not renamed in branch protection before rescuing; "
             "REQUIRED_GATES in this script is the copy that goes stale",
+        )
+
+    if (pr.get("author") or {}).get("login") == DEPENDABOT and not labels & VERDICT_LABELS:
+        # The reviewer skips dependabot, so no verdict comes; the maintainer
+        # lands a bump outside .github/workflows/ (heartbeat duty 3) and is
+        # refused inside it (merge-pr's seat gate, #1368), so a green bump
+        # under that prefix waits on the BDFL's sweep and nothing else.
+        if files is None:
+            return None
+        workflows = [path for path in files if path.startswith(WORKFLOW_PREFIX)]
+        if not workflows:
+            return None
+        return finding(
+            "workflow-bump",
+            f"a dependabot bump of {len(workflows)} file(s) under {WORKFLOW_PREFIX}, "
+            "every required gate green; the reviewer skips dependabot and merge-pr "
+            "refuses the maintainer's seat on a workflow file",
+            "the BDFL's (GOVERNANCE 'Merging'): read the bump, release notes on a "
+            f"major, then merge-pr {pr['number']} --sha {pr['headRefOid']}",
         )
 
     review = by_job.get(REVIEW_CHECK)
@@ -648,11 +683,15 @@ def main():
     rows = []
     for pr in pulls:
         drift = None
-        if green and not suppress(pr) and any(
-            gate["conclusion"] in DEAD for gate in required_gates(pr)
-        ):
-            drift = drift_of(green, pr["headRefOid"])
-        rows.append((pr, classify(pr, now, drift)))
+        files = None
+        if not suppress(pr):
+            if green and any(gate["conclusion"] in DEAD for gate in required_gates(pr)):
+                drift = drift_of(green, pr["headRefOid"])
+            # One file read per dependabot PR: the workflow-bump signature is
+            # the only one that needs the paths before a plan.
+            if (pr.get("author") or {}).get("login") == DEPENDABOT:
+                files = changed_files(pr["number"])
+        rows.append((pr, classify(pr, now, drift, files)))
     branch_rows, branches = orphans({pr["headRefName"] for pr in pulls}, now)
     render(
         [(pr, found) for pr, found in rows if found],
