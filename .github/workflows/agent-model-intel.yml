@@ -52,8 +52,11 @@ jobs:
     # Headroom for the telemetry collector, which downloads one small zip
     # per audit artifact in its two windows: 129 artifacts took 56 seconds
     # on 2026-08-23, and its own cap allows 600. The backfill below adds
-    # the listing alone while the live writer keeps up, and a nine-minute
-    # walk (1,773 artifacts, 2026-10-09) only after a wiped table.
+    # the listing alone while the live writer keeps up, and a whole walk
+    # after a wiped table or a schema statement that created a table or
+    # added a column (#1355): nine minutes for 1,773 artifacts on
+    # 2026-10-09 with one write per artifact, unmeasured since the walk
+    # went to eight runs a call.
     timeout-minutes: 20
     permissions:
       contents: read
