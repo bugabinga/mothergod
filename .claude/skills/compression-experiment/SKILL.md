@@ -17,8 +17,9 @@ This skill coordinates one run without copying those rules.
 
 1. Read `research/JOURNAL.md` in full, then `research/README.md`,
    `research/corpus/POLICY.md`, and `ROADMAP.md`.
-2. Inspect open PRs and `claude/*` branches.
-   Do not duplicate work already in flight.
+2. Inspect open PRs: an open PR is work in flight, do not duplicate it.
+   A `claude/*` branch with no PR is a handoff to resume, rebased on
+   main, briefed by its commit message and issue thread (#1388).
 3. Confirm the codec and benchmark harness can measure the next candidate.
 4. Read the job's start, the anchor of the loop's 60% mark (ADR-0070):
 
