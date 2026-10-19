@@ -516,6 +516,26 @@ test("an approval older than the head's review round is held, not trusted", () =
   assert.match(plan.hold, new RegExp(`merge-pr 377 --sha ${HEAD}`));
 });
 
+test("PR #1243: a second review run on the head after the PASS is the same round, so it lands", () => {
+  // Round 1 posted its PASS and the label event followed; an `edited` event
+  // raised a second run on the same head that skipped the model (#1246) and
+  // concluded success after the label. The round began at its first run and
+  // ended at its newest; the newest start alone held this head (#1301).
+  const { found, plan } = planFor(
+    approved({
+      statusCheckRollup: [
+        ...GREEN_GATES,
+        review("SUCCESS", { startedAt: "2026-08-30T10:53:30Z" }),
+        review("SUCCESS", { startedAt: "2026-08-30T10:58:00Z", completedAt: "2026-08-30T10:58:20Z" }),
+      ],
+    }),
+    { files: ["src/column.rs"], approved_at: "2026-08-30T10:56:50Z" },
+  );
+  assert.equal(found.review.startedAt, "2026-08-30T10:53:30Z");
+  assert.equal(found.review.completedAt, "2026-08-30T10:58:20Z");
+  assert.deepEqual(plan.argv[0].slice(1), ["377", "--sha", HEAD]);
+});
+
 test("a file list that did not read holds the merge; a vacuous read is not proof", () => {
   const { plan } = planFor(approved(), { approved_at: "2026-08-30T10:56:50Z" });
   assert.match(plan.hold, /did not read/);
