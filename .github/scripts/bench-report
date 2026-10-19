@@ -52,9 +52,12 @@ States, the first word of the first line, in the order tested:
                     do this wake, the next one publishes.
     publish <id>    the newest pass covers, succeeded, and its artifact is
                     live: `bench-report --publish` writes the five files
-                    into the tree, then push-branch and gh-pr ship them
-                    under the title this prints, which is where the next
-                    read learns the generator.
+                    into the tree, `cargo x check` then names the README
+                    and site quotes the new timing columns moved
+                    (tests/claims.rs pins them, so a PR of the five files
+                    alone fails `test`, #1384), and push-branch and gh-pr
+                    ship all of it under the title this prints, which is
+                    where the next read learns the generator.
     dispatch        generated predates affecting and no live pass covers it
                     (none, failed, cancelled, or its artifact expired):
                     one `gh workflow run` on GH_WORKFLOW_TOKEN.
@@ -283,8 +286,10 @@ def render(facts, error, out=sys.stdout):
     elif state == "publish":
         print(f"publish {newest['databaseId']}: a pass on main finished {newest['updatedAt']} covers it; {stale}.", file=out)
         print("    Next: .github/scripts/bench-report --publish, which writes the five files into the tree;", file=out)
-        print("    then push-branch and gh-pr ship them, under this title and no other, because the", file=out)
-        print("    next read learns the generator from it:", file=out)
+        print("    then `cargo x check`: tests/claims.rs pins README.md and site/index.html to the reports'", file=out)
+        print("    date, CPU model and MB/s and names each quote the new reports moved, so fix those in", file=out)
+        print("    the same diff (#1384); then push-branch and gh-pr ship it all, under this title and no", file=out)
+        print("    other, because the next read learns the generator from it:", file=out)
         print(f'    "{TITLE.format(sha=newest["headSha"][:7])}"', file=out)
         print(f"    {newest['url']}", file=out)
     else:

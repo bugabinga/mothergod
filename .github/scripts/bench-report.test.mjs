@@ -170,6 +170,10 @@ test("render leads with the state word, dictates the publish title, and ends wit
   const lines = out.trim().split("\n");
   assert.match(lines[0], /^publish 42: /);
   assert.match(out, /bench-report --publish/);
+  // The quoters ride in the same diff: a publish PR of the five files alone
+  // fails `test`, because tests/claims.rs pins README.md and site/index.html
+  // to the reports' timing columns (#1384, PR #1383's first round).
+  assert.match(out, /`cargo x check`: tests\/claims\.rs pins README\.md and site\/index\.html/);
   assert.match(out, /"bench: publish the reports regenerated at deadbee"/);
   assert.match(
     lines.at(-1),
