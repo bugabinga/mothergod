@@ -157,6 +157,11 @@ All notable changes to this project are documented here. Format follows
   now, carrying the same site nav as every other page so a broken or
   mistyped link still offers a way to the three real pages instead of a
   silent copy of the homepage.
+- Status page: names, per corpus, the fastest gzip, zstd or xz level that
+  compresses at least as well as mothergod and the best-compressing level
+  that is at least as fast, with their bits/byte and encode MB/s and the
+  date the pair last moved, so a reader sees what mothergod's ratio costs
+  in speed against the level they would otherwise pick (#1340).
 
 ### Changed
 

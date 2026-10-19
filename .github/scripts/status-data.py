@@ -20,6 +20,9 @@ else:
 - benchmarks             bench/baseline.json (the CI ratio gate's baseline)
 - ratio                  docs/benchmarks/*.md aggregates + baseline.json's
                          commit date (gap to the field, and when it last moved)
+- frontier               docs/benchmarks/*.md frontier sections (mothergod's two
+                         neighbours among every gzip, zstd and xz level, and
+                         when the pair last moved)
 - experiments            research/progress.jsonl
 - merged_commits_7d      git history (deploy checks out full depth)
 - sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
@@ -197,6 +200,14 @@ def _methods():
     return methods
 
 
+def cells(line):
+    """A markdown table row's cells, bold marks stripped."""
+    return [c.strip().strip("*") for c in line.strip().strip("|").split("|")]
+
+
+REPORTS = (("Canterbury", "canterbury.md"), ("Silesia", "silesia.md"))
+
+
 @field("benchmarks")
 def _benchmarks():
     baseline = json.loads((ROOT / "bench" / "baseline.json").read_text())
@@ -225,13 +236,10 @@ def _ratio():
     instead of silently mislabeling a column.
     """
     corpora = []
-    for corpus, filename in (("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")):
+    for corpus, filename in REPORTS:
         lines = (ROOT / "docs" / "benchmarks" / filename).read_text(
             encoding="utf-8"
         ).splitlines()
-
-        def cells(line):
-            return [c.strip().strip("*") for c in line.strip().strip("|").split("|")]
 
         header = cells(next(l for l in lines if l.startswith("| file |")))
         row = cells(next(l for l in lines if l.startswith("|") and "aggregate" in l))
@@ -268,6 +276,69 @@ def _ratio():
         raise ValueError("no commit touches bench/baseline.json")
     age = (NOW.date() - datetime.fromisoformat(written).date()).days
     return {"corpora": corpora, "baseline_written": written, "baseline_age_days": age}
+
+
+@field("frontier")
+def _frontier():
+    """Where mothergod sits among every gzip, zstd and xz level (#1340).
+
+    The ratio field names the one strongest reference; this names the two
+    levels a user would weigh mothergod against, from the frontier section
+    each finals report appends: the fastest level that compresses at least
+    as well, and the best-compressing level that is at least as fast. A
+    leader on an axis has no neighbour on it, so that side is null.
+
+    `moved` is the commit date of the newest change to either neighbour
+    line, so a regeneration that leaves the pair as it was does not move it.
+    """
+    corpora = []
+    for corpus, filename in REPORTS:
+        source = f"docs/benchmarks/{filename}"
+        text = (ROOT / source).read_text(encoding="utf-8")
+        _, found, section = text.partition("\n## Frontier:")
+        if not found:
+            raise ValueError(f"no frontier section in {filename}")
+        rows = {}
+        for line in section.splitlines():
+            if line.startswith("|"):
+                row = cells(line)
+                try:
+                    rows[row[0]] = {"bits_per_byte": float(row[1]), "encode_mbps": float(row[2])}
+                except ValueError:
+                    continue  # the header and the separator row
+        if "mothergod" not in rows:
+            raise ValueError(f"no mothergod row in {filename}'s frontier section")
+
+        def neighbour(what):
+            named = re.search(rf"^{what}: (.+)$", section, re.MULTILINE)
+            if not named:
+                raise ValueError(f"no '{what}' line in {filename}")
+            level = named.group(1).strip()
+            return None if level == "none" else {"level": level, **rows[level]}
+
+        moved = subprocess.run(
+            [
+                "git", "-C", str(ROOT), "log", "-1", "--format=%cs",
+                "-G^(fastest level at least as good|best level at least as fast):",
+                "--", source,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if not moved:
+            raise ValueError(f"no commit touches {filename}'s neighbour lines")
+        corpora.append(
+            {
+                "corpus": corpus,
+                "source": source,
+                "mothergod": rows["mothergod"],
+                "as_good": neighbour("fastest level at least as good"),
+                "as_fast": neighbour("best level at least as fast"),
+                "moved": moved,
+            }
+        )
+    return {"corpora": corpora}
 
 
 @field("experiments")
