@@ -15,6 +15,8 @@
 //! hour, because `mothergod_bench::reference::measure_all` (shared by
 //! both binaries) times `mothergod` one file at a time: the published
 //! MB/s is a rate only if nothing runs beside it (issue #1321).
+//! `frontier_section` then times every gzip, zstd and xz level the same way
+//! and appends the frontier table (issue #1340).
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin finals_report`. Markdown is linted, not formatted (`cargo x lint
@@ -23,7 +25,9 @@
 use mothergod_bench::baseline::load_and_fingerprint;
 use mothergod_bench::corpus::{extract_canterbury, fetch_and_cache, parse_manifest};
 use mothergod_bench::finals::{Provenance, Versions, format_report};
-use mothergod_bench::reference::{generated_at, machine_info, measure_all, tool_version};
+use mothergod_bench::reference::{
+    frontier_section, generated_at, machine_info, measure_all, tool_version,
+};
 use mothergod_bench::repo_root;
 use std::process::ExitCode;
 
@@ -86,6 +90,14 @@ fn main() -> ExitCode {
         }
     };
 
+    let frontier = match frontier_section(&files, &measurements) {
+        Ok(section) => section,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let generated_at = match generated_at() {
         Ok(stamp) => stamp,
         Err(err) => {
@@ -95,7 +107,7 @@ fn main() -> ExitCode {
     };
 
     let machine = machine_info();
-    let report = format_report(
+    let mut report = format_report(
         "Canterbury",
         "corpus.canterbury.ac.nz `cantrbry.tar.gz`, pinned by URL + SHA-256 in `bench/corpus.toml`",
         &generated_at,
@@ -107,6 +119,8 @@ fn main() -> ExitCode {
             machine: &machine,
         },
     );
+
+    report.push_str(&frontier);
 
     let out_path = root.join("docs/benchmarks/canterbury.md");
     if let Err(err) = std::fs::write(&out_path, &report) {
