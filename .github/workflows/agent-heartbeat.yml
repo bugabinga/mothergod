@@ -122,7 +122,11 @@ jobs:
                code. The reviewer's items are in its comment on the
                thread; a labeled PR with no push after that comment is
                yours, and your push does not clear the label, the
-               reviewer's next PASS does. Skip claude/deslop-*
+               reviewer's next PASS does. A result the body states and
+               your push moved (a test count, a number) is re-stated in
+               the body with `gh pr edit`, never corrected in a comment:
+               the body is what the merge records, and #1450 spent three
+               rounds on one stale count. Skip claude/deslop-*
                branches: the deslopper fixes its own returned PRs
                (ADR-0016).
             2. PRs from forks, which the reviewer never runs on: review
