@@ -2,10 +2,12 @@
 
 The herald's institutional memory (ADR-0040): how mothergod meets
 humans, what was measured, what was learned, what was rejected.
-Public on purpose — this project's marketing is evidence, arranged
+Public on purpose: this project's marketing is evidence, arranged
 well, and the arranging is auditable.
 
-Entries are dated, newest first, two kinds:
+Entries are dated, newest first, headed `## <date>: <kind>: <title>`
+(`herald-survey-due` reads the kind word right after the date), two
+kinds:
 
 - **Survey** (weekly): the USERS numbers with sources, next to last
   week's; one OSS marketing study with the principles extracted; the
@@ -18,7 +20,7 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
-## 2026-10-20 — Editorial: "no internal parallelism" outlived the second core by a day
+## 2026-10-20: Editorial: "no internal parallelism" outlived the second core by a day
 
 The site's Speed section opened by saying the codec has no internal
 parallelism, a sentence from #483. #1394 gave `write::Encoder` two
@@ -36,7 +38,7 @@ greps `src/` for `spawn` would guard a word, not the behavior. The
 README carries the two-core fact in its memory paragraph already and
 never made the false claim, so it stays as is.
 
-## 2026-10-19 — Editorial: "slow" got its comparison, from the same run
+## 2026-10-19: Editorial: "slow" got its comparison, from the same run
 
 README and site said mothergod is slow and quoted its MB/s, with
 nothing to measure them against: a reader had to know what `xz -9e`
@@ -61,7 +63,7 @@ this PR.** The frontier's 652.3 MB on Silesia is a reading per run;
 the 2026-10-17 entry's reasoning (publish the bound, not the reading)
 stands, and the new sentence points at the column instead.
 
-## 2026-10-18 — Editorial: the release notes named a format three versions old
+## 2026-10-18: Editorial: the release notes named a format three versions old
 
 `CHANGELOG.md`'s summary said the bitstream is `FORMAT_VERSION` 13 and
 that versions below 13 no longer decode. The build writes 16 and
@@ -76,7 +78,7 @@ dropping the number from the summary.** The release notes are where
 a packager looks for which files decode; the number belongs there,
 guarded, rather than nowhere.
 
-## 2026-10-17 — Editorial: "one 16 MiB block at a time" read as a memory figure
+## 2026-10-17: Editorial: "one 16 MiB block at a time" read as a memory figure
 
 #1145. The README's streaming sentence named the block size and no
 peak, so an embedder sizing a container read 16 MiB; the encode peak
@@ -92,7 +94,7 @@ goes red before the sentence turns false. Not claimed: any peak on
 incompressible input, which nobody has measured. The two rustdoc
 sites in #1145 are the maintainer's and stay open there.
 
-## 2026-10-17 — Editorial: the 404 page counted its siblings, and the count rotted in a day
+## 2026-10-17: Editorial: the 404 page counted its siblings, and the count rotted in a day
 
 #1229 added `/decisions` to the 404's frame, and its sentence still said
 "Three pages do", listing three. The frame was right because
@@ -106,7 +108,7 @@ waiting for the fifth page. A sentence that points at a tested
 structure does not need its own guard; a sentence that restates the
 structure does.
 
-## 2026-10-16 — Editorial: /decisions shipped; one sentence leads to it, from where "who decides" is asked
+## 2026-10-16: Editorial: /decisions shipped; one sentence leads to it, from where "who decides" is asked
 
 #1231, closing out the 2026-09-24 entry's hand-over: #1229 put the page
 on `mothergod.dev` this morning.
@@ -140,7 +142,7 @@ which states rules a reader should keep in mind, not places to go.
 **To measure.** Whether `/decisions` gets read at all; the traffic
 snapshot owns that number, and the next survey reads it.
 
-## 2026-10-16 — Editorial: the smoke test is one a reader can run twice
+## 2026-10-16: Editorial: the smoke test is one a reader can run twice
 
 #1216. The quoted `mothergod -v LICENSE` wrote `LICENSE.mgdc` into the
 checkout, so the second run failed with `File exists`. Both pages now
@@ -158,7 +160,7 @@ command gets tried in a terminal before it ships, not only in a test.
 second run still fails; a sentence warning about a failure we can avoid
 is the wrong fix.
 
-## 2026-10-15 — Editorial: "Try it" shows what a first run prints, and a test holds the number
+## 2026-10-15: Editorial: "Try it" shows what a first run prints, and a test holds the number
 
 #1196, from this morning's survey. Both "Try it" sections now quote one
 transcript, `mothergod -v LICENSE` and the line it prints, between the
@@ -176,7 +178,7 @@ mirrors.
 **Rejected: the gzip/zstd/xz comparison on the same file.** One 1 KB file
 is not a corpus; the pages say so in one clause and point at the tables.
 
-## 2026-10-15 — Survey: the repo reader fell back, and the site instrument went blind at our volume
+## 2026-10-15: Survey: the repo reader fell back, and the site instrument went blind at our volume
 
 Seventh survey, seven days after the sixth.
 
@@ -280,7 +282,7 @@ site is the measured entry point.
 Rejected again, same reason as every prior week: buying reach by
 posting anywhere. Falling uniques do not change that.
 
-## 2026-10-14 — Editorial: "Try it" became the man page, one clause per CLI PR
+## 2026-10-14: Editorial: "Try it" became the man page, one clause per CLI PR
 
 Queue empty, so this is a defect found on the surface. #1153, #1160 and
 #1179 each appended a flag to the paragraph under "Try it", on README and
@@ -305,7 +307,7 @@ is the claim the reader needs, and it stays. The changelog keeps one
 bullet per flag, because release notes are where a returning user looks
 for what is new.
 
-## 2026-10-14 — Editorial: the streaming pair grew a third member, and the README kept two
+## 2026-10-14: Editorial: the streaming pair grew a third member, and the README kept two
 
 Queue empty, so this is a defect found on the surface. #1150 added
 `write::Encoder`, the `std::io::Write` side, hours after the entry below
@@ -324,7 +326,7 @@ chunks, came out byte for byte what `copy_encode` writes, and `mothergod
 **Rejected: a third code block.** It would repeat the example's shape with
 one name changed; the type's own doc example is a `cargo doc --open` away.
 
-## 2026-10-13 — Editorial: the README's library example stopped at the slice API
+## 2026-10-13: Editorial: the README's library example stopped at the slice API
 
 Queue empty, so this is a defect found on the surface. The README's
 "Library API" showed `compress` and `decompress` on a byte slice and
@@ -346,7 +348,7 @@ reader does not need to pick the streaming pair. **Rejected: a library
 section on `/`.** The site's visitor decides whether to try the tool;
 the embedder reads the repo, and `/` already sends them there.
 
-## 2026-10-13 — Editorial: the strongest new trust fact reached only the changelog
+## 2026-10-13: Editorial: the strongest new trust fact reached only the changelog
 
 Queue empty, so this is a defect found on the surface. #1118 ended every
 frame in a CRC-32, so a damaged file is an error instead of wrong bytes
@@ -369,7 +371,7 @@ genre that decodes flips silently at their defaults** (`tests/fit/lib.txt`,
 `integrity-check`). True and measured, but on `/` it reads as a jab at
 tools the reader likely uses, and the claim stands without it.
 
-## 2026-10-12 — Editorial: the big-file warning outlived its bug by one bullet
+## 2026-10-12: Editorial: the big-file warning outlived its bug by one bullet
 
 Queue empty, so this is a defect found on the surface. #1106 made the
 CLI compress through `copy_encode` and took the entry below's warning off
@@ -393,7 +395,7 @@ the `copy_encode` bullet: no release had the earlier behavior.
 and in release notes it reads as a speed claim; the README's Speed
 section owns speed, with its corpus named.
 
-## 2026-10-12 — Editorial: a trier with a big file got its own size back, unwarned
+## 2026-10-12: Editorial: a trier with a big file got its own size back, unwarned
 
 Queue empty, so this is a defect found on the surface. #1090 made
 `compress` store any input over 256 MiB, so that every frame it writes
@@ -421,7 +423,7 @@ behavior that was fixed.
 and it can change with any format bump. "A few bytes" stays true, and
 the exact count changes nothing the reader does.
 
-## 2026-10-11 — Editorial: the changelog kept the sentence README and site lost
+## 2026-10-11: Editorial: the changelog kept the sentence README and site lost
 
 Queue empty, so this is a defect found on the surface. The entry below
 fixed "`--help` is the entire interface" on README and `/`; `CHANGELOG.md`
@@ -447,7 +449,7 @@ written to a terminal", exit 1.
 README's recipe against it; a third copy in the changelog would be
 unguarded.
 
-## 2026-10-11 — Editorial: "no flags" stopped being true on 2026-10-10
+## 2026-10-11: Editorial: "no flags" stopped being true on 2026-10-10
 
 Queue empty, so this is a defect found on the surface. README and `/`
 both said "`mothergod --help` is the entire interface: no flags". #1035
@@ -464,7 +466,7 @@ levels, no tuning knobs", which is the claim that matters to them.
 **Rejected: listing `-V` too.** The sentence is about how small the
 interface is, not its aliases; `CHANGELOG.md` names the short spelling.
 
-## 2026-10-10 — Editorial: the homepage's trust link landed on factory vocabulary
+## 2026-10-10: Editorial: the homepage's trust link landed on factory vocabulary
 
 Queue empty, so this is a defect found on the surface. `/`'s panic
 principle sends the reader to `/status` for the live fuzz time and crash
@@ -489,7 +491,7 @@ docstring is the factory's; `docs/TESTING.md` is the human page about
 the same portfolio, and the script stays one click further for whoever
 reads the strategy.
 
-## 2026-10-10 — Editorial: "can be retired" undersold a rule that now always fires
+## 2026-10-10: Editorial: "can be retired" undersold a rule that now always fires
 
 Queue empty, so this is a defect found on the surface. ADR-0063 (#949)
 made it a rule: until the first release, a `FORMAT_VERSION` bump retires
@@ -514,7 +516,7 @@ case, and the exception does not change what a trier should do.
 week, and the certainty, not the frequency, is what changes the action.
 Status box: 81 words to 92, same count method as the 2026-10-09 entry.
 
-## 2026-10-09 — Editorial: the origin story goes where the reader asks "who"
+## 2026-10-09: Editorial: the origin story goes where the reader asks "who"
 
 #963: the surface never said mothergod began as an autoresearch loop.
 **Placed it as the first paragraph of "Who builds it", README and site,
@@ -544,7 +546,7 @@ ratio comparison**: the sentence states a shared metric and nothing more,
 per the issue's own constraint. Measure: the next four surveys' repo
 numbers, per the issue.
 
-## 2026-10-09 — Editorial: the site's Status box explained the pipeline twice
+## 2026-10-09: Editorial: the site's Status box explained the pipeline twice
 
 Queue empty (no open `marketing` issue, no `claude/*` branch), so this is
 a defect found on the surface. #923 took the pipeline out of the README's
@@ -566,7 +568,7 @@ trier's action, and it matches the status page's own wording. Counts:
 The README already reads this way since #849; the two surfaces now say
 the same thing at the same length.
 
-## 2026-10-08 — Editorial: the README opener lost its pipeline, and gained no pointer
+## 2026-10-08: Editorial: the README opener lost its pipeline, and gained no pointer
 
 #923 cut "A filter bank feeds an optimal-parse LZ..." from the README's
 first paragraph. What remains is the site tagline's pitch: what it is,
@@ -581,7 +583,7 @@ reader the factory's instructions. The `research/JOURNAL.md` link already
 serves the engineer who wants to descend. Revisit when a design page
 for humans exists.
 
-## 2026-10-08 — Survey: the repo reader doubled again, and the README greets them with the pipeline
+## 2026-10-08: Survey: the repo reader doubled again, and the README greets them with the pipeline
 
 Sixth survey, seven days after the fifth.
 
@@ -682,7 +684,7 @@ allows at most one emoji, and we have one language's worth of readers.
 Rejected again, same reason as every prior week: buying reach by
 posting anywhere. Zero mentions is a real number and it stays one.
 
-## 2026-10-03 — Editorial: the Measured section's win-count claim had the same unguarded shape
+## 2026-10-03: Editorial: the Measured section's win-count claim had the same unguarded shape
 
 `#443` remains the only open `marketing` issue, still blocked on `#739`
 (agent-system, unmerged). Queue empty again, so this is a second defect
@@ -713,7 +715,7 @@ check`: clean.
 No `CHANGELOG.md` entry: a test-only change with no surface diff, same
 precedent as the entry above and `72baf65` (#803).
 
-## 2026-10-03 — Editorial: the Speed section's CPU claim had no guard, and drifted
+## 2026-10-03: Editorial: the Speed section's CPU claim had no guard, and drifted
 
 `#443` remains the only open `marketing` issue, still blocked on `#739`
 (agent-system, unmerged). Queue empty, so this is a defect found on the
@@ -743,7 +745,7 @@ clean.
 No `CHANGELOG.md` entry: a copy edit correcting a drifted fact, not a
 product change, same precedent as `72baf65` (#803) and the entry below.
 
-## 2026-10-02 — Editorial: README made readers scroll past two paragraphs to reach "Try it"
+## 2026-10-02: Editorial: README made readers scroll past two paragraphs to reach "Try it"
 
 Queue: #849, unclaimed, filed by the 2026-10-01 survey below and accepted by
 the curator at 172ea7a. #443 is the only other open `marketing` issue; its
@@ -784,7 +786,7 @@ of file through the line before `## Try it`), gives 544, not 547. Not
 this PR's error since #849 predates it, but recorded so the number
 stops propagating unverified.
 
-## 2026-10-01 — Survey: the repo doubled, the site halved, and the README makes them scroll
+## 2026-10-01: Survey: the repo doubled, the site halved, and the README makes them scroll
 
 Fifth survey, six days after the fourth, same cadence the fourth had.
 This morning's editorial run read "within the last 6 days" as covering
@@ -912,7 +914,7 @@ Rejected again, same reason as every prior week: buying reach by
 posting anywhere. Zero mentions across Hacker News, lobste.rs and
 reddit is a real number and it stays one.
 
-## 2026-10-01 — Editorial: the Silesia caption named "the same two" instead of naming them
+## 2026-10-01: Editorial: the Silesia caption named "the same two" instead of naming them
 
 Queue checked first: #443 is the only open `marketing` issue and its build
 sits in #739, agent-system territory, unmerged since 2026-09-22. Nothing
@@ -941,7 +943,7 @@ at `HEAD`: both rows render on one line each at 375×812 and at 1440×900,
 identical wrap behavior to the Canterbury row immediately above, no shift to
 anything below the strip at either width.
 
-## 2026-09-28 — Editorial: the ratio number moved and the changelog didn't
+## 2026-09-28: Editorial: the ratio number moved and the changelog didn't
 
 `CHANGELOG.md`'s Unreleased "Ratio" bullet still claimed 1.374 bits/byte on
 Canterbury and 2.061 on Silesia. Both figures were current when written but
@@ -976,7 +978,7 @@ track it; the fix is the tracking.
 
 Verified: `cargo x check` green, including the new test.
 
-## 2026-09-27 — Editorial: the soft-404 gets a real page, not a special case
+## 2026-09-27: Editorial: the soft-404 gets a real page, not a special case
 
 Closed #753's item 3, the piece the 2026-09-26 entry deliberately left
 out. Shipped `site/404.html`, curl.se's model named in the survey that
@@ -1035,7 +1037,7 @@ Cloudflare's general behavior, not a probe of this specific deploy.
 **Closes #753.** Items 1 and 2 landed 2026-09-26 (previous entry); this
 is item 3, the last one.
 
-## 2026-09-26 — Editorial: two files, not the whole soft-404
+## 2026-09-26: Editorial: two files, not the whole soft-404
 
 Took #753's items 1 and 2, filed by yesterday's survey: `mothergod.dev`
 answers 200 with the homepage for any path, `/robots.txt` and
@@ -1087,7 +1089,7 @@ Not re-verified against the live host, because nothing here changes
 until the next deploy; the next survey's soft-404 recheck is that
 verification.
 
-## 2026-09-25 — Editorial: the canonical tag named a URL that redirects away
+## 2026-09-25: Editorial: the canonical tag named a URL that redirects away
 
 Took #754, opened by this morning's survey: Cloudflare Pages serves the
 site at `/status` and `/agents` and 308-redirects the `.html` form, while
@@ -1127,7 +1129,7 @@ Leaves #753 clear: its `sitemap.xml` now has a settled convention to list,
 and listing the `.html` form would have reproduced this defect in a third
 file.
 
-## 2026-09-25 — Survey: every reader lands on `/`, and the site cannot say 404
+## 2026-09-25: Survey: every reader lands on `/`, and the site cannot say 404
 
 Fourth survey, six days after the third rather than seven, so two
 instruments needed a window decision before anything could be compared.
@@ -1337,7 +1339,7 @@ real number and it stays one. Note the distinction this week's findings
 sharpen: being findable is not being promoted, and a site that cannot
 return 404 is failing at the first without having attempted the second.
 
-## 2026-09-24 — Editorial: the ADR series gets a fifth page, built and handed off, not shipped
+## 2026-09-24: Editorial: the ADR series gets a fifth page, built and handed off, not shipped
 
 Took #443, the operator's 2026-09-01 charter: render `docs/adr/` on
 `mothergod.dev`, book-like, minimal, searchable, so a reader understands the
@@ -1444,7 +1446,7 @@ the machinery lands, and because a herald PR that only adds four link
 lines and a changelog entry once #739 merges will not need a journal entry
 of its own to explain a decision this one already made.
 
-## 2026-09-24 — Editorial: the answer was there, under the architecture
+## 2026-09-24: Editorial: the answer was there, under the architecture
 
 Took #692, the top of the queue and unblocked since #703 landed.
 `/status.html`'s first heading asks "Can I use this yet?" and its card opened
@@ -1515,7 +1517,7 @@ answer from `phase` *and* `format_version`. The format version is not part of
 the answer to "can I use this yet", so it moved into the disclosure summary
 instead. Recorded rather than folded in silently.
 
-## 2026-09-23 — Editorial: half the status box was already mechanized, and the run said so
+## 2026-09-23: Editorial: half the status box was already mechanized, and the run said so
 
 Took #703, the top of the queue: the curator ranked it above #692 on the
 argument that `/` takes every measured pageload and `/status.html` takes none,
@@ -1595,7 +1597,7 @@ denies the release in words the list does not carry goes unguarded. That is
 the cost of guarding prose at all, and the liveness half is the cheapest
 signal that the list is still live.
 
-## 2026-09-23 — Editorial: our best promise was written as a list, and the list had already expired
+## 2026-09-23: Editorial: our best promise was written as a list, and the list had already expired
 
 The strongest reassurance this project offers a stranger is that a file it
 writes today stays readable forever. Both human surfaces made it, and both
@@ -1670,7 +1672,7 @@ rep-slot models". The page's loudest slot spends itself on architecture under
 a heading asking about usability. That is item 3's complaint in its sharpest
 form and it goes in the new issue as the first thing to fix.
 
-## 2026-09-22 — Editorial: the standing lead was a desktop defect wearing a phone costume
+## 2026-09-22: Editorial: the standing lead was a desktop defect wearing a phone costume
 
 Closed the standing lead recorded 2026-09-21 and confirmed again in the same
 day's frame entry: the verdict strip from #630 wrapped two-up-one-down at
@@ -1741,7 +1743,7 @@ Not done: the strip's copy. "Silesia, vs the same two" back-references the
 Canterbury row, which reads correctly in row order but would not survive
 reordering. One idea per PR, and this one is layout.
 
-## 2026-09-22 — Editorial: three pages joined by a back-link are not a site
+## 2026-09-22: Editorial: three pages joined by a back-link are not a site
 
 Shipped #604's item 4, "three pages, no shared frame". Every page now opens
 with the same four links in the same order, `mothergod` / Status / Agents /
@@ -1806,7 +1808,7 @@ open: at that width "Wins" and "Loses" sit side by side with "Not yet"
 alone underneath, and the "Wins" caption breaks across three ragged lines.
 One idea per PR.
 
-## 2026-09-21 — Editorial: a screenshot is evidence only if it names how it was served
+## 2026-09-21: Editorial: a screenshot is evidence only if it names how it was served
 
 Took #636, the operator's charter of 2026-09-20: "when herald makes changes
 to the site, i want to see screenshots of old and new or videos." Designed
@@ -1870,7 +1872,7 @@ machinery changes as agent-system issues instead. All three artifacts are
 agent-system. Design was mine and is done; deciding my own envelope is
 ADR-0008's call, not mine, so it goes to the BDFL with both exits named.
 
-## 2026-09-21 — Editorial: the last source-identifier on the front page
+## 2026-09-21: Editorial: the last source-identifier on the front page
 
 Closed the remaining slice of #411's "zero internal vocabulary" half.
 The curator's last two grooms on that issue both named the same live
@@ -1919,7 +1921,7 @@ broader site restructure), and the remainder of #443 (ADR rendering).
 Both are larger design work than this slice; #411 stays open as the
 tracking umbrella per the curator's last groom.
 
-## 2026-09-20 — Editorial: the Speed numbers stopped wearing prose
+## 2026-09-20: Editorial: the Speed numbers stopped wearing prose
 
 Shipped another slice of issue #604: item 2, "prose where structure
 belongs." The Speed section's four rate figures sat embedded inside a
@@ -1966,7 +1968,7 @@ remaining prose-heavy sections ("What this is," "Try it") are unattempted;
 "Try it" is a recipe, which is the one place prose is the right shape for
 a command sequence. Left for the next slice.
 
-## 2026-09-20 — Editorial: the verdict now sits above the argument
+## 2026-09-20: Editorial: the verdict now sits above the argument
 
 Shipped a slice of issue #604 (the operator's charter, 2026-09-18): item 1,
 "no headline". Before this change, `/`'s first screen was the logo, the
@@ -2009,7 +2011,7 @@ to satisfy item 1's done-bar; not done here, left as the next slice, for
 the same single-source-of-truth reason that entry gave for not filing it
 separately.
 
-## 2026-09-19 — Survey: a short, self-healing pause, and one heading worth stealing
+## 2026-09-19: Survey: a short, self-healing pause, and one heading worth stealing
 
 Third survey, seven days after the second, on schedule for the first time.
 Frame for the numbers below: issue #560 paused every agent workflow for
@@ -2135,7 +2137,7 @@ Rejected again, same reason as every prior week: buying reach by posting
 anywhere. Zero mentions across Hacker News, lobste.rs and reddit is a real
 number and it stays one.
 
-## 2026-09-18 — Editorial: the trust page's evidence, minus the numbers that would lie by tomorrow
+## 2026-09-18: Editorial: the trust page's evidence, minus the numbers that would lie by tomorrow
 
 Shipped issue #522. `/`'s Principles section stated four claims as bare
 assertions; the evidence for all four already existed, machine-generated,
@@ -2184,7 +2186,7 @@ Not touched: #443 (render ADRs on the site) and the remainder of #411
 (full audience-model overhaul), both larger design work than a single
 slice.
 
-## 2026-09-12 — Survey: nine dark days, and the instruments went dark with them
+## 2026-09-12: Survey: nine dark days, and the instruments went dark with them
 
 Second survey, twelve days after the first rather than seven. The gap is
 the finding that frames everything below: issue #517 paused every agent
@@ -2348,7 +2350,7 @@ Rejected again this week, for the same reason as last week: buying reach
 by posting anywhere. Zero mentions across Hacker News, lobste.rs and
 reddit is a real number and it stays one.
 
-## 2026-09-03 — Editorial: the surface never said what to type
+## 2026-09-03: Editorial: the surface never said what to type
 
 For two days I polished the argument and never noticed the surface had
 no verb. `README.md` and `site/index.html` answered three of the
@@ -2402,7 +2404,7 @@ unguarded is that the page names what it answers to. Four of the five
 restated fact classes on the surface now carry a guard, with the
 measurement date still open as issue #469.
 
-## 2026-09-02 — Editorial: publishing the number that makes us look worst
+## 2026-09-02: Editorial: publishing the number that makes us look worst
 
 The 2026-09-01 entry withheld encode and decode throughput from the
 surface for one stated reason: the reports carried MB/s columns without
@@ -2458,7 +2460,7 @@ That test is the mechanism this surface keeps earning; it now covers
 three of the four restated fact classes, with the measurement date still
 open as issue #469.
 
-## 2026-09-02 — Editorial: the first screen answers "what", not "who"
+## 2026-09-02: Editorial: the first screen answers "what", not "who"
 
 Shipped issue #416. Both first screens led with who builds mothergod:
 the site tagline was "General-purpose lossless compression, developed in
@@ -2515,7 +2517,7 @@ date, so nothing caught it. Filed as issue #469: a guard that covers
 three of the four restated facts teaches everyone that the fourth is
 covered.
 
-## 2026-09-01 — Editorial: the ratio arrived a day before I said it would
+## 2026-09-01: Editorial: the ratio arrived a day before I said it would
 
 Yesterday's survey concluded "when you have no ratio, sell the property
 you can prove, and name the date the ratio arrives." That was wrong on
@@ -2595,7 +2597,7 @@ project's rules forbid ever dropping decode support for a version 2 or
 to the visitor's "can I trust it", and it was being thrown away by a
 sentence that overstated our own instability.
 
-## 2026-08-31 — Survey: the baseline row
+## 2026-08-31: Survey: the baseline row
 
 First survey. Every number below is a first observation, so nothing
 has a prior week to sit next to yet; the "prev" column starts filling
