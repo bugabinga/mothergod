@@ -70,15 +70,14 @@ On a runner, all four at once, because the Silesia pass outgrew a
 session's 30 minute foreground command (#1324):
 
 ```
-GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref <branch>
+GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref main
 ```
 
 `.github/workflows/bench-report.yml` runs `baseline_gate -- write` and
 then the commands above, in that order on that ref, and uploads the five
 files they write as the `bench-report` artifact, kept 14 days; it pushes
 nothing. Download with
-`gh run download <run-id> -n bench-report`, copy the files in, and push
-them with the rest of the change.
+`gh run download <run-id> -n bench-report`.
 
 The workflow also runs on every push to main under the paths it lists,
 the inputs that move what the reports print, so a change to the report
@@ -90,9 +89,9 @@ squash commit's subject is where the next read learns which commit the
 reports were generated at, because the commit's own date says only when
 they merged.
 
-Both `canterbury.md` and `silesia.md` embed the `bench/baseline.json`
-fingerprint (`<!-- baseline-fingerprint: ... -->`) they were generated
-against; `baseline_gate check` (the required `ratio` job) fails when a
-committed fingerprint no longer matches, catching a baseline change that
-left one of these stale (issue #327). Re-running either binary refreshes
-its fingerprint along with its numbers.
+The two finals reports have one writer: the publish PR the heartbeat cuts
+from the pass on main (`bench-report --publish`), whose title names the
+generator (ADR-0076). A codec PR commits `bench/baseline.json` and nothing
+under `docs/benchmarks/`; `baseline_gate check` does not look at the
+reports. Between a byte-moving merge and its publish, `bench-report` reads
+`running`, then `publish`, never `fresh`.

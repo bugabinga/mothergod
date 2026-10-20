@@ -6,12 +6,12 @@ like survey-due, stalled-prs and state.
 
 bench-report.yml regenerates the five published benchmark files on a runner
 and hands them back as an artifact (#1324); a seat downloads it and pushes
-the files on its own token. A codec PR owes that pass to the ratio gate,
-which pins compress() bytes and both reports' baseline fingerprint (#1254,
-#327), so that path forces itself. The other path had no owner: a change to
-the report binaries themselves (#1356, #1367, #1373 and #1376 added the
-competitor frontier to both reports) lands on main and the committed reports
-stay as they were, with nothing to say so. Two maintainer runs on 2026-10-19
+the files on its own token. The ratio gate pins compress() bytes and no
+longer demands the reports in a codec PR (ADR-0076, #1437): the pass on main
+after the merge is the one writer. A change to the report binaries themselves
+(#1356, #1367, #1373 and #1376 added the competitor frontier to both reports)
+lands on main the same way, and the committed reports stay as they were
+until a publish PR, with nothing else to say so. Two maintainer runs on 2026-10-19
 named the dispatch a blocker for want of a token the seat holds
 (agent-heartbeat.yml grants `actions: write` for exactly this). A duty two
 wakes apart, dispatch then download, held in a model's memory across runs,

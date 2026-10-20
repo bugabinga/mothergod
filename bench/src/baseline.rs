@@ -23,7 +23,6 @@ use crate::DatasetKind;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
-use std::path::Path;
 
 /// Bytes generated per case. Small enough that every case's
 /// `mothergod::compress` call finishes in well under a second in a release
@@ -143,9 +142,12 @@ pub fn bits_per_byte(compressed_len: usize, original_len: usize) -> f64 {
     (compressed_len as f64) * 8.0 / (original_len as f64)
 }
 
-/// 64-bit FNV-1a of `bytes`. Not cryptographic: [`fingerprint`] and
-/// [`Entry::digest`] only detect an honest accidental change, never resist a
-/// deliberate one (the reasoning on [`fingerprint`]).
+/// 64-bit FNV-1a of `bytes`. Not cryptographic: [`Entry::digest`] only
+/// detects an honest accidental change, never resists a deliberate one, so a
+/// dependency-free hash is the right size (ADR-0002's zero-dependency rule
+/// binds the core crate; this is bench tooling, but pulling in `sha2` for a
+/// marker nobody attacks would tax every default-feature build for a
+/// collision resistance this job never needed).
 fn fnv1a(bytes: &[u8]) -> u64 {
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
@@ -174,8 +176,8 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// The bits/byte of every case, the map [`regressions`], [`deltas`],
-    /// [`hold_at_best`] and [`fingerprint`] work over.
+    /// The bits/byte of every case, the map [`regressions`], [`deltas`] and
+    /// [`hold_at_best`] work over.
     #[must_use]
     pub fn bpb(&self) -> BTreeMap<String, f64> {
         self.cases
@@ -389,62 +391,6 @@ impl Regression {
     }
 }
 
-/// Short, stable fingerprint of a baseline measurement map: the canonical
-/// text (sorted keys, fixed six-decimal values, `1.500000`) run through a
-/// 64-bit FNV-1a hash, printed as 16 lowercase hex digits. Two maps with the
-/// same values fingerprint identically regardless of the source file's exact
-/// bytes (key order, whitespace), since both go through the same layout
-/// first.
-///
-/// Digests stay out of it, so a change of output at equal bits/byte never
-/// marks the finals reports stale on its own (issue #1182).
-///
-/// The hash input is frozen at the fixed six-decimal form, not
-/// [`format_baseline`]'s trimmed one: the committed finals reports embed
-/// this digest, and a different input moves it without the baseline moving.
-///
-/// The held-out-final reports (`bench::finals::format_report`) embed this
-/// for the `bench/baseline.json` they were generated against, so
-/// `baseline_gate` can detect a baseline that moved without those reports
-/// following (issue #327) — a content invariant, not a PR-diff heuristic,
-/// so it holds regardless of which commit last touched which file. Not a
-/// cryptographic hash: this only needs to detect an honest accidental
-/// mismatch, never resist a deliberate one, so a dependency-free 64-bit
-/// FNV-1a is the right size for the job (ADR-0002's zero-dependency rule
-/// binds the core crate; this is bench tooling, but pulling in `sha2` — see
-/// this crate's `Cargo.toml` — for a freshness marker nobody attacks would
-/// tax every default-feature build for a collision resistance this job
-/// never needed).
-#[must_use]
-pub fn fingerprint(measurements: &BTreeMap<String, f64>) -> String {
-    let mut canonical = String::from("{\n");
-    let mut remaining = measurements.len();
-    for (name, &bpb) in measurements {
-        remaining -= 1;
-        let comma = if remaining == 0 { "" } else { "," };
-        writeln!(canonical, "  \"{name}\": {bpb:.6}{comma}")
-            .expect("writing to a String never fails");
-    }
-    canonical.push_str("}\n");
-    format!("{:016x}", fnv1a(canonical.as_bytes()))
-}
-
-/// Reads `bench/baseline.json` under `root`, parses it, and fingerprints
-/// it: the read-parse-fingerprint sequence `finals_report` and
-/// `silesia_report` both need before compressing anything (issue #330,
-/// this exact block regrew once already after it95 first consolidated it).
-///
-/// # Errors
-///
-/// A human-readable message if the file cannot be read or its content
-/// fails [`parse_baseline`].
-pub fn load_and_fingerprint(root: &Path) -> Result<String, String> {
-    let text = std::fs::read_to_string(root.join("bench/baseline.json"))
-        .map_err(|err| format!("failed to read bench/baseline.json: {err}"))?;
-    let baseline = parse_baseline(&text).map_err(|err| err.to_string())?;
-    Ok(fingerprint(&baseline.bpb()))
-}
-
 /// Compares `measured` against `baseline`, reporting every case that grew
 /// by more than [`TOLERANCE_BITS`] bits/byte. A case present only in
 /// `measured` (no committed baseline yet, e.g. a newly added kind) or only
@@ -578,8 +524,8 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 mod tests {
     use super::{
         BaselineParseError, CASE_LEN, Entry, Snapshot, TOLERANCE_BITS, bits_per_byte, cases,
-        deltas, fingerprint, fnv1a, format_baseline, hold_at_best, mean_delta, output_changes,
-        parse_baseline, regressions,
+        deltas, fnv1a, format_baseline, hold_at_best, mean_delta, output_changes, parse_baseline,
+        regressions,
     };
     use std::collections::BTreeMap;
 
@@ -811,53 +757,6 @@ mod tests {
         let mut measured = BTreeMap::new();
         measured.insert("a".to_string(), 1.0);
         assert_eq!(regressions(&baseline, &measured), []);
-    }
-
-    #[test]
-    fn fingerprint_is_deterministic() {
-        let mut measurements = BTreeMap::new();
-        measurements.insert("a".to_string(), 1.5);
-        measurements.insert("b".to_string(), 7.999_999);
-        assert_eq!(fingerprint(&measurements), fingerprint(&measurements));
-    }
-
-    #[test]
-    fn fingerprint_input_is_frozen_at_six_fixed_decimals() {
-        // Computed from `{\n  "a": 1.500000,\n  "b": 8.000000\n}\n` before
-        // issue #943 trimmed the written form; the finals reports embed it.
-        let mut measurements = BTreeMap::new();
-        measurements.insert("a".to_string(), 1.5);
-        measurements.insert("b".to_string(), 8.0);
-        assert_eq!(fingerprint(&measurements), "2939a726f123b9c0");
-    }
-
-    #[test]
-    fn fingerprint_ignores_map_insertion_order() {
-        let mut forward = BTreeMap::new();
-        forward.insert("a".to_string(), 1.5);
-        forward.insert("b".to_string(), 2.5);
-        let mut backward = BTreeMap::new();
-        backward.insert("b".to_string(), 2.5);
-        backward.insert("a".to_string(), 1.5);
-        assert_eq!(fingerprint(&forward), fingerprint(&backward));
-    }
-
-    #[test]
-    fn fingerprint_changes_when_a_value_changes() {
-        let mut before = BTreeMap::new();
-        before.insert("a".to_string(), 1.5);
-        let mut after = BTreeMap::new();
-        after.insert("a".to_string(), 1.500_001);
-        assert_ne!(fingerprint(&before), fingerprint(&after));
-    }
-
-    #[test]
-    fn fingerprint_changes_when_a_key_changes() {
-        let mut before = BTreeMap::new();
-        before.insert("a".to_string(), 1.5);
-        let mut after = BTreeMap::new();
-        after.insert("z".to_string(), 1.5);
-        assert_ne!(fingerprint(&before), fingerprint(&after));
     }
 
     fn map(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {

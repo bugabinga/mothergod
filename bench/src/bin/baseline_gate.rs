@@ -9,18 +9,9 @@
 //! digest `bench/baseline.json` commits (issue #1182), whatever the size:
 //! a refactor's "output unchanged" is this check's result, and an output
 //! change is declared by regenerating the baseline in the same PR, the
-//! rule `tests/golden.rs` sets for an encoder-only change. The digests stay
-//! out of the fingerprint below.
-//!
-//! `check` also verifies the held-out-final reports
-//! (`docs/benchmarks/canterbury.md`, `docs/benchmarks/silesia.md`) still
-//! embed this exact `bench/baseline.json`'s fingerprint (issue #327): a
-//! baseline change is a deliberate signal the codec's measured behavior
-//! changed, so those two reports (real Silesia/Canterbury numbers, not the
-//! synthetic gate cases here) can now be stale. A content check against the
-//! committed reports, not a regeneration: `finals_report`/`silesia_report`
-//! fetch real corpora over the network, too slow and non-hermetic for this
-//! required check to run on every PR.
+//! rule `tests/golden.rs` sets for an encoder-only change. The held-out
+//! finals reports are not checked here: their one writer is the publish PR
+//! cut from the pass on main (ADR-0076, issue #1437).
 //!
 //! `check` also gates decode speed (issue #907): [`mothergod_bench::speed`]
 //! measures the cost in calibration steps per decoded byte and fails past
@@ -50,12 +41,10 @@
 //! `... -- spread [--rows] < logs` (see [`SPREAD_USAGE`]).
 
 use mothergod_bench::baseline::{
-    Snapshot, deltas, fingerprint, format_baseline, hold_at_best, mean_delta, measure_all,
-    output_changes, parse_baseline, regressions,
+    Snapshot, deltas, format_baseline, hold_at_best, mean_delta, measure_all, output_changes,
+    parse_baseline, regressions,
 };
-use mothergod_bench::finals::stale_reason;
 use mothergod_bench::reference::cpu_model;
-use mothergod_bench::repo_root;
 use mothergod_bench::speed;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -67,33 +56,6 @@ use std::process::ExitCode;
 /// path is correct regardless of the caller's working directory.
 fn baseline_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("baseline.json")
-}
-
-/// Held-out-final reports that must track `bench/baseline.json`'s
-/// fingerprint (issue #327), repo-root-relative.
-const FINALS_REPORTS: [&str; 2] = [
-    "docs/benchmarks/canterbury.md",
-    "docs/benchmarks/silesia.md",
-];
-
-/// Reports a reason for every [`FINALS_REPORTS`] entry whose embedded
-/// fingerprint does not match `baseline`'s. A report this checkout does
-/// not have (unreadable) counts as stale too, named as such rather than
-/// silently skipped.
-fn stale_finals_reports(baseline: &std::collections::BTreeMap<String, f64>) -> Vec<String> {
-    let current = fingerprint(baseline);
-    FINALS_REPORTS
-        .iter()
-        .filter_map(|relative_path| {
-            let path = repo_root().join(relative_path);
-            match std::fs::read_to_string(&path) {
-                Ok(text) => {
-                    stale_reason(&text, &current).map(|reason| format!("{relative_path} {reason}"))
-                }
-                Err(err) => Some(format!("{relative_path}: failed to read: {err}")),
-            }
-        })
-        .collect()
 }
 
 /// Measures [`speed::decode_cost`] on the gate cases once, prints it under
@@ -159,8 +121,8 @@ fn delta_report(path: &Path, measured: &BTreeMap<String, f64>) -> Result<String,
     Ok(out)
 }
 
-/// The `check` mode: gates `measured` against the committed baseline, the
-/// decode speed and the finals reports, naming each failure and its fix.
+/// The `check` mode: gates `measured` against the committed baseline and the
+/// decode speed, naming each failure and its fix.
 fn check(measured: &Snapshot) -> ExitCode {
     let text = match std::fs::read_to_string(baseline_path()) {
         Ok(text) => text,
@@ -183,7 +145,6 @@ fn check(measured: &Snapshot) -> ExitCode {
         measure_decode_cost(),
         speed::MAX_SLOWDOWN,
     );
-    let stale = stale_finals_reports(&baseline.bpb());
 
     if !regs.is_empty() {
         eprintln!("bench baseline gate: {} case(s) regressed:", regs.len());
@@ -217,27 +178,10 @@ fn check(measured: &Snapshot) -> ExitCode {
     if let Some(slow) = &slow {
         report_slowdown(slow);
     }
-    if !stale.is_empty() {
-        eprintln!(
-            "bench baseline gate: {} held-out-final report(s) stale (issue #327):",
-            stale.len()
-        );
-        for reason in &stale {
-            eprintln!("  {reason}");
-        }
-        eprintln!(
-            "regenerate the stale report(s) in this PR, locally:\n\
-             \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report\n\
-             \x20 cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report\n\
-             or on a runner, silesia_report being about 35 minutes (docs/benchmarks/README.md):\n\
-             \x20 GH_TOKEN=\"$GH_WORKFLOW_TOKEN\" gh workflow run bench-report.yml --ref <branch>\n\
-             \x20 gh run download <run-id> -n bench-report"
-        );
-    }
 
-    if regs.is_empty() && changed.is_empty() && slow.is_none() && stale.is_empty() {
+    if regs.is_empty() && changed.is_empty() && slow.is_none() {
         println!(
-            "bench baseline gate: {} cases, no regression, output unchanged, decode speed within margin, finals reports fresh",
+            "bench baseline gate: {} cases, no regression, output unchanged, decode speed within margin",
             measured.cases.len()
         );
         ExitCode::SUCCESS
