@@ -98,6 +98,20 @@ test("a `Closes: #a, #b` line becomes one keyword per issue: GitHub links only t
   assert.doesNotMatch(single.stderr, /rewrote/);
 });
 
+test("a bulleted or quoted `Closes: #a, #b` line is rewritten too, its lead kept (#1406)", () => {
+  const body =
+    "Why.\n\n- Closes: #1, #2\n> Fixes #3, #4\n* Resolves: #5 and #6\n    Closes: #7, #8\nthe `Closes: #9, #10` form";
+  const { status, stderr, called } = run(["claude/x", "t"], { body });
+  assert.equal(status, 0);
+  assert.match(called.argv[7], /^- Closes #1, closes #2$/m);
+  assert.match(called.argv[7], /^> Fixes #3, fixes #4$/m);
+  assert.match(called.argv[7], /^\* Resolves #5, resolves #6$/m);
+  // Four spaces of indent make a code block, which GitHub does not link: untouched.
+  assert.match(called.argv[7], /^    Closes: #7, #8$/m);
+  assert.match(called.argv[7], /^the `Closes: #9, #10` form$/m);
+  assert.match(stderr, /rewrote 3 closing line/);
+});
+
 test("with no GH_TOKEN the session's own credential comes from gh auth token", () => {
   const { status, called } = run(["claude/x", "t"], { env: { GH_TOKEN: undefined } });
   assert.equal(status, 0);
