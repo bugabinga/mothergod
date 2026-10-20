@@ -139,6 +139,10 @@ const REACH_BLOCK_LEN: usize = 128 * 1024;
 /// and inside [`mothergod::lz::WIDE_WINDOW`] (`lz::Reach`).
 const REACH_DISTANCE: usize = mothergod::lz::WINDOW + REACH_BLOCK_LEN + 64 * 1024;
 
+/// Bytes in [`reach_case`]'s input: the distance to the second copy, then
+/// that copy. The baseline page quotes it beside [`CASE_LEN`].
+pub const REACH_CASE_LEN: usize = REACH_DISTANCE + REACH_BLOCK_LEN;
+
 /// The gate's one input past the standard match reach (issue #1434): a
 /// uniform-random block, [`crate::json_records`] filler, then the block
 /// again one standard reach, a block and some slack after its first copy.
@@ -577,9 +581,9 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, Entry, REACH_BLOCK_LEN, REACH_CASE_NAME, Snapshot,
-        TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a, format_baseline, hold_at_best,
-        mean_delta, output_changes, parse_baseline, reach_case, regressions,
+        BaselineParseError, CASE_LEN, Entry, REACH_BLOCK_LEN, REACH_CASE_LEN, REACH_CASE_NAME,
+        Snapshot, TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a, format_baseline,
+        hold_at_best, mean_delta, output_changes, parse_baseline, reach_case, regressions,
     };
     use std::collections::BTreeMap;
 
@@ -626,6 +630,7 @@ mod tests {
     #[test]
     fn reach_case_repeats_its_block_past_the_standard_reach_inside_the_wide_one() {
         let case = reach_case();
+        assert_eq!(case.data.len(), REACH_CASE_LEN);
         // The first copy starts at 0, so the second's offset is the distance.
         let distance = case.data.len() - REACH_BLOCK_LEN;
         assert_eq!(case.data[..REACH_BLOCK_LEN], case.data[distance..]);
