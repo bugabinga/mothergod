@@ -11,6 +11,10 @@
 // newer than B by date while B's pass is unpublished. The generator a
 // publish commit names in its subject, not the commit's date, decides.
 //
+// The third is #1381: a reports commit naming no generator is stale by
+// rule, so a hand edit of a report heals through the next publish instead
+// of reading fresh over an unpublished pass.
+//
 // `decide`, `generator` and `render` are pure by construction (no network:
 // `read` hands them facts) so these can exist. The end-to-end test puts a
 // stub `gh` on PATH that answers the reads from a table and writes the
@@ -127,6 +131,16 @@ test("generator reads the pass head from the publish subject this script dictate
   assert.equal(call("generator", REPORTS.subject), null);
   assert.equal(call("generator", "lz: regenerated at a glance, the parse"), null);
   assert.equal(call("generator", ""), null);
+});
+
+test("a reports commit naming no generator is stale by rule: dispatch without a covering pass, publish with one", () => {
+  const [state, reason] = call("decide", decision({ generated: null }));
+  assert.equal(state, "dispatch");
+  assert.match(reason, /no pass on main at or after it/);
+  assert.deepEqual(
+    call("decide", decision({ generated: null, newest: pass(), head: "2026-10-19T04:00:00Z", live: true })),
+    ["publish", null],
+  );
 });
 
 test("a pass whose head predates the affecting commit does not cover it", () => {
@@ -309,22 +323,27 @@ test("end to end: the generator named in the publish subject outranks the report
   assert.equal(readFileSync(join(root, "bench/baseline.json"), "utf8"), "new\n");
 });
 
-test("end to end: a reports commit naming no generator is its own, and a later one reads fresh", () => {
+test("end to end: a reports commit naming no generator is stale by rule even when newer, and --publish overwrites it", () => {
+  // The hand edit (09:00Z) is newer than the bench commit (03:38Z); before
+  // #1381 that read fresh and the pass's output sat unpublished.
   const root = scratchRepo();
-  const subject = "lz: widen the window and regenerate the reports (#1401)";
+  const subject = "docs: fix a heading in both benchmark reports (#1401)";
   const own = {
     ...answers,
     "path=docs/benchmarks/canterbury.md": commit(FRESH.sha, FRESH.date, subject),
     "path=docs/benchmarks/silesia.md": commit(FRESH.sha, FRESH.date, subject),
   };
   const run = withGh(own, ["--publish"], root);
-  assert.equal(run.status, 1);
+  assert.equal(run.status, 0, run.stderr);
   assert.match(
     run.stdout,
-    /^fresh: the reports \(f0e0d0c, generated at f0e0d0c 2026-10-19T09:00:00Z\) are at or after/,
+    /^publish 42: .*the reports \(f0e0d0c, naming no generator, stale by rule\) predate a23a7b0/,
   );
-  assert.match(run.stderr, /--publish needs state publish, not fresh/);
-  assert.equal(readFileSync(join(root, "docs/benchmarks/canterbury.md"), "utf8"), "old\n");
+  assert.match(
+    run.stdout,
+    /bench-report: publish \| affecting a23a7b0 .* \| reports f0e0d0c naming no generator, stale by rule \| pass 42 \| gh readable/,
+  );
+  assert.equal(readFileSync(join(root, "docs/benchmarks/canterbury.md"), "utf8"), "new\n");
 });
 
 test("end to end: the trigger paths come from main's workflow, and a workflow listing none is UNREADABLE", () => {

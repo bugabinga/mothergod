@@ -46,9 +46,10 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-      # write, not read: `gh workflow run bench-report.yml --ref <branch>`
-      # on GH_WORKFLOW_TOKEN is how a codec PR gets its finals reports
-      # regenerated, a pass no session can run in the foreground
+      # write, not read: `gh workflow run bench-report.yml --ref main` on
+      # GH_WORKFLOW_TOKEN is the `dispatch` state `.github/scripts/bench-report`
+      # prints, the healing for a finals pass that failed or expired
+      # unpublished, a pass no session can run in the foreground
       # (bench-report.yml's header, #1324).
       actions: write
     steps:
