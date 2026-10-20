@@ -6,12 +6,12 @@ like survey-due, stalled-prs and state.
 
 bench-report.yml regenerates the five published benchmark files on a runner
 and hands them back as an artifact (#1324); a seat downloads it and pushes
-the files on its own token. A codec PR owes that pass to the ratio gate,
-which pins compress() bytes and both reports' baseline fingerprint (#1254,
-#327), so that path forces itself. The other path had no owner: a change to
-the report binaries themselves (#1356, #1367, #1373 and #1376 added the
-competitor frontier to both reports) lands on main and the committed reports
-stay as they were, with nothing to say so. Two maintainer runs on 2026-10-19
+the files on its own token. The ratio gate pins compress() bytes and no
+longer demands the reports in a codec PR (ADR-0076, #1437): the pass on main
+after the merge is the one writer. A change to the report binaries themselves
+(#1356, #1367, #1373 and #1376 added the competitor frontier to both reports)
+lands on main the same way, and the committed reports stay as they were
+until a publish PR, with nothing else to say so. Two maintainer runs on 2026-10-19
 named the dispatch a blocker for want of a token the seat holds
 (agent-heartbeat.yml grants `actions: write` for exactly this). A duty two
 wakes apart, dispatch then download, held in a model's memory across runs,
@@ -28,11 +28,11 @@ not depend on the caller's checkout or branch:
                 (#1254) makes every PR whose compress() output moves on
                 the 11 cases commit a regenerated baseline, so that file's
                 merge is the codec's signal, about one a day against ten
-                src/ commits. The list was `bench/src` alone on the premise
-                that the gate demands the finals in the PR; it demands
-                them only when a bpb moves, and #1423 moved six Silesia
-                finals and no bpb (every digest, by the version byte), so
-                the finals sat stale behind a `fresh` read. What still
+                src/ commits. `check` does not read the reports (ADR-0076),
+                so the list is the only demand: the list was `bench/src`
+                alone, and #1423 moved six Silesia finals and no bpb
+                (every digest, by the version byte), so the finals sat
+                stale behind a `fresh` read. What still
                 escapes: a change that leaves all 11 digests intact while
                 moving larger inputs (#1434 gives the gate a long case),
                 and one that moves speed alone. One list to widen, with
@@ -43,8 +43,8 @@ not depend on the caller's checkout or branch:
     generated   the commit on main the committed reports were generated at.
                 A publish commit names it in its subject, the title this
                 script prints for the publish PR ("regenerated at <sha>");
-                a commit that names none, a codec PR that regenerated on
-                its own branch, is its own generator. The reports commit's
+                a commit that names none, a hand edit of a report, is its
+                own generator. The reports commit's
                 own date would not do: a publish PR for pass P can merge
                 after a later report-affecting commit B lands, and then
                 the reports are newer than B by date while B's pass is

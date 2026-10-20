@@ -28,7 +28,6 @@
 //! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint
 //! -- docs/benchmarks/silesia.md` to check).
 
-use mothergod_bench::baseline::load_and_fingerprint;
 use mothergod_bench::corpus::{ManifestEntry, decompress_silesia, fetch_and_cache, parse_manifest};
 use mothergod_bench::field::run_child_if_requested;
 use mothergod_bench::finals::{Provenance, Versions, format_report};
@@ -73,14 +72,6 @@ fn main() -> ExitCode {
         return code;
     }
     let root = repo_root();
-
-    let baseline_fingerprint = match load_and_fingerprint(&root) {
-        Ok(fingerprint) => fingerprint,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::FAILURE;
-        }
-    };
 
     let manifest_text = match std::fs::read_to_string(root.join("bench/corpus.toml")) {
         Ok(text) => text,
@@ -151,7 +142,6 @@ fn main() -> ExitCode {
         "silesia_report",
         &Provenance {
             versions: &versions,
-            baseline_fingerprint: &baseline_fingerprint,
             machine: &machine,
         },
     );

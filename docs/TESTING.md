@@ -382,16 +382,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `compress()`'s output over the 11 fixed inputs, so a refactor's
   "bitstream unchanged" is a green check and an output change is declared
   by `baseline_gate -- write` in the same PR, the rule an encoder-only
-  change already follows for `tests/golden.rs`. The digests stay out of
-  the fingerprint below.
-- The same `baseline_gate check` invocation also fails when
-  `docs/benchmarks/canterbury.md` or `docs/benchmarks/silesia.md` embeds a
-  `bench/baseline.json` fingerprint (`crate::baseline::fingerprint`) that
-  no longer matches the committed file (issue #327): a baseline change is
-  a deliberate signal the codec's measured behavior changed, so the
-  held-out finals numbers can now be stale. A content check against the
-  committed reports, not a regeneration: those two reports fetch real
-  corpora over the network, too slow and non-hermetic to run on every PR.
+  change already follows for `tests/golden.rs`.
+- The held-out finals reports (`docs/benchmarks/canterbury.md`,
+  `docs/benchmarks/silesia.md`) are not checked by `baseline_gate`: they
+  fetch real corpora over the network, too slow and non-hermetic for every
+  PR, and their one writer is the publish PR cut from the pass on main
+  (ADR-0076, issue #1437).
 
 ## 8. Allocation torture (landed, #453)
 
