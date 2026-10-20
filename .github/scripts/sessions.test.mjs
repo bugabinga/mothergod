@@ -131,6 +131,32 @@ test("success:false from the API is unreadable too, with its message", async () 
   });
 });
 
+// 2026-10-20: two director wakes in a row typed a name the schema lacks and read
+// UNREADABLE, the word for a store that is down. The refusal is the caller's
+// and carries the tables, so the next statement is typed from the screen.
+test("a statement the store refuses prints the tables and exits 2, never UNREADABLE", async () => {
+  await withStub(
+    {
+      status: 400,
+      payload: { success: false, errors: [{ code: 7500, message: "no such table: runs: SQLITE_ERROR" }] },
+    },
+    async (base) => {
+      const r = await run(["sql", "SELECT turns FROM runs"], { D1_API_BASE: base });
+      assert.equal(r.code, 2, r.out);
+      assert.match(r.out, /statement refused: .*no such table: runs/);
+      assert.doesNotMatch(r.out, /UNREADABLE/);
+      assert.match(r.out, /tables, from infra\/sessions\/schema\.sql/);
+      assert.match(r.out, /^    sessions\(run_id, attempt, at, role, event, .*, response_bytes, writes\)$/m);
+      assert.match(
+        r.out,
+        /^    guard\(run_id, attempt, at, role, event, discretionary, decision, reason, rung, effort, projection\)$/m,
+      );
+      assert.match(r.out, /^    walls\(run_id, attempt, tool, wall\)$/m);
+      assert.doesNotMatch(r.out, /sessions_role_at/);
+    },
+  );
+});
+
 test("no token is unreadable, not empty", async () => {
   const r = await run(["sql", "SELECT 1"], { CLOUDFLARE_API_TOKEN: "" });
   assert.notEqual(r.code, 0);
