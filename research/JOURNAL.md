@@ -2891,7 +2891,9 @@ record.
   reach and the encoder keeps the wide parse only when smaller, wired
   (`FORMAT_VERSION` 17, ADR-0075). Twenty-second slice, S2-A128: the four
   finals S2-A127 left unread, all shrink and all seven losses to zstd -19
-  remain; full record in S2-A128's own entry.
+  remain; full record in S2-A128's own entry. Twenty-third slice, S2-A129:
+  the wide trial started early on the idle trial thread, output bytes
+  unchanged, encode 8% to 23% faster on the files measured.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9119,3 +9121,44 @@ record.
   code's ceiling, the wide trial beside the narrow
   ones on idle cores, `baseline_gate -- speed` on the wide frame (CI's
   `ratio` and speed gates read it). `research/progress.jsonl` it205.
+
+- S2-A129 | ACCEPTED | Issue #1448, the wide trial beside the narrow ones.
+  Hypothesis: a trial thread that finds no candidate left while another
+  trial still runs, starting the wide parse of the smallest body finished so
+  far, cuts the wall-clock of a file over 1 MiB with output bytes unchanged
+  and the peak under the 1 GiB bound, because that thread would otherwise
+  idle until the winner is known. | Mechanism: S2-A127's wide parse needs
+  the winner, so it ran after every trial and one of two cores idled for
+  its whole length. A dry thread cannot know the winner either, but the
+  smallest body so far is the winner whenever the running trial loses, and
+  then the wide body is ready when the narrow search ends. A wrong guess
+  costs the idle thread's time only: the real wide trial starts at once on
+  the caller beside the wasted one, so live working sets stay at the
+  workers' count, and the payload is the one a serial search writes because
+  the guess is only used when it is the winner. No thread starts when every
+  trial is finished, so one worker is the old path. | Measured, release
+  build, AMD EPYC 9V45 4 logical cores runner (not S2-A128's EPYC 7763; this
+  runner encodes `dickens` in 326 s where S2-A127 saw 45 s, so the ratios
+  carry and the seconds do not), `mothergod` from stdin, wall-clock and peak
+  RSS from `/usr/bin/time`, main at `ead0272` against the branch. A
+  3,000,000-byte prefix of Silesia `dickens`, two runs each interleaved: main
+  90.68 and 91.17 s, branch 84.03 and 84.18 s (-7.5%); the four trials took
+  24.8, 29.1, 28.7 and 33.2 s and the wide parse 28.9 s, so by those times
+  one thread runs dry 9 s before the other, which is the 9 s saved. Whole files at the `bench/corpus.toml` pins (SHA-256
+  verified), one run each: `dickens` 325.88 to 299.25 s (-8%), 543,604 to
+  546,692 KiB; `reymont` 250.60 to 193.60 s (-23%), 353,760 to 400,680 KiB.
+  The first 16,777,215 bytes of `webster`, one byte under a block: 479.32
+  to 417.62 s (-13%), 877,020 to 877,088 KiB, under the 1,048,576 KiB bound.
+  Every output is `cmp`-identical to main's and the decode of the branch's
+  equals the input. | Verdict: **accepted**. Output bytes are unchanged by
+  construction and by `cmp`, the peak stays under the bound, and none of
+  the four inputs slows. The gain is what idle time the schedule leaves, not the whole 1.24x
+  to 1.52x: with four equal trials on two threads neither is ever dry before
+  the other, and the wide parse still runs alone on one core. Hiding it
+  there needs a guess before the narrow trials end, a third working set
+  against the 1 GiB bound, or a cheaper wide parse. | **Not measured:** the
+  other Silesia files, how often the guess is wrong (the payload cannot show
+  it), the tail block of a stream past 16 MiB, one run per file so the
+  seconds are inside run-to-run noise on a shared runner, and `reymont`'s
+  rise of 47 MB, which the bound permits and no cause was sought for.
+  `research/progress.jsonl` it206.
