@@ -288,6 +288,15 @@ test("cite lists open issues before closed ones, newest first within each", () =
   assert.deepEqual(got, ["#1069 open", "#980 open", "#1013 closed 2026-10-10"]);
 });
 
+test("names_workflow wants the name whole: deny-ci-background names no ci", () => {
+  assert.equal(call("names_workflow", ["ci: worker red on main", "ci"]), true);
+  assert.equal(call("names_workflow", ["`ci` red at 7c97e01", "ci"]), true);
+  assert.equal(call("names_workflow", ["deny-ci-background and deny-review-recompute match prose", "ci"]), false);
+  assert.equal(call("names_workflow", ["agent-ci-x red", "ci"]), false);
+  assert.equal(call("names_workflow", ["cia", "ci"]), false);
+  assert.equal(call("names_workflow", [null, "ci"]), false);
+});
+
 test("seat_of reads the role footer and falls back to the login", () => {
   const footer = "Shipped it.\n\n---\n_maintainer · [Claude Code](https://claude.ai/code)_";
   assert.equal(call("seat_of", [{ body: footer, user: { login: "github-actions" } }]), "maintainer");
@@ -347,7 +356,9 @@ test("end to end: the checks are read per workflow, a red is cited, the rest cou
           run(2, "2026-10-15T22:00:00Z", "success", "push"),
         ],
       },
-      "search/issues": { items: [{ number: 1013, state: "closed", closed_at: "2026-10-10T12:23:33Z" }] },
+      "search/issues": {
+        items: [{ number: 1013, title: "monster: BSD lane red", state: "closed", closed_at: "2026-10-10T12:23:33Z" }],
+      },
       "pr list": [{
         number: 7,
         title: "a: b",
@@ -471,6 +482,46 @@ test("end to end: a feature issue titled with the workflow's name does not file 
   assert.match(proc.stdout, /monster  failure  \d+d \(2026-10-10, schedule\)  unfiled: a bug issue this run/);
   assert.doesNotMatch(proc.stdout, /#980/);
   assert.match(proc.stdout, /checks 2 \(red 1, unfiled 1, unreadable 0\)/);
+});
+
+// GitHub tokenises `deny-ci-background` into a hit for `in:title ci`; the
+// red read as filed by an issue about a hook, and the footer said unfiled 0
+// on a red nobody had filed (#1457). The filter is on the title, in Python.
+test("end to end: a bug titled with a hyphenated word holding the name does not file the red", () => {
+  const run = {
+    id: 1,
+    created_at: "2026-10-20T09:46:00Z",
+    conclusion: "failure",
+    event: "push",
+    html_url: "https://github.com/o/r/actions/runs/1",
+  };
+  const hook = { number: 1377, title: "deny-ci-background and deny-review-recompute match prose", state: "open" };
+  const red = { number: 1454, title: "worker red on main: ci fails at 7c97e01", state: "open" };
+  const board = (items) =>
+    withGh(
+      {
+        "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
+        "workflows/11/runs": { workflow_runs: [] },
+        "workflows/12/runs": { workflow_runs: [run] },
+        "label:bug": { items },
+        "pr list": [],
+        "issue list": [ISSUE],
+        "issues/3/comments": [],
+        "issues/3": { comments: 0 },
+        "commits?": [],
+      },
+      ["--since", "2026-10-15T20:11:13Z"],
+    );
+  const only = board([hook]);
+  assert.equal(only.status, 0, only.stderr);
+  assert.match(only.stdout, /ci  failure  \d+d \(2026-10-20, push\)  unfiled: a bug issue this run/);
+  assert.doesNotMatch(only.stdout, /#1377/);
+  assert.match(only.stdout, /checks 2 \(red 1, unfiled 1, unreadable 0\)/);
+  const both = board([hook, red]);
+  assert.equal(both.status, 0, both.stderr);
+  assert.match(both.stdout, /ci  failure  \d+d \(2026-10-20, push\)  #1454 open/);
+  assert.doesNotMatch(both.stdout, /#1377/);
+  assert.match(both.stdout, /checks 2 \(red 1, unfiled 0, unreadable 0\)/);
 });
 
 test("end to end: a PR-branch failure is never read for a workflow with no run on main", () => {

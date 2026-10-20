@@ -22,7 +22,8 @@ Facts, in the order the prompt names them:
                concluded. `skipped` and `cancelled` are routine, not
                conclusions: bot events the actor filter rejects, and the
                debounce (ADR-0014). A red names the `bug` issues whose TITLE
-               carries the workflow name and that moved since the run: an
+               carries the workflow name whole (`deny-ci-background` names no
+               `ci`, #1457) and that moved since the run: an
                open one is the filed fix, a closed one is a fix that landed
                and waits on the next run, recheck's after a push to main
                or the cron's (#1069), none is `unfiled`, and an
@@ -170,6 +171,16 @@ def cite(items):
     return rows
 
 
+def names_workflow(title, name):
+    """True when `title` carries `name` whole: `deny-ci-background` names no `ci`.
+
+    GitHub's title search tokenises on hyphens, so `in:title ci` returned a
+    bug about the deny-ci-background hook and a red nobody had filed printed
+    as filed (#1457). The tokeniser cannot be told about hyphens; this can.
+    """
+    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", title or "") is not None
+
+
 def read_checks(repo, alarm, now):
     """Fact 1: the newest concluded run on main per watched workflow."""
     names, error = watched(alarm)
@@ -213,7 +224,9 @@ def read_checks(repo, alarm, now):
                 "-f", f"q=repo:{repo} is:issue label:bug in:title {name} updated:>={row['created']}",
                 "-f", "per_page=10",
             )
-            row["cited"] = None if error else cite(found.get("items", []))
+            row["cited"] = None if error else cite(
+                [i for i in found.get("items", []) if names_workflow(i.get("title"), name)]
+            )
         rows.append(row)
     unfiled = sum(1 for r in rows if r["conclusion"] not in (None, "success") and r["cited"] == [])
     return {"error": None, "rows": rows, "unfiled": unfiled}
