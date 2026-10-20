@@ -190,9 +190,63 @@ test("--wait: an agent-approved applied before this head's review run started is
   assert.equal(status, 4);
   assert.match(
     stderr,
-    /applied at 2026-10-09T07:30:00Z, before this head's review run started at 2026-10-09T08:00:00Z/,
+    /applied at 2026-10-09T07:30:00Z, before this head's review round started at 2026-10-09T08:00:00Z/,
   );
   assert.deepEqual(merges, []);
+});
+
+test("--wait: a second review run on the same head after the PASS is the same round, so it lands", () => {
+  // PR #1243 (#1301): round 1 posted its PASS at 08:00 and the label event
+  // followed at 08:01:30; an `edited` event raised a second run on the same
+  // head at 08:02 that skipped the model (#1246) and concluded success. The
+  // round began when its first run did, so the label postdates it. Reading
+  // the newest run held this head at exit 4 with every gate green.
+  const { status, stdout, stderr, merges } = run(WAIT, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      {
+        match: "check-runs",
+        responses: [
+          runs(
+            ["review", "completed", "success", "2026-10-09T08:00:00Z"],
+            ["review", "completed", "success", "2026-10-09T08:02:00Z"],
+            ...GREEN_GATES,
+          ),
+        ],
+      },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout + stderr);
+  assert.match(stdout, /after the review started 2026-10-09T08:00:00Z/);
+  assert.equal(merges.length, 1);
+});
+
+test("--wait: a queued re-read with no start stamp beside a concluded round does not hold it", () => {
+  // The null stamp belongs to a run that has not started; the round's start
+  // is its first run's, and only a head with no stamped run at all is held.
+  const { status, stdout, stderr, merges } = run(WAIT, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      {
+        match: "check-runs",
+        responses: [
+          runs(
+            ["review", "completed", "success", "2026-10-09T08:00:00Z"],
+            ["review", "queued", null, null],
+            ...GREEN_GATES,
+          ),
+        ],
+      },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout + stderr);
+  assert.equal(merges.length, 1);
 });
 
 test("--wait: a concluded review run with a null started_at is held, not merged", () => {
@@ -209,7 +263,7 @@ test("--wait: a concluded review run with a null started_at is held, not merged"
     ],
   });
   assert.equal(status, 4);
-  assert.match(stderr, /review run on abc123456789 concluded with no started_at stamp/);
+  assert.match(stderr, /review round on abc123456789 concluded with no started_at stamp/);
   assert.deepEqual(merges, []);
 });
 

@@ -123,7 +123,7 @@ import subprocess
 import sys
 import time
 
-from verdict import approved_at
+from verdict import approved_at, round_started
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 # The reviewer's typed verdict (CLAUDE.md "Issue/PR conventions"): exactly
@@ -207,13 +207,20 @@ def required_contexts():
     return contexts
 
 
-def latest_runs(sha):
-    """Newest check run per name on this SHA. A re-run leaves its predecessor
-    in the rollup (PR #377 carried two `review` runs), so the latest start
-    wins."""
+def check_runs(sha):
+    """Every check run on this SHA, re-runs beside the runs they replaced."""
+    payload = gh_json((f"repos/{REPO}/commits/{sha}/check-runs?per_page=100",))
+    return payload.get("check_runs", [])
+
+
+def latest_runs(runs):
+    """Newest check run per name. A re-run leaves its predecessor in the
+    rollup (PR #377 carried two `review` runs), so the latest start wins: a
+    gate's verdict is its newest run's, and so is a review's status. The
+    round's START is its first run's (verdict.round_started), read from the
+    same list."""
     latest = {}
-    runs = gh_json((f"repos/{REPO}/commits/{sha}/check-runs?per_page=100",))
-    for run in runs.get("check_runs", []):
+    for run in runs:
         seen = latest.get(run["name"])
         if seen is None or (run["started_at"] or "") > (seen["started_at"] or ""):
             latest[run["name"]] = run
@@ -272,6 +279,7 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
     review = "unread"
     labels = []
     pending = []
+    runs = []
     # True after a poll whose label-event read failed, so the deadline names
     # the cause instead of "gates pending none" (#968).
     unread = False
@@ -285,7 +293,8 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
             if head != sha:
                 die(f"head moved past the pinned {sha[:12]} to {head[:12]}; "
                     "re-read the PR before deciding again")
-            latest = latest_runs(sha)
+            runs = check_runs(sha)
+            latest = latest_runs(runs)
         except ApiError as err:
             note(f"read failed ({err}); retrying at the next poll")
             info = latest = None
@@ -313,24 +322,27 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
                     # Both stamps are GitHub's ISO-8601 UTC strings, so the
                     # string order is the time order (stalled-prs holds the
                     # same comparison). A None label event is an unread
-                    # timeline, retried; a None start on a concluded run is
-                    # final, because polling cannot grow a stamp a finished
-                    # run never got, and `labeled < ""` is False for every
-                    # stamp, which is the fail-open #967 closed.
+                    # timeline, retried; a None round start, no review run
+                    # on the head with a stamp, is final, because polling
+                    # cannot grow a stamp a finished run never got, and
+                    # `labeled < ""` is False for every stamp, which is the
+                    # fail-open #967 closed.
                     labeled = approved_at(pr, REPO)
-                    started = run.get("started_at")
+                    started = round_started(
+                        r["started_at"] for r in runs if r["name"] == REVIEW_CHECK)
                     unread = labeled is None
                     if unread:
                         note("the agent-approved label event did not read; "
                              "retrying at the next poll")
                     elif started is None:
-                        die(f"the review run on {sha[:12]} concluded with no "
-                            "started_at stamp, so agent-approved cannot be placed "
+                        die(f"the review round on {sha[:12]} concluded with no "
+                            "started_at stamp on any of its runs, so agent-approved "
+                            "cannot be placed "
                             "before or after it (stalled-prs holds on the same "
                             "test); read the round, then merge without --wait", 4)
                     elif labeled < started:
                         die(f"agent-approved on #{pr} was applied at {labeled}, "
-                            f"before this head's review run started at {started}: "
+                            f"before this head's review round started at {started}: "
                             "the label survived a push and a paused or empty round "
                             "left it (stalled-prs holds on the same test); read the "
                             "round, then merge without --wait", 4)
@@ -514,7 +526,7 @@ def main():
             "this merge is the BDFL's, on the admin PAT "
             "(agents/GOVERNANCE.md, Merging)")
     try:
-        pending = unmet_gates(latest_runs(sha), required_contexts())
+        pending = unmet_gates(latest_runs(check_runs(sha)), required_contexts())
     except ApiError as err:
         die(f"cannot read the gates on {sha[:12]} ({err}); refusing to escalate "
             "without proof they are green")

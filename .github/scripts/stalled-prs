@@ -152,7 +152,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-from verdict import approved_at
+from verdict import approved_at, round_started
 
 from anchor import STAMP, gh, iso, stamp_to_dt
 
@@ -238,14 +238,17 @@ def latest(rollup, key):
     return newest
 
 
-def finding(kind, detail, rescue, review=None, ended=None):
-    """One reported stall. `review` carries the head's review-check timestamps
-    and `ended` when a red gate finished, for the kinds --rescue can act on,
-    so plan() needs no second rollup read."""
+def finding(kind, detail, rescue, review=None, ended=None, started=None):
+    """One reported stall. `review` is the head's newest review run and
+    `started` the round's start, its earliest review run's
+    (verdict.round_started): the round ended when its newest run did, which
+    times the refire grace, and began when its first did, which places the
+    approval for the land arm. `ended` is when a red gate finished, for the
+    refresh arm. All read here, so plan() needs no second rollup read."""
     found = {"kind": kind, "detail": detail, "rescue": rescue}
     if review is not None:
         found["review"] = {
-            "startedAt": review.get("startedAt"),
+            "startedAt": started,
             "completedAt": review.get("completedAt"),
         }
     if ended is not None:
@@ -365,6 +368,16 @@ def classify(pr, now, drift=None, files=None):
     review = by_job.get(REVIEW_CHECK)
     if review is None or review["status"] != "COMPLETED":
         return None
+    # The round began at the head's first review run, not its newest: a PASS
+    # and the `edited` run that skips the model after it (#1246) are one
+    # round, and the newest start held #1243 at a label event sixteen
+    # seconds older than the re-read (#1301).
+    started = round_started(
+        check.get("startedAt")
+        for check in rollup
+        if check.get("__typename") == "CheckRun"
+        and (check.get("workflowName"), check["name"]) == REVIEW_CHECK
+    )
 
     # A dead review outranks any verdict label, checked before the labels
     # because a dying session can half-apply its verdict: PR #516's review
@@ -381,6 +394,7 @@ def classify(pr, now, drift=None, files=None):
             f"`gh pr reopen {pr['number']}`. agent-review has no "
             "workflow_dispatch, so reopen is the only refire",
             review,
+            started=started,
         )
 
     if not labels & VERDICT_LABELS:
@@ -393,6 +407,7 @@ def classify(pr, now, drift=None, files=None):
                 f"{review.get('detailsUrl', 'the review run')} first, if one "
                 "duplicate review is worth the read",
                 review,
+                started=started,
             )
         return None
 
@@ -403,6 +418,7 @@ def classify(pr, now, drift=None, files=None):
             "GOVERNANCE 'Stalled auto-merge', second signature: "
             f"merge-pr {pr['number']} --sha <reviewed-head>",
             review,
+            started=started,
         )
     return None
 
