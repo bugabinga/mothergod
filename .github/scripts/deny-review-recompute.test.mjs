@@ -79,6 +79,10 @@ const denied = [
     "gh-comment 1 <<'EOF'\nverdict\nEOF\ncargo x check",
     "a recompute after the terminator",
   ],
+  [
+    "gh-comment 1 <<EOF\nthe `cargo x check` gate\nEOF",
+    "an unquoted body is expanded by bash, backticks run (#1377)",
+  ],
 ];
 
 const allowed = [

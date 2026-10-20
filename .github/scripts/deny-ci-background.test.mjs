@@ -139,7 +139,7 @@ test("a heredoc fed to a posting script is prose; fed to a shell it runs (#1377)
   // the turn and a reword. The posting scripts never execute stdin.
   const posted = [
     ".github/scripts/gh-comment 1 <<'EOF'\nThe old chain was fmt & clippy.\nEOF",
-    "tg-send <<EOF\nfish & chips\nEOF",
+    "tg-send <<\"EOF\"\nfish & chips\nEOF",
     "timeout 60 .github/scripts/gh-pr claude/x \"title\" <<'EOF'\nbody with setsid -f in it\nEOF",
     "push-branch claude/x src/lz.rs <<'EOF'\nlz: drop the coproc mention\nEOF",
   ];
@@ -149,13 +149,15 @@ test("a heredoc fed to a posting script is prose; fed to a shell it runs (#1377)
   }
   // Every other receiver keeps its body: a shell runs it, a wrapper
   // around a shell still ends in one, and a pipe's first command reads
-  // the body before the poster does. Unknown fails closed (#355).
+  // the body before the poster does. Unknown fails closed (#355). An
+  // unquoted delimiter keeps its body too: bash expands it first.
   const live = [
     "bash <<'EOF'\ncargo test &\nEOF",
     "timeout 600 bash <<EOF\ncargo test &\nEOF",
     "cat <<EOF | gh-comment 1\nfish & chips\nEOF",
-    "gh-comment 1 <<EOF\nprose\nEOF\nsleep 100 &",
-    "gh-comment 1 <<EOF &\nprose\nEOF",
+    "gh-comment 1 <<'EOF'\nprose\nEOF\nsleep 100 &",
+    "gh-comment 1 <<'EOF' &\nprose\nEOF",
+    "gh-comment 1 <<EOF\nfish & chips\nEOF",
   ];
   for (const command of live) {
     const call = { tool_name: "Bash", tool_input: { command } };

@@ -68,13 +68,14 @@ DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 # bluntness is what catches a live idiom inside `sh -c '...'`, after
 # `eval`, or in an `xargs -I{}` template; #355's review showed any
 # anchoring cheap enough for a hook opens those holes. One body is
-# dropped before the scan: a heredoc fed to a posting script
-# (`heredoc.POSTING`), which posts or commits what it reads and never
-# runs it, so a `&` in a verdict or a commit message is prose by
+# dropped before the scan: a quoted-delimiter heredoc fed to a posting
+# script (`heredoc.POSTING`), which posts or commits what it reads and
+# never runs it, so a `&` in a verdict or a commit message is prose by
 # construction; that cost was 45 rewritten turns a week (#1377). Any
 # other receiver keeps its body, `timeout 600 bash <<EOF` included:
 # the list names what never executes, so an unknown reader fails
-# closed. Each entry: (pattern, step-summary reason).
+# closed; so does an unquoted delimiter, whose body bash expands before
+# any reader sees it. Each entry: (pattern, step-summary reason).
 SHELL_DETACH = (
     # Bare `&` control operator. The lookbehind clears `&&`, `>&`,
     # `<&`, `|&`; the lookahead clears `&&`, `&>`, and ampersands

@@ -48,10 +48,12 @@ globals (`--color`, `--config`, `-C`, `-Z`, the closed set per `cargo
 --help`) consume their value token too (#333 round seven). A
 space-valued global this list does not know fails open, the accepted
 posture for a guard aimed at a forgetful model, not an adversary. A
-heredoc body fed to a posting script leaves the string before any of
-this (`heredoc.py`, #1377): a verdict that says `cargo x check` was not
-run is prose, and 22 reviewer runs a week lost a turn to it; a body fed
-to anything else, a shell or a wrapper around one, stays in.
+quoted-delimiter heredoc body fed to a posting script leaves the string
+before any of this (`heredoc.py`, #1377): a verdict that says `cargo x
+check` was not run is prose, and 22 reviewer runs a week lost a turn to
+it; a body fed to anything else, a shell or a wrapper around one, stays
+in, and so does an unquoted body, which bash expands before the poster
+reads it.
 Scoped runs are the reviewer's real job and stay
 allowed: `cargo test -p <crate>`, `cargo x test -- <path>`,
 feature-flagged builds CI does not cover, and any segment carrying

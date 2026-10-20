@@ -10,10 +10,16 @@ sentence and posted again: 45 denied turns a week across the reviewer and
 three other seats (#1377).
 
 A heredoc body is data for the command that reads it. When that command
-is one of this repo's posting scripts (`POSTING`), the data is posted or
-committed, never executed, and nothing in it can run or detach. So the
-body leaves the string before the scan, and the rest of the command, the
-operator line and whatever follows the terminator, stays in it.
+is one of this repo's posting scripts (`POSTING`) and the delimiter is
+quoted, the data is posted or committed, never executed, and nothing in
+it can run or detach. So the body leaves the string before the scan, and
+the rest of the command, the operator line and whatever follows the
+terminator, stays in it.
+
+An unquoted delimiter keeps its body: bash expands `$(...)` and backticks
+in that body before the posting script reads a byte, so the receiver does
+not make it inert. Prose naming a gate in backticks is the common case,
+and it runs. The deny messages tell a seat to write `<<'EOF'`.
 
 Every other receiver keeps its body. `bash <<EOF` runs the body, and so
 does `timeout 600 bash <<EOF` or `env sh <<EOF`, which is why the list is
@@ -40,7 +46,8 @@ import re
 POSTING = frozenset({"gh-comment", "gh-pr", "tg-send", "push-branch", "post-verdict"})
 
 # `<<` or `<<-`, not part of `<<<`, then the delimiter word: single-quoted,
-# double-quoted, or bare (a leading backslash quotes it too).
+# double-quoted, or bare (a leading backslash quotes it too). A bare word
+# with no backslash is the unquoted form, whose body bash expands.
 OPERATOR = re.compile(
     r"(?<!<)<<(?!<)(-?)\s*(?:'([^']*)'|\"([^\"]*)\"|(\\?[^\s;&|<>()]+))"
 )
@@ -64,7 +71,11 @@ def without_posted_bodies(command: str) -> str:
         kept.append(line)
         i += 1
         for match in OPERATOR.finditer(line):
-            delimiter = match.group(2) or match.group(3) or match.group(4).lstrip("\\")
+            single, double, bare = match.group(2, 3, 4)
+            quoted = bare is None or bare.startswith("\\")
+            delimiter = bare.lstrip("\\") if bare is not None else (
+                single if single is not None else double
+            )
             strip_tabs = match.group(1) == "-"
             end = i
             while end < len(lines):
@@ -72,7 +83,7 @@ def without_posted_bodies(command: str) -> str:
                 if candidate == delimiter:
                     break
                 end += 1
-            if receiver(line[: match.start()]) not in POSTING:
+            if not quoted or receiver(line[: match.start()]) not in POSTING:
                 kept.extend(lines[i:end])
             if end < len(lines):
                 kept.append(lines[end])
