@@ -13,19 +13,32 @@ import { test } from "node:test";
 
 const script = join(new URL(".", import.meta.url).pathname, "gh-comment");
 
-function run(args, { body = "hello", env = {} } = {}) {
+// The stub records every gh call in order. `issue list`, which `--new` sends
+// first (#1374), answers with `issues` as JSON, or exits 1 when `issues` is
+// "FAIL"; every other verb prints a URL. `called` is the last call, the one
+// that posts, so the assertions written before the list existed still read
+// the create or the comment.
+function run(args, { body = "hello", env = {}, issues = [] } = {}) {
   const stub = mkdtempSync(join(tmpdir(), "gh-comment-"));
-  const log = join(stub, "argv.json");
+  const log = join(stub, "calls.json");
   const recorder = join(stub, "record.mjs");
   writeFileSync(
     recorder,
-    `import { writeFileSync } from "node:fs";
-writeFileSync(${JSON.stringify(log)}, JSON.stringify({
-  argv: process.argv.slice(2),
-  token: process.env.GH_TOKEN ?? null,
-  admin: process.env.GH_ADMIN_TOKEN ?? null,
-}));
-console.log("https://github.com/o/r/issues/1");
+    `import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const log = ${JSON.stringify(log)};
+const calls = existsSync(log) ? JSON.parse(readFileSync(log, "utf8")) : [];
+const argv = process.argv.slice(2);
+calls.push({ argv, token: process.env.GH_TOKEN ?? null, admin: process.env.GH_ADMIN_TOKEN ?? null });
+writeFileSync(log, JSON.stringify(calls));
+if (argv.slice(0, 2).join(" ") === "issue list") {
+  if (process.env.GH_STUB_ISSUES === "FAIL") {
+    console.error("HTTP 500: edge down");
+    process.exit(1);
+  }
+  console.log(process.env.GH_STUB_ISSUES);
+} else {
+  console.log("https://github.com/o/r/issues/1");
+}
 `,
   );
   writeFileSync(join(stub, "gh"), `#!/bin/sh\nexec node ${recorder} "$@"\n`);
@@ -38,16 +51,18 @@ console.log("https://github.com/o/r/issues/1");
       ROLE: "bdfl",
       GH_WORKFLOW_TOKEN: "workflow-token",
       GH_ADMIN_TOKEN: "admin-token",
+      GH_STUB_ISSUES: issues === "FAIL" ? "FAIL" : JSON.stringify(issues),
       ...env,
     },
   });
-  let called = null;
+  let calls = [];
   try {
-    called = JSON.parse(readFileSync(log, "utf8"));
+    calls = JSON.parse(readFileSync(log, "utf8"));
   } catch {
     // gh was never reached; the refusal tests assert exactly that.
   }
-  return { ...proc, called };
+  const verbs = calls.map((c) => c.argv.slice(0, 2).join(" "));
+  return { ...proc, called: calls.at(-1) ?? null, calls, verbs };
 }
 
 test("--new creates an issue with the labels, the footer, and the workflow token", () => {
@@ -59,6 +74,88 @@ test("--new creates an issue with the labels, the footer, and the workflow token
   assert.equal(called.token, "workflow-token");
   // The admin PAT is stripped, not merely unused: an ambient one is the bug.
   assert.equal(called.admin, null);
+});
+
+// Issue #1374: the deslopper filed one decodes_incrementally finding four
+// times in 40 hours, and each copy cost a triage. The guard holds for every
+// seat because it is in the one path an issue is filed through, not in a
+// prompt each seat has to remember.
+test("--new refuses a title whose identifier an open issue's title already names, and lists it", () => {
+  const issues = [
+    { number: 1281, title: "decodes_incrementally's matches! drifts silently when a Candidate variant is added" },
+    { number: 1326, title: "gzip reference size varies by a few bytes between runs" },
+  ];
+  const { status, stderr, verbs } = run(
+    [
+      "--new",
+      "lib.rs decodes_incrementally restates codec::decode_to_writer's streaming dispatch",
+      "--label",
+      "product",
+    ],
+    { issues },
+  );
+  assert.equal(status, 1);
+  assert.match(stderr, /already names `decodes_incrementally`:/);
+  assert.match(stderr, /#1281  decodes_incrementally's matches!/);
+  assert.doesNotMatch(stderr, /#1326/);
+  assert.match(stderr, /--anyway/);
+  assert.deepEqual(verbs, ["issue list"]);
+});
+
+test("--anyway files past the hit without reading the list, on the same credential", () => {
+  const issues = [{ number: 1281, title: "decodes_incrementally's matches! drifts silently" }];
+  const { status, verbs, called } = run(
+    ["--new", "decodes_incrementally restates the dispatch", "--anyway"],
+    { issues },
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(verbs, ["issue create"]);
+  assert.equal(called.token, "workflow-token");
+});
+
+test("a shared file name, script name or type name is an area, not a duplicate", () => {
+  const issues = [
+    { number: 1354, title: "literal.rs ALPHABET_U32 restates 256 beside a derived ALPHABET" },
+    { number: 1418, title: "bench-report --publish leaves the body's moved columns to the seat" },
+  ];
+  const { status, stderr, verbs } = run(
+    ["--new", "literal.rs and codec.rs: bench-report helpers shared by the PPM expert have one caller"],
+    { issues },
+  );
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(verbs, ["issue list", "issue create"]);
+});
+
+test("a :: path meets its bare segment, a backticked token meets itself, a flag meets a flag", () => {
+  const issues = [
+    { number: 1297, title: "codec::decode_to_writer restates the dispatch" },
+    { number: 1301, title: "merge-pr --wait reads the latest review run on a head" },
+    { number: 1192, title: "`mutants` is advisory and pending" },
+  ];
+  const titles = [
+    "decode_to_writer's doc lumps Stored with Transpose",
+    "merge-pr --wait exits 4 on every PR",
+    "the `mutants` job never ends",
+  ];
+  for (const title of titles) {
+    const { status, stderr } = run(["--new", title], { issues });
+    assert.equal(status, 1, title);
+    assert.match(stderr, /already names/, title);
+  }
+});
+
+test("an open-issue list gh cannot read files with a warning, never silently and never a refusal", () => {
+  const { status, stderr, verbs } = run(["--new", "decodes_incrementally restates the dispatch"], { issues: "FAIL" });
+  assert.equal(status, 0);
+  assert.match(stderr, /filing without the duplicate check/);
+  assert.deepEqual(verbs, ["issue list", "issue create"]);
+});
+
+test("--anyway without --new is refused rather than silently dropped", () => {
+  const { status, stderr, called } = run(["489", "--anyway"]);
+  assert.equal(status, 1);
+  assert.equal(called, null);
+  assert.match(stderr, /--anyway applies to --new only/);
 });
 
 test("a completion-announcement opener is trimmed before the body is posted", () => {

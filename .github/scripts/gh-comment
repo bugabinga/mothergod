@@ -71,13 +71,27 @@ tell exists to catch (PR #772's own close, caught the next run). `gh pr
 close` takes the same `--comment` this script already assembles, so
 `--delete-branch` swaps the verb rather than adding a second code path.
 
+`--new` reads the open issues first and refuses a title whose identifiers
+an open issue's title already names (issue #1374): the deslopper filed one
+`decodes_incrementally` finding four times in 40 hours, two other seats
+filed the gzip temp-file name twice, and each copy cost a triage while the
+copies diverged. The identifiers are the tokens a reader would grep for: an
+underscore name, a `::` path, a `--flag`, a single backticked token. A file
+name or a script name is an area, not a defect, and matching on those
+refused four unrelated pairs out of six among the open issues. A hit prints
+the issues, so the seat reads them, then comments there or files with
+`--anyway`. An issue list this cannot read files with a warning rather
+than refusing, because the refusal would cost the run its report.
+
 Usage: gh-comment <issue-or-pr-number> [--close [--delete-branch]] < body
-       gh-comment --new "<title>" [--label NAME]... < body
+       gh-comment --new "<title>" [--label NAME]... [--anyway] < body
 Prints the comment's or the new issue's URL on stdout.
 """
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
 
@@ -92,6 +106,69 @@ def die(*lines):
     sys.exit(1)
 
 
+# A backticked span that is one token: `mutants`, `probe`, `cargo-mutants`.
+BACKTICKED = re.compile(r"`([\w.:/-]{3,})`")
+# What a token sheds before it is judged: quotes, brackets, sentence
+# punctuation, then a possessive, so `decodes_incrementally's` and
+# `(select::pick)` read as the names they carry.
+EDGES = "`\"'()[]{},;:!?"
+
+
+def identifiers(title):
+    """The tokens of `title` a reader would grep the code for, lowercased.
+
+    An underscore name, a `::` path and each underscore segment of it (so
+    `codec::decode_to_writer` meets a bare `decode_to_writer`), a `--flag`,
+    a single backticked token. Nothing else: a file name, a script name or
+    a type name is the area an issue is about, and two issues in one area
+    are the normal case, not a duplicate.
+    """
+    found = set()
+    for span in BACKTICKED.findall(title):
+        found.add(span.lower())
+    for raw in title.split():
+        token = re.sub(r"'s$", "", raw.strip(EDGES)).rstrip(".")
+        if len(token) < 3:
+            continue
+        if "_" in token or "::" in token or token.startswith("--"):
+            found.add(token.lower())
+            if "::" in token:
+                found.update(seg.lower() for seg in token.split("::") if "_" in seg)
+    return found
+
+
+def duplicates(title, issues):
+    """The open issues whose title shares an identifier with `title`.
+
+    Each as (number, title, shared identifiers sorted), in the listing's
+    order, newest first.
+    """
+    mine = identifiers(title)
+    hits = []
+    for issue in issues:
+        shared = mine.intersection(identifiers(issue.get("title") or ""))
+        if shared:
+            hits.append((issue.get("number"), issue.get("title"), sorted(shared)))
+    return hits
+
+
+def open_issues(env):
+    """Every open issue's number and title, or None with the reason it could not be read."""
+    result = subprocess.run(
+        ["gh", "issue", "list", "--state", "open", "--limit", "500", "--json", "number,title"],
+        env=env, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None, result.stderr.strip() or f"gh exited {result.returncode}"
+    try:
+        issues = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, "gh issue list did not return JSON"
+    if not isinstance(issues, list):
+        return None, "gh issue list did not return a list"
+    return issues, None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="gh-comment", description=__doc__.splitlines()[0])
     parser.add_argument("number", nargs="?", help="the issue or PR to comment on or close")
@@ -101,6 +178,8 @@ def main() -> int:
     parser.add_argument("--new", metavar="TITLE", help="open a new issue with this title")
     parser.add_argument("--label", action="append", default=[], metavar="NAME",
                         help="label for --new, repeatable")
+    parser.add_argument("--anyway", action="store_true",
+                        help="with --new, file even when an open issue names the same identifier")
     args = parser.parse_args()
 
     # `is not None`, because an empty --new is a typo, not an absent flag, and
@@ -116,6 +195,8 @@ def main() -> int:
                 "       gh-comment --new \"<title>\" [--label NAME]... < body")
         if args.label:
             die("--label applies to --new only; label an existing issue with `gh issue edit`")
+        if args.anyway:
+            die("--anyway applies to --new only; a comment has no duplicate to override")
         if args.delete_branch and not args.close:
             die("--delete-branch needs --close; there is no branch to drop on a comment")
         scope = os.environ.get("PR_NUMBER")
@@ -162,6 +243,19 @@ def main() -> int:
     env.pop("GH_ADMIN_TOKEN", None)
 
     if args.new is not None:
+        if not args.anyway:
+            issues, reason = open_issues(env)
+            if issues is None:
+                print(f"gh-comment: could not read the open issues ({reason}); filing "
+                      "without the duplicate check (#1374)", file=sys.stderr)
+            else:
+                hits = duplicates(args.new, issues)
+                if hits:
+                    names = sorted({name for _, _, shared in hits for name in shared})
+                    die(f"an open issue already names {', '.join(f'`{n}`' for n in names)}:",
+                        *(f"    #{number}  {title}" for number, title, _ in hits),
+                        "the same finding is a comment there (`gh-comment <number> < body`); "
+                        "a different one files with --anyway (#1374)")
         call = ["issue", "create", "--title", args.new, "--body", full_body]
         for label in args.label:
             call += ["--label", label]
