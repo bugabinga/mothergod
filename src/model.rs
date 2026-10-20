@@ -7,6 +7,7 @@
 //! adaptive state without driving an [`crate::coder::Encoder`]
 //! (ROADMAP M2's ideal-cost accounting mode).
 
+use crate::Rate;
 use crate::coder::{Decoder, Encoder};
 
 /// An order-0 adaptive frequency table over `0..alphabet_len` symbols.
@@ -56,13 +57,7 @@ impl Model {
     }
 
     fn update(&mut self, symbol: usize) {
-        crate::rescale_bank(
-            &mut self.freq,
-            &mut self.total,
-            symbol,
-            crate::DEFAULT_RESCALE_INCREMENT,
-            crate::DEFAULT_RESCALE_LIMIT,
-        );
+        crate::rescale_bank(&mut self.freq, &mut self.total, symbol, Rate::DEFAULT);
     }
 
     /// Codes `symbol` through `encoder` under this table's current

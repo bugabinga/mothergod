@@ -480,31 +480,37 @@ fn stored_data(payload: &[u8]) -> &[u8] {
     payload.get(STORED_LEN_BYTES..).unwrap_or_default()
 }
 
-/// Frequency increment and rescale ceiling of every adaptive frequency table
-/// at the archive's original rate (`INC`/`LIM` in
-/// `research/imports/session-1/mothergod.rs`). [`literal::Literal`]'s
-/// fast-rate bank 0 is the one table that tunes its own
-/// `FAST_INCREMENT`/`FAST_LIMIT`.
-pub(crate) const DEFAULT_RESCALE_INCREMENT: u32 = 12;
-/// See [`DEFAULT_RESCALE_INCREMENT`].
-pub(crate) const DEFAULT_RESCALE_LIMIT: u32 = 65536;
+/// How fast an adaptive frequency table learns: the increment each
+/// observation adds and the total above which every count halves. The two
+/// travel as one value so a table cannot pair one rate's increment with
+/// another's ceiling.
+#[derive(Clone, Copy)]
+pub(crate) struct Rate {
+    increment: u32,
+    limit: u32,
+}
 
-/// Increments `freq[symbol]`/`*total` by `increment`, then halves every
-/// entry of `freq` once `*total` exceeds `limit`, recomputing `*total` from
-/// the halved counts.
+impl Rate {
+    /// The archive's original rate, shared by every adaptive frequency table
+    /// but [`literal::Literal`]'s fast-rate bank 0 (`INC`/`LIM` in
+    /// `research/imports/session-1/mothergod.rs`).
+    pub(crate) const DEFAULT: Self = Self::new(12, 65536);
+
+    pub(crate) const fn new(increment: u32, limit: u32) -> Self {
+        Self { increment, limit }
+    }
+}
+
+/// Increments `freq[symbol]`/`*total` by `rate`'s increment, then halves
+/// every entry of `freq` once `*total` exceeds `rate`'s limit, recomputing
+/// `*total` from the halved counts.
 ///
 /// The halving is `(f+1) >> 1`, so a symbol with any evidence keeps
 /// frequency at least 1 and stays codable.
-pub(crate) fn rescale_bank(
-    freq: &mut [u32],
-    total: &mut u32,
-    symbol: usize,
-    increment: u32,
-    limit: u32,
-) {
-    freq[symbol] += increment;
-    *total += increment;
-    if *total > limit {
+pub(crate) fn rescale_bank(freq: &mut [u32], total: &mut u32, symbol: usize, rate: Rate) {
+    freq[symbol] += rate.increment;
+    *total += rate.increment;
+    if *total > rate.limit {
         let mut new_total = 0u32;
         for f in freq.iter_mut() {
             *f = (*f + 1) >> 1;
