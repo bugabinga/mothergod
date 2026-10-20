@@ -171,58 +171,28 @@ whole-buffer decode by design, JOURNAL S2-D4, and encode still takes a
 whole buffer); and the format spec made normative by ADR-0041 (its
 decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 
-## M7: Trust engineering (ADR-0043)
-
-Numbered by creation order, placed here by priority: correctness debt
-compounds worse than a late release, so the heartbeat works these ahead
-of M5 and M6's open items. M3 stays the journal's program, worked by the
-heartbeat (ADR-0062), unaffected. Strategy in `docs/TESTING.md`;
-mechanisms in the issues.
-
-Items, in [milestone M7](https://github.com/bugabinga/mothergod/milestone/2):
-the trust ledger and the status page's TRUST panel (#449), which the
-others append to; fuzzing that compounds (#450); the `frame_gen`
-valid-frame generator and structure-aware fuzzing (#451); proptest
-shrinking properties and decode-API differential agreement (#452); the
-allocation torture sweep (#453); weekly region coverage, published never
-gated (#454); the monthly whole-crate mutation score (#455); the Miri lane
-in monster (#456); and the test-craft skill for the agents (#457).
-Exploratory, a journal slice's option and no item: Kani proof harnesses on
-the coder's renormalization/update math, adopted only if it proves an
-invariant fuzzing cannot, journal rules apply.
-
-## M8: Genre fit (ADR-0064)
-
-Numbered by creation order, placed after M7 because correctness debt
-compounds, and ahead of M5 because its finish line is nearer: the genre
-is finite. The scorecard's FIT line is what it moves.
-
-Items, in [milestone M8](https://github.com/bugabinga/mothergod/milestone/3):
-the CLI genre matrix with its conformance suite (#981) and the library
-idiom matrix (#982) landed, and every gap measured before a matrix existed
-(#976 to #979, #983) closed through them. What remains is the BSD lane
-(#980), without which "fits BSD" is a claim no run has made. A new gap is
-a row the suite flips in `tests/fit/*.txt`, then an issue; the count is on
-/status.
-
 ## M5: Parse engine (ADR-0074)
 
 Numbered by creation order, four items, done when the last closes
-(ADR-0047); placed after M8 because M8's finish line is nearer, and
-ahead of M6 because the 0.1 release promises what M0 to M4 delivered and
-nothing here. The Speed tiers program until
+(ADR-0047); the last closed 2026-10-20. The Speed tiers program until
 2026-10-18, when the operator's question (when to tackle speed, ratio on
 large files and memory) got one answer because the three are one
 mechanism: the optimal parse holds state per input byte (21 bytes, 41
 before #1341; `src/lib.rs`, `BLOCK_LEN`'s doc; JOURNAL S2-A116, S2-A123).
 That sets the 16 MiB block and its 370 MB; the block bounds the parallel
 encode, four live being about 1.5 GB against the 1 GiB `memory-check`
-pins, so two blocks run at once, S2-A125, and S2-A122's four-way 2x stays unwired; and the 1 MiB `lz::WINDOW` is #1342's
-hypothesis for the Silesia losses, not a measured cause: all 12 Silesia
-files exceed it and 7 lose to zstd -19, all 11 Canterbury files sit under
-it and win; a blanket bump (JOURNAL S2-R7) and an adaptive window
-(S2-R11) are already rejected, so what remains is reach where a file has
-long-range structure, read on the finals.
+pins, so two blocks run at once, S2-A125, and S2-A122's four-way 2x stays
+unwired. The 1 MiB `lz::WINDOW` was #1342's hypothesis for the Silesia
+losses: a blanket bump (JOURNAL S2-R7) and an adaptive window (S2-R11)
+were rejected, and what shipped is a trial, a frame declaring a 1 MiB or
+2 MiB reach with the wide parse kept only when strictly smaller
+(`FORMAT_VERSION` 17, ADR-0075, S2-A127). Read once on the finals, 11 of
+12 Silesia files shrink, 0.3% to 2.4% (`xml` unchanged), encode costs
+1.24x to 1.52x, peak RSS stays under 1 GiB, and all seven losses to
+zstd -19 remain (S2-A128): the window was part of the correlation, not
+all of it. What remains open rides the journal's leads, a reach past the
+offset code's ceiling and the wide trial beside the narrow ones on idle
+cores.
 
 Items, in [milestone M5](https://github.com/bugabinga/mothergod/milestone/4),
 in order: the field measured at every level, gzip 1 to 9, zstd 1 to 22,
@@ -253,6 +223,40 @@ committed constant by its margin (#907, `bench/src/speed.rs`). No hermetic
 case maps to Silesia's 1 MB/s (its files span 0.25 to 6.6), so
 what is held is "no unexplained slowdown", and the aggregate on the finals
 reports is still read at each regeneration.
+
+## M7: Trust engineering (ADR-0043)
+
+Numbered by creation order, placed here by priority: correctness debt
+compounds worse than a late release, so the heartbeat works these ahead
+of M6's open items. M3 stays the journal's program, worked by the
+heartbeat (ADR-0062), unaffected. Strategy in `docs/TESTING.md`;
+mechanisms in the issues.
+
+Items, in [milestone M7](https://github.com/bugabinga/mothergod/milestone/2):
+the trust ledger and the status page's TRUST panel (#449), which the
+others append to; fuzzing that compounds (#450); the `frame_gen`
+valid-frame generator and structure-aware fuzzing (#451); proptest
+shrinking properties and decode-API differential agreement (#452); the
+allocation torture sweep (#453); weekly region coverage, published never
+gated (#454); the monthly whole-crate mutation score (#455); the Miri lane
+in monster (#456); and the test-craft skill for the agents (#457).
+Exploratory, a journal slice's option and no item: Kani proof harnesses on
+the coder's renormalization/update math, adopted only if it proves an
+invariant fuzzing cannot, journal rules apply.
+
+## M8: Genre fit (ADR-0064)
+
+Numbered by creation order, placed after M7 because correctness debt
+compounds, and ahead of M6 because its finish line is nearer: the genre
+is finite. The scorecard's FIT line is what it moves.
+
+Items, in [milestone M8](https://github.com/bugabinga/mothergod/milestone/3):
+the CLI genre matrix with its conformance suite (#981) and the library
+idiom matrix (#982) landed, and every gap measured before a matrix existed
+(#976 to #979, #983) closed through them. What remains is the BSD lane
+(#980), without which "fits BSD" is a claim no run has made. A new gap is
+a row the suite flips in `tests/fit/*.txt`, then an issue; the count is on
+/status.
 
 ## M6: Release 0.1
 
