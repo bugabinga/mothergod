@@ -32,6 +32,6 @@ A reports commit naming no generator is stale by rule, never fresh (issue #1381)
 The base is lost at squash, and a title convention is a prompt rule three seats would each learn once.
 
 **An in-PR finals run as a required check.**
-212 MB of Silesia at 0.19 to 0.22 MB/s (the runner CPU moves it by a quarter: `bench-report.yml`'s timed pass of 2026-10-18 and `docs/benchmarks/silesia.md`'s aggregate row) is 16 to 19 minutes on every push of every codec PR, for a number the post-merge pass measures once.
+212 MB of Silesia at 0.188 MB/s (`bench-report.yml`'s timed pass of 2026-10-18) to 0.216 MB/s (`docs/benchmarks/silesia.md`'s aggregate row) is 16 to 19 minutes on every push of every codec PR, for a number the post-merge pass measures once.
 
 This is a guard moved, not weakened: the in-PR demand saw a bpb move on 50,000-byte cases and nothing else, and the post-merge pass measures the finals themselves.
