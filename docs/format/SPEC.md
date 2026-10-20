@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 16)
+# mothergod bitstream format (FORMAT_VERSION 17)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 16)
+4       1     format version (currently 17)
 5       1     method byte
 6       ...   payload (method-defined)
 end-4   4     check value: CRC-32 of every byte before it, u32 LE
@@ -42,7 +42,8 @@ length, so a frame's end is knowable and frames chain into a stream
 (ADR-0067); 13 closed each frame with a check value (ADR-0068); 14 added
 the base64 filter and derived a frame's output length from its filtered
 length (ADR-0071); 15 added the reverse filter (ADR-0072); 16 added
-reverse then delta (ADR-0073).
+reverse then delta (ADR-0073); 17 declared the match reach in the selector
+(ADR-0075).
 
 ## Check value (ADR-0068)
 
@@ -118,7 +119,7 @@ adaptive range coder (`src/coder.rs`).
 
 ```
 offset  size  field
-0       2     filter selector: [kind, param]
+0       2     selector: [kind | reach << 7, param]
 2       4     declared length of the filtered bytes, u32 LE
 6       4     token count, u32 LE
 10      8     coded length: the range-coded stream's byte count, u64 LE
@@ -181,14 +182,21 @@ a bit at exactly one bit, so the gain is adaptation alone: record-shaped
 data repeats exact lengths (`research/JOURNAL.md` S2-A114/S2-A115). A
 distance's residual bits are raw.
 
-Filter selector `kind`: 0 (none), 1 (delta), 2 (BCJ), 3 (transpose),
+Selector `kind`: its low 7 bits name the filter, 0 (none), 1 (delta), 2 (BCJ), 3 (transpose),
 4 (base64 unwrap, ADR-0071), 5 (byte reversal, ADR-0072), 6 (byte reversal,
 then delta, ADR-0073). `param` is the delta stride or transpose column count,
 `1..=255`; zero for kinds that take none (0, 2, 4, 5). A decoder MUST
 reject any other `[kind, param]` pair as `Corrupt`
 (`filters::select::Candidate::from_header_bytes`) — an unrecognized kind, or
 a zero `param` on a kind that requires one, or a nonzero one on a kind that
-takes none. The declared length is the length of the *filtered* bytes: a
+takes none. The top bit of the `kind` byte is the frame's *reach*
+(ADR-0075): clear, a match distance may be at most 1 MiB (`2^20`); set, at
+most `2^21 - 1`, the last distance the offset code's top bucket can name. A
+decoder MUST reject a match distance past the declared reach as `Corrupt`,
+and a decoder that streams a frame holds a ring of that many bytes. The
+encoder's choice of reach is free (`codec::encode` tries the wide reach on
+input longer than 1 MiB and keeps it when the payload is strictly smaller),
+so the reach is no part of what a filter means. The declared length is the length of the *filtered* bytes: a
 decoder reconstructs those first, checks their length against this field,
 and only then reverses the filter to recover the original frame data.
 

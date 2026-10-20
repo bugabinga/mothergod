@@ -159,7 +159,7 @@ fn decode_to_writer_delta_path_covers_match_copies_too() {
     let filtered: Vec<u8> = [1u8, 2, 3, 4].iter().copied().cycle().take(200).collect();
     let raw = filters::delta::decode(&filtered, stride);
     let mut frame = Candidate::Delta(stride).to_header_bytes().to_vec();
-    frame.extend(encode_tokens(&filtered, None));
+    frame.extend(encode_tokens(&filtered, None, Reach::Standard));
 
     assert_decode_matches(&frame, &raw, "Delta path with match/rep copies");
 }
@@ -363,7 +363,7 @@ fn decode_to_writer_bcj_path_covers_match_copies_too() {
     let filtered: Vec<u8> = unit.iter().copied().cycle().take(200).collect();
     let raw = filters::bcj::decode(&filtered);
     let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
-    frame.extend(encode_tokens(&filtered, None));
+    frame.extend(encode_tokens(&filtered, None, Reach::Standard));
 
     assert_decode_matches(&frame, &raw, "Bcj path with match/rep copies");
 }
@@ -386,7 +386,7 @@ fn decode_to_writer_bcj_path_flushes_a_trailing_opcode_on_finish() {
     filtered.extend_from_slice(&[0xE8, 0x01, 0x02, 0x03]);
     let raw = filters::bcj::decode(&filtered);
     let mut frame = Candidate::Bcj.to_header_bytes().to_vec();
-    frame.extend(encode_tokens(&filtered, None));
+    frame.extend(encode_tokens(&filtered, None, Reach::Standard));
 
     assert_decode_matches(
         &frame,
@@ -541,18 +541,136 @@ fn ensure_within_window_accepts_the_boundary_and_rejects_one_past() {
     // and `>` -> `>=` both survive the full suite because of it. Unit
     // testing the extracted comparison directly, at exactly the
     // boundary in both directions, is the only way to tell `>` apart
-    // from its neighbors without driving a WINDOW-sized decode.
-    let window = u32::try_from(lz::WINDOW).expect("WINDOW fits u32");
-    assert_eq!(
-        ensure_within_window(NonZeroU32::new(window).expect("WINDOW is not zero")),
-        Ok(()),
-        "a distance exactly at the window edge is legal"
+    // from its neighbors without driving a window-sized decode.
+    for reach in [Reach::Standard, Reach::Wide] {
+        let window = u32::try_from(reach.window()).expect("the window fits u32");
+        assert_eq!(
+            ensure_within_window(
+                NonZeroU32::new(window).expect("a window is not zero"),
+                reach
+            ),
+            Ok(()),
+            "a distance exactly at the window edge is legal at {reach:?}"
+        );
+        assert_eq!(
+            ensure_within_window(
+                NonZeroU32::new(window + 1).expect("a window plus one is not zero"),
+                reach
+            ),
+            Err(Error::Corrupt),
+            "one past the window edge must be rejected at {reach:?}"
+        );
+    }
+}
+
+/// A `Method::Lz` frame whose last token is a match at `distance`, behind
+/// a 256-byte ramp repeated out to `distance + 100` bytes, its selector
+/// declaring `reach`; with the bytes it decodes to when `reach` allows
+/// `distance`. The ramp's period makes a ring slot off by one read a
+/// different byte, and the filler is a handful of long matches, so the
+/// frame is cheap to code and to decode at any distance.
+fn far_match_frame(distance: usize, reach: Reach) -> (Vec<u8>, Vec<u8>) {
+    let mut tokens: Vec<Token> = (0..=255u8).map(Token::Literal).collect();
+    let mut filled = 256usize;
+    while filled < distance + 100 {
+        let len = (distance + 100 - filled).min(65535);
+        tokens.push(Token::Match {
+            len: u32::try_from(len).expect("a match length fits u32"),
+            distance: NonZeroU32::new(256).expect("256 is not zero"),
+        });
+        filled += len;
+    }
+    tokens.push(Token::Match {
+        len: 4,
+        distance: NonZeroU32::new(u32::try_from(distance).expect("fits u32"))
+            .expect("a distance is not zero"),
+    });
+    let data = lz::replay(&tokens);
+    let mut frame = selector(Candidate::Identity, reach).to_vec();
+    frame.extend(encode_tokens_with(&data, None, &tokens));
+    (frame, data)
+}
+
+#[test]
+fn a_wide_frame_decodes_a_match_at_the_widest_distance_both_ways() {
+    // Pins that the streaming ring's capacity is exactly the reach: a
+    // ring one slot short overwrites the byte this match reads.
+    let (frame, data) = far_match_frame(lz::WIDE_WINDOW, Reach::Wide);
+
+    assert_decode_matches(&frame, &data, "a wide frame at WIDE_WINDOW");
+}
+
+#[test]
+fn a_standard_frame_rejects_a_match_past_the_standard_window_both_ways() {
+    let (wide, _) = far_match_frame(lz::WINDOW + 1, Reach::Wide);
+    let (standard, _) = far_match_frame(lz::WINDOW + 1, Reach::Standard);
+
+    assert!(
+        decode(&wide, MAX_DECODED_LEN).is_ok(),
+        "the wide twin decodes"
     );
+    assert_eq!(decode(&standard, MAX_DECODED_LEN), Err(Error::Corrupt));
+    assert!(matches!(
+        decode_streaming(&standard, MAX_DECODED_LEN),
+        Err(crate::WriteError::Decode(Error::Corrupt))
+    ));
+}
+
+#[test]
+fn selector_carries_reach_in_the_top_bit_and_splits_back() {
+    for candidate in [
+        Candidate::Identity,
+        Candidate::Delta(crate::test_support::nz(4)),
+        Candidate::ReverseDelta(crate::test_support::nz(20)),
+    ] {
+        let narrow = selector(candidate, Reach::Standard);
+        let wide = selector(candidate, Reach::Wide);
+        assert_eq!(narrow, candidate.to_header_bytes());
+        assert_eq!(wide[0], narrow[0] | 0x80);
+        assert_eq!(wide[1], narrow[1]);
+        for (bytes, reach) in [(narrow, Reach::Standard), (wide, Reach::Wide)] {
+            let payload = [bytes[0], bytes[1], 9];
+            let (split_candidate, split_reach, rest) =
+                split_selector(&payload).expect("a selector");
+            assert_eq!(
+                (split_candidate, split_reach, rest),
+                (candidate, reach, &[9u8][..])
+            );
+        }
+    }
+    // A wide bit on a kind no candidate has is still no candidate.
+    assert_eq!(split_selector(&[0x80 | 7, 0, 0]), Err(Error::Corrupt));
+}
+
+#[test]
+fn encode_declares_the_wide_reach_when_a_repeat_sits_past_the_standard_window() {
+    // A record, a run of zeros past the standard window, the record
+    // again: only a wide match reaches the first copy.
+    let record = crate::test_support::record_text(2);
+    let mut data = record.clone();
+    data.resize(lz::WINDOW + record.len() + 4096, 0);
+    data.extend_from_slice(&record);
+
+    let encoded = encode(&data);
+
+    assert_eq!(encoded[0] & 0x80, 0x80, "the selector declares Reach::Wide");
+    assert_decode_matches(&encoded, &data, "a repeat past the standard window");
+}
+
+#[test]
+fn encode_keeps_the_standard_reach_when_the_wide_parse_buys_nothing() {
+    // Longer than the window and with nothing to reach: both parses give
+    // the same body, a tie, which goes to the standard reach.
+    let data = vec![0u8; lz::WINDOW + 4096];
+
+    let encoded = encode(&data);
+
     assert_eq!(
-        ensure_within_window(NonZeroU32::new(window + 1).expect("WINDOW + 1 is not zero")),
-        Err(Error::Corrupt),
-        "one past the window edge must be rejected"
+        encoded[0] & 0x80,
+        0,
+        "the selector declares Reach::Standard"
     );
+    assert_decode_matches(&encoded, &data, "a run longer than the window");
 }
 
 #[test]
@@ -598,7 +716,7 @@ fn ideal_cost_bits_tracks_real_encoded_length_within_one_percent() {
 
     let ideal_bits = ideal_cost_bits(data);
 
-    let real = encode_tokens(data, None);
+    let real = encode_tokens(data, None, Reach::Standard);
     #[allow(
         clippy::cast_precision_loss,
         reason = "encoded length is far below f64's exact integer range (2^53)"
@@ -845,7 +963,7 @@ fn compressed_len_with_window_matches_wired_encode_tokens_at_wired_window() {
         .collect();
     assert_eq!(
         compressed_len_with_window(&data, lz::WINDOW),
-        encode_tokens(&data, None).len()
+        encode_tokens(&data, None, Reach::Standard).len()
     );
 }
 
@@ -1030,7 +1148,11 @@ fn a_hostile_coded_length_is_truncated_not_allocated() {
 fn forced_payload(candidate: Candidate, data: &[u8]) -> Vec<u8> {
     let columns = None;
     let mut payload = candidate.to_header_bytes().to_vec();
-    payload.extend(encode_tokens(&apply_filter(candidate, data), columns));
+    payload.extend(encode_tokens(
+        &apply_filter(candidate, data),
+        columns,
+        Reach::Standard,
+    ));
     payload
 }
 
@@ -1043,7 +1165,7 @@ fn base64_text_picks_the_base64_filter_and_beats_identity() {
         Some(Candidate::Base64)
     );
     assert!(
-        encoded.len() < SELECTOR_LEN + encode_tokens(&wrapped, None).len(),
+        encoded.len() < SELECTOR_LEN + encode_tokens(&wrapped, None, Reach::Standard).len(),
         "unwrapping must beat coding the base64 text as it stands"
     );
     assert_decode_matches(&encoded, &wrapped, "picked Base64");
@@ -1069,7 +1191,7 @@ fn base64_extent_is_the_unwrapped_length_re_wrapped() {
     // it decodes to, which framing budgets against (ADR-0071).
     let wrapped = filters::base64_unwrap::decode(&crate::test_support::record_text(60));
     let forced = forced_payload(Candidate::Base64, &wrapped);
-    let (_, rest) = split_candidate(&forced).expect("selector");
+    let (_, _, rest) = split_selector(&forced).expect("selector");
     let (header, _) = split_token_header(rest).expect("header");
     assert_eq!(header.declared_len as usize, wrapped.len() / 4 * 3);
     let extent = declared_extent(&forced).expect("extent");
@@ -1138,7 +1260,7 @@ fn le_rows_pick_the_reverse_filter_and_beat_identity() {
         Some(Candidate::Reverse)
     );
     assert!(
-        encoded.len() < SELECTOR_LEN + encode_tokens(&rows, None).len(),
+        encoded.len() < SELECTOR_LEN + encode_tokens(&rows, None, Reach::Standard).len(),
         "reversing must beat coding the rows as they stand"
     );
     assert_decode_matches(&encoded, &rows, "picked Reverse");
@@ -1181,7 +1303,7 @@ fn le_rows_pick_reverse_delta_and_beat_every_single_filter() {
         "picked {picked:?}"
     );
     assert!(
-        encoded.len() < SELECTOR_LEN + encode_tokens(&rows, None).len(),
+        encoded.len() < SELECTOR_LEN + encode_tokens(&rows, None, Reach::Standard).len(),
         "reversing then differencing must beat coding the rows as they stand"
     );
     assert_decode_matches(&encoded, &rows, "picked ReverseDelta");

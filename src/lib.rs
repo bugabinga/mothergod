@@ -67,7 +67,7 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// naming any other version is rejected as `UnsupportedVersion` before its
 /// payload is read (`tests/golden/` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 16;
+pub const FORMAT_VERSION: u8 = 17;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -819,8 +819,9 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// filters whose undo step runs sequentially with small fixed lookback or
 /// lookahead (a no-op, a stride, or a 5-byte call/jmp instruction), so the
 /// decoded LZ token stream needs no whole-buffer pass afterward, and
-/// `codec::decode_to_writer` bounds memory to [`lz::WINDOW`] (1 MiB) for any
-/// of them regardless of the frame's declared length.
+/// `codec::decode_to_writer` bounds memory to the frame's declared
+/// [`lz::Reach`] (1 MiB, or 2 MiB for a wide frame) for any of them
+/// regardless of the frame's declared length.
 /// [`Method::Stored`] writes its payload slice of `input` through the same
 /// bounded writer and allocates no decoded buffer, so resident memory is the
 /// input plus the write buffer. [`filters::select::Candidate::Transpose`],
