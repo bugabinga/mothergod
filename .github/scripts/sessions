@@ -15,7 +15,11 @@ contract for the same reason.
 
 Verbs:
 
-    sql <statement> [param ...]   any statement; rows as one aligned table
+    sql <statement> [param ...]   any statement; rows as one aligned table.
+                                  A statement the store refuses (a table or
+                                  column the schema lacks) prints the tables
+                                  with their columns and exits 2: the
+                                  caller's error, never UNREADABLE
     roles [--since 7d|DATE]       per role over the window: runs, measured,
                                   median and max turns, output tokens,
                                   denials, errors, no-op runs over the runs
@@ -321,12 +325,59 @@ def unreadable(error):
     return 1
 
 
+def schema_tables(text):
+    """Each table the schema text creates, with its columns, as (name, columns).
+
+    A CREATE TABLE names the table and its column lines; an ALTER TABLE ADD
+    COLUMN appends to the table it names. Indexes are not tables and are
+    skipped.
+    """
+    columns = {}
+    order = []
+    for statement in statements(text):
+        words = statement.split()
+        if words[:2] == ["CREATE", "TABLE"]:
+            name = statement.split("(", 1)[0].split()[-1]
+            order.append(name)
+            columns[name] = []
+            for line in statement.split("(", 1)[1].splitlines():
+                first = line.strip().split(" ", 1)[0].strip(",)")
+                if first and first.upper() not in ("PRIMARY", "UNIQUE", "FOREIGN", "CHECK"):
+                    columns[name].append(first)
+        elif words[:2] == ["ALTER", "TABLE"] and "COLUMN" in words:
+            columns.setdefault(words[2], []).append(words[words.index("COLUMN") + 1])
+    return [(name, columns[name]) for name in order]
+
+
+def refused(error):
+    """A statement the store parsed and rejected: the caller's error, not the store's.
+
+    Two director wakes in a row typed a column and then a table the schema
+    does not have, and each read UNREADABLE, the word that means the store
+    is down (runs 39346133849 and 39368227119, 2026-10-20). The tables print with the refusal because nobody opens
+    schema.sql while the error is on the screen; the docstring already
+    pointed there, which is where the two wakes did not look.
+    """
+    print(f"sessions: statement refused: {error}")
+    print(f"    tables, from {os.path.relpath(SCHEMA)}:")
+    for name, columns in schema_tables(schema()):
+        print(f"    {name}({', '.join(columns)})")
+    return 2
+
+
 def main(argv):
     verb = argv[1] if len(argv) > 1 else ""
     args = argv[2:]
     try:
         if verb == "sql" and args:
-            rows = d1.query(args[0], args[1:])
+            try:
+                rows = d1.query(args[0], args[1:])
+            except d1.Unreadable as error:
+                # SQLITE_ERROR is the suffix D1 puts on a statement it parsed
+                # and refused; anything else is the store, and stays UNREADABLE.
+                if "SQLITE_ERROR" not in str(error):
+                    raise
+                return refused(error)
             print("\n".join(render(rows)))
         elif verb == "roles":
             spec = flag(args, "--since") or "7d"
