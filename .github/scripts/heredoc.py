@@ -29,14 +29,19 @@ shell still ends in a shell. Two prefixes are transparent, because they
 change nothing about who reads the body: `NAME=value` assignments and
 `timeout [flags] <duration>`, the wrapper CLAUDE.md rule 12 asks for.
 
-The parse is line-based, like bash's: the operator `<<`, `<<-`, or either
-with a quoted or `\\`-escaped word, names a delimiter; the body is the
-lines that follow, up to the line that is exactly the delimiter (`<<-`
-strips leading tabs first); a body with no terminator runs to the end,
-as bash reads it. A here-string (`<<<`) is a word, not a body. Several
-heredocs on one line take their bodies in order. A `<<` inside quotes on
-the operator line reads as an operator too, which over-strips for a
-posting receiver and never for any other: less scanned, nothing run.
+The parse is line-based, like bash's: the operator `<<` or `<<-`, outside
+any quote, names a delimiter word; the body is the lines that follow, up
+to the line that is exactly the delimiter (`<<-` strips leading tabs
+first); a body with no terminator runs to the end, as bash reads it. The
+word is read the way bash reads it, quote removal included: `<<"E"OF` and
+`<<\\E\\OF` both name `EOF`, quoted. A `<<` inside a quote is an
+argument, not an operator, and the lines after it are live. A here-string
+(`<<<`) is a word, not a body. Several heredocs on one line take their
+bodies in order. A word the parse cannot finish (an unclosed quote) keeps
+every line after it.
+
+The receiver is read from the operator's prefix with quoted spans masked,
+so a `;` or a command name inside an argument names no segment.
 """
 
 import os
@@ -45,12 +50,12 @@ import re
 # The scripts whose stdin is a body they post or commit and never execute.
 POSTING = frozenset({"gh-comment", "gh-pr", "tg-send", "push-branch", "post-verdict"})
 
-# `<<` or `<<-`, not part of `<<<`, then the delimiter word: single-quoted,
-# double-quoted, or bare (a leading backslash quotes it too). A bare word
-# with no backslash is the unquoted form, whose body bash expands.
-OPERATOR = re.compile(
-    r"(?<!<)<<(?!<)(-?)\s*(?:'([^']*)'|\"([^\"]*)\"|(\\?[^\s;&|<>()]+))"
-)
+# `<<` or `<<-`, not part of `<<<`; the delimiter word follows and is read
+# by `delimiter_word`.
+OPERATOR = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*")
+
+# Characters that end an unquoted word.
+WORD_END = frozenset(" \t;&|<>()")
 
 # The word that reads the body: the first word of the operator's own
 # simple command, after the last control operator or opening bracket on
@@ -59,6 +64,69 @@ OPERATOR = re.compile(
 SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||&|\(|\{|^)")
 ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=\S*$")
 DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+
+
+def mask_quoted(text: str) -> tuple[str, bool]:
+    """`text` with the contents of every quoted span replaced by `x`, and
+    whether `text` ends inside a quote. The quote characters stay. Escapes
+    follow bash: a backslash quotes the next character outside quotes and
+    before `"`, `\\`, `$` or a backtick inside double quotes, never inside
+    single quotes."""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            out.append(ch if ch == "'" else "x")
+            if ch == "'":
+                quote = ""
+        elif ch == "\\" and i + 1 < len(text) and (not quote or text[i + 1] in '"\\$`'):
+            out.append(ch if not quote else "x")
+            out.append("x")
+            i += 1
+        elif quote == '"':
+            out.append(ch if ch == '"' else "x")
+            if ch == '"':
+                quote = ""
+        else:
+            out.append(ch)
+            if ch in "'\"":
+                quote = ch
+        i += 1
+    return "".join(out), quote != ""
+
+
+def delimiter_word(line: str, start: int) -> tuple[str, bool, int] | None:
+    """The heredoc delimiter word at `line[start:]` after quote removal,
+    whether any part of it was quoted, and the index after it; None when
+    there is no word or a quote never closes."""
+    word: list[str] = []
+    quoted = False
+    i = start
+    while i < len(line) and line[i] not in WORD_END:
+        ch = line[i]
+        if ch == "\\":
+            quoted = True
+            i += 1
+            if i < len(line):
+                word.append(line[i])
+        elif ch in "'\"":
+            quoted = True
+            i += 1
+            while i < len(line) and line[i] != ch:
+                if ch == '"' and line[i] == "\\" and i + 1 < len(line) and line[i + 1] in '"\\$`':
+                    i += 1
+                word.append(line[i])
+                i += 1
+            if i == len(line):
+                return None
+        else:
+            word.append(ch)
+        i += 1
+    if i == start:
+        return None
+    return "".join(word), quoted, i
 
 
 def without_posted_bodies(command: str) -> str:
@@ -70,12 +138,17 @@ def without_posted_bodies(command: str) -> str:
         line = lines[i]
         kept.append(line)
         i += 1
-        for match in OPERATOR.finditer(line):
-            single, double, bare = match.group(2, 3, 4)
-            quoted = bare is None or bare.startswith("\\")
-            delimiter = bare.lstrip("\\") if bare is not None else (
-                single if single is not None else double
-            )
+        pos = 0
+        while match := OPERATOR.search(line, pos):
+            pos = match.end()
+            prefix, inside = mask_quoted(line[: match.start()])
+            if inside:
+                continue
+            parsed = delimiter_word(line, match.end())
+            if parsed is None:
+                kept.extend(lines[i:])
+                return "\n".join(kept)
+            delimiter, quoted, pos = parsed
             strip_tabs = match.group(1) == "-"
             end = i
             while end < len(lines):
@@ -83,7 +156,7 @@ def without_posted_bodies(command: str) -> str:
                 if candidate == delimiter:
                     break
                 end += 1
-            if not quoted or receiver(line[: match.start()]) not in POSTING:
+            if not quoted or receiver(prefix) not in POSTING:
                 kept.extend(lines[i:end])
             if end < len(lines):
                 kept.append(lines[end])

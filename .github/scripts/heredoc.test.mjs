@@ -105,6 +105,42 @@ test("a posting command behind a control operator still owns its body", () => {
   assert.equal(strip(command), "cd /tmp && .github/scripts/gh-comment 1 --close <<'EOF'\nEOF");
 });
 
+test("a `<<'EOF'` inside a quoted argument is no operator; the lines after it are live", () => {
+  for (
+    const command of [
+      "gh-comment 1 \"title <<'EOF' idiom\"\nsleep 100 &",
+      "gh-comment 1 'it''s <<\"EOF\"'\nsleep 100 &",
+      "gh-comment --new \"don't <<'EOF' it\"\nsleep 100 &",
+    ]
+  ) {
+    assert.equal(strip(command), command, command);
+  }
+});
+
+test("a quote that closes before the operator leaves the receiver in charge", () => {
+  const command = "gh-comment --new \"don't\" <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(command), "gh-comment --new \"don't\" <<'EOF'\nEOF");
+});
+
+test("a posting name inside an argument is not the receiver", () => {
+  const command = "sh -c \"cat | sh; gh-comment 1 \" <<'EOF'\ncargo test &\nEOF";
+  assert.equal(strip(command), command);
+});
+
+test("a delimiter word is read with quote removal: partly escaped or concatenated", () => {
+  for (
+    const operator of ["<<\\E\\OF", "<<E\\OF", "<<\"E\"OF", "<<E'O'F", "<<'E'\"O\"F"]
+  ) {
+    const command = `gh-comment 1 ${operator}\nprose &\nEOF\nsleep 100 &`;
+    assert.equal(strip(command), `gh-comment 1 ${operator}\nEOF\nsleep 100 &`, operator);
+  }
+});
+
+test("an unclosed quote in the delimiter keeps every line after it", () => {
+  const command = "gh-comment 1 <<'EOF\nprose &\nEOF\nsleep 100 &";
+  assert.equal(strip(command), command);
+});
+
 test("no heredoc, no change", () => {
   for (const command of ["cargo test", "echo 'a << b'", ""]) {
     assert.equal(strip(command), command, command);
