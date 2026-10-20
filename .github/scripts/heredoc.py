@@ -37,7 +37,9 @@ word is read the way bash reads it, quote removal included: `<<"E"OF` and
 `<<\\E\\OF` both name `EOF`, quoted. A `<<` inside a quote or a
 comment is an argument or prose, not an operator, and the lines after it
 are live; the quote or comment is read across the command's own lines,
-not the operator's alone. A here-string
+not the operator's alone, and so is a substitution: an operator inside an
+open backtick, `$(`, `<(` or `>(` keeps the body, because bash ends the
+substitution at its closing delimiter and runs what follows. A here-string
 (`<<<`) is a word, not a body. Several heredocs on one line take their
 bodies in order. A word the parse cannot finish or does not model (an unclosed
 quote, `<<$'EOF'`, a trailing backslash) keeps every line after it, and so
@@ -117,6 +119,28 @@ def mask_quoted(text: str) -> tuple[str, bool]:
     return "".join(out), quote != "" or comment
 
 
+CASE_WORD = re.compile(r"(?:^|[\s;&|(){}])case\s")
+
+
+def substitution_open(masked: str) -> bool:
+    """Whether `masked`, quotes and comments already masked, ends inside a
+    command or process substitution: an odd count of backticks, or a
+    `$(`, `<(` or `>(` that no `)` has closed. A `)` with no opener, or a
+    `case` word, whose patterns end in a bare `)`, makes the count
+    untrustworthy, so both answer True: the body stays in the scan."""
+    if masked.count("`") % 2 or CASE_WORD.search(masked):
+        return True
+    openers: list[bool] = []
+    for i, ch in enumerate(masked):
+        if ch == "(":
+            openers.append(i > 0 and masked[i - 1] in "$<>")
+        elif ch == ")":
+            if not openers:
+                return True
+            openers.pop()
+    return any(openers)
+
+
 def continues(text: str) -> bool:
     """Whether the command line that `text` ends is not over at its last
     newline: a backslash joins the next line into it, and an open quote
@@ -183,7 +207,7 @@ def without_posted_bodies(command: str) -> str:
             pos = match.end()
             before = "\n".join(code[:-1] + [line[: match.start()]])
             masked, inside = mask_quoted(before)
-            if inside:
+            if inside or substitution_open(masked):
                 continue
             parsed = delimiter_word(line, match.end())
             if parsed is None:

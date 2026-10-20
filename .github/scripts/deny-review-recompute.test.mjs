@@ -87,6 +87,14 @@ const denied = [
     "gh-comment 1 <<'EOF' \\\n; cargo x check\nprose\nEOF",
     "a backslash joins the next line onto the operator, it is not body",
   ],
+  [
+    "`gh-comment 1 <<'EOF' `\ncargo x check\nEOF",
+    "a backtick closes on the operator line, the body is live shell",
+  ],
+  [
+    "$(gh-comment 1 <<'EOF' ;\nprose\nEOF )\ncargo x check",
+    "the substitution closes before the terminator, what follows runs",
+  ],
 ];
 
 const allowed = [

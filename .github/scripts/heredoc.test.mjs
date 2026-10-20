@@ -203,6 +203,26 @@ test("a quote left open on the operator line carries it into the next; every lin
   assert.equal(strip(command), command);
 });
 
+test("an operator inside an open substitution keeps every line", () => {
+  for (
+    const command of [
+      "`gh-comment 1 <<'EOF' `\nsleep 100 &\nEOF",
+      "$(gh-comment 1 <<'EOF' ;\nprose\nEOF )\nsleep 100 &",
+      "cat <(gh-comment 1 <<'EOF'\nprose\nEOF\n) ; sleep 100 &",
+      "echo $(case x in a) gh-comment 1 <<'EOF'\nsleep 100 &\nEOF\n)",
+    ]
+  ) {
+    assert.equal(strip(command), command, command);
+  }
+});
+
+test("a substitution that closed before the operator leaves the receiver in charge", () => {
+  const command = "sha=$(git rev-parse HEAD)\ngh-comment 1 <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(command), "sha=$(git rev-parse HEAD)\ngh-comment 1 <<'EOF'\nEOF");
+  const subshell = "(gh-comment 1 <<'EOF'\nfish & chips\nEOF\n)";
+  assert.equal(strip(subshell), "(gh-comment 1 <<'EOF'\nEOF\n)");
+});
+
 test("a comment ending the operator line does not continue it", () => {
   const command = "gh-comment 1 <<'EOF' # note\nfish & chips\nEOF";
   assert.equal(strip(command), "gh-comment 1 <<'EOF' # note\nEOF");
