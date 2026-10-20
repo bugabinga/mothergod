@@ -191,6 +191,23 @@ test("a `$'` before the operator keeps the body, its escapes are not modelled", 
   assert.equal(strip(command), command);
 });
 
+test("a backslash that ends the operator line joins the next line; every line stays", () => {
+  const command = "gh-comment 1 <<'EOF' \\\n& sleep 100 &\nprose\nEOF";
+  assert.equal(strip(command), command);
+  const doubled = "gh-comment 1 <<'EOF' \\\\\nprose &\nEOF";
+  assert.equal(strip(doubled), "gh-comment 1 <<'EOF' \\\\\nEOF");
+});
+
+test("a quote left open on the operator line carries it into the next; every line stays", () => {
+  const command = "gh-comment 1 <<'EOF' 'a\nb' ; sleep 100 &\nprose\nEOF";
+  assert.equal(strip(command), command);
+});
+
+test("a comment ending the operator line does not continue it", () => {
+  const command = "gh-comment 1 <<'EOF' # note\nfish & chips\nEOF";
+  assert.equal(strip(command), "gh-comment 1 <<'EOF' # note\nEOF");
+});
+
 test("a `#` inside a word is no comment", () => {
   const command = "gh-comment 1 a#b <<'EOF'\nfish & chips\nEOF";
   assert.equal(strip(command), "gh-comment 1 a#b <<'EOF'\nEOF");

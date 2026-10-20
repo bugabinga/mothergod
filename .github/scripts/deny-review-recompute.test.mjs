@@ -83,6 +83,10 @@ const denied = [
     "gh-comment 1 <<EOF\nthe `cargo x check` gate\nEOF",
     "an unquoted body is expanded by bash, backticks run (#1377)",
   ],
+  [
+    "gh-comment 1 <<'EOF' \\\n; cargo x check\nprose\nEOF",
+    "a backslash joins the next line onto the operator, it is not body",
+  ],
 ];
 
 const allowed = [

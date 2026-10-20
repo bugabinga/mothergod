@@ -41,7 +41,10 @@ not the operator's alone. A here-string
 (`<<<`) is a word, not a body. Several heredocs on one line take their
 bodies in order. A word the parse cannot finish or does not model (an unclosed
 quote, `<<$'EOF'`, a trailing backslash) keeps every line after it, and so
-does a `$'` before the operator.
+does a `$'` before the operator. The body starts after the command's last
+line, not the operator's: an operator line that ends in a backslash or
+inside an open quote runs on into the next line, so every line after it
+stays, as `continues` reads it.
 
 The receiver is read from the operator's prefix with quoted spans masked,
 so a `;` or a command name inside an argument names no segment.
@@ -114,6 +117,16 @@ def mask_quoted(text: str) -> tuple[str, bool]:
     return "".join(out), quote != "" or comment
 
 
+def continues(text: str) -> bool:
+    """Whether the command line that `text` ends is not over at its last
+    newline: a backslash joins the next line into it, and an open quote
+    carries it on, so bash reads the heredoc body after a later line than
+    the physical one. Over-reports a comment ending in a backslash, which
+    only keeps more of the command in the scan."""
+    backslashes = len(text) - len(text.rstrip("\\"))
+    return backslashes % 2 == 1 or mask_quoted(text + "\n")[1]
+
+
 def delimiter_word(line: str, start: int) -> tuple[str, bool, int] | None:
     """The heredoc delimiter word at `line[start:]` after quote removal,
     whether any part of it was quoted, and the index after it; None when
@@ -174,6 +187,9 @@ def without_posted_bodies(command: str) -> str:
                 continue
             parsed = delimiter_word(line, match.end())
             if parsed is None:
+                kept.extend(lines[i:])
+                return "\n".join(kept)
+            if continues("\n".join(code)):
                 kept.extend(lines[i:])
                 return "\n".join(kept)
             delimiter, quoted, pos = parsed
