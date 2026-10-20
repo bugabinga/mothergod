@@ -97,7 +97,13 @@ jobs:
                `.github/scripts/push-branch`, then run
                `.github/scripts/settle-push <pr>` and trust its exit
                code, not the push's.
-            2. Otherwise hunt. Pick one scope per the Scope section of
+            2. Otherwise the oldest open issue you filed (`gh issue list
+               --label product --search "deslopper in:body"`): a scope
+               already found and stated, so a hunt already paid for.
+               Take it as the scope on a new branch claude/deslop-<slug>,
+               `Closes #N` in the PR body; when the finding no longer
+               holds on main, close it with the reason instead.
+            3. Otherwise hunt. Pick one scope per the Scope section of
                the skill, state it in one sentence, and execute the
                skill's procedure on a new branch claude/deslop-<slug>.
 
