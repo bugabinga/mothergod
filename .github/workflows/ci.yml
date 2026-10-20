@@ -29,7 +29,7 @@ jobs:
   # Path filter: a PR that changes no gate input gets skips, and the
   # ruleset counts a skipped required check as satisfied, so a docs PR
   # costs no crate build. Outputs describe x quality inputs, Rust
-  # build inputs, and JavaScript tests. The filter enumerates tool-input
+  # build inputs, and the ratio gate's. The filter enumerates tool-input
   # file types, never tree paths: globs like *.rs and Cargo.toml stay correct
   # when directories move, so the list drifts only when a toolchain changes.
   # Sync rule: a new x input class extends the quality regex in the same diff.
@@ -62,7 +62,6 @@ jobs:
     outputs:
       quality: ${{ steps.filter.outputs.quality }}
       rust: ${{ steps.filter.outputs.rust }}
-      js: ${{ steps.filter.outputs.js }}
       ratio: ${{ steps.filter.outputs.ratio }}
     steps:
       - name: Detect tool-input changes
@@ -73,7 +72,6 @@ jobs:
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "quality=true" >> "$GITHUB_OUTPUT"
             echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "js=true" >> "$GITHUB_OUTPUT"
             echo "ratio=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -90,11 +88,6 @@ jobs:
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
-          fi
-          if echo "$files" | grep -qE '\.[cm]?js$|^\.github/(scripts|actions/agent-audit|workflows)/|^agents/personas/'; then
-            echo "js=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "js=false" >> "$GITHUB_OUTPUT"
           fi
           if echo "$files" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)baseline\.json$|^rust-toolchain|^\.cargo/|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
             echo "ratio=true" >> "$GITHUB_OUTPUT"
@@ -200,22 +193,21 @@ jobs:
   # rounds of hand-tracing in PR #155 review, so it has tests, and tests
   # nobody runs are decoration. The same dependency-free Node runner exercises
   # agent-audit's extraction script and retrospect's budget footer, both
-  # importing the shared allowance parse (issue #310); the js filter above
-  # watches all of .github/scripts/ because those files, retrospect included
-  # (extensionless, invisible to a suffix match), are what these tests read.
-  # It watches .github/workflows/ and agents/personas/ for the same reason
-  # (issue #505): gh-comment's test reads every workflow's env block and takes
-  # the seat names from the persona files, so a PR adding seat seven is
-  # precisely the one that must run this job, and it touches no script.
+  # importing the shared allowance parse (issue #310). No path filter, on
+  # purpose: these tests read across the tree, and the filter that listed
+  # their inputs grew twice (.github/scripts/ for retrospect, extensionless
+  # and invisible to a suffix match, #310; .github/workflows/ and
+  # agents/personas/ for gh-comment's test, #505) and still missed
+  # status-data's test, which reads ROADMAP.md, src/lib.rs, bench/, docs/
+  # and tests/fit/: #1451, a roadmap-only PR, skipped this job and turned
+  # main red on merge. The job takes about a minute beside clippy's ten,
+  # so running it on every PR costs less than the next missed input.
   # A required check since 2026-10-09: it holds the prompt pins
   # (prompt-bytes), and #957 landed red here because merge-pr reads the
-  # ruleset alone and a workflow PR gets no reviewer (#114). Skipped
-  # satisfies the ruleset, so a crate-only PR pays nothing for it.
+  # ruleset alone and a workflow PR gets no reviewer (#114).
   worker:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: changes
-    if: ${{ always() && needs.changes.outputs.js != 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: node --test infra/telegram-worker/*.test.mjs
