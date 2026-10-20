@@ -178,15 +178,9 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
 /// One node's ideal cost: `-log2(p)` if it resolved to `bit`, `-log2(1 - p)`
 /// otherwise. Shared by every bit-tree pricing path
 /// ([`ideal_cost_bits_sse`], [`crate::literal::Literal`]'s logistic-mix
-/// pricing) so the formula carries one `disallowed-methods` exemption.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends \
-              on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't \
-              apply off the coding path)"
-)]
+/// pricing) so the two outcomes of a node are priced alike.
 pub(crate) fn ideal_cost_bit(bit: bool, p: f64) -> f64 {
-    -(if bit { p.log2() } else { (1.0 - p).log2() })
+    crate::surprisal(if bit { p } else { 1.0 - p })
 }
 
 /// Prices what [`encode_symbol_sse`] would pay for `symbol`: each

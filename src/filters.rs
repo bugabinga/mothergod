@@ -763,13 +763,8 @@ pub mod select {
     /// One `(from, to)` pair's contribution to an order-1 entropy sum:
     /// `-count * log2(count / total)`, `total` being how often `from`
     /// occurred as the first byte of a pair. Used by [`Order1::bits`].
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "encoder-only: filter-selection heuristic (ADR-0024 decision 3), no bitstream depends on it"
-    )]
     fn surprisal_bits(count: u32, total: u32) -> f64 {
-        let p = f64::from(count) / f64::from(total);
-        -f64::from(count) * p.log2()
+        f64::from(count) * crate::surprisal(f64::from(count) / f64::from(total))
     }
 
     /// Pair-count scratch for the order-1 entropy proxies, allocated once

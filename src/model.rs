@@ -86,14 +86,10 @@ impl Model {
     ///
     /// Panics if `symbol >= alphabet_len`, same bound as [`Self::encode`].
     #[must_use]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "ideal-cost accounting never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here (ADR-0006, ADR-0024's determinism rule doesn't apply off the coding path)"
-    )]
     pub fn ideal_cost_bits(&mut self, symbol: usize) -> f64 {
         let probability = f64::from(self.freq[symbol]) / f64::from(self.total);
         self.update(symbol);
-        -probability.log2()
+        crate::surprisal(probability)
     }
 
     /// Decodes one symbol from `decoder` under this table's current
