@@ -50,10 +50,6 @@ fn wraps_past_capacity_without_disturbing_still_in_range_bytes() {
         }
         // The widest legal distance still reads the byte pushed that far
         // back: the ring's capacity is exactly the reach.
-        assert_eq!(
-            window.get(window_len),
-            u8::try_from(5 % 256).unwrap(),
-            "{reach:?}"
-        );
+        assert_eq!(window.get(window_len), 5, "{reach:?}");
     }
 }

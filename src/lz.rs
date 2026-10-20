@@ -15,8 +15,8 @@ pub const WINDOW: usize = 1 << 20;
 
 /// Largest backward distance a match may reference at [`Reach::Wide`]:
 /// `2^21 - 1`, the last distance the offset code's top bucket
-/// ([`OFFSET_BUCKETS`], `bucket(WINDOW)` plus its 20 raw bits) can name.
-/// A window past it needs a wider [`OFFSET_BUCKETS`], a format change of
+/// (`OFFSET_BUCKETS`, `bucket(WINDOW)` plus its 20 raw bits) can name.
+/// A window past it needs a wider `OFFSET_BUCKETS`, a format change of
 /// its own.
 pub const WIDE_WINDOW: usize = (1 << 21) - 1;
 
@@ -902,7 +902,7 @@ struct PriceTable {
     literal: Vec<f64>,
     /// Match/rep length price by [`bucket`], [`LENGTH_BUCKETS`] entries.
     length: Vec<f64>,
-    /// Match distance price by [`bucket`], [`OFFSET_BUCKETS`] entries.
+    /// Match distance price by [`bucket`], `OFFSET_BUCKETS` entries.
     offset: Vec<f64>,
     /// Flat price of choosing a rep over a normal match, independent of
     /// slot or length.
@@ -1205,7 +1205,7 @@ impl DpState {
 /// `window` bounds [`BinaryTreeMatchFinder`]'s reach, same parameter
 /// [`BinaryTreeMatchFinder::new`] itself takes (`research/JOURNAL.md`
 /// S2-A61). Must keep `bucket(window as u32) < OFFSET_BUCKETS`, i.e.
-/// `window < 2^21`: `prices.offset` has exactly [`OFFSET_BUCKETS`] entries,
+/// `window < 2^21`: `prices.offset` has exactly `OFFSET_BUCKETS` entries,
 /// and a distance whose bucket falls outside that range panics on the
 /// index below rather than silently mispricing. [`parse_optimal`] passes
 /// [`WINDOW`] (`bucket(WINDOW) == 20`, in range with headroom to `2^21 -

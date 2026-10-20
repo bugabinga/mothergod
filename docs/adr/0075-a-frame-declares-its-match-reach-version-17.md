@@ -22,7 +22,7 @@ Under ADR-0063 the bump retires version 16 in the same PR: the nine `v16-` golde
 ## Consequences
 
 The sealed set and any input where the wide parse loses are byte-identical to a standard encode, so the gate holds by construction instead of by a detector.
-The cost is encode time: the second parse runs after the filter trials, 1.4x to 1.6x wall-clock on Silesia files over 1 MiB (`research/JOURNAL.md` S2-A127).
+The cost is encode time: the second parse runs after the filter trials, 1.3x to 1.5x wall-clock on Silesia files over 1 MiB (`research/JOURNAL.md` S2-A127).
 A decoder streaming a wide frame holds 2 MiB of ring where a standard frame holds 1 MiB; whole-buffer decode is unchanged.
 A hostile frame can declare the wide reach for the price of one bit, which costs it a fixed 2 MiB and no more, because the declared length still bounds the output.
 Match finder state is per position in the block, not per distance, so the wide reach adds no encoder memory.

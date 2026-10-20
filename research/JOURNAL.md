@@ -2887,7 +2887,9 @@ record.
   blanket bump on the codec of today and read the Silesia finals once
   (issue #1342), rejected on the sealed set while every real file but `xml`
   shrank; the conflict between the two is an open question in S2-R35's own
-  entry.
+  entry. Twenty-first slice, S2-A127: the gate by trial, a frame declares its
+  reach and the encoder keeps the wide parse only when smaller, wired
+  (`FORMAT_VERSION` 17, ADR-0075).
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9036,3 +9038,50 @@ record.
   `OFFSET_BUCKETS`, xz's reach), a block wider than 16 MiB, the shipped path
   with filter trials, the real decoder (its bound rejects the frames), decode
   time. `research/progress.jsonl` it203.
+- S2-A127 | ACCEPTED | Issue #1342 step 3, the gate S2-R35 left open, wired.
+  Hypothesis: a frame that declares its reach, 1 MiB or `2^21 - 1`, with the
+  encoder keeping the wide parse of the winning filter candidate only when
+  strictly smaller, shrinks real files with repeats between 1 and 2 MiB back
+  and leaves every input where the wide parse loses byte-identical to a
+  standard encode, so the sealed set cannot regress. | Mechanism: the gate is
+  the trial, not a detector. S2-R9, S2-R11 and S2-A95 each built a signal for
+  "far matches pay" and each failed on a data class the signal did not see;
+  the encode of the winner at both reaches measures what they guessed, at the
+  price of one more parse. `lz::Reach` rides the selector's `kind` top bit
+  (ADR-0075, `FORMAT_VERSION` 17), `decode` rejects a distance past the
+  declared reach and sizes the streaming ring to it. Input of 1 MiB or less
+  has nothing to reach and pays no trial. | Measured, release build, AMD EPYC
+  7763 4 logical cores runner, the shipped `compress` path with filter trials
+  and the real decoder, every case decoded back and compared. Train, 4,000,000
+  bytes at seed `0xC0FFEE123456789A`, bytes main to branch: `markov_h8_2_trap`
+  1,127,305 both, `json_records` 230,811 both, `base64_wrapped` 188,253 to
+  188,091, `interleaved_audio16` 2,769,000 both, `sqlite_like_records`
+  1,611,103 to 1,610,698, `x86_dense_code` 1,155,229 to 1,154,147; mean
+  **-0.000550** b/B. Sealed, same length at `sealed_seed` of that key:
+  `access_log` 350,417 both, `gradient_image` 2,848,674 both; mean
+  **0.000000**. Finals, read once under the charter and not a verdict input
+  (`research/corpus/POLICY.md`), whole files at the `bench/corpus.toml` pins,
+  bytes main to branch, encode seconds main to branch, one run each: `xml`
+  467,470 both, 12.9 to 19.6 s; `reymont` 1,394,850 to 1,361,868 (-2.36%),
+  38.3 to 51.6 s; `ooffice` 2,263,365 to 2,246,969 (-0.72%), 40.7 to 53.0 s;
+  `mr` 3,060,361 to 3,044,817 (-0.51%), 46.0 to 67.1 s; `x-ray` 4,719,651 to
+  4,695,620 (-0.51%), 54.4 to 68.4 s; `sao` 4,909,232 to 4,896,324 (-0.26%),
+  58.1 to 80.4 s; `dickens` 2,956,893 to 2,899,385 (-1.94%), 45.2 to 68.4 s;
+  `osdb` 2,967,352 to 2,923,188 (-1.49%), 46.5 to 68.0 s; eight files
+  22,739,174 to 22,535,641 bytes (-0.90%). Peak RSS within 1% on every file
+  (237 to 556 MB). | Verdict: **accepted**. Sealed delta is zero by
+  construction and was measured zero, the train mean falls, and no train case
+  grows, which S2-R35's blanket bump could not say. Encode costs 1.26x to 1.52x
+  wall-clock on these files because the second parse runs after the trials,
+  where S2-R35's token-stage 1.10x had no trials to wait behind. The token
+  stage's train gains (S2-R35: `markov_h8_2_trap` -0.019518, `sqlite_like_records`
+  -0.005138) did not carry to the shipped path: `compress` picks a filter first,
+  and the far matches of the raw input are not the far matches of the filtered
+  one, `markov_h8_2_trap` shrinking by nothing here. The `interleaved_audio16`
+  loss stays undiagnosed and is now unpaid: the gate declines it. | **Not
+  measured:** `samba`, `nci`, `webster` and `mozilla` (the shipped path on
+  the four largest finals, one block of 16 MiB each or more), decode time of a
+  wide frame (the streaming ring's modulus is now dynamic, `baseline_gate --
+  speed` owns it), a reach past the offset code's ceiling, running the wide
+  trial beside the narrow ones on idle cores to hide the 1.26x to 1.52x.
+  `research/progress.jsonl` it204.
