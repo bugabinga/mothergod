@@ -379,10 +379,13 @@ The decoder's contract: **never panic, never overallocate, on any input.**
 - The same `baseline_gate check` invocation also fails when a gate case
   compresses to different bytes than the digest `bench/baseline.json`
   commits (issue #1182), whatever the size: it is the CI pin on
-  `compress()`'s output over the 11 fixed inputs, so a refactor's
+  `compress()`'s output over the fixed inputs, so a refactor's
   "bitstream unchanged" is a green check and an output change is declared
   by `baseline_gate -- write` in the same PR, the rule an encoder-only
-  change already follows for `tests/golden.rs`.
+  change already follows for `tests/golden.rs`. One of those inputs is
+  longer than the rest, a repeat past the standard match reach
+  (`baseline::reach_case`, issue #1434): the others sit inside it and
+  cannot feel a reach-class change.
 - The held-out finals reports (`docs/benchmarks/canterbury.md`,
   `docs/benchmarks/silesia.md`) are not checked by `baseline_gate`: they
   fetch real corpora over the network, too slow and non-hermetic for every
