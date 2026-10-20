@@ -53,6 +53,7 @@ import os
 import re
 import sys
 
+import heredoc
 import walls
 
 # Tools that can detach work from the turn. Bash backgrounds only on
@@ -61,13 +62,19 @@ DEFAULT_FOREGROUND = ("Bash",)
 DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 
 # The scan has no notion of quoting or nesting, so an idiom that is
-# inert data (prose, a -c payload, a heredoc) still trips it: an
-# accepted cost, because a quote-aware shell parser in a hook is
-# entanglement this guard refuses, and the deny message names the
-# rewrite. The same bluntness is what catches a live idiom inside
-# `sh -c '...'`, after `eval`, or in an `xargs -I{}` template; #355's
-# review showed any anchoring cheap enough for a hook opens those
-# holes. Each entry: (pattern, step-summary reason).
+# inert data (prose, a -c payload) still trips it: an accepted cost,
+# because a quote-aware shell parser in a hook is entanglement this
+# guard refuses, and the deny message names the rewrite. The same
+# bluntness is what catches a live idiom inside `sh -c '...'`, after
+# `eval`, or in an `xargs -I{}` template; #355's review showed any
+# anchoring cheap enough for a hook opens those holes. One body is
+# dropped before the scan: a heredoc fed to a posting script
+# (`heredoc.POSTING`), which posts or commits what it reads and never
+# runs it, so a `&` in a verdict or a commit message is prose by
+# construction; that cost was 45 rewritten turns a week (#1377). Any
+# other receiver keeps its body, `timeout 600 bash <<EOF` included:
+# the list names what never executes, so an unknown reader fails
+# closed. Each entry: (pattern, step-summary reason).
 SHELL_DETACH = (
     # Bare `&` control operator. The lookbehind clears `&&`, `>&`,
     # `<&`, `|&`; the lookahead clears `&&`, `&>`, and ampersands
@@ -98,11 +105,12 @@ SHELL_DETACH_MESSAGE = (
     "and orphan cleanup kills the process (runs 33207936812, "
     "33269388206). Drop the detach and run the command in the "
     "foreground (default timeout 10 minutes, ceiling 30 via the "
-    "timeout parameter). If the flagged idiom "
-    "is literal text, not shell syntax, reword it, for example `&` "
-    "as 'and'. If it has to stay verbatim, as bitwise code inside a "
-    "heredoc does, write the file with the Write tool and pass the "
-    "path to the command instead."
+    "timeout parameter). If the flagged idiom is text you are posting, "
+    "feed it to the posting script through a heredoc (`gh-comment <n> "
+    "<<'EOF'`), whose body this guard does not scan. Elsewhere reword "
+    "it, for example `&` as 'and'; if it has to stay verbatim, as "
+    "bitwise code does, write the file with the Write tool and pass "
+    "the path to the command instead."
 )
 
 
@@ -125,8 +133,9 @@ def main() -> int:
         if background is True:
             reason = "in background"
         elif isinstance(command, str):
+            scanned = heredoc.without_posted_bodies(command)
             for pattern, why in SHELL_DETACH:
-                if pattern.search(command):
+                if pattern.search(scanned):
                     reason = why
                     break
     elif tool in DEFAULT_BACKGROUND and background is not False:

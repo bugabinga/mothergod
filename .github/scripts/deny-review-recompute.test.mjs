@@ -72,6 +72,13 @@ const denied = [
     "cargo -q run --manifest-path x/Cargo.toml -- test",
     "global flag before the alias expansion",
   ],
+  ["bash <<'EOF'\ncargo x check\nEOF", "a heredoc fed to a shell runs (#1377)"],
+  ["timeout 600 bash <<EOF\ncargo x test\nEOF", "a wrapper around a shell is a shell"],
+  ["cat <<EOF | sh\ncargo x check\nEOF", "the pipe's first command reads the body"],
+  [
+    "gh-comment 1 <<'EOF'\nverdict\nEOF\ncargo x check",
+    "a recompute after the terminator",
+  ],
 ];
 
 const allowed = [
@@ -103,6 +110,18 @@ const allowed = [
   ["grep 'cargo x \\\ncheck' notes.md", "continuation inside quoted prose"],
   ["cargo --offline test -p mothergod-bench", "global flag plus scope"],
   ["cargo -q x test -- src/lz", "global flag, scoped constituent"],
+  [
+    ".github/scripts/gh-comment 1 <<'EOF'\nI did not run cargo x lint on the markdown files.\nEOF",
+    "prose fed to a posting script (#1377)",
+  ],
+  [
+    ".github/scripts/post-verdict 9 pass <<'EOF'\nNot executed: cargo x check as a CI gate.\nEOF",
+    "a verdict naming the gate it did not run",
+  ],
+  [
+    "push-branch claude/x src/lz.rs <<'EOF'\nlz: cargo test -- before push\nEOF",
+    "a commit message",
+  ],
 ];
 
 for (const [command, why] of denied) {
