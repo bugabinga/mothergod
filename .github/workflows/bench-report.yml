@@ -2,37 +2,31 @@
 # as an artifact, because the measurement outgrew a session (#1324):
 # `silesia_report` times `mothergod` one file at a time (#1321, #1325), about
 # 20 minutes for 212 MB, and a session's foreground command caps at 30 with
-# background execution denied (CLAUDE.md rule 12). Every output-changing
-# codec PR needs the pass since the ratio gate pins compress() bytes
-# (#1254): the baseline moves, both finals reports embed its fingerprint
-# (#327), and `baseline_gate check` demands them regenerated in the same
-# PR. By hand three times in the week before this file (#1214, #1228,
-# #1248), the last time the cap allowed it.
+# background execution denied (CLAUDE.md rule 12).
 #
 # A push to main under the paths below runs it unasked: a change to the
 # report binaries moves what the reports print, and the committed reports
 # stayed stale behind four such merges (#1356, #1367, #1373, #1376) while
 # two maintainer runs named the dispatch a blocker. `bench/baseline.json`
-# is a path because the gate's demand reaches only the 11 cases' bpb:
-# #1423 moved six Silesia finals by up to 2.2% and every digest, no bpb,
-# so `check` demanded nothing and the finals sat stale behind a `fresh`
-# read (#1434 is the long case the gate lacks). The digest pin makes every
-# byte-moving PR commit that file, so its merge is the codec's cue, about
-# one a day against ten src/ commits; `src/` itself would run a pass per
-# refactor. `bench/corpus.toml` because a moved pin is a different corpus.
-# `.github/scripts/bench-report` reads those paths from this file and
-# tells the next heartbeat whether the pass is owed, running, or finished
-# and waiting to be published. A codec PR still dispatches on its own branch:
-#   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref <branch>
-# It never pushes: a push on the workflow token to a PR branch holds every
-# run it triggers at GitHub's approval gate (GOVERNANCE "Push identity"),
-# and a script-only workflow carries no other credential. The seat that
-# dispatched downloads at its next wake, the one shape rule 12 allows for
-# a run no session can wait on:
-#   gh run download <run-id> -n bench-report
-# then copies the five files in and pushes with push-branch on its own
-# token. The run id comes from
-#   gh run list --workflow bench-report.yml --branch <branch>
+# because the gate's digest pin (#1254) makes every byte-moving codec PR
+# commit it, so its merge is the codec's cue, about one a day against ten
+# src/ commits; `src/` itself would run a pass per refactor, and nothing
+# narrower than that file sees a reach-class change: #1423 moved six
+# Silesia finals by up to 2.2% and no pinned bpb (#1434 is the long case
+# the gate lacks). `bench/corpus.toml` because a moved pin is a different
+# corpus. `.github/scripts/bench-report` reads those paths from this file,
+# so the trigger and the detector cannot disagree, and tells the next
+# heartbeat whether the pass is running, finished and waiting to be
+# published, or owed a dispatch, the healing for one that failed or
+# expired unpublished:
+#   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref main
+# The publish PR the heartbeat cuts from the artifact is the reports' one
+# writer, titled with the pass head so the next read learns the generator
+# (ADR-0076); a codec PR commits `bench/baseline.json` and no report, and
+# a reports commit naming no generator is stale by rule (#1381). This
+# workflow never pushes: main takes PRs only (#583), and the publish PR
+# carries the README and site quotes tests/claims.rs pins to the reports'
+# timing columns, which the seat moves in the same diff (#1384).
 name: bench-report
 
 on:
@@ -73,9 +67,8 @@ jobs:
       - uses: ./.github/actions/rust-ci
         with:
           checks: setup
-      # The four commands `docs/benchmarks/README.md` "Regenerating" lists,
-      # in its order: the baseline first, because both finals reports embed
-      # its fingerprint.
+      # The commands `docs/benchmarks/README.md` "Regenerating" lists, in
+      # its order, after the baseline `render_baseline_graph` draws.
       - run: cargo run -p mothergod-bench --release --bin baseline_gate -- write
       - run: cargo run -p mothergod-bench --release --bin render_baseline_graph
       - run: cargo x fmt -- docs/benchmarks/baseline.svg

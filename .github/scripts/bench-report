@@ -42,13 +42,18 @@ not depend on the caller's checkout or branch:
                 jitter.
     generated   the commit on main the committed reports were generated at.
                 A publish commit names it in its subject, the title this
-                script prints for the publish PR ("regenerated at <sha>");
-                a commit that names none, a hand edit of a report, is its
-                own generator. The reports commit's
-                own date would not do: a publish PR for pass P can merge
-                after a later report-affecting commit B lands, and then
-                the reports are newer than B by date while B's pass is
-                unpublished (the reviewer's sequence on #1378).
+                script prints for the publish PR ("regenerated at <sha>").
+                A reports commit that names none is stale by rule, never
+                fresh: the publish PR is the reports' one writer
+                (ADR-0076), so such a commit is a hand edit, and the next
+                publish overwrites it with a pass's output. Not UNREADABLE,
+                because `--publish` needs state publish and a revert names
+                no generator either, so that answer would deadlock on the
+                one commit nothing honest writes (#1381). The reports
+                commit's own date would not do: a publish PR for pass P
+                can merge after a later report-affecting commit B lands,
+                and then the reports are newer than B by date while B's
+                pass is unpublished (the reviewer's sequence on #1378).
     pass        the newest bench-report.yml run on main. It covers the
                 affecting commit when its head is at or after it; main is
                 linear (squash merges), so committer dates order it, and a
@@ -57,7 +62,8 @@ not depend on the caller's checkout or branch:
 
 States, the first word of the first line, in the order tested:
 
-    fresh           generated is at or after affecting; nothing owed.
+    fresh           generated is at or after affecting; nothing owed. Never
+                    this when the reports commit names no generator.
     running <id>    the newest pass covers and is in progress; nothing to
                     do this wake, the next one publishes.
     publish <id>    the newest pass covers, succeeded, and its artifact is
@@ -194,6 +200,11 @@ def generator(subject):
     return hit.group(1) if hit else None
 
 
+def fresh(generated, affecting):
+    """Whether the reports need nothing: generated at or after affecting, and generated at all."""
+    return generated is not None and generated["date"] >= affecting["date"]
+
+
 def read(repo):
     """The facts `decide` needs, read lazily: the pass's head and artifact only when the reports are stale."""
     paths, error = report_paths(repo)
@@ -207,7 +218,7 @@ def read(repo):
         return None, error
     named = generator(reports["subject"])
     if named is None:
-        generated = {"sha": reports["sha"], "date": reports["date"]}
+        generated = None
     else:
         generated, error = commit(repo, named)
         if error:
@@ -230,7 +241,7 @@ def read(repo):
         return None, f"runs of {WORKFLOW} on main: {error}"
     newest = runs[0] if runs else None
     head = live = None
-    if newest is not None and generated["date"] < affecting["date"]:
+    if newest is not None and not fresh(generated, affecting):
         row, error = commit(repo, newest["headSha"])
         if error:
             return None, f"head of run {newest['databaseId']}: {error}"
@@ -253,12 +264,13 @@ def read(repo):
 def decide(affecting, generated, newest, head, live):
     """The state and its reason. Pure: every input is a fact `read` produced.
 
-    `generated` is the commit the reports were generated at, `newest` the
-    newest pass on main or None, `head` its head commit's date (None when
-    not read), `live` whether its artifact is still downloadable (None when
+    `generated` is the commit the reports were generated at, None when the
+    reports commit names no generator (stale by rule), `newest` the newest
+    pass on main or None, `head` its head commit's date (None when not
+    read), `live` whether its artifact is still downloadable (None when
     not read).
     """
-    if generated["date"] >= affecting["date"]:
+    if fresh(generated, affecting):
         return "fresh", None
     if newest is None or head is None or head < affecting["date"]:
         return "dispatch", "no pass on main at or after it"
@@ -281,7 +293,12 @@ def render(facts, error, out=sys.stdout):
 
     affecting, reports, generated, newest = (facts[k] for k in ("affecting", "reports", "generated", "newest"))
     state, reason = decide(affecting, generated, facts["newest"], facts["head"], facts["live"])
-    where = f"the reports ({reports['sha'][:7]}, generated at {generated['sha'][:7]} {generated['date']})"
+    origin = (
+        f"generated at {generated['sha'][:7]} {generated['date']}"
+        if generated is not None
+        else "naming no generator, stale by rule"
+    )
+    where = f"the reports ({reports['sha'][:7]}, {origin})"
     stale = f"{where} predate {affecting['sha'][:7]} ({affecting['date']}, under {affecting['path']})"
     if state == "fresh":
         print(
@@ -310,7 +327,7 @@ def render(facts, error, out=sys.stdout):
     print(
         f"\nbench-report: {state}"
         f" | affecting {affecting['sha'][:7]} {affecting['date']} under {affecting['path']}"
-        f" | reports {reports['sha'][:7]} generated at {generated['sha'][:7]} {generated['date']}"
+        f" | reports {reports['sha'][:7]} {origin}"
         f" | pass {newest['databaseId'] if newest else 'none'}"
         " | gh readable",
         file=out,
