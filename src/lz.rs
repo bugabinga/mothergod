@@ -27,8 +27,11 @@ pub(crate) const MIN_MATCH_LEN: usize = 4;
 const MIN_REP_LEN: usize = 2;
 
 /// [`MIN_REP_LEN`] as a `u32`, the type [`Token`] lengths and the price
-/// table use. The cast is of the literal 2, so it cannot truncate.
-#[allow(clippy::cast_possible_truncation)]
+/// table use.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "the cast is of the literal 2, so it cannot truncate"
+)]
 const MIN_REP_LEN_U32: u32 = MIN_REP_LEN as u32;
 
 /// Longest run a single token can cover; longer repeats are split into
@@ -834,9 +837,10 @@ pub(crate) fn bucket(v: u32) -> usize {
 /// that many raw bits on top of the coder's own modeled price to pin down
 /// which value in that log2-wide bucket it actually was.
 fn extra_bits(bucket_index: usize) -> f64 {
-    // bucket_index is always < OFFSET_BUCKETS (21), far below f64's exact
-    // integer range (2^53): no precision loss.
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "bucket_index < OFFSET_BUCKETS (21), far below f64's exact integer range (2^53)"
+    )]
     {
         bucket_index as f64
     }

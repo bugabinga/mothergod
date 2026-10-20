@@ -238,9 +238,10 @@ pub mod bcj {
             instruction[3],
             instruction[4],
         ]);
-        // x86 rel32 addressing wraps at 2^32, so truncating the position
-        // to u32 keeps a stream past 4 GiB round-tripping.
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "x86 rel32 addressing wraps at 2^32, so truncating the position to u32 keeps a stream past 4 GiB round-tripping"
+        )]
         let post_addr = (position as u32).wrapping_add(INSTRUCTION_LEN as u32);
         instruction[1..INSTRUCTION_LEN]
             .copy_from_slice(&rewrite_operand(operand, post_addr).to_le_bytes());
@@ -311,7 +312,10 @@ pub mod bcj {
         fn from_slice(bytes: &[u8]) -> Self {
             let mut buf = [0; INSTRUCTION_LEN];
             buf[..bytes.len()].copy_from_slice(bytes);
-            #[allow(clippy::cast_possible_truncation)]
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "bytes.len() <= INSTRUCTION_LEN, which fits u8"
+            )]
             let len = bytes.len() as u8;
             Self { buf, len }
         }
@@ -773,8 +777,10 @@ pub mod select {
         /// from noise well enough to shortlist (`JOURNAL` S1-L3).
         fn entropy(&mut self, data: &[u8], columns: NonZeroUsize) -> f64 {
             let (bits, transitions) = self.bits(data, columns.get());
-            // transitions <= PROBE_LEN (16384): exact in f64.
-            #[allow(clippy::cast_precision_loss)]
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "transitions <= PROBE_LEN (16384): exact in f64"
+            )]
             let transitions = transitions.max(1) as f64;
             bits / transitions
         }
