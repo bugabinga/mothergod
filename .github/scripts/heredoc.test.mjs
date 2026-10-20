@@ -223,6 +223,28 @@ test("a substitution that closed before the operator leaves the receiver in char
   assert.equal(strip(subshell), "(gh-comment 1 <<'EOF'\nEOF\n)");
 });
 
+test("a `{` or a closed backtick pair in argument position names no receiver", () => {
+  for (
+    const prefix of [
+      "bash -s { gh-comment 1",
+      "bash -s x{ gh-comment 1",
+      "bash -s `true` gh-comment 1",
+      "bash -s `true`gh-comment 1",
+      "{ gh-comment 1",
+    ]
+  ) {
+    const command = `${prefix} <<'EOF'\nsleep 100 &\nEOF`;
+    assert.equal(strip(command), command, prefix);
+  }
+});
+
+test("a receiver on an earlier physical line of the operator's command is the receiver", () => {
+  const live = "echo \\\ngh-comment 1 <<'EOF'\nsleep 100 &\nEOF";
+  assert.equal(strip(live), live);
+  const posted = "gh-comment 1 \\\n  --close <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(posted), "gh-comment 1 \\\n  --close <<'EOF'\nEOF");
+});
+
 test("a comment ending the operator line does not continue it", () => {
   const command = "gh-comment 1 <<'EOF' # note\nfish & chips\nEOF";
   assert.equal(strip(command), "gh-comment 1 <<'EOF' # note\nEOF");

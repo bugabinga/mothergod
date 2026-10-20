@@ -48,8 +48,10 @@ line, not the operator's: an operator line that ends in a backslash or
 inside an open quote runs on into the next line, so every line after it
 stays, as `continues` reads it.
 
-The receiver is read from the operator's prefix with quoted spans masked,
-so a `;` or a command name inside an argument names no segment.
+The receiver is read from the operator's logical line, with quoted spans
+masked, so a `;` or a command name inside an argument names no segment, and
+`echo \\` over `gh-comment 1 <<'EOF'` is one command whose receiver is
+`echo`: masking turns a backslash-escaped newline into a plain character.
 """
 
 import os
@@ -68,10 +70,13 @@ WORD_END = frozenset(" \t;&|<>()")
 # The word that reads the body: the first word of the operator's own
 # simple command, after the last control operator or opening bracket on
 # the line, skipping assignments and a timeout wrapper. Everything else is
-# an argument of that word. A backtick opens a command substitution like
-# `(` does, so a shell inside one is its own receiver. An `&` is an
-# operator unless it belongs to a redirection (`2>&1`, `&>file`).
-SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||(?<![<>])&(?!>)|\(|\{|`|^)")
+# an argument of that word. An `&` is an operator unless it belongs to a
+# redirection (`2>&1`, `&>file`). Neither `{` nor a backtick starts a
+# segment: `{` is a reserved word only at command position and an argument
+# anywhere else (`bash -s { gh-comment`), so `{ gh-comment` has the
+# receiver `{` and keeps its body; an open backtick is `substitution_open`'s
+# to answer and a closed pair is an argument (``bash -s `true` gh-comment``).
+SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||(?<![<>])&(?!>)|\(|^)")
 ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=\S*$")
 DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 
@@ -224,7 +229,7 @@ def without_posted_bodies(command: str) -> str:
                 if candidate == delimiter:
                     break
                 end += 1
-            if not quoted or receiver(masked[len(masked) - match.start():]) not in POSTING:
+            if not quoted or receiver(masked[masked.rfind("\n") + 1:]) not in POSTING:
                 kept.extend(lines[i:end])
             if end < len(lines):
                 kept.append(lines[end])

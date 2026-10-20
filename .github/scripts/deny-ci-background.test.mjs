@@ -162,6 +162,9 @@ test("a heredoc fed to a posting script is prose; fed to a shell it runs (#1377)
     "gh-comment 1 <<'EOF' 'a\nb' ; sleep 100 &\nprose\nEOF",
     "`gh-comment 1 <<'EOF' `\nsleep 100 &\nEOF",
     "$(gh-comment 1 <<'EOF' ;\nprose\nEOF )\nsleep 100 &",
+    "bash -s { gh-comment <<'EOF'\nsleep 100 &\nEOF",
+    "bash -s `true` gh-comment <<'EOF'\nsleep 100 &\nEOF",
+    "echo \\\ngh-comment 1 <<'EOF'\nsleep 100 &\nEOF",
   ];
   for (const command of live) {
     const call = { tool_name: "Bash", tool_input: { command } };
