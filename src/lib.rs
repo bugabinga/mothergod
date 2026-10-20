@@ -501,6 +501,18 @@ impl Rate {
     }
 }
 
+/// `-log2(p)`: the Shannon price, in bits, of an outcome of probability `p`.
+/// Every pricing path calls this one function, so the ADR-0024
+/// `disallowed-methods` exemption for `log2` is stated once.
+#[inline]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "encoder-only: pricing never drives an Encoder or Decoder, so no bitstream depends on libm's last-ulp behavior here; a heuristic that prices differently picks a different valid frame, costing reproducibility, not correctness (ADR-0024 decision 3)"
+)]
+pub(crate) fn surprisal(p: f64) -> f64 {
+    -p.log2()
+}
+
 /// Increments `freq[symbol]`/`*total` by `rate`'s increment, then halves
 /// every entry of `freq` once `*total` exceeds `rate`'s limit, recomputing
 /// `*total` from the halved counts.
