@@ -56,7 +56,7 @@
 //! literal bytes together, without touching an [`Encoder`].
 
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 
 use crate::Error;
@@ -793,87 +793,160 @@ impl ResidualTree {
 #[must_use]
 pub fn encode(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
     let candidates = filters::select::pick(data);
-    let (candidate, mut body) = best_trial(data, &candidates, workers)
+    let (candidate, reach, body) = search(data, &candidates, workers)
         .expect("filters::select::pick always returns at least Candidate::Identity");
-    let mut reach = Reach::Standard;
-    if data.len() > lz::WINDOW {
-        let wide = encode_tokens(
-            &apply_filter(candidate, data),
-            candidate.columns(),
-            Reach::Wide,
-        );
-        if crate::candidate_beats_incumbent(wide.len(), body.len()) {
-            reach = Reach::Wide;
-            body = wide;
-        }
-    }
-
     let mut out = Vec::with_capacity(SELECTOR_LEN + body.len());
     out.extend_from_slice(&selector(candidate, reach));
     out.extend(body);
     out
 }
 
-/// The winner among `candidates`, with its body, as the first candidate in
-/// the list to reach the smallest body: what a serial loop that replaces its
-/// incumbent only on a strictly smaller body keeps. Up to `workers` threads
-/// take the next untried candidate until none is left; each keeps its own
-/// winner, which is its first smallest because it takes candidates in list
-/// order, and the merge by list position then picks the global first
-/// smallest. `None` for no candidates.
-fn best_trial(
+/// A finished trial: the candidate's position in the shortlist, the
+/// candidate, and its body at [`Reach::Standard`].
+type Winner = (usize, Candidate, Vec<u8>);
+
+/// [`Candidate`] `candidate` at [`Reach::Wide`]: the body [`encode`]'s wide
+/// trial compares against the narrow one.
+fn wide_body(data: &[u8], candidate: Candidate) -> Vec<u8> {
+    encode_tokens(
+        &apply_filter(candidate, data),
+        candidate.columns(),
+        Reach::Wide,
+    )
+}
+
+/// The winner among `candidates` as `(candidate, reach, body)`: the first
+/// candidate in the list to reach the smallest body at [`Reach::Standard`],
+/// what a serial loop that replaces its incumbent only on a strictly smaller
+/// body keeps, then the wide trial [`encode`] documents. `None` for no
+/// candidates.
+///
+/// Up to `workers` threads take the next untried candidate until none is
+/// left; each keeps its own winner, which is its first smallest because it
+/// takes candidates in list order, and the merge by list position then picks
+/// the global first smallest.
+///
+/// A thread that finds none left while another trial still runs would idle
+/// until the winner is known, so it starts the wide trial of the smallest
+/// body finished so far. That guess is the winner when the running trial
+/// loses, and then the wide body is ready when the narrow search ends; when
+/// it is not, the real wide trial starts at once beside the wasted one, so
+/// the working sets stay at `workers` and the payload is the serial one
+/// either way (`research/JOURNAL.md` S2-A129).
+fn search(
     data: &[u8],
     candidates: &[Candidate],
     workers: NonZeroUsize,
-) -> Option<(Candidate, Vec<u8>)> {
-    type Winner = (usize, Candidate, Vec<u8>);
+) -> Option<(Candidate, Reach, Vec<u8>)> {
+    // Size of each finished trial's body, `usize::MAX` while it runs or
+    // waits; a body never has that length. Relaxed: the guess it feeds
+    // never changes the payload, only what runs early.
+    let sizes: Vec<AtomicUsize> = candidates
+        .iter()
+        .map(|_| AtomicUsize::new(usize::MAX))
+        .collect();
     let next = AtomicUsize::new(0);
-    let work = || -> Option<Winner> {
-        let mut best: Option<Winner> = None;
-        loop {
-            // Relaxed: the counter hands out each index once and orders
-            // nothing else.
-            let index = next.fetch_add(1, Ordering::Relaxed);
-            let Some(&candidate) = candidates.get(index) else {
-                return best;
-            };
-            let filtered = apply_filter(candidate, data);
-            let body = encode_tokens(&filtered, candidate.columns(), Reach::Standard);
-            if best.as_ref().is_none_or(|(_, _, existing)| {
-                crate::candidate_beats_incumbent(body.len(), existing.len())
-            }) {
-                best = Some((index, candidate, body));
-            }
-        }
-    };
+    let speculating = AtomicBool::new(false);
+    let has_wide_trial = data.len() > lz::WINDOW;
 
-    let mut winners: Vec<Winner> = thread::scope(|scope| {
-        // A refused spawn (the process is out of threads) leaves the work to
-        // the threads that did start, this one included.
+    thread::scope(|scope| {
+        let work = || -> (Option<Winner>, Option<(usize, WideTrial<'_>)>) {
+            let mut best: Option<Winner> = None;
+            loop {
+                // Relaxed: the counter hands out each index once and orders
+                // nothing else.
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(&candidate) = candidates.get(index) else {
+                    break;
+                };
+                let filtered = apply_filter(candidate, data);
+                let body = encode_tokens(&filtered, candidate.columns(), Reach::Standard);
+                sizes[index].store(body.len(), Ordering::Relaxed);
+                if best.as_ref().is_none_or(|(_, _, existing)| {
+                    crate::candidate_beats_incumbent(body.len(), existing.len())
+                }) {
+                    best = Some((index, candidate, body));
+                }
+            }
+            let guess = if has_wide_trial && sizes.iter().any(is_pending) {
+                leader(&sizes).filter(|_| !speculating.swap(true, Ordering::Relaxed))
+            } else {
+                None
+            };
+            // A refused spawn (the process is out of threads) is no guess.
+            let trial = guess.and_then(|index| {
+                let candidate = candidates[index];
+                thread::Builder::new()
+                    .spawn_scoped(scope, move || wide_body(data, candidate))
+                    .ok()
+                    .map(|handle| (index, handle))
+            });
+            (best, trial)
+        };
+
+        // A refused spawn leaves the work to the threads that did start,
+        // this one included.
         let helpers: Vec<_> = (1..workers.get().min(candidates.len()))
             .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
             .collect();
-        let mut winners: Vec<Winner> = work().into_iter().collect();
+        let (own, own_trial) = work();
+        let mut winners: Vec<Winner> = own.into_iter().collect();
+        let mut trial = own_trial;
         for helper in helpers {
             // A panic on a trial thread is the panic a serial encode raises.
-            winners.extend(
-                helper
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            );
+            let (winner, helper_trial) = helper
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            winners.extend(winner);
+            trial = trial.or(helper_trial);
         }
-        winners
-    });
-    winners.sort_by_key(|&(index, ..)| index);
-    let mut best: Option<(Candidate, Vec<u8>)> = None;
-    for (_, candidate, body) in winners {
-        if best.as_ref().is_none_or(|(_, existing)| {
-            crate::candidate_beats_incumbent(body.len(), existing.len())
-        }) {
-            best = Some((candidate, body));
+        winners.sort_by_key(|&(index, ..)| index);
+        let mut best: Option<Winner> = None;
+        for winner in winners {
+            if best.as_ref().is_none_or(|(_, _, existing)| {
+                crate::candidate_beats_incumbent(winner.2.len(), existing.len())
+            }) {
+                best = Some(winner);
+            }
+        }
+        let (index, candidate, body) = best?;
+        if !has_wide_trial {
+            return Some((candidate, Reach::Standard, body));
+        }
+        let wide = match trial {
+            Some((guessed, handle)) if guessed == index => handle
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            // A wrong guess is left running and joined when the scope ends.
+            _ => wide_body(data, candidate),
+        };
+        if crate::candidate_beats_incumbent(wide.len(), body.len()) {
+            Some((candidate, Reach::Wide, wide))
+        } else {
+            Some((candidate, Reach::Standard, body))
+        }
+    })
+}
+
+/// A wide trial running on a thread of [`search`]'s scope.
+type WideTrial<'scope> = thread::ScopedJoinHandle<'scope, Vec<u8>>;
+
+/// Whether a trial's size slot still holds no finished body.
+fn is_pending(size: &AtomicUsize) -> bool {
+    size.load(Ordering::Relaxed) == usize::MAX
+}
+
+/// The first candidate among the finished trials to reach the smallest
+/// body, the serial loop's rule; `None` when no trial has finished.
+fn leader(sizes: &[AtomicUsize]) -> Option<usize> {
+    let mut leader: Option<(usize, usize)> = None;
+    for (index, size) in sizes.iter().enumerate() {
+        let size = size.load(Ordering::Relaxed);
+        if size != usize::MAX && leader.is_none_or(|(_, smallest)| size < smallest) {
+            leader = Some((index, size));
         }
     }
-    best
+    leader.map(|(index, _)| index)
 }
 
 /// Byte length of [`encode_tokens_with`]'s header: declared output length
