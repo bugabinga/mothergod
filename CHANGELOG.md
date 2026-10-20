@@ -13,7 +13,7 @@ All notable changes to this project are documented here. Format follows
   match: up to 2.4% smaller on Silesia text (`reymont`, `dickens`), nothing
   lost where it does not help, because the encoder keeps the 1 MiB frame when
   the 2 MiB one is not smaller. Encode takes 1.3x to 1.5x as long on those
-  files; decode is unchanged. `FORMAT_VERSION` 16 to 17, ADR-0075 (#1342).
+  files; decode is unchanged. `FORMAT_VERSION` 16 to 17, ADR-0075 (#1423).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
   status first, each superseded decision linked to the one that replaced
   it, searchable in the browser, so a reader learns what is decided today
