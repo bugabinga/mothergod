@@ -315,10 +315,11 @@
       <section>
         <h2>Speed</h2>
         <p>
-          Slow, and that is the honest headline. mothergod's codec has no
-          internal parallelism; the reports time it one file at a time, with
-          nothing else running, on one CI machine (AMD EPYC 7763, 4 logical
-          cores), so each rate is comparable between files.
+          Slow, and that is the honest headline, even with two cores helping:
+          mothergod encodes on up to two cores and decodes on one. The reports
+          time it one file at a time, with nothing else running, on one CI
+          machine (AMD EPYC 7763, 4 logical cores), so each rate is comparable
+          between files. A one-core machine encodes slower than these rates.
         </p>
         <table class="bench" id="speed">
           <caption class="visually-hidden">
