@@ -2889,7 +2889,9 @@ record.
   shrank; the conflict between the two is an open question in S2-R35's own
   entry. Twenty-first slice, S2-A127: the gate by trial, a frame declares its
   reach and the encoder keeps the wide parse only when smaller, wired
-  (`FORMAT_VERSION` 17, ADR-0075).
+  (`FORMAT_VERSION` 17, ADR-0075). Twenty-second slice, S2-A128: the four
+  finals S2-A127 left unread, all shrink and all seven losses to zstd -19
+  remain; full record in S2-A128's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9085,3 +9087,35 @@ record.
   speed` owns it), a reach past the offset code's ceiling, running the wide
   trial beside the narrow ones on idle cores to hide the 1.26x to 1.52x.
   `research/progress.jsonl` it204.
+
+- S2-A128 | ACCEPTED | Issue #1342, the four finals S2-A127 left unread, and
+  the wide frame's decode time. Hypothesis: the trial's gain carries to the
+  four largest Silesia files, and a wide frame decodes no slower than a
+  standard one. | Measured, release build, AMD EPYC 7763 4 logical cores
+  runner, whole files at the `bench/corpus.toml` pins (SHA-256 verified),
+  `compress` and `decompress` of main at `8313225` against its parent
+  `73ad3b8`, every output decoded and compared, one run each, sequential.
+  Bytes narrow to wide, encode seconds narrow to wide, decode seconds
+  narrow to wide, peak RSS KiB narrow to wide: `samba` 4,252,271 to
+  4,174,293 (-1.83%), 116.0 to 149.1 s, 8.1 to 8.0 s, 539,680 to 539,708;
+  `nci` 1,970,683 to 1,943,762 (-1.37%), 106.8 to 132.9 s, 4.1 to 3.9 s,
+  822,468 to 822,636; `webster` 9,314,902 to 9,113,592 (-2.16%), 178.6 to
+  229.5 s, 10.4 to 9.7 s, 922,672 to 922,100; `mozilla` 15,488,699 to
+  15,349,871 (-0.90%), 300.6 to 385.2 s, 32.9 to 31.6 s, 906,280 to 929,288;
+  four files 31,026,555 to 30,581,518 bytes (-1.43%). | Verdict: **accepted**,
+  a measurement of S2-A127's accepted gate, not a new candidate; the
+  finals are not a verdict input (`research/corpus/POLICY.md`). Every file
+  shrinks, encode costs 1.24x to 1.29x, decode time is within 7% either way
+  (one run each, so inside the run-to-run noise), peak RSS rises 2.5% on `mozilla`
+  and is within 0.1% elsewhere, 929,288 KiB at the highest, under 1 GiB. Against zstd -19 on the same finals
+  (`docs/benchmarks/silesia.md` as of 2026-10-19, the narrow numbers
+  reproduce its mothergod column to the byte), the gap in b/B closes and
+  does not flip: `samba` 0.1324 to 0.1035, `nci` 0.0729 to 0.0665, `webster`
+  0.1226 to 0.0837, `mozilla` 0.0651 to 0.0435, `reymont` 0.0560 to 0.0162,
+  `dickens` 0.0839 to 0.0388; `xml` unchanged at 0.0213. All seven losses
+  to zstd -19 remain, so the reach closes 0.006 to 0.045 b/B of gaps of 0.056
+  to 0.132 and the 1 MiB window is part of #1342's correlation, not all of
+  it; `nci` gains least in b/B. **Not measured:** a reach past the offset
+  code's ceiling, the wide trial beside the narrow
+  ones on idle cores, `baseline_gate -- speed` on the wide frame (CI's
+  `ratio` and speed gates read it). `research/progress.jsonl` it205.
