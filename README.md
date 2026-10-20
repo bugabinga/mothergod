@@ -42,7 +42,7 @@ Methodology, per-file rates, every level of gzip, zstd and xz, peak
 memory included, and the regeneration command: [`docs/benchmarks/`](docs/benchmarks/).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 16) is specified but not frozen. Before the first
+format (`FORMAT_VERSION` 17) is specified but not frozen. Before the first
 release, each format change retires the version before it, so the next build
 that changes the format will not read a file you compress today. After that,
 until 1.0 a version can still be retired; from 1.0 on, none ever is. The
