@@ -674,6 +674,29 @@ fn encode_keeps_the_standard_reach_when_the_wide_parse_buys_nothing() {
 }
 
 #[test]
+fn an_idle_thread_starting_the_wide_trial_early_never_changes_the_payload() {
+    // Two candidates that both run at once, so the first to finish finds
+    // the other still running and starts the wide trial of its own body,
+    // a guess the payload must not show. Only a wide match reaches the
+    // first record, so the wide frame wins.
+    let record = crate::test_support::record_text(2);
+    let mut data = record.clone();
+    data.resize(lz::WINDOW + record.len() + 4096, 0);
+    data.extend_from_slice(&record);
+    let candidates = [Candidate::Identity, Candidate::Reverse];
+
+    let serial = search(&data, &candidates, NonZeroUsize::MIN);
+
+    // Two workers is every thread the two candidates can use.
+    assert_eq!(
+        search(&data, &candidates, crate::test_support::nz(2)),
+        serial
+    );
+    let (_, reach, _) = serial.expect("two candidates");
+    assert_eq!(reach, Reach::Wide);
+}
+
+#[test]
 fn caller_supplied_max_len_below_max_decoded_len_is_honored() {
     // A frame legal under MAX_DECODED_LEN can still be rejected by a
     // caller's tighter max_len, proving the parameter is a real

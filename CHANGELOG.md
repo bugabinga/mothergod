@@ -171,6 +171,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- encode: a file over 1 MiB on two or more cores starts the 2 MiB reach trial
+  on the thread that would otherwise wait for the other filter trials, so
+  Silesia `reymont` compresses 23% faster (251 s to 194 s) and `dickens` 8%
+  (326 s to 299 s) on a 4-core runner, with output bytes unchanged and peak
+  memory under 1 GiB (#1448).
 - encode: the optimal parse holds 21 bytes of state per input byte, down
   from 41, so a 16 MiB block peaks at 372 MB instead of 700 MB and
   Silesia `dickens` at 364 MB instead of 562 MB, with output bytes
