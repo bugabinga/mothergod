@@ -254,7 +254,7 @@
           Aggregate bits per byte on the two named corpora, lower is better.
           Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
           both are pinned by URL and SHA-256, fetched at measurement time and
-          never committed. Measured 2026-10-19 against <code>gzip 1.12</code>,
+          never committed. Measured 2026-10-20 against <code>gzip 1.12</code>,
           <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
           flags in the header row.
         </p>
@@ -287,7 +287,7 @@
               </tr>
               <tr>
                 <th scope="row">Silesia</th>
-                <td class="ours">2.029</td>
+                <td class="ours">2.005</td>
                 <td>2.553</td>
                 <td>1.997</td>
                 <td>1.829</td>
@@ -336,22 +336,23 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.254</td>
-              <td>3.870</td>
+              <td>0.249</td>
+              <td>3.593</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.216</td>
-              <td>2.267</td>
+              <td>0.150</td>
+              <td>2.367</td>
             </tr>
           </tbody>
         </table>
         <p>
-          Silesia's 212 MB took about sixteen minutes to compress and about a
-          minute and a half to read back. Encoding carries the optimal parse, so
-          it runs roughly ten times slower than decoding. In the same run,
-          <code>xz -9e</code> encoded Silesia at 2.274 MB/s and decoded it at
-          70.235 MB/s, more than ten times faster both ways. The reports set
+          Silesia's 212 MB took about twenty-four minutes to compress and about
+          a minute and a half to read back. Encoding carries the optimal parse,
+          so it runs roughly sixteen times slower than decoding. In the same
+          run,
+          <code>xz -9e</code> encoded Silesia at 1.913 MB/s and decoded it at
+          67.003 MB/s, more than ten times faster both ways. The reports set
           every level of gzip, zstd and xz beside mothergod, peak memory
           included.
         </p>
@@ -360,7 +361,7 @@
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.6 to 21.2 MB/s</span>. Speed is measured on every
+          <span class="rate">0.4 to 19.6 MB/s</span>. Speed is measured on every
           benchmark run and becomes a target of its own at the speed-tiers
           milestone on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
