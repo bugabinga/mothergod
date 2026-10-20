@@ -841,14 +841,12 @@ pub mod select {
 
     /// [`Candidate::Identity`] and every [`Candidate::Delta`] stride up to
     /// [`MAX_DELTA_STRIDE`], scored by [`Order1::entropy`] of `probe` after
-    /// the filter, lowest first.
-    fn rank_by_delta(probe: &[u8], order1: &mut Order1) -> Vec<(f64, Candidate)> {
+    /// the filter, lowest first, beside [`Candidate::Identity`]'s own score.
+    fn rank_by_delta(probe: &[u8], order1: &mut Order1) -> (f64, Vec<(f64, Candidate)>) {
+        let identity = order1.entropy(probe, NonZeroUsize::MIN);
         let mut scored: Vec<(f64, Candidate)> =
             Vec::with_capacity(usize::from(MAX_DELTA_STRIDE) + 1);
-        scored.push((
-            order1.entropy(probe, NonZeroUsize::MIN),
-            Candidate::Identity,
-        ));
+        scored.push((identity, Candidate::Identity));
         for stride in (1..=MAX_DELTA_STRIDE)
             .filter_map(NonZeroU8::new)
             .map(NonZeroUsize::from)
@@ -859,7 +857,7 @@ pub mod select {
             ));
         }
         scored.sort_by(|a, b| a.0.total_cmp(&b.0));
-        scored
+        (identity, scored)
     }
 
     /// Shortlists filters worth a full trial encode against `data`.
@@ -871,7 +869,7 @@ pub mod select {
         let probe = &data[..data.len().min(PROBE_LEN)];
 
         let mut order1 = Order1::new();
-        let scored = rank_by_delta(probe, &mut order1);
+        let (baseline, scored) = rank_by_delta(probe, &mut order1);
 
         let mut candidates = vec![scored[0].1];
         candidates.push(if scored[0].1 == Candidate::Identity {
@@ -901,17 +899,13 @@ pub mod select {
         // end of the block can rank another stride first.
         let tail = &data[data.len().saturating_sub(PROBE_LEN)..];
         let reversed_tail: Vec<u8> = tail.iter().rev().copied().collect();
-        if let (_, Candidate::Delta(stride)) = rank_by_delta(&reversed_tail, &mut order1)[0] {
+        if let (_, Candidate::Delta(stride)) = rank_by_delta(&reversed_tail, &mut order1).1[0] {
             candidates.push(Candidate::ReverseDelta(stride));
         }
 
         if data.len() >= MIN_TRANSPOSE_LEN {
-            // rank_by_delta's Identity score is the one-column entropy of
-            // `probe`, the baseline a transpose has to beat.
-            let baseline = scored
-                .iter()
-                .find_map(|&(entropy, c)| (c == Candidate::Identity).then_some(entropy))
-                .unwrap_or(f64::INFINITY);
+            // `baseline`, the one-column entropy of `probe`, is what a
+            // transpose has to beat.
             let best = TRANSPOSE_COLUMNS
                 .iter()
                 .map(|&columns| (columns, order1.entropy(probe, columns)))
