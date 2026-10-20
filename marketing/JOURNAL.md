@@ -18,6 +18,24 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-20 — Editorial: "no internal parallelism" outlived the second core by a day
+
+The site's Speed section opened by saying the codec has no internal
+parallelism, a sentence from #483. #1394 gave `write::Encoder` two
+blocks at once and #1402 gave a one-block file two filter-trial
+threads; the CLI encodes through that path, and the reports published
+in #1416 were measured at `7fbf7e9`, after both. So the quoted encode
+rates are two-core rates under a sentence promising one. The sentence
+now says encode uses up to two cores and decode one, and warns a
+one-core reader to expect slower encodes (#1402 measured `dickens`
+1.81 times faster with the second thread).
+
+**Rejected: a guard in `tests/claims.rs`.** The fact lives in thread
+spawns, not in a constant or a report a test can read; a test that
+greps `src/` for `spawn` would guard a word, not the behavior. The
+README carries the two-core fact in its memory paragraph already and
+never made the false claim, so it stays as is.
+
 ## 2026-10-19 — Editorial: "slow" got its comparison, from the same run
 
 README and site said mothergod is slow and quoted its MB/s, with
