@@ -23,7 +23,7 @@ Facts, in the order the prompt names them:
                conclusions: bot events the actor filter rejects, and the
                debounce (ADR-0014). A red names the `bug` issues whose TITLE
                carries the workflow name whole (`deny-ci-background` names no
-               `ci`, #1457) and that moved since the run: an
+               `ci`, #1457), in any case, and that moved since the run: an
                open one is the filed fix, a closed one is a fix that landed
                and waits on the next run, recheck's after a push to main
                or the cron's (#1069), none is `unfiled`, and an
@@ -85,6 +85,10 @@ from anchor import OPS_LOG, iso, previous_run_start, stamp_to_dt
 # bot event creates a run the actor filter then rejects; agent-bdfl.yml says
 # why), so the newest one that concluded sits some rows back.
 RUN_PAGE = 50
+# Search hits per red before the title filter, which runs client-side: a
+# short name like `ci` draws hyphen noise (`deny-ci-background`), and a real
+# bug pushed off the page would print as unfiled (#1462's review).
+SEARCH_PAGE = 50
 
 # Commits read in one page. A full page may be a cut one (a stale anchor after
 # a long gap), so the render says `100+` rather than a count that looks whole.
@@ -177,8 +181,10 @@ def names_workflow(title, name):
     GitHub's title search tokenises on hyphens, so `in:title ci` returned a
     bug about the deny-ci-background hook and a red nobody had filed printed
     as filed (#1457). The tokeniser cannot be told about hyphens; this can.
+    Case folds as the search folds: monster-report.mjs files its own red as
+    "Monster CI failure", and a filter that missed it would file a duplicate.
     """
-    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", title or "") is not None
+    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", title or "", re.IGNORECASE) is not None
 
 
 def read_checks(repo, alarm, now):
@@ -222,7 +228,7 @@ def read_checks(repo, alarm, now):
             found, error = gh(
                 "api", "-X", "GET", "search/issues",
                 "-f", f"q=repo:{repo} is:issue label:bug in:title {name} updated:>={row['created']}",
-                "-f", "per_page=10",
+                "-f", f"per_page={SEARCH_PAGE}",
             )
             row["cited"] = None if error else cite(
                 [i for i in found.get("items", []) if names_workflow(i.get("title"), name)]
