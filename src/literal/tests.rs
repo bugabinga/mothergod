@@ -122,6 +122,32 @@ fn ideal_cost_bits_sse_drops_as_a_byte_gets_more_likely() {
     assert!(third < second);
 }
 
+#[test]
+fn ideal_cost_bits_sse_leaves_the_mixer_where_ideal_cost_bits_does() {
+    // The two methods price differently but must adapt the banks and
+    // mixing weights identically (`ideal_cost_bits_sse`'s doc), and
+    // the benchmark baseline prices through the SSE one. `ideal_cost_bits`
+    // reads only the banks and weights, so on twin models its cost for
+    // a probe byte exposes any divergence the training left there.
+    let corpus: &[u8] = b"the cat sat on the mat. the cat sat on the hat. that is that.";
+    let mut plain = Literal::new();
+    let mut sse = Literal::new();
+    let mut context = Context::default();
+    for &byte in corpus {
+        let _ = plain.ideal_cost_bits(context, byte);
+        let _ = sse.ideal_cost_bits_sse(context, byte);
+        context = context.after_literal(byte);
+    }
+    for probe in *b"thez" {
+        let want = plain.ideal_cost_bits(context, probe);
+        let got = sse.ideal_cost_bits(context, probe);
+        assert!(
+            (want - got).abs() < 1e-9,
+            "probe {probe}: plain {want} bits, after the sse method {got} bits"
+        );
+    }
+}
+
 /// `f64::exp`, the pre-ADR-0024 reference this test diffs `exp`
 /// against. `#[cfg(test)]`-gated, so it never reaches the decode
 /// path this crate ships.
