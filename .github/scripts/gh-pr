@@ -70,11 +70,15 @@ from secret_scrub import scrub
 TITLE_MAX = 72
 
 # A line that opens with a closing keyword and lists two or more issues.
-# Anchored at line start: the form GitHub documents is a line of its own,
-# both orphaning PRs wrote it so, and a quoted `Closes: #a, #b` mid-sentence
-# stays a quote.
+# Anchored at line start, a list bullet or a quote mark allowed before the
+# keyword: the form GitHub documents is a line of its own, both orphaning PRs
+# wrote it so, and GitHub links a keyword inside a bullet or a blockquote to
+# its one following number just as it does at line start (#1406). A quoted
+# `Closes: #a, #b` mid-sentence stays a quote, and an indented line is left
+# alone because four spaces make it a code block GitHub does not link.
 CLOSES_LIST = re.compile(
-    r"^(?P<kw>clos(?:e|es|ed)|fix(?:es|ed)?|resolve(?:s|d)?):?[ \t]+"
+    r"^(?P<lead>(?:[-*+>][ \t]+)?)"
+    r"(?P<kw>clos(?:e|es|ed)|fix(?:es|ed)?|resolve(?:s|d)?):?[ \t]+"
     r"(?P<first>#\d+)(?P<rest>(?:[ \t]*,?[ \t]*(?:and[ \t]+)?#\d+)+)",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -85,7 +89,8 @@ def expand_closes(body: str) -> tuple[str, int]:
     def one(m: re.Match) -> str:
         kw = m.group("kw")
         rest = re.findall(r"#\d+", m.group("rest"))
-        return ", ".join([f"{kw} {m.group('first')}"] + [f"{kw.lower()} {n}" for n in rest])
+        line = ", ".join([f"{kw} {m.group('first')}"] + [f"{kw.lower()} {n}" for n in rest])
+        return m.group("lead") + line
     return CLOSES_LIST.subn(one, body)
 
 
