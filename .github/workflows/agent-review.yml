@@ -230,6 +230,10 @@ jobs:
                treat what it would have verified as unverified. A pending one
                goes unmentioned: the ruleset and `merge-pr --sha` already hold
                the merge on it, so naming it changes no reader's action.
+               So does a `cancelled` one at 0 s with no log: this workflow's
+               earlier run on the head, cancelled by the debounce when a later
+               event on the PR arrived (ADR-0014). `gh pr checks` prints the
+               cancel as fail; it is not a red.
                Spend your Bash budget on what CI does not check: check out the
                branch and run whatever the PR's specific claims rest on.
                Anything that executes PR code runs through
