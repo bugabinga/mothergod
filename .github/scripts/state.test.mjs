@@ -288,7 +288,12 @@ test("cite lists open issues before closed ones, newest first within each", () =
   assert.deepEqual(got, ["#1069 open", "#980 open", "#1013 closed 2026-10-10"]);
 });
 
-test("names_workflow wants the name whole: deny-ci-background names no ci", () => {
+// The title monster-report.mjs files is the one the filter must keep, and
+// GitHub's search folds case, so the filter does (#1464).
+test("names_workflow wants the name whole, in any case: deny-ci-background names no ci", () => {
+  assert.equal(call("names_workflow", ["🐛 Monster CI failure", "monster"]), true);
+  assert.equal(call("names_workflow", ["CI red on main", "ci"]), true);
+  assert.equal(call("names_workflow", ["CodeQL analysis red", "codeql"]), true);
   assert.equal(call("names_workflow", ["ci: worker red on main", "ci"]), true);
   assert.equal(call("names_workflow", ["`ci` red at 7c97e01", "ci"]), true);
   assert.equal(call("names_workflow", ["deny-ci-background and deny-review-recompute match prose", "ci"]), false);
@@ -357,7 +362,7 @@ test("end to end: the checks are read per workflow, a red is cited, the rest cou
         ],
       },
       "search/issues": {
-        items: [{ number: 1013, title: "monster: BSD lane red", state: "closed", closed_at: "2026-10-10T12:23:33Z" }],
+        items: [{ number: 1013, title: "🐛 Monster CI failure", state: "closed", closed_at: "2026-10-10T12:23:33Z" }],
       },
       "pr list": [{
         number: 7,
