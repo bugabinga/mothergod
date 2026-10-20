@@ -67,7 +67,7 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// naming any other version is rejected as `UnsupportedVersion` before its
 /// payload is read (`tests/golden/` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 16;
+pub const FORMAT_VERSION: u8 = 17;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

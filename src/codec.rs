@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! offset  size  field
-//! 0       2     filter selector: [kind, param] (`filters::select::Candidate`)
+//! 0       2     selector: [kind | reach << 7, param] (`filters::select::Candidate`, `lz::Reach`)
 //! 2       4     declared length of the filtered bytes, u32 LE
 //! 6       4     token count, u32 LE
 //! 10      8     range-coded stream length in bytes, u64 LE
@@ -64,7 +64,7 @@ use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{self, select::Candidate};
 use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
-use crate::lz::{self, RepCache, RepSlot, Token};
+use crate::lz::{self, Reach, RepCache, RepSlot, Token};
 use crate::model::Model;
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
@@ -511,10 +511,16 @@ impl TokenSink for CostSink {
 /// exactly when this trial's candidate is [`Candidate::Transpose`] with that
 /// column count, selecting the column-expert literal path for the whole
 /// trial (see [`EncodeSink`]).
+/// `reach` bounds the parse's match distances and is the one the payload's
+/// selector must declare ([`selector`]).
 /// Panics under the same condition as [`encode_tokens_with`], which this
 /// delegates to.
-fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>) -> Vec<u8> {
-    encode_tokens_with(data, columns, &lz::parse_optimal(data))
+fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>, reach: Reach) -> Vec<u8> {
+    encode_tokens_with(
+        data,
+        columns,
+        &lz::parse_optimal_with_window(data, reach.window()),
+    )
 }
 
 /// `encode_tokens`'s real-bitstream length, but parsed with
@@ -757,11 +763,19 @@ impl ResidualTree {
 }
 
 /// Encodes `data` into a `Method::Lz` payload: trials every candidate
-/// filter [`filters::select::pick`] shortlists, keeps whichever produces
-/// the smallest `encode_tokens` body, and prefixes that body with the
-/// winning candidate's 2-byte selector (see the module docs' "Payload
-/// layout"). Each candidate is applied to the raw input: one filter, or
-/// [`Candidate::ReverseDelta`], the one fixed composition.
+/// filter [`filters::select::pick`] shortlists at [`Reach::Standard`], keeps
+/// whichever produces the smallest `encode_tokens` body, and prefixes that
+/// body with the winning candidate's 2-byte selector (see the module docs'
+/// "Payload layout"). Each candidate is applied to the raw input: one
+/// filter, or [`Candidate::ReverseDelta`], the one fixed composition.
+///
+/// Input longer than [`lz::WINDOW`] gets one more trial, the winning
+/// candidate at [`Reach::Wide`], kept only when strictly smaller: the
+/// repeats between 1 and 2 MiB back that real files have shrink them, and
+/// where the wide parse loses (`research/JOURNAL.md` S2-R35's
+/// `interleaved_audio16`, `access_log`, `gradient_image`) the payload is the
+/// one a narrow encode writes. A shorter input has nothing to reach, so it
+/// pays no trial.
 ///
 /// Up to `workers` trials run at once, the calling thread being one of them.
 /// The trials are independent encodes, so the payload is the one a serial
@@ -776,11 +790,23 @@ impl ResidualTree {
 #[must_use]
 pub fn encode(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
     let candidates = filters::select::pick(data);
-    let (candidate, body) = best_trial(data, &candidates, workers)
+    let (candidate, mut body) = best_trial(data, &candidates, workers)
         .expect("filters::select::pick always returns at least Candidate::Identity");
+    let mut reach = Reach::Standard;
+    if data.len() > lz::WINDOW {
+        let wide = encode_tokens(
+            &apply_filter(candidate, data),
+            candidate.columns(),
+            Reach::Wide,
+        );
+        if crate::candidate_beats_incumbent(wide.len(), body.len()) {
+            reach = Reach::Wide;
+            body = wide;
+        }
+    }
 
     let mut out = Vec::with_capacity(SELECTOR_LEN + body.len());
-    out.extend_from_slice(&candidate.to_header_bytes());
+    out.extend_from_slice(&selector(candidate, reach));
     out.extend(body);
     out
 }
@@ -809,7 +835,7 @@ fn best_trial(
                 return best;
             };
             let filtered = apply_filter(candidate, data);
-            let body = encode_tokens(&filtered, candidate.columns());
+            let body = encode_tokens(&filtered, candidate.columns(), Reach::Standard);
             if best.as_ref().is_none_or(|(_, _, existing)| {
                 crate::candidate_beats_incumbent(body.len(), existing.len())
             }) {
@@ -858,20 +884,43 @@ fn best_trial(
 /// (ADR-0065): no bound short of `u64` is proved for what the coder emits.
 const TOKEN_HEADER_LEN: usize = 2 * size_of::<u32>() + size_of::<u64>();
 
-/// Byte length of the filter selector that opens a `Method::Lz` payload.
+/// Byte length of the selector that opens a `Method::Lz` payload.
 const SELECTOR_LEN: usize = 2;
 
-/// Splits a `Method::Lz` payload into the filter [`Candidate`] its 2-byte
-/// selector names and the rest, which [`read_header`] expects.
+/// The bit of a selector's `kind` byte that declares [`Reach::Wide`];
+/// [`Candidate::to_header_bytes`] leaves it clear, its kinds being under
+/// 128.
+const WIDE_REACH_BIT: u8 = 0x80;
+
+/// The 2-byte selector that opens a `Method::Lz` payload: `candidate`'s
+/// bytes, `kind` carrying `reach` in its top bit.
+fn selector(candidate: Candidate, reach: Reach) -> [u8; SELECTOR_LEN] {
+    let [kind, param] = candidate.to_header_bytes();
+    let wide = match reach {
+        Reach::Standard => 0,
+        Reach::Wide => WIDE_REACH_BIT,
+    };
+    [kind | wide, param]
+}
+
+/// Splits a `Method::Lz` payload into the filter [`Candidate`] and the
+/// [`Reach`] its 2-byte selector names, and the rest, which [`read_header`]
+/// expects.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the selector,
 /// [`Error::Corrupt`] if the selector names no [`Candidate`].
-fn split_candidate(payload: &[u8]) -> Result<(Candidate, &[u8]), Error> {
-    let (&selector, rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
-    let candidate = Candidate::from_header_bytes(selector).ok_or(Error::Corrupt)?;
-    Ok((candidate, rest))
+fn split_selector(payload: &[u8]) -> Result<(Candidate, Reach, &[u8]), Error> {
+    let (&[kind, param], rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
+    let reach = if kind & WIDE_REACH_BIT == 0 {
+        Reach::Standard
+    } else {
+        Reach::Wide
+    };
+    let candidate =
+        Candidate::from_header_bytes([kind & !WIDE_REACH_BIT, param]).ok_or(Error::Corrupt)?;
+    Ok((candidate, reach, rest))
 }
 
 /// The three fields of an `Lz` payload's header, before the stream.
@@ -921,7 +970,7 @@ pub(crate) const EXTENT_PREFIX_LEN: usize = SELECTOR_LEN + TOKEN_HEADER_LEN;
 /// declared stream length overflows `usize`; [`Error::Corrupt`] if the
 /// selector names no [`Candidate`].
 pub(crate) fn declared_extent(bytes: &[u8]) -> Result<Extent, Error> {
-    let (candidate, rest) = split_candidate(bytes)?;
+    let (candidate, _, rest) = split_selector(bytes)?;
     let (header, _) = split_token_header(rest)?;
     let coded_len = usize::try_from(header.coded_len).map_err(|_| Error::Truncated)?;
     Ok(Extent {
@@ -978,14 +1027,16 @@ fn ensure_room(output_len: usize, additional: usize, declared_len: usize) -> Res
     }
 }
 
-/// Rejects a match distance past [`lz::WINDOW`]. [`decode_offset`] can
-/// return distances up to `2 * WINDOW - 1` (`OFFSET_BUCKETS`'s docs, bucket
-/// 20's residual bits), but the encoder's match finder never searches past
-/// `WINDOW`: a wider distance is adversarial, and rejecting it here, before
-/// it ever reaches `RepCache`, keeps every cached rep distance within
-/// `WINDOW` too, so this is the only place that needs the check.
-fn ensure_within_window(distance: NonZeroU32) -> Result<(), Error> {
-    if distance.get() as usize > lz::WINDOW {
+/// Rejects a match distance past the frame's declared [`Reach`].
+/// [`decode_offset`] can return distances up to `2 * WINDOW - 1`
+/// (`OFFSET_BUCKETS`'s docs, bucket 20's residual bits), which is
+/// [`lz::WIDE_WINDOW`]; a [`Reach::Standard`] frame's encoder never
+/// searches past `WINDOW`, so a wider distance there is adversarial, and
+/// rejecting it here, before it ever reaches `RepCache`, keeps every cached
+/// rep distance within the reach too, so this is the only place that needs
+/// the check.
+fn ensure_within_window(distance: NonZeroU32, reach: Reach) -> Result<(), Error> {
+    if distance.get() as usize > reach.window() {
         Err(Error::Corrupt)
     } else {
         Ok(())
@@ -1088,6 +1139,7 @@ fn decode_offset(models: &mut Models, ac: &mut Decoder, len: u32) -> u32 {
 fn decode_tokens<S: DecodeSink>(
     token_count: u32,
     declared_len: usize,
+    reach: Reach,
     models: &mut Models,
     ac: &mut Decoder,
     reps: &mut RepCache,
@@ -1107,7 +1159,7 @@ fn decode_tokens<S: DecodeSink>(
                 let distance = decode_offset(models, ac, len);
                 let distance =
                     NonZeroU32::new(distance).expect("decode_offset's result is always >= 1");
-                ensure_within_window(distance)?;
+                ensure_within_window(distance, reach)?;
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
                 reps.push_front(distance);
@@ -1213,7 +1265,7 @@ impl DecodeSink for VecSink<'_> {
 ///   [`Candidate::Base64`], [`Candidate::Reverse`] and
 ///   [`Candidate::ReverseDelta`]) the filter's undo buffer.
 /// - [`Error::Corrupt`] if the filter selector names no [`Candidate`]; bytes
-///   follow the stream; a match distance exceeds [`lz::WINDOW`] (the
+///   follow the stream; a match distance exceeds the frame's [`Reach`] (the
 ///   encoder's match finder never searches past it, so a wider one is never
 ///   legitimate, and left unrejected would force the decoder to retain
 ///   output far past what any real bitstream needs, `research/JOURNAL.md`
@@ -1225,7 +1277,7 @@ impl DecodeSink for VecSink<'_> {
 ///
 /// Never, on any `payload`.
 pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
-    let (candidate, payload) = split_candidate(payload)?;
+    let (candidate, reach, payload) = split_selector(payload)?;
     let (declared_len, token_count, ac_bytes) = read_header(payload, max_len, candidate)?;
 
     let mut ac = Decoder::new(ac_bytes);
@@ -1253,6 +1305,7 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     decode_tokens(
         token_count,
         declared_len,
+        reach,
         &mut models,
         &mut ac,
         &mut reps,
@@ -1270,7 +1323,7 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
 ///
 /// A candidate [`StreamUndo`] has a variant for (`Identity`, `Delta`, `Bcj`)
 /// undoes the LZ token stream one filtered byte at a time as it is produced,
-/// so it bounds resident memory to [`lz::WINDOW`] via [`lz::Window`]
+/// so it bounds resident memory to the frame's [`Reach::window`] via [`lz::Window`]
 /// regardless of `declared_len` (`research/JOURNAL.md`
 /// S1-P7/S2-D5/S2-A74, ROADMAP M4's bounded-memory decode guarantee). The
 /// rest need their filter undone over the complete buffer, so they take
@@ -1290,7 +1343,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     max_len: u32,
     writer: &mut W,
 ) -> Result<(), crate::WriteError> {
-    let (candidate, filtered_payload) = split_candidate(payload)?;
+    let (candidate, reach, filtered_payload) = split_selector(payload)?;
     let mut undo = match candidate {
         Candidate::Identity => StreamUndo::Identity,
         Candidate::Delta(stride) => {
@@ -1310,7 +1363,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     let mut ac = Decoder::new(ac_bytes);
     let mut models = Models::try_new().map_err(Error::from)?;
     let mut reps = RepCache::initial();
-    let mut window = lz::Window::try_new().map_err(Error::from)?;
+    let mut window = lz::Window::try_new(reach).map_err(Error::from)?;
 
     let mut sink = StreamingSink {
         window: &mut window,
@@ -1320,6 +1373,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     decode_tokens(
         token_count,
         declared_len,
+        reach,
         &mut models,
         &mut ac,
         &mut reps,

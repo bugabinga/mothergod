@@ -8,11 +8,41 @@
 
 use std::num::NonZeroU32;
 
-/// Largest backward distance a match may reference: 1 MiB. The wired parse
-/// passes this to the match finders, which take their window as a
-/// parameter so a larger one can be measured without a format change
+/// Largest backward distance a match may reference at [`Reach::Standard`]:
+/// 1 MiB. The match finders take their window as a parameter
 /// (`JOURNAL` S1-P4).
 pub const WINDOW: usize = 1 << 20;
+
+/// Largest backward distance a match may reference at [`Reach::Wide`]:
+/// `2^21 - 1`, the last distance the offset code's top bucket
+/// ([`OFFSET_BUCKETS`], `bucket(WINDOW)` plus its 20 raw bits) can name.
+/// A window past it needs a wider [`OFFSET_BUCKETS`], a format change of
+/// its own.
+pub const WIDE_WINDOW: usize = (1 << 21) - 1;
+
+/// How far back a frame's matches may reach, declared on the wire by the
+/// payload selector's top bit (`docs/format/SPEC.md`). The encoder picks
+/// per payload by trial (`research/JOURNAL.md` S2-R35, S2-A127); the decoder
+/// bounds both its distance check and its streaming ring by it, so a
+/// hostile frame cannot name a reach its header did not declare.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// Distances up to [`WINDOW`].
+    Standard,
+    /// Distances up to [`WIDE_WINDOW`].
+    Wide,
+}
+
+impl Reach {
+    /// The largest distance a match at this reach may name.
+    #[must_use]
+    pub const fn window(self) -> usize {
+        match self {
+            Self::Standard => WINDOW,
+            Self::Wide => WIDE_WINDOW,
+        }
+    }
+}
 
 /// Shortest run [`parse_greedy`] emits as [`Token::Match`]. Below this a
 /// literal costs fewer bits than a match's length+distance overhead.
@@ -196,27 +226,27 @@ impl RepCache {
     }
 }
 
-/// Fixed-capacity ring buffer over the last [`WINDOW`] decoded bytes, for
-/// [`crate::codec`]'s streaming decode (bounded memory, ROADMAP M4). A byte
-/// older than `WINDOW` is silently overwritten, which is sound because
+/// Fixed-capacity ring buffer over the last [`Reach::window`] decoded bytes,
+/// for [`crate::codec`]'s streaming decode (bounded memory, ROADMAP M4). A
+/// byte older than that is silently overwritten, which is sound because
 /// `crate::codec::ensure_within_window` rejects any distance wider before it
 /// reaches here, and the caller has already handed every byte to its sink.
 pub(crate) struct Window {
     buf: Box<[u8]>,
     /// Total bytes ever pushed, unbounded (mirrors `decode`'s
     /// `output.len()`): [`Self::get`] maps it back into `buf`'s fixed
-    /// `WINDOW` capacity by distance, this value is never used as an index
+    /// capacity by distance, this value is never used as an index
     /// directly.
     written: usize,
 }
 
 impl Window {
-    /// An empty window: `WINDOW` bytes of backing storage, nothing written
-    /// yet. Fallible so an allocator failure on the decode path returns
-    /// `Err` instead of aborting (hard rule 2, `tests/torture.rs`).
-    pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
+    /// An empty window: [`Reach::window`] bytes of backing storage, nothing
+    /// written yet. Fallible so an allocator failure on the decode path
+    /// returns `Err` instead of aborting (hard rule 2, `tests/torture.rs`).
+    pub(crate) fn try_new(reach: Reach) -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
-            buf: crate::try_filled_vec(WINDOW, 0u8)?.into_boxed_slice(),
+            buf: crate::try_filled_vec(reach.window(), 0u8)?.into_boxed_slice(),
             written: 0,
         })
     }
@@ -228,9 +258,9 @@ impl Window {
     }
 
     /// Appends `byte` as the newest decoded byte, overwriting whichever
-    /// byte was pushed exactly `WINDOW` pushes ago, if any.
+    /// byte was pushed exactly a capacity of pushes ago, if any.
     pub(crate) fn push(&mut self, byte: u8) {
-        self.buf[self.written % WINDOW] = byte;
+        self.buf[self.written % self.buf.len()] = byte;
         self.written += 1;
     }
 
@@ -246,7 +276,7 @@ impl Window {
     /// stale, overwritten slot from a real one, so it does not attempt a
     /// second, redundant bounds check the caller has already done.
     pub(crate) fn get(&self, distance: usize) -> u8 {
-        self.buf[(self.written - distance) % WINDOW]
+        self.buf[(self.written - distance) % self.buf.len()]
     }
 }
 
