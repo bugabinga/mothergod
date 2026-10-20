@@ -336,23 +336,22 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.249</td>
-              <td>3.593</td>
+              <td>0.257</td>
+              <td>3.858</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.150</td>
-              <td>2.367</td>
+              <td>0.161</td>
+              <td>2.277</td>
             </tr>
           </tbody>
         </table>
         <p>
-          Silesia's 212 MB took about twenty-four minutes to compress and about
-          a minute and a half to read back. Encoding carries the optimal parse,
-          so it runs roughly sixteen times slower than decoding. In the same
-          run,
-          <code>xz -9e</code> encoded Silesia at 1.913 MB/s and decoded it at
-          67.003 MB/s, more than ten times faster both ways. The reports set
+          Silesia's 212 MB took about twenty-two minutes to compress and about a
+          minute and a half to read back. Encoding carries the optimal parse, so
+          it runs roughly fourteen times slower than decoding. In the same run,
+          <code>xz -9e</code> encoded Silesia at 2.076 MB/s and decoded it at
+          72.045 MB/s, more than ten times faster both ways. The reports set
           every level of gzip, zstd and xz beside mothergod, peak memory
           included.
         </p>
@@ -361,7 +360,7 @@
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.4 to 19.6 MB/s</span>. Speed is measured on every
+          <span class="rate">0.6 to 21.2 MB/s</span>. Speed is measured on every
           benchmark run and becomes a target of its own at the speed-tiers
           milestone on the
           <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"

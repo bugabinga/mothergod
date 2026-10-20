@@ -2,14 +2,15 @@
 
 # Baseline snapshot
 
-As of 2026-10-20T09:48:34Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 11 fixed-seed, 50,000-byte cases (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
+As of 2026-10-20T15:45:22Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 12 fixed-seed cases, each 50000 bytes except `wide_reach_repeat`, 1376256 bytes (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
 
-![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-10-20T09:48:34Z](baseline.svg)
+![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-10-20T15:45:22Z](baseline.svg)
 
 | case | bits/byte |
 |---|---|
 | `base64_wrapped` | 0.395360 |
 | `json_records` | 0.519360 |
+| `wide_reach_repeat` | 1.187756 |
 | `entropy_ladder_h1` | 1.253120 |
 | `entropy_ladder_h2` | 2.372480 |
 | `markov_h8_2_trap` | 2.372640 |
