@@ -12,10 +12,17 @@
 # A push to main under the paths below runs it unasked: a change to the
 # report binaries moves what the reports print, and the committed reports
 # stayed stale behind four such merges (#1356, #1367, #1373, #1376) while
-# two maintainer runs named the dispatch a blocker. `.github/scripts/
-# bench-report` reads those paths from this file and tells the next
-# heartbeat whether the pass is owed, running, or finished and waiting
-# to be published. A codec PR still dispatches on its own branch:
+# two maintainer runs named the dispatch a blocker. `bench/baseline.json`
+# is a path because the gate's demand reaches only the 11 cases' bpb:
+# #1423 moved six Silesia finals by up to 2.2% and every digest, no bpb,
+# so `check` demanded nothing and the finals sat stale behind a `fresh`
+# read (#1434 is the long case the gate lacks). The digest pin makes every
+# byte-moving PR commit that file, so its merge is the codec's cue, about
+# one a day against ten src/ commits; `src/` itself would run a pass per
+# refactor. `bench/corpus.toml` because a moved pin is a different corpus.
+# `.github/scripts/bench-report` reads those paths from this file and
+# tells the next heartbeat whether the pass is owed, running, or finished
+# and waiting to be published. A codec PR still dispatches on its own branch:
 #   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref <branch>
 # It never pushes: a push on the workflow token to a PR branch holds every
 # run it triggers at GitHub's approval gate (GOVERNANCE "Push identity"),
@@ -33,6 +40,8 @@ on:
     branches: [main]
     paths:
       - bench/src/**
+      - bench/baseline.json
+      - bench/corpus.toml
       - .github/workflows/bench-report.yml
   workflow_dispatch:
 
