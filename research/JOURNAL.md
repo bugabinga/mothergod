@@ -2883,7 +2883,11 @@ record.
   What is left is the large-file-mode alternative (ROADMAP M5
   territory, a deliberate mode distinct from the default rather than a
   parse heuristic), or accepting that far-match residue on this data is
-  not a pricing problem at all.
+  not a pricing problem at all. Twentieth slice, S2-R35: re-ran S2-R7's
+  blanket bump on the codec of today and read the Silesia finals once
+  (issue #1342), rejected on the sealed set while every real file but `xml`
+  shrank; the conflict between the two is an open question in S2-R35's own
+  entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -8963,3 +8967,72 @@ record.
   one, pinned by the unit tests only), a trial list with `Bcj` or `Base64`
   in it on a block this size, the skip-a-losing-trial trade
   S2-A121 lists, decode. `research/progress.jsonl` it202.
+- S2-R35 | REJECTED | S1-P4's blanket window bump, re-run under changed
+  conditions, plus the one read of the Silesia finals issue #1342 charters.
+  Hypothesis: raising the wired parse window from `lz::WINDOW` (1 MiB) to the
+  `2^21 - 1` offset-bucket ceiling lowers bits/byte on the Silesia files, all
+  of which exceed 1 MiB, and does not regress the sealed set. | Conditions
+  changed since S2-R7 (2026-08-29): the codec carries three months of model
+  and parse work (the literal, length and offset splits, the filter bank, two
+  blocks at once), the train kinds now include `base64_wrapped` and
+  `interleaved_audio16`, and the measure is the real bitstream, not ideal cost.
+  Premise corrected: the slice is not encoder-only, as #1342's charter reads.
+  `codec::ensure_within_window` makes `decode` reject any distance past
+  `lz::WINDOW`, and `lz::Window` is a `WINDOW`-byte ring, so a frame holding a
+  2 MiB reach needs a `FORMAT_VERSION`, an ADR, a golden, and a streaming
+  decode bound of 2 MiB (CLAUDE.md rule 5). | Measured, release build, AMD
+  EPYC 7763 4 logical cores runner. Basis: `codec::compressed_len_with_window`
+  summed over 16 MiB blocks of the raw file, real bitstream bytes, no filter
+  selection and no trial threads, so the figures are the token stage only and
+  sit above `docs/benchmarks/silesia.md` where a filter wins (`ooffice` 3.29
+  here against 2.94 there, `x-ray` 4.76 against 4.46). Each file ran once, both
+  windows side by side on two of the four cores, so the seconds are a ratio and
+  not a rate. Corpus: Silesia at the `bench/corpus.toml` pins, whole files,
+  read once and tuned against nothing.
+
+  | file | bytes | b/B at 1 MiB | b/B at 2^21 - 1 | delta b/B | delta bytes | secs old | secs new | peak MiB |
+  |---|---|---|---|---|---|---|---|---|
+  | `dickens` | 10192446 | 2.322154 | 2.275276 | -0.046878 | -2.02% | 15.4 | 19.3 | 231 |
+  | `mozilla` | 51220480 | 2.434476 | 2.412161 | -0.022315 | -0.92% | 58.9 | 64.6 | 459 |
+  | `mr` | 9970564 | 2.455507 | 2.443035 | -0.012472 | -0.51% | 12.2 | 14.0 | 232 |
+  | `nci` | 33553445 | 0.469856 | 0.463437 | -0.006419 | -1.37% | 34.1 | 34.7 | 380 |
+  | `ooffice` | 6152192 | 3.291007 | 3.272991 | -0.018015 | -0.55% | 8.1 | 8.8 | 153 |
+  | `osdb` | 10085684 | 2.354303 | 2.323704 | -0.030599 | -1.30% | 12.9 | 13.5 | 240 |
+  | `reymont` | 6627202 | 1.683773 | 1.643959 | -0.039814 | -2.36% | 8.0 | 8.7 | 149 |
+  | `samba` | 21606400 | 1.574440 | 1.545568 | -0.028872 | -1.83% | 23.4 | 24.5 | 389 |
+  | `sao` | 7251944 | 5.417021 | 5.403709 | -0.013313 | -0.25% | 14.2 | 16.0 | 224 |
+  | `webster` | 41458703 | 1.797425 | 1.758580 | -0.038845 | -2.16% | 49.8 | 56.3 | 414 |
+  | `x-ray` | 8474240 | 4.761206 | 4.760693 | -0.000513 | -0.01% | 12.4 | 13.8 | 220 |
+  | `xml` | 5345280 | 0.699620 | 0.699630 | +0.000010 | +0.00% | 4.6 | 4.7 | 118 |
+  | **12 files** | 211938580 | 2.055643 | 2.032150 | **-0.023492** | -1.14% | 254.0 | 278.9 | |
+
+  Peak MiB is the larger of the two windows, which agree to 1 MiB: the match
+  finder's arrays are per position in the block, so reach costs no memory,
+  as #1342's charter predicted. Encode time grew 1.02x to 1.25x per file,
+  1.10x over the corpus. Train, 4,000,000 bytes per case at seed
+  `0xC0FFEE123456789A` (S2-R7's key), the same basis: `markov_h8_2_trap`
+  -0.019518, `sqlite_like_records` -0.005138, `x86_dense_code` -0.001004,
+  `json_records` -0.000060, `base64_wrapped` +0.001690,
+  `interleaved_audio16` **+0.099434**; mean **+0.012567**. Sealed, same
+  length at `sealed_seed` of that key: `access_log` +0.000768,
+  `gradient_image` +0.000322; mean +0.000545. | Verdict: **rejected**. Both
+  sealed kinds regress, and the train mean now regresses too, where S2-R7's
+  was a gain, because `interleaved_audio16` is in the set: S2-R3, S2-R4 and
+  S2-R7 apply, a sealed regression fails the accept rule whatever the net.
+  The finals are not an accept signal (`research/corpus/POLICY.md`: never
+  inside the experiment loop) and are recorded because the charter commissions
+  one read. | Mechanism: the finals win is reach, repeats between 1 and 2 MiB
+  back that real text, sources and databases have and the generators do not,
+  largest on the text files (`reymont`, `dickens`, `webster`, `samba`). The
+  `interleaved_audio16` loss is not diagnosed; the candidate cause, matches
+  between unrelated samples that the DP buys against the fixed bucket-20
+  distance tax of S2-A95 and that cost more than they save, is untested. |
+  **Open, for the operator:** the policy's sealed set is synthetic and has no
+  real long-range structure, the finals have it, and the two disagree in sign.
+  Adopting the bump means either a sealed kind drawn from real data, a policy
+  change that is the operator's to make, or a gate that keeps the bump off
+  `interleaved_audio16`-like inputs, which S2-R9 and S2-R11 found hard for
+  other shapes. **Not measured:** a window past the ceiling (a wider
+  `OFFSET_BUCKETS`, xz's reach), a block wider than 16 MiB, the shipped path
+  with filter trials, the real decoder (its bound rejects the frames), decode
+  time. `research/progress.jsonl` it203.
