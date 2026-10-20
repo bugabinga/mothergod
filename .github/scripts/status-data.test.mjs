@@ -68,9 +68,15 @@ test("✅ is delivered history and a section with neither is a program", () => {
 });
 
 test("order is ROADMAP.md's section order, which is rank", () => {
+  // The expectation is read from the file, never pinned here: a roadmap PR
+  // reorders sections without touching this test, and a pinned list turned
+  // main red when #1451 moved M5 among the delivered milestones.
+  const roadmap = readFileSync(new URL("../../ROADMAP.md", import.meta.url).pathname, "utf-8");
+  const sections = [...roadmap.matchAll(/^## (M\d+)/gm)].map((m) => m[1]);
+  assert.ok(sections.length > 1, "ROADMAP.md has milestone sections");
   assert.deepEqual(
     up.milestones.map((m) => m.id),
-    ["M0", "M1", "M2", "M3", "M4", "M7", "M8", "M5", "M6"],
+    sections,
   );
 });
 
