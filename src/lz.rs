@@ -816,6 +816,12 @@ const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63]
 /// on (16 contexts of 256 symbols each).
 const LITERAL_CONTEXTS: usize = 16;
 
+/// The byte of `data` before position `pos`, the literal-context input to
+/// [`literal_price_index`]; `None` at the very start of the stream.
+fn byte_before(data: &[u8], pos: usize) -> Option<u8> {
+    data[..pos].last().copied()
+}
+
 /// Flat index into a [`LITERAL_CONTEXTS`]-by-256 literal table for `byte`,
 /// given the byte preceding it in the stream (`None` at the very start,
 /// context 0).
@@ -945,8 +951,7 @@ impl PriceCounts {
         let mut counts = Self::new();
         let mut pos = 0usize;
         for token in tokens {
-            let prev_byte = if pos > 0 { Some(data[pos - 1]) } else { None };
-            counts.observe(*token, prev_byte);
+            counts.observe(*token, byte_before(data, pos));
             pos += match *token {
                 Token::Literal(_) => 1,
                 Token::Match { len, .. } | Token::Rep { len, .. } => len as usize,
@@ -957,7 +962,7 @@ impl PriceCounts {
 
     /// Bumps the counts for one already-decided `token`, whose preceding
     /// byte (for a literal's context; `None` at the start of the stream,
-    /// matching [`Self::tally`]'s own `pos > 0` check) is `prev_byte`.
+    /// as [`byte_before`] gives) is `prev_byte`.
     ///
     /// Lets a caller build up counts one finalized token at a time, which
     /// [`Self::tally`] cannot (it replays a complete sequence). [`dp_round`]
@@ -1253,9 +1258,9 @@ fn dp_round_with_ring(
         let base = state.price_at(i);
         let reps = state.cache_at(i);
 
-        let prev_byte = if i > 0 { Some(data[i - 1]) } else { None };
-        let literal_cost =
-            base + prices.literal[literal_price_index(prev_byte, data[i])] + FLAG_BIT_PRICE;
+        let literal_cost = base
+            + prices.literal[literal_price_index(byte_before(data, i), data[i])]
+            + FLAG_BIT_PRICE;
         state.relax(literal_cost, i + 1, Move::Literal, reps);
 
         state.relax_rep_candidates(prices, data, i, base, reps, &mut rep_carry);
