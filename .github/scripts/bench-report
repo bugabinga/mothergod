@@ -28,11 +28,11 @@ not depend on the caller's checkout or branch:
                 (#1254) makes every PR whose compress() output moves on
                 the 11 cases commit a regenerated baseline, so that file's
                 merge is the codec's signal, about one a day against ten
-                src/ commits. The list was `bench/src` alone on the premise
-                that the gate demands the finals in the PR; it demands
-                them only when a bpb moves, and #1423 moved six Silesia
-                finals and no bpb (every digest, by the version byte), so
-                the finals sat stale behind a `fresh` read. What still
+                src/ commits. `check` does not read the reports (ADR-0076),
+                so the list is the only demand: the list was `bench/src`
+                alone, and #1423 moved six Silesia finals and no bpb
+                (every digest, by the version byte), so the finals sat
+                stale behind a `fresh` read. What still
                 escapes: a change that leaves all 11 digests intact while
                 moving larger inputs (#1434 gives the gate a long case),
                 and one that moves speed alone. One list to widen, with
