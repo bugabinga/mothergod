@@ -50,8 +50,8 @@ fn pseudo_random_symbols_round_trip() {
 
 #[test]
 fn rescale_triggers_and_round_trip_still_holds() {
-    // DEFAULT_RESCALE_LIMIT is 65536 and every update adds
-    // DEFAULT_RESCALE_INCREMENT=12, so a two-symbol alphabet coded
+    // Rate::DEFAULT's limit is 65536 and every update adds its
+    // increment, 12, so a two-symbol alphabet coded
     // 10,000 times crosses the halving threshold several times over;
     // round-trip must still hold on the far side of every halving.
     let symbols: Vec<usize> = (0..10_000).map(|i| usize::from(i % 3 == 0)).collect();
@@ -96,7 +96,7 @@ fn ideal_cost_matches_fresh_table_uniform_distribution() {
 #[test]
 fn ideal_cost_drops_as_a_symbol_gets_more_likely() {
     // Coding the same symbol repeatedly raises its own frequency
-    // (DEFAULT_RESCALE_INCREMENT), so its ideal cost must strictly
+    // (Rate::DEFAULT's increment), so its ideal cost must strictly
     // decrease call over call as the table adapts toward it.
     let mut model = Model::new(4);
     let first = model.ideal_cost_bits(0);

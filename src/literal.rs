@@ -37,6 +37,7 @@
 
 use std::num::NonZeroUsize;
 
+use crate::Rate;
 use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
@@ -83,11 +84,10 @@ fn bank_slot(bank: usize, symbol: usize) -> usize {
     bank * ALPHABET + symbol
 }
 
-/// Frequency increment and rescale ceiling for the fast-rate context expert
-/// (bank 0): higher increment and lower ceiling than the other five, so it
-/// tracks recent bytes hardest and forgets fastest.
-const FAST_INCREMENT: u32 = 32;
-const FAST_LIMIT: u32 = 6144;
+/// Rate of the fast-rate context expert (bank 0): higher increment and lower
+/// ceiling than the other five, so it tracks recent bytes hardest and
+/// forgets fastest.
+const FAST_RATE: Rate = Rate::new(32, 6144);
 
 /// Exponentiated-gradient learning rate and weight clamp.
 const LEARNING_RATE: f64 = 0.05;
@@ -731,20 +731,16 @@ impl Literal {
             weights[expert] = adapt_weight(weights[expert], estimate[expert], mixed, exp_fn);
         }
         for (expert, &bank) in bank_indices.iter().enumerate() {
-            let (increment, limit) = if expert == 0 {
-                (FAST_INCREMENT, FAST_LIMIT)
+            let rate = if expert == 0 {
+                FAST_RATE
             } else {
-                (
-                    crate::DEFAULT_RESCALE_INCREMENT,
-                    crate::DEFAULT_RESCALE_LIMIT,
-                )
+                Rate::DEFAULT
             };
             crate::rescale_bank(
                 &mut self.freq[bank_row(bank)],
                 &mut self.total[bank],
                 symbol,
-                increment,
-                limit,
+                rate,
             );
         }
     }
@@ -922,8 +918,7 @@ impl Literal {
             &mut column_state.freq[bank_row(column_bank)],
             &mut column_state.total[column_bank],
             symbol,
-            crate::DEFAULT_RESCALE_INCREMENT,
-            crate::DEFAULT_RESCALE_LIMIT,
+            Rate::DEFAULT,
         );
     }
 
