@@ -878,8 +878,9 @@ pub fn decompress_to_writer<W: std::io::Write>(
 /// [`Method::Lz`]'s answer depends on which filter its encoder picked.
 /// `Transpose` writes scattered across the *entire* buffer in column-major
 /// order, `Base64` has no per-byte undo, and `Reverse` and `ReverseDelta`
-/// emit the last byte first, so those need the whole buffer resident. The
-/// `matches!` below is a second copy of `decompress_to_writer`'s own dispatch.
+/// emit the last byte first, so those need the whole buffer resident.
+/// `Candidate::streaming` is the one list of which candidates stream,
+/// shared with `decompress_to_writer`'s own dispatch.
 ///
 /// # Errors
 ///
@@ -897,13 +898,7 @@ pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
             let selector = frame.payload.first_chunk().ok_or(Error::Truncated)?;
             let candidate =
                 filters::select::Candidate::from_header_bytes(*selector).ok_or(Error::Corrupt)?;
-            incremental &= !matches!(
-                candidate,
-                filters::select::Candidate::Transpose(_)
-                    | filters::select::Candidate::Base64
-                    | filters::select::Candidate::Reverse
-                    | filters::select::Candidate::ReverseDelta(_)
-            );
+            incremental &= candidate.streaming().is_some();
         }
     }
     Ok(incremental)

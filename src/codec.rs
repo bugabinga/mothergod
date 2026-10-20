@@ -62,7 +62,10 @@ use std::thread;
 use crate::Error;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
-use crate::filters::{self, select::Candidate};
+use crate::filters::{
+    self,
+    select::{Candidate, Streaming},
+};
 use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
 use crate::lz::{self, Reach, RepCache, RepSlot, Token};
 use crate::model::Model;
@@ -1344,19 +1347,16 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     writer: &mut W,
 ) -> Result<(), crate::WriteError> {
     let (candidate, reach, filtered_payload) = split_selector(payload)?;
-    let mut undo = match candidate {
-        Candidate::Identity => StreamUndo::Identity,
-        Candidate::Delta(stride) => {
+    let Some(streaming) = candidate.streaming() else {
+        writer.write_all(&decode(payload, max_len)?)?;
+        return Ok(());
+    };
+    let mut undo = match streaming {
+        Streaming::Identity => StreamUndo::Identity,
+        Streaming::Delta(stride) => {
             StreamUndo::Delta(filters::delta::Undo::try_new(stride).map_err(Error::from)?)
         }
-        Candidate::Bcj => StreamUndo::Bcj(filters::bcj::Undo::try_new().map_err(Error::from)?),
-        Candidate::Transpose(_)
-        | Candidate::Base64
-        | Candidate::Reverse
-        | Candidate::ReverseDelta(_) => {
-            writer.write_all(&decode(payload, max_len)?)?;
-            return Ok(());
-        }
+        Streaming::Bcj => StreamUndo::Bcj(filters::bcj::Undo::try_new().map_err(Error::from)?),
     };
     let (declared_len, token_count, ac_bytes) = read_header(filtered_payload, max_len, candidate)?;
 

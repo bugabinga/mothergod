@@ -649,6 +649,18 @@ pub mod select {
         ReverseDelta(NonZeroUsize),
     }
 
+    /// A [`Candidate`] that streams, with the parameter its undo needs
+    /// ([`Candidate::streaming`]).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Streaming {
+        /// [`Candidate::Identity`].
+        Identity,
+        /// [`Candidate::Delta`] with this stride.
+        Delta(NonZeroUsize),
+        /// [`Candidate::Bcj`].
+        Bcj,
+    }
+
     impl Candidate {
         /// Serializes this candidate into the 2-byte filter selector
         /// `[kind, param]` that opens `Method::Lz`'s payload
@@ -711,6 +723,19 @@ pub mod select {
                 | Self::Base64
                 | Self::Reverse
                 | Self::ReverseDelta(_) => None,
+            }
+        }
+
+        /// The candidates whose undo runs one filtered byte at a time, and
+        /// so decode without the whole buffer resident; `None` for the rest.
+        /// The one statement of which candidates stream: a new variant
+        /// fails to compile here until it is decided.
+        pub(crate) fn streaming(self) -> Option<Streaming> {
+            match self {
+                Self::Identity => Some(Streaming::Identity),
+                Self::Delta(stride) => Some(Streaming::Delta(stride)),
+                Self::Bcj => Some(Streaming::Bcj),
+                Self::Transpose(_) | Self::Base64 | Self::Reverse | Self::ReverseDelta(_) => None,
             }
         }
 
