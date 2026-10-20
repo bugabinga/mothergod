@@ -24,12 +24,22 @@ not depend on the caller's checkout or branch:
                 bench-report.yml lists on main, read from that file so the
                 trigger and this detector cannot disagree: the inputs whose
                 change moves what the reports print. `src/` is not among
-                them: a codec change that moves bytes regenerates in its own
-                PR under the ratio gate, and one that only moves speed is not
-                tracked today. One list to widen, with the cost in mind:
-                every pass is serial by design (#1321) and every regenerated
-                report differs in its timing columns, so a wider list is
-                more publish PRs of runner jitter.
+                them, `bench/baseline.json` is: the gate's digest pin
+                (#1254) makes every PR whose compress() output moves on
+                the 11 cases commit a regenerated baseline, so that file's
+                merge is the codec's signal, about one a day against ten
+                src/ commits. The list was `bench/src` alone on the premise
+                that the gate demands the finals in the PR; it demands
+                them only when a bpb moves, and #1423 moved six Silesia
+                finals and no bpb (every digest, by the version byte), so
+                the finals sat stale behind a `fresh` read. What still
+                escapes: a change that leaves all 11 digests intact while
+                moving larger inputs (#1434 gives the gate a long case),
+                and one that moves speed alone. One list to widen, with
+                the cost in mind: every pass is serial by design (#1321)
+                and every regenerated report differs in its timing
+                columns, so a wider list is more publish PRs of runner
+                jitter.
     generated   the commit on main the committed reports were generated at.
                 A publish commit names it in its subject, the title this
                 script prints for the publish PR ("regenerated at <sha>");
