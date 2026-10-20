@@ -403,7 +403,11 @@ fn logistic_mix_node_matches_hand_computed_stretch_and_dot() {
     let mut prefix = [[0u64; ALPHABET + 1]; EXPERTS];
     for (sums, &p) in prefix.iter_mut().zip(&p) {
         sums[hi] = 256;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "256 * (1 - p) is in [0, 256] for p in [0, 1]"
+        )]
         let mid_sum = (256.0 * (1.0 - p)) as u64;
         sums[mid] = mid_sum;
     }
