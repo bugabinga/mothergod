@@ -24,7 +24,8 @@
 //! a file and the train mean, and exits 0 whatever the sign, because it
 //! reports and `check` gates. Neither touches `bench/baseline.json`, and
 //! both measure [`mothergod_bench::baseline::cases`] only, never a sealed
-//! case.
+//! case and never the reach case (issue #1434), which `check` and `write`
+//! add and whose length would break the train mean's denominator.
 //!
 //! `spread` is the table #1184 validates on (issue #1186): it reads CI log
 //! text on stdin and prints per-CPU runs, min, median, max and range of the
@@ -41,8 +42,8 @@
 //! `... -- spread [--rows] < logs` (see [`SPREAD_USAGE`]).
 
 use mothergod_bench::baseline::{
-    Snapshot, deltas, format_baseline, hold_at_best, mean_delta, measure_all, output_changes,
-    parse_baseline, regressions,
+    Snapshot, deltas, format_baseline, hold_at_best, mean_delta, measure_all, measure_gate,
+    output_changes, parse_baseline, regressions,
 };
 use mothergod_bench::reference::cpu_model;
 use mothergod_bench::speed;
@@ -289,16 +290,14 @@ fn main() -> ExitCode {
         eprintln!("usage: baseline_gate delta <baseline file>");
         return ExitCode::FAILURE;
     }
-    let measured = measure_all();
-
     match mode.as_str() {
         "measure" => {
-            print!("{}", format_baseline(&measured));
+            print!("{}", format_baseline(&measure_all()));
             ExitCode::SUCCESS
         }
         "delta" => {
             let path = baseline_file.expect("checked above");
-            match delta_report(&path, &measured.bpb()) {
+            match delta_report(&path, &measure_all().bpb()) {
                 Ok(report) => {
                     print!("{report}");
                     ExitCode::SUCCESS
@@ -309,8 +308,8 @@ fn main() -> ExitCode {
                 }
             }
         }
-        "write" => write(&measured),
-        "check" => check(&measured),
+        "write" => write(&measure_gate()),
+        "check" => check(&measure_gate()),
         other => {
             eprintln!(
                 "unknown mode {other:?}, expected \"check\", \"write\", \"speed\", \"spread\", \"measure\" or \"delta\""

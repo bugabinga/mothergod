@@ -127,6 +127,48 @@ pub fn cases() -> Vec<Case> {
     out
 }
 
+/// Name of the one case [`reach_case`] builds, its key in
+/// `bench/baseline.json`.
+pub const REACH_CASE_NAME: &str = "wide_reach_repeat";
+
+/// Bytes of the block [`reach_case`] repeats.
+const REACH_BLOCK_LEN: usize = 128 * 1024;
+
+/// Bytes between the two copies of that block's start: the standard match
+/// reach, a block and slack, so the copy sits past [`mothergod::lz::WINDOW`]
+/// and inside [`mothergod::lz::WIDE_WINDOW`] (`lz::Reach`).
+const REACH_DISTANCE: usize = mothergod::lz::WINDOW + REACH_BLOCK_LEN + 64 * 1024;
+
+/// Bytes in [`reach_case`]'s input: the distance to the second copy, then
+/// that copy. The baseline page quotes it beside [`CASE_LEN`].
+pub const REACH_CASE_LEN: usize = REACH_DISTANCE + REACH_BLOCK_LEN;
+
+/// The gate's one input past the standard match reach (issue #1434): a
+/// uniform-random block, [`crate::json_records`] filler, then the block
+/// again one standard reach, a block and some slack after its first copy.
+/// The block is incompressible on its own, so a parse that reaches the first copy saves
+/// the whole second one and one that cannot pays for it in full: a
+/// reach-class change moves this case's bits/byte by whole bits where the
+/// [`CASE_LEN`] cases, all inside the standard reach, cannot feel it.
+///
+/// Not part of [`cases`]: its length is not [`CASE_LEN`], so it does not
+/// enter the train mean (`research/README.md`) or the decode-speed
+/// calibration, which both count [`cases`] only.
+#[must_use]
+pub fn reach_case() -> Case {
+    let block = crate::entropy_ladder(8, REACH_BLOCK_LEN, CASE_SEED);
+    let mut data = block.clone();
+    data.extend(crate::json_records(
+        REACH_DISTANCE - REACH_BLOCK_LEN,
+        CASE_SEED,
+    ));
+    data.extend_from_slice(&block);
+    Case {
+        name: REACH_CASE_NAME,
+        data,
+    }
+}
+
 /// Bits/byte of `compressed_len` bytes encoding `original_len` original
 /// bytes. `0.0` when `original_len` is `0` (nothing to measure a ratio
 /// against).
@@ -208,9 +250,25 @@ impl Snapshot {
 
 /// Compresses every [`cases`] entry through `mothergod::compress` and
 /// records each one's bits/byte and output digest, keyed by [`Case::name`].
+/// The train measurement: `measure` and `delta` use it, because their mean
+/// counts [`CASE_LEN`]-byte cases only.
 #[must_use]
 pub fn measure_all() -> Snapshot {
-    let cases = cases()
+    measure(&cases())
+}
+
+/// [`measure_all`] plus the [`reach_case`]: what `check` and `write` hold
+/// `bench/baseline.json` to.
+#[must_use]
+pub fn measure_gate() -> Snapshot {
+    let mut gate = cases();
+    gate.push(reach_case());
+    measure(&gate)
+}
+
+/// Compresses each of `cases` and records its [`Entry`].
+fn measure(cases: &[Case]) -> Snapshot {
+    let cases = cases
         .iter()
         .map(|case| {
             let compressed = mothergod::compress(&case.data);
@@ -523,9 +581,9 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, Entry, Snapshot, TOLERANCE_BITS, bits_per_byte, cases,
-        deltas, fnv1a, format_baseline, hold_at_best, mean_delta, output_changes, parse_baseline,
-        regressions,
+        BaselineParseError, CASE_LEN, Entry, REACH_BLOCK_LEN, REACH_CASE_LEN, REACH_CASE_NAME,
+        Snapshot, TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a, format_baseline,
+        hold_at_best, mean_delta, output_changes, parse_baseline, reach_case, regressions,
     };
     use std::collections::BTreeMap;
 
@@ -567,6 +625,28 @@ mod tests {
         for case in cases() {
             assert_eq!(case.data.len(), CASE_LEN, "case {} wrong length", case.name);
         }
+    }
+
+    #[test]
+    fn reach_case_repeats_its_block_past_the_standard_reach_inside_the_wide_one() {
+        let case = reach_case();
+        assert_eq!(case.data.len(), REACH_CASE_LEN);
+        // The first copy starts at 0, so the second's offset is the distance.
+        let distance = case.data.len() - REACH_BLOCK_LEN;
+        assert_eq!(case.data[..REACH_BLOCK_LEN], case.data[distance..]);
+        assert!(
+            distance > mothergod::lz::WINDOW,
+            "the standard reach sees it"
+        );
+        assert!(
+            distance <= mothergod::lz::WIDE_WINDOW,
+            "the wide reach cannot see it"
+        );
+        assert_eq!(case.name, REACH_CASE_NAME);
+        assert!(
+            cases().iter().all(|c| c.name != REACH_CASE_NAME),
+            "the train cases and the reach case are disjoint"
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! it byte-for-byte, same as `site/status-data.json`'s own generate-then-fmt
 //! step).
 
-use mothergod_bench::baseline::parse_baseline;
+use mothergod_bench::baseline::{CASE_LEN, REACH_CASE_LEN, REACH_CASE_NAME, parse_baseline};
 use mothergod_bench::graph::{Bar, render_svg, render_table_markdown};
 use mothergod_bench::repo_root;
 use std::process::{Command, ExitCode};
@@ -82,8 +82,8 @@ fn main() -> ExitCode {
          render_baseline_graph`. Do not hand-edit; re-run the generator instead. -->\n\n\
          # Baseline snapshot\n\n\
          As of {generated_at}. Source: `bench/baseline.json`, measured by \
-         `mothergod::compress` on 11 fixed-seed, 50,000-byte cases \
-         (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the \
+         `mothergod::compress` on {} fixed-seed cases, each {CASE_LEN} bytes \
+         except `{REACH_CASE_NAME}`, {REACH_CASE_LEN} bytes (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the \
          pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: \
          this table is mothergod against itself, run over run; see \
          `docs/benchmarks/canterbury.md` for real numbers against the pinned \
@@ -91,6 +91,7 @@ fn main() -> ExitCode {
          (`research/JOURNAL.md` S2-A37).\n\n\
          ![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of {generated_at}](baseline.svg)\n\n\
          {}",
+        bars.len(),
         render_table_markdown(&bars)
     );
     let md_path = benchmarks_dir.join("baseline.md");

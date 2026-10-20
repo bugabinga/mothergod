@@ -4,12 +4,12 @@
 //! graphs rendered from `research/progress.jsonl` into `docs/benchmarks/`".
 //!
 //! `bench/baseline.json` is the only source of real, named-corpus bits/byte
-//! this crate can measure today (`research/JOURNAL.md` S2-A35); it has 11
-//! cases, past the dataviz convention's ~7-class chart-alone ceiling, so
+//! this crate can measure today (`research/JOURNAL.md` S2-A35); it has more
+//! cases than the dataviz convention's ~7-class chart-alone ceiling, so
 //! [`render_table_markdown`] is the table half of "table + chart" and
 //! [`render_svg`] is the chart half — see `docs/benchmarks/README.md` for
 //! how the two are used together. No charting dependency: the whole chart
-//! is ~11 static bars, comfortably hand-rolled as SVG text.
+//! is a few static bars, comfortably hand-rolled as SVG text.
 //!
 //! The chart is a static asset committed to `docs/benchmarks/`, viewed as a
 //! markdown image on GitHub — no JavaScript runs there, so there is no

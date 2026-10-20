@@ -26,16 +26,17 @@ not depend on the caller's checkout or branch:
                 change moves what the reports print. `src/` is not among
                 them, `bench/baseline.json` is: the gate's digest pin
                 (#1254) makes every PR whose compress() output moves on
-                the 11 cases commit a regenerated baseline, so that file's
+                the gate cases commit a regenerated baseline, so that file's
                 merge is the codec's signal, about one a day against ten
                 src/ commits. `check` does not read the reports (ADR-0076),
                 so the list is the only demand: the list was `bench/src`
                 alone, and #1423 moved six Silesia finals and no bpb
                 (every digest, by the version byte), so the finals sat
                 stale behind a `fresh` read. What still
-                escapes: a change that leaves all 11 digests intact while
-                moving larger inputs (#1434 gives the gate a long case),
-                and one that moves speed alone. One list to widen, with
+                escapes: a change that leaves every digest intact while
+                moving inputs the gate cases do not resemble (the one
+                long case, #1434, holds a single repeat past the standard
+                reach), and one that moves speed alone. One list to widen, with
                 the cost in mind: every pass is serial by design (#1321)
                 and every regenerated report differs in its timing
                 columns, so a wider list is more publish PRs of runner

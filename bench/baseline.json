@@ -39,6 +39,10 @@
     "bpb": 3.24672,
     "digest": "168076921ddc3573"
   },
+  "wide_reach_repeat": {
+    "bpb": 1.187756,
+    "digest": "71ad8393de35380c"
+  },
   "x86_dense_code": {
     "bpb": 2.65184,
     "digest": "10b170de46336cef"
