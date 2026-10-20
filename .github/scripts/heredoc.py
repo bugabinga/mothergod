@@ -60,8 +60,10 @@ WORD_END = frozenset(" \t;&|<>()")
 # The word that reads the body: the first word of the operator's own
 # simple command, after the last control operator or opening bracket on
 # the line, skipping assignments and a timeout wrapper. Everything else is
-# an argument of that word.
-SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||&|\(|\{|^)")
+# an argument of that word. A backtick opens a command substitution like
+# `(` does, so a shell inside one is its own receiver. An `&` is an
+# operator unless it belongs to a redirection (`2>&1`, `&>file`).
+SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||(?<![<>])&(?!>)|\(|\{|`|^)")
 ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=\S*$")
 DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 

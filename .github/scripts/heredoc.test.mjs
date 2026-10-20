@@ -141,6 +141,25 @@ test("an unclosed quote in the delimiter keeps every line after it", () => {
   assert.equal(strip(command), command);
 });
 
+test("a shell inside a backtick substitution is its own receiver", () => {
+  for (const body of ["cargo x check", "sleep 1 &"]) {
+    const command = `gh-comment 1 \`bash <<'EOF'\n${body}\nEOF\n\``;
+    assert.equal(strip(command), command, body);
+  }
+});
+
+test("the & of a redirection is no control operator", () => {
+  for (const redirect of ["2>&1", ">&2", "&>out", "<&0"]) {
+    const command = `gh-comment 1 ${redirect} <<'EOF'\nfish & chips\nEOF`;
+    assert.equal(strip(command), `gh-comment 1 ${redirect} <<'EOF'\nEOF`, redirect);
+  }
+});
+
+test("a detach before the receiver still ends its segment", () => {
+  const command = "sleep 1 & gh-comment 1 <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(command), "sleep 1 & gh-comment 1 <<'EOF'\nEOF");
+});
+
 test("no heredoc, no change", () => {
   for (const command of ["cargo test", "echo 'a << b'", ""]) {
     assert.equal(strip(command), command, command);

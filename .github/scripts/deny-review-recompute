@@ -156,7 +156,8 @@ MESSAGE = (
     "test -p <crate>`, `cargo x test -- <path>`, feature-flagged "
     "builds, through .github/scripts/probe. Prose that names a gate, "
     "in a verdict or a commit message, goes to the posting script "
-    "through a heredoc, whose body this guard does not scan."
+    "through a quoted heredoc (`<<'EOF'`), whose body this guard does "
+    "not scan."
 )
 
 
