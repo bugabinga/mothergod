@@ -160,6 +160,42 @@ test("a detach before the receiver still ends its segment", () => {
   assert.equal(strip(command), "sleep 1 & gh-comment 1 <<'EOF'\nEOF");
 });
 
+test("a delimiter with `$` before a quote or a trailing backslash is not parsed; every line stays", () => {
+  for (const operator of ["<<$'EOF'", "<<$\"EOF\"", "<<'E'$'OF'", "<<EOF\\"]) {
+    const command = `gh-comment 1 ${operator}\nprose &\nEOF\nsleep 100 &`;
+    assert.equal(strip(command), command, operator);
+  }
+});
+
+test("a quote opened on an earlier line makes the operator an argument", () => {
+  const command = "echo \"a\ngh-comment 1 <<'EOF'\nx\" ; sleep 100 &\nEOF";
+  assert.equal(strip(command), command);
+});
+
+test("a quote that closes on an earlier line leaves the receiver in charge", () => {
+  const command = "echo \"a\nb\"\ngh-comment 1 <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(command), "echo \"a\nb\"\ngh-comment 1 <<'EOF'\nEOF");
+});
+
+test("a comment hides the operator; a comment on an earlier line does not", () => {
+  const live = "true # note; gh-comment 1 <<'EOF'\nsleep 100 &\nEOF";
+  assert.equal(strip(live), live);
+  const redirect = "echo hi >#x; gh-comment 1 <<'EOF'\nsleep 100 &\nEOF";
+  assert.equal(strip(redirect), redirect);
+  const earlier = "# don't\ngh-comment 1 <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(earlier), "# don't\ngh-comment 1 <<'EOF'\nEOF");
+});
+
+test("a `$'` before the operator keeps the body, its escapes are not modelled", () => {
+  const command = "echo $'a\\'b\ngh-comment 1 <<'EOF'\nx' ; sleep 100 &\nEOF";
+  assert.equal(strip(command), command);
+});
+
+test("a `#` inside a word is no comment", () => {
+  const command = "gh-comment 1 a#b <<'EOF'\nfish & chips\nEOF";
+  assert.equal(strip(command), "gh-comment 1 a#b <<'EOF'\nEOF");
+});
+
 test("no heredoc, no change", () => {
   for (const command of ["cargo test", "echo 'a << b'", ""]) {
     assert.equal(strip(command), command, command);

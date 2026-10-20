@@ -30,15 +30,18 @@ change nothing about who reads the body: `NAME=value` assignments and
 `timeout [flags] <duration>`, the wrapper CLAUDE.md rule 12 asks for.
 
 The parse is line-based, like bash's: the operator `<<` or `<<-`, outside
-any quote, names a delimiter word; the body is the lines that follow, up
+any quote and comment, names a delimiter word; the body is the lines that follow, up
 to the line that is exactly the delimiter (`<<-` strips leading tabs
 first); a body with no terminator runs to the end, as bash reads it. The
 word is read the way bash reads it, quote removal included: `<<"E"OF` and
-`<<\\E\\OF` both name `EOF`, quoted. A `<<` inside a quote is an
-argument, not an operator, and the lines after it are live. A here-string
+`<<\\E\\OF` both name `EOF`, quoted. A `<<` inside a quote or a
+comment is an argument or prose, not an operator, and the lines after it
+are live; the quote or comment is read across the command's own lines,
+not the operator's alone. A here-string
 (`<<<`) is a word, not a body. Several heredocs on one line take their
-bodies in order. A word the parse cannot finish (an unclosed quote) keeps
-every line after it.
+bodies in order. A word the parse cannot finish or does not model (an unclosed
+quote, `<<$'EOF'`, a trailing backslash) keeps every line after it, and so
+does a `$'` before the operator.
 
 The receiver is read from the operator's prefix with quoted spans masked,
 so a `;` or a command name inside an argument names no segment.
@@ -69,17 +72,24 @@ DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 
 
 def mask_quoted(text: str) -> tuple[str, bool]:
-    """`text` with the contents of every quoted span replaced by `x`, and
-    whether `text` ends inside a quote. The quote characters stay. Escapes
-    follow bash: a backslash quotes the next character outside quotes and
-    before `"`, `\\`, `$` or a backtick inside double quotes, never inside
-    single quotes."""
+    """`text` with the contents of every quoted span and every comment
+    replaced by `x`, and whether `text` ends where no operator can be read:
+    inside a quote, inside a comment, or after a `$'` whose escapes this
+    scan does not model. The quote characters stay. Escapes follow bash: a
+    backslash quotes the next character outside quotes and before `"`, `\\`,
+    `$` or a backtick inside double quotes, never inside single quotes. A
+    `#` at the start of a word opens a comment that runs to the newline.
+    The length is preserved."""
     out: list[str] = []
     quote = ""
+    comment = False
     i = 0
     while i < len(text):
         ch = text[i]
-        if quote == "'":
+        if comment:
+            out.append("\n" if ch == "\n" else "x")
+            comment = ch != "\n"
+        elif quote == "'":
             out.append(ch if ch == "'" else "x")
             if ch == "'":
                 quote = ""
@@ -91,18 +101,26 @@ def mask_quoted(text: str) -> tuple[str, bool]:
             out.append(ch if ch == '"' else "x")
             if ch == '"':
                 quote = ""
+        elif ch == "'" and out and out[-1] == "$":
+            return "".join(out) + "x" * (len(text) - i), True
+        elif ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|()<>"):
+            out.append("x")
+            comment = True
         else:
             out.append(ch)
             if ch in "'\"":
                 quote = ch
         i += 1
-    return "".join(out), quote != ""
+    return "".join(out), quote != "" or comment
 
 
 def delimiter_word(line: str, start: int) -> tuple[str, bool, int] | None:
     """The heredoc delimiter word at `line[start:]` after quote removal,
     whether any part of it was quoted, and the index after it; None when
-    there is no word or a quote never closes."""
+    there is no word, a quote never closes, or the word is one this parse
+    does not model: a `$` directly before a quote (`<<$'EOF'` names `EOF`
+    in bash) or a backslash that ends the line (bash joins the next line
+    into the word)."""
     word: list[str] = []
     quoted = False
     i = start
@@ -111,9 +129,12 @@ def delimiter_word(line: str, start: int) -> tuple[str, bool, int] | None:
         if ch == "\\":
             quoted = True
             i += 1
-            if i < len(line):
-                word.append(line[i])
+            if i == len(line):
+                return None
+            word.append(line[i])
         elif ch in "'\"":
+            if word and word[-1] == "$":
+                return None
             quoted = True
             i += 1
             while i < len(line) and line[i] != ch:
@@ -135,15 +156,20 @@ def without_posted_bodies(command: str) -> str:
     """`command` with every heredoc body a posting script reads removed."""
     lines = command.split("\n")
     kept: list[str] = []
+    # The command's own lines, bodies excluded: a quote or a comment is read
+    # across them, because bash reads it across newlines.
+    code: list[str] = []
     i = 0
     while i < len(lines):
         line = lines[i]
         kept.append(line)
+        code.append(line)
         i += 1
         pos = 0
         while match := OPERATOR.search(line, pos):
             pos = match.end()
-            prefix, inside = mask_quoted(line[: match.start()])
+            before = "\n".join(code[:-1] + [line[: match.start()]])
+            masked, inside = mask_quoted(before)
             if inside:
                 continue
             parsed = delimiter_word(line, match.end())
@@ -158,7 +184,7 @@ def without_posted_bodies(command: str) -> str:
                 if candidate == delimiter:
                     break
                 end += 1
-            if not quoted or receiver(prefix) not in POSTING:
+            if not quoted or receiver(masked[len(masked) - match.start():]) not in POSTING:
                 kept.extend(lines[i:end])
             if end < len(lines):
                 kept.append(lines[end])
