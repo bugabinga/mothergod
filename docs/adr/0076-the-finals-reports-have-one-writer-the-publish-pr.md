@@ -23,7 +23,7 @@ The window between a byte-moving merge and its publish is hours and honest: `ben
 "Fresh" is derivable from the repo alone: one generator, on main, after the merge, named in its commit.
 A codec PR no longer waits a wake for a runner pass, and the finals pass runs once per byte-moving change.
 Issue #1381 closes by deleting the detector's self-generator branch; `bench-report.yml`'s header and `agent-heartbeat.yml`'s dispatch-on-branch comment lose that path in the same follow-up, those two files being the BDFL's.
-The two committed reports lose their marker line by hand here, the one edit their generator would make.
+The two committed reports keep their marker line until the next publish regenerates them, and nothing reads it: a hand edit of a report would make its squash commit its own generator, and the detector would read `fresh` over an unpublished pass.
 
 ## Rejected alternatives
 

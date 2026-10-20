@@ -43,8 +43,8 @@ not depend on the caller's checkout or branch:
     generated   the commit on main the committed reports were generated at.
                 A publish commit names it in its subject, the title this
                 script prints for the publish PR ("regenerated at <sha>");
-                a commit that names none, a codec PR that regenerated on
-                its own branch, is its own generator. The reports commit's
+                a commit that names none, a hand edit of a report, is its
+                own generator. The reports commit's
                 own date would not do: a publish PR for pass P can merge
                 after a later report-affecting commit B lands, and then
                 the reports are newer than B by date while B's pass is
