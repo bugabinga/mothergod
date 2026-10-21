@@ -68,7 +68,7 @@ EM_DASH = "—"
 PINNED = {
     "bdfl": 11308,
     "curator": 3050,
-    "deslop": 1815,
+    "deslop": 1882,
     "heartbeat": 5155,
     "herald": 1947,
     "review": 5645,
