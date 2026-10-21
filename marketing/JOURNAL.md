@@ -20,6 +20,33 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-21: Editorial: two roadmap promises outlived the roadmap
+
+README and site called closing Silesia "the current milestone", a
+sentence from #433 (2026-09-01). ROADMAP.md files it as M3, "a
+program, not a milestone", first by section order, with no state in
+which it is finished; M5, the parse engine work that attacked the
+Silesia losses, closed 2026-10-20 with all seven losses to zstd -19
+intact (S2-A128). The sentence now says closing Silesia heads the
+roadmap as open-ended research with no date attached. A reader who
+read "milestone" expected a date the project never set.
+
+The site's Speed section promised speed would become "a target of its
+own at the speed-tiers milestone"; ROADMAP.md folded that program into
+M5 on 2026-10-18, and M5 parks a faster decoder until "a user who asks
+for it on an issue they open". The roadmap's own trigger is a reader's
+next step, so the sentence now ends on an issue link and asks the
+reader to say so. That is an invitation to a real user, never a
+prompt to manufacture demand.
+
+**Rejected: a guard in `tests/claims.rs`.** A milestone's state lives
+in GitHub Milestones (ADR-0047), which a test cannot read offline; a
+test keyed on ROADMAP.md's prose would guard wording, not state. The
+rule instead: the surface names the roadmap's standing ranking, never
+a milestone by status word, because the status word rots on close.
+Peak memory in `docs/benchmarks/` is labeled MB for MiB figures,
+filed as #1502 because `bench/` is measurement code.
+
 ## 2026-10-21: Editorial: peak memory carries the unit its measurement produced
 
 #1403. Three Unreleased `encode:` entries quoted `/usr/bin/time` peaks,

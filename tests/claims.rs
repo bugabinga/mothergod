@@ -557,8 +557,8 @@ fn verdict_strip_words_match_their_aggregate_comparisons() {
     // separate location: nothing but this test ties its "Wins"/"Loses"
     // words to the comparison they name, so a regenerated report that flips
     // one could leave the header stale (site/index.html itself calls
-    // "Closing Silesia" the project's current milestone, i.e. the exact
-    // word this strip hardcodes for Silesia today is a live target).
+    // closing Silesia the head of the roadmap, i.e. the exact word this
+    // strip hardcodes for Silesia today is a live target).
     let site = read("site/index.html");
     let items = verdict_items(&site);
 
