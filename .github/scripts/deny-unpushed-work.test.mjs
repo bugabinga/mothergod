@@ -175,6 +175,18 @@ test("a stamp path squatted by a directory leaves the session untracked and allo
   assert.ok(statSync(stamp).isDirectory());
 });
 
+test("a stamp of invalid UTF-8 is rewritten as a fresh start and allowed", () => {
+  const { dir, dirty } = repo();
+  dirty();
+  const { stamp, env } = session();
+  writeFileSync(stamp, Buffer.from([0xff, 0xfe]));
+  const res = run(env, bash(dir));
+  assert.equal(res.status, 0);
+  const written = JSON.parse(readFileSync(stamp, "utf8"));
+  assert.ok(Math.abs(written.start - Date.now() / 1000) < 5);
+  assert.equal(written.fired, false);
+});
+
 test("a git that cannot run is no evidence of edits: the aged, dirty session is allowed", () => {
   const { dir, dirty } = repo();
   dirty();
