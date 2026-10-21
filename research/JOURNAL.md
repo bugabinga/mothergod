@@ -9172,7 +9172,7 @@ record.
   cost beside the walk cost in `baseline_gate -- speed`, both dividing the
   one decode time, so their ratio cancels main's code drift. The table is
   `baseline_gate -- spread` and `spread --rows` over the `ratio` job log of
-  the 36 `ci.yml` push runs on main from 7fbf7e9 through b4ed992 that carry
+  the 36 `ci.yml` push runs on main from f505167 through b4ed992 that carry
   both lines. | Measured, per CPU model, runs, median, range: walk, EPYC
   7763 15, 106.64, +26.6%; EPYC 9V74 11, 113.15, +12.9%; EPYC 9V45 6,
   114.69, +4.9%; Xeon Platinum 8573C 1, 110.22; Xeon 6973P-C 1, 106.84;
@@ -9180,9 +9180,9 @@ record.
   EPYC 9V74 11, 9.28, +18.0%; EPYC 9V45 6, 9.41, +9.8%; 8573C 1, 7.06;
   6973P-C 1, 6.19; 8370C 2, 8.04, +1.1%. | Verdict: **rejected** on the
   issue's own finish line, a within-model range under 10% on the pool's
-  models: rows beat the walk on the EPYC 7763 only (18.0% against 26.6%),
-  and are wider on the 9V74 (18.0% against 12.9%) and the 9V45 (9.8%
-  against 4.9%). Across models, which is what the one committed
+  models: of the models with at least 6 runs, rows beat the walk on the
+  EPYC 7763 only (18.0% against 26.6%), and are wider on the 9V74 (18.0%
+  against 12.9%) and the 9V45 (9.8% against 4.9%). Across models, which is what the one committed
   `BASELINE_DECODE_COST` compares, the row medians span 6.19 to 9.48
   (+53%) against the walk's 106.64 to 130.94 (+23%), so the 8370C problem
   of S2-A117 returns as the 6973P-C at the low end. Waiting for more runs
