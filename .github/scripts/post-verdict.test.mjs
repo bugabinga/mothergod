@@ -12,7 +12,10 @@ import { test } from "node:test";
 const script = join(new URL(".", import.meta.url).pathname, "post-verdict");
 const ID = "c".repeat(64);
 
-function run(args, { body = "one [must]: the test is missing", env = {}, failEdit = false } = {}) {
+function run(
+  args,
+  { body = "one [must]: the test is missing", env = {}, failEdit = false, armed = false } = {},
+) {
   const stub = mkdtempSync(join(tmpdir(), "post-verdict-"));
   const log = join(stub, "calls.jsonl");
   const recorder = join(stub, "record.mjs");
@@ -22,6 +25,7 @@ function run(args, { body = "one [must]: the test is missing", env = {}, failEdi
 const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, token: process.env.GH_TOKEN ?? null }) + "\\n");
 if (argv[1] === "edit" && ${failEdit}) { console.error("label not found"); process.exit(1); }
+if (argv[1] === "view") { console.log(${armed} ? '{"enabledAt":"2026-10-20T20:26:51Z"}' : "null"); process.exit(0); }
 console.log("https://github.com/o/r/pull/1#issuecomment-9");
 `,
   );
@@ -51,8 +55,9 @@ console.log("https://github.com/o/r/pull/1#issuecomment-9");
 test("fail flips the pair to changes-requested, then posts the stamped items", () => {
   const { status, stdout, calls } = run(["950", "fail"]);
   assert.equal(status, 0, stdout);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls[0].argv, [
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0].argv, ["pr", "view", "950", "--json", "autoMergeRequest", "--jq", ".autoMergeRequest"]);
+  assert.deepEqual(calls[1].argv, [
     "pr",
     "edit",
     "950",
@@ -61,16 +66,36 @@ test("fail flips the pair to changes-requested, then posts the stamped items", (
     "--remove-label",
     "agent-approved",
   ]);
-  assert.equal(calls[0].token, "app-token");
-  assert.deepEqual(calls[1].argv.slice(0, 3), ["issue", "comment", "950"]);
+  assert.equal(calls[1].token, "app-token");
+  assert.deepEqual(calls[2].argv.slice(0, 3), ["issue", "comment", "950"]);
   assert.match(
-    calls[1].argv[4],
+    calls[2].argv[4],
     new RegExp(
       `^one \\[must\\]: the test is missing\\n\\n<!-- verdict fail ${ID} -->\\n\\n---\\n_reviewer · \\[Claude Code\\]`,
     ),
   );
-  assert.equal(calls[1].token, "workflow-token");
+  assert.equal(calls[2].token, "workflow-token");
   assert.equal(stdout.trim(), "https://github.com/o/r/pull/1#issuecomment-9");
+});
+
+test("fail on a PASS-armed auto-merge disarms it before the label moves (#1467)", () => {
+  const { status, stderr, calls } = run(["950", "fail"], { armed: true });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "view"], ["pr", "merge"], ["pr", "edit"], ["issue", "comment"]],
+  );
+  assert.deepEqual(calls[1].argv, ["pr", "merge", "950", "--disable-auto"]);
+  assert.equal(calls[1].token, "app-token");
+  assert.match(stderr, /auto-merge on #950 disarmed/);
+});
+
+test("pass never reads or touches auto-merge", () => {
+  const { calls } = run(["950", "pass"], { armed: true });
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "edit"], ["issue", "comment"]],
+  );
 });
 
 test("pass flips the pair to agent-approved and stamps pass", () => {
@@ -91,8 +116,8 @@ test("pass flips the pair to agent-approved and stamps pass", () => {
 test("an empty DIFF_ID posts unstamped and says so, never withholds the verdict", () => {
   const { status, stderr, calls } = run(["950", "fail"], { env: { DIFF_ID: "" } });
   assert.equal(status, 0);
-  assert.equal(calls.length, 2);
-  assert.doesNotMatch(calls[1].argv[4], /<!-- verdict/);
+  assert.equal(calls.length, 3);
+  assert.doesNotMatch(calls[2].argv[4], /<!-- verdict/);
   assert.match(stderr, /DIFF_ID is empty, posting unstamped/);
 });
 
@@ -119,7 +144,10 @@ test("an empty body is refused before the label moves", () => {
 test("a failed label edit stops before the comment", () => {
   const { status, stderr, calls } = run(["950", "fail"], { failEdit: true });
   assert.equal(status, 1);
-  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "view"], ["pr", "edit"]],
+  );
   assert.match(stderr, /gh pr edit on #950 failed: label not found/);
 });
 
