@@ -19,7 +19,7 @@ recorded experiment in
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-10-20 against
+measurement time and never committed. Measured 2026-10-21 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
@@ -35,9 +35,10 @@ Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
-0.257 MB/s and decoded it at 3.858 MB/s; it encoded Silesia at 0.161 MB/s and
-decoded it at 2.277 MB/s. In the same run, `xz -9e` encoded Silesia at 2.076
-MB/s and decoded it at 72.045 MB/s, more than ten times faster both ways.
+0.405 MB/s and decoded it at 5.167 MB/s; it encoded Silesia at 0.271 MB/s and
+decoded it at 3.543 MB/s. In the same run, `xz -9e` encoded Silesia at 2.597
+MB/s and decoded it at 95.324 MB/s, more than nine times faster to encode and
+more than twenty times faster to decode.
 Methodology, per-file rates, every level of gzip, zstd and xz, peak
 memory included, and the regeneration command: [`docs/benchmarks/`](docs/benchmarks/).
 

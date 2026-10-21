@@ -674,11 +674,14 @@ fn frontier_throughput(report_file: &str, level: &str) -> [f64; 2] {
 }
 
 /// README and site anchor "slow" against `xz -9e` on Silesia: they quote its
-/// rates from the same run and call it "more than ten times faster both
-/// ways". The rates are compared like `published_throughput_matches_its_generated_reports`
-/// compares mothergod's; the multiplier holds while both of the report's
-/// ratios stay at or above ten, so a faster encoder fails here before the
-/// sentence turns false.
+/// rates from the same run and call it "more than nine times faster to
+/// encode and more than twenty times faster to decode". The rates are
+/// compared like `published_throughput_matches_its_generated_reports`
+/// compares mothergod's; each multiplier holds while the report's ratio
+/// stays at or above it, so a faster encoder fails here before the sentence
+/// turns false. The encode multiplier was ten until the 2026-10-21 run on a
+/// different CI CPU measured 9.6: the ratio moves with the machine, so the
+/// sentence states what the newest report supports.
 #[test]
 fn published_speed_anchor_matches_its_generated_report() {
     let xz = frontier_throughput("silesia.md", "xz -9e");
@@ -689,7 +692,7 @@ fn published_speed_anchor_matches_its_generated_report() {
         "<code>xz -9e</code> encoded Silesia at",
     );
 
-    for (index, direction) in ["encode", "decode"].iter().enumerate() {
+    for (index, (direction, floor)) in [("encode", 9.0), ("decode", 20.0)].iter().enumerate() {
         let rounded = format!("{:.3}", xz[index]);
         for (surface, claim) in [
             ("README.md", readme[index]),
@@ -703,8 +706,8 @@ fn published_speed_anchor_matches_its_generated_report() {
         }
         let ratio = xz[index] / ours[index];
         assert!(
-            ratio >= 10.0,
-            "README.md and site/index.html say xz -9e is more than ten times faster to {direction} Silesia, docs/benchmarks/silesia.md says {ratio:.1} times"
+            ratio >= *floor,
+            "README.md and site/index.html say xz -9e is more than {floor} times faster to {direction} Silesia, docs/benchmarks/silesia.md says {ratio:.1} times"
         );
     }
 }
