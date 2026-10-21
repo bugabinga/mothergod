@@ -1203,31 +1203,33 @@ fn decode_offset(models: &mut Models, ac: &mut Decoder, len: u32) -> u32 {
 }
 
 /// The shared skeleton behind [`decode`] and [`decode_to_writer`]:
-/// decodes `token_count` tokens off `ac` in coding order, routing every
-/// literal byte and copy through `sink`, and advancing the literal-model
-/// context and `reps` exactly as [`decode`] and [`decode_to_writer`] both
-/// require. See [`DecodeSink`]'s docs for why this exists.
+/// decodes `token_count` tokens off `ac_bytes` in coding order with fresh
+/// models and rep cache, routing every literal byte and copy through `sink`,
+/// and advancing the literal-model context and the rep cache exactly as
+/// [`decode`] and [`decode_to_writer`] both require. See [`DecodeSink`]'s
+/// docs for why this exists.
 fn decode_tokens<S: DecodeSink>(
     token_count: u32,
     declared_len: usize,
     reach: Reach,
-    models: &mut Models,
-    ac: &mut Decoder,
-    reps: &mut RepCache,
+    ac_bytes: &[u8],
     sink: &mut S,
 ) -> Result<(), S::Err> {
+    let mut ac = Decoder::new(ac_bytes);
+    let mut models = Models::try_new().map_err(Error::from)?;
+    let mut reps = RepCache::initial();
     let mut context = Context::default();
     for _ in 0..token_count {
         let flag_table = usize::from(context.after_copy);
-        match FlagKind::from_index(models.flag[flag_table].decode(ac)) {
+        match FlagKind::from_index(models.flag[flag_table].decode(&mut ac)) {
             FlagKind::Literal => {
                 ensure_room(sink.len(), 1, declared_len)?;
-                let byte = sink.literal(models, ac, context)?;
+                let byte = sink.literal(&mut models, &mut ac, context)?;
                 context = context.after_literal(byte);
             }
             FlagKind::Match => {
-                let len = decode_length(models, ac, FlagKind::Match);
-                let distance = decode_offset(models, ac, len);
+                let len = decode_length(&mut models, &mut ac, FlagKind::Match);
+                let distance = decode_offset(&mut models, &mut ac, len);
                 let distance =
                     NonZeroU32::new(distance).expect("decode_offset's result is always >= 1");
                 ensure_within_window(distance, reach)?;
@@ -1238,8 +1240,8 @@ fn decode_tokens<S: DecodeSink>(
             FlagKind::Rep => {
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
-                let slot = RepSlot::from_index(models.slot.decode(ac));
-                let len = decode_length(models, ac, FlagKind::Rep);
+                let slot = RepSlot::from_index(models.slot.decode(&mut ac));
+                let len = decode_length(&mut models, &mut ac, FlagKind::Rep);
                 let distance = reps.get(slot);
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
@@ -1351,9 +1353,6 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let (candidate, reach, payload) = split_selector(payload)?;
     let (declared_len, token_count, ac_bytes) = read_header(payload, max_len, candidate)?;
 
-    let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new()?;
-    let mut reps = RepCache::initial();
     let column = candidate
         .columns()
         .map(|columns| ColumnExpertState::try_new(MAX_COLUMN_BANKS).map(|state| (columns, state)))
@@ -1373,15 +1372,7 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
         declared_len,
         column,
     };
-    decode_tokens(
-        token_count,
-        declared_len,
-        reach,
-        &mut models,
-        &mut ac,
-        &mut reps,
-        &mut sink,
-    )?;
+    decode_tokens(token_count, declared_len, reach, ac_bytes, &mut sink)?;
 
     if output.len() != declared_len {
         return Err(Error::Corrupt);
@@ -1428,9 +1419,6 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     };
     let (declared_len, token_count, ac_bytes) = read_header(filtered_payload, max_len, candidate)?;
 
-    let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new().map_err(Error::from)?;
-    let mut reps = RepCache::initial();
     let mut window = lz::Window::try_new(reach).map_err(Error::from)?;
 
     let mut sink = StreamingSink {
@@ -1438,15 +1426,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
         undo: &mut undo,
         writer: &mut *writer,
     };
-    decode_tokens(
-        token_count,
-        declared_len,
-        reach,
-        &mut models,
-        &mut ac,
-        &mut reps,
-        &mut sink,
-    )?;
+    decode_tokens(token_count, declared_len, reach, ac_bytes, &mut sink)?;
 
     undo.finish(writer)?;
 
