@@ -125,7 +125,12 @@ DISPATCH = f'GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run {WORKFLOW} --ref main
 # The publish PR's title, and so the squash commit's subject: the one place
 # the generator is recorded, and GENERATOR is how the next read finds it.
 TITLE = "bench: publish the reports regenerated at {sha}"
-GENERATOR = re.compile(r"regenerated at ([0-9a-f]{7,40})\b")
+FULL_SHA = 40
+# Twelve characters, because seven resolved once as no object (the docstring
+# of `commit`); the regex admits seven for the five publish subjects on main
+# that carry them.
+SHORT_SHA = 12
+GENERATOR = re.compile(rf"regenerated at ([0-9a-f]{{7,{FULL_SHA}}})\b")
 
 
 def gh(*args):
@@ -165,8 +170,27 @@ def report_paths(repo):
 
 
 def commit(repo, sha):
-    """A commit on the repository as {"sha", "date"}, by sha or ref."""
+    """A commit on the repository as {"sha", "date"}, by full sha, prefix or ref.
+
+    `commits/{sha}` resolves a prefix against every object in the repository
+    network, forks and dead PR heads included, and seven hex characters are
+    not always one object there: `e4e3444`, named by 7162ea1 ("bench:
+    publish the reports regenerated at e4e3444"), answered 422 "No commit
+    found" while its eighth character resolved and every earlier publish
+    prefix did (#1495). A prefix the endpoint refuses is asked of commit
+    search, which indexes commits alone: one hit names the full sha, read
+    back through the endpoint so every date has one shape (search stamps
+    milliseconds, the endpoint does not, and `fresh` compares the strings);
+    any other count stays unreadable naming both answers. A full sha is
+    never retried, because nothing else can know it.
+    """
     row, error = gh("api", f"repos/{repo}/commits/{sha}")
+    if error and len(sha) < FULL_SHA:
+        found, reason = gh("api", f"search/commits?q=repo:{repo}+hash:{sha}")
+        hits = found.get("items", []) if isinstance(found, dict) else []
+        if len(hits) == 1:
+            return commit(repo, hits[0]["sha"])
+        return None, f"{error}; commit search: {reason or f'{len(hits)} commits'}"
     if error:
         return None, error
     return {"sha": row["sha"], "date": row["commit"]["committer"]["date"]}, None
@@ -318,7 +342,7 @@ def render(facts, error, out=sys.stdout):
         print("    date, CPU model and MB/s and names each quote the new reports moved, so fix those in", file=out)
         print("    the same diff (#1384); then push-branch and gh-pr ship it all, under this title and no", file=out)
         print("    other, because the next read learns the generator from it:", file=out)
-        print(f'    "{TITLE.format(sha=newest["headSha"][:7])}"', file=out)
+        print(f'    "{TITLE.format(sha=newest["headSha"][:SHORT_SHA])}"', file=out)
         print(f"    {newest['url']}", file=out)
     else:
         print(f"dispatch: {stale}, and {reason}.", file=out)

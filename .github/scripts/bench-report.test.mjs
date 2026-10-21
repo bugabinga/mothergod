@@ -124,6 +124,7 @@ test("the reviewer's sequence: a publish merged after a later bench commit is no
 
 test("generator reads the pass head from the publish subject this script dictates, and nothing else", () => {
   assert.equal(call("generator", "bench: publish the reports regenerated at deadbee"), "deadbee");
+  assert.equal(call("generator", "bench: publish the reports regenerated at deadbeefdead (#1500)"), "deadbeefdead");
   assert.equal(
     call("generator", "bench: publish the reports regenerated at deadbeefdeadbeefdeadbeefdeadbeefdeadbeef (#1400)"),
     "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
@@ -188,7 +189,8 @@ test("render leads with the state word, dictates the publish title, and ends wit
   // fails `test`, because tests/claims.rs pins README.md and site/index.html
   // to the reports' timing columns (#1384, PR #1383's first round).
   assert.match(out, /`cargo x check`: tests\/claims\.rs pins README\.md and site\/index\.html/);
-  assert.match(out, /"bench: publish the reports regenerated at deadbee"/);
+  // Twelve characters: seven resolved once as no object on GitHub (#1495).
+  assert.match(out, /"bench: publish the reports regenerated at deadbeefdead"/);
   assert.match(
     lines.at(-1),
     /^bench-report: publish \| affecting a23a7b0 .* under bench\/src \| reports c71bd43 generated at c71bd43 .* \| pass 42 \| gh readable$/,
@@ -344,6 +346,45 @@ test("end to end: a reports commit naming no generator is stale by rule even whe
     /bench-report: publish \| affecting a23a7b0 .* \| reports f0e0d0c naming no generator, stale by rule \| pass 42 \| gh readable/,
   );
   assert.equal(readFileSync(join(root, "docs/benchmarks/canterbury.md"), "utf8"), "new\n");
+});
+
+// The generator prefix of a publish subject already on main: `commits/<prefix>`
+// resolves it against every object in the repository network and refused
+// e4e3444 with 422 while the eighth character resolved (#1495). Commit
+// search indexes commits alone, so one hit there is the commit.
+// Search stamps milliseconds on its dates; the endpoint does not, and the
+// dates compare as strings, so the hit's date is never the one printed.
+const HIT = {
+  sha: "0ddba11000000000000000000000000000000000",
+  commit: { committer: { date: "2026-10-19T01:00:00.000Z" } },
+};
+const { "commits/0ddba11": readback, ...refusing } = answers;
+refusing[`commits/${HIT.sha}`] = readback;
+
+test("end to end: a generator prefix the commits endpoint refuses resolves through commit search", () => {
+  const root = scratchRepo();
+  const run = withGh({ ...refusing, "hash:0ddba11": { total_count: 1, items: [HIT] } }, [], root);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(
+    run.stdout,
+    /^publish 42: .*the reports \(c71bd43, generated at 0ddba11 2026-10-19T01:00:00Z\) predate a23a7b0/,
+  );
+});
+
+test("end to end: a prefix neither endpoint resolves is UNREADABLE naming both answers", () => {
+  const root = scratchRepo();
+  const none = withGh(refusing, [], root);
+  assert.equal(none.status, 0, none.stderr);
+  assert.match(
+    none.stdout,
+    /^bench-report: UNREADABLE \(generator 0ddba11, named by c71bd43: stub gh: no answer for api repos\/o\/r\/commits\/0ddba11; commit search: stub gh: no answer for api search\/commits\?q=repo:o\/r\+hash:0ddba11\)/,
+  );
+  const two = withGh({ ...refusing, "hash:0ddba11": { total_count: 2, items: [HIT, HIT] } }, [], root);
+  assert.equal(two.status, 0, two.stderr);
+  assert.match(
+    two.stdout,
+    /^bench-report: UNREADABLE \(generator 0ddba11, named by c71bd43: .*; commit search: 2 commits\)/,
+  );
 });
 
 test("end to end: the trigger paths come from main's workflow, and a workflow listing none is UNREADABLE", () => {
