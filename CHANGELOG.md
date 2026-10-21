@@ -177,20 +177,20 @@ All notable changes to this project are documented here. Format follows
   (326 s to 299 s) on a 4-core runner, with output bytes unchanged and peak
   memory under 1 GiB (#1448).
 - encode: the optimal parse holds 21 bytes of state per input byte, down
-  from 41, so a 16 MiB block peaks at 372 MB instead of 700 MB and
-  Silesia `dickens` at 364 MB instead of 562 MB, with output bytes
+  from 41, so a 16 MiB block peaks at 364 MiB instead of 684 MiB and
+  Silesia `dickens` at 355 MiB instead of 549 MiB, with output bytes
   unchanged and encode time within +4% on 16 MiB of zeros (#1341).
 - encode: on two or more cores a file or stream past 16 MiB encodes two
   blocks at once, so Silesia `mozilla` compresses in 261 s instead of 358 s
   (1.37 times faster, 4-core runner) with output bytes unchanged; peak memory
-  there is 879 MB against 521 MB serial, and 256 MiB of zeros peaks at 776 MB,
+  there is 859 MiB against 509 MiB serial, and 256 MiB of zeros peaks at 758 MiB,
   both under the 1 GiB bound. A one-core machine encodes serially as before
   (#1322).
 - encode: on two or more cores a file of one block, up to 16 MiB, runs its
   filter trials on two threads, so Silesia `dickens` compresses in 49 s
   instead of 89 s (1.81 times faster, 4-core runner) and the first 16 MiB
   minus one byte of `webster` in 80 s instead of 137 s, with output bytes
-  unchanged; peak memory there is 544 MB and 877 MB against 320 MB and 512 MB
+  unchanged; peak memory there is 531 MiB and 857 MiB against 313 MiB and 500 MiB
   serial, under the 1 GiB bound (#1322).
 - encode: peak memory falls by 12% to 18% on Silesia (`mozilla` from 617 to
   509 MiB, `dickens` from 355 to 312 MiB) because the optimal parse frees
