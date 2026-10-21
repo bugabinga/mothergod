@@ -46,28 +46,36 @@ use crate::sse::{LogitSse, MIN_PROBABILITY, Sse};
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
 
+/// Values of a byte's high nibble, the part of the previous byte the weight
+/// key and the alignment expert read.
+const NIBBLES: usize = 16;
+
 /// Number of distinct mixing-weight vectors: one per `(prev-byte nibble,
 /// after-copy)` key.
-const WEIGHT_CONTEXTS: usize = 32;
+const WEIGHT_CONTEXTS: usize = NIBBLES * 2;
 
 /// Byte alphabet every context bank models: the one [`bittree`] walks.
 const ALPHABET: usize = bittree::ALPHABET;
-/// [`ALPHABET`] as a `u32`, spelled as its own literal instead of a cast
-/// so no truncation lint applies to a compile-time-obvious value.
-const ALPHABET_U32: u32 = 256;
+/// [`ALPHABET`] as a `u32`, the type a bank's `total` counts in.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "ALPHABET is the 256 byte values, which fit u32"
+)]
+const ALPHABET_U32: u32 = ALPHABET as u32;
 
 // Bank layout: one contiguous bank space, sliced per expert so [`banks`]
-// can address any of them with a single base offset.
+// can address any of them with a single base offset. A slice holds one bank
+// per value of the key [`banks`] packs for that expert.
 const FAST_BASE: usize = 0;
-const FAST_BANKS: usize = 512;
+const FAST_BANKS: usize = ALPHABET * 2;
 const SLOW_BASE: usize = FAST_BASE + FAST_BANKS;
-const SLOW_BANKS: usize = 512;
+const SLOW_BANKS: usize = ALPHABET * 2;
 const ORDER0_BASE: usize = SLOW_BASE + SLOW_BANKS;
 const ORDER0_BANKS: usize = 1;
 const ORDER2_BASE: usize = ORDER0_BASE + ORDER0_BANKS;
 const ORDER2_BANKS: usize = 4096;
 const ALIGN_BASE: usize = ORDER2_BASE + ORDER2_BANKS;
-const ALIGN_BANKS: usize = 64;
+const ALIGN_BANKS: usize = 4 * NIBBLES;
 const WORD_BASE: usize = ALIGN_BASE + ALIGN_BANKS;
 const WORD_BANKS: usize = 4096;
 /// Total context banks across all six experts.
@@ -298,11 +306,12 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let after_copy = usize::from(context.after_copy);
     let rate_context = prev1 | (after_copy * ALPHABET);
     let order2 = ((prev1 << 8) | prev2) & (ORDER2_BANKS - 1);
-    let align = ((context.position & 3) << 4) | (prev1 >> 4);
+    let nibble = prev1 >> 4;
+    let align = ((context.position & 3) * NIBBLES) | nibble;
     let word_hash = usize::try_from(context.word_hash)
         .expect("word_hash is a u32, always fits usize")
         & (WORD_BANKS - 1);
-    let weight_index = (prev1 >> 4) | (after_copy * 16);
+    let weight_index = nibble | (after_copy * NIBBLES);
     (
         [
             FAST_BASE + rate_context,
