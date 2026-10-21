@@ -2,8 +2,8 @@ use std::io::ErrorKind;
 
 use super::*;
 use crate::test_support::{
-    bcj_call_dense_data, columnar_drift_data, forge_floor_extent, mixed_stream, repeated_sentence,
-    tabular_columns_data,
+    bcj_call_dense_data, columnar_drift_data, forge_floor_extent, lz_total_past_max_decoded_len,
+    mixed_stream, repeated_sentence, tabular_columns_data,
 };
 use crate::{FORMAT_VERSION, MAGIC, METHOD_OFFSET, WriteError, compress, decompress_to_writer};
 
@@ -347,4 +347,16 @@ fn a_bad_selector_is_corrupt_even_when_the_source_ends_after_it() {
         (Vec::new(), Some(ErrorKind::InvalidData))
     );
     assert_eq!(drain(Decoder::new(cut.as_slice())), drain_to_writer(&cut));
+}
+
+#[test]
+fn a_streamed_lz_total_past_max_decoded_len_is_read_not_rejected() {
+    // Pins `Decoder::with_max_len`'s call site of `Budget::new` (#1273),
+    // which `only_a_collecting_budget_caps_the_lz_total` cannot: a reader
+    // over the concatenation of large `Lz` outputs (ADR-0067) reads to the
+    // end, as `decompress_to_writer` writes it (#1088).
+    let stream = lz_total_past_max_decoded_len();
+    let copied = io::copy(&mut Decoder::new(stream.as_slice()), &mut io::sink())
+        .expect("the stream decodes to its end");
+    assert!(copied > u64::from(codec::MAX_DECODED_LEN));
 }

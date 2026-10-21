@@ -214,6 +214,19 @@ pub(crate) fn mixed_stream() -> (Vec<u8>, Vec<u8>) {
     (stream, parts.concat())
 }
 
+/// A concatenation of `Lz` frames whose outputs sum to one frame past
+/// [`crate::codec::MAX_DECODED_LEN`], each frame under it (ADR-0067). The
+/// shared input of the call-site pins on `Budget::new` (#1088, #1273): a
+/// site that caps the `Lz` total rejects it. Decode work scales with
+/// output, so a pin costs seconds in the test profile whatever the frame
+/// size.
+pub(crate) fn lz_total_past_max_decoded_len() -> Vec<u8> {
+    const FRAME_LEN: usize = 1 << 20;
+    let frame = crate::compress(&vec![0u8; FRAME_LEN]);
+    assert_eq!(frame[crate::METHOD_OFFSET], crate::Method::Lz as u8);
+    frame.repeat(crate::codec::MAX_DECODED_LEN as usize / FRAME_LEN + 1)
+}
+
 /// JSON-ish text, `lines` rows long: what `Candidate::Base64` unwraps once
 /// `filters::base64_unwrap::decode` has wrapped it.
 pub(crate) fn record_text(lines: usize) -> Vec<u8> {
