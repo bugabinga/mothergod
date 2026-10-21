@@ -316,7 +316,8 @@ pub fn format_baseline(snapshot: &Snapshot) -> String {
     out
 }
 
-/// A line [`parse_baseline`] could not read as `"<name>": <bpb>`.
+/// A line [`parse_baseline`] could not read as part of a case in the shape
+/// [`format_baseline`] writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaselineParseError {
     /// 1-based line number.
