@@ -71,17 +71,21 @@ tell exists to catch (PR #772's own close, caught the next run). `gh pr
 close` takes the same `--comment` this script already assembles, so
 `--delete-branch` swaps the verb rather than adding a second code path.
 
-`--new` reads the open issues first and refuses a title whose identifiers
-an open issue's title already names (issue #1374): the deslopper filed one
-`decodes_incrementally` finding four times in 40 hours, two other seats
-filed the gzip temp-file name twice, and each copy cost a triage while the
-copies diverged. The identifiers are the tokens a reader would grep for: an
-underscore name, a `::` path, a `--flag`, a single backticked token. A file
-name or a script name is an area, not a defect, and matching on those
-refused four unrelated pairs out of six among the open issues. A hit prints
-the issues, so the seat reads them, then comments there or files with
-`--anyway`. An issue list this cannot read files with a warning rather
-than refusing, because the refusal would cost the run its report.
+`--new` reads the open issues first and refuses a title that names an
+identifier an open issue's title names, with the same claim beside it
+(issue #1374): the deslopper filed one `decodes_incrementally` finding
+four times in 40 hours, two other seats filed the gzip temp-file name
+twice, and each copy cost a triage while the copies diverged. The
+identifiers are the tokens a reader would grep for: an underscore name, a
+`::` path, a `--flag`, a single backticked token. A file name or a script
+name is an area, not a defect, and matching on those refused four
+unrelated pairs out of six among the open issues. A name alone is an area
+too: two issues on one hot symbol are the normal case, 66 of the 71 pairs
+sharing one among 200 closed titles on 2026-10-21 (#1427), so a copy must
+restate two words of the claim as well. A hit prints the issues, so the
+seat reads them, then comments there or files with `--anyway`. An issue
+list this cannot read files with a warning rather than refusing, because
+the refusal would cost the run its report.
 
 Usage: gh-comment <issue-or-pr-number> [--close [--delete-branch]] < body
        gh-comment --new "<title>" [--label NAME]... [--anyway] < body
@@ -112,6 +116,19 @@ BACKTICKED = re.compile(r"`([\w.:/-]{3,})`")
 # punctuation, then a possessive, so `decodes_incrementally's` and
 # `(select::pick)` read as the names they carry.
 EDGES = "`\"'()[]{},;:!?"
+# A path or a dotted extension names a file, whatever else the token
+# carries: `bench_report.rs` is an area, not a defect (#1427).
+FILE_NAME = re.compile(r"/|\.[a-z]+$")
+# A word this short is grammar ("the", "with", "when"), never a claim.
+CLAIM_LETTERS = 5
+
+
+def words(title):
+    """Every word of `title` as a reader greps for it: edges shed, lowercased."""
+    for raw in title.split():
+        token = re.sub(r"'s$", "", raw.strip(EDGES)).rstrip(".")
+        if len(token) >= 3:
+            yield token.lower()
 
 
 def identifiers(title):
@@ -123,32 +140,38 @@ def identifiers(title):
     a type name is the area an issue is about, and two issues in one area
     are the normal case, not a duplicate.
     """
-    found = set()
-    for span in BACKTICKED.findall(title):
-        found.add(span.lower())
-    for raw in title.split():
-        token = re.sub(r"'s$", "", raw.strip(EDGES)).rstrip(".")
-        if len(token) < 3:
-            continue
+    found = {span.lower() for span in BACKTICKED.findall(title)}
+    for token in words(title):
         if "_" in token or "::" in token or token.startswith("--"):
-            found.add(token.lower())
+            found.add(token)
             if "::" in token:
-                found.update(seg.lower() for seg in token.split("::") if "_" in seg)
-    return found
+                found.update(seg for seg in token.split("::") if "_" in seg)
+    return {name for name in found if not FILE_NAME.search(name)}
+
+
+def claim(title):
+    """The words of `title` that say what is wrong, beyond the names it greps for."""
+    return {word for word in words(title) if len(word) >= CLAIM_LETTERS} - identifiers(title)
 
 
 def duplicates(title, issues):
-    """The open issues whose title shares an identifier with `title`.
+    """The open issues whose title names an identifier of `title` and its claim.
 
     Each as (number, title, shared identifiers sorted), in the listing's
-    order, newest first.
+    order, newest first. A shared name alone is the normal case: among the
+    200 closed titles of 2026-10-21, 71 pairs shared one and 66 of those
+    were distinct defects in one hot symbol, seven titles on `baseline_gate`
+    alone (#1427). A copy restates the claim too, two or more of the same
+    words of CLAIM_LETTERS or longer: on that corpus the rule kept every
+    copy and 7 of the 66.
     """
-    mine = identifiers(title)
+    mine, said = identifiers(title), claim(title)
     hits = []
     for issue in issues:
-        shared = mine.intersection(identifiers(issue.get("title") or ""))
-        if shared:
-            hits.append((issue.get("number"), issue.get("title"), sorted(shared)))
+        theirs = issue.get("title") or ""
+        shared = mine.intersection(identifiers(theirs))
+        if shared and len(said.intersection(claim(theirs))) >= 2:
+            hits.append((issue.get("number"), theirs, sorted(shared)))
     return hits
 
 
@@ -179,7 +202,7 @@ def main() -> int:
     parser.add_argument("--label", action="append", default=[], metavar="NAME",
                         help="label for --new, repeatable")
     parser.add_argument("--anyway", action="store_true",
-                        help="with --new, file even when an open issue names the same identifier")
+                        help="with --new, file even when an open issue names the same identifier and claim")
     args = parser.parse_args()
 
     # `is not None`, because an empty --new is a typo, not an absent flag, and

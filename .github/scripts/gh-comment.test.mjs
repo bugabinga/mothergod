@@ -80,9 +80,12 @@ test("--new creates an issue with the labels, the footer, and the workflow token
 // times in 40 hours, and each copy cost a triage. The guard holds for every
 // seat because it is in the one path an issue is filed through, not in a
 // prompt each seat has to remember.
-test("--new refuses a title whose identifier an open issue's title already names, and lists it", () => {
+test("--new refuses a title whose identifier and claim an open issue's title already names, and lists it", () => {
   const issues = [
-    { number: 1281, title: "decodes_incrementally's matches! drifts silently when a Candidate variant is added" },
+    {
+      number: 1297,
+      title: "decodes_incrementally restates codec::decode_to_writer's streaming dispatch as a second matches!",
+    },
     { number: 1326, title: "gzip reference size varies by a few bytes between runs" },
   ];
   const { status, stderr, verbs } = run(
@@ -95,11 +98,49 @@ test("--new refuses a title whose identifier an open issue's title already names
     { issues },
   );
   assert.equal(status, 1);
-  assert.match(stderr, /already names `decodes_incrementally`:/);
-  assert.match(stderr, /#1281  decodes_incrementally's matches!/);
+  assert.match(stderr, /already names `codec::decode_to_writer`, `decode_to_writer`, `decodes_incrementally`:/);
+  assert.match(stderr, /#1297  decodes_incrementally restates/);
   assert.doesNotMatch(stderr, /#1326/);
   assert.match(stderr, /--anyway/);
   assert.deepEqual(verbs, ["issue list"]);
+});
+
+// Issue #1427: a name alone flagged 66 distinct defects among 71 pairs on
+// 200 closed titles, seven titles on baseline_gate alone, and a seat that
+// learns the retry is routine stops reading the hits. A copy restates the
+// claim; a second defect in the same symbol does not.
+test("a shared name alone is an area; a copy shares two words of the claim too", () => {
+  const issues = [
+    { number: 1434, title: "baseline_gate check sees no input past 50,000 bytes" },
+    { number: 1346, title: "baseline_gate stale-finals stderr cites README for 35 minutes it does not state" },
+  ];
+  const copy = run(
+    ["--new", "baseline_gate's stale-finals stderr sends the fixer into a 35 minute foreground run"],
+    { issues },
+  );
+  assert.equal(copy.status, 1);
+  assert.match(copy.stderr, /#1346  baseline_gate stale-finals/);
+  assert.doesNotMatch(copy.stderr, /#1434/);
+  const other = run(
+    ["--new", "baseline_gate write raises a case's baseline when the case grew within tolerance"],
+    { issues },
+  );
+  assert.equal(other.status, 0, other.stderr);
+  assert.deepEqual(other.verbs, ["issue list", "issue create"]);
+});
+
+test("a file name with an underscore is an area, bare or backticked, even when the claim matches", () => {
+  const issues = [{ number: 1354, title: "bench_report.rs reads stale rows from the frontier table" }];
+  for (
+    const title of [
+      "bench_report.rs writes stale rows to the frontier table",
+      "`bench_report.rs` writes stale rows to the frontier table",
+    ]
+  ) {
+    const { status, stderr, verbs } = run(["--new", title], { issues });
+    assert.equal(status, 0, `${title}: ${stderr}`);
+    assert.deepEqual(verbs, ["issue list", "issue create"], title);
+  }
 });
 
 test("--anyway files past the hit without reading the list, on the same credential", () => {
@@ -128,14 +169,14 @@ test("a shared file name, script name or type name is an area, not a duplicate",
 
 test("a :: path meets its bare segment, a backticked token meets itself, a flag meets a flag", () => {
   const issues = [
-    { number: 1297, title: "codec::decode_to_writer restates the dispatch" },
+    { number: 1297, title: "codec::decode_to_writer restates the streaming dispatch" },
     { number: 1301, title: "merge-pr --wait reads the latest review run on a head" },
-    { number: 1192, title: "`mutants` is advisory and pending" },
+    { number: 1192, title: "`mutants` is advisory and pending on every push" },
   ];
   const titles = [
-    "decode_to_writer's doc lumps Stored with Transpose",
-    "merge-pr --wait exits 4 on every PR",
-    "the `mutants` job never ends",
+    "decode_to_writer's doc restates the streaming dispatch",
+    "merge-pr --wait reads the latest review run twice",
+    "the `mutants` job stays advisory and pending",
   ];
   for (const title of titles) {
     const { status, stderr } = run(["--new", title], { issues });
