@@ -838,12 +838,9 @@ fn search(
     candidates: &[Candidate],
     workers: NonZeroUsize,
 ) -> Option<(Candidate, Reach, Vec<u8>)> {
-    // Size of each finished trial's body, `usize::MAX` while it runs or
-    // waits; a body never has that length. Relaxed: the guess it feeds
-    // never changes the payload, only what runs early.
     let sizes: Vec<AtomicUsize> = candidates
         .iter()
-        .map(|_| AtomicUsize::new(usize::MAX))
+        .map(|_| AtomicUsize::new(PENDING))
         .collect();
     let next = AtomicUsize::new(0);
     let speculating = AtomicBool::new(false);
@@ -868,7 +865,7 @@ fn search(
                     best = Some((index, candidate, body));
                 }
             }
-            let guess = if has_wide_trial && sizes.iter().any(is_pending) {
+            let guess = if has_wide_trial && sizes.iter().any(|size| finished(size).is_none()) {
                 leader(&sizes).filter(|_| !speculating.swap(true, Ordering::Relaxed))
             } else {
                 None
@@ -931,22 +928,26 @@ fn search(
 /// A wide trial running on a thread of [`search`]'s scope.
 type WideTrial<'scope> = thread::ScopedJoinHandle<'scope, Vec<u8>>;
 
-/// Whether a trial's size slot still holds no finished body.
-fn is_pending(size: &AtomicUsize) -> bool {
-    size.load(Ordering::Relaxed) == usize::MAX
+/// What a trial's size slot holds while it runs or waits; a body never has
+/// that length.
+const PENDING: usize = usize::MAX;
+
+/// The body size a trial's slot holds, `None` while it is [`PENDING`].
+/// Relaxed: the guess it feeds never changes the payload, only what runs
+/// early.
+fn finished(size: &AtomicUsize) -> Option<usize> {
+    Some(size.load(Ordering::Relaxed)).filter(|&len| len != PENDING)
 }
 
 /// The first candidate among the finished trials to reach the smallest
 /// body, the serial loop's rule; `None` when no trial has finished.
 fn leader(sizes: &[AtomicUsize]) -> Option<usize> {
-    let mut leader: Option<(usize, usize)> = None;
-    for (index, size) in sizes.iter().enumerate() {
-        let size = size.load(Ordering::Relaxed);
-        if size != usize::MAX && leader.is_none_or(|(_, smallest)| size < smallest) {
-            leader = Some((index, size));
-        }
-    }
-    leader.map(|(index, _)| index)
+    sizes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, size)| Some((index, finished(size)?)))
+        .min_by_key(|&(_, size)| size)
+        .map(|(index, _)| index)
 }
 
 /// Byte length of [`encode_tokens_with`]'s header: declared output length
