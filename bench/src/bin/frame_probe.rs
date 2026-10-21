@@ -13,9 +13,13 @@
 //! shorter stream, not a silent one.
 //!
 //! Usage: `cargo run -p mothergod-bench --release --bin frame_probe --
-//! [--max-decodes <n>] <file>...`. A flip costs one frame's checksum, so the
-//! default of 20000 bounds a file at seconds; pass `--max-decodes
-//! 18446744073709551615` for every flip.
+//! [--max-decodes <n>] <file>...`. A run is capped by decode count, and every
+//! decode costs time linear in the frame, so the default of 20000 bounds a
+//! file at seconds only for a small one. Measured on a release build at the
+//! default: `README.md` (3492 B frame) 1.0 s, a 700 KB slice of the release
+//! binary (253 KB frame) 16.8 s, 1 MB of `/dev/urandom` (1000018 B frame)
+//! 64 s, so about a minute per MB. Pass `--max-decodes 18446744073709551615`
+//! for every flip.
 
 // The two items a bench binary reads are `probe` and `Report`; the
 // rest is the shared module's own surface.
@@ -50,7 +54,7 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1).peekable();
     let mut cap = DEFAULT_MAX_DECODES;
     if args.next_if(|arg| arg == "--max-decodes").is_some() {
-        let Some(Ok(n)) = args.next().map(|n| n.parse()) else {
+        let Some(Ok(n)) = args.next().map(|n| n.parse()).filter(|n| *n != Ok(0)) else {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
         };

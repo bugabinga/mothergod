@@ -128,4 +128,5 @@ fn the_binary_fails_on_a_missing_file_and_on_no_arguments() {
     );
     assert_eq!(run(&[]).0, 2);
     assert_eq!(run(&["--max-decodes", "x", "a"]).0, 2);
+    assert_eq!(run(&["--max-decodes", "0", "a"]).0, 2);
 }
