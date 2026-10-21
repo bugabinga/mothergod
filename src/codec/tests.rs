@@ -1403,3 +1403,17 @@ fn trial_workers_never_change_the_payload() {
         assert_decode_matches(&serial, &input, "serial trials");
     }
 }
+
+#[test]
+fn leader_is_the_first_smallest_finished_trial() {
+    let sizes = |slots: &[usize]| -> Vec<AtomicUsize> {
+        slots.iter().map(|&size| AtomicUsize::new(size)).collect()
+    };
+    assert_eq!(leader(&sizes(&[])), None);
+    assert_eq!(leader(&sizes(&[usize::MAX, usize::MAX])), None);
+    assert_eq!(
+        leader(&sizes(&[usize::MAX, 9, usize::MAX, 4, 4, 7])),
+        Some(3)
+    );
+    assert_eq!(leader(&sizes(&[5, 5])), Some(0));
+}
