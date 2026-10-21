@@ -20,6 +20,21 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-21: Editorial: peak memory carries the unit its measurement produced
+
+#1403. Three Unreleased `encode:` entries quoted `/usr/bin/time` peaks,
+which are KiB, as MB: 877,156 KiB read "877 MB", 2.4% low against
+decimal MB and labeled with neither. They now say MiB, the KiB figure
+over 1024, rounded (857 MiB). The #1341 entry had the same shape and
+the issue did not list it; it moved too.
+
+**Rejected: converting to decimal MB.** The bound the reader compares
+against is "1 GiB", and the #1382 entry beside these already writes
+MiB; decimal MB would put 509 MiB and 521 MB for one run in adjacent
+lines. The rule: a memory figure carries the binary unit its source
+measured in. The 256 MiB "946 MB" entry stays, because its journal
+source (S2-A116) records MB and no KiB to convert from.
+
 ## 2026-10-20: Editorial: "no internal parallelism" outlived the second core by a day
 
 The site's Speed section opened by saying the codec has no internal
