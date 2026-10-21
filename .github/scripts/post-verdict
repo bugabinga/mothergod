@@ -22,8 +22,17 @@ diff did not read at guard time, and a verdict withheld for a missing
 stamp would stall the PR where an unstamped one merely costs the next
 refresh a review (verdict-stands fails open toward reviewing).
 
-The labels ride the ambient GH_TOKEN, the app token the reviewer always
-used for them; the comment rides gh-comment's GH_WORKFLOW_TOKEN with its
+A fail first pulls any auto-merge a PASS armed (#1467): #1462's round 1
+PASS armed the merge through merge-pr, propagate-review's refresh of the
+same diff drew a round 2 FAIL, and GitHub landed the head 25 seconds after
+it, under `changes-requested`. An interlock a later verdict cannot pull
+is a label. The disarm is `gh pr merge --disable-auto`, read first through
+`gh pr view --json autoMergeRequest`; a read or a disarm that fails is
+named on stderr and the verdict still posts, because a withheld FAIL
+stops nothing either.
+
+The labels and the disarm ride the ambient GH_TOKEN, the app token the
+reviewer always used for them; the comment rides gh-comment's GH_WORKFLOW_TOKEN with its
 footer, opener trim and secret scrub, so a verdict stays one comment the
 retrospect, rounds.py and the self-trigger guard already recognise.
 ROLE must be `reviewer`: the pair is that seat's typed verdict and no
@@ -58,6 +67,28 @@ def stamped(body, verdict, diff_id):
     return f"{body}\n\n<!-- verdict {verdict} {diff_id} -->"
 
 
+def gh(*args):
+    return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+def disarm(number):
+    """Pull a PASS-armed auto-merge before the FAIL posts (#1467); never raise."""
+    view = gh("pr", "view", number, "--json", "autoMergeRequest", "--jq", ".autoMergeRequest")
+    if view.returncode != 0:
+        print(f"post-verdict: could not read auto-merge on #{number}: {view.stderr.strip()}; "
+              "a PASS-armed merge may still land", file=sys.stderr)
+        return
+    if view.stdout.strip() in ("", "null"):
+        return
+    off = gh("pr", "merge", number, "--disable-auto")
+    if off.returncode != 0:
+        print(f"post-verdict: auto-merge on #{number} stayed armed: {off.stderr.strip()}; "
+              "the FAIL posts anyway and the merge may land", file=sys.stderr)
+        return
+    print(f"post-verdict: auto-merge on #{number} disarmed; the FAIL now blocks the merge",
+          file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="post-verdict", description=__doc__.splitlines()[0])
     parser.add_argument("number", help="the PR the verdict is on")
@@ -80,11 +111,10 @@ def main():
         print("post-verdict: DIFF_ID is empty, posting unstamped; the next refresh "
               "re-reviews instead of standing", file=sys.stderr)
 
+    if args.verdict == "fail":
+        disarm(args.number)
     add, remove = LABELS[args.verdict]
-    edit = subprocess.run(
-        ["gh", "pr", "edit", args.number, "--add-label", add, "--remove-label", remove],
-        capture_output=True, text=True,
-    )
+    edit = gh("pr", "edit", args.number, "--add-label", add, "--remove-label", remove)
     if edit.returncode != 0:
         die(f"gh pr edit on #{args.number} failed: {edit.stderr.strip()}")
 
