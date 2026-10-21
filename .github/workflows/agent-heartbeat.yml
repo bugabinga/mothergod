@@ -203,11 +203,13 @@ jobs:
             nothing but a green dependabot PR (duty 3).
 
             End of run: if you acted (fixed, merged, opened, filed),
-            post 3 to 6 lines on the ops-log issue with
+            post 2 to 5 lines on the ops-log issue with
             `.github/scripts/gh-comment <issue>`: what changed, first
-            and concretely (Voice S1), what is next, blockers. A duty
-            you found empty, or a push refused as stale, is not a line.
-            A run that changed nothing posts nothing.
+            and concretely (Voice S1), then blockers. No "next" line:
+            the next run reads the queue, and a forecast is a citation
+            nobody verified. A duty you found empty, or a push refused
+            as stale, is not a line. A run that changed nothing posts
+            nothing.
           # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes":
           # the old allowlist of binary names denied `ls` while granting
           # `Write`, and cost 11 median permission denials per run.
