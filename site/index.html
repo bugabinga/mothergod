@@ -300,9 +300,11 @@
           <code>xz -9e</code> in aggregate on Canterbury, and loses to both in
           aggregate on Silesia. Per file, against whichever of the two is
           stronger on that file, it wins 7 of 11 on Canterbury and 1 of 12 on
-          Silesia. Closing Silesia is the current milestone. The per-file
-          tables, the throughput columns, and the one command that regenerates
-          each report are in
+          Silesia. Closing Silesia heads the
+          <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
+          >roadmap</a>, as open-ended research with no date attached. The
+          per-file tables, the throughput columns, and the one command that
+          regenerates each report are in
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/canterbury.md"
           ><code>docs/benchmarks/canterbury.md</code></a> and
@@ -361,10 +363,12 @@
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
           <span class="rate">0.4 to 19.6 MB/s</span>. Speed is measured on every
-          benchmark run and becomes a target of its own at the speed-tiers
-          milestone on the
-          <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
-          >roadmap</a>; nothing before then is tuned for it.
+          benchmark run, but ratio is the target: a faster decoder means a
+          second decoding path and a format change, and the roadmap holds it
+          until a user asks. If decode speed is what keeps you from using
+          mothergod,
+          <a href="https://github.com/bugabinga/mothergod/issues/new/choose"
+          >open an issue</a> and say so.
         </p>
       </section>
 
