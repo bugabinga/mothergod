@@ -11,6 +11,10 @@
 // neither lane can do (`tests/cli.rs` has the reasons for the binary).
 #![cfg(not(any(miri, target_os = "android")))]
 
+// Shared with the `frame_probe` binary; this suite reads `probe` alone.
+#[allow(dead_code)]
+#[path = "fit/integrity.rs"]
+mod integrity;
 #[path = "fit/matrix.rs"]
 mod matrix;
 
@@ -221,30 +225,21 @@ fn incompressible() -> Vec<u8> {
 }
 
 /// The corpus the row names: one `Lz` frame and one `Stored` frame, every
-/// single-bit flip of each. The row holds when no flip decodes to other
-/// bytes without an error.
+/// single-bit flip and every truncation of each. The row holds when none
+/// decodes to other bytes without an error.
 fn integrity_check() -> Seen {
-    let lz_payload = sample();
-    let stored_payload = incompressible();
     let frames = [
-        (mothergod::Method::Lz, lz_payload),
-        (mothergod::Method::Stored, stored_payload),
+        (mothergod::Method::Lz, sample()),
+        (mothergod::Method::Stored, incompressible()),
     ];
     let mut silent = 0usize;
     for (method, payload) in frames {
-        let frame = mothergod::compress(&payload);
         assert_eq!(
-            mothergod::Method::try_from(frame[5]),
+            mothergod::Method::try_from(mothergod::compress(&payload)[5]),
             Ok(method),
             "the corpus must hold one frame of each method"
         );
-        for bit in 0..frame.len() * 8 {
-            let mut flipped = frame.clone();
-            flipped[bit / 8] ^= 1 << (bit % 8);
-            if mothergod::decompress_bounded(&flipped, 1 << 16).is_ok_and(|out| out != payload) {
-                silent += 1;
-            }
-        }
+        silent += integrity::probe(&payload, usize::MAX).silent;
     }
     seen(silent == 0)
 }
