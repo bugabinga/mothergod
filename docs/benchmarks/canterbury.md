@@ -2,24 +2,24 @@
 
 # Canterbury held-out-final snapshot
 
-As of 2026-10-21T03:47:30Z. Corpus: corpus.canterbury.ac.nz `cantrbry.tar.gz`, pinned by URL + SHA-256 in `bench/corpus.toml` (`research/corpus/POLICY.md`'s held-out finals, fetched and pin-verified by `bench::corpus`, never committed). Reference compressors, versions as actually run: `gzip 1.12` (gzip -9), `*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***` (zstd -19), `xz (XZ Utils) 5.4.5` (xz -9e) — `research/corpus/POLICY.md` pins the flags, not the installed binary, so this line is the version record CLAUDE.md rule 4 asks for. `regret` is mothergod's bits/byte minus the stronger (lower) of zstd/xz on the same file, positive meaning mothergod does worse (`research/corpus/POLICY.md`, "Growing the corpus").
+As of 2026-10-21T12:35:56Z. Corpus: corpus.canterbury.ac.nz `cantrbry.tar.gz`, pinned by URL + SHA-256 in `bench/corpus.toml` (`research/corpus/POLICY.md`'s held-out finals, fetched and pin-verified by `bench::corpus`, never committed). Reference compressors, versions as actually run: `gzip 1.12` (gzip -9), `*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***` (zstd -19), `xz (XZ Utils) 5.4.5` (xz -9e) — `research/corpus/POLICY.md` pins the flags, not the installed binary, so this line is the version record CLAUDE.md rule 4 asks for. `regret` is mothergod's bits/byte minus the stronger (lower) of zstd/xz on the same file, positive meaning mothergod does worse (`research/corpus/POLICY.md`, "Growing the corpus").
 
-The `mothergod encode MB/s`/`mothergod decode MB/s` columns are indicative of this one machine only, not a cross-machine claim: AMD EPYC 9V45 96-Core Processor, 4 logical core(s), CI runner, mothergod timed one file at a time, no other measurement running (`reference::measure_all`).
+The `mothergod encode MB/s`/`mothergod decode MB/s` columns are indicative of this one machine only, not a cross-machine claim: AMD EPYC 7763 64-Core Processor, 4 logical core(s), CI runner, mothergod timed one file at a time, no other measurement running (`reference::measure_all`).
 
 | file | bytes | mothergod b/B | gzip -9 b/B | zstd -19 b/B | xz -9e b/B | regret | mothergod encode MB/s | mothergod decode MB/s |
 |---|---|---|---|---|---|---|---|---|
-| `alice29.txt` | 152089 | 2.542616 | 2.851646 | 2.588747 | 2.552611 | -0.009994 | 0.504 | 3.352 |
-| `asyoulik.txt` | 125179 | 2.828781 | 3.121929 | 2.884893 | 2.849807 | -0.021026 | 0.486 | 2.794 |
-| `cp.html` | 24603 | 2.434825 | 2.603585 | 2.509287 | 2.488152 | -0.053327 | 0.317 | 1.612 |
-| `fields.c` | 11150 | 2.139552 | 2.267982 | 2.166099 | 2.175426 | -0.026547 | 0.279 | 1.825 |
-| `grammar.lsp` | 3721 | 2.597151 | 2.726149 | 2.612201 | 2.777748 | -0.015050 | 0.225 | 0.921 |
-| `kennedy.xls` | 1029744 | 0.232400 | 1.629570 | 0.503651 | 0.402958 | -0.170559 | 0.300 | 11.480 |
-| `lcet10.txt` | 426754 | 2.247046 | 2.707921 | 2.274659 | 2.239942 | +0.007105 | 0.511 | 4.367 |
-| `plrabn12.txt` | 481861 | 2.755849 | 3.225793 | 2.779922 | 2.746950 | +0.008899 | 0.477 | 3.693 |
-| `ptt5` | 513216 | 0.638468 | 0.816982 | 0.680322 | 0.621337 | +0.017131 | 0.594 | 5.817 |
-| `sum` | 38240 | 2.214644 | 2.678243 | 2.324477 | 1.987448 | +0.227197 | 0.412 | 2.178 |
-| `xargs.1` | 4227 | 3.224982 | 3.372605 | 3.270405 | 3.429383 | -0.045422 | 0.193 | 0.888 |
-| **aggregate (11 files)** | 2810784 | **1.347100** | **2.080555** | **1.469771** | **1.403395** | **-0.056295** | **0.405** | **5.167** |
+| `alice29.txt` | 152089 | 2.542616 | 2.851646 | 2.588747 | 2.552611 | -0.009994 | 0.299 | 2.142 |
+| `asyoulik.txt` | 125179 | 2.828781 | 3.121929 | 2.884893 | 2.849807 | -0.021026 | 0.300 | 1.803 |
+| `cp.html` | 24603 | 2.434825 | 2.603585 | 2.509287 | 2.488152 | -0.053327 | 0.197 | 0.922 |
+| `fields.c` | 11150 | 2.139552 | 2.267982 | 2.166099 | 2.175426 | -0.026547 | 0.168 | 0.952 |
+| `grammar.lsp` | 3721 | 2.597151 | 2.726149 | 2.612201 | 2.777748 | -0.015050 | 0.117 | 0.384 |
+| `kennedy.xls` | 1029744 | 0.232400 | 1.629570 | 0.503651 | 0.402958 | -0.170559 | 0.198 | 19.588 |
+| `lcet10.txt` | 426754 | 2.247046 | 2.707921 | 2.274659 | 2.239942 | +0.007105 | 0.302 | 2.844 |
+| `plrabn12.txt` | 481861 | 2.755849 | 3.225793 | 2.779922 | 2.746950 | +0.008899 | 0.291 | 2.336 |
+| `ptt5` | 513216 | 0.638468 | 0.816982 | 0.680322 | 0.621337 | +0.017131 | 0.337 | 3.820 |
+| `sum` | 38240 | 2.214644 | 2.678243 | 2.324477 | 1.987448 | +0.227197 | 0.251 | 1.295 |
+| `xargs.1` | 4227 | 3.224982 | 3.372605 | 3.270405 | 3.429383 | -0.045422 | 0.103 | 0.393 |
+| **aggregate (11 files)** | 2810784 | **1.347100** | **2.080555** | **1.469771** | **1.403395** | **-0.056295** | **0.252** | **3.641** |
 
 ## Frontier: every level of gzip, zstd and xz beside mothergod
 
@@ -27,49 +27,49 @@ Each row sums this corpus's files. Every process ran one at a time, on the machi
 
 | level | b/B | encode MB/s | decode MB/s | peak MB |
 |---|---|---|---|---|
-| **mothergod** | **1.347100** | **0.405** | **5.167** | **56.7** |
-| xz -6 | 1.401107 | 5.671 | 72.578 | 32.2 |
-| xz -7 | 1.401107 | 5.438 | 69.093 | 47.1 |
-| xz -8 | 1.401107 | 5.097 | 69.762 | 79.0 |
-| xz -9 | 1.401107 | 5.062 | 66.033 | 79.0 |
-| xz -9e | 1.403395 | 2.929 | 68.555 | 79.0 |
-| xz -5 | 1.413709 | 6.005 | 71.736 | 32.2 |
-| xz -4 | 1.419015 | 6.761 | 70.883 | 24.2 |
-| zstd -22 | 1.469028 | 1.867 | 19.461 | 714.7 |
-| zstd -21 | 1.469190 | 2.662 | 10.696 | 327.3 |
-| zstd -19 | 1.469332 | 4.570 | 107.630 | 88.4 |
-| zstd -20 | 1.469332 | 4.088 | 107.692 | 166.5 |
-| zstd -18 | 1.484343 | 7.260 | 104.837 | 56.4 |
-| xz -3 | 1.572139 | 17.437 | 72.547 | 20.1 |
-| xz -2 | 1.584549 | 20.370 | 71.050 | 15.5 |
-| xz -1 | 1.623052 | 24.915 | 67.697 | 10.6 |
-| zstd -17 | 1.639301 | 9.134 | 106.966 | 55.8 |
-| zstd -16 | 1.647150 | 11.882 | 109.038 | 39.6 |
-| zstd -14 | 1.682008 | 17.030 | 108.622 | 56.2 |
-| zstd -15 | 1.682025 | 14.572 | 108.514 | 71.8 |
-| zstd -13 | 1.682941 | 21.272 | 109.496 | 39.8 |
-| zstd -12 | 1.689752 | 25.897 | 106.471 | 47.9 |
-| zstd -11 | 1.689769 | 32.140 | 120.130 | 28.2 |
-| zstd -10 | 1.693002 | 36.241 | 121.591 | 28.4 |
-| zstd -9 | 1.699896 | 42.672 | 127.492 | 17.5 |
-| zstd -8 | 1.700585 | 46.113 | 126.694 | 12.8 |
-| zstd -7 | 1.700986 | 48.457 | 126.830 | 12.6 |
-| zstd -6 | 1.714818 | 56.107 | 126.893 | 9.6 |
-| zstd -5 | 1.758003 | 64.114 | 127.583 | 10.6 |
-| xz -0 | 1.759623 | 28.713 | 62.636 | 4.9 |
-| zstd -4 | 1.791728 | 76.858 | 127.573 | 9.6 |
-| zstd -3 | 1.802068 | 84.647 | 128.082 | 7.9 |
-| zstd -2 | 1.853188 | 92.460 | 128.749 | 8.2 |
-| zstd -1 | 1.960842 | 84.260 | 126.706 | 5.1 |
-| gzip -9 | 2.079491 | 5.872 | 56.062 | 2.0 |
-| gzip -8 | 2.081156 | 10.662 | 99.087 | 2.0 |
-| gzip -6 | 2.088135 | 28.263 | 116.480 | 2.0 |
-| gzip -7 | 2.093452 | 23.932 | 115.703 | 2.0 |
-| gzip -5 | 2.120991 | 43.177 | 114.704 | 2.0 |
-| gzip -4 | 2.237124 | 59.897 | 113.986 | 2.0 |
-| gzip -3 | 2.300246 | 59.272 | 117.649 | 2.0 |
-| gzip -2 | 2.381639 | 73.250 | 115.579 | 2.0 |
-| gzip -1 | 2.463165 | 76.371 | 111.332 | 2.1 |
+| **mothergod** | **1.347100** | **0.252** | **3.641** | **56.5** |
+| xz -6 | 1.401107 | 3.215 | 52.665 | 27.6 |
+| xz -7 | 1.401107 | 3.022 | 52.584 | 32.9 |
+| xz -8 | 1.401107 | 2.885 | 51.275 | 44.4 |
+| xz -9 | 1.401107 | 2.875 | 49.378 | 44.4 |
+| xz -9e | 1.403395 | 1.697 | 52.271 | 44.5 |
+| xz -5 | 1.413709 | 3.467 | 52.950 | 27.5 |
+| xz -4 | 1.419015 | 3.962 | 52.821 | 19.6 |
+| zstd -22 | 1.469028 | 0.432 | 78.815 | 710.4 |
+| zstd -21 | 1.469190 | 0.834 | 14.742 | 326.3 |
+| zstd -19 | 1.469332 | 1.864 | 82.540 | 85.3 |
+| zstd -20 | 1.469332 | 1.359 | 82.294 | 165.3 |
+| zstd -18 | 1.484343 | 3.259 | 85.376 | 53.3 |
+| xz -3 | 1.572139 | 8.770 | 52.889 | 15.5 |
+| xz -2 | 1.584549 | 11.433 | 51.576 | 11.5 |
+| xz -1 | 1.623052 | 15.631 | 51.674 | 9.5 |
+| zstd -17 | 1.639301 | 3.995 | 86.904 | 52.7 |
+| zstd -16 | 1.647150 | 4.900 | 87.802 | 36.7 |
+| zstd -14 | 1.682008 | 5.489 | 88.426 | 52.8 |
+| zstd -15 | 1.682025 | 4.339 | 85.646 | 68.8 |
+| zstd -13 | 1.682941 | 7.338 | 88.562 | 36.8 |
+| zstd -12 | 1.689752 | 7.266 | 84.956 | 44.9 |
+| zstd -11 | 1.689769 | 11.380 | 87.004 | 24.9 |
+| zstd -10 | 1.693002 | 12.591 | 89.253 | 24.9 |
+| zstd -9 | 1.699896 | 19.462 | 90.159 | 14.9 |
+| zstd -8 | 1.700585 | 24.838 | 91.186 | 9.9 |
+| zstd -7 | 1.700986 | 26.879 | 90.388 | 9.9 |
+| zstd -6 | 1.714818 | 34.492 | 90.924 | 7.3 |
+| zstd -5 | 1.758003 | 38.794 | 88.994 | 7.4 |
+| xz -0 | 1.759623 | 18.857 | 49.154 | 4.7 |
+| zstd -4 | 1.791728 | 47.392 | 91.603 | 6.7 |
+| zstd -3 | 1.802068 | 56.892 | 91.288 | 5.5 |
+| zstd -2 | 1.853188 | 64.461 | 91.165 | 5.0 |
+| zstd -1 | 1.960842 | 68.153 | 91.418 | 5.0 |
+| gzip -9 | 2.079491 | 4.310 | 86.057 | 1.9 |
+| gzip -8 | 2.081156 | 7.575 | 86.747 | 1.9 |
+| gzip -6 | 2.088135 | 19.896 | 86.707 | 1.9 |
+| gzip -7 | 2.093452 | 16.585 | 86.491 | 1.9 |
+| gzip -5 | 2.120991 | 31.078 | 86.406 | 1.9 |
+| gzip -4 | 2.237124 | 44.035 | 86.520 | 1.9 |
+| gzip -3 | 2.300246 | 43.549 | 87.654 | 1.9 |
+| gzip -2 | 2.381639 | 53.730 | 85.338 | 2.0 |
+| gzip -1 | 2.463165 | 56.831 | 81.406 | 2.0 |
 
 fastest level at least as good: none
 
