@@ -105,6 +105,7 @@ test("a malformed status line is reported as a problem, not a crash", () => {
 
 function fixture(files) {
   const dir = mkdtempSync(join(tmpdir(), "adr-data-fixture-"));
+  // A Buffer value writes raw bytes, for the file that is not valid UTF-8.
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   return generate(dir);
 }
@@ -141,4 +142,14 @@ test("an empty file is reported as a problem and the rest still render", () => {
   assert.equal(out.total, 1);
   assert.equal(out.problems.length, 1);
   assert.match(out.problems[0], /0002-empty\.md/);
+});
+
+test("a non-UTF-8 file is reported as a problem and the rest still render", () => {
+  const out = fixture({
+    "0001-ok.md": adr("Text."),
+    "0002-bad.md": Buffer.from([0xff, 0xfe, 0x20, 0x62, 0x61, 0x64]),
+  });
+  assert.equal(out.total, 1);
+  assert.equal(out.problems.length, 1);
+  assert.match(out.problems[0], /0002-bad\.md: UnicodeDecodeError/);
 });
