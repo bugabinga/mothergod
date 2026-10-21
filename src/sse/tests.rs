@@ -254,7 +254,7 @@ fn logit_sse_update_advances_the_lower_and_upper_bin_separately() {
     // bin, for this test to match the independent hand simulation
     // below.
     let p = 0.6;
-    let (lower_index, fraction) = LogitSse::position(p);
+    let (lower_index, fraction) = Logit::position(p);
     assert!(
         fraction > 0.05 && fraction < 0.95,
         "need p=0.6 to split non-trivially between two neighboring bins, \
@@ -379,8 +379,8 @@ fn logit_sse_bins_concentrate_resolution_near_the_extremes() {
     fn gap(lo: (usize, f64), hi: (usize, f64)) -> f64 {
         (hi.0 as f64 + hi.1) - (lo.0 as f64 + lo.1)
     }
-    let mid_gap = gap(LogitSse::position(0.50), LogitSse::position(0.52));
-    let ext_gap = gap(LogitSse::position(0.96), LogitSse::position(0.98));
+    let mid_gap = gap(Logit::position(0.50), Logit::position(0.52));
+    let ext_gap = gap(Logit::position(0.96), Logit::position(0.98));
 
     assert!(
         ext_gap > mid_gap,

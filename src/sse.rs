@@ -219,16 +219,11 @@ impl<S: Spacing> Table<S> {
         self.contexts
     }
 
-    /// [`Spacing::position`] under this table's `S`.
-    fn position(p: f64) -> (usize, f64) {
-        S::position(p)
-    }
-
     /// `context`'s lower bin index for `p` into `self.bins`, and the
     /// fraction past it.
     fn locate(&self, context: usize, p: f64) -> (usize, f64) {
         assert!(context < self.contexts, "{} context out of range", S::NAME);
-        let (lower, fraction) = Self::position(p);
+        let (lower, fraction) = S::position(p);
         (context * BINS + lower, fraction)
     }
 
@@ -252,7 +247,7 @@ impl<S: Spacing> Table<S> {
 
     /// Adapts `context`'s two bins nearest `p` toward the observed
     /// `outcome` (`1.0` if true, `0.0` if false) by `LEARNING_RATE`,
-    /// weighted by how close `p` sits to each bin (`position`'s
+    /// weighted by how close `p` sits to each bin ([`Spacing::position`]'s
     /// `fraction`). Independent of [`Self::refine`]: a caller decides for
     /// itself whether to refine before observing the outcome, same shape
     /// as [`crate::model::Model::encode`] coding a symbol and updating its
