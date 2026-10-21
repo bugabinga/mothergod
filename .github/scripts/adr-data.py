@@ -219,16 +219,16 @@ def render_blocks(lines, known, tight=False):
     return "".join(out)
 
 
-def parse_adr(path, known):
-    lines = path.read_text(encoding="utf-8").splitlines()
+def parse_adr(name, text, known):
+    lines = text.splitlines()
     m = HEADING_RE.match(lines[0])
     if not m:
-        raise ValueError(f"{path.name}: line 1 is not `# ADR-NNNN: Title`")
+        raise ValueError(f"{name}: line 1 is not `# ADR-NNNN: Title`")
     number, title = m.groups()
 
     sm = STATUS_RE.match(lines[2])
     if not sm:
-        raise ValueError(f"{path.name}: line 3 is not a `Status:` line")
+        raise ValueError(f"{name}: line 3 is not a `Status:` line")
     # The status line sometimes soft-wraps onto following lines (ADR-0004's
     # amendment note is one); join up to the first
     # blank line before splitting into · -separated segments, or a wrapped
@@ -262,7 +262,7 @@ def parse_adr(path, known):
     elif status_raw == "accepted":
         status_kind = "accepted"
     else:
-        raise ValueError(f"{path.name}: unrecognised status {status_raw!r}")
+        raise ValueError(f"{name}: unrecognised status {status_raw!r}")
 
     body_lines = lines[body_start:]
     body_html = render_blocks(body_lines, known)
@@ -279,7 +279,7 @@ def parse_adr(path, known):
         "relations_html": [render_inline(r, known) for r in relations],
         "body_html": body_html,
         "body_text": body_text,
-        "source": f"docs/adr/{path.name}",
+        "source": f"docs/adr/{name}",
     }
 
 
@@ -288,22 +288,31 @@ def main(out_path, adr_dir=ADR_DIR):
     if not paths:
         raise SystemExit(f"no ADRs found under {adr_dir}")
 
-    known = set()
+    # One read per file, inside the guard: a file that cannot be read or
+    # decoded is that file's problem line, never a crash that writes no JSON.
+    texts = {}
+    problems = []
     for p in paths:
+        try:
+            texts[p.name] = p.read_text(encoding="utf-8")
+        except Exception as err:  # noqa: BLE001 - diagnosis is the point
+            problems.append(f"{p.name}: {type(err).__name__}: {err}")
+
+    known = set()
+    for text in texts.values():
         # `[:1]`, not `[0]`: an empty file is that file's problem below, not a
         # crash here that writes no JSON at all.
-        first = p.read_text(encoding="utf-8").splitlines()[:1]
+        first = text.splitlines()[:1]
         m = HEADING_RE.match(first[0]) if first else None
         if m:
             known.add(m.group(1))
 
     adrs = []
-    problems = []
-    for p in paths:
+    for name, text in texts.items():
         try:
-            adrs.append(parse_adr(p, known))
+            adrs.append(parse_adr(name, text, known))
         except Exception as err:  # noqa: BLE001 - diagnosis is the point
-            problems.append(f"{p.name}: {type(err).__name__}: {err}")
+            problems.append(f"{name}: {type(err).__name__}: {err}")
 
     adrs.sort(key=lambda a: a["number"])
     data = {
