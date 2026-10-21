@@ -18,7 +18,7 @@ hours rather than at the next cron.
 | Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
 | Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451); allocation torture (`torture-check`) |
 | Weekly | schedule | no, alarmed | monster matrix, coverage, CLI memory bound (`memory-check`), Miri (#456) |
-| Monthly | schedule | no, alarmed | whole-crate mutation sweep (#455) |
+| Monthly | schedule | no, alarmed | whole-crate mutation sweep (planned, #455) |
 
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
 new crashers, mutation score, and region coverage, rendered on the
@@ -37,8 +37,8 @@ and `status.html` renders it under "Is it tested?". Writers landed:
 Writers pending: mutation score (#455), shown as not yet measured
 until its sweep lands.
 Ledger numbers are maps, never gates; the only merge-blocking
-checks are behavioral. Items carrying issue numbers are planned; the
-layers below describe what runs today.
+checks are behavioral. An issue number is a pointer to the issue that
+tracked the work; a row not yet built says "planned" in its own cell.
 
 ## Two classes (ADR-0056)
 
