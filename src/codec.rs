@@ -897,16 +897,10 @@ fn search(
             winners.extend(winner);
             trial = trial.or(helper_trial);
         }
-        winners.sort_by_key(|&(index, ..)| index);
-        let mut best: Option<Winner> = None;
-        for winner in winners {
-            if best.as_ref().is_none_or(|(_, _, existing)| {
-                crate::candidate_beats_incumbent(winner.2.len(), existing.len())
-            }) {
-                best = Some(winner);
-            }
-        }
-        let (index, candidate, body) = best?;
+        // Smallest body, a tie to the earlier candidate: the serial rule.
+        let (index, candidate, body) = winners
+            .into_iter()
+            .min_by_key(|(index, _, body)| (body.len(), *index))?;
         if !has_wide_trial {
             return Some((candidate, Reach::Standard, body));
         }
