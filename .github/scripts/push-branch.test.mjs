@@ -450,3 +450,68 @@ test("a path x refuses on its own account is noted with x's cause, and its neigh
   assert.match(r.stderr, /bench\/unformatted\.json: needs formatting/);
   assert.deepEqual(r.asked, ["x fmt --check -- assets/link.svg", "x fmt --check -- bench/unformatted.json"]);
 });
+
+// guard_not_stale (#1449): the guard diffed the base against HEAD and read
+// the caller's own locally committed edit as a revert of the base, then
+// prescribed `git reset --hard`, which on a committed edit is one typo from
+// losing it. A HEAD that descends from the base holds everything the base
+// holds, so the diff is the caller's additions and the guard returns before
+// diffing. A HEAD the base is not an ancestor of, a sibling commit here, is
+// the revert class the guard exists for and still dies.
+const staleDriver = `
+import importlib.machinery, importlib.util, json, os, sys
+
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+os.chdir(sys.argv[2])
+try:
+    pb.guard_not_stale("claude/x", sys.argv[3], ["f.txt"])
+    died = False
+except SystemExit:
+    died = True
+print(json.dumps({"died": died}))
+`;
+
+test("a HEAD that descends from the base passes the stale guard; a sibling of the base still dies", () => {
+  const repo = mkdtempSync(join(tmpdir(), "push-branch-test-"));
+  try {
+    const git = (...args) => {
+      const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: repo,
+        encoding: "utf8",
+      });
+      assert.equal(r.status, 0, r.stderr);
+      return r.stdout.trim();
+    };
+    const commit = (content, subject) => {
+      writeFileSync(join(repo, "f.txt"), content);
+      git("add", "f.txt");
+      git("commit", "-q", "-m", subject);
+      return git("rev-parse", "HEAD");
+    };
+    const guard = (baseSha) => {
+      const run = spawnSync("python3", ["-c", staleDriver, scriptsDir, repo, baseSha], { encoding: "utf8" });
+      assert.equal(run.status, 0, run.stderr);
+      return { ...JSON.parse(run.stdout), stderr: run.stderr };
+    };
+    git("init", "-q");
+    const base = commit("0\n", "base");
+    const child = commit("1\n", "the caller's edit, committed on top of the base");
+    git("checkout", "-q", base);
+    commit("2\n", "a sibling of the child");
+
+    const sibling = guard(child);
+    assert.equal(sibling.died, true, "HEAD is the child's sibling: pushing f.txt would revert the child");
+    assert.match(sibling.stderr, /would revert the base's version/);
+
+    git("checkout", "-q", child);
+    const descendant = guard(base);
+    assert.equal(descendant.died, false, "HEAD descends from the base: the diff is the caller's own commit");
+    assert.equal(descendant.stderr, "");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
