@@ -226,6 +226,15 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   the `Error` variant it must reach (`PINS` in `tests/adversarial.rs`), so a
   seed an earlier check rejects cannot pass for the check it is named for;
   allocation stays bounded by a stated multiple of the declared output size.
+- **Integrity probe of a PR's own input (#1210).** `cargo run -p
+  mothergod-bench --release --bin frame_probe -- <file>...` compresses each
+  file and decodes every truncation and single-bit flip of its frame,
+  exhaustive below `--max-decodes` each (default 20000) and a seeded sample
+  across the frame above it. It prints `bytes`, `flips`, `truncations` and
+  `silent` per file and exits non-zero on any silent wrong output. The probe
+  is `tests/fit/integrity.rs`, shared with the FIT row `integrity-check`.
+  Files over one 16 MiB block are refused: several frames make a truncation
+  at a boundary a valid stream.
 - **Allocation-failure torture (#453).** The bound above stops decode from
   asking for too much; it does not prove decode survives the allocator
   actually refusing a request. `tests/torture.rs` (`cargo test --test
