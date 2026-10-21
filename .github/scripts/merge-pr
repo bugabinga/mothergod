@@ -251,6 +251,17 @@ def read_pr(pr):
     return gh_json((f"repos/{REPO}/pulls/{pr}",))
 
 
+def read_lags_pin(head, sha):
+    """Whether `head`, the PR's current read, is an ancestor of `sha`, the
+    pin. GitHub's PR view lags its ref by seconds after a push, so a wait
+    pinned to the sha push-branch just returned can read the head from
+    before it (#1429): the pin is the newer commit, and one more poll
+    catches up. `behind` is a push past the pin and `diverged` a force-push,
+    both moves the pin exists to refuse."""
+    compare = gh_json((f"repos/{REPO}/compare/{head}...{sha}",))
+    return compare.get("status") == "ahead"
+
+
 def exit_if_landed(pr, info):
     """A merged PR is the one success the wait and the merge share."""
     if info.get("merged"):
@@ -273,8 +284,14 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
     and one failed read is a retry wherever it falls. The deadline is checked
     after each poll, so `--timeout 0` polls once. `gates_only` never reads
     the review: the caller proved no verdict can come (main checks the
-    precondition), so green gates alone return the head."""
+    precondition), so green gates alone return the head. A read whose head
+    the pin descends from is the PR lagging the push the pin came from
+    (read_lags_pin), spent one poll on before it dies; a read the pin does
+    not descend from is a move, dead at once."""
     deadline = time.monotonic() + timeout
+    # True after a poll read a head behind the pin, so the second such read
+    # names the lag instead of spending the whole deadline on it.
+    lagged = False
     contexts = None
     review = "unread"
     labels = []
@@ -290,11 +307,22 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
             exit_if_landed(pr, info)
             head = info["head"]["sha"]
             sha = sha or head
-            if head != sha:
+            if head != sha and not read_lags_pin(head, sha):
                 die(f"head moved past the pinned {sha[:12]} to {head[:12]}; "
                     "re-read the PR before deciding again")
-            runs = check_runs(sha)
-            latest = latest_runs(runs)
+            if head != sha and lagged:
+                die(f"the PR still reads {head[:12]}, behind the pinned {sha[:12]}, "
+                    "a poll after it first did: the push the pin came from is not "
+                    f"on the PR; `gh pr view {pr} --json headRefOid` before pinning again")
+            if head != sha:
+                note(f"the PR reads {head[:12]}, behind the pinned {sha[:12]}: the "
+                     "read lags the push (#1429); re-reading at the next poll")
+                lagged = True
+                # Nothing to judge this poll, the same state as a failed read.
+                info = latest = None
+            else:
+                runs = check_runs(sha)
+                latest = latest_runs(runs)
         except ApiError as err:
             note(f"read failed ({err}); retrying at the next poll")
             info = latest = None

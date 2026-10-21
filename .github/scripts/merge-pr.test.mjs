@@ -541,15 +541,25 @@ test("--wait: a review that concluded green without a verdict label exits 4", ()
   assert.deepEqual(merges, []);
 });
 
+// A read whose head differs from the pin asks the compare API which is the
+// ancestor: `behind` is a push past the pin (the pin is the older commit),
+// `ahead` is the PR view lagging the push the pin came from (#1429).
+const MOVED = "def4567890abcdef1234";
+const compare = (base, head, status) => ({
+  match: `^api repos/o/r/compare/${base}\\.\\.\\.${head}$`,
+  responses: [{ stdout: { status } }],
+});
+
 test("--wait: a head that moves between polls exits 1 before any merge", () => {
   const { status, stderr, merges, calls } = run(WAIT, {
     responses: [
       {
         match: "^api repos/o/r/pulls/42$",
-        responses: [pr([]), pr([], { head: { sha: "def4567890abcdef1234" } })],
+        responses: [pr([]), pr([], { head: { sha: MOVED } })],
       },
       ruleset,
       { match: "check-runs", responses: [runs(["review", "in_progress", null], ...GREEN_GATES)] },
+      compare(MOVED, HEAD, "behind"),
       merge,
     ],
   });
@@ -561,6 +571,66 @@ test("--wait: a head that moves between polls exits 1 before any merge", () => {
     1,
     "the first poll saw the old head; the second never read its runs",
   );
+});
+
+// Issue #1429: `merge-pr --wait --sha <new>` typed within a second of
+// push-branch returning <new> read the PR's previous head and died as if
+// the head had moved past the pin, when the pin was the newer commit.
+const STALE = "0ld0ld0ld0ld0ld0ld0l";
+const PINNED = [...WAIT, "--sha", HEAD];
+
+test("--wait --sha: a PR read behind the pin is re-read once, then the wait proceeds", () => {
+  const { status, stdout, merges, calls } = run(PINNED, {
+    responses: [
+      {
+        match: "^api repos/o/r/pulls/42$",
+        responses: [pr([], { head: { sha: STALE } }), pr(["agent-approved"])],
+      },
+      ruleset,
+      compare(STALE, HEAD, "ahead"),
+      { match: "check-runs", responses: [runs(["review", "completed", "success"], ...GREEN_GATES)] },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout);
+  assert.match(stdout, /the PR reads 0ld0ld0ld0ld, behind the pinned abc123456789: the read lags the push/);
+  assert.match(stdout, /merged #42 at abc123456789 as squash1/);
+  assert.equal(merges.length, 1);
+  assert.equal(
+    calls.filter((c) => c.join(" ").includes("check-runs")).length,
+    1,
+    "the lagging poll judged nothing; only the caught-up read checked the runs",
+  );
+});
+
+test("--wait --sha: a read still behind the pin after the retry names the lag, not a move", () => {
+  const { status, stderr, merges } = run(PINNED, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([], { head: { sha: STALE } })] },
+      ruleset,
+      compare(STALE, HEAD, "ahead"),
+      merge,
+    ],
+  });
+  assert.equal(status, 1);
+  assert.match(stderr, /still reads 0ld0ld0ld0ld, behind the pinned abc123456789/);
+  assert.doesNotMatch(stderr, /moved past/);
+  assert.deepEqual(merges, []);
+});
+
+test("--wait --sha: a read the pin diverged from is a move, dead at once", () => {
+  const { status, stderr, merges } = run(PINNED, {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([], { head: { sha: STALE } })] },
+      ruleset,
+      compare(STALE, HEAD, "diverged"),
+      merge,
+    ],
+  });
+  assert.equal(status, 1);
+  assert.match(stderr, /head moved past the pinned abc123456789 to 0ld0ld0ld0ld/);
+  assert.deepEqual(merges, []);
 });
 
 test("--wait: a PR merged by the reviewer during the wait is success", () => {
