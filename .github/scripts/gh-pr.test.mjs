@@ -112,6 +112,29 @@ test("a bulleted or quoted `Closes: #a, #b` line is rewritten too, its lead kept
   assert.match(stderr, /rewrote 3 closing line/);
 });
 
+test("an ordered, nested, quoted or task-list lead is rewritten too, its lead kept (#1420)", () => {
+  const body = [
+    "1. Closes: #1, #2",
+    ">Closes: #3, #4",
+    "> > Closes: #5, #6",
+    "  - Closes: #7, #8",
+    "- [ ] Closes: #9, #10",
+    "   Fixes #11, #12",
+    "    Closes: #13, #14",
+  ].join("\n");
+  const { status, stderr, called } = run(["claude/x", "t"], { body });
+  assert.equal(status, 0);
+  assert.match(called.argv[7], /^1\. Closes #1, closes #2$/m);
+  assert.match(called.argv[7], /^>Closes #3, closes #4$/m);
+  assert.match(called.argv[7], /^> > Closes #5, closes #6$/m);
+  assert.match(called.argv[7], /^  - Closes #7, closes #8$/m);
+  assert.match(called.argv[7], /^- \[ \] Closes #9, closes #10$/m);
+  // Up to three spaces is a paragraph GitHub links; four is a code block it does not.
+  assert.match(called.argv[7], /^   Fixes #11, fixes #12$/m);
+  assert.match(called.argv[7], /^    Closes: #13, #14$/m);
+  assert.match(stderr, /rewrote 6 closing line/);
+});
+
 test("with no GH_TOKEN the session's own credential comes from gh auth token", () => {
   const { status, called } = run(["claude/x", "t"], { env: { GH_TOKEN: undefined } });
   assert.equal(status, 0);
