@@ -5,8 +5,10 @@
 // that must see "in progress, then concluded" has something to see. With no
 // script every call fails loudly, so the guard tests prove only that the
 // guard did or did not let the call through. The unscripted merge paths
-// (403 escalation, 409) still have no coverage here; 405 is covered below. The timeline read
-// in verdict.py is covered through the wait's stale-approval and unread-timeline tests only.
+// (403 escalation, a first-attempt 409) still have no coverage here; 405 and
+// the arm refusal it can meet are covered below. The timeline read in
+// verdict.py is covered through the wait's stale-approval and unread-timeline
+// tests only.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -696,23 +698,65 @@ test("a 405 arms auto-merge on the pinned head and exits 2", () => {
   assert.match(stderr, /auto-merge armed on abc123456789 alone/);
 });
 
-test("a 405 whose arming GitHub refuses exits 1 and says nothing is armed", () => {
-  const refused = {
-    match: "^api graphql",
+// Issue #1417: GitHub arms nothing on a mergeable PR, and the last gate can
+// go green in the seconds between the attempt and the arm; #1413 sat approved
+// for four hours on that race. A refusal is answered with one more attempt on
+// the same pin, whatever the refusal's words, because the pin keeps a moved
+// head out (409) and unmet gates come back as a 405 the caller can read.
+const refused = {
+  match: "^api graphql",
+  responses: [
+    {
+      status: 1,
+      stdout: { errors: [{ message: "Pull request is in clean status" }] },
+      stderr: "gh: Pull request is in clean status (enablePullRequestAutoMerge)",
+    },
+  ],
+};
+const merged = { stdout: { sha: "squash0123456789", merged: true, message: "Pull Request successfully merged" } };
+
+test("a 405, a refused arm, then a 200: the race lands on the second attempt", () => {
+  const { status, merges, stdout, stderr } = run(["42", "--sha", HEAD], {
     responses: [
-      {
-        status: 1,
-        stdout: { errors: [{ message: "Pull request is in clean status" }] },
-        stderr: "gh: Pull request is in clean status (enablePullRequestAutoMerge)",
-      },
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      { match: "PUT repos/o/r/pulls/42/merge", responses: [unmet.responses[0], merged] },
+      refused,
     ],
-  };
-  const { status, stderr } = run(["42", "--sha", HEAD], {
+  });
+  assert.equal(status, 0, stdout + stderr);
+  assert.equal(merges.length, 2, "one attempt before the arm, one after the refusal");
+  assert.ok(merges.every((argv) => argv.includes("--input")), "both attempts carry the pinned body");
+  assert.match(stdout, /refused to arm auto-merge on abc123456789 \(.*Pull request is in clean status/);
+  assert.match(stdout, /merged #42 at abc123456789 as squash0123456789 on the session token, second attempt/);
+});
+
+test("a 405 whose arming GitHub refuses, then a 405 again, exits 1 with both messages and nothing armed", () => {
+  const { status, merges, stderr } = run(["42", "--sha", HEAD], {
     responses: [{ match: "^api repos/o/r/pulls/42$", responses: [pr([])] }, unmet, refused],
   });
   assert.equal(status, 1, stderr);
+  assert.equal(merges.length, 2, "the refusal buys exactly one more attempt");
   assert.match(stderr, /nothing is armed/);
   assert.match(stderr, /Pull request is in clean status/);
+  assert.match(stderr, /Required status check "test" is expected/);
+});
+
+test("a 405, a refused arm, then a 409: the moved head exits 1 and nothing lands", () => {
+  const moved = {
+    status: 1,
+    stdout: { message: "Head branch was modified. Review and try the merge again." },
+    stderr: "gh: Head branch was modified (HTTP 409)",
+  };
+  const { status, merges, stderr } = run(["42", "--sha", HEAD], {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([])] },
+      { match: "PUT repos/o/r/pulls/42/merge", responses: [unmet.responses[0], moved] },
+      refused,
+    ],
+  });
+  assert.equal(status, 1, stderr);
+  assert.equal(merges.length, 2);
+  assert.match(stderr, /head moved past the pinned abc123456789/);
 });
 
 test("--wait never arms: a 405 after green gates exits 2 with nothing armed", () => {

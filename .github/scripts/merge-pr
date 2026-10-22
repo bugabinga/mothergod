@@ -22,9 +22,14 @@ moves:
   and GitHub lands that head when the gates pass. The porcelain's
   `gh pr merge --auto` pins nothing, and thirteen of fourteen landings on
   2026-10-10 typed it as a second command after this exit (#1026). An
-  arming GitHub refuses exits 1 with its words and nothing armed. Under
-  `--wait` the gates were just proven green, so a 405 there exits 2 with
-  nothing armed, for a reader.
+  arming GitHub refuses is answered with one more merge attempt on the
+  same pin, because a PR that is already mergeable is one GitHub will not
+  arm: the last gate can go green in the seconds between the attempt and
+  the arm, and #1413 sat approved for four hours on that race (#1417). The
+  retry needs no reading of the refusal's words: a moved head is 409 and
+  unmet gates are 405 again, which exits 1 with both messages and nothing
+  armed. Under `--wait` the gates were just proven green, so a 405 there
+  exits 2 with nothing armed, for a reader.
 - HTTP 403 on a PR touching `.github/workflows/**` is the app token's
   standing refusal (issue #136); that merge belongs to the admin PAT, the
   BDFL's alone. With GH_ADMIN_TOKEN present the merge retries on it once;
@@ -455,6 +460,11 @@ def attempt(pr, sha, token=None):
     )
 
 
+def landed(pr, sha, proc, credential):
+    """Name the squash commit a successful attempt returned."""
+    note(f"merged #{pr} at {sha[:12]} as {json.loads(proc.stdout)['sha']} on {credential}")
+
+
 USAGE = ("usage: merge-pr <pr-number> [--sha <reviewed-head>] "
          "[--wait [--gates-only] [--timeout <seconds>] [--interval <seconds>]]")
 
@@ -522,8 +532,7 @@ def main():
 
     proc, status = attempt(pr, sha)
     if proc.returncode == 0:
-        note(f"merged #{pr} at {sha[:12]} as "
-             f"{json.loads(proc.stdout)['sha']} on the session token")
+        landed(pr, sha, proc, "the session token")
         return
     if status == 405:
         unmet = api_message(proc)
@@ -531,12 +540,22 @@ def main():
             die(f"required gates unmet on #{pr} after the wait read them green: "
                 f"{unmet}; nothing armed, re-read the PR", 2)
         refused = arm_auto_merge(pr, sha, info["node_id"])
-        if refused:
-            die(f"required gates unmet on #{pr} ({unmet}) and GitHub refused to arm "
-                f"auto-merge on {sha[:12]}: {refused}; nothing is armed, the BDFL "
-                "sweep rescues an approved PR")
-        die(f"required gates unmet on #{pr}: {unmet}; auto-merge armed on "
-            f"{sha[:12]} alone, GitHub lands it when they pass", 2)
+        if not refused:
+            die(f"required gates unmet on #{pr}: {unmet}; auto-merge armed on "
+                f"{sha[:12]} alone, GitHub lands it when they pass", 2)
+        # GitHub arms nothing on a mergeable PR, and the last gate can go
+        # green between the attempt and the arm (#1417). Same pin, so a
+        # moved head is 409 and nothing lands that was not reviewed.
+        note(f"GitHub refused to arm auto-merge on {sha[:12]} ({refused}); "
+             "attempting the merge once more, the gates may have gone green")
+        proc, status = attempt(pr, sha)
+        if proc.returncode == 0:
+            landed(pr, sha, proc, "the session token, second attempt")
+            return
+        if status == 405:
+            die(f"required gates unmet on #{pr} ({api_message(proc)}) and GitHub "
+                f"refused to arm auto-merge on {sha[:12]}: {refused}; nothing is "
+                "armed, the BDFL sweep rescues an approved PR")
     if status == 409:
         die(f"head moved past the pinned {sha[:12]}: {api_message(proc)}; "
             "re-read the PR before deciding again")
@@ -565,8 +584,7 @@ def main():
          "retrying once on the admin PAT")
     proc, status = attempt(pr, sha, token=admin)
     if proc.returncode == 0:
-        note(f"merged #{pr} at {sha[:12]} as "
-             f"{json.loads(proc.stdout)['sha']} on the admin PAT")
+        landed(pr, sha, proc, "the admin PAT")
         return
     if status == 405:
         die(f"required gates unmet on #{pr}: {api_message(proc)}", 2)
