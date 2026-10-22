@@ -179,6 +179,12 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
         .ok_or_else(|| io::Error::other(format!("{cmd} --version produced no output")))
 }
 
+/// gzip's pinned arguments: level 9 as POLICY.md pins it, `-n` so the
+/// header stores neither the input's file name nor its mtime, else the
+/// temp file's name length moves the compressed length by a byte per
+/// character (#1326). Zstd and xz store neither.
+const GZIP_ARGS: [&str; 3] = ["-9", "-n", "-c"];
+
 /// Compressed lengths of `data` under the three pinned reference
 /// compressors, `(gzip, zstd, xz)`. Untimed, so it may share the machine.
 ///
@@ -186,7 +192,7 @@ pub fn tool_version(cmd: &str) -> io::Result<String> {
 ///
 /// Returns an error naming `name` if any reference compressor fails on it.
 fn reference_lens(name: &str, data: &[u8]) -> Result<(usize, usize, usize), String> {
-    let gzip_len = compressed_len("gzip", &["-9", "-c"], data)
+    let gzip_len = compressed_len("gzip", &GZIP_ARGS, data)
         .map_err(|err| format!("gzip failed on {name}: {err}"))?;
     let zstd_len = compressed_len("zstd", &["-19", "-c"], data)
         .map_err(|err| format!("zstd failed on {name}: {err}"))?;
@@ -307,7 +313,9 @@ pub fn frontier_section(
 
 #[cfg(test)]
 mod tests {
-    use super::{compressed_len, generated_at, machine_info, tool_version};
+    use super::{
+        GZIP_ARGS, compressed_len, generated_at, machine_info, run_to_stdout, tool_version,
+    };
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger
@@ -366,6 +374,28 @@ mod tests {
             len > 0 && len < fixture.len(),
             "expected 0 < len < {}, got {len}",
             fixture.len()
+        );
+    }
+
+    #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "no gzip on Android's on-device shell (issue #618)"
+    )]
+    fn pinned_gzip_length_does_not_depend_on_the_input_file_name() {
+        let fixture = fixture();
+        let dir = std::env::temp_dir();
+        let short = dir.join("mgd-gz-a");
+        let long = dir.join("mgd-gz-name-of-another-length-entirely");
+        std::fs::write(&short, &fixture).expect("write short-named input");
+        std::fs::write(&long, &fixture).expect("write long-named input");
+        let by_short = run_to_stdout("gzip", &GZIP_ARGS, &short);
+        let by_long = run_to_stdout("gzip", &GZIP_ARGS, &long);
+        let _ = std::fs::remove_file(&short);
+        let _ = std::fs::remove_file(&long);
+        assert_eq!(
+            by_short.expect("gzip on short name").len(),
+            by_long.expect("gzip on long name").len()
         );
     }
 
