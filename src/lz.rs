@@ -1080,23 +1080,6 @@ impl DpState {
         }
     }
 
-    /// [`Self::relax`] for a [`Token::Rep`] candidate of `len` at `slot`,
-    /// starting from position `i` with base price `base` (`self.price_at(i)`,
-    /// passed in rather than re-read so callers can loop over several
-    /// candidate lengths without re-borrowing `self` immutably each time).
-    fn relax_rep(
-        &mut self,
-        prices: &PriceTable,
-        base: f64,
-        i: usize,
-        len: u32,
-        slot: RepSlot,
-        new_cache: RepCache,
-    ) {
-        let cost = base + prices.length_price(len) + prices.rep;
-        self.relax(cost, i + len as usize, Move::Rep { len, slot }, new_cache);
-    }
-
     /// Prices every [`Token::Rep`] candidate at position `i`: for each of
     /// the three cached distances that actually matches here, a length-2
     /// candidate (always tried once a rep of any length exists), each
@@ -1119,16 +1102,21 @@ impl DpState {
             }
             let mut new_cache = reps;
             new_cache.promote(slot);
+            let mut relax_len = |len: u32| {
+                let cost = base + prices.length_price(len) + prices.rep;
+                self.relax(cost, i + len as usize, Move::Rep { len, slot }, new_cache);
+            };
+
             let rep_len = to_u32(rep_len);
-            self.relax_rep(prices, base, i, MIN_REP_LEN_U32, slot, new_cache);
+            relax_len(MIN_REP_LEN_U32);
             for &len in &LENGTH_STEPS {
                 if len > rep_len {
                     break;
                 }
-                self.relax_rep(prices, base, i, len, slot, new_cache);
+                relax_len(len);
             }
             if !LENGTH_STEPS.contains(&rep_len) && rep_len > MIN_REP_LEN_U32 {
-                self.relax_rep(prices, base, i, rep_len, slot, new_cache);
+                relax_len(rep_len);
             }
         }
     }
