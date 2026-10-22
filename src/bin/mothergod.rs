@@ -216,7 +216,8 @@ fn run(mode: Mode, options: Options, operands: &[Option<PathBuf>]) -> ExitCode {
         let code = match mode {
             Mode::Convert(direction) => convert(direction, operand, options),
             Mode::Test => test(operand, options.verbose),
-        };
+        }
+        .unwrap_or_else(|err| fail(&err));
         if code == ExitCode::from(SIGPIPE_STATUS) {
             return code;
         }
@@ -229,12 +230,15 @@ fn run(mode: Mode, options: Options, operands: &[Option<PathBuf>]) -> ExitCode {
 
 /// Decodes one input to nowhere: it names no output file, so the input needs
 /// no suffix, and nothing is written whether it decodes or not.
-fn test(operand: Option<&Path>, verbose: bool) -> ExitCode {
-    let input = match read_input(operand) {
-        Ok(input) => input,
-        Err(err) => return fail(&err),
-    };
-    decompress_into(&input, io::sink(), "nowhere", &input_name(operand), verbose)
+fn test(operand: Option<&Path>, verbose: bool) -> Result<ExitCode, String> {
+    let input = read_input(operand)?;
+    Ok(decompress_into(
+        &input,
+        io::sink(),
+        "nowhere",
+        &input_name(operand),
+        verbose,
+    ))
 }
 
 /// What a message calls an input.
@@ -244,8 +248,13 @@ fn input_name(operand: Option<&Path>) -> String {
 
 /// Converts one input, stdin when `operand` is `None`, to stdout when there
 /// is no operand or `options.to_stdout` is set, else to the file named from
-/// `operand` by [`add_suffix`] or [`strip_suffix`].
-fn convert(direction: Direction, operand: Option<&Path>, options: Options) -> ExitCode {
+/// `operand` by [`add_suffix`] or [`strip_suffix`]. An `Err` is a failure
+/// before any output was opened.
+fn convert(
+    direction: Direction,
+    operand: Option<&Path>,
+    options: Options,
+) -> Result<ExitCode, String> {
     let Options {
         to_stdout,
         existing,
@@ -256,29 +265,19 @@ fn convert(direction: Direction, operand: Option<&Path>, options: Options) -> Ex
     match direction {
         Direction::Compress => {
             let target = source.map(|source| (source, add_suffix(source)));
-            let reader = match open_input(operand) {
-                Ok(reader) => reader,
-                Err(err) => return fail(&err),
-            };
-            write_to(target, existing, |sink, dest_name| {
+            let reader = open_input(operand)?;
+            Ok(write_to(target, existing, |sink, dest_name| {
                 compress_into(reader, sink, dest_name, &input_name, verbose)
-            })
+            }))
         }
         Direction::Decompress => {
-            let target = match source {
-                Some(source) => match strip_suffix(source) {
-                    Ok(out_path) => Some((source, out_path)),
-                    Err(err) => return fail(&err),
-                },
-                None => None,
-            };
-            let input = match read_input(operand) {
-                Ok(input) => input,
-                Err(err) => return fail(&err),
-            };
-            write_to(target, existing, |sink, dest_name| {
+            let target = source
+                .map(|source| strip_suffix(source).map(|out_path| (source, out_path)))
+                .transpose()?;
+            let input = read_input(operand)?;
+            Ok(write_to(target, existing, |sink, dest_name| {
                 decompress_into(&input, sink, dest_name, &input_name, verbose)
-            })
+            }))
         }
     }
 }
