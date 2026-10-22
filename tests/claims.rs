@@ -1230,6 +1230,25 @@ fn shared_frame_offers_the_same_links_on_every_page() {
         ("site/404.html", None),
     ];
 
+    // site/404.html says every page the site has is linked from its frame
+    // (issue #1283), so the list above must be the directory, not a copy
+    // of it: a page added to site/ and left out of the list ships unchecked
+    // (issue #1284), and a listed page that is gone is a stale entry.
+    let mut on_disk: Vec<String> =
+        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("site"))
+            .expect("site/ should be readable")
+            .map(|entry| entry.expect("site/ entry should be readable").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "html"))
+            .map(|path| format!("site/{}", path.file_name().unwrap().to_string_lossy()))
+            .collect();
+    on_disk.sort();
+    let mut listed: Vec<&str> = pages.iter().map(|(file, _)| *file).collect();
+    listed.sort_unstable();
+    assert_eq!(
+        on_disk, listed,
+        "site/*.html differs from the pages this test checks; add the new page to `pages`"
+    );
+
     let mut expected: Option<(&str, Vec<(String, String)>)> = None;
     for (file, own_path) in pages {
         let page = read(file);
