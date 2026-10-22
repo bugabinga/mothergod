@@ -30,7 +30,11 @@ measurement time and never committed. Measured 2026-10-22 against
 mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and
 loses to both in aggregate on Silesia. Per file, against whichever of the two
 is stronger on that file, it wins 7 of 11 on Canterbury and 1 of 12 on
-Silesia. Closing Silesia heads [`ROADMAP.md`](ROADMAP.md), as open-ended
+Silesia. The wins are Canterbury's six smallest text and source files
+(`alice29.txt`, `asyoulik.txt`, `cp.html`, `fields.c`, `grammar.lsp`,
+`xargs.1`), its `kennedy.xls` spreadsheet, and Silesia's `ooffice` library.
+The widest losses are Silesia's `sao` star catalog, `mozilla` install archive
+and `mr` medical image, and Canterbury's `sum` executable. Closing Silesia heads [`ROADMAP.md`](ROADMAP.md), as open-ended
 research with no date attached.
 Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).

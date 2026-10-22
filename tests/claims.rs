@@ -2,7 +2,7 @@
 //! `FORMAT_VERSION`, the
 //! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
-//! encode/decode MB/s and `xz -9e`'s beside them, the benchmark CPU model, the per-file win count, the
+//! encode/decode MB/s and `xz -9e`'s beside them, the benchmark CPU model, the per-file win count and the files named behind it, the
 //! measurement date, the
 //! reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
@@ -419,19 +419,23 @@ fn prose_integers(text: &str) -> Vec<usize> {
 /// read off the single source of truth rather than recomputed from the
 /// four compressor columns, so this guard and the report agree on what
 /// "stronger" means by construction. Excludes the `**aggregate` row, which
-/// a per-file win count never counts.
-fn per_file_regrets(report_file: &str) -> Vec<f64> {
+/// a per-file win count never counts. Paired with the file's name, the
+/// row's first backticked cell.
+fn per_file_regrets(report_file: &str) -> Vec<(String, f64)> {
     let text = read(&format!("docs/benchmarks/{report_file}"));
     text.lines()
         .filter(|line| line.starts_with("| `"))
-        .map(|line| markdown_numbers(line)[5])
+        .map(|line| {
+            let name = line.split('`').nth(1).unwrap_or_default().to_owned();
+            (name, markdown_numbers(line)[5])
+        })
         .collect()
 }
 
 /// How many files mothergod wins (negative regret) out of how many total.
 fn win_count_from_report(report_file: &str) -> (usize, usize) {
     let regrets = per_file_regrets(report_file);
-    let wins = regrets.iter().filter(|regret| **regret < 0.0).count();
+    let wins = regrets.iter().filter(|(_, regret)| *regret < 0.0).count();
     (wins, regrets.len())
 }
 
@@ -473,6 +477,65 @@ fn win_count_claims_match_their_generated_reports() {
             );
         }
     }
+}
+
+/// The backticked file names in the sentence of `text` that opens with
+/// `marker`, sorted. Whitespace is collapsed first so a sentence wrapped
+/// across source lines still matches; the sentence ends at a period
+/// followed by a space, never at the period inside `fields.c`.
+fn files_named_after(text: &str, marker: &str) -> Vec<String> {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let start = flat
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found"));
+    let rest = &flat[start..];
+    let sentence = &rest[..rest.find(". ").unwrap_or(rest.len())];
+    let mut names: Vec<String> = sentence
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn named_wins_and_widest_losses_match_their_generated_reports() {
+    // README names the files behind the win count, and the files it loses
+    // on by the widest margin, so a reader can ask "will it win on my
+    // data" (issue #1515). Every regret across both reports is the truth:
+    // the named wins are exactly the files with negative regret, and the
+    // named losses are exactly as many files as are named, taken from the
+    // top of the regret ranking.
+    let mut regrets = per_file_regrets("canterbury.md");
+    regrets.extend(per_file_regrets("silesia.md"));
+    let readme = read("README.md");
+
+    let mut true_wins: Vec<String> = regrets
+        .iter()
+        .filter(|(_, regret)| *regret < 0.0)
+        .map(|(name, _)| name.clone())
+        .collect();
+    true_wins.sort();
+    let claimed_wins = files_named_after(&readme, "The wins are ");
+    assert_eq!(
+        claimed_wins, true_wins,
+        "README.md names {claimed_wins:?} as its per-file wins, docs/benchmarks/ says {true_wins:?}"
+    );
+
+    let claimed_losses = files_named_after(&readme, "The widest losses are ");
+    regrets.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let mut true_losses: Vec<String> = regrets
+        .iter()
+        .take(claimed_losses.len())
+        .map(|(name, _)| name.clone())
+        .collect();
+    true_losses.sort();
+    assert_eq!(
+        claimed_losses, true_losses,
+        "README.md names {claimed_losses:?} as its widest losses, docs/benchmarks/ ranks {true_losses:?} widest"
+    );
 }
 
 /// The verdict strip's per-corpus judgment word ("Wins"/"Loses") and its
