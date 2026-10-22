@@ -1,5 +1,5 @@
 // Pins for memory-check, the recipe seven by-hand measurements shared
-// (#1109, #1145): the footer prints once both children ran, a peak at or
+// (#1109, #1145): one footer per input prints once both children ran, a peak at or
 // over the bound fails and names the side, a decode that differs fails
 // under the bound, and a child that does not exit 0 is a failure, never a
 // reading. The subprocess pins use a stub compressor (cat both ways, or a
@@ -9,7 +9,7 @@
 // (#1148).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -25,7 +25,11 @@ function stub(body) {
 
 const run = (binary, ...args) => spawnSync(script, [...args, binary], { encoding: "utf8" });
 
-const footer = (out) => out.split("\n").find((line) => line.startsWith("memory-check: bytes"));
+const footers = (out) => out.split("\n").filter((line) => line.startsWith("memory-check: input"));
+const footer = (out) => footers(out)[0];
+
+// Small inputs: the defaults are 256 MiB and 36 MiB, minutes of codec.
+const small = ["--bytes", "4096", "--dense-bytes", "4096"];
 
 const driver = `
 import importlib.machinery, importlib.util, json, sys
@@ -51,32 +55,53 @@ test("under is strict: a peak one below the bound holds, at the bound fails, eac
   assert.deepEqual(verdict(5, 5, 1024, false), ["round trip differs"]);
 });
 
-test("a stub that copies both ways holds: exit 0, the footer carries both peaks and the size", () => {
-  const r = run(stub("exec cat"), "--bytes", "4096");
+test("a stub that copies both ways holds: exit 0, one footer per input carries both peaks and the size", () => {
+  const r = run(stub("exec cat"), ...small);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(
-    footer(r.stdout),
-    /^memory-check: bytes 4096 \| encode peak \d+ KiB \| decode peak \d+ KiB \| bound 1048576 KiB \| compressed 4096 B \| round trip ok$/,
-  );
+  const [zeros, words, ...rest] = footers(r.stdout);
+  assert.deepEqual(rest, []);
+  for (const [line, label] of [[zeros, "zeros"], [words, "words"]]) {
+    assert.match(
+      line,
+      new RegExp(
+        `^memory-check: input ${label} \\| bytes 4096 \\| encode peak \\d+ KiB \\| decode peak \\d+ KiB \\| bound 1048576 KiB \\| compressed 4096 B \\| round trip ok$`,
+      ),
+    );
+  }
 });
 
-test("a peak at or over the bound fails and names the side", () => {
-  const r = run(stub("exec cat"), "--bytes", "4096", "--bound-kib", "1");
+test("the words input is the same bytes on every run, and not zeros", () => {
+  const dump = "if [ \"$1\" = -d ]; then cat; else tee \"$MC_DUMP\"; fi";
+  const dir = mkdtempSync(join(tmpdir(), "memory-check-"));
+  const dumps = [0, 1].map((i) => {
+    const path = join(dir, `words${i}`);
+    const r = spawnSync(script, [...small, stub(dump)], { encoding: "utf8", env: { ...process.env, MC_DUMP: path } });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    return readFileSync(path);
+  });
+  assert.deepEqual(dumps[0], dumps[1]);
+  assert.match(dumps[0].toString(), /^[a-z ]{4096}$/);
+});
+
+test("a peak at or over the bound fails and names the input and the side", () => {
+  const r = run(stub("exec cat"), ...small, "--bound-kib", "1");
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stdout, /encode peak \d+ KiB is not under the bound/);
-  assert.match(r.stdout, /decode peak \d+ KiB is not under the bound/);
+  for (const label of ["zeros", "words"]) {
+    assert.match(r.stdout, new RegExp(`${label}: encode peak \\d+ KiB is not under the bound`));
+    assert.match(r.stdout, new RegExp(`${label}: decode peak \\d+ KiB is not under the bound`));
+  }
 });
 
 test("a decode that differs fails under the bound, and the footer says so", () => {
   const liar = "if [ \"$1\" = -d ]; then head -c 4095 /dev/zero; printf x; else cat; fi";
-  const r = run(stub(liar), "--bytes", "4096");
+  const r = run(stub(liar), ...small);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(footer(r.stdout), /round trip DIFFERS$/);
-  assert.match(r.stdout, /^memory-check: round trip differs$/m);
+  assert.match(r.stdout, /^memory-check: zeros: round trip differs$/m);
 });
 
 test("a child that does not exit 0 is a failure, never a reading", () => {
-  const r = run(stub("exit 3"), "--bytes", "4096");
+  const r = run(stub("exit 3"), ...small);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /did not exit 0/);
   assert.equal(footer(r.stdout), undefined);

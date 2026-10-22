@@ -109,9 +109,11 @@ on a rule, not a number.
 
 The advisory `memory-check` workflow runs Saturdays at 06:29 UTC and on
 manual dispatch: `.github/scripts/memory-check` on the release CLI, 256
-MiB of zeros plus one byte (17 frames) through encode and then decode,
-each child's peak resident set read from the kernel (#1109; the claim is
-CHANGELOG.md's "under 1 GiB however long the input"). A round trip that
+MiB of zeros plus one byte (17 frames) and then 36 MiB of seeded random
+words (dense short matches, the token lists zeros barely grows), each
+through encode and then decode, each child's peak resident set read from
+the kernel (#1109, #1396; the claim is CHANGELOG.md's "under 1 GiB however
+long the input"). A round trip that
 differs or a peak at or over 1 GiB fails the job, named in the footer,
 and wakes the fixer through the alarm. No ledger entry: the bound is the
 gate, and the readings print beside it in the log, so a peak climbing
