@@ -137,16 +137,8 @@ pub mod transpose {
     /// because a zero column count has no rows to transpose.
     #[must_use]
     pub fn encode(data: &[u8], columns: NonZeroUsize) -> Vec<u8> {
-        let columns = columns.get();
-        let n = data.len();
-        let mut out = Vec::with_capacity(n);
-        for start in 0..columns {
-            let mut i = start;
-            while i < n {
-                out.push(data[i]);
-                i += columns;
-            }
-        }
+        let mut out = Vec::with_capacity(data.len());
+        for_each_column_major(data.len(), columns.get(), |i| out.push(data[i]));
         out
     }
 
@@ -170,14 +162,22 @@ pub mod transpose {
 
     /// Scan shared by [`decode`] and [`try_decode`] over a zero-filled `out`.
     fn decode_into(out: &mut [u8], data: &[u8], columns: usize) {
-        let n = out.len();
         let mut pos = 0usize;
+        for_each_column_major(out.len(), columns, |i| {
+            out[i] = data[pos];
+            pos += 1;
+        });
+    }
+
+    /// Calls `visit` with the indices `0..len` in the order [`encode`] writes
+    /// them: column 0's (`0`, `columns`, `2 * columns`, ...), then column 1's,
+    /// and so on. The one statement of the layout, so the two directions
+    /// cannot disagree. A loop and not an iterator: `flat_map`'s `next`
+    /// ran slower than this loop on 16 MiB at 2 to 16 columns.
+    fn for_each_column_major(len: usize, columns: usize, mut visit: impl FnMut(usize)) {
         for start in 0..columns {
-            let mut i = start;
-            while i < n {
-                out[i] = data[pos];
-                pos += 1;
-                i += columns;
+            for i in (start..len).step_by(columns) {
+                visit(i);
             }
         }
     }
