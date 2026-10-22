@@ -147,6 +147,20 @@ pub enum Error {
     OutOfMemory,
 }
 
+impl Error {
+    /// `Ok` when `len` is at most `max`, else [`Error::TooLarge`] with `len`
+    /// saturated to `u32::MAX`: the one check every output bound runs.
+    pub(crate) fn ensure_within(len: u64, max: u32) -> Result<(), Self> {
+        if len > u64::from(max) {
+            return Err(Self::TooLarge {
+                len: u32::try_from(len).unwrap_or(u32::MAX),
+                max,
+            });
+        }
+        Ok(())
+    }
+}
+
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -453,22 +467,12 @@ impl Budget {
     /// work (`rust-craft` skill's allocation-discipline).
     fn admit(&mut self, method: Method, output_len: u64) -> Result<(), Error> {
         self.produced = self.produced.saturating_add(output_len);
-        if let Some(max) = self.cap
-            && self.produced > u64::from(max)
-        {
-            return Err(Error::TooLarge {
-                len: u32::try_from(self.produced).unwrap_or(u32::MAX),
-                max,
-            });
+        if let Some(max) = self.cap {
+            Error::ensure_within(self.produced, max)?;
         }
         if self.collects && method == Method::Lz {
             self.lz_produced = self.lz_produced.saturating_add(output_len);
-            if self.lz_produced > u64::from(codec::MAX_DECODED_LEN) {
-                return Err(Error::TooLarge {
-                    len: u32::try_from(self.lz_produced).unwrap_or(u32::MAX),
-                    max: codec::MAX_DECODED_LEN,
-                });
-            }
+            Error::ensure_within(self.lz_produced, codec::MAX_DECODED_LEN)?;
         }
         Ok(())
     }

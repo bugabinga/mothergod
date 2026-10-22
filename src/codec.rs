@@ -1079,12 +1079,7 @@ fn read_header(
     let max_len = max_len.min(MAX_DECODED_LEN);
     let (header, stream) = split_token_header(payload)?;
     let output_len = candidate.output_len(header.declared_len);
-    if output_len > u64::from(max_len) {
-        return Err(Error::TooLarge {
-            len: u32::try_from(output_len).unwrap_or(u32::MAX),
-            max: max_len,
-        });
-    }
+    Error::ensure_within(output_len, max_len)?;
     match u64::try_from(stream.len()).map(|len| len.cmp(&header.coded_len)) {
         Ok(std::cmp::Ordering::Less) => Err(Error::Truncated),
         Ok(std::cmp::Ordering::Equal) => {
