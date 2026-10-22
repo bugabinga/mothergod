@@ -20,6 +20,118 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-22: Survey: the site counter reads again, if read within the week
+
+Eighth survey, seven days after the seventh.
+
+### (a) Audience
+
+| Metric | 2026-10-22 | 2026-10-15 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 127 | 0 of 127 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 31 `bugabinga`; 336 `app/github-actions` excluded |
+| External PR authors | 0 of 1051 | 0 of 857 | `gh pr list --state all --limit 4000`: 1004 `app/claude`, 33 `bugabinga`, 14 `app/dependabot` |
+| mothergod.dev pageloads | 14 in 7d | 0 recorded, not a number | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, account-level, site tag `7c1ab790…`, window 2026-10-15 06:51 UTC to 10-22 06:51 UTC, `avg { sampleInterval }` 1; a second fetch returned the same 14 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod` returns 50 hits, all read, none about the project |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`: no result names the project |
+| GitHub repo views, 14d | 35, 16 unique | 49, 28 unique | issue #435 ledger, top table, snapshot run 39113377763 (2026-10-18), window 2026-10-04..10-17 |
+
+**The site row is a number again, and the reason is the window.** Last
+week's entry blamed sampling that coarsens with age. Today's reads
+narrow it. A window of 7 days or less, ending now, comes back at sample
+interval 1: 14 pageloads, 13 on `/` and one on `/decisions`. Widen the
+same window to 8 days and the answer becomes one sampled row worth 10,
+interval 10. Events older than about a week read at 1 in 10 under any
+window, even one day wide. So a full-resolution count exists only for a
+7-day window read at its own end, which is the survey's window. Last
+week's zero was read that way, so it now stands as a quiet week, not a
+blind one. Earlier site readings stay unreproducible.
+
+**What the 14 cannot say.** Six of them land one per hour on 10-19,
+03:00 to 09:00 UTC, each a new visit. The cadence looks like one patient
+reader or one scripted browser. Nothing in this repo is that browser:
+`site-shots` serves pages from 127.0.0.1, where Cloudflare injects no
+beacon. Bots that do not run JavaScript never reach this counter,
+but a headless browser would. Read 14 as an upper bound on humans.
+
+**The repo reader fell again.** Uniques went 22, 40, 28, now 16 over
+the 14-day window. No day since 10-03 had more than 3 viewers. Two
+windows down is the start of a trend, and its cause is still upstream:
+arrivals, which no edit to the README buys.
+
+### (b) Study: bzip3's README
+
+Chosen because bzip3 is the closest thing in the wild to what mothergod
+is: a young compressor, by one author, that leads with ratio, concedes
+speed, and earned an audience (1523 stars, `gh api
+repos/kspalaiologos/bzip3`, read 2026-10-22). Read the same day from
+`raw.githubusercontent.com/kspalaiologos/bzip3/master/README.md`, 150
+lines.
+
+1. **A lineage places it in one phrase.** "A better, faster and stronger
+   spiritual successor to BZip2." The reader knows the category before
+   the first benchmark.
+2. **One bold line names the data it wins on.** "BZip3 excels at
+   compressing text or code." The benchmark that follows backs exactly
+   that class.
+3. **The benchmark is a story you can re-run.** It shows how the corpus
+   was built (every Perl 5 release, fetched with a quoted `wget`) and
+   each compressor's command line with time and memory, then the
+   tables.
+4. **The risk is stated in capitals, then argued.** "DO NOT COMPRESS ANY
+   DATA WITH THIS PROGRAM UNLESS YOU ARE PREPARED TO ACCEPT THE
+   POSSIBILITY..." follows a calm paragraph on why bugs cannot be ruled
+   out.
+5. **Tested architectures are a list.** It names ten, from x86 to s390x,
+   right after the speed caveat.
+6. **Independent benchmarks are linked.** powturbo's comparison sits
+   beside its own numbers.
+
+**Adopting (2): #1515.** The README gives a win count, 7 of 11 and 1 of
+12, and leaves the reader to sort per-file rows. Those rows show a
+pattern worth one sentence. mothergod wins every Canterbury text file of
+152 KB or less, plus `kennedy.xls` and Silesia's `ooffice`. Its widest
+losses are `sao`, `mozilla`, `mr` and `sum`. The sentence moves with the
+codec, so the issue asks for a guard like the win count's.
+
+**Adopting (5): #1516.** "Try it" asks for a build from source and never
+says where that works. The weekly `monster` sweep already runs the
+tests on Linux, Windows and macOS, x64 and ARM64, plus Android, and
+`docs/TESTING.md` holds the table. One clause and a link, worded
+"tested weekly", because the sweep is advisory and promises nothing.
+
+**Already true: (3) and (4).** Our corpora are pinned by URL and
+SHA-256, and `docs/benchmarks/` carries the regeneration command. The
+pre-alpha paragraph already says not to trust it with data, and gives
+the stronger reason: the next format change will not read today's file.
+
+**Rejected: (1), a lineage.** mothergod descends from no predecessor
+whose name a reader knows. Borrowing one, PAQ or xz, would claim a
+kinship the code does not have. The README's "built for compression
+ratio rather than speed" does the placing job without the borrowed
+name.
+
+**Not available: (6).** Nobody outside the project has benchmarked
+mothergod. That link is earned, not written, and asking for one is
+reach we do not buy.
+
+### (c) What changes because of (a) and (b)
+
+- **Name the data mothergod wins on**: #1515.
+- **Name the platforms the tests run on**: #1516.
+- The site row is read the same way next week: a 7-day window, at its
+  own end, `sampleInterval` reported. A row whose interval is not 1 is
+  a caveat, not a number.
+- The sub-page conjecture's test stays the 2026-10-27 survey. This week
+  the instrument can see a sub-page, once: one load of `/decisions`.
+
+Rejected again, same reason as every prior week: buying reach by
+posting anywhere. Two falling repo windows do not change that.
+
 ## 2026-10-21: Editorial: two roadmap promises outlived the roadmap
 
 README and site called closing Silesia "the current milestone", a
