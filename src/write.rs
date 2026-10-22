@@ -11,7 +11,7 @@ use super::{BLOCK_LEN, compress_block};
 
 /// Encodes of one block of input that run at once at most, whether the block
 /// is one of a stream's or one of the trials of a block's filter search:
-/// two, because an encode's working set is about 370 MB (`BLOCK_LEN`'s doc)
+/// two, because an encode's working set is about 364 MiB (`BLOCK_LEN`'s doc)
 /// and the bound the CLI and the library state is 1 GiB, which holds two
 /// and not three (`research/JOURNAL.md` S2-A125). A machine with one core
 /// encodes serially, in the calling thread, as before.
@@ -34,9 +34,9 @@ type InFlight = JoinHandle<Vec<u8>>;
 /// streaming counterpart of [`compress`](crate::compress).
 ///
 /// Bytes collect in a block of 16 MiB. A full block becomes one frame
-/// written to `W`, so memory follows the block and not the total written;
-/// the buffer is up to twice the block in capacity because a growing `Vec`
-/// doubles, and the compressor's working set comes on top of it. That
+/// written to `W`, so memory follows the blocks in flight and not the total
+/// written; the buffer is up to twice the block in capacity because a growing
+/// `Vec` doubles, and the compressor's working set comes on top of it. That
 /// working set, not the block, sets the peak: a stream of 256 MiB of zeros
 /// encodes in under 1 GiB, a bound `.github/scripts/memory-check` asserts
 /// weekly ([`copy_encode`](crate::copy_encode) has the same bound and is

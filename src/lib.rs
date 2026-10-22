@@ -600,10 +600,11 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 }
 
 /// The input bytes one [`compress`] frame covers. The optimal parse holds
-/// 21 bytes of state per input byte, so this sets the encoder's peak memory
-/// at roughly 370 MB whatever the input length (#1341); the ratio a block
-/// gives up by restarting its models is priced in `research/JOURNAL.md`
-/// S2-A116.
+/// 21 bytes of state per input byte, so this sets the working set of one
+/// block's encode at roughly 364 MiB whatever the input length (#1341); the
+/// peak is that times the encodes running at once ([`write::Encoder`]'s doc),
+/// which `.github/scripts/memory-check` bounds. The ratio a block gives up by
+/// restarting its models is priced in `research/JOURNAL.md` S2-A116.
 ///
 /// The 21 bytes, by array of the DP pass (`lz::dp_round`):
 ///
@@ -619,13 +620,14 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 /// position being expanded; they were 8 and 12 bytes per position until
 /// S2-A123. The token lists between rounds, the greedy seed's `prev` array
 /// and the models sit on top and are not per-position constants: 16 MiB of
-/// zeros peaks at 372 MB (S2-A123).
+/// zeros, encoded serially, peaked at 364 MiB (S2-A123).
 const BLOCK_LEN: usize = 16 * 1024 * 1024;
 
 /// Compresses `input` into a self-describing stream of frames.
 ///
 /// Cuts `input` into blocks of 16 MiB, one frame each, so the
-/// encoder's memory is bounded by the block and not by the input. Each frame
+/// encoder's memory is bounded by the blocks encoding at once, at most two,
+/// and not by the input. Each frame
 /// tries [`Method::Lz`] and falls back to [`Method::Stored`] whenever that
 /// does not produce a smaller frame (`docs/format/SPEC.md`'s Stored-floor
 /// invariant): tiny, incompressible, or already-compressed input. An input
