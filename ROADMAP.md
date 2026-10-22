@@ -146,7 +146,7 @@ wirings had shipped under #1123 and #1222 in one week). Resolved, by id:
 SSE (S1-P1), per-column modeling (S1-P5), the logit-domain mixer (S1-P8,
 S2-A102), the learned baseline (S2-A104, S2-A105), the length split
 (S2-A109, S2-A110), the offset split (S2-A111, S2-A112), the low-bit
-length models (S2-A114, S2-A115). Exhausted under JOURNAL S2-L1, pending a
+length models (S2-A114, S2-A115). Exhausted, each under its own id, pending a
 genuinely new mechanism and not a variant: btultra2-class parse (S1-P2),
 PPM escape (S1-P3), large windows (S1-P4), per-expert rate gating
 (S2-R33), the previous-token flag state (S2-R34).
