@@ -129,16 +129,21 @@ def load_stamp(path: str, now: float) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
             stamp = json.load(fh)
-        # json.load admits NaN and Infinity as floats; an infinite or NaN
-        # start makes `age // 60` raise, so only a finite one is a stamp
-        # (#1481). Anything else is a fresh start.
+        # A stamp is valid when its age is finite and not negative. json.load
+        # admits NaN and Infinity as floats and integers of any size: NaN and
+        # -Infinity make `age // 60` raise, while +Infinity or a start in
+        # the future gives a negative age, so the nag never fires (#1481).
+        # Anything else is a fresh start.
         start = stamp.get("start") if isinstance(stamp, dict) else None
-        if isinstance(start, (int, float)) and math.isfinite(start):
-            return stamp
+        if isinstance(start, (int, float)):
+            age = now - start
+            if math.isfinite(age) and age >= 0:
+                return stamp
     # ValueError is the parent of json.JSONDecodeError and of the
     # UnicodeDecodeError that open(encoding="utf-8") raises on a stamp
-    # that is not UTF-8 (#1398); any unreadable stamp means a fresh start.
-    except (OSError, ValueError):
+    # that is not UTF-8 (#1398); OverflowError is the integer too large
+    # for a float in `now - start`; any unreadable stamp means a fresh start.
+    except (OSError, ValueError, OverflowError):
         pass
     stamp = {"start": now, "fired": False}
     save_stamp(path, stamp)

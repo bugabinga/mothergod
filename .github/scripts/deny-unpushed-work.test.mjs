@@ -187,10 +187,20 @@ test("a stamp of invalid UTF-8 is rewritten as a fresh start and allowed", () =>
   assert.equal(written.fired, false);
 });
 
-// JSON.stringify cannot write these; Python's json.load reads each as a
-// float, and `int(age // 60)` raised on the first two (#1481).
-for (const start of ["NaN", "-Infinity", "1e999"]) {
-  test(`a stamp whose start is ${start} is rewritten as a fresh start and allowed`, () => {
+// JSON.stringify cannot write the first three; Python's json.load reads each
+// as a float, and `int(age // 60)` raised on the first two (#1481). The
+// integers past float range raise OverflowError in `now - start`; 1e308 is
+// finite but in the future, so its age is negative and the nag never fires.
+const BAD_STARTS = [
+  "NaN",
+  "-Infinity",
+  "1e999",
+  "1e308",
+  `1${"0".repeat(400)}`,
+  `-1${"0".repeat(400)}`,
+];
+for (const start of BAD_STARTS) {
+  test(`a stamp whose start is ${start.length > 12 ? `a ${start.length}-character integer` : start} is rewritten as a fresh start and allowed`, () => {
     const { dir, dirty } = repo();
     dirty();
     const { stamp, env } = session();
