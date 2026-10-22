@@ -56,6 +56,7 @@ shows no deny, means the hook stopped firing.
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -128,7 +129,11 @@ def load_stamp(path: str, now: float) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
             stamp = json.load(fh)
-        if isinstance(stamp, dict) and isinstance(stamp.get("start"), (int, float)):
+        # json.load admits NaN and Infinity as floats; an infinite or NaN
+        # start makes `age // 60` raise, so only a finite one is a stamp
+        # (#1481). Anything else is a fresh start.
+        start = stamp.get("start") if isinstance(stamp, dict) else None
+        if isinstance(start, (int, float)) and math.isfinite(start):
             return stamp
     # ValueError is the parent of json.JSONDecodeError and of the
     # UnicodeDecodeError that open(encoding="utf-8") raises on a stamp

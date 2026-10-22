@@ -187,6 +187,23 @@ test("a stamp of invalid UTF-8 is rewritten as a fresh start and allowed", () =>
   assert.equal(written.fired, false);
 });
 
+// JSON.stringify cannot write these; Python's json.load reads each as a
+// float, and `int(age // 60)` raised on the first two (#1481).
+for (const start of ["NaN", "-Infinity", "1e999"]) {
+  test(`a stamp whose start is ${start} is rewritten as a fresh start and allowed`, () => {
+    const { dir, dirty } = repo();
+    dirty();
+    const { stamp, env } = session();
+    writeFileSync(stamp, `{"start": ${start}, "fired": false}`);
+    const res = run(env, bash(dir));
+    assert.equal(res.status, 0, res.stderr);
+    const written = JSON.parse(readFileSync(stamp, "utf8"));
+    assert.ok(Number.isFinite(written.start));
+    assert.ok(Math.abs(written.start - Date.now() / 1000) < 5);
+    assert.equal(written.fired, false);
+  });
+}
+
 test("a git that cannot run is no evidence of edits: the aged, dirty session is allowed", () => {
   const { dir, dirty } = repo();
   dirty();
