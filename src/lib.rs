@@ -662,7 +662,8 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
 /// [`compress`] returns. A longer one writes `Lz` frames [`compress`] would
 /// store, so its total `Lz` output passes what [`decompress`] and
 /// [`decompress_bounded`] hold in memory and they reject it as
-/// [`Error::TooLarge`]; [`decompress_to_writer`] carries any length.
+/// [`Error::TooLarge`]; [`decompress_to_writer`] carries any length at a
+/// `max_len` of [`codec::MAX_DECODED_LEN`] or more.
 ///
 /// # Errors
 ///

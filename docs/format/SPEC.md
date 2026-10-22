@@ -257,8 +257,9 @@ founding port bug this section's invariant exists to rule out.
   wire-format field, so raising it is not a `FORMAT_VERSION` bump. It bounds
   one `Lz` frame's output and the total `Lz` output of a stream the buffered
   `mothergod::decompress` holds in memory; it is no file-size limit, because
-  `mothergod::compress` cuts its input into 16 MiB frames and
-  `mothergod::decompress_to_writer` carries a stream of any length
+  `mothergod::compress` cuts its input into 16 MiB frames up to that length
+  (past it, one `Stored` frame) and `mothergod::decompress_to_writer`
+  carries a stream of any length at a `max_len` of that or more
   (ADR-0067). `mothergod::decompress_bounded` lets a caller tighten this
   ceiling to its own memory budget (clamped, never raised, since 256 MiB is
   the only value this decoder's worst-case decode time has been measured
