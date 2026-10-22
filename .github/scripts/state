@@ -31,10 +31,18 @@ Facts, in the order the prompt names them:
                because the ops log's body mentions every workflow; `bug`
                only, because a feature issue titled with the workflow's
                name (monster's BSD lane, #980) is not the red's fix and
-               would read as filed. Only main is read: a workflow that
-               never concludes there (agent-review runs on PR branches,
-               where stalled-prs reads its reds) prints as having no
-               concluded run, never as a red this seat must file.
+               would read as filed. Only main is judged, and the page is
+               read across branches: the API's `branch=main` filter
+               answered `total_count 0` with an empty page for seventeen
+               of the eighteen watched workflows while Actions was
+               degraded on 2026-10-22 (run 39811812824), byte-identical
+               to a workflow that never ran there, and the board printed
+               red 0. Every watched workflow has run somewhere, so an
+               empty page across branches is a read that failed and
+               prints UNREADABLE; a workflow that never concludes on main
+               (agent-review runs on PR branches, where stalled-prs reads
+               its reds) prints as having no concluded run, never as a
+               red this seat must file.
     prs        open pull requests, each with its verdict label and age.
     issues     open issues by realm label, unrouted first, and the counts of
                the labels the queues filter on.
@@ -81,10 +89,15 @@ import yaml
 
 from anchor import OPS_LOG, iso, previous_run_start, stamp_to_dt
 
-# Runs read per workflow. A seat's runs on main are mostly `skipped` (every
-# bot event creates a run the actor filter then rejects; agent-bdfl.yml says
-# why), so the newest one that concluded sits some rows back.
-RUN_PAGE = 50
+# Runs read per workflow, across branches (the docstring says why), the API's
+# page maximum. A seat's runs are mostly `skipped` (every bot event creates a
+# run the actor filter then rejects; agent-bdfl.yml says why) and the
+# PR-branch ones share the page, so the newest one that concluded on main
+# sits some rows back.
+RUN_PAGE = 100
+# What an empty runs page means for a workflow agent-alarm watches, which it
+# watches because it runs.
+EMPTY_PAGE = "no runs on any branch: a page the Actions API served empty"
 # Search hits per red before the title filter, which runs client-side: a
 # short name like `ci` draws hyphen noise (`deny-ci-background`), and a real
 # bug pushed off the page would print as unfiled (#1462's review).
@@ -156,10 +169,10 @@ def watched(path):
 
 
 def newest_run(runs):
-    """The newest run that concluded, or None. Newest is sorted here, not trusted (#902)."""
+    """The newest run on main that concluded, or None. Newest is sorted here, not trusted (#902)."""
     ordered = sorted(runs, key=lambda run: iso(run["created_at"]), reverse=True)
     for run in ordered:
-        if run.get("conclusion") not in ROUTINE:
+        if run.get("head_branch") == "main" and run.get("conclusion") not in ROUTINE:
             return run
     return None
 
@@ -207,13 +220,18 @@ def read_checks(repo, alarm, now):
         page, error = gh(
             "api",
             f"repos/{repo}/actions/workflows/{ids[name]}/runs"
-            f"?branch=main&status=completed&per_page={RUN_PAGE}",
+            f"?status=completed&per_page={RUN_PAGE}",
         )
         if error:
             row["error"] = error
             rows.append(row)
             continue
-        run = newest_run(page.get("workflow_runs", []))
+        runs = page.get("workflow_runs") or []
+        if not runs:
+            row["error"] = EMPTY_PAGE
+            rows.append(row)
+            continue
+        run = newest_run(runs)
         if run is None:
             rows.append(row)
             continue

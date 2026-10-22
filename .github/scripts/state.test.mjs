@@ -166,7 +166,7 @@ test("a check with no concluded run and one that cannot be read each get their o
       },
     }),
   );
-  assert.match(out, /monster  no concluded run among the newest 50 on main/);
+  assert.match(out, /monster  no concluded run among the newest 100 on main/);
   assert.match(out, /gone  UNREADABLE \(no workflow of that name\)/);
   assert.match(out, /checks 2 \(red 0, unfiled 0, unreadable 1\)/);
 });
@@ -267,16 +267,18 @@ test("the ops log prints seat and first line, the commits sha and subject", () =
   assert.match(out, /commits: 1 on main since 2026-10-15T20:11:13Z \(run 42\)\n    dd06127  filters: wire reverse/);
 });
 
-test("newest_run skips skipped and cancelled and sorts rather than trusting the page", () => {
-  const run = (created, conclusion) => ({ created_at: created, conclusion });
+test("newest_run judges main only, skips skipped and cancelled, and sorts rather than trusting the page", () => {
+  const run = (created, conclusion, head_branch = "main") => ({ created_at: created, conclusion, head_branch });
   const got = call("newest_run", [[
     run("2026-10-01T00:00:00Z", "success"),
+    run("2026-10-11T00:00:00Z", "failure", "claude/x"),
     run("2026-10-10T00:00:00Z", "skipped"),
     run("2026-10-09T00:00:00Z", "cancelled"),
     run("2026-10-08T00:00:00Z", "failure"),
   ]]);
-  assert.equal(got.conclusion, "failure");
+  assert.equal(got.created_at, "2026-10-08T00:00:00Z");
   assert.equal(call("newest_run", [[run("2026-10-10T00:00:00Z", "skipped")]]), null);
+  assert.equal(call("newest_run", [[run("2026-10-10T00:00:00Z", "failure", "claude/x")]]), null);
 });
 
 test("cite lists open issues before closed ones, newest first within each", () => {
@@ -340,6 +342,14 @@ console.log(JSON.stringify(hit[1]));
 }
 
 const ISSUE = { number: 1, title: "t", labels: [{ name: "product" }] };
+const GREEN = {
+  id: 5,
+  created_at: "2026-10-15T22:00:00Z",
+  conclusion: "success",
+  event: "schedule",
+  head_branch: "main",
+  html_url: "https://github.com/o/r/actions/runs/5",
+};
 
 test("end to end: the checks are read per workflow, a red is cited, the rest counted", () => {
   const run = (id, created, conclusion, event = "schedule") => ({
@@ -347,6 +357,7 @@ test("end to end: the checks are read per workflow, a red is cited, the rest cou
     created_at: created,
     conclusion,
     event,
+    head_branch: "main",
     html_url: `https://github.com/o/r/actions/runs/${id}`,
   });
   const proc = withGh(
@@ -435,6 +446,7 @@ test("end to end: one workflow's runs unreadable does not take the board down", 
           created_at: "2026-10-15T22:00:00Z",
           conclusion: "success",
           event: "push",
+          head_branch: "main",
           html_url: "u",
         }],
       },
@@ -466,13 +478,14 @@ test("end to end: a feature issue titled with the workflow's name does not file 
     created_at: "2026-10-10T09:46:00Z",
     conclusion: "failure",
     event: "schedule",
+    head_branch: "main",
     html_url: "https://github.com/o/r/actions/runs/1",
   };
   const proc = withGh(
     {
       "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
       "workflows/11/runs": { workflow_runs: [run] },
-      "workflows/12/runs": { workflow_runs: [] },
+      "workflows/12/runs": { workflow_runs: [GREEN] },
       "label:bug": { items: [] },
       "search/issues": { items: [{ number: 980, state: "open" }] },
       "pr list": [],
@@ -498,6 +511,7 @@ test("end to end: a bug titled with a hyphenated word holding the name does not 
     created_at: "2026-10-20T09:46:00Z",
     conclusion: "failure",
     event: "push",
+    head_branch: "main",
     html_url: "https://github.com/o/r/actions/runs/1",
   };
   const hook = { number: 1377, title: "deny-ci-background and deny-review-recompute match prose", state: "open" };
@@ -506,7 +520,7 @@ test("end to end: a bug titled with a hyphenated word holding the name does not 
     withGh(
       {
         "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
-        "workflows/11/runs": { workflow_runs: [] },
+        "workflows/11/runs": { workflow_runs: [GREEN] },
         "workflows/12/runs": { workflow_runs: [run] },
         "label:bug": { items },
         "pr list": [],
@@ -541,7 +555,6 @@ test("end to end: a PR-branch failure is never read for a workflow with no run o
   const proc = withGh(
     {
       "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
-      "branch=main": { workflow_runs: [] },
       "workflows/11/runs": { workflow_runs: [failure] },
       "workflows/12/runs": { workflow_runs: [failure] },
       "pr list": [],
@@ -553,7 +566,32 @@ test("end to end: a PR-branch failure is never read for a workflow with no run o
     ["--since", "2026-10-15T20:11:13Z"],
   );
   assert.equal(proc.status, 0, proc.stderr);
-  assert.match(proc.stdout, /monster  no concluded run among the newest 50 on main/);
+  assert.match(proc.stdout, /monster  no concluded run among the newest 100 on main/);
   assert.doesNotMatch(proc.stdout, /unfiled:|claude\/x/);
   assert.match(proc.stdout, /checks 2 \(red 0, unfiled 0, unreadable 0\)/);
+});
+
+// While Actions was degraded on 2026-10-22 the per-workflow page under
+// `branch=main` came back `total_count 0`, empty, for seventeen of eighteen
+// watched workflows, and the board read red 0 (run 39811812824). A watched
+// workflow has run, so the page is read across branches and an empty one is
+// a read that failed.
+test("end to end: an empty runs page is UNREADABLE and counted, never a no-run", () => {
+  const proc = withGh(
+    {
+      "actions/workflows?": { workflows: [{ name: "monster", id: 11 }, { name: "ci", id: 12 }] },
+      "workflows/11/runs": { total_count: 0, workflow_runs: [] },
+      "workflows/12/runs": { workflow_runs: [GREEN] },
+      "pr list": [],
+      "issue list": [ISSUE],
+      "issues/3/comments": [],
+      "issues/3": { comments: 0 },
+      "commits?": [],
+    },
+    ["--since", "2026-10-15T20:11:13Z"],
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /monster  UNREADABLE \(no runs on any branch: a page the Actions API served empty\)/);
+  assert.doesNotMatch(proc.stdout, /no concluded run/);
+  assert.match(proc.stdout, /checks 2 \(red 0, unfiled 0, unreadable 1\)/);
 });
