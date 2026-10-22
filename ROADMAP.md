@@ -173,8 +173,8 @@ decode-forever start moved to 1.0 by ADR-0050). Done 2026-09-01.
 
 ## M5: Parse engine (ADR-0074)
 
-Numbered by creation order, four items, done when the last closes
-(ADR-0047); the last closed 2026-10-20. The Speed tiers program until
+Numbered by creation order, done when the last closes (ADR-0047); the
+last closed 2026-10-20. The Speed tiers program until
 2026-10-18, when the operator's question (when to tackle speed, ratio on
 large files and memory) got one answer because the three are one
 mechanism: the optimal parse holds state per input byte (21 bytes, 41
@@ -198,7 +198,7 @@ Items, in [milestone M5](https://github.com/bugabinga/mothergod/milestone/4),
 in order: the field measured at every level, gzip 1 to 9, zstd 1 to 22,
 xz 0 to 9e, ratio with encode and decode MB/s and peak RSS on the finals,
 mothergod one row per level it offers, published and tracked on /status
-(#1340);
+(#1340), and those reports retimed one file at a time (#1324);
 the parse state budget and its cut (#1341); the headroom spent, threads
 over blocks and trials under 1 GiB (#1322), then the window or block where
 a file has long-range structure, read once on the finals (#1342).
