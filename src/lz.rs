@@ -8,6 +8,8 @@
 
 use std::num::NonZeroU32;
 
+use crate::bittree::ALPHABET;
+
 /// Largest backward distance a match may reference at [`Reach::Standard`]:
 /// 1 MiB. The match finders take their window as a parameter
 /// (`JOURNAL` S1-P4).
@@ -813,7 +815,7 @@ const SHORT_MATCH_MAX_DISTANCE: u32 = 4096;
 const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63];
 
 /// Previous-byte high-nibble contexts the literal price table conditions
-/// on (16 contexts of 256 symbols each).
+/// on (16 contexts of [`ALPHABET`] symbols each).
 const LITERAL_CONTEXTS: usize = 16;
 
 /// The byte of `data` before position `pos`, the literal-context input to
@@ -822,12 +824,12 @@ fn byte_before(data: &[u8], pos: usize) -> Option<u8> {
     data[..pos].last().copied()
 }
 
-/// Flat index into a [`LITERAL_CONTEXTS`]-by-256 literal table for `byte`,
+/// Flat index into a [`LITERAL_CONTEXTS`]-by-[`ALPHABET`] literal table for `byte`,
 /// given the byte preceding it in the stream (`None` at the very start,
 /// context 0).
 fn literal_price_index(prev_byte: Option<u8>, byte: u8) -> usize {
     let context = prev_byte.map_or(0, |b| usize::from(b >> 4));
-    context * 256 + usize::from(byte)
+    context * ALPHABET + usize::from(byte)
 }
 
 /// [`bucket`] values a match/rep length ever falls into: `bucket(1)` is 0,
@@ -900,7 +902,7 @@ fn to_prices(counts: &[u32]) -> Vec<f64> {
 /// [`Token`]s the DP chose between are ([`parse_optimal`]'s result).
 struct PriceTable {
     /// Literal price by `(previous byte's high nibble, byte)`:
-    /// [`LITERAL_CONTEXTS`] contexts of 256 symbols each.
+    /// [`LITERAL_CONTEXTS`] contexts of [`ALPHABET`] symbols each.
     literal: Vec<f64>,
     /// Match/rep length price by [`bucket`], [`LENGTH_BUCKETS`] entries.
     length: Vec<f64>,
@@ -934,7 +936,7 @@ struct PriceCounts {
 impl PriceCounts {
     fn new() -> Self {
         Self {
-            literal: vec![1; LITERAL_CONTEXTS * 256],
+            literal: vec![1; LITERAL_CONTEXTS * ALPHABET],
             length: vec![1; LENGTH_BUCKETS],
             offset: vec![1; OFFSET_BUCKETS],
             rep: 1,
@@ -984,14 +986,9 @@ impl PriceCounts {
     /// the rep flag against the full token count plus a Laplace pad of 2,
     /// matching the `+1` folded into every frequency entry.
     fn prices(&self, total_tokens: usize) -> PriceTable {
-        let mut literal = vec![0.0; LITERAL_CONTEXTS * 256];
-        for context in 0..LITERAL_CONTEXTS {
-            let row = &self.literal[context * 256..context * 256 + 256];
-            literal[context * 256..context * 256 + 256].copy_from_slice(&to_prices(row));
-        }
         let total_tokens = to_u32(total_tokens);
         PriceTable {
-            literal,
+            literal: self.literal.chunks(ALPHABET).flat_map(to_prices).collect(),
             length: to_prices(&self.length),
             offset: to_prices(&self.offset),
             rep: price(self.rep, total_tokens + 2) + EXTRA_HEADER_BITS_PRICE,
