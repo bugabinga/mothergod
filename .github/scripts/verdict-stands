@@ -34,11 +34,18 @@ Two routes stand, and `stands=true` skips the model on either:
     a fail    stamped with diff_id, under `changes-requested`: the author
               has changed nothing the reviewer reads, so a second run would
               post the same items and cost a review.
-    a pass    stamped with the id of this same diff under the title and
-              body as they were BEFORE this `edited` event, under
-              `agent-approved`: the edit touched nothing the merge depends
-              on, the head is the one that round reviewed, and the
-              auto-merge that round armed lands it. The pre-edit text is
+    a pass    on an `edited` event, under `agent-approved`, stamped with
+              the id of this same diff under the title and body as they
+              were BEFORE the edit, or as they are NOW: either way the
+              edit moved no head, the head is the one that round reviewed,
+              and the auto-merge that round armed lands it. The pre-edit
+              stamp is the edit that followed a PASS (#1243); the current
+              stamp is the PASS that followed the edit, posted by a
+              cancelled run whose Claude step outlived the cancel (PR
+              #1533: a push, then a body edit four seconds later; the
+              cancelled run stamped the edited text and the survivor,
+              matching the pre-edit text only, re-reviewed it, two PASS
+              verdicts 86 seconds apart on one head). The pre-edit text is
               GitHub's `changes` payload, handed in as CHANGES in the
               environment. `changes.title.from` rides only when the title
               changed and `changes.body.from` only when the body did, so
@@ -167,9 +174,11 @@ def decide(labels, comments, diff_id, before_id=""):
         return False, "the newest reviewer comment is a pass stamp and no title or body was edited; reviewing"
     if "agent-approved" not in labels:
         return False, "a pass stamp without agent-approved, so no approval is standing; reviewing"
+    if stamped == diff_id:
+        return True, f"the standing pass covers {diff_id[:12]}: the diff, title and body as they are now"
     if stamped != before_id:
-        return False, (f"the standing pass covers {stamped[:12]}, the text before this edit "
-                       f"was {before_id[:12]}; reviewing")
+        return False, (f"the standing pass covers {stamped[:12]}, this text is {diff_id[:12]} and the text "
+                       f"before this edit was {before_id[:12]}; reviewing")
     return True, f"the standing pass covers {before_id[:12]}: the diff is unchanged and the edit answered no [must]"
 
 
