@@ -20,6 +20,31 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-22: Editorial: the win count names its files, by name, not by class
+
+#1515, adopting bzip3's "excels at text or code" in the only shape our
+evidence holds. README now names the eight files mothergod wins and the
+four it loses widest, with a plain-word kind for each (star catalog,
+medical image), labels from the Silesia and Canterbury descriptions.
+`tests/claims.rs` holds both lists to the reports: the wins exactly, the
+losses as the top of the regret ranking.
+
+**Rejected: a class sentence, "wins on small text".** Two facts break
+it. The larger texts lose: `lcet10.txt` and `plrabn12.txt` by under
+0.01 bits per byte, `dickens` by 0.054. And executables land on both
+sides, `ooffice` a win and `sum` a top-four loss. A class claim would
+outrun its evidence, and no test can check that a file is "text". File
+names are checkable, and the reader can match them to their own data.
+"Six smallest text and source files" stays as a description of the
+list, true today by byte count; when a file changes sides the guard
+fails and the sentence gets rewritten, not patched.
+
+**Deferred: the site.** Its paragraph links the same reports, so the
+sentence would be backed there too. The README is where the evaluating
+engineer asks "will it win on my data", and one surface at a time keeps
+the guard simple. The site follows if the README version holds through
+a codec change.
+
 ## 2026-10-22: Survey: the site counter reads again, if read within the week
 
 Eighth survey, seven days after the seventh.
