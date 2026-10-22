@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the CLI's peak memory on a stream past 256 MiB, red over the bound.
+"""Measure the CLI's peak memory on two inputs, red over the bound.
 
 Extensionless and executable because agents type it as a command mid-session,
 like stalled-prs and survey-due, and because the weekly `memory-check`
@@ -13,18 +13,27 @@ followed on 2026-10-13, each a release build on a runner and one
 hand-rolled `/usr/bin/time` recipe apiece (#1109, #1145). The next PR on the
 path would have bought them again.
 
-This is that recipe, once. Zeros, 256 MiB plus one byte, 16 full blocks and
-a one-byte seventeenth, the smallest input past `decompress`'s 256 MiB cap
-and so the stream-of-frames path end to end, and the input every by-hand
-reading used; the file is sparse, so it costs no disk. Encode and decode run
+This is that recipe, once, on two inputs. The first is zeros, 256 MiB plus
+one byte, 16 full blocks and a one-byte seventeenth, the smallest input past
+`decompress`'s 256 MiB cap and so the stream-of-frames path end to end, and
+the input every by-hand reading used; the file is sparse, so it costs no
+disk. Zeros is the cheapest input to parse, though: it has few tokens, and
+the token lists are the part of a block's state that is not a per-position
+constant (`BLOCK_LEN`'s doc). Real data peaked 13% above zeros
+(879,396 KiB on `mozilla` against 775,816 KiB on zeros, #1396), so
+the second input is dense short matches: 36,554,432 bytes, two blocks and a
+part, of seeded random words from a 4096-word vocabulary, built here so the
+weekly lane downloads no corpus. Encode and decode run
 as children of this process and each child's peak resident set is read from
 `os.wait4`, the kernel's own number for that child, so no `time(1)` has to
 be installed, parsed or remembered. The round trip is compared byte for
 byte, because a bound on a broken decode is not a bound on anything. The
-script took 172 s end to end on a hosted runner, release build cached (run
-38468086345, `workflow_dispatch`, 2026-10-13, this corpus). One logged
-point, not a range: run times vary by runner, which is why the lane is
-weekly and the PR gate never runs it; the workflow's timeout and
+zeros input alone took 172 s end to end on a hosted runner, release build
+cached (run 38468086345, `workflow_dispatch`, 2026-10-13, that corpus); the
+words input adds 240 s (encode peak 869,912 KiB, 83% of the bound; a
+4-core runner session, release build, 2026-10-22, not a logged workflow run).
+One logged point, not a range: run times vary by runner, which is why the
+lane is weekly and the PR gate never runs it; the workflow's timeout and
 docs/TESTING.md defer to this figure rather than restate one.
 
 The bound is the published claim, 1 GiB, not a fit to the readings: a user
@@ -32,18 +41,20 @@ reads the changelog, not the lane's log. The readings print beside it so the
 log is the trend, and a peak that climbs toward the bound is visible before
 it crosses.
 
-Usage: memory-check [--bytes N] [--bound-kib K] <mothergod binary>
+Usage: memory-check [--bytes N] [--dense-bytes N] [--bound-kib K] <mothergod binary>
 
-Exit 0 when the round trip holds and both peaks are under the bound,
-strictly, because the claim says under. Exit 1 otherwise, naming which. The
-footer prints once both children ran: the bytes, both peaks in KiB, the bound
-and the compressed size, so a reader can tell a bound that holds from a
-measurement that never ran. A child that does not exit 0 ends the run before
-the footer, named instead.
+Exit 0 when every input's round trip holds and both its peaks are under the
+bound, strictly, because the claim says under. Exit 1 otherwise, naming the
+input and which. One footer per input prints once both children ran: the
+input, the bytes, both peaks in KiB, the bound and the compressed size, so a
+reader can tell a bound that holds from a measurement that never ran. A child
+that does not exit 0 ends the run before its footer, named instead.
 """
 
 import argparse
+import filecmp
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -53,7 +64,11 @@ import tempfile
 DEFAULT_BYTES = 256 * 1024 * 1024 + 1
 # The changelog's claim, "under 1 GiB", in the unit ru_maxrss reports.
 DEFAULT_BOUND_KIB = 1024 * 1024
-CHUNK = 16 * 1024 * 1024
+# Two 16 MiB blocks and a part, the size #1396 measured at 848,884 KiB on
+# journal words: both workers hold a full block's token lists at once.
+DEFAULT_DENSE_BYTES = 36_554_432
+VOCABULARY = 4096
+WORDS_PER_CHUNK = 1 << 20
 
 
 def run_child(argv, stdin_path, stdout_path):
@@ -76,14 +91,28 @@ def run_child(argv, stdin_path, stdout_path):
     sys.exit(1)
 
 
-def is_zeros(path, expected):
-    size = 0
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK):
-            if chunk != bytes(len(chunk)):
-                return False
-            size += len(chunk)
-    return size == expected
+def write_zeros(path, size):
+    with open(path, "wb") as f:
+        f.truncate(size)  # sparse: reads as zeros, costs no disk
+
+
+def write_words(path, size):
+    """`size` bytes of space-joined words drawn uniformly from a seeded vocabulary.
+
+    Seeded, so every run and every runner measures the same bytes; a word is
+    2 to 9 letters, so matches are short and the parse emits many tokens.
+    """
+    rng = random.Random(5)
+    vocabulary = [
+        "".join(rng.choices("abcdefghijklmnopqrstuvwxyz", k=rng.randint(2, 9)))
+        for _ in range(VOCABULARY)
+    ]
+    with open(path, "wb") as f:
+        written = 0
+        while written < size:
+            text = " ".join(rng.choices(vocabulary, k=WORDS_PER_CHUNK)).encode()
+            f.write(text[: size - written])
+            written += min(len(text), size - written)
 
 
 def verdict(encode, decode, bound_kib, lossless):
@@ -102,27 +131,36 @@ def verdict(encode, decode, bound_kib, lossless):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bytes", type=int, default=DEFAULT_BYTES)
+    parser.add_argument("--dense-bytes", type=int, default=DEFAULT_DENSE_BYTES)
     parser.add_argument("--bound-kib", type=int, default=DEFAULT_BOUND_KIB)
     parser.add_argument("binary")
     args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory(prefix="memory-check-") as tmp:
-        zeros = os.path.join(tmp, "zeros")
-        packed = os.path.join(tmp, "zeros.mgdc")
-        back = os.path.join(tmp, "zeros.out")
-        with open(zeros, "wb") as f:
-            f.truncate(args.bytes)  # sparse: reads as zeros, costs no disk
-        encode = run_child([args.binary], zeros, packed)
-        compressed = os.path.getsize(packed)
-        decode = run_child([args.binary, "-d"], packed, back)
-        lossless = is_zeros(back, args.bytes)
-
-    failures = verdict(encode, decode, args.bound_kib, lossless)
-    print(
-        f"memory-check: bytes {args.bytes} | encode peak {encode} KiB"
-        f" | decode peak {decode} KiB | bound {args.bound_kib} KiB"
-        f" | compressed {compressed} B | round trip {'ok' if lossless else 'DIFFERS'}"
+    inputs = (
+        ("zeros", write_zeros, args.bytes),
+        ("words", write_words, args.dense_bytes),
     )
+    failures = []
+    with tempfile.TemporaryDirectory(prefix="memory-check-") as tmp:
+        source = os.path.join(tmp, "source")
+        packed = os.path.join(tmp, "source.mgdc")
+        back = os.path.join(tmp, "source.out")
+        for label, write, size in inputs:
+            write(source, size)
+            encode = run_child([args.binary], source, packed)
+            compressed = os.path.getsize(packed)
+            decode = run_child([args.binary, "-d"], packed, back)
+            lossless = filecmp.cmp(source, back, shallow=False)
+            print(
+                f"memory-check: input {label} | bytes {size} | encode peak {encode} KiB"
+                f" | decode peak {decode} KiB | bound {args.bound_kib} KiB"
+                f" | compressed {compressed} B | round trip {'ok' if lossless else 'DIFFERS'}"
+            )
+            failures += [
+                f"{label}: {failure}"
+                for failure in verdict(encode, decode, args.bound_kib, lossless)
+            ]
+
     for failure in failures:
         print(f"memory-check: {failure}")
     sys.exit(1 if failures else 0)
