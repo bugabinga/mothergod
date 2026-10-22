@@ -898,9 +898,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
 dependencies = [
  "either",
 ]
@@ -978,14 +978,14 @@ dependencies = [
 
 [[package]]
 name = "markup_fmt"
-version = "0.27.5"
+version = "0.27.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da03959c6bf266b20096fffe9d872af592c8d75f8023bd12af9edfa95aefbeb0"
+checksum = "df2c4bb9a66c59714ba02c074187491e30daaf99127dcb287ce2aa8fa0c1a9fe"
 dependencies = [
  "aho-corasick",
  "anyhow",
  "css_dataset",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "memchr",
  "regex",
  "tiny_pretty 0.4.3",
@@ -1573,9 +1573,9 @@ dependencies = [
 
 [[package]]
 name = "rumdl"
-version = "0.2.79"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16327d5335d93032bfd5643d3ca5588719ac4e55682249b8d4b7d6b5343b2b08"
+checksum = "921d2d0698c506f7af875f89ce66d820314bcf5da79b35deba13d5a7b16e88e0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1587,6 +1587,7 @@ dependencies = [
  "libc",
  "log",
  "markdown",
+ "memchr",
  "mimalloc",
  "oxc_allocator",
  "oxc_parser",
@@ -2207,6 +2208,9 @@ name = "tiny_pretty"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c4c0dd4d9821b02f4a9848656f971304402049d80fb434d64a83890b2ade7d7"
+dependencies = [
+ "unicode-width",
+]
 
 [[package]]
 name = "tinystr"
