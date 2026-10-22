@@ -714,20 +714,33 @@ impl ResidualTree {
         (modeled, residual - modeled)
     }
 
-    /// Codes `value`'s residual bits below its [`lz::bucket`]: the top
-    /// `min(b, RESIDUAL_MODELED_BITS)` through this tree, most significant
-    /// first, then the rest raw.
-    fn encode(&mut self, ac: &mut Encoder, value: u32) {
+    /// Residual bits of `value` sent raw, the ones [`Self::walk`] leaves to
+    /// its caller.
+    fn raw_bits(value: u32) -> u32 {
+        Self::split(lz::bucket(value)).1
+    }
+
+    /// Hands `code` each node on the path of `value`'s modeled residual
+    /// bits, most significant first, with the bit taken there: the one walk
+    /// that [`Self::encode`] codes and [`Self::ideal_cost_bits`] prices.
+    fn walk(&mut self, value: u32, mut code: impl FnMut(&mut Model, usize)) {
         let b = lz::bucket(value);
         let (modeled, raw) = Self::split(b);
         let base = b << RESIDUAL_MODELED_BITS;
         let mut node = 1usize;
         for shift in (raw..raw + modeled).rev() {
             let bit = ((value >> shift) & 1) as usize;
-            self.nodes[base + node].encode(ac, bit);
+            code(&mut self.nodes[base + node], bit);
             node = node * 2 + bit;
         }
-        ac.encode_bits(value, raw);
+    }
+
+    /// Codes `value`'s residual bits below its [`lz::bucket`]: the top
+    /// `min(b, RESIDUAL_MODELED_BITS)` through this tree, most significant
+    /// first, then the rest raw.
+    fn encode(&mut self, ac: &mut Encoder, value: u32) {
+        self.walk(value, |model, bit| model.encode(ac, bit));
+        ac.encode_bits(value, Self::raw_bits(value));
     }
 
     /// Inverse of [`Self::encode`] for the decoded bucket `b`: returns the
@@ -751,16 +764,8 @@ impl ResidualTree {
     /// Ideal cost of `value`'s residual bits below its bucket, priced
     /// exactly as [`Self::encode`] codes them.
     fn ideal_cost_bits(&mut self, value: u32) -> f64 {
-        let b = lz::bucket(value);
-        let (modeled, raw) = Self::split(b);
-        let base = b << RESIDUAL_MODELED_BITS;
-        let mut node = 1usize;
-        let mut cost = f64::from(raw);
-        for shift in (raw..raw + modeled).rev() {
-            let bit = ((value >> shift) & 1) as usize;
-            cost += self.nodes[base + node].ideal_cost_bits(bit);
-            node = node * 2 + bit;
-        }
+        let mut cost = f64::from(Self::raw_bits(value));
+        self.walk(value, |model, bit| cost += model.ideal_cost_bits(bit));
         cost
     }
 }
