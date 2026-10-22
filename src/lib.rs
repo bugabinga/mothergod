@@ -600,11 +600,13 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 }
 
 /// The input bytes one [`compress`] frame covers. The optimal parse holds
-/// 21 bytes of state per input byte, so this sets the working set of one
-/// block's encode at roughly 364 MiB whatever the input length (#1341); the
-/// peak is that times the encodes running at once ([`write::Encoder`]'s doc),
-/// which `.github/scripts/memory-check` bounds. The ratio a block gives up by
-/// restarting its models is priced in `research/JOURNAL.md` S2-A116.
+/// 21 bytes of state per input byte, so this bounds one block's encode by the
+/// block and not by the input length (#1341): 16 MiB of zeros peaks at
+/// 364 MiB serially, `mozilla` at the `bench/corpus.toml` pin at 509 MiB
+/// (`research/JOURNAL.md` S2-A123, S2-A125). Blocks encoding at once do not
+/// add up to a multiple of either; [`write::Encoder`]'s doc and
+/// `.github/scripts/memory-check` own that peak. The ratio a block gives up
+/// by restarting its models is priced in S2-A116.
 ///
 /// The 21 bytes, by array of the DP pass (`lz::dp_round`):
 ///
@@ -619,8 +621,8 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 /// block, because no move reaches more than `MAX_MATCH_LEN` past the
 /// position being expanded; they were 8 and 12 bytes per position until
 /// S2-A123. The token lists between rounds, the greedy seed's `prev` array
-/// and the models sit on top and are not per-position constants: 16 MiB of
-/// zeros, encoded serially, peaked at 364 MiB (S2-A123).
+/// and the models sit on top and are not per-position constants, which is why
+/// real data peaks above zeros (S2-A124).
 const BLOCK_LEN: usize = 16 * 1024 * 1024;
 
 /// Compresses `input` into a self-describing stream of frames.

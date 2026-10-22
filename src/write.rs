@@ -11,9 +11,10 @@ use super::{BLOCK_LEN, compress_block};
 
 /// Encodes of one block of input that run at once at most, whether the block
 /// is one of a stream's or one of the trials of a block's filter search:
-/// two, because an encode's working set is about 364 MiB (`BLOCK_LEN`'s doc)
-/// and the bound the CLI and the library state is 1 GiB, which holds two
-/// and not three (`research/JOURNAL.md` S2-A125). A machine with one core
+/// two, because an encode's working set on real data is about 509 MiB
+/// (`mozilla`, 520,928 KiB serially) and the bound the CLI and the library
+/// state is 1 GiB, which holds two and not three (`research/JOURNAL.md`
+/// S2-A125). A machine with one core
 /// encodes serially, in the calling thread, as before.
 const MAX_CONCURRENT_ENCODES: usize = 2;
 
