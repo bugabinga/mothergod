@@ -142,8 +142,10 @@ Shared house rules; your per-agent voice rides in your prompt from
     the pin a verdict or merge covers is not a citation. A3 a URL is a
     citation; the point rides inline.
   - Title, of a PR and the squash commit it becomes: T1 `area: effect`,
-    imperative, at most 72 characters, no period. T2 it stands alone as a
-    release-notes line; one that cannot names a PR doing two things.
+    the effect in present tense (what holds after the merge, or the
+    imperative that makes it so), at most 72 characters, no period. T2 it
+    stands alone as a release-notes line; one that cannot names a PR doing
+    two things.
   - PR body: P1 three sentences minimum: the problem, what happens now,
     what happens after. P2 why this way, and the alternative rejected.
     P3 a new round opens with what changed since the last. P4 open
