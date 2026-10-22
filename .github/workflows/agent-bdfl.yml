@@ -162,7 +162,7 @@ jobs:
           # lever. Same predicate as TRIGGER_EVENT below, for the same reason.
           discretionary: ${{ github.event_name == 'workflow_dispatch' && inputs.source == 'cron' }}
 
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         if: steps.guard.outputs.paused != 'true'
         with:
           toolchain: stable
@@ -170,7 +170,7 @@ jobs:
 
       - id: claude
         if: steps.guard.outputs.paused != 'true'
-        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
+        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1
         env:
           # Operator-issued admin PAT (ADR-0009). gh keeps using the app
           # token by default; admin/settings calls opt in explicitly with
