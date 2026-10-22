@@ -6,8 +6,9 @@
 // repository in a temp dir, because the claim that matters is which pushes
 // and edits change the id: a merge of main that touches no PR file keeps
 // it, an indentation-only fix changes it, a body edit changes it, and an
-// edit after a PASS stands only on the pre-edit text GitHub's `changes`
-// payload carries.
+// edit after a PASS stands on the pre-edit text GitHub's `changes`
+// payload carries, or on the current text when the PASS came after the
+// edit.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -83,6 +84,17 @@ test("a standing pass on the pre-edit id with agent-approved stands: the edit an
   );
   assert.equal(stands, true);
   assert.match(why, /answered no \[must\]/);
+});
+
+test("a pass stamped with the current id under agent-approved stands on an edit: the PASS came after the edit (#1533)", () => {
+  const [stands, why] = decide(
+    ["agent-approved"],
+    [reviewer("holds", "2026-10-22T18:36:15Z", ["pass", ID])],
+    ID,
+    OTHER,
+  );
+  assert.equal(stands, true);
+  assert.match(why, /as they are now/);
 });
 
 test("a pass stamp with nothing edited reviews, agent-approved or not (#1041's refresh)", () => {
@@ -301,6 +313,19 @@ test("end to end: a body edit after a pass stands on the pre-edit body (#1243's 
   assert.notEqual(second.diff_id, first.diff_id);
   assert.equal(second.stands, "true");
   assert.match(second.stderr, /answered no \[must\]/);
+});
+
+test("end to end: a PASS posted after the edit stands on the current text (#1533's shape)", () => {
+  const { dir, base, head } = prBranch();
+  const edited = { ...passedOn(""), body: "why, restated after the push" };
+  const changes = JSON.stringify({ body: { from: "why" } });
+  const first = stands(dir, "1", base, head, edited, changes);
+  assert.equal(first.stands, "false");
+  const late = { ...edited, comments: [reviewer("holds", "2026-10-22T18:36:15Z", ["pass", first.diff_id])] };
+  const second = stands(dir, "1", base, head, late, changes);
+  assert.equal(second.diff_id, first.diff_id);
+  assert.equal(second.stands, "true");
+  assert.match(second.stderr, /as they are now/);
 });
 
 test("end to end: a title-only edit after a pass stands, the body falling back to its current value", () => {
