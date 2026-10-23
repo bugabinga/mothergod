@@ -207,6 +207,10 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- library: `decodes_incrementally` answers for a frame the encoder chose a
+  2 MiB reach for, where it returned `Err(Corrupt)` for a frame `decompress`
+  accepts, so a streaming caller no longer rejects large text frames up front
+  (#1554).
 - bench: the encode and decode MB/s in `docs/benchmarks/` reports are timed
   one file at a time, so a figure compares between files; the old run
   timed 12 threads on 4 cores, and `dickens` read 0.022 MB/s against 0.104

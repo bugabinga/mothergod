@@ -916,9 +916,7 @@ pub fn decodes_incrementally(input: &[u8]) -> Result<bool, Error> {
     for frame in Frames::new(input) {
         let frame = frame?;
         if frame.method == Method::Lz {
-            let selector = frame.payload.first_chunk().ok_or(Error::Truncated)?;
-            let candidate =
-                filters::select::Candidate::from_header_bytes(*selector).ok_or(Error::Corrupt)?;
+            let (candidate, _reach, _rest) = codec::split_selector(frame.payload)?;
             incremental &= candidate.streaming().is_some();
         }
     }

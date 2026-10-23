@@ -946,6 +946,23 @@ fn decodes_incrementally_pins_the_lz_version_boundary() {
 }
 
 #[test]
+fn decodes_incrementally_reads_a_wide_reach_selector_as_decompress_does() {
+    // #1554: `codec::encode` sets `WIDE_REACH_BIT` in the selector's kind
+    // byte when the wide trial wins; the bit is reach, not filter, so the
+    // answer is the candidate's alone.
+    let data = b"the quick brown fox jumps over the lazy dog. ".repeat(50);
+    let mut frame = compress(&data);
+    assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
+    assert_eq!(decodes_incrementally(&frame), Ok(true));
+    frame[HEADER_LEN] |= 0x80;
+    let check_at = frame.len() - 4;
+    let check = crc32::crc32(&frame[..check_at]);
+    frame[check_at..].copy_from_slice(&check.to_le_bytes());
+    assert_eq!(decompress(&frame), Ok(data));
+    assert_eq!(decodes_incrementally(&frame), Ok(true));
+}
+
+#[test]
 fn malformed_filter_selector_is_rejected_as_corrupt() {
     // [0, 1]: kind 0 (Identity) never carries a nonzero param, so
     // Candidate::from_header_bytes names no real candidate for it
