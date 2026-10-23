@@ -402,17 +402,24 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
     }
 }
 
-/// [`EncodeSink`]'s column-coding state for a [`Candidate::Transpose`]
-/// trial: `columns` is the candidate's own param, `data_len` is the
-/// filtered data's length (`crate::column::column_of`'s `len`, always the
-/// pre-filter length too since a `Transpose` frame's filter preserves
-/// length), and
-/// `state` is the seventh expert's own fresh bank/weight/SSE state for this
-/// one trial encode.
-struct ColumnCoding<'a> {
+/// The column-coding state of a [`Candidate::Transpose`] frame, in
+/// [`EncodeSink`] and [`VecSink`] alike: `columns` is the candidate's own
+/// param, `data_len` is the filtered data's length (`crate::column::column_of`'s
+/// `len`, always the pre-filter length too since a `Transpose` frame's filter
+/// preserves length), and `state` is the seventh expert's own fresh
+/// bank/weight/SSE state for this one trial encode or frame decode.
+struct ColumnCoding {
     columns: NonZeroUsize,
     data_len: usize,
-    state: &'a mut ColumnExpertState,
+    state: ColumnExpertState,
+}
+
+impl ColumnCoding {
+    /// The [`ColumnExpertState`] bank the literal at `position` of the
+    /// filtered stream codes under.
+    fn bank(&self, position: usize) -> usize {
+        column::bank_of(position, self.columns, self.data_len, MAX_COLUMN_BANKS)
+    }
 }
 
 /// [`TokenSink`] that drives a real [`Encoder`], [`walk_tokens`]'s use in
@@ -423,7 +430,7 @@ struct ColumnCoding<'a> {
 /// trial (`research/JOURNAL.md` S1-P5).
 struct EncodeSink<'a> {
     ac: &'a mut Encoder,
-    column: Option<ColumnCoding<'a>>,
+    column: Option<ColumnCoding>,
 }
 
 impl TokenSink for EncodeSink<'_> {
@@ -434,15 +441,10 @@ impl TokenSink for EncodeSink<'_> {
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
         match &mut self.column {
             Some(col) => {
-                let bank = column::bank_of(
-                    context.position,
-                    col.columns,
-                    col.data_len,
-                    MAX_COLUMN_BANKS,
-                );
+                let bank = col.bank(context.position);
                 models
                     .literal
-                    .encode_column(self.ac, context, byte, bank, col.state);
+                    .encode_column(self.ac, context, byte, bank, &mut col.state);
             }
             None => {
                 models
@@ -587,14 +589,11 @@ fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Toke
 
     let mut models = Models::new();
     let mut ac = Encoder::new();
-    let mut column_state = columns.map(|_| ColumnExpertState::new(MAX_COLUMN_BANKS));
-    let column = columns
-        .zip(column_state.as_mut())
-        .map(|(columns, state)| ColumnCoding {
-            columns,
-            data_len: data.len(),
-            state,
-        });
+    let column = columns.map(|columns| ColumnCoding {
+        columns,
+        data_len: data.len(),
+        state: ColumnExpertState::new(MAX_COLUMN_BANKS),
+    });
     walk_tokens(
         tokens,
         data,
@@ -1275,15 +1274,12 @@ fn decode_tokens<S: DecodeSink>(
 
 /// [`DecodeSink`] for [`decode`]'s whole-buffer path: a literal byte is
 /// pushed onto `output`, and a copy replays [`copy_checked`] over what
-/// `output` already holds. `column` mirrors [`encode_tokens`]'s
-/// `ColumnCoding`, but owned here rather than borrowed (there is no
-/// per-candidate trial to share it across): `Some` exactly when this
-/// frame's candidate is [`Candidate::Transpose`], selecting the
-/// column-keyed literal expert over [`crate::literal::Literal::decode_logit_sse`].
+/// `output` already holds. `column` is `Some` exactly when this frame's
+/// candidate is [`Candidate::Transpose`], selecting the column-keyed literal
+/// expert over [`crate::literal::Literal::decode_logit_sse`].
 struct VecSink<'a> {
     output: &'a mut Vec<u8>,
-    declared_len: usize,
-    column: Option<(NonZeroUsize, ColumnExpertState)>,
+    column: Option<ColumnCoding>,
 }
 
 impl DecodeSink for VecSink<'_> {
@@ -1300,14 +1296,11 @@ impl DecodeSink for VecSink<'_> {
         context: Context,
     ) -> Result<u8, Error> {
         let byte = match &mut self.column {
-            Some((columns, state)) => {
-                let bank = column::bank_of(
-                    context.position,
-                    *columns,
-                    self.declared_len,
-                    MAX_COLUMN_BANKS,
-                );
-                models.literal.decode_column(ac, context, bank, state)
+            Some(col) => {
+                let bank = col.bank(context.position);
+                models
+                    .literal
+                    .decode_column(ac, context, bank, &mut col.state)
             }
             None => models
                 .literal
@@ -1376,7 +1369,13 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
 
     let column = candidate
         .columns()
-        .map(|columns| ColumnExpertState::try_new(MAX_COLUMN_BANKS).map(|state| (columns, state)))
+        .map(|columns| {
+            ColumnExpertState::try_new(MAX_COLUMN_BANKS).map(|state| ColumnCoding {
+                columns,
+                data_len: declared_len,
+                state,
+            })
+        })
         .transpose()?;
     // Reserved fallibly and exactly up front, not left to grow through
     // `push`/`extend`'s doubling: `declared_len` is already bounded above,
@@ -1390,7 +1389,6 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
 
     let mut sink = VecSink {
         output: &mut output,
-        declared_len,
         column,
     };
     decode_tokens(token_count, declared_len, reach, ac_bytes, &mut sink)?;
