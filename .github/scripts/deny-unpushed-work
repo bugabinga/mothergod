@@ -142,8 +142,10 @@ def load_stamp(path: str, now: float) -> dict:
     # ValueError is the parent of json.JSONDecodeError and of the
     # UnicodeDecodeError that open(encoding="utf-8") raises on a stamp
     # that is not UTF-8 (#1398); OverflowError is the integer too large
-    # for a float in `now - start`; any unreadable stamp means a fresh start.
-    except (OSError, ValueError, OverflowError):
+    # for a float in `now - start`; RecursionError is a stamp nested past
+    # the parser's limit, which json.load raises before any decode error
+    # (#1525); any unreadable stamp means a fresh start.
+    except (OSError, ValueError, OverflowError, RecursionError):
         pass
     stamp = {"start": now, "fired": False}
     save_stamp(path, stamp)
