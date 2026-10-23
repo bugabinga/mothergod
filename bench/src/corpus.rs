@@ -13,7 +13,10 @@
 //! [`fetch_and_cache`] tries `url` first, then each mirror in listed
 //! order, against the one unchanged `sha256` pin, stopping at the first
 //! source whose bytes verify (issue #875: a host's download going dark
-//! should not block the whole gate). The pinned bytes
+//! should not block the whole gate). A source that fails with an I/O
+//! error is retried [`FETCH_ATTEMPTS`] times before the next source
+//! is tried (issue #1568: one connection reset on a mirrorless origin
+//! was the whole pass). The pinned bytes
 //! are the compressed download, not the corpus file itself:
 //! [`decompress_silesia`] unwraps one Silesia file's bzip2 stream, and
 //! [`extract_canterbury`] lists every file inside Canterbury's
@@ -26,6 +29,15 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Attempts per source on an I/O error. A checksum mismatch is never
+/// retried: the same URL serves the same wrong bytes.
+const FETCH_ATTEMPTS: usize = 3;
+
+/// Longest a socket read may block, so a hung origin fails in about a
+/// minute instead of the OS's TCP timeout (twelve minutes in #1568).
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// One `[[file]]` entry from `bench/corpus.toml`: a pinned download.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,7 +169,8 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// a silently wrong result (`research/corpus/POLICY.md`, "refuses to run
 /// on a checksum mismatch"). Tries the entry's `url`, then each of its
 /// `mirrors` in order, stopping at the first source whose bytes verify;
-/// one source refusing the request (issue #875) does not fail the fetch
+/// a source failing with an I/O error is tried up to [`FETCH_ATTEMPTS`]
+/// times before the next one, and one source refusing the request (issue #875) does not fail the fetch
 /// as long as a later source still produces the pinned bytes.
 ///
 /// # Errors
@@ -200,18 +213,25 @@ fn fetch_and_cache_with(
         std::iter::once(entry.url.as_str()).chain(entry.mirrors.iter().map(String::as_str));
     let mut last_err = None;
     for url in sources {
-        let result = fetch(url).and_then(|bytes| {
-            let actual = sha256_hex(&bytes);
-            if actual == entry.sha256 {
-                Ok(bytes)
-            } else {
-                Err(FetchError::ChecksumMismatch {
-                    name: name.to_string(),
-                    expected: entry.sha256.clone(),
-                    actual,
-                })
+        let mut attempt = 0;
+        let result = loop {
+            attempt += 1;
+            let result = fetch(url).and_then(|bytes| {
+                let actual = sha256_hex(&bytes);
+                if actual == entry.sha256 {
+                    Ok(bytes)
+                } else {
+                    Err(FetchError::ChecksumMismatch {
+                        name: name.to_string(),
+                        expected: entry.sha256.clone(),
+                        actual,
+                    })
+                }
+            });
+            if !matches!(result, Err(FetchError::Io(_))) || attempt == FETCH_ATTEMPTS {
+                break result;
             }
-        });
+        };
         match result {
             Ok(bytes) => {
                 std::fs::create_dir_all(cache_dir)?;
@@ -231,7 +251,10 @@ fn cache_path_for(cache_dir: &Path, entry: &ManifestEntry) -> PathBuf {
 }
 
 fn http_get(url: &str) -> Result<Vec<u8>, FetchError> {
-    let response = ureq::get(url)
+    let response = ureq::AgentBuilder::new()
+        .timeout_read(READ_TIMEOUT)
+        .build()
+        .get(url)
         .call()
         .map_err(|err| FetchError::Io(std::io::Error::other(err.to_string())))?;
     let mut bytes = Vec::new();
@@ -432,6 +455,60 @@ mod tests {
         });
         assert_eq!(result.unwrap(), payload);
         assert!(cache_dir.join(&expected).exists());
+    }
+
+    #[test]
+    fn fetch_and_cache_retries_a_source_after_an_io_error() {
+        let payload = b"second attempt bytes".to_vec();
+        let expected = super::sha256_hex(&payload);
+        let manifest = manifest_with_one_entry(&expected);
+        let cache_dir = temp_cache_dir("retry");
+
+        let calls = std::cell::Cell::new(0);
+        let result = fetch_and_cache_with(&manifest, "fixture", &cache_dir, |_url| {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 {
+                Err(FetchError::Io(std::io::Error::other("connection reset")))
+            } else {
+                Ok(payload.clone())
+            }
+        });
+        assert_eq!(result.unwrap(), payload);
+        assert_eq!(calls.get(), 2);
+        assert!(cache_dir.join(&expected).exists());
+    }
+
+    #[test]
+    fn fetch_and_cache_gives_up_after_the_attempt_budget_with_the_last_error() {
+        let manifest = manifest_with_one_entry(&super::sha256_hex(b"never served"));
+        let cache_dir = temp_cache_dir("retry-exhausted");
+
+        let calls = std::cell::Cell::new(0);
+        let result = fetch_and_cache_with(&manifest, "fixture", &cache_dir, |_url| {
+            calls.set(calls.get() + 1);
+            Err(FetchError::Io(std::io::Error::other(format!(
+                "reset {}",
+                calls.get()
+            ))))
+        });
+        assert_eq!(calls.get(), super::FETCH_ATTEMPTS);
+        assert!(
+            matches!(result, Err(FetchError::Io(err)) if err.to_string() == format!("reset {}", super::FETCH_ATTEMPTS))
+        );
+    }
+
+    #[test]
+    fn fetch_and_cache_does_not_retry_a_checksum_mismatch() {
+        let manifest = manifest_with_one_entry(&super::sha256_hex(b"pinned"));
+        let cache_dir = temp_cache_dir("no-retry-mismatch");
+
+        let calls = std::cell::Cell::new(0);
+        let result = fetch_and_cache_with(&manifest, "fixture", &cache_dir, |_url| {
+            calls.set(calls.get() + 1);
+            Ok(b"other".to_vec())
+        });
+        assert_eq!(calls.get(), 1);
+        assert!(matches!(result, Err(FetchError::ChecksumMismatch { .. })));
     }
 
     #[test]
