@@ -20,6 +20,19 @@ pub struct Report {
     pub silent: usize,
 }
 
+impl Report {
+    /// Bit flips a frame of `bytes` offers: every bit of it.
+    pub fn flip_space(&self) -> usize {
+        self.bytes * 8
+    }
+
+    /// Truncations a frame of `bytes` offers: every proper prefix, the empty
+    /// one included.
+    pub fn truncation_space(&self) -> usize {
+        self.bytes
+    }
+}
+
 /// The `picks` positions of `0..total` a probe decodes: all of them when
 /// `total <= cap`, else `cap` positions, one in each of `cap` equal cells of
 /// `0..total`, so the sample covers the whole frame and no position repeats.
@@ -54,13 +67,13 @@ pub fn probe_with<E>(
         truncations: 0,
         silent: 0,
     };
-    for bit in positions(frame.len() * 8, cap) {
+    for bit in positions(report.flip_space(), cap) {
         let mut flipped = frame.to_vec();
         flipped[bit / 8] ^= 1 << (bit % 8);
         report.flips += 1;
         report.silent += usize::from(silent(&flipped));
     }
-    for len in positions(frame.len(), cap) {
+    for len in positions(report.truncation_space(), cap) {
         report.truncations += 1;
         report.silent += usize::from(silent(&frame[..len]));
     }

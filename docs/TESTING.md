@@ -232,7 +232,8 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   mothergod-bench --release --bin frame_probe -- <file>...` compresses each
   file and decodes every truncation and single-bit flip of its frame,
   exhaustive below `--max-decodes` each (default 20000) and a seeded sample
-  across the frame above it. It prints `bytes`, `flips`, `truncations` and
+  across the frame above it. It prints `bytes`, `flips` and `truncations`
+  (each `<decoded> of <offered>`, so a capped run states its coverage) and
   `silent` per file and exits non-zero on any silent wrong output. The probe
   is `tests/fit/integrity.rs`, shared with the FIT row `integrity-check`.
   Files over one 16 MiB block are refused: several frames make a truncation

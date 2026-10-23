@@ -2,9 +2,11 @@
 //! file named on the command line, then decodes every single-bit flip and
 //! every truncation of its frame, exhaustive below `--max-decodes` each and
 //! a seeded sample across the whole frame above it. Prints one line per
-//! file, `<path>: bytes <n>, flips <n>, truncations <n>, silent <n>`, and
-//! exits non-zero when any mutation decodes to bytes other than the file's,
-//! or a file cannot be probed. The probe is `tests/fit/integrity.rs`, the
+//! file, `<path>: bytes <n>, flips <n> of <total>, truncations <n> of
+//! <total>, silent <n>`, each total the mutations the frame offers, so a
+//! capped run states its coverage, and exits non-zero when any mutation
+//! decodes to bytes other than the file's, or a file cannot be probed. The
+//! probe is `tests/fit/integrity.rs`, the
 //! same function the `integrity-check` FIT row runs, so what counts as
 //! silent has one definition.
 //!
@@ -69,8 +71,13 @@ fn main() -> ExitCode {
         match probe_file(Path::new(&path), cap) {
             Ok(report) => {
                 println!(
-                    "{path}: bytes {}, flips {}, truncations {}, silent {}",
-                    report.bytes, report.flips, report.truncations, report.silent
+                    "{path}: bytes {}, flips {} of {}, truncations {} of {}, silent {}",
+                    report.bytes,
+                    report.flips,
+                    report.flip_space(),
+                    report.truncations,
+                    report.truncation_space(),
+                    report.silent
                 );
                 failed |= report.silent != 0;
             }
