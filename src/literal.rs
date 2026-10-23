@@ -214,17 +214,6 @@ fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) 
     (weight * exp_fn(gradient)).clamp(MIN_WEIGHT, MAX_WEIGHT)
 }
 
-/// Bits the cumulative table `cum` charges `symbol`: `-log2` of its share of
-/// `cum[ALPHABET]`.
-fn cum_cost_bits(cum: &[u64; ALPHABET + 1], symbol: usize) -> f64 {
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "cum entries are fixed-point sums bounded well under 2^53 (FIXED_POINT_SCALE is 2^32, ALPHABET is 256), so this loses no precision that matters"
-    )]
-    let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
-    bittree::ideal_cost_bit(true, probability)
-}
-
 /// Per-byte modeling context every [`Literal`] coding path reads to select
 /// which banks blend at this position: the previous two bytes (`0` before
 /// the start of output), the output position, whether the previous token was
@@ -749,9 +738,13 @@ impl Literal {
     pub fn ideal_cost_bits(&mut self, context: Context, byte: u8) -> f64 {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
         let symbol = usize::from(byte);
-        let bits = cum_cost_bits(&cum, symbol);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "cum entries are fixed-point sums bounded well under 2^53 (FIXED_POINT_SCALE is 2^32, ALPHABET is 256), so this loses no precision that matters"
+        )]
+        let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
         self.update(&bank_indices, weight_index, symbol, exp);
-        bits
+        crate::surprisal(probability)
     }
 
     /// [`Self::ideal_cost_bits`]'s counterpart over the blended `cum`
