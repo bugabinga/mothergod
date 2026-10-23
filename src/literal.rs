@@ -414,9 +414,7 @@ const LOGISTIC_INITIAL_WEIGHT: f64 = 1.0 / 6.0;
 /// bit-tree node: the node's error, target bit minus the pre-refine mix
 /// `p`, nudges each expert's weight by `rate` scaled by that expert's own
 /// stretched input. Split out of [`Literal::logistic_cost_bits`] so this
-/// arithmetic is checkable against the walk's chained state (#783's
-/// mutants outlived the walk-level tests; issue's shape is
-/// `test-craft`'s survivor-triage).
+/// arithmetic is checkable against the walk's chained state.
 fn logistic_gradient_step(
     weights: &mut [f64; EXPERTS],
     stretched: &[f64; EXPERTS],
@@ -435,9 +433,8 @@ fn logistic_gradient_step(
 /// probability, [`stretch`]ed and weighted-summed against `weights`.
 /// Shared by every [`Literal::code_bit_walk`] instantiation, the one step
 /// they all take before diverging into their own rate schedules. Split out
-/// on [`logistic_gradient_step`]'s own grounds (#783): checkable against
-/// directly-chosen prefix sums, independent of the walk's chained state
-/// (`test-craft`'s survivor-triage, #810).
+/// so it is checkable against directly-chosen prefix sums, independent of
+/// the walk's chained state.
 fn logistic_mix_node(
     prefix: &[[u64; ALPHABET + 1]; EXPERTS],
     weights: &[f64; EXPERTS],
@@ -463,9 +460,8 @@ fn logistic_mix_node(
 /// prediction error (target bit minus the pre-refine mix `p`)
 /// and advances `recent` at `recent_decay` and `baseline` at
 /// [`SURPRISE_BASELINE_DECAY`], both through [`surprise_ema_update`].
-/// Split out on [`logistic_gradient_step`]'s own grounds (#783): checkable
-/// against directly-chosen `bit`/`p` pairs, independent of the walk's
-/// chained state (`test-craft`'s survivor-triage, #810).
+/// Split out so it is checkable against directly-chosen `bit`/`p` pairs,
+/// independent of the walk's chained state.
 fn surprise_error_tracking_step(
     recent: &mut f64,
     baseline: &mut f64,
@@ -656,22 +652,9 @@ impl Literal {
     /// increasing and `cum[ALPHABET]` is always the true total passed to
     /// the coder.
     ///
-    /// Two passes, not one fused loop over `symbol` (`research/JOURNAL.md`
-    /// S1-P6, issue #447): the per-symbol multiply-add below is
-    /// independent across symbols, but the original single loop also
-    /// carried `acc`'s running total through the same iterations, a
-    /// loop-carried dependency that keeps the optimizer from
-    /// autovectorizing the multiply-add at all. Splitting the prefix sum
-    /// into its own pass over already-computed values leaves the
-    /// axpy-shaped accumulation (pass one) free of any cross-symbol
-    /// dependency. This changes only *when* each addition happens, never
-    /// its value: pass one still sums the same six per-expert terms for a
-    /// given symbol in the same expert order (0..EXPERTS) the old fused
-    /// loop did, and pass two, [`cumulate`], performs the identical
-    /// `(mixed >> 16) + 1` running sum. `mix`'s output is therefore bit-for-bit identical to
-    /// the pre-split version; this is a speed change, not a format change
-    /// (hard rule 5), so no golden fixture or `FORMAT_VERSION` bump is
-    /// needed.
+    /// Pass one, the per-expert multiply-add, has no cross-symbol
+    /// dependency, so it autovectorizes; pass two, [`cumulate`], is the
+    /// prefix sum.
     fn mix(&self, bank_indices: &[usize; EXPERTS], weight_index: usize) -> [u64; ALPHABET + 1] {
         let weights = &self.weights[weight_index];
         let weight_sum: f64 = weights.iter().sum();
