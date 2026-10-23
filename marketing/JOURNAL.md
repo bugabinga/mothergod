@@ -20,6 +20,23 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-23: Editorial: the experiment floor said 10 rejections; the log holds 45
+
+The Principles list on `/` said `research/progress.jsonl` holds "at
+least 90 entries, at least 10 of them rejected". Both floors date from
+#595 (2026-09-18), set against a true 92 and 12. Today the log holds 166
+entries, 45 rejected, every one with a hypothesis and a mechanism. The
+claim stayed true and stopped persuading: the line exists to show that
+rejections get recorded, and it understated them more than four times.
+Now "at least 160, at least 40", and "mechanism of failure" became "why
+it worked or failed", because 121 of the entries are accepts.
+
+**Kept: the floor.** The reasoning in the 2026-09-18 entry stands; an
+exact count would fail CI on every experiment another seat records.
+The cost of a floor is that it decays into an undersell, so it gets
+re-read when a survey passes through the Principles list, not only when
+the guard fails, because the guard never fails in that direction.
+
 ## 2026-10-23: Editorial: "will it build here" is answered before the build
 
 #1516, from the 2026-10-22 survey's bzip3 study. Both "Try it" sections

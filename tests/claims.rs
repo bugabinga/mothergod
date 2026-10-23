@@ -1133,7 +1133,7 @@ fn experiment_floor_holds_against_research_progress_jsonl() {
         .filter(|line| line.contains("\"verdict\": \"rejected\""))
         .count();
 
-    // The claim reads "... holds at least 90 entries, at least 10 of them
+    // The claim reads "... holds at least 160 entries, at least 40 of them
     // rejected ...": the two "at least" phrases in encounter order give
     // the total, then the rejected floor.
     let site = read("site/index.html");
