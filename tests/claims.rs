@@ -731,7 +731,7 @@ fn published_throughput_matches_its_generated_reports() {
 fn frontier_throughput(report_file: &str, level: &str) -> [f64; 2] {
     let text = read(&format!("docs/benchmarks/{report_file}"));
     let row = line_containing(&text, &format!("| {level} |"));
-    // Columns after the level: b/B, encode MB/s, decode MB/s, peak MB.
+    // Columns after the level: b/B, encode MB/s, decode MB/s, peak MiB.
     let numbers = markdown_numbers(row);
     [numbers[1], numbers[2]]
 }

@@ -150,7 +150,7 @@ pub fn format_table(mothergod: &Row, field: &[Row]) -> String {
     rows.sort_by(|(a, _), (b, _)| a.bpb().total_cmp(&b.bpb()));
 
     let mut out = String::from(
-        "| level | b/B | encode MB/s | decode MB/s | peak MB |\n|---|---|---|---|---|\n",
+        "| level | b/B | encode MB/s | decode MB/s | peak MiB |\n|---|---|---|---|---|\n",
     );
     for (row, is_mothergod) in rows {
         let peak = row
@@ -195,7 +195,7 @@ pub fn format_section(mothergod: &Row, field: &[Row]) -> String {
         "\n## Frontier: every level of gzip, zstd and xz beside mothergod\n\n\
          Each row sums this corpus's files. Every process ran one at a time, \
          on the machine named above, from a file on stdin: encode and decode \
-         MB/s are total bytes over total wall-clock seconds, and peak MB is \
+         MB/s are total bytes over total wall-clock seconds, and peak MiB is \
          the largest resident set of any one process (`/usr/bin/time -f %M`). \
          The speed axis of the two neighbour lines is encode MB/s (issue \
          #1340).\n\n{}",
@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(
             format_table(&mg, &field),
             "\
-| level | b/B | encode MB/s | decode MB/s | peak MB |
+| level | b/B | encode MB/s | decode MB/s | peak MiB |
 |---|---|---|---|---|
 | xz -9e | 1.920000 | 0.100 | 2.000 | 1.0 |
 | **mothergod** | **2.000000** | **0.040** | **1.000** | **-** |
