@@ -56,6 +56,10 @@ fn the_codec_reports_no_silent_mutation_and_the_counts_follow_the_cap() {
         (capped.flips, capped.truncations, capped.silent),
         (50, 50, 0)
     );
+    assert_eq!(
+        (capped.flip_space(), capped.truncation_space()),
+        (frame_len * 8, frame_len)
+    );
 }
 
 /// A decoder that skips the checksum, the failure the probe exists to see.
@@ -104,7 +108,9 @@ fn the_binary_prints_one_line_per_file_and_exits_zero_when_none_is_silent() {
     let dir = std::env::temp_dir().join(format!("frame_probe-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("scratch dir");
     let file = dir.join("input.txt");
-    std::fs::write(&file, b"one cited line per review. ".repeat(10)).expect("scratch file");
+    let payload = b"one cited line per review. ".repeat(10);
+    let frame_len = mothergod::compress(&payload).len();
+    std::fs::write(&file, payload).expect("scratch file");
     let path = file.to_str().expect("utf8 path");
     let (code, stdout, _) = run(&["--max-decodes", "40", path]);
     std::fs::remove_dir_all(&dir).expect("scratch cleanup");
@@ -113,7 +119,10 @@ fn the_binary_prints_one_line_per_file_and_exits_zero_when_none_is_silent() {
         .strip_prefix(&format!("{path}: bytes "))
         .expect("path first");
     assert!(
-        line.ends_with(", flips 40, truncations 40, silent 0\n"),
+        line.ends_with(&format!(
+            ", flips 40 of {}, truncations 40 of {frame_len}, silent 0\n",
+            frame_len * 8
+        )),
         "{line}"
     );
 }
