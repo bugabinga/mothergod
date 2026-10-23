@@ -4,7 +4,7 @@ use proptest::prelude::*;
 /// The structural classes `mod tests`' hand-written examples cover:
 /// unstructured noise, a short pattern repeated (forces a Match/Rep
 /// token), a long single-byte run (the overlapping-distance copy
-/// `copy_checked`/`copy_match` must get right), and a low-period
+/// `copy_checked` must get right), and a low-period
 /// pattern (drives repeated matches at one distance, exercising the
 /// rep cache). Lengths span both sides of `OPTIMAL_MIN_LEN` (64), the
 /// threshold below which `parse_optimal` short-circuits to
