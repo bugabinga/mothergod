@@ -77,7 +77,7 @@ fn frontier_section_has_a_row_per_level_and_mothergod() {
         .expect("checked above");
     assert!(
         !mothergod_row.contains("**-**"),
-        "mothergod's peak MB is measured: {mothergod_row}"
+        "mothergod's peak MiB is measured: {mothergod_row}"
     );
 }
 
