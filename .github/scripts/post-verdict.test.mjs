@@ -14,7 +14,14 @@ const ID = "c".repeat(64);
 
 function run(
   args,
-  { body = "one [must]: the test is missing", env = {}, failEdit = false, armed = false } = {},
+  {
+    body = "one [must]: the test is missing",
+    env = {},
+    failEdit = false,
+    armed = false,
+    failView = false,
+    failDisarm = false,
+  } = {},
 ) {
   const stub = mkdtempSync(join(tmpdir(), "post-verdict-"));
   const log = join(stub, "calls.jsonl");
@@ -25,7 +32,9 @@ function run(
 const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, token: process.env.GH_TOKEN ?? null }) + "\\n");
 if (argv[1] === "edit" && ${failEdit}) { console.error("label not found"); process.exit(1); }
+if (argv[1] === "view" && ${failView}) { console.error("HTTP 502"); process.exit(1); }
 if (argv[1] === "view") { console.log(${armed} ? '{"enabledAt":"2026-10-20T20:26:51Z"}' : "null"); process.exit(0); }
+if (argv[1] === "merge" && ${failDisarm}) { console.error("not permitted"); process.exit(1); }
 console.log("https://github.com/o/r/pull/1#issuecomment-9");
 `,
   );
@@ -88,6 +97,27 @@ test("fail on a PASS-armed auto-merge disarms it before the label moves (#1467)"
   assert.deepEqual(calls[1].argv, ["pr", "merge", "950", "--disable-auto"]);
   assert.equal(calls[1].token, "app-token");
   assert.match(stderr, /auto-merge on #950 disarmed/);
+});
+
+test("a failed auto-merge read is named on stderr and the fail still posts (#1473)", () => {
+  const { status, stderr, calls } = run(["950", "fail"], { failView: true });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "view"], ["pr", "edit"], ["issue", "comment"]],
+  );
+  assert.match(stderr, /could not read auto-merge on #950: HTTP 502; a PASS-armed merge may still land/);
+});
+
+test("a failed disarm is named on stderr and the fail still posts (#1473)", () => {
+  // armed: true, or disarm() returns before `merge` runs and this passes without reaching the arm.
+  const { status, stderr, calls } = run(["950", "fail"], { armed: true, failDisarm: true });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "view"], ["pr", "merge"], ["pr", "edit"], ["issue", "comment"]],
+  );
+  assert.match(stderr, /auto-merge on #950 stayed armed: not permitted; the FAIL posts anyway/);
 });
 
 test("pass never reads or touches auto-merge", () => {
