@@ -138,4 +138,8 @@ fn the_binary_fails_on_a_missing_file_and_on_no_arguments() {
     assert_eq!(run(&[]).0, 2);
     assert_eq!(run(&["--max-decodes", "x", "a"]).0, 2);
     assert_eq!(run(&["--max-decodes", "0", "a"]).0, 2);
+    // A flag after the first argument is rejected before any file is read.
+    let (code, stdout, stderr) = run(&["one", "--max-decodes", "5"]);
+    assert_eq!((code, stdout.as_str()), (2, ""));
+    assert!(stderr.starts_with("usage: "), "{stderr}");
 }
