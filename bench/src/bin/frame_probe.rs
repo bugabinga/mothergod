@@ -62,12 +62,15 @@ fn main() -> ExitCode {
         };
         cap = n;
     }
-    if args.peek().is_none() {
+    // The flag has one position, first; a later `--` argument is a
+    // misplaced flag, not a path to probe (issue #1477).
+    let paths: Vec<String> = args.collect();
+    if paths.is_empty() || paths.iter().any(|arg| arg.starts_with("--")) {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
     let mut failed = false;
-    for path in args {
+    for path in paths {
         match probe_file(Path::new(&path), cap) {
             Ok(report) => {
                 println!(
