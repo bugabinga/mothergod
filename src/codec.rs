@@ -904,25 +904,40 @@ fn search(
             trial = trial.or(helper_trial);
         }
         // Smallest body, a tie to the earlier candidate: the serial rule.
-        let (index, candidate, body) = winners
+        let winner = winners
             .into_iter()
             .min_by_key(|(index, _, body)| (body.len(), *index))?;
-        if !has_wide_trial {
-            return Some((candidate, Reach::Standard, body));
-        }
-        let wide = match trial {
-            Some((guessed, handle)) if guessed == index => handle
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            // A wrong guess is left running and joined when the scope ends.
-            _ => wide_body(data, candidate),
-        };
-        if crate::candidate_beats_incumbent(wide.len(), body.len()) {
-            Some((candidate, Reach::Wide, wide))
+        Some(if has_wide_trial {
+            widen(data, winner, trial)
         } else {
-            Some((candidate, Reach::Standard, body))
-        }
+            let (_, candidate, body) = winner;
+            (candidate, Reach::Standard, body)
+        })
     })
+}
+
+/// [`search`]'s last step: the narrow `winner` against its wide trial, the
+/// wide body kept only when strictly smaller. `trial` is the early guess
+/// and the index it was made for; it is joined when that index is the
+/// winner's, and any other guess is left running and joined when the scope
+/// ends, the real wide trial running here instead. Either way the result is
+/// what a serial search writes.
+fn widen(
+    data: &[u8],
+    (index, candidate, body): Winner,
+    trial: Option<(usize, WideTrial<'_>)>,
+) -> (Candidate, Reach, Vec<u8>) {
+    let wide = match trial {
+        Some((guessed, handle)) if guessed == index => handle
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        _ => wide_body(data, candidate),
+    };
+    if crate::candidate_beats_incumbent(wide.len(), body.len()) {
+        (candidate, Reach::Wide, wide)
+    } else {
+        (candidate, Reach::Standard, body)
+    }
 }
 
 /// A wide trial running on a thread of [`search`]'s scope.
