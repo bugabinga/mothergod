@@ -550,6 +550,12 @@ pub(crate) fn try_filled_vec<T: Clone>(
     Ok(v)
 }
 
+/// The value of a joined worker thread, or its panic resumed here: a panic on
+/// a thread of an encode is the panic a serial encode raises.
+pub(crate) fn rejoin<T>(joined: std::thread::Result<T>) -> T {
+    joined.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
 /// Fallible `data.to_vec()`: `Err` instead of an abort if the allocator
 /// cannot satisfy `data.len()` bytes (#453).
 pub(crate) fn try_vec_from_slice(

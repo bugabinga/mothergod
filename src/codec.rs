@@ -59,7 +59,6 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 
-use crate::Error;
 use crate::coder::{Decoder, Encoder};
 use crate::column;
 use crate::filters::{
@@ -69,6 +68,7 @@ use crate::filters::{
 use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
 use crate::lz::{self, Reach, RepCache, RepSlot, Token};
 use crate::model::Model;
+use crate::{Error, rejoin};
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -895,10 +895,7 @@ fn search(
         let mut winners: Vec<Winner> = own.into_iter().collect();
         let mut trial = own_trial;
         for helper in helpers {
-            // A panic on a trial thread is the panic a serial encode raises.
-            let (winner, helper_trial) = helper
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            let (winner, helper_trial) = rejoin(helper.join());
             winners.extend(winner);
             trial = trial.or(helper_trial);
         }
@@ -927,9 +924,7 @@ fn widen(
     trial: Option<(usize, WideTrial<'_>)>,
 ) -> (Candidate, Reach, Vec<u8>) {
     let wide = match trial {
-        Some((guessed, handle)) if guessed == index => handle
-            .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        Some((guessed, handle)) if guessed == index => rejoin(handle.join()),
         _ => wide_body(data, candidate),
     };
     if crate::candidate_beats_incumbent(wide.len(), body.len()) {

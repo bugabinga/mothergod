@@ -7,7 +7,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use super::{BLOCK_LEN, compress_block};
+use super::{BLOCK_LEN, compress_block, rejoin};
 
 /// Encodes of one block of input that run at once at most, whether the block
 /// is one of a stream's or one of the trials of a block's filter search:
@@ -196,11 +196,7 @@ impl<W: Write> Encoder<W> {
         let Some(handle) = self.in_flight.pop_front() else {
             return Ok(());
         };
-        // A panic on the encoding thread is the panic a serial encode raises.
-        let frame = handle
-            .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-        self.write_frame(&frame)
+        self.write_frame(&rejoin(handle.join()))
     }
 
     /// Writes every running block's frame, oldest first.
