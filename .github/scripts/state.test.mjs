@@ -16,6 +16,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { ISSUE_TITLE } from "./monster-report.mjs";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
 const script = join(scriptsDir, "state");
@@ -293,7 +294,7 @@ test("cite lists open issues before closed ones, newest first within each", () =
 // The title monster-report.mjs files is the one the filter must keep, and
 // GitHub's search folds case, so the filter does (#1464).
 test("names_workflow wants the name whole, in any case: deny-ci-background names no ci", () => {
-  assert.equal(call("names_workflow", ["🐛 Monster CI failure", "monster"]), true);
+  assert.equal(call("names_workflow", [ISSUE_TITLE, "monster"]), true);
   assert.equal(call("names_workflow", ["CI red on main", "ci"]), true);
   assert.equal(call("names_workflow", ["CodeQL analysis red", "codeql"]), true);
   assert.equal(call("names_workflow", ["ci: worker red on main", "ci"]), true);
@@ -373,7 +374,7 @@ test("end to end: the checks are read per workflow, a red is cited, the rest cou
         ],
       },
       "search/issues": {
-        items: [{ number: 1013, title: "🐛 Monster CI failure", state: "closed", closed_at: "2026-10-10T12:23:33Z" }],
+        items: [{ number: 1013, title: ISSUE_TITLE, state: "closed", closed_at: "2026-10-10T12:23:33Z" }],
       },
       "pr list": [{
         number: 7,
