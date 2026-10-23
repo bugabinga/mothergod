@@ -46,9 +46,12 @@ use crate::sse::{LogitSse, MIN_PROBABILITY, Sse};
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
 
-/// Values of a byte's high nibble, the part of the previous byte the weight
+/// Width of a byte's high nibble, the part of the previous byte the weight
 /// key and the alignment expert read.
-const NIBBLES: usize = 16;
+const NIBBLE_BITS: u32 = 4;
+
+/// Values of a byte's high nibble.
+const NIBBLES: usize = 1 << NIBBLE_BITS;
 
 /// Number of distinct mixing-weight vectors: one per `(prev-byte nibble,
 /// after-copy)` key.
@@ -66,6 +69,8 @@ const ALPHABET_U32: u32 = ALPHABET as u32;
 // Bank layout: one contiguous bank space, sliced per expert so [`banks`]
 // can address any of them with a single base offset. A slice holds one bank
 // per value of the key [`banks`] packs for that expert.
+// The order-2 and word slices are masked by their bank count in [`banks`], so
+// each holds a power of two, written as the 12 bits of key it keeps.
 const FAST_BASE: usize = 0;
 const FAST_BANKS: usize = ALPHABET * 2;
 const SLOW_BASE: usize = FAST_BASE + FAST_BANKS;
@@ -73,11 +78,13 @@ const SLOW_BANKS: usize = ALPHABET * 2;
 const ORDER0_BASE: usize = SLOW_BASE + SLOW_BANKS;
 const ORDER0_BANKS: usize = 1;
 const ORDER2_BASE: usize = ORDER0_BASE + ORDER0_BANKS;
-const ORDER2_BANKS: usize = 4096;
+const ORDER2_BANKS: usize = 1 << 12;
 const ALIGN_BASE: usize = ORDER2_BASE + ORDER2_BANKS;
-const ALIGN_BANKS: usize = 4 * NIBBLES;
+/// Positions the alignment expert tells apart: `position % ALIGN_PHASES`.
+const ALIGN_PHASES: usize = 4;
+const ALIGN_BANKS: usize = ALIGN_PHASES * NIBBLES;
 const WORD_BASE: usize = ALIGN_BASE + ALIGN_BANKS;
-const WORD_BANKS: usize = 4096;
+const WORD_BANKS: usize = 1 << 12;
 /// Total context banks across all six experts.
 const BANKS: usize = WORD_BASE + WORD_BANKS;
 
@@ -294,9 +301,9 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let prev2 = usize::from(context.prev2);
     let after_copy = usize::from(context.after_copy);
     let rate_context = prev1 | (after_copy * ALPHABET);
-    let order2 = ((prev1 << 8) | prev2) & (ORDER2_BANKS - 1);
-    let nibble = prev1 >> 4;
-    let align = ((context.position & 3) * NIBBLES) | nibble;
+    let order2 = ((prev1 << u8::BITS) | prev2) & (ORDER2_BANKS - 1);
+    let nibble = prev1 >> NIBBLE_BITS;
+    let align = ((context.position % ALIGN_PHASES) * NIBBLES) | nibble;
     let word_hash = usize::try_from(context.word_hash)
         .expect("word_hash is a u32, always fits usize")
         & (WORD_BANKS - 1);
@@ -659,13 +666,9 @@ impl Literal {
         cumulate(mixed)
     }
 
-    /// [`banks`] plus [`Self::mix`] in one call: every coding/pricing method
-    /// below starts by selecting `context`'s bank indices and weight
-    /// context, then blending them into a mixed cumulative-frequency table,
-    /// before doing whatever is specific to that method and, eventually,
-    /// calling [`Self::update`] with the same `bank_indices`/`weight_index`.
-    /// One place for that shared prelude keeps the six call sites from
-    /// drifting if `banks` or `mix` ever change.
+    /// [`banks`] plus [`Self::mix`] in one call: the prelude of the two
+    /// pricing methods that price the six-expert blend itself, which then call
+    /// [`Self::update`] with the same `bank_indices`/`weight_index`.
     fn banks_and_cum(&self, context: Context) -> ([usize; EXPERTS], usize, [u64; ALPHABET + 1]) {
         let (bank_indices, weight_index) = banks(context);
         let cum = self.mix(&bank_indices, weight_index);
