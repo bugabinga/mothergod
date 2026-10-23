@@ -88,7 +88,12 @@ jobs:
                courteously), labeled blocked-on-human with the exact
                ask, or accepted with a comment saying what acceptance
                means: the evidence it carries, what would finish it,
-               and what it blocks or is blocked by. An issue already
+               and what it blocks or is blocked by. Accepted, it also
+               carries its type where the queue reads one: `bug` for a
+               defect with a repro, `enhancement` for a gap with a
+               beneficiary, neither for a question or a charter;
+               `agent-queue` ranks bug above plain above enhancement,
+               and no other seat applies them. An issue already
                satisfied by shipped code is the cheapest close there
                is; check the tree before assuming it is open work. A
                new ledger issue is yours to label on triage. A product
