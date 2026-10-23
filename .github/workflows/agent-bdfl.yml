@@ -128,6 +128,12 @@ jobs:
       statuses: write
       discussions: write
       pages: write
+      # write, not read: `gh workflow run bench-report.yml --ref main` on
+      # GH_WORKFLOW_TOKEN is the `dispatch` state `.github/scripts/bench-report`
+      # prints, which `state` hands this seat every wake; without the grant
+      # the order it names is a 403 (run 40017251671). The same grant and
+      # reason as agent-heartbeat.yml's, so either seat heals a failed pass.
+      actions: write
       # The Security tab, read-only, for `.github/scripts/security-alerts`.
       # Two keys because they cover different scanners and neither implies
       # the other: `security-events` is code scanning (and is explicitly NOT
