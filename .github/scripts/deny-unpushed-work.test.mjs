@@ -199,20 +199,32 @@ const BAD_STARTS = [
   `1${"0".repeat(400)}`,
   `-1${"0".repeat(400)}`,
 ];
+// A stamp the hook cannot read as a session: the dirty call is allowed and
+// the stamp is rewritten as a fresh start within 5 s of now.
+function freshStart(content) {
+  const { dir, dirty } = repo();
+  dirty();
+  const { stamp, env } = session();
+  writeFileSync(stamp, content);
+  const res = run(env, bash(dir));
+  assert.equal(res.status, 0, res.stderr);
+  const written = JSON.parse(readFileSync(stamp, "utf8"));
+  assert.ok(Number.isFinite(written.start));
+  assert.ok(Math.abs(written.start - Date.now() / 1000) < 5);
+  assert.equal(written.fired, false);
+}
+
 for (const start of BAD_STARTS) {
   test(`a stamp whose start is ${start.length > 12 ? `a ${start.length}-character integer` : start} is rewritten as a fresh start and allowed`, () => {
-    const { dir, dirty } = repo();
-    dirty();
-    const { stamp, env } = session();
-    writeFileSync(stamp, `{"start": ${start}, "fired": false}`);
-    const res = run(env, bash(dir));
-    assert.equal(res.status, 0, res.stderr);
-    const written = JSON.parse(readFileSync(stamp, "utf8"));
-    assert.ok(Number.isFinite(written.start));
-    assert.ok(Math.abs(written.start - Date.now() / 1000) < 5);
-    assert.equal(written.fired, false);
+    freshStart(`{"start": ${start}, "fired": false}`);
   });
 }
+
+// json.load recurses once per nesting level and raises RecursionError, not a
+// ValueError, past the interpreter's limit (#1525).
+test("a stamp nested past the parser's recursion limit is rewritten as a fresh start and allowed", () => {
+  freshStart("[".repeat(200000));
+});
 
 test("a git that cannot run is no evidence of edits: the aged, dirty session is allowed", () => {
   const { dir, dirty } = repo();
