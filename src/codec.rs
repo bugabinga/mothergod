@@ -1002,7 +1002,7 @@ fn selector(candidate: Candidate, reach: Reach) -> [u8; SELECTOR_LEN] {
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the selector,
 /// [`Error::Corrupt`] if the selector names no [`Candidate`].
-fn split_selector(payload: &[u8]) -> Result<(Candidate, Reach, &[u8]), Error> {
+pub(crate) fn split_selector(payload: &[u8]) -> Result<(Candidate, Reach, &[u8]), Error> {
     let (&[kind, param], rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
     let reach = if kind & WIDE_REACH_BIT == 0 {
         Reach::Standard
