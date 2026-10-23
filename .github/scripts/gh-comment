@@ -150,8 +150,14 @@ def identifiers(title):
 
 
 def claim(title):
-    """The words of `title` that say what is wrong, beyond the names it greps for."""
-    return {word for word in words(title) if len(word) >= CLAIM_LETTERS} - identifiers(title)
+    """The words of `title` that say what is wrong, beyond the names it greps for.
+
+    A file name is an area here as well (#1505): `baseline_gate drops
+    frontier rows in bench_report.rs` and `baseline_gate drops cases in
+    bench_report.rs` share one claim word, `drops`, not two.
+    """
+    said = {word for word in words(title) if len(word) >= CLAIM_LETTERS}
+    return {word for word in said if not FILE_NAME.search(word)} - identifiers(title)
 
 
 def duplicates(title, issues):
