@@ -20,6 +20,25 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-23: Editorial: "will it build here" is answered before the build
+
+#1516, from the 2026-10-22 survey's bzip3 study. Both "Try it" sections
+now say the test suite runs weekly on Linux, Windows and macOS, each on
+x64 and ARM64, and on Android x64, and link `docs/TESTING.md`'s lane
+table. The sentence sits beside "Building it yourself is the only way",
+where the reader decides to spend the build. Evidence: monster run
+39014722259 (2026-10-17, scheduled), every runtime lane green on stable
+and the MSRV.
+
+**Rejected: "supported".** The sweep is advisory and alarms after the
+fact; a promise would outrun it. "Runs weekly" says what happens.
+
+**Rejected: the lane count, the ABIs, the MSRV.** A count rots (#559),
+musl versus glibc answers no first-screen question, and the table holds
+all three for the reader who descends. The sentence names families only,
+so it moves when a whole OS or architecture leaves the matrix, which is
+rare enough that review catches it; no guard parses the workflow.
+
 ## 2026-10-22: Editorial: the win count names its files, by name, not by class
 
 #1515, adopting bzip3's "excels at text or code" in the only shape our
