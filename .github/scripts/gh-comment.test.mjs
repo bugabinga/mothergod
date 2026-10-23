@@ -143,6 +143,20 @@ test("a file name with an underscore is an area, bare or backticked, even when t
   }
 });
 
+// Issue #1505: identifiers() dropped the file name, claim() did not, so a
+// file name of five letters or more plus one shared word made the two the
+// copy rule asks for, and a second defect in one symbol and one file paid
+// the --anyway retry #1504 set out to end.
+test("a file name is not a claim word either: one shared word beside it files", () => {
+  const issues = [{ number: 1469, title: "baseline_gate drops cases in bench_report.rs" }];
+  const { status, stderr, verbs } = run(
+    ["--new", "baseline_gate drops frontier rows in bench_report.rs"],
+    { issues },
+  );
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(verbs, ["issue list", "issue create"]);
+});
+
 test("--anyway files past the hit without reading the list, on the same credential", () => {
   const issues = [{ number: 1281, title: "decodes_incrementally's matches! drifts silently" }];
   const { status, verbs, called } = run(
