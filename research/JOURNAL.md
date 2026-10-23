@@ -5880,7 +5880,9 @@ record.
   scratch driver) reverted in full, per the `compression-experiment`
   skill's "delete rejected candidate code"; `fieldtype::FieldState`/
   `field_bank` themselves (S2-A99) are unaffected, standalone and unwired,
-  same status as `column::column_of`/`column_bank` after S2-R8.
+  same status as `column::column_of`/`column_bank` after S2-R8
+  (`fieldtype.rs` left main in #1360, ea114aa ("deslop: delete fieldtype.rs,
+  a classifier no code path calls")).
   `research/progress.jsonl` it155.
 - S2-R16 | REJECTED | S1-P3's own remaining scope (`src/ppm.rs`'s module
   doc, restated in S2-A57/S2-R6's own text): the third of its three named
