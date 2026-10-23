@@ -9,6 +9,7 @@
 use std::num::NonZeroU32;
 
 use crate::bittree::ALPHABET;
+use crate::codec::copy_checked;
 
 /// Largest backward distance a match may reference at [`Reach::Standard`]:
 /// 1 MiB. The match finders take their window as a parameter
@@ -272,7 +273,7 @@ impl Window {
     ///
     /// Panics (via the internal subtraction underflowing) if `distance` is
     /// zero or exceeds [`Self::written_len`]. Callers reject both cases
-    /// ahead of time the same way [`crate::codec::copy_checked`] does with
+    /// ahead of time the same way [`copy_checked`] does with
     /// `output.len().checked_sub(distance)`, so this is never reached with
     /// adversarial input, only a caller bug; `Window` cannot itself tell a
     /// stale, overwritten slot from a real one, so it does not attempt a
@@ -720,23 +721,6 @@ pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
     tokens
 }
 
-/// Copies `len` bytes to the end of `out` from `distance` bytes before its
-/// current end, one byte at a time so a distance shorter than `len` (a
-/// run, not a disjoint repeat) still reproduces the source correctly —
-/// each copied byte becomes visible to later reads in the same call, the
-/// way `extend_from_slice` from a fixed source region would not.
-fn copy_match(out: &mut Vec<u8>, len: u32, distance: Distance) {
-    let distance = distance.get() as usize;
-    let start = out
-        .len()
-        .checked_sub(distance)
-        .expect("match distance must not reach before the output produced so far");
-    for k in 0..len as usize {
-        let byte = out[start + k];
-        out.push(byte);
-    }
-}
-
 /// Reconstructs the original bytes from `tokens`, the inverse of
 /// [`parse_greedy`] and [`parse_optimal`]. `Token` is not wire format, so
 /// this is the token-level inverse, not [`crate::codec`]'s decode.
@@ -753,18 +737,23 @@ pub fn replay(tokens: &[Token]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut reps = RepCache::initial();
     for token in tokens {
-        match *token {
-            Token::Literal(byte) => out.push(byte),
+        let (len, distance) = match *token {
+            Token::Literal(byte) => {
+                out.push(byte);
+                continue;
+            }
             Token::Match { len, distance } => {
-                copy_match(&mut out, len, distance);
                 reps.push_front(distance);
+                (len, distance)
             }
             Token::Rep { len, slot } => {
                 let distance = reps.get(slot);
-                copy_match(&mut out, len, distance);
                 reps.promote(slot);
+                (len, distance)
             }
-        }
+        };
+        copy_checked(&mut out, len, distance)
+            .expect("match distance must not reach before the output produced so far");
     }
     out
 }

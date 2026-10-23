@@ -1117,14 +1117,19 @@ fn ensure_within_window(distance: NonZeroU32, reach: Reach) -> Result<(), Error>
 
 /// Copies `len` bytes to the end of `output` from `distance` bytes before
 /// its current end, one byte at a time so a distance shorter than `len` (a
-/// run, not a disjoint repeat) still reproduces the source correctly.
-/// Mirrors [`lz::replay`]'s `copy_match`, but returns [`Error::Corrupt`]
-/// instead of panicking when `distance` reaches before the start of
-/// `output`: unlike `replay`, this runs on a token stream decoded from an
-/// adversarial bitstream, not one [`lz::parse_optimal`] just produced
-/// (`rust-craft` skill, panic-discipline: decode-path input is never
-/// trusted).
-fn copy_checked(output: &mut Vec<u8>, len: u32, distance: NonZeroU32) -> Result<(), Error> {
+/// run, not a disjoint repeat) still reproduces the source correctly, each
+/// copied byte visible to later reads in the same call.
+///
+/// Returns [`Error::Corrupt`], never panics, when `distance` reaches before
+/// the start of `output`: this runs on a token stream decoded from an
+/// adversarial bitstream (`rust-craft` skill, panic-discipline: decode-path
+/// input is never trusted). [`lz::replay`], whose tokens [`lz::parse_optimal`]
+/// just produced, calls it too and treats that error as a bug.
+pub(crate) fn copy_checked(
+    output: &mut Vec<u8>,
+    len: u32,
+    distance: NonZeroU32,
+) -> Result<(), Error> {
     let distance = distance.get() as usize;
     let start = output.len().checked_sub(distance).ok_or(Error::Corrupt)?;
     for k in 0..len as usize {

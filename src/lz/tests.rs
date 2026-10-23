@@ -43,7 +43,7 @@ fn roundtrip_simple_repeat_produces_a_match() {
 
 #[test]
 fn roundtrip_run_length_exercises_overlapping_distance() {
-    // distance (1) shorter than the eventual match length: copy_match
+    // distance (1) shorter than the eventual match length: copy_checked
     // must read bytes it just wrote, not a disjoint source region.
     roundtrip(&vec![b'a'; 1000]);
 }
@@ -150,7 +150,7 @@ fn optimal_roundtrip_simple_repeat_produces_a_match_or_rep() {
 
 #[test]
 fn optimal_roundtrip_run_length_exercises_overlapping_distance() {
-    // distance 1, shorter than the match length: copy_match must read
+    // distance 1, shorter than the match length: copy_checked must read
     // bytes it just wrote.
     roundtrip_optimal(&vec![b'a'; 1000]);
 }
