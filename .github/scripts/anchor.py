@@ -17,6 +17,8 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
+import d1
+
 # The ops-log issue (CLAUDE.md "Where things live"): where the survey's
 # marker lives (survey-due) and where the state read takes its last three
 # comments from (state). One number here, so the two readers cannot drift.
@@ -90,16 +92,50 @@ def stale(stamp, now=None):
     return age if age > STALE_HOURS else None
 
 
+def session_rows(run_ids):
+    """The listed run ids with a sessions row (ADR-0060); None when the table is unreadable.
+
+    The row is the liveness marker every real session leaves, so it is what
+    separates a run from a hollow one: a guard-skipped run concludes
+    `success` with no session, and anchoring on it covered two hours where the
+    outage was nine days (#525). A session that died before its audit step
+    has no row either and is skipped the same way, on purpose: erring long
+    costs a re-read, erring short after an outage loses operator input
+    silently.
+
+    One query for the whole page, so the ordinary wake spends one read where
+    it spent one artifacts call and an outage spends one where it spent one
+    per hollow run. The table, not the artifact, because the two mark the
+    same runs from the same writer (agent-audit writes both as the run ends)
+    and the table lives on a store an Actions degradation does not touch:
+    run 39811812824 read `total_count 0` from `/artifacts` for sixty
+    successes while `run list` answered every start, and died (#1530).
+    None, never an empty set, when the table could not be read, so the
+    caller probes artifacts instead of walking the page as hollow; the one
+    line says which provider answered.
+    """
+    if not run_ids:
+        return set()
+    marks = ", ".join("?" for _ in run_ids)
+    try:
+        rows = d1.query(f"SELECT run_id FROM sessions WHERE run_id IN ({marks})", [int(i) for i in run_ids])
+    except d1.Unreadable as error:
+        print(
+            f"{os.path.basename(sys.argv[0])}: session table UNREADABLE ({error}); "
+            "anchoring on audit artifacts instead.",
+            file=sys.stderr,
+        )
+        return None
+    return {str(row.get("run_id")) for row in rows}
+
+
 def held_session(repo, run_id):
     """True when the run uploaded an audit artifact (ADR-0023).
 
-    The artifact is the liveness marker every real session leaves, so it is
-    what separates a run from a hollow one: a guard-skipped run concludes
-    `success` with no session, and anchoring on it covered two hours where the
-    outage was nine days (#525). A session that died before its audit step
-    has no artifact either and is skipped the same way, on purpose: erring
-    long costs a re-read, erring short after an outage loses operator input
-    silently.
+    The fallback for an unreadable session table, per run: the artifact is
+    the same liveness mark as the row, from the same writer, read from
+    Actions. Both providers down is the one shape that dies asking for
+    `--since`.
     """
     count = gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts", "--jq", ".total_count")
     return int(count.strip() or 0) > 0
@@ -114,11 +150,12 @@ def previous_run_start(repo, this_run, now=None):
     is that a duty may see an item its predecessor already saw. Overlap is a
     re-read; a gap is a lost signal.
 
-    Walks newest first and asks each candidate for its artifact, so the
-    ordinary wake spends one extra call and an outage spends one per hollow
-    run it crosses. Newest first is sorted here, not trusted from the API:
-    the one page that came back out of order anchored a duty a month back
-    (#902). `now` is for tests; the clock is the default.
+    Walks newest first and asks the session table once for the whole page
+    (artifacts per run when the table is unreadable), so the ordinary wake
+    spends one extra call and an outage spends one, or one per hollow run
+    crossed. Newest first is sorted here, not trusted from the API: the one
+    page that came back out of order anchored a duty a month back (#902).
+    `now` is for tests; the clock is the default.
     """
     runs = json.loads(
         gh(
@@ -128,10 +165,14 @@ def previous_run_start(repo, this_run, now=None):
         )
     )
     runs.sort(key=lambda run: iso(run["startedAt"] or run["createdAt"]), reverse=True)
+    held = session_rows([run["databaseId"] for run in runs])
     for run in runs:
         if this_run and str(run["databaseId"]) == str(this_run):
             continue
-        if not held_session(repo, run["databaseId"]):
+        if held is None:
+            if not held_session(repo, run["databaseId"]):
+                continue
+        elif str(run["databaseId"]) not in held:
             continue
         stamp = iso(run["startedAt"] or run["createdAt"])
         if (age := stale(stamp, now)) is not None:
@@ -144,8 +185,8 @@ def previous_run_start(repo, this_run, now=None):
             )
         return stamp, run["databaseId"]
     die(
-        f"no {ANCHOR_WORKFLOW} run with an audit artifact among the last "
-        f"{RUN_WALK} successes to anchor on. "
+        f"no {ANCHOR_WORKFLOW} run with a session row (or an audit artifact, the "
+        f"table being unreadable) among the last {RUN_WALK} successes to anchor on. "
         "Pass --since <ISO8601> with the window you mean."
     )
     return None  # unreachable; die() exits. Keeps the return type honest.
