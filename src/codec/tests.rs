@@ -696,6 +696,58 @@ fn an_idle_thread_starting_the_wide_trial_early_never_changes_the_payload() {
     assert_eq!(reach, Reach::Wide);
 }
 
+/// Input where the wide trial wins, the two candidates it is searched with,
+/// the narrow winner among them as [`widen`] takes it, and the result a
+/// serial [`search`] writes: an early guess either way must reproduce that
+/// result.
+fn wide_winning_search() -> (Vec<u8>, Winner, (Candidate, Reach, Vec<u8>)) {
+    let record = crate::test_support::record_text(2);
+    let mut data = record.clone();
+    data.resize(lz::WINDOW + record.len() + 4096, 0);
+    data.extend_from_slice(&record);
+    let candidates = [Candidate::Identity, Candidate::Reverse];
+    let serial = search(&data, &candidates, NonZeroUsize::MIN).expect("two candidates");
+    // The oracle is pinned apart from `widen`, which `search` itself calls.
+    assert_eq!(
+        serial,
+        (serial.0, Reach::Wide, wide_body(&data, serial.0)),
+        "the wide trial wins on this input"
+    );
+    let index = candidates
+        .iter()
+        .position(|&candidate| candidate == serial.0)
+        .expect("the winner is a candidate");
+    let body = encode_tokens(
+        &apply_filter(serial.0, &data),
+        serial.0.columns(),
+        Reach::Standard,
+    );
+    (data, (index, serial.0, body), serial)
+}
+
+#[test]
+fn widen_joins_a_right_guess_and_matches_the_serial_search() {
+    let (data, winner, serial) = wide_winning_search();
+    let (index, candidate, _) = winner;
+    let widened = thread::scope(|scope| {
+        let handle = scope.spawn(|| wide_body(&data, candidate));
+        widen(&data, winner, Some((index, handle)))
+    });
+    assert_eq!(widened, serial);
+}
+
+#[test]
+fn widen_ignores_a_wrong_guess_and_matches_the_serial_search() {
+    let (data, winner, serial) = wide_winning_search();
+    let wrong = 1 - winner.0;
+    let widened = thread::scope(|scope| {
+        // An empty body would win were it consumed.
+        let handle = scope.spawn(Vec::new);
+        widen(&data, winner, Some((wrong, handle)))
+    });
+    assert_eq!(widened, serial);
+}
+
 #[test]
 fn caller_supplied_max_len_below_max_decoded_len_is_honored() {
     // A frame legal under MAX_DECODED_LEN can still be rejected by a
