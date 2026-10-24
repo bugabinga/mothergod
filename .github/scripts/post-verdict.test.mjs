@@ -110,7 +110,6 @@ test("a failed auto-merge read is named on stderr and the fail still posts (#147
 });
 
 test("a failed disarm is named on stderr and the fail still posts (#1473)", () => {
-  // armed: true, or disarm() returns before `merge` runs and this passes without reaching the arm.
   const { status, stderr, calls } = run(["950", "fail"], { armed: true, failDisarm: true });
   assert.equal(status, 0, stderr);
   assert.deepEqual(
