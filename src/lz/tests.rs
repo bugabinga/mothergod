@@ -280,49 +280,6 @@ fn optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss() {
 }
 
 #[test]
-fn greedy_with_window_reaches_a_repeat_a_smaller_window_would_miss() {
-    // research/JOURNAL.md S1-P4's remaining scope named parse_greedy's
-    // own hash-chain finder as "still hardcoded to WINDOW, unexamined";
-    // same shape as optimal_with_window_reaches_a_repeat_a_smaller_
-    // window_would_miss above, proving the parameter actually gates
-    // parse_greedy_with_window's reach end to end, losslessly either way.
-    let template: Vec<u8> = (0u8..80).collect();
-    let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
-        .take(420)
-        .map(|s| 128 + u8::try_from(s % 128).unwrap())
-        .collect();
-    let mut data = template.clone();
-    data.extend_from_slice(&filler);
-    data.extend_from_slice(&template);
-    let distance = filler.len() + template.len();
-
-    let small_window = 300;
-    let large_window = 700;
-    assert!(small_window < distance && distance <= large_window);
-
-    let small = parse_greedy_with_window(&data, small_window);
-    assert_eq!(replay(&small), data);
-    assert!(
-        small.iter().all(|t| !matches!(
-            t,
-            Token::Match { distance: d, .. } if d.get() as usize > small_window
-        )),
-        "a window of {small_window} must never produce a fresh match past it"
-    );
-
-    let large = parse_greedy_with_window(&data, large_window);
-    assert_eq!(replay(&large), data);
-    assert!(
-        large.iter().any(|t| matches!(
-            t,
-            Token::Match { distance: d, .. } if d.get() as usize == distance
-        )),
-        "a window of {large_window} must find the planted repeat at distance {distance}, \
-         unreachable through {small_window}"
-    );
-}
-
-#[test]
 fn optimal_roundtrip_random_like_binary_never_worse_than_stored() {
     // A pseudo-random byte stream (no real structure): the DP must
     // still round-trip even when literals dominate.
@@ -855,7 +812,7 @@ fn find_best_stops_after_max_chain_tries() {
     let query = data.len();
     data.extend_from_slice(long);
 
-    let mut finder = MatchFinder::new(&data, data.len());
+    let mut finder = MatchFinder::new(&data);
     for i in 0..query {
         finder.insert(i);
     }

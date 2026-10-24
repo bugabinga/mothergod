@@ -12,7 +12,7 @@ use crate::bittree::ALPHABET;
 use crate::codec::copy_checked;
 
 /// Largest backward distance a match may reference at [`Reach::Standard`]:
-/// 1 MiB. The match finders take their window as a parameter
+/// 1 MiB. `BinaryTreeMatchFinder` takes its window as a parameter
 /// (`JOURNAL` S1-P4).
 pub const WINDOW: usize = 1 << 20;
 
@@ -346,9 +346,6 @@ fn prefix_hash(data: &[u8], i: usize) -> usize {
 /// anything a decoder reads.
 struct MatchFinder<'d> {
     data: &'d [u8],
-    /// Largest backward distance [`Self::find_best`] reports; must fit
-    /// `u32` ([`to_u32`]'s obligation).
-    window: usize,
     /// `head[hash]` is the most recently inserted position with that
     /// hash, or [`NO_POSITION`].
     head: Vec<u32>,
@@ -359,10 +356,9 @@ struct MatchFinder<'d> {
 }
 
 impl<'d> MatchFinder<'d> {
-    fn new(data: &'d [u8], window: usize) -> Self {
+    fn new(data: &'d [u8]) -> Self {
         Self {
             data,
-            window,
             head: vec![NO_POSITION; 1 << HASH_BITS],
             prev: vec![NO_POSITION; data.len().max(1)],
         }
@@ -389,7 +385,7 @@ impl<'d> MatchFinder<'d> {
         while j != NO_POSITION && tries < MAX_CHAIN_TRIES {
             let j_pos = j as usize;
             let offset = i - j_pos; // j was inserted at an earlier position: i >= j_pos.
-            if offset > self.window {
+            if offset > WINDOW {
                 break;
             }
             // Zero when `i` itself is `insert`ed, so it heads its own chain.
@@ -653,19 +649,6 @@ impl<'d> BinaryTreeMatchFinder<'d> {
 /// 16 MiB blocks, well under this bound, rather than lift it.
 #[must_use]
 pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
-    parse_greedy_with_window(data, WINDOW)
-}
-
-/// [`parse_greedy`], with its match reach bound by `window` instead of the
-/// wired [`WINDOW`] (`research/JOURNAL.md` S1-P4), so a candidate window can
-/// be measured through the seed pass and the short-input path that bypasses
-/// the DP.
-///
-/// # Panics
-///
-/// Same as [`parse_greedy`].
-#[must_use]
-pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
     let n = data.len();
     assert!(
         u32::try_from(n).is_ok(),
@@ -673,7 +656,7 @@ pub fn parse_greedy_with_window(data: &[u8], window: usize) -> Vec<Token> {
     );
     let mut tokens = Vec::new();
     let mut reps = RepCache::initial();
-    let mut finder = MatchFinder::new(data, window);
+    let mut finder = MatchFinder::new(data);
     let mut i = 0usize;
     while i < n {
         finder.insert(i);
@@ -1368,7 +1351,7 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
-    let mut round = parse_greedy_with_window(data, WINDOW);
+    let mut round = parse_greedy(data);
     for _ in 0..DP_ROUNDS {
         let prices = PriceCounts::tally(&round, data).prices(round.len());
         // The prices are all the next round takes from these tokens, and a

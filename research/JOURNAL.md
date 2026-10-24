@@ -2751,7 +2751,7 @@ record.
   `parse_greedy` half of S2-A63's remaining-scope note — its hash-chain
   `MatchFinder` gained the same per-instance `window` parameter
   `BinaryTreeMatchFinder` got in S2-A61, via a new
-  `parse_greedy_with_window`; `parse_greedy` and the wired
+  `parse_greedy_with_window` (left main in #1613); `parse_greedy` and the wired
   `parse_optimal_with_window` seed pass both still pass `WINDOW`
   unchanged, so nothing currently encoded moves. Fifth slice, S2-R7:
   answered that decision, rejected — despite a net-improving train mean
