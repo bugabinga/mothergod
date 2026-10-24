@@ -3116,10 +3116,8 @@ record.
   2026-09-01T09:32:52Z) has `xargs.1` (the file S2-A67 first flagged
   under the floor) at 0.596 MB/s decode, still under the 1 MB/s floor —
   cited as the standing figure this slice narrows the gap against, not
-  a claim this slice re-measured it. | Mechanism: full argument lives in
-  `Literal::mix`'s own
-  updated doc comment (`src/literal.rs`), so it stays in one place
-  instead of drifting between there and here. `Literal::decode`'s
+  a claim this slice re-measured it. | Mechanism: the equivalence argument
+  is this entry's Hypothesis text above. `Literal::decode`'s
   O(ALPHABET) linear symbol-scan is untouched, a smaller and separate
   bottleneck (at most 256 comparisons per byte against `mix`'s 1536
   multiply-add-shift operations) — left for a later slice if it's ever
