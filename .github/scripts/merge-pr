@@ -48,8 +48,9 @@ moves:
   the caller's decision and this call fails loud instead of shipping
   unreviewed content. Default pin is the head read here; pass --sha for
   the head the verdict actually covered, in full or as a prefix of at
-  least MIN_SHA characters (the twelve every surface prints; a shorter
-  prefix is a pin an attacker can forge by hashing, 2^28 for seven).
+  least MIN_SHA characters (the twelve that state, retrospect and the
+  verdict comment print; a shorter prefix is a pin an attacker can forge
+  by hashing, 2^28 for seven).
 - The target must match PR_NUMBER when the caller's environment carries
   one (a review session, agent-review.yml's Claude step). Issue #771 was
   a review scoped to #768 that merged #770 instead, a wrong resolution
@@ -260,10 +261,11 @@ def read_pr(pr):
 
 def pinned(sha, head):
     """The pin at full length: `head` when `sha` is None or names it by
-    prefix, else `sha` as typed. Every head this project prints is twelve
-    characters (state, retrospect, the verdict comment), so a typed pin is
-    a prefix more often than a full oid, and the merge body and the
-    auto-merge arm carry a full one: `--sha a67fe4b7dc56` on #1573 died as
+    prefix, else `sha` as typed. The heads state, retrospect and the
+    verdict comment print are twelve characters (a stalled-prs recipe
+    carries the full oid), so a typed pin is a prefix more often than a
+    full oid, and the merge body and the auto-merge arm carry a full one:
+    `--sha a67fe4b7dc56` on #1573 died as
     "moved past a67fe4b7dc56 to a67fe4b7dc56" (2026-10-24). A pin that is
     not a prefix of the head stays as typed, for the move-or-lag judgement
     that follows."""
