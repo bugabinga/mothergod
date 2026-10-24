@@ -4,21 +4,27 @@
 # 20 minutes for 212 MB, and a session's foreground command caps at 30 with
 # background execution denied (CLAUDE.md rule 12).
 #
-# A push to main under the paths below runs it unasked: a change to the
-# report binaries moves what the reports print, and the committed reports
-# stayed stale behind four such merges (#1356, #1367, #1373, #1376) while
-# two maintainer runs named the dispatch a blocker. `bench/baseline.json`
-# because the gate's digest pin (#1254) makes every byte-moving codec PR
-# commit it, so its merge is the codec's cue, about one a day against ten
-# src/ commits; `src/` itself would run a pass per refactor, and nothing
-# narrower than that file sees a reach-class change: #1423 moved six
-# Silesia finals by up to 2.2% and no pinned bpb (#1434 is the long case
-# the gate lacks). `bench/corpus.toml` because a moved pin is a different
-# corpus. `.github/scripts/bench-report` reads those paths from this file,
-# so the trigger and the detector cannot disagree, and tells the next
-# heartbeat whether the pass is running, finished and waiting to be
-# published, or owed a dispatch, the healing for one that failed or
-# expired unpublished:
+# It runs unasked on a weekly clock and on a push to main that moves a pin
+# below. `bench/baseline.json` because the gate's digest pin (#1254) makes
+# every byte-moving codec PR commit it, so its merge is the codec's cue
+# (two in the seven days to 2026-10-24, against 53 src/ commits); `src/`
+# itself would run a pass per refactor, and nothing narrower than that file
+# sees a reach-class change: #1423 moved six Silesia finals by up to 2.2%
+# and no pinned bpb (#1434 is the long case the gate lacks).
+# `bench/corpus.toml` because a moved pin is a different corpus.
+# `bench/src/**` was on the list so that a change to the report binaries
+# would regenerate what they print (#1356, #1367, #1373, #1376): the ten
+# passes of those seven days answered frame_probe, corpus-fetch and
+# gate-message merges, none moved a ratio, and each cost about fifty
+# runner minutes plus a maintainer and a reviewer run to publish timing
+# jitter (#1486 counts the hand edits). A change to the binaries now waits
+# for the week's pass, which also carries the speed-only codec change
+# nothing else triggers. A native cron, because this workflow exchanges no
+# OIDC token (ADR-0035). `.github/scripts/bench-report` reads the push
+# paths from this file, so the trigger and the detector cannot disagree,
+# and tells the next heartbeat whether the newest pass is running,
+# finished and waiting to be published, or owed a dispatch, the healing
+# for one that failed or expired unpublished:
 #   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref main
 # The publish PR the heartbeat cuts from the artifact is the reports' one
 # writer, titled with the pass head so the next read learns the generator
@@ -33,10 +39,13 @@ on:
   push:
     branches: [main]
     paths:
-      - bench/src/**
       - bench/baseline.json
       - bench/corpus.toml
       - .github/workflows/bench-report.yml
+  schedule:
+    # Saturday 03:17 UTC: the pass is done before the day's heartbeat
+    # wakes publish it, and the Sunday survey reads the week's numbers.
+    - cron: "17 3 * * 6"
   workflow_dispatch:
 
 permissions:

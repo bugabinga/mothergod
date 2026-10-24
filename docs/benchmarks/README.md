@@ -79,9 +79,11 @@ files they write as the `bench-report` artifact, kept 14 days; it pushes
 nothing. Download with
 `gh run download <run-id> -n bench-report`.
 
-The workflow also runs on every push to main under the paths it lists,
-the inputs that move what the reports print, so a change to the report
-binaries regenerates without a dispatch. `.github/scripts/bench-report`
+The workflow also runs on a weekly clock (Saturday 03:17 UTC) and on
+every push to main that moves a pin it lists, `bench/baseline.json` or
+`bench/corpus.toml`; a change to the report binaries waits for the week's
+pass, because every pass moves the timing columns whether or not a number
+behind them did. `.github/scripts/bench-report`
 says where main stands, `fresh`, `running`, `publish` or `dispatch`,
 and `bench-report --publish` writes a finished pass's five files into
 the tree for the PR that publishes them, under the title it prints: the
