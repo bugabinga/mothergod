@@ -213,12 +213,6 @@ impl<S: Spacing> Table<S> {
         }
     }
 
-    /// The number of independent contexts this table calibrates.
-    #[must_use]
-    pub fn contexts(&self) -> usize {
-        self.contexts
-    }
-
     /// `context`'s lower bin index for `p` into `self.bins`, and the
     /// fraction past it.
     fn locate(&self, context: usize, p: f64) -> (usize, f64) {
@@ -233,9 +227,9 @@ impl<S: Spacing> Table<S> {
     ///
     /// # Panics
     ///
-    /// Panics if `context >= self.contexts()`: contexts come from a
-    /// caller's own fixed indexing scheme, the same bound
-    /// [`crate::model::Model::encode`] documents for out-of-range
+    /// Panics if `context` is at or past the `contexts` the table was built
+    /// with: contexts come from a caller's own fixed indexing scheme, the
+    /// same bound [`crate::model::Model::encode`] documents for out-of-range
     /// symbols, not from adversarial input.
     #[must_use]
     pub fn refine(&self, context: usize, p: f64) -> f64 {
@@ -255,8 +249,7 @@ impl<S: Spacing> Table<S> {
     ///
     /// # Panics
     ///
-    /// Panics if `context >= self.contexts()`, same bound as
-    /// [`Self::refine`].
+    /// Panics as [`Self::refine`] does.
     pub fn update(&mut self, context: usize, p: f64, outcome: bool) {
         let (lower, fraction) = self.locate(context, p);
         let target = if outcome { 1.0 } else { 0.0 };

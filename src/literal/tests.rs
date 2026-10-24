@@ -527,7 +527,6 @@ fn surprise_logistic_mix_logit_sse_new_starts_at_uniform_weights_and_zero_error_
     );
     assert_eq!(mix.recent_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
     assert_eq!(mix.baseline_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
-    assert_eq!(mix.sse.contexts(), bittree::SSE_CONTEXTS);
 }
 
 #[test]
