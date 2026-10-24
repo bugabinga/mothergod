@@ -1941,7 +1941,7 @@ record.
   independently; `refine` is monotonic in its input probability on a
   fresh table; out-of-range input probabilities clamp rather than panic;
   out-of-range context indices panic (mirrors `model::Model::encode`'s
-  documented bound); `contexts()` reports the constructed count. All five
+  documented bound); `contexts()` reports the constructed count (the accessor left main in #1603). All five
   root CLAUDE.md gates clean (two intra-doc-link warnings against private
   items, `BINS` and `Self::position`, fixed by dropping the doc links,
   same class as S2-A8/S2-A10/S2-A11/S2-A12/S2-A16). | No bpb measurement:

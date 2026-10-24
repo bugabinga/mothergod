@@ -125,11 +125,6 @@ fn update_out_of_range_context_panics() {
 }
 
 #[test]
-fn contexts_reports_the_constructed_count() {
-    assert_eq!(Sse::new(5).contexts(), 5);
-}
-
-#[test]
 fn calibrated_probability_round_trips_and_costs_less_than_a_fixed_split() {
     // The mechanism S1-P1 names as this primitive's reason to exist,
     // proven end to end: an uninformative primary estimate (constant
@@ -358,11 +353,6 @@ fn logit_sse_refine_out_of_range_context_panics() {
 fn logit_sse_update_out_of_range_context_panics() {
     let mut sse = LogitSse::new(2);
     sse.update(2, 0.5, true);
-}
-
-#[test]
-fn logit_sse_contexts_reports_the_constructed_count() {
-    assert_eq!(LogitSse::new(5).contexts(), 5);
 }
 
 #[test]
