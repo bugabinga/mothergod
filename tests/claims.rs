@@ -482,7 +482,9 @@ fn win_count_claims_match_their_generated_reports() {
 /// The backticked file names in the sentence of `text` that opens with
 /// `marker`, sorted. Whitespace is collapsed first so a sentence wrapped
 /// across source lines still matches; the sentence ends at a period
-/// followed by a space, never at the period inside `fields.c`.
+/// followed by a space, never at the period inside `fields.c`. An empty
+/// list panics: the loss check sizes its ranking by this list's length,
+/// so zero names would compare an empty claim to an empty truth.
 fn files_named_after(text: &str, marker: &str) -> Vec<String> {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let start = flat
@@ -496,6 +498,10 @@ fn files_named_after(text: &str, marker: &str) -> Vec<String> {
         .step_by(2)
         .map(str::to_owned)
         .collect();
+    assert!(
+        !names.is_empty(),
+        "the sentence opening {marker:?} names no backticked file, so the claim checks nothing"
+    );
     names.sort();
     names
 }
