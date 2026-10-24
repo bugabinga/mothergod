@@ -160,8 +160,9 @@ fixtures, and nothing else: a test that spawns a sibling binary by its
 `CARGO_BIN_EXE_*` path finds a host path that does not exist on the device.
 Such a test carries `#[cfg_attr(target_os = "android", ignore = "...")]`
 with this reason, or its file sits behind `cfg(not(target_os = "android"))`
-when every test in it spawns (`tests/cli.rs`). #518 and #1588 each cost a
-week of red monster for a missing one, because no PR lane runs Android.
+when every test in it spawns (`tests/cli.rs`). #518 stayed red a week;
+#1588 was caught by the first weekly run after the tests landed, because no
+PR lane runs Android.
 
 The advisory `coverage-check` workflow runs Sundays at 04:51 UTC and on
 manual dispatch: `cargo llvm-cov --package mothergod --json`, region
@@ -460,7 +461,8 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   that cannot run it (`script(1)` for the terminal row is Linux only and
   must pass its own pty control, the permission-bit row is Unix only) and the row is then unmeasured there.
   Citations are read from the runner's man pages, never from memory.
-  The suite spawns the binary, so it runs on no Miri or Android lane.
+  The suite spawns the binary, so it runs on no Miri lane and carries the
+  Android guard stated under "Current automated cadence".
 - The library half is `tests/fit/lib.txt` and `tests/fit_lib.rs`, the
   same format and the same two checks (`tests/fit/matrix.rs`). A row
   with a file in `tests/fit/lib/` is probed by compiling that file with
@@ -469,5 +471,5 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   suite fails instead of reading every refusal as a gap. The other
   rows run the behavior. Citations are read from the genre crates'
   registry source in a scratch crate outside the checkout, never
-  fetched. The suite spawns `rustc`, so it runs on no Miri or Android
-  lane.
+  fetched. The suite spawns `rustc`, so it runs on no Miri lane and
+  carries the Android guard stated under "Current automated cadence".
