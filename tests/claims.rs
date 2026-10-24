@@ -24,6 +24,16 @@
 //! `CHANGELOG.md`'s own headings, the recipe against the binary's own
 //! usage output, and fails naming the file, the claimed value, and the
 //! true value.
+//!
+//! A figure copied verbatim from a generated report is a located figure: its
+//! locator returns the byte span it occupies in the surface, and
+//! `check_figures` compares what sits there with the report's value. With
+//! `MOTHERGOD_BLESS_CLAIMS=1` it rewrites the span to the report's value
+//! instead of failing (issue #1486), so a benchmark publish moves the digits
+//! in one command and this file stays the one parser of those sentences. The
+//! words around a figure (a verdict, a win count, "more than nine times") are
+//! derived claims and fail as before: a floor that breaks is a sentence to
+//! rewrite, not a number to stamp.
 
 // Not under Miri: prose-vs-source string comparison, no codec code runs
 // here for Miri to observe, so the lane spends its budget elsewhere
@@ -36,11 +46,114 @@
 // claims are true (issue #518).
 #![cfg(not(any(miri, target_os = "android")))]
 
+use std::ops::Range;
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
 
 fn read(relative: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("cannot read {relative}: {error}"))
+}
+
+/// Serializes `check_figures`: tests run on threads and two of them rewrite
+/// `README.md` or `site/index.html`, so each read, locate, compare, splice
+/// and write happens whole under this lock, on a fresh read of the file. A
+/// failing check panics holding it, so a poisoned lock is still a lock.
+static SURFACES: Mutex<()> = Mutex::new(());
+
+/// Whether a stale figure is rewritten to its source's value instead of
+/// failing the test.
+fn blessing() -> bool {
+    std::env::var_os("MOTHERGOD_BLESS_CLAIMS").is_some_and(|value| value == "1")
+}
+
+/// Compares each figure `locate` finds in `file` with `truth`, in order.
+/// A stale figure fails naming the file, `name(index)`, the claimed text and
+/// the `source` that says otherwise; under `MOTHERGOD_BLESS_CLAIMS=1` it is
+/// rewritten in place instead. Truth is the exact text the surface carries,
+/// so a figure the reader sees as "1.37" where the report says "1.370" is
+/// stale too.
+fn check_figures(
+    file: &str,
+    source: &str,
+    locate: impl Fn(&str) -> Vec<Range<usize>>,
+    truth: &[String],
+    name: impl Fn(usize) -> String,
+) {
+    check_figures_within(file, source, |text| 0..text.len(), locate, truth, name);
+}
+
+/// `check_figures` that rewrites only figures inside `scope(text)`: a figure
+/// outside it, such as one in a released `CHANGELOG.md` section, is history
+/// and fails even under bless, because blessing it would rewrite the record.
+fn check_figures_within(
+    file: &str,
+    source: &str,
+    scope: impl Fn(&str) -> Range<usize>,
+    locate: impl Fn(&str) -> Vec<Range<usize>>,
+    truth: &[String],
+    name: impl Fn(usize) -> String,
+) {
+    let _held = SURFACES.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut text = read(file);
+    let spans = locate(&text);
+    assert_eq!(
+        spans.len(),
+        truth.len(),
+        "{file}: found {} figures where {source} has {}",
+        spans.len(),
+        truth.len()
+    );
+
+    let scope = scope(&text);
+    let mut stale = Vec::new();
+    let mut failures = Vec::new();
+    for (index, (span, truth)) in spans.iter().zip(truth).enumerate() {
+        let claim = &text[span.clone()];
+        if claim == truth {
+            continue;
+        }
+        if blessing() && scope.start <= span.start && span.end <= scope.end {
+            stale.push((span.clone(), truth));
+        } else {
+            failures.push(format!(
+                "{file}'s {} is {claim}, {source} says {truth}",
+                name(index)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    if stale.is_empty() {
+        return;
+    }
+
+    // Back to front, so a longer or shorter replacement cannot move a span
+    // still to be spliced.
+    stale.sort_by_key(|(span, _)| std::cmp::Reverse(span.start));
+    for (span, truth) in stale {
+        text.replace_range(span, truth);
+    }
+    // Rename, not truncate-and-write: a test reading the file without the
+    // lock must see the old file or the new one, never half of one.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
+    let staging = path.with_extension("blessing");
+    std::fs::write(&staging, text)
+        .and_then(|()| std::fs::rename(&staging, &path))
+        .unwrap_or_else(|error| panic!("cannot bless {file}: {error}"));
+}
+
+/// The one value every `(source, value)` pair agrees on. A figure two
+/// reports both carry (the CPU model, the date, a tool version) has no single
+/// truth to stamp when they differ, so that fails even under bless.
+fn agreed(what: &str, from: &[(String, String)]) -> String {
+    let (first_source, first) = &from[0];
+    for (source, value) in &from[1..] {
+        assert_eq!(
+            value, first,
+            "{what} is {first} in {first_source} and {value} in {source}"
+        );
+    }
+    first.clone()
 }
 
 /// The first run of ASCII digits after `marker`, skipping intervening
@@ -65,59 +178,94 @@ fn number_and_tail_after<'a>(text: &'a str, marker: &str) -> (u8, &'a str) {
     (number, after[digits.len()..].trim_start())
 }
 
-/// Numbers found between a `>` and the following `<`, in encounter order:
-/// picks HTML tag *content* (`<td class="ours">1.374</td>` -> `1.374`)
-/// while skipping tag attributes and non-numeric content (`Canterbury`).
-fn html_numbers(fragment: &str) -> Vec<f64> {
-    let mut values = Vec::new();
-    let mut rest = fragment;
-    while let Some(tag_end) = rest.find('>') {
-        rest = &rest[tag_end + 1..];
-        let text_end = rest.find('<').unwrap_or(rest.len());
-        if let Ok(value) = rest[..text_end].trim().parse::<f64>() {
-            values.push(value);
+/// Byte ranges of the numbers found between a `>` and the following `<`
+/// within `region` of `text`, in encounter order: picks HTML tag *content*
+/// (`<td class="ours">1.374</td>` -> `1.374`) while skipping tag attributes
+/// and non-numeric content (`Canterbury`).
+fn html_number_spans(text: &str, region: Range<usize>) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
+    let mut at = region.start;
+    while let Some(tag_end) = text[at..region.end].find('>') {
+        let start = at + tag_end + 1;
+        let len = text[start..region.end]
+            .find('<')
+            .unwrap_or(region.end - start);
+        let content = &text[start..start + len];
+        let number = content.trim();
+        if number.parse::<f64>().is_ok() {
+            let from = start + content.len() - content.trim_start().len();
+            spans.push(from..from + number.len());
         }
-        rest = &rest[text_end..];
+        at = start + len;
     }
-    values
+    spans
 }
 
-/// Numbers in a markdown table row's cells, `**bold**` or plain, in column
-/// order; a non-numeric cell (a label, an empty edge cell) is skipped.
+/// Byte ranges of the numbers in the cells of the markdown table row at
+/// `line` of `text`, `**bold**` or plain, in column order; a non-numeric cell
+/// (a label, an empty edge cell) is skipped.
+fn markdown_number_spans(text: &str, line: Range<usize>) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
+    let mut cell_start = line.start;
+    for cell in text[line].split('|') {
+        let number = cell.trim().trim_matches('*').trim();
+        if number.parse::<f64>().is_ok() {
+            // The cell holds only whitespace and asterisks before its number.
+            let from = cell_start + cell.find(number).expect("the number is in its cell");
+            spans.push(from..from + number.len());
+        }
+        cell_start += cell.len() + 1;
+    }
+    spans
+}
+
+/// Numbers in a markdown table row's cells, read through the same locator
+/// the surfaces' figures use.
 fn markdown_numbers(row: &str) -> Vec<f64> {
-    row.split('|')
-        .filter_map(|cell| cell.trim().trim_matches('*').trim().parse::<f64>().ok())
+    markdown_number_spans(row, 0..row.len())
+        .into_iter()
+        .map(|span| row[span].parse().expect("a located number parses"))
         .collect()
 }
 
-/// Decimal numbers anywhere in free-flowing prose, in encounter order:
-/// `"(1.374 bits/byte vs 1.470 and 1.403)"` -> `[1.374, 1.470, 1.403]`.
-/// Unlike `markdown_numbers`, there is no cell delimiter to split on, so
-/// this scans character by character instead.
-fn prose_numbers(text: &str) -> Vec<f64> {
-    let mut values = Vec::new();
+/// Byte ranges of the decimal numbers anywhere in `region` of free-flowing
+/// prose, in encounter order: `"(1.374 bits/byte vs 1.470 and 1.403)"` ->
+/// the three. Unlike `markdown_number_spans`, there is no cell delimiter to
+/// split on, so this scans character by character instead.
+fn prose_number_spans(text: &str, region: Range<usize>) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
     let bytes = text.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
+    let mut index = region.start;
+    while index < region.end {
         if bytes[index].is_ascii_digit() {
             let start = index;
-            while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
+            while index < region.end && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
                 index += 1;
             }
-            if let Ok(value) = text[start..index].parse::<f64>() {
-                values.push(value);
+            if text[start..index].parse::<f64>().is_ok() {
+                spans.push(start..index);
             }
         } else {
             index += 1;
         }
     }
-    values
+    spans
+}
+
+/// The first line of `text` containing `needle`, newline excluded.
+fn line_range(text: &str, needle: &str) -> Range<usize> {
+    let at = text
+        .find(needle)
+        .unwrap_or_else(|| panic!("no line contains {needle:?}"));
+    let start = text[..at].rfind('\n').map_or(0, |newline| newline + 1);
+    let end = text[at..]
+        .find('\n')
+        .map_or(text.len(), |newline| at + newline);
+    start..end
 }
 
 fn line_containing<'a>(text: &'a str, needle: &str) -> &'a str {
-    text.lines()
-        .find(|line| line.contains(needle))
-        .unwrap_or_else(|| panic!("no line contains {needle:?}"))
+    &text[line_range(text, needle)]
 }
 
 #[test]
@@ -300,23 +448,36 @@ fn aggregate_from_report(report_file: &str) -> [f64; 4] {
     [numbers[1], numbers[2], numbers[3], numbers[4]]
 }
 
-fn aggregate_from_readme(corpus: &str) -> [f64; 4] {
-    let readme = read("README.md");
-    let row = line_containing(&readme, &format!("| {corpus} |"));
-    let numbers = markdown_numbers(row);
-    [numbers[0], numbers[1], numbers[2], numbers[3]]
+/// The first four numbers of README's table row for `corpus`: mothergod,
+/// gzip -9, zstd -19, xz -9e, in the report's column order.
+fn aggregate_spans_in_readme(text: &str, corpus: &str) -> Vec<Range<usize>> {
+    let row = line_range(text, &format!("| {corpus} |"));
+    markdown_number_spans(text, row)
+        .into_iter()
+        .take(4)
+        .collect()
 }
 
-fn aggregate_from_site(corpus: &str) -> [f64; 4] {
-    let site = read("site/index.html");
+/// The first four numbers of the site's Measured-table row for `corpus`, in
+/// the same order.
+fn aggregate_spans_in_site(text: &str, corpus: &str) -> Vec<Range<usize>> {
     let marker = format!("<th scope=\"row\">{corpus}</th>");
-    let start = site
+    let start = text
         .find(&marker)
         .unwrap_or_else(|| panic!("{marker:?} not found in site/index.html"));
-    let fragment = &site[start..];
-    let end = fragment.find("</tr>").unwrap_or(fragment.len());
-    let numbers = html_numbers(&fragment[..end]);
-    [numbers[0], numbers[1], numbers[2], numbers[3]]
+    let end = text[start..]
+        .find("</tr>")
+        .map_or(text.len(), |at| start + at);
+    html_number_spans(text, start..end)
+        .into_iter()
+        .take(4)
+        .collect()
+}
+
+/// A report figure as the surfaces print it: three decimals (issue #431:
+/// "1.374", not "1.373741"). The throughput columns already carry three.
+fn three_decimals(value: f64) -> String {
+    format!("{value:.3}")
 }
 
 #[test]
@@ -325,47 +486,57 @@ fn aggregate_ratios_match_their_generated_reports() {
     let columns = ["mothergod", "gzip -9", "zstd -19", "xz -9e"];
 
     for (corpus, report_file) in corpora {
-        let truth = aggregate_from_report(report_file);
-        let readme = aggregate_from_readme(corpus);
-        let site = aggregate_from_site(corpus);
+        let truth = aggregate_from_report(report_file).map(three_decimals);
+        let source = format!("docs/benchmarks/{report_file}");
+        let name = |index: usize| format!("{corpus} {} bits/byte", columns[index]);
 
-        for (index, column) in columns.iter().enumerate() {
-            // The published surfaces round to 3 decimals (issue #431: e.g.
-            // "1.374", not "1.373741"), so compare rounded strings rather
-            // than exact floats or an unrounded prefix.
-            let rounded = format!("{:.3}", truth[index]);
-            let readme_claim = format!("{:.3}", readme[index]);
-            let site_claim = format!("{:.3}", site[index]);
-
-            assert_eq!(
-                readme_claim, rounded,
-                "README.md's {corpus} {column} bits/byte is {readme_claim}, docs/benchmarks/{report_file} says {rounded}"
-            );
-            assert_eq!(
-                site_claim, rounded,
-                "site/index.html's {corpus} {column} bits/byte is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
-            );
-        }
+        check_figures(
+            "README.md",
+            &source,
+            |text| aggregate_spans_in_readme(text, corpus),
+            &truth,
+            name,
+        );
+        check_figures(
+            "site/index.html",
+            &source,
+            |text| aggregate_spans_in_site(text, corpus),
+            &truth,
+            name,
+        );
     }
+}
+
+/// The `[Unreleased]` section of `CHANGELOG.md`: its heading to the next
+/// release heading. A figure in a released section is history.
+fn changelog_unreleased(text: &str) -> Range<usize> {
+    let start = text
+        .find("## [Unreleased]")
+        .expect("CHANGELOG.md has an [Unreleased] section");
+    let end = text[start..]
+        .find("\n## [")
+        .map_or(text.len(), |at| start + at);
+    start..end
 }
 
 /// `CHANGELOG.md`'s "Ratio" bullet names only three of the four columns the
 /// other surfaces carry, in this order: `[mothergod, zstd -19, xz -9e]`. It
 /// never names gzip, so it maps onto `aggregate_from_report`'s four-wide
 /// array by skipping index 1.
-fn aggregate_from_changelog(corpus: &str) -> [f64; 3] {
-    let changelog = read("CHANGELOG.md");
+fn aggregate_spans_in_changelog(text: &str, corpus: &str) -> Vec<Range<usize>> {
     let marker = format!("{corpus} (");
-    let start = changelog
+    let start = text
         .find(&marker)
         .unwrap_or_else(|| panic!("{marker:?} not found in CHANGELOG.md"))
         + marker.len();
-    let end = changelog[start..]
+    let end = text[start..]
         .find(')')
         .unwrap_or_else(|| panic!("unterminated {corpus} parenthetical in CHANGELOG.md"))
         + start;
-    let numbers = prose_numbers(&changelog[start..end]);
-    [numbers[0], numbers[1], numbers[2]]
+    prose_number_spans(text, start..end)
+        .into_iter()
+        .take(3)
+        .collect()
 }
 
 #[test]
@@ -375,24 +546,23 @@ fn changelog_ratio_claim_matches_its_generated_reports() {
     let report_indices = [0, 2, 3];
 
     for (corpus, report_file) in corpora {
-        let truth = aggregate_from_report(report_file);
-        let changelog = aggregate_from_changelog(corpus);
+        let report = aggregate_from_report(report_file);
+        let truth = report_indices.map(|index| three_decimals(report[index]));
 
-        for (position, column) in columns.iter().enumerate() {
-            let rounded = format!("{:.3}", truth[report_indices[position]]);
-            let changelog_claim = format!("{:.3}", changelog[position]);
-
-            assert_eq!(
-                changelog_claim, rounded,
-                "CHANGELOG.md's {corpus} {column} bits/byte is {changelog_claim}, docs/benchmarks/{report_file} says {rounded}"
-            );
-        }
+        check_figures_within(
+            "CHANGELOG.md",
+            &format!("docs/benchmarks/{report_file}"),
+            changelog_unreleased,
+            |text| aggregate_spans_in_changelog(text, corpus),
+            &truth,
+            |index| format!("{corpus} {} bits/byte", columns[index]),
+        );
     }
 }
 
 /// Plain (non-decimal) integers anywhere in free-flowing prose, in
 /// encounter order: `"wins 6 of 11 on Canterbury"` -> `[6, 11]`. Separate
-/// from `prose_numbers` because a win count has no fractional part, and
+/// from `prose_number_spans` because a win count has no fractional part, and
 /// parsing straight to `usize` avoids a float-to-int cast on a count.
 fn prose_integers(text: &str) -> Vec<usize> {
     let mut values = Vec::new();
@@ -667,50 +837,56 @@ fn throughput_from_report(report_file: &str) -> [f64; 2] {
     [numbers[6], numbers[7]]
 }
 
-/// The first two numbers immediately followed by `MB/s`, scanning from
-/// `marker` onward. README states a corpus name once and then gives its two
-/// rates in encode-then-decode order in prose ("encoded Canterbury at 0.133
-/// MB/s and decoded it at 4.422 MB/s"), so the corpus name is the only
-/// anchor this needs and the prose stays free to reword around it.
-fn throughput_after(text: &str, marker: &str) -> [f64; 2] {
-    let start = text
+/// Byte ranges of the first two numbers immediately followed by `MB/s`,
+/// scanning from `marker` onward. README states a corpus name once and then
+/// gives its two rates in encode-then-decode order in prose ("encoded
+/// Canterbury at 0.133 MB/s and decoded it at 4.422 MB/s"), so the corpus
+/// name is the only anchor this needs and the prose stays free to reword
+/// around it.
+fn throughput_spans_after(text: &str, marker: &str) -> Vec<Range<usize>> {
+    let mut cursor = text
         .find(marker)
-        .unwrap_or_else(|| panic!("{marker:?} not found"));
-    let mut rates = text[start..].split("MB/s").take(2).map(|before| {
-        let reversed: String = before
-            .trim_end()
-            .chars()
-            .rev()
-            .take_while(|c| c.is_ascii_digit() || *c == '.')
-            .collect();
-        let number: String = reversed.chars().rev().collect();
-        number
-            .parse::<f64>()
-            .unwrap_or_else(|_| panic!("no MB/s rate after {marker:?}, found {before:?}"))
-    });
-    let encode = rates.next().expect("encode rate after the corpus name");
-    let decode = rates.next().expect("decode rate after the corpus name");
-    [encode, decode]
+        .unwrap_or_else(|| panic!("{marker:?} not found"))
+        + marker.len();
+    (0..2)
+        .map(|_| {
+            let unit = cursor
+                + text[cursor..]
+                    .find("MB/s")
+                    .unwrap_or_else(|| panic!("no MB/s rate after {marker:?}"));
+            let end = text[..unit].trim_end().len();
+            let digits = text[cursor..end]
+                .bytes()
+                .rev()
+                .take_while(|byte| byte.is_ascii_digit() || *byte == b'.')
+                .count();
+            cursor = unit + "MB/s".len();
+            end - digits..end
+        })
+        .collect()
 }
 
-/// The Speed table's encode/decode MB/s for `corpus`, scoped to `id="speed"`
-/// so it cannot match the Measured table's own `<th scope="row">{corpus}</th>`
-/// row (issue #604 item 2: the Speed section states its rates in a table,
-/// not prose, so this reads cells the way `aggregate_from_site` does).
-fn throughput_from_site(corpus: &str) -> [f64; 2] {
-    let site = read("site/index.html");
-    let table_start = site
+/// The Speed table's encode and decode MB/s cells for `corpus`, scoped to
+/// `id="speed"` so it cannot match the Measured table's own
+/// `<th scope="row">{corpus}</th>` row (issue #604 item 2: the Speed section
+/// states its rates in a table, not prose, so this reads cells the way
+/// `aggregate_spans_in_site` does).
+fn throughput_spans_in_site(text: &str, corpus: &str) -> Vec<Range<usize>> {
+    let table = text
         .find("id=\"speed\"")
         .unwrap_or_else(|| panic!("no #speed table in site/index.html"));
-    let table = &site[table_start..];
     let marker = format!("<th scope=\"row\">{corpus}</th>");
     let start = table
-        .find(&marker)
-        .unwrap_or_else(|| panic!("{marker:?} not found in the #speed table"));
-    let fragment = &table[start..];
-    let end = fragment.find("</tr>").unwrap_or(fragment.len());
-    let numbers = html_numbers(&fragment[..end]);
-    [numbers[0], numbers[1]]
+        + text[table..]
+            .find(&marker)
+            .unwrap_or_else(|| panic!("{marker:?} not found in the #speed table"));
+    let end = text[start..]
+        .find("</tr>")
+        .map_or(text.len(), |at| start + at);
+    html_number_spans(text, start..end)
+        .into_iter()
+        .take(2)
+        .collect()
 }
 
 #[test]
@@ -718,28 +894,25 @@ fn published_throughput_matches_its_generated_reports() {
     let corpora = [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")];
 
     for (corpus, report_file) in corpora {
-        let truth = throughput_from_report(report_file);
+        let truth = throughput_from_report(report_file).map(three_decimals);
+        let source = format!("docs/benchmarks/{report_file}");
+        let name = |index: usize| format!("{corpus} {} MB/s", ["encode", "decode"][index]);
         let marker = format!("encoded {corpus} at");
-        let readme = throughput_after(&read("README.md"), &marker);
-        let site = throughput_from_site(corpus);
 
-        for (index, direction) in ["encode", "decode"].iter().enumerate() {
-            // The reports already print three decimals, so the surfaces
-            // quote them verbatim; compare as strings for the same reason
-            // the ratio test does.
-            let rounded = format!("{:.3}", truth[index]);
-            let readme_claim = format!("{:.3}", readme[index]);
-            let site_claim = format!("{:.3}", site[index]);
-
-            assert_eq!(
-                readme_claim, rounded,
-                "README.md's {corpus} {direction} MB/s is {readme_claim}, docs/benchmarks/{report_file} says {rounded}"
-            );
-            assert_eq!(
-                site_claim, rounded,
-                "site/index.html's {corpus} {direction} MB/s is {site_claim}, docs/benchmarks/{report_file} says {rounded}"
-            );
-        }
+        check_figures(
+            "README.md",
+            &source,
+            |text| throughput_spans_after(text, &marker),
+            &truth,
+            name,
+        );
+        check_figures(
+            "site/index.html",
+            &source,
+            |text| throughput_spans_in_site(text, corpus),
+            &truth,
+            name,
+        );
     }
 }
 
@@ -766,24 +939,25 @@ fn frontier_throughput(report_file: &str, level: &str) -> [f64; 2] {
 fn published_speed_anchor_matches_its_generated_report() {
     let xz = frontier_throughput("silesia.md", "xz -9e");
     let ours = throughput_from_report("silesia.md");
-    let readme = throughput_after(&read("README.md"), "`xz -9e` encoded Silesia at");
-    let site = throughput_after(
-        &read("site/index.html"),
-        "<code>xz -9e</code> encoded Silesia at",
+    let truth = xz.map(three_decimals);
+    let name = |index: usize| format!("xz -9e Silesia {} MB/s", ["encode", "decode"][index]);
+
+    check_figures(
+        "README.md",
+        "docs/benchmarks/silesia.md",
+        |text| throughput_spans_after(text, "`xz -9e` encoded Silesia at"),
+        &truth,
+        name,
+    );
+    check_figures(
+        "site/index.html",
+        "docs/benchmarks/silesia.md",
+        |text| throughput_spans_after(text, "<code>xz -9e</code> encoded Silesia at"),
+        &truth,
+        name,
     );
 
     for (index, (direction, floor)) in [("encode", 9.0), ("decode", 20.0)].iter().enumerate() {
-        let rounded = format!("{:.3}", xz[index]);
-        for (surface, claim) in [
-            ("README.md", readme[index]),
-            ("site/index.html", site[index]),
-        ] {
-            let claim = format!("{claim:.3}");
-            assert_eq!(
-                claim, rounded,
-                "{surface}'s xz -9e Silesia {direction} MB/s is {claim}, docs/benchmarks/silesia.md says {rounded}"
-            );
-        }
         let ratio = xz[index] / ours[index];
         assert!(
             ratio >= *floor,
@@ -792,134 +966,171 @@ fn published_speed_anchor_matches_its_generated_report() {
     }
 }
 
-/// The CPU model token after "AMD EPYC ": the run of characters up to the
-/// next whitespace or comma, which strips the report's own "96-Core
-/// Processor" suffix (`"AMD EPYC 9V45 96-Core Processor,"` -> `"9V45"`) and
-/// the site prose's own trailing comma (`"AMD EPYC 9V45, 4 logical"` ->
-/// `"9V45"`) the same way regardless of which form `text` uses.
-fn epyc_model(text: &str) -> String {
+/// Byte range of the CPU model token after "AMD EPYC ": the run of
+/// characters up to the next whitespace or comma, which strips the report's
+/// own "96-Core Processor" suffix (`"AMD EPYC 9V45 96-Core Processor,"` ->
+/// `"9V45"`) and the site prose's own trailing comma (`"AMD EPYC 9V45, 4
+/// logical"` -> `"9V45"`) the same way regardless of which form `text` uses.
+fn epyc_model_span(text: &str) -> Range<usize> {
     let marker = "AMD EPYC ";
     let start = text
         .find(marker)
         .unwrap_or_else(|| panic!("{marker:?} not found"))
         + marker.len();
-    let rest = &text[start..];
-    let end = rest
+    let end = text[start..]
         .find(|c: char| c.is_whitespace() || c == ',')
-        .unwrap_or(rest.len());
-    rest[..end].to_string()
+        .map_or(text.len(), |at| start + at);
+    start..end
 }
 
-#[test]
-fn published_cpu_model_matches_its_generated_reports() {
-    let site_claim = epyc_model(&read("site/index.html"));
-
-    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
-        let truth = epyc_model(&read(&format!("docs/benchmarks/{report_file}")));
-        assert_eq!(
-            site_claim, truth,
-            "site/index.html's CPU model is {site_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
-        );
-    }
-}
-
-/// The date restated in a surface's "Measured `<date>`" phrase.
-fn measured_date(text: &str) -> String {
-    let marker = "Measured ";
+/// Byte range of the date after `marker`: the run of digits and hyphens, so
+/// a surface's "Measured 2026-10-24 against" and a report's "As of
+/// 2026-10-24T17:20:21Z" both end at the date.
+fn date_span_after(text: &str, marker: &str) -> Range<usize> {
     let start = text
         .find(marker)
         .unwrap_or_else(|| panic!("{marker:?} not found"))
         + marker.len();
-    let rest = &text[start..];
-    let end = rest
+    let end = text[start..]
         .find(|c: char| !(c.is_ascii_digit() || c == '-'))
-        .unwrap_or(rest.len());
-    rest[..end].to_string()
+        .map_or(text.len(), |at| start + at);
+    start..end
 }
 
-/// A report's own measurement date, the date part of its `As of <timestamp>`
-/// header.
-fn report_date(report_file: &str) -> String {
-    let text = read(&format!("docs/benchmarks/{report_file}"));
-    let marker = "As of ";
-    let start = text
-        .find(marker)
-        .unwrap_or_else(|| panic!("{marker:?} not found in {report_file}"))
-        + marker.len();
-    let rest = &text[start..];
-    let end = rest
-        .find('T')
-        .unwrap_or_else(|| panic!("no time separator after {marker:?} in {report_file}"));
-    rest[..end].to_string()
+/// What `figure` locates in the `docs/benchmarks/` reports, which must agree:
+/// both name the CPU, the date and the tool versions of one pass.
+fn from_both_reports(what: &str, figure: impl Fn(&str) -> Range<usize>) -> String {
+    let readings: Vec<(String, String)> = ["canterbury.md", "silesia.md"]
+        .iter()
+        .map(|report_file| {
+            let text = read(&format!("docs/benchmarks/{report_file}"));
+            (
+                format!("docs/benchmarks/{report_file}"),
+                text[figure(&text)].to_owned(),
+            )
+        })
+        .collect();
+    agreed(what, &readings)
+}
+
+const BOTH_REPORTS: &str = "docs/benchmarks/{canterbury,silesia}.md";
+
+#[test]
+fn published_cpu_model_matches_its_generated_reports() {
+    check_figures(
+        "site/index.html",
+        BOTH_REPORTS,
+        |text| vec![epyc_model_span(text)],
+        &[from_both_reports(
+            "the benchmark CPU model",
+            epyc_model_span,
+        )],
+        |_| "CPU model".to_owned(),
+    );
 }
 
 #[test]
 fn measurement_date_matches_its_report() {
-    let readme_claim = measured_date(&read("README.md"));
-    let site_claim = measured_date(&read("site/index.html"));
-
-    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
-        let truth = report_date(report_file);
-        assert_eq!(
-            readme_claim, truth,
-            "README.md's measurement date is {readme_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
-        );
-        assert_eq!(
-            site_claim, truth,
-            "site/index.html's measurement date is {site_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
+    let truth = from_both_reports("the measurement date", |text| {
+        date_span_after(text, "As of ")
+    });
+    for file in ["README.md", "site/index.html"] {
+        check_figures(
+            file,
+            BOTH_REPORTS,
+            |text| vec![date_span_after(text, "Measured ")],
+            std::slice::from_ref(&truth),
+            |_| "measurement date".to_owned(),
         );
     }
 }
 
-/// The first dotted version number (a digit run containing `.`) after the
-/// first occurrence of `name` in `text`. Scans past intervening prose
-/// rather than taking the text immediately after `name`: the report's own
-/// zstd line reads "Zstandard CLI (64-bit) v1.5.7", so a run of digits
-/// starts at "64" (from "64-bit") before the actual version, and only the
-/// dot distinguishes the real version from that false start.
-fn version_after(text: &str, name: &str) -> String {
-    let start = text
+/// Byte range of the first dotted version number (a digit run containing
+/// `.`) after the first occurrence of `name` in `text`. Scans past
+/// intervening prose rather than taking the text immediately after `name`:
+/// the report's own zstd line reads "Zstandard CLI (64-bit) v1.5.7", so a run
+/// of digits starts at "64" (from "64-bit") before the actual version, and
+/// only the dot distinguishes the real version from that false start.
+fn version_span_after(text: &str, name: &str) -> Range<usize> {
+    let mut at = text
         .find(name)
         .unwrap_or_else(|| panic!("{name:?} not found"))
         + name.len();
-    let mut rest = &text[start..];
     loop {
-        let digit_start = rest
-            .find(|c: char| c.is_ascii_digit())
-            .unwrap_or_else(|| panic!("no version digits after {name:?}"));
-        let run = &rest[digit_start..];
-        let run_end = run
+        let start = at
+            + text[at..]
+                .find(|c: char| c.is_ascii_digit())
+                .unwrap_or_else(|| panic!("no version digits after {name:?}"));
+        let end = text[start..]
             .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-            .unwrap_or(run.len());
-        let candidate = &run[..run_end];
-        if candidate.contains('.') {
-            return candidate.to_string();
+            .map_or(text.len(), |len| start + len);
+        if text[start..end].contains('.') {
+            return start..end;
         }
-        rest = &run[run_end..];
+        at = end;
     }
 }
 
 #[test]
 fn reference_compressor_versions_match_their_generated_reports() {
-    let readme = read("README.md");
-    let site = read("site/index.html");
-
-    for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
-        let report = read(&format!("docs/benchmarks/{report_file}"));
-        for tool in ["gzip", "Zstandard", "XZ Utils"] {
-            let truth = version_after(&report, tool);
-            let readme_claim = version_after(&readme, tool);
-            let site_claim = version_after(&site, tool);
-            assert_eq!(
-                readme_claim, truth,
-                "README.md's {tool} version is {readme_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
-            );
-            assert_eq!(
-                site_claim, truth,
-                "site/index.html's {tool} version is {site_claim}, docs/benchmarks/{report_file} ({corpus}) says {truth}"
+    for tool in ["gzip", "Zstandard", "XZ Utils"] {
+        let truth = from_both_reports(&format!("the {tool} version"), |text| {
+            version_span_after(text, tool)
+        });
+        for file in ["README.md", "site/index.html"] {
+            check_figures(
+                file,
+                BOTH_REPORTS,
+                |text| vec![version_span_after(text, tool)],
+                std::slice::from_ref(&truth),
+                |_| format!("{tool} version"),
             );
         }
     }
+}
+
+/// Every data row's decode MB/s across both reports: the last column of a
+/// per-file row (`docs/benchmarks/{canterbury,silesia}.md`'s own header).
+/// Excludes the `**aggregate` row, which is not a file.
+fn per_file_decode_rates() -> Vec<f64> {
+    ["canterbury.md", "silesia.md"]
+        .iter()
+        .flat_map(|report_file| {
+            read(&format!("docs/benchmarks/{report_file}"))
+                .lines()
+                .filter(|line| line.starts_with("| `"))
+                .map(|line| markdown_numbers(line)[7])
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn site_per_file_decode_range_matches_its_generated_reports() {
+    // "Per-file decode rates in those reports run from 0.6 to 25.8 MB/s":
+    // the slowest and the fastest file of either report, to one decimal.
+    // Unpinned until issue #1486: a publish moved it and nothing said so.
+    let rates = per_file_decode_rates();
+    let slowest = rates.iter().copied().fold(f64::INFINITY, f64::min);
+    let fastest = rates.iter().copied().fold(0.0, f64::max);
+
+    check_figures(
+        "site/index.html",
+        BOTH_REPORTS,
+        |text| {
+            let marker = "<span class=\"rate\">";
+            let start = text
+                .find(marker)
+                .unwrap_or_else(|| panic!("{marker:?} not found in site/index.html"))
+                + marker.len();
+            let end = text[start..]
+                .find("</span>")
+                .map_or(text.len(), |at| start + at);
+            prose_number_spans(text, start..end)
+        },
+        &[format!("{slowest:.1}"), format!("{fastest:.1}")],
+        |index| format!("per-file {} decode MB/s", ["lowest", "highest"][index]),
+    );
 }
 
 /// What `mothergod --help` prints. The binary's own usage text is the source

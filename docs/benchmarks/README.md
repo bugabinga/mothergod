@@ -86,7 +86,10 @@ pass, because every pass moves the timing columns whether or not a number
 behind them did. `.github/scripts/bench-report`
 says where main stands, `fresh`, `running`, `publish` or `dispatch`,
 and `bench-report --publish` writes a finished pass's five files into
-the tree for the PR that publishes them, under the title it prints: the
+the tree and stamps the figures README.md, site/index.html and
+CHANGELOG.md's `[Unreleased]` section copy from them (`tests/claims.rs`
+under `MOTHERGOD_BLESS_CLAIMS=1`; the words around a figure are not
+stamped), for the PR that publishes them, under the title it prints: the
 squash commit's subject is where the next read learns which commit the
 reports were generated at, because the commit's own date says only when
 they merged.

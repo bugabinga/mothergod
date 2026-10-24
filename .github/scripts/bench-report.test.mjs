@@ -23,7 +23,7 @@
 // only the renderer.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -210,8 +210,9 @@ test("render leads with the state word, dictates the publish title, and ends wit
   assert.match(out, /bench-report --publish/);
   // The quoters ride in the same diff: a publish PR of the five files alone
   // fails `test`, because tests/claims.rs pins README.md and site/index.html
-  // to the reports' timing columns (#1384, PR #1383's first round).
-  assert.match(out, /`cargo x check`: tests\/claims\.rs pins README\.md and site\/index\.html/);
+  // to the reports' timing columns (#1384, PR #1383's first round); the
+  // publish stamps those figures itself (#1486).
+  assert.match(out, /stamps the figures README\.md, site\/index\.html and CHANGELOG\.md copy from them/);
   // Twelve characters: seven resolved once as no object on GitHub (#1495).
   assert.match(out, /"bench: publish the reports regenerated at deadbeefdead"/);
   assert.match(
@@ -237,8 +238,11 @@ test("an unreadable gh prints UNREADABLE and no state word", () => {
 // End to end: a stub gh answers the reads from a table keyed by a substring
 // of argv and, for `run download`, writes the five files under the -D
 // directory. The tree is a scratch git repository so `--publish` has a
-// toplevel to write into and a `git status` to report.
-function withGh(answers, args, cwd) {
+// toplevel to write into and a `git status` to report. A stub cargo stands
+// in for the stamp, tests/claims.rs in bless mode: it logs the environment
+// bit and argv it saw as `result.cargo`, rewrites README.md as the stamp
+// would, and exits with `cargo.status` after printing `cargo.stdout`.
+function withGh(answers, args, cwd, cargo = { status: 0, stdout: "" }) {
   const dir = mkdtempSync(join(tmpdir(), "bench-report-"));
   const table = join(dir, "answers.json");
   writeFileSync(table, JSON.stringify(answers));
@@ -265,11 +269,21 @@ console.log(JSON.stringify(hit[1]));
   );
   writeFileSync(join(dir, "gh"), `#!/bin/sh\nexec node ${stub} "$@"\n`);
   chmodSync(join(dir, "gh"), 0o755);
-  return spawnSync(script, ["--repo", "o/r", ...args], {
+  const log = join(dir, "cargo.log");
+  writeFileSync(
+    join(dir, "cargo"),
+    `#!/bin/sh\necho "$MOTHERGOD_BLESS_CLAIMS $*" > ${log}\necho stamped > README.md\necho ${
+      JSON.stringify(cargo.stdout)
+    }\nexit ${cargo.status}\n`,
+  );
+  chmodSync(join(dir, "cargo"), 0o755);
+  const run = spawnSync(script, ["--repo", "o/r", ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
   });
+  run.cargo = existsSync(log) ? readFileSync(log, "utf8").trim() : null;
+  return run;
 }
 
 function scratchRepo() {
@@ -282,6 +296,7 @@ function scratchRepo() {
       "docs/benchmarks/baseline.svg",
       "docs/benchmarks/canterbury.md",
       "docs/benchmarks/silesia.md",
+      "README.md",
     ]
   ) {
     mkdirSync(join(root, rel, ".."), { recursive: true });
@@ -346,6 +361,24 @@ test("end to end: the generator named in the publish subject outranks the report
   assert.match(written.stdout, / M docs\/benchmarks\/silesia\.md/);
   assert.equal(readFileSync(join(root, "docs/benchmarks/canterbury.md"), "utf8"), "new\n");
   assert.equal(readFileSync(join(root, "bench/baseline.json"), "utf8"), "new\n");
+
+  // The stamp ran once, in bless mode, over the claims test alone, and what
+  // it rewrote shows beside the five files for the seat to ship.
+  assert.equal(written.cargo, "1 test --test claims");
+  assert.match(written.stdout, / M README\.md/);
+});
+
+test("end to end: a stamp that fails on a falsified sentence exits 1 with its last lines, the files written", () => {
+  const root = scratchRepo();
+  const run = withGh(answers, ["--publish"], root, {
+    status: 101,
+    stdout: "README.md's xz -9e Silesia decode MB/s is 9.5, docs/benchmarks/silesia.md says 87.638",
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /published run 42: 5 files written into the tree/);
+  assert.match(run.stdout, /`cargo test --test claims` failed under MOTHERGOD_BLESS_CLAIMS=1/);
+  assert.match(run.stdout, /xz -9e Silesia decode MB\/s is 9\.5/);
+  assert.equal(readFileSync(join(root, "docs/benchmarks/silesia.md"), "utf8"), "new\n");
 });
 
 test("end to end: the clock's pass is publish although no pin moved, and the line says what the reports lack", () => {
