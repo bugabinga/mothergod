@@ -34,6 +34,9 @@ a cheaper layer's claim is noise with a maintenance bill.
 - Ledger numbers are maps, never targets (ADR-0043). A test whose
   only effect is moving coverage or mutation score is a manufactured
   assertion; do not write it.
+- A test that spawns a binary carries the Android ignore. The guard and
+  its reason are one paragraph in `docs/TESTING.md` "Current automated
+  cadence", under the runtime target table.
 
 ## The four
 
