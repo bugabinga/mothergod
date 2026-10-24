@@ -759,6 +759,42 @@ test("a 405, a refused arm, then a 409: the moved head exits 1 and nothing lands
   assert.match(stderr, /head moved past the pinned abc123456789/);
 });
 
+// 2026-10-24: `--sha a67fe4b7dc56`, the twelve characters every state and
+// retrospect line prints, died on #1573 as "head moved past the pinned
+// a67fe4b7dc56 to a67fe4b7dc56". A prefix of the head is the head.
+test("--sha a prefix of the head pins the full head: the arm carries the whole oid", () => {
+  const { status, calls, stderr } = run(["42", "--sha", HEAD.slice(0, 12)], {
+    responses: [{ match: "^api repos/o/r/pulls/42$", responses: [pr([])] }, unmet, armed],
+  });
+  assert.equal(status, 2, stderr);
+  const arm = calls.find((argv) => argv[1] === "graphql");
+  assert.ok(arm, "the mutation was sent");
+  assert.ok(arm.includes(`oid=${HEAD}`), "pinned to the full head, not the typed prefix");
+});
+
+test("--wait --sha a prefix of the head is not a move; the wait merges at it", () => {
+  const { status, stdout, stderr, merges } = run([...WAIT, "--sha", HEAD.slice(0, 12)], {
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      ruleset,
+      { match: "check-runs", responses: [runs(["review", "completed", "success"], ...GREEN_GATES)] },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout + stderr);
+  assert.doesNotMatch(stderr, /moved past/);
+  assert.match(stdout, /merged #42 at abc123456789 as squash1/);
+  assert.equal(merges.length, 1);
+});
+
+test("--sha that is not a commit sha is refused before any read", () => {
+  const { status, calls, stderr } = run(["42", "--sha", "abc"]);
+  assert.equal(status, 1);
+  assert.deepEqual(calls, []);
+  assert.match(stderr, /--sha 'abc' is not a commit sha/);
+});
+
 test("--wait never arms: a 405 after green gates exits 2 with nothing armed", () => {
   const { status, calls, stderr } = run(WAIT, {
     responses: [

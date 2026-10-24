@@ -256,6 +256,20 @@ def read_pr(pr):
     return gh_json((f"repos/{REPO}/pulls/{pr}",))
 
 
+def pinned(sha, head):
+    """The pin at full length: `head` when `sha` is None or names it by
+    prefix, else `sha` as typed. Every head this project prints is twelve
+    characters (state, retrospect, the verdict comment), so a typed pin is
+    a prefix more often than a full oid, and the merge body and the
+    auto-merge arm carry a full one: `--sha a67fe4b7dc56` on #1573 died as
+    "moved past a67fe4b7dc56 to a67fe4b7dc56" (2026-10-24). A pin that is
+    not a prefix of the head stays as typed, for the move-or-lag judgement
+    that follows."""
+    if sha is None or head.startswith(sha):
+        return head
+    return sha
+
+
 def read_lags_pin(head, sha):
     """Whether `head`, the PR's current read, is an ancestor of `sha`, the
     pin. GitHub's PR view lags its ref by seconds after a push, so a wait
@@ -311,7 +325,7 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
             info = read_pr(pr)
             exit_if_landed(pr, info)
             head = info["head"]["sha"]
-            sha = sha or head
+            sha = pinned(sha, head)
             if head != sha and not read_lags_pin(head, sha):
                 die(f"head moved past the pinned {sha[:12]} to {head[:12]}; "
                     "re-read the PR before deciding again")
@@ -488,7 +502,10 @@ def main():
         at = args.index("--sha")
         if at + 1 >= len(args):
             die(USAGE)
-        sha = args[at + 1]
+        sha = args[at + 1].lower()
+        if len(sha) < 7 or sha.strip("0123456789abcdef"):
+            die(f"--sha {args[at + 1]!r} is not a commit sha: seven or more hex "
+                "characters, the head or a prefix of it")
         del args[at:at + 2]
     wait = "--wait" in args
     if wait:
@@ -528,7 +545,7 @@ def main():
         except ApiError as err:
             die(f"reading PR #{pr} failed: {err}")
         exit_if_landed(pr, info)
-        sha = sha or info["head"]["sha"]
+        sha = pinned(sha, info["head"]["sha"])
 
     proc, status = attempt(pr, sha)
     if proc.returncode == 0:
