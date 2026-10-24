@@ -20,7 +20,7 @@ loader = importlib.machinery.SourceFileLoader("mutants_sweep", sys.argv[1] + "/m
 spec = importlib.util.spec_from_loader("mutants_sweep", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
-raw = json.loads(sys.argv[2])
+raw = json.loads(sys.stdin.read())
 def shard(s):
     return mod.Shard(name=s["name"], spec=s.get("spec"), listed=s.get("listed", []),
                      outcomes=s.get("outcomes", {}), error=s.get("error"))
@@ -41,8 +41,8 @@ elif fn == "read_shard":
     print(json.dumps(dataclasses.asdict(s)))
 elif fn == "triage":
     o = mod.triage(sweep(raw["sweep"]), {int(k): set(v) for k, v in raw["filed"].items()})
-    d = dataclasses.asdict(o); d["summary"] = o.summary
-    print(json.dumps(d))
+    print(json.dumps({"missed": o.missed, "undecided": o.undecided, "elsewhere": o.elsewhere,
+                      "excluded": o.excluded, "scaffold": dict(o.scaffold), "summary": o.summary}))
 elif fn == "render":
     title, body = mod.render(sweep(raw["sweep"]), owed(raw["owed"]), raw["head"], raw["date"], raw["run_url"], raw.get("dedup_error"))
     print(json.dumps({"title": title, "body": body}))
@@ -55,7 +55,8 @@ elif fn == "filed":
 `;
 
 function call(payload) {
-  const run = spawnSync("python3", ["-c", driver, scriptsDir, JSON.stringify(payload)], { encoding: "utf8" });
+  // The payload rides stdin: the August fixture below is past Linux's single-argument limit.
+  const run = spawnSync("python3", ["-c", driver, scriptsDir], { encoding: "utf8", input: JSON.stringify(payload) });
   assert.equal(run.status, 0, run.stderr);
   return JSON.parse(run.stdout);
 }
@@ -104,11 +105,13 @@ test("the August 2026 sweep's counts give 82.02", () => {
   assert.equal(s.score, 82.02);
 });
 
-test("a missing shard voids the score and is named", () => {
-  const s = call({ fn: "merge", shards: [{ ...shard0, spec: "0/3" }, { ...shard1, spec: "2/3" }] });
+test("a missing shard voids the score and is named; many missing are counted", () => {
+  let s = call({ fn: "merge", shards: [{ ...shard0, spec: "0/3" }, { ...shard1, spec: "2/3" }] });
   assert.equal(s.score, null);
   assert.deepEqual(s.problems, ["shard 1 of 3 missing"]);
   assert.equal(s.denominator, 3);
+  s = call({ fn: "merge", shards: [{ ...shard0, spec: "0/256" }] });
+  assert.deepEqual(s.problems, ["255 of 256 shards missing, received 0"]);
 });
 
 test("a shard cut by its budget leaves never-run mutants and no score", () => {

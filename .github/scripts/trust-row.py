@@ -11,8 +11,8 @@ the retention, so "cumulative fuzz CPU-hours" is cumulative.
 Two verbs.
 
 `trust-row.py <entry.json>` is the live write, the step after the artifact
-upload in fuzz-check.yml and coverage-check.yml; the attempt is
-GITHUB_RUN_ATTEMPT. It never fails the run: exit 0 on every path
+upload in each writer (`grep -l trust-row.py .github/workflows/*.yml` lists
+them); the attempt is GITHUB_RUN_ATTEMPT. It never fails the run: exit 0 on every path
 (ADR-0023), a row that could not be written is a `::warning::`
 annotation, and no CLOUDFLARE_API_TOKEN is a configuration, one line.
 

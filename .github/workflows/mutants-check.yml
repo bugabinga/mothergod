@@ -17,8 +17,8 @@
 # score on the trust ledger; the dispatch button this file carried for a
 # one-time backlog measurement went with it (#455).
 #
-# Both mutate `--package mothergod` alone: `bench` and `x` measure and
-# orchestrate, they are not the codec under test.
+# Everything here mutates `--package mothergod` alone: `bench` and `x`
+# measure and orchestrate, they are not the codec under test.
 #
 # `--timeout-multiplier 10` doubles cargo-mutants' default of 5x the baseline
 # test duration, because the default's anchor is measured under conditions it

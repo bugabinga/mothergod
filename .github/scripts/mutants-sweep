@@ -202,7 +202,9 @@ def merge(shards):
         denominator = next(iter(denominators))
         missing = [k for k in range(denominator) if indices[k] == 0]
         repeated = sorted(k for k, c in indices.items() if c > 1)
-        if missing:
+        if len(missing) > 5:
+            problems.append(f"{len(missing)} of {denominator} shards missing, received {', '.join(map(str, sorted(indices)))}")
+        elif missing:
             problems.append(f"shard{'s' if len(missing) != 1 else ''} {', '.join(map(str, missing))} of {denominator} missing")
         if repeated:
             problems.append(f"shard{'s' if len(repeated) != 1 else ''} {', '.join(map(str, repeated))} received twice")

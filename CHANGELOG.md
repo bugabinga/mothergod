@@ -8,6 +8,11 @@ All notable changes to this project are documented here. Format follows
 
 ### Added
 
+- site: the status page's TRUST panel shows the whole-crate mutation score,
+  measured on the first of each month by a sharded `cargo-mutants` sweep of
+  every line of the codec, so a reader sees how much of the code the test
+  suite actually checks, not only how much it reaches; survivors in the
+  decoder's territory land in one refreshed issue (#1613).
 - codec: `compress` reaches 2 MiB back instead of 1 MiB on input over 1 MiB
   when that shrinks the frame, so repeats between 1 and 2 MiB apart now
   match: up to 2.4% smaller on Silesia text (`reymont`, `dickens`), nothing
