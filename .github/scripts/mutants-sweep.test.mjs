@@ -6,7 +6,7 @@
 // the duplicate the territory and dedup rules exist to end.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -361,16 +361,16 @@ test("the script scores a shard directory end to end with --no-issue and writes 
     run.stdout,
     /^mutants-sweep: score 50\.0% \| caught 2 missed 2 unviable 0 timeout 0 never-ran 0 \| shards 2\/2 \| owed 1 survivor \| issue skipped$/m,
   );
-  const written = JSON.parse(spawnSync("cat", [entry], { encoding: "utf8" }).stdout);
+  const written = JSON.parse(readFileSync(entry, "utf8"));
   assert.equal(written.role, "mutants");
   assert.equal(written.run_id, "42");
   assert.equal(written.mutation_score, 50.0);
   assert.equal(written.fuzz_cpu_s, null);
   assert.equal(written.coverage_region_pct, null);
   assert.match(written.date, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-  const missed = spawnSync("cat", [join(report, "missed.txt")], { encoding: "utf8" }).stdout;
+  const missed = readFileSync(join(report, "missed.txt"), "utf8");
   assert.equal(missed, `${decodeSurvivor}\n${scaffoldA}\n`);
-  const summary = spawnSync("cat", [join(report, "summary.md")], { encoding: "utf8" }).stdout;
+  const summary = readFileSync(join(report, "summary.md"), "utf8");
   assert.ok(summary.startsWith("The monthly whole-crate sweep at `deadbee`"));
   assert.doesNotMatch(summary, /<!-- mutants-sweep -->/);
 });
@@ -385,5 +385,5 @@ test("a shards directory with nothing in it still writes a null entry and says s
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /^::warning::mutants-sweep: no shard directory$/m);
   assert.match(run.stdout, /score unmeasured \| .* \| shards 0\/\? \| owed nothing \| issue skipped$/m);
-  assert.equal(JSON.parse(spawnSync("cat", [entry], { encoding: "utf8" }).stdout).mutation_score, null);
+  assert.equal(JSON.parse(readFileSync(entry, "utf8")).mutation_score, null);
 });
