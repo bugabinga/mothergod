@@ -380,6 +380,13 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   declared in the PR body with the measured justification, the
   `bench/baseline.json` pattern (issue #290's ruling; mechanics in
   `tests/golden.rs`'s module doc).
+- `tests/parse_digest.rs` pins one digest of `parse_optimal`'s and one of
+  `parse_greedy`'s token stream over generated inputs and every golden
+  plaintext, because golden pins whole frames on ten plaintexts and a
+  parse change confined to long rep runs or the carry cache passes it.
+  A refactor claiming no behaviour change cites it green; an encoder-only
+  change regenerates its constants under the same declaration rule as the
+  golden pair (#1524).
 
 ## 6. Differential oracle (during the M1 port)
 
