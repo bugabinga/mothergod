@@ -13,11 +13,11 @@
 # missed mutants in `decodes_incrementally` in 2m45s, one of which that
 # PR's review had already flagged by eye.
 #
-# The full sweep survives as `workflow_dispatch`: the backlog in code that
-# predates this gate is a one-time measurement, so it gets a button, not a
-# cron.
+# The whole crate is swept monthly by mutants-sweep.yml, sharded, with the
+# score on the trust ledger; the dispatch button this file carried for a
+# one-time backlog measurement went with it (#455).
 #
-# Both modes mutate `--package mothergod` alone: `bench` and `x` measure and
+# Both mutate `--package mothergod` alone: `bench` and `x` measure and
 # orchestrate, they are not the codec under test.
 #
 # `--timeout-multiplier 10` doubles cargo-mutants' default of 5x the baseline
@@ -80,7 +80,6 @@ on:
       - "rust-toolchain.toml"
       - "tests/mutants.toml"
       - ".github/workflows/mutants-check.yml"
-  workflow_dispatch:
 
 # Raised per job below; the mutants job writes one issue on a merged PR.
 permissions: {}
@@ -102,10 +101,9 @@ jobs:
       contents: read # checkout
       pull-requests: read # mutants-debt reads the PR's merged state
       issues: write # mutants-debt files a merged PR's survivors
-    # The ceiling for the dispatched full sweep; each mode's real budget is
-    # its own step timeout below, so a hung PR gate never holds a runner for
-    # the sweep's allowance.
-    timeout-minutes: 350
+    # The mutate step's own budget is below; this is the ceiling for the
+    # whole job around it.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -135,7 +133,6 @@ jobs:
           cache-bin: false
 
       - name: Mutate the changed lines
-        if: github.event_name == 'pull_request'
         # 60, from the data (#947): the longest run that finished took 19.6
         # min (#930, run 37758136497), five codec-wide diffs were cut at 25
         # in 17 days, and 109 mutants at #690's measured rate (84 decided in
@@ -155,19 +152,6 @@ jobs:
           # verdict step below judges them from missed.txt. Exiting here on
           # either would red a PR for a timeout, which is an undecided mutant
           # and not evidence of a missing test.
-          case $status in
-            0 | 2 | 3) ;;
-            *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
-          esac
-
-      - name: Mutate the whole codec
-        if: github.event_name != 'pull_request'
-        timeout-minutes: 330
-        run: |
-          set +e
-          cargo mutants --config tests/mutants.toml --package mothergod --timeout-multiplier 10 -j 4
-          status=$?
-          set -e
           case $status in
             0 | 2 | 3) ;;
             *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
@@ -195,9 +179,7 @@ jobs:
       # run is the case this step exists for. Same-repo PRs only: a fork's
       # token cannot file, and its red is read on the open thread.
       - name: File the survivors of a merged PR
-        if: >-
-          always() && github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name == github.repository
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

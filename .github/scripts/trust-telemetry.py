@@ -17,7 +17,8 @@ the trailing 90-day retention window and the page said so.
 Each entry is `{date, run_id, role, fuzz_cpu_s, crashers_new,
 mutation_score, coverage_region_pct}`; a writer leaves the fields it does
 not measure null (#450/#451 fuzzing, #454 coverage, #455 mutation own
-theirs). `loc_code`/`loc_test` from the issue's schema are deliberately not
+theirs). `mutation_score` and `coverage_region_pct` are percents;
+the score is caught over caught plus missed (mutants-sweep's docstring). `loc_code`/`loc_test` from the issue's schema are deliberately not
 carried per entry: the status page already publishes current source line
 counts from status-data.py, and stamping every writer with a duplicate
 source-tree walk would fork that single source of truth.

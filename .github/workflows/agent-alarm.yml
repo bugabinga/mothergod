@@ -72,6 +72,9 @@ on:
       - corpus-fetch-check
       - coverage-check
       - fuzz-check
+      # Monthly, so a red here is the month's mutation score and nobody
+      # else reads it until the next first (#455).
+      - mutants-sweep
       - torture-check
       - memory-check
       - monster
