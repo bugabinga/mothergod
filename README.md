@@ -40,9 +40,9 @@ Per-file tables, the throughput columns, and the command that regenerates
 each report: [`docs/benchmarks/`](docs/benchmarks/).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
-0.240 MB/s and decoded it at 3.562 MB/s; it encoded Silesia at 0.165 MB/s and
-decoded it at 2.270 MB/s. In the same run, `xz -9e` encoded Silesia at 1.947
-MB/s and decoded it at 71.368 MB/s, more than nine times faster to encode and
+0.297 MB/s and decoded it at 4.568 MB/s; it encoded Silesia at 0.208 MB/s and
+decoded it at 2.868 MB/s. In the same run, `xz -9e` encoded Silesia at 2.121
+MB/s and decoded it at 87.638 MB/s, more than nine times faster to encode and
 more than twenty times faster to decode.
 Methodology, per-file rates, every level of gzip, zstd and xz, peak
 memory included, and the regeneration command: [`docs/benchmarks/`](docs/benchmarks/).
