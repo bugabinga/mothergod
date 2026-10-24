@@ -479,28 +479,33 @@ fn win_count_claims_match_their_generated_reports() {
     }
 }
 
-/// The backticked file names in the sentence of `text` that opens with
-/// `marker`, sorted. Whitespace is collapsed first so a sentence wrapped
-/// across source lines still matches; the sentence ends at a period
-/// followed by a space, never at the period inside `fields.c`. An empty
-/// list panics: the loss check sizes its ranking by this list's length,
-/// so zero names would compare an empty claim to an empty truth.
-fn files_named_after(text: &str, marker: &str) -> Vec<String> {
+/// The code-quoted file names in the sentence of `text` that opens with
+/// `marker`, sorted; `quote` is the opening and closing delimiter pair,
+/// backticks in Markdown, `<code>` tags in HTML. Whitespace is collapsed
+/// first so a sentence wrapped across source lines still matches; the
+/// sentence ends at a period followed by a space, never at the period
+/// inside `fields.c`. An empty list panics: the loss check sizes its
+/// ranking by this list's length, so zero names would compare an empty
+/// claim to an empty truth.
+fn files_named_after(text: &str, marker: &str, (open, close): (&str, &str)) -> Vec<String> {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let start = flat
         .find(marker)
         .unwrap_or_else(|| panic!("{marker:?} not found"));
     let rest = &flat[start..];
-    let sentence = &rest[..rest.find(". ").unwrap_or(rest.len())];
-    let mut names: Vec<String> = sentence
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(str::to_owned)
-        .collect();
+    let mut sentence = &rest[..rest.find(". ").unwrap_or(rest.len())];
+    let mut names = Vec::new();
+    while let Some(at) = sentence.find(open) {
+        let quoted = &sentence[at + open.len()..];
+        let end = quoted
+            .find(close)
+            .unwrap_or_else(|| panic!("unclosed {open:?} after {marker:?}"));
+        names.push(quoted[..end].to_owned());
+        sentence = &quoted[end + close.len()..];
+    }
     assert!(
         !names.is_empty(),
-        "the sentence opening {marker:?} names no backticked file, so the claim checks nothing"
+        "the sentence opening {marker:?} names no code-quoted file, so the claim checks nothing"
     );
     names.sort();
     names
@@ -508,40 +513,46 @@ fn files_named_after(text: &str, marker: &str) -> Vec<String> {
 
 #[test]
 fn named_wins_and_widest_losses_match_their_generated_reports() {
-    // README names the files behind the win count, and the files it loses
-    // on by the widest margin, so a reader can ask "will it win on my
-    // data" (issue #1515). Every regret across both reports is the truth:
-    // the named wins are exactly the files with negative regret, and the
-    // named losses are exactly as many files as are named, taken from the
-    // top of the regret ranking.
+    // README and the site name the files behind the win count, and the
+    // files mothergod loses on by the widest margin, so a reader can ask
+    // "will it win on my data" (issues #1515, #1566). Every regret across
+    // both reports is the truth: the named wins are exactly the files with
+    // negative regret, and the named losses are exactly as many files as
+    // are named, taken from the top of the regret ranking.
     let mut regrets = per_file_regrets("canterbury.md");
     regrets.extend(per_file_regrets("silesia.md"));
-    let readme = read("README.md");
-
     let mut true_wins: Vec<String> = regrets
         .iter()
         .filter(|(_, regret)| *regret < 0.0)
         .map(|(name, _)| name.clone())
         .collect();
     true_wins.sort();
-    let claimed_wins = files_named_after(&readme, "The wins are ");
-    assert_eq!(
-        claimed_wins, true_wins,
-        "README.md names {claimed_wins:?} as its per-file wins, docs/benchmarks/ says {true_wins:?}"
-    );
-
-    let claimed_losses = files_named_after(&readme, "The widest losses are ");
     regrets.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let mut true_losses: Vec<String> = regrets
-        .iter()
-        .take(claimed_losses.len())
-        .map(|(name, _)| name.clone())
-        .collect();
-    true_losses.sort();
-    assert_eq!(
-        claimed_losses, true_losses,
-        "README.md names {claimed_losses:?} as its widest losses, docs/benchmarks/ ranks {true_losses:?} widest"
-    );
+
+    let surfaces = [
+        ("README.md", ("`", "`")),
+        ("site/index.html", ("<code>", "</code>")),
+    ];
+    for (surface, quote) in surfaces {
+        let text = read(surface);
+        let claimed_wins = files_named_after(&text, "The wins are ", quote);
+        assert_eq!(
+            claimed_wins, true_wins,
+            "{surface} names {claimed_wins:?} as its per-file wins, docs/benchmarks/ says {true_wins:?}"
+        );
+
+        let claimed_losses = files_named_after(&text, "The widest losses are ", quote);
+        let mut true_losses: Vec<String> = regrets
+            .iter()
+            .take(claimed_losses.len())
+            .map(|(name, _)| name.clone())
+            .collect();
+        true_losses.sort();
+        assert_eq!(
+            claimed_losses, true_losses,
+            "{surface} names {claimed_losses:?} as its widest losses, docs/benchmarks/ ranks {true_losses:?} widest"
+        );
+    }
 }
 
 /// The verdict strip's per-corpus judgment word ("Wins"/"Loses") and its

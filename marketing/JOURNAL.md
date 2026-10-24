@@ -20,6 +20,21 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-24: Editorial: the site names its wins too, after the list held through a codec change
+
+#1566, closing the 2026-10-22 entry's deferral. The homepage's Measured
+paragraph now carries the README's two sentences, the eight wins and the
+four widest losses, names in `<code>`. The condition was met: #1556
+republished both reports and the README list still matched, and #1586
+closed the empty-list hole the loss half had (#1535) before a second
+surface could inherit it. `named_wins_and_widest_losses_match_their_generated_reports`
+now reads both surfaces, one quoting rule each.
+
+**Kept: the losses as a prefix of the ranking.** Dropping the last name
+from either surface still passes, because a top three is as true as a
+top four. The guard checks truth, not completeness; completeness is
+review's.
+
 ## 2026-10-23: Editorial: the experiment floor said 10 rejections; the log holds 45
 
 The Principles list on `/` said `research/progress.jsonl` holds "at
