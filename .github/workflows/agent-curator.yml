@@ -108,7 +108,10 @@ jobs:
                respond this run: converge or concede. A disagreement
                that will not converge gets one comment naming it, and
                your final response flags it for the BDFL.
-            3. Groom up to 3 open issues, longest-untouched first.
+            3. Groom up to 3 open issues, longest-ungroomed first: skip
+               any issue a `Groomed:` line of a curator ops-log post
+               named in the last 7 days, because a silent groom moves
+               no `updatedAt` (#1577), then longest-untouched.
                Staleness: does the claim still match the repo? Check,
                and cite what you checked. Duplicates: close the
                younger onto the older unless the younger is sharper.
@@ -134,8 +137,9 @@ jobs:
             blocked-on-human (the latch rule, GOVERNANCE.md).
 
             End of run: if you acted (closed, filed, labeled,
-            critiqued), post a summary on the ops-log issue; a run
-            that changed nothing posts nothing there.
+            critiqued) or groomed, post a summary on the ops-log issue
+            with one `Groomed:` line naming every issue you groomed,
+            commented or not; a run that did neither posts nothing there.
           # Bash is the one built-in offered: `--tools` hides, where
           # `--allowedTools` only pre-approves (#725). The curator judges
           # and routes, never modifies the tree (GOVERNANCE.md "Tool
