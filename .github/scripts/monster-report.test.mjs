@@ -111,7 +111,9 @@ test("failed matrix detection includes failures and timeouts", () => {
 });
 
 test("dedup selects one bot-authored marked issue deterministically", () => {
-  const bot = { login: "github-actions[bot]" };
+  // The login as `gh issue list --json author` prints it, which is what the
+  // workflow feeds select; the REST spelling is the next test's.
+  const bot = { login: "app/github-actions" };
   const issues = [
     { number: 30, state: "CLOSED", title: "renamed", body: ISSUE_MARKER, author: bot },
     { number: 32, state: "OPEN", title: "renamed", body: ISSUE_MARKER, author: bot },
@@ -119,6 +121,15 @@ test("dedup selects one bot-authored marked issue deterministically", () => {
   ];
 
   assert.deepEqual(selectIssue(issues), { number: 32, state: "OPEN" });
+});
+
+test("dedup accepts the REST spelling of the bot login too", () => {
+  assert.deepEqual(
+    selectIssue([
+      { number: 31, state: "CLOSED", title: "renamed", body: ISSUE_MARKER, author: { login: "github-actions[bot]" } },
+    ]),
+    { number: 31, state: "CLOSED" },
+  );
 });
 
 test("dedup ignores title-only issues", () => {
