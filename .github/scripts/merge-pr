@@ -261,13 +261,14 @@ def read_pr(pr):
 
 def pinned(sha, head):
     """The pin at full length: `head` when `sha` is None or names it by
-    prefix, else `sha` as typed. merge-pr's own messages print twelve
-    characters (a stalled-prs recipe carries the full oid), so a typed pin
-    is a prefix more often than a full oid, and the merge body and the
-    auto-merge arm carry a full one: `--sha a67fe4b7dc56` on #1573 died as
-    "moved past a67fe4b7dc56 to a67fe4b7dc56" (2026-10-24). A pin that is
-    not a prefix of the head stays as typed, for the move-or-lag judgement
-    that follows."""
+    prefix, else `sha` as typed. A typed pin is either a prefix (the twelve
+    characters merge-pr's own messages print) or a full oid (a stalled-prs
+    recipe, the reviewer's `--sha "$HEAD_SHA"`), and the merge body and the
+    auto-merge arm carry a full one, so a prefix pin is widened before the
+    comparison: `--sha a67fe4b7dc56` on #1573 died as "moved past
+    a67fe4b7dc56 to a67fe4b7dc56" (2026-10-24). A pin that is not a prefix
+    of the head stays as typed, for the move-or-lag judgement that
+    follows."""
     if sha is None or head.startswith(sha):
         return head
     return sha
