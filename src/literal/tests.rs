@@ -207,23 +207,6 @@ fn column_expert_state_new_starts_at_the_laplace_floor() {
     assert_eq!(state.weight, vec![1.0; WEIGHT_CONTEXTS]);
 }
 
-/// [`ColumnExpertState::try_new`] must produce the exact same state
-/// [`ColumnExpertState::new`] does: the real decode path's fallible
-/// constructor is not a second, independently-written source of the
-/// same starting state ([`Self::try_new`]'s own docs).
-#[test]
-fn column_expert_state_try_new_matches_new() {
-    let via_new = ColumnExpertState::new(crate::test_support::nz(4));
-    let via_try_new = ColumnExpertState::try_new(crate::test_support::nz(4)).unwrap();
-    assert_eq!(via_new.freq, via_try_new.freq);
-    assert_eq!(via_new.total, via_try_new.total);
-    assert_eq!(via_new.weight, via_try_new.weight);
-    assert_eq!(
-        format!("{:?}", via_new.sse),
-        format!("{:?}", via_try_new.sse)
-    );
-}
-
 /// Round-trips bytes through [`Literal::encode_column`]/`decode_column`
 /// under a fixed `column_bank` per byte (`columns` cycles through
 /// `banks`), the real-wiring counterpart of `roundtrip_bytes_sse`

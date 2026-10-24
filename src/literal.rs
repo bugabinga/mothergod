@@ -355,12 +355,7 @@ impl ColumnExpertState {
     /// every weight at 1.0, the [`Sse`] table at the identity mapping.
     #[must_use]
     pub fn new(max_banks: NonZeroUsize) -> Self {
-        Self {
-            freq: vec![1u32; max_banks.get() * ALPHABET],
-            total: vec![ALPHABET_U32; max_banks.get()],
-            weight: vec![1.0; WEIGHT_CONTEXTS],
-            sse: Sse::new(bittree::SSE_CONTEXTS),
-        }
+        crate::abort_on_oom(Self::try_new(max_banks))
     }
 
     /// Fallible counterpart to [`Self::new`], as [`Literal::try_new`] is for
@@ -555,12 +550,7 @@ impl SurpriseLogisticMix {
     /// established," the maximum-surprise starting point).
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            weights: vec![[LOGISTIC_INITIAL_WEIGHT; EXPERTS]; WEIGHT_CONTEXTS],
-            recent_sq_error: vec![0.0; WEIGHT_CONTEXTS],
-            baseline_sq_error: vec![0.0; WEIGHT_CONTEXTS],
-            sse: LogitSse::new(bittree::SSE_CONTEXTS),
-        }
+        crate::abort_on_oom(Self::try_new())
     }
 
     /// Fallible counterpart to [`Self::new`], the same shape
@@ -616,20 +606,14 @@ impl Literal {
     /// at 1.0 (experts start equally trusted).
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            freq: vec![1u32; BANKS * ALPHABET],
-            total: vec![ALPHABET_U32; BANKS],
-            weights: vec![[1.0; EXPERTS]; WEIGHT_CONTEXTS],
-            sse: Sse::new(bittree::SSE_CONTEXTS),
-        }
+        crate::abort_on_oom(Self::try_new())
     }
 
-    /// Fallible counterpart to [`Self::new`]: the same fresh model, but
-    /// returns `Err` instead of aborting if the allocator cannot satisfy
-    /// any of its tables. [`crate::codec::decode`]'s real decode path
-    /// uses this (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); [`Self::new`] stays the panicking
-    /// constructor the encoder and every test use.
+    /// The one statement of a fresh model, returning `Err` if the allocator
+    /// cannot satisfy any of its tables. [`crate::codec::decode`]'s real
+    /// decode path uses this (hard rule 2, `rust-craft` skill's
+    /// allocation-discipline, `tests/torture.rs`, #453); [`Self::new`] is
+    /// this with an abort, the constructor the encoder and every test use.
     pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             freq: crate::try_filled_vec(BANKS * ALPHABET, 1u32)?,
