@@ -788,12 +788,20 @@ test("--wait --sha a prefix of the head is not a move; the wait merges at it", (
   assert.equal(merges.length, 1);
 });
 
-test("--sha that is not a commit sha is refused before any read", () => {
-  const { status, calls, stderr } = run(["42", "--sha", "abc"]);
-  assert.equal(status, 1);
-  assert.deepEqual(calls, []);
-  assert.match(stderr, /--sha 'abc' is not a commit sha/);
-});
+for (
+  const [name, pin] of [
+    ["seven hex characters, a forgeable prefix", HEAD.slice(0, 7)],
+    ["eleven hex characters, one under the floor", HEAD.slice(0, 11)],
+    ["twelve characters with a non-hex one", "abc123456789".replace("9", "g")],
+  ]
+) {
+  test(`--sha of ${name} is refused before any read`, () => {
+    const { status, calls, stderr } = run(["42", "--sha", pin]);
+    assert.equal(status, 1);
+    assert.deepEqual(calls, []);
+    assert.match(stderr, /is not a pin/);
+  });
+}
 
 test("--wait never arms: a 405 after green gates exits 2 with nothing armed", () => {
   const { status, calls, stderr } = run(WAIT, {

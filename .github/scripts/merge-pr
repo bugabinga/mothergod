@@ -47,7 +47,9 @@ moves:
 - The merge pins a head SHA (409 on mismatch), so a push landing between
   the caller's decision and this call fails loud instead of shipping
   unreviewed content. Default pin is the head read here; pass --sha for
-  the head the verdict actually covered.
+  the head the verdict actually covered, in full or as a prefix of at
+  least MIN_SHA characters (the twelve every surface prints; a shorter
+  prefix is a pin an attacker can forge by hashing, 2^28 for seven).
 - The target must match PR_NUMBER when the caller's environment carries
   one (a review session, agent-review.yml's Claude step). Issue #771 was
   a review scoped to #768 that merged #770 instead, a wrong resolution
@@ -479,6 +481,8 @@ def landed(pr, sha, proc, credential):
     note(f"merged #{pr} at {sha[:12]} as {json.loads(proc.stdout)['sha']} on {credential}")
 
 
+MIN_SHA = 12
+
 USAGE = ("usage: merge-pr <pr-number> [--sha <reviewed-head>] "
          "[--wait [--gates-only] [--timeout <seconds>] [--interval <seconds>]]")
 
@@ -503,9 +507,10 @@ def main():
         if at + 1 >= len(args):
             die(USAGE)
         sha = args[at + 1].lower()
-        if len(sha) < 7 or sha.strip("0123456789abcdef"):
-            die(f"--sha {args[at + 1]!r} is not a commit sha: seven or more hex "
-                "characters, the head or a prefix of it")
+        if len(sha) < MIN_SHA or sha.strip("0123456789abcdef"):
+            die(f"--sha {args[at + 1]!r} is not a pin: the head or a prefix of "
+                f"it, {MIN_SHA} or more hex characters, because a shorter "
+                "prefix can be forged by a colliding push")
         del args[at:at + 2]
     wait = "--wait" in args
     if wait:
