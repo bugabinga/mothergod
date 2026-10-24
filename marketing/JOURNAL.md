@@ -20,6 +20,22 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-24: Editorial: the fuzz totals stopped being a 90-day window on 2026-10-11
+
+`/status`'s "Is it tested?" paragraph said fuzz time and crashes are
+totalled "over the last 90 days, which is as long as their records are
+kept". #1077 made each run a permanent table row and the total
+cumulative, and its changelog line said so; the page prose kept the old
+window for thirteen days. The live `trust-data.json` read 57 entries
+since 2026-09-02, 28.46 fuzz CPU-hours, 0 crashers. The sentence now
+says every recorded night, and points at the date line the page already
+renders under the grid, so the start date lives in the data and not in
+prose.
+
+**Rejected: typing the start date into the paragraph.** The asof line
+already prints it from `since`; a second copy is one more sentence to
+rot.
+
 ## 2026-10-24: Editorial: the site names its wins too, after the list held through a codec change
 
 #1566, closing the 2026-10-22 entry's deferral. The homepage's Measured
