@@ -153,10 +153,9 @@ jobs:
       # Is there anything new to judge? verdict-stands prints the id of
       # the diff, title and body (DIFF_ID below, which post-verdict stamps
       # into the verdict) and `stands=true` when the newest reviewer
-      # comment is a fail stamped with that same id under a standing
-      # `changes-requested`, or a pass stamped with the id this diff had
-      # under the title and body before an `edited` event, under a
-      # standing `agent-approved` (#1246). CHANGES is the event's
+      # comment's stamp already covers this run. The routes that stand
+      # live in the script's docstring, the one list (#1246; #1537 is
+      # what a copy of it here drifted into). CHANGES is the event's
       # `changes` payload, the pre-edit text, `null` on every other
       # action. It fails open toward reviewing: an unreadable PR, diff or
       # payload prints an empty id and reviews.
