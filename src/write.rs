@@ -16,20 +16,16 @@ use super::{BLOCK_LEN, compress_block, rejoin};
 /// state is 1 GiB, which holds two and not three (`research/JOURNAL.md`
 /// S2-A125). A machine with one core
 /// encodes serially, in the calling thread, as before.
-const MAX_CONCURRENT_ENCODES: usize = 2;
+const MAX_CONCURRENT_ENCODES: NonZeroUsize = NonZeroUsize::new(2).unwrap();
 
 /// The encodes of a block that run at once on this machine: its cores, up to
 /// [`MAX_CONCURRENT_ENCODES`]. A stream's blocks and one block's trials
 /// share the bound and never nest: the last block of a stream, alone, spends
 /// it on trials.
 pub(crate) fn concurrent_encodes() -> NonZeroUsize {
-    thread::available_parallelism().map_or(NonZeroUsize::MIN, |cores| {
-        cores.min(NonZeroUsize::new(MAX_CONCURRENT_ENCODES).expect("two is nonzero"))
-    })
+    thread::available_parallelism()
+        .map_or(NonZeroUsize::MIN, |cores| cores.min(MAX_CONCURRENT_ENCODES))
 }
-
-/// A full block on its way to a frame, in the order the blocks were cut.
-type InFlight = JoinHandle<Vec<u8>>;
 
 /// Compresses what is written to it into `W` as a stream of frames, the
 /// streaming counterpart of [`compress`](crate::compress).
@@ -96,7 +92,7 @@ pub struct Encoder<W> {
     block_len: usize,
     /// Blocks encoding on their own threads, oldest first; never more than
     /// `workers`. Empty when `workers` is one.
-    in_flight: VecDeque<InFlight>,
+    in_flight: VecDeque<JoinHandle<Vec<u8>>>,
     workers: NonZeroUsize,
     /// A stream is one or more frames (ADR-0067): an encoder that cut no
     /// block still owes one, for the empty input. Set when a block is cut,
