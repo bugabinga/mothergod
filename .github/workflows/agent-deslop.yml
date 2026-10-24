@@ -100,7 +100,7 @@ jobs:
             2. Otherwise the oldest issue you filed, inside src/, with
                no open PR of yours closing it: `gh issue list --label
                product --search "deslopper in:body" --limit 100 --json
-               number,title,createdAt`, oldest first; `gh pr list
+               number,title,createdAt`, oldest first; `gh pr list --limit 100
                --json number,closingIssuesReferences` says which are
                taken, GitHub's own parse, not a word search (#1428);
                one outside src/ stays the maintainer's. A scope already
