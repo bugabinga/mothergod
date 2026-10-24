@@ -22,25 +22,26 @@ not depend on the caller's checkout or branch:
 
     affecting   the newest commit on main under the push paths
                 bench-report.yml lists on main, read from that file so the
-                trigger and this detector cannot disagree: the inputs whose
-                change moves what the reports print. `src/` is not among
-                them, `bench/baseline.json` is: the gate's digest pin
-                (#1254) makes every PR whose compress() output moves on
-                the gate cases commit a regenerated baseline, so that file's
-                merge is the codec's signal, about one a day against ten
-                src/ commits. `check` does not read the reports (ADR-0076),
-                so the list is the only demand: the list was `bench/src`
-                alone, and #1423 moved six Silesia finals and no bpb
-                (every digest, by the version byte), so the finals sat
-                stale behind a `fresh` read. What still
-                escapes: a change that leaves every digest intact while
-                moving inputs the gate cases do not resemble (the one
-                long case, #1434, holds a single repeat past the standard
-                reach), and one that moves speed alone. One list to widen, with
-                the cost in mind: every pass is serial by design (#1321)
-                and every regenerated report differs in its timing
-                columns, so a wider list is more publish PRs of runner
-                jitter.
+                trigger and this detector cannot disagree: the pins whose
+                merge is a demand for a pass. `src/` is not among them,
+                `bench/baseline.json` is: the gate's digest pin (#1254)
+                makes every PR whose compress() output moves on the gate
+                cases commit a regenerated baseline, so that file's merge
+                is the codec's signal, a few a week against several src/
+                commits a day. `check` does not read the reports
+                (ADR-0076), so the list is the only demand. Neither is
+                `bench/src`: it was, so a change to the report binaries
+                would regenerate what they print, and of the ten passes
+                published in the seven days to 2026-10-24, eight answered
+                a merge no kept path saw, each a publish PR of runner
+                jitter (every pass is serial by design, #1321, and every
+                regenerated report differs in its timing columns). What escapes the list, a change that
+                leaves every digest intact while moving inputs the gate
+                cases do not resemble (the one long case, #1434), one
+                that moves speed alone, and the binaries themselves, the
+                weekly pass carries: bench-report.yml runs on a clock as
+                well, and a pass is published whether a pin asked for it
+                or the clock did.
     generated   the commit on main the committed reports were generated at.
                 A publish commit names it in its subject, the title this
                 script prints for the publish PR ("regenerated at <sha>").
@@ -61,13 +62,18 @@ not depend on the caller's checkout or branch:
                 newer run's head is never older than an older run's, so only
                 the newest run can cover.
 
-States, the first word of the first line, in the order tested:
+States, the first word of the first line, in the order tested. A pass
+is owed when generated predates affecting (a pin moved) or when the newest
+pass's head is newer than generated (the clock ran, or a pin's pass is
+done); both mean the same thing, a measurement main has that the reports
+do not:
 
-    fresh           generated is at or after affecting; nothing owed. Never
-                    this when the reports commit names no generator.
-    running <id>    the newest pass covers and is in progress; nothing to
+    fresh           generated is at or after affecting and no pass on main
+                    is newer than it; nothing owed. Never this when the
+                    reports commit names no generator.
+    running <id>    the newest pass is owed and in progress; nothing to
                     do this wake, the next one publishes.
-    publish <id>    the newest pass covers, succeeded, and its artifact is
+    publish <id>    the newest pass is owed, succeeded, and its artifact is
                     live: `bench-report --publish` writes the five files
                     into the tree, `cargo x check` then names the README
                     and site quotes the new timing columns moved
@@ -75,16 +81,16 @@ States, the first word of the first line, in the order tested:
                     alone fails `test`, #1384), and push-branch and gh-pr
                     ship all of it under the title this prints, which is
                     where the next read learns the generator.
-    dispatch        generated predates affecting and no live pass covers it
-                    (none, failed, cancelled, or its artifact expired):
-                    one `gh workflow run` on GH_WORKFLOW_TOKEN.
+    dispatch        a pin moved and no pass is at or after it, or the
+                    owed pass failed, was cancelled, or its artifact
+                    expired: one `gh workflow run` on GH_WORKFLOW_TOKEN.
     UNREADABLE      gh could not answer; the reason follows. Never an empty
                     result, because a false `fresh` is the silent stale
                     report this exists to end.
 
-bench-report.yml runs on every push to main under those paths, so `dispatch`
-is the healing state for a pass that was cancelled, failed or expired
-unpublished, not the routine one.
+bench-report.yml runs on every push to main under those paths and on a
+weekly clock, so `dispatch` is the healing state for a pass that was
+cancelled, failed or expired unpublished, not the routine one.
 
 Liveness: the footer always names the three facts it read, so a reader can
 tell fresh reports from a detector that stopped reading.
@@ -226,12 +232,21 @@ def generator(subject):
 
 
 def fresh(generated, affecting):
-    """Whether the reports need nothing: generated at or after affecting, and generated at all."""
+    """Whether the pins ask for nothing: generated at or after affecting, and generated at all."""
     return generated is not None and generated["date"] >= affecting["date"]
 
 
+def owed(affecting, generated, head):
+    """Whether a pass with this head is one the reports lack: it covers a pin the reports predate, or it is newer than their generator."""
+    if head is None:
+        return False
+    if not fresh(generated, affecting):
+        return head >= affecting["date"]
+    return head > generated["date"]
+
+
 def read(repo):
-    """The facts `decide` needs, read lazily: the pass's head and artifact only when the reports are stale."""
+    """The facts `decide` needs, read lazily: the pass's head when one exists, its artifact when it may be owed."""
     paths, error = report_paths(repo)
     if error:
         return None, error
@@ -266,12 +281,12 @@ def read(repo):
         return None, f"runs of {WORKFLOW} on main: {error}"
     newest = runs[0] if runs else None
     head = live = None
-    if newest is not None and not fresh(generated, affecting):
+    if newest is not None:
         row, error = commit(repo, newest["headSha"])
         if error:
             return None, f"head of run {newest['databaseId']}: {error}"
         head = row["date"]
-        if head >= affecting["date"] and newest["status"] == "completed" and newest["conclusion"] == "success":
+        if owed(affecting, generated, head) and newest["status"] == "completed" and newest["conclusion"] == "success":
             data, error = gh("api", f"repos/{repo}/actions/runs/{newest['databaseId']}/artifacts")
             if error:
                 return None, f"artifacts of run {newest['databaseId']}: {error}"
@@ -295,9 +310,9 @@ def decide(affecting, generated, newest, head, live):
     read), `live` whether its artifact is still downloadable (None when
     not read).
     """
-    if fresh(generated, affecting):
+    if fresh(generated, affecting) and not owed(affecting, generated, head):
         return "fresh", None
-    if newest is None or head is None or head < affecting["date"]:
+    if not owed(affecting, generated, head):
         return "dispatch", "no pass on main at or after it"
     if newest["status"] != "completed":
         return "running", None
@@ -324,19 +339,22 @@ def render(facts, error, out=sys.stdout):
         else "naming no generator, stale by rule"
     )
     where = f"the reports ({reports['sha'][:7]}, {origin})"
-    stale = f"{where} predate {affecting['sha'][:7]} ({affecting['date']}, under {affecting['path']})"
+    if fresh(generated, affecting):
+        stale = f"{where} were generated before its head ({facts['head']})"
+    else:
+        stale = f"{where} predate {affecting['sha'][:7]} ({affecting['date']}, under {affecting['path']})"
     if state == "fresh":
         print(
-            f"fresh: {where} are at or after the newest report-affecting commit"
-            f" ({affecting['sha'][:7]}, {affecting['date']}).",
+            f"fresh: {where} are at or after the newest pin commit"
+            f" ({affecting['sha'][:7]}, {affecting['date']}) and no pass on main is newer.",
             file=out,
         )
     elif state == "running":
-        print(f"running {newest['databaseId']}: a pass on main started {newest['createdAt']} covers it; {stale}.", file=out)
+        print(f"running {newest['databaseId']}: a pass on main started {newest['createdAt']}; {stale}.", file=out)
         print("    Nothing to do this wake. The wake after it finishes publishes.", file=out)
         print(f"    {newest['url']}", file=out)
     elif state == "publish":
-        print(f"publish {newest['databaseId']}: a pass on main finished {newest['updatedAt']} covers it; {stale}.", file=out)
+        print(f"publish {newest['databaseId']}: a pass on main finished {newest['updatedAt']}; {stale}.", file=out)
         print("    Next: .github/scripts/bench-report --publish, which writes the five files into the tree;", file=out)
         print("    then `cargo x check`: tests/claims.rs pins README.md and site/index.html to the reports'", file=out)
         print("    date, CPU model and MB/s and names each quote the new reports moved, so fix those in", file=out)

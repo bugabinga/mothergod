@@ -94,8 +94,31 @@ test("stale reports with no pass on main answer dispatch, never fresh", () => {
   assert.match(reason, /no pass on main at or after it/);
 });
 
-test("reports generated after the report-affecting commit are fresh", () => {
+test("reports generated after the newest pin commit, with no pass newer than them, are fresh", () => {
   assert.deepEqual(call("decide", decision({ generated: FRESH })), ["fresh", null]);
+  // The pass that generated them is not newer than them.
+  assert.deepEqual(call("decide", decision({ generated: FRESH, newest: pass(), head: FRESH.date, live: true })), [
+    "fresh",
+    null,
+  ]);
+});
+
+test("the weekly clock: a pass newer than the generator is owed with no pin moved", () => {
+  // No pin moved since the reports were generated (09:00Z); the clock ran a
+  // pass at 10:00Z. Before the clock, `fresh` short-circuited and a pass no
+  // pin asked for was never published.
+  const tick = { head: "2026-10-19T10:00:00Z", generated: FRESH };
+  assert.deepEqual(call("decide", decision({ ...tick, newest: pass(), live: true })), ["publish", null]);
+  assert.deepEqual(call("decide", decision({ ...tick, newest: pass({ status: "in_progress", conclusion: null }) })), [
+    "running",
+    null,
+  ]);
+  const [state, reason] = call("decide", decision({ ...tick, newest: pass({ conclusion: "failure" }) }));
+  assert.equal(state, "dispatch");
+  assert.match(reason, /42, concluded failure/);
+  const [expired, why] = call("decide", decision({ ...tick, newest: pass(), live: false }));
+  assert.equal(expired, "dispatch");
+  assert.match(why, /42, succeeded but its artifact expired/);
 });
 
 test("one commit touching both the binaries and the reports is fresh", () => {
@@ -323,6 +346,43 @@ test("end to end: the generator named in the publish subject outranks the report
   assert.match(written.stdout, / M docs\/benchmarks\/silesia\.md/);
   assert.equal(readFileSync(join(root, "docs/benchmarks/canterbury.md"), "utf8"), "new\n");
   assert.equal(readFileSync(join(root, "bench/baseline.json"), "utf8"), "new\n");
+});
+
+test("end to end: the clock's pass is publish although no pin moved, and the line says what the reports lack", () => {
+  // The pin commit (2026-10-18) predates the generator (01:00Z on the 19th);
+  // the newest pass ran at 04:00Z on no pin's demand.
+  const root = scratchRepo();
+  const quiet = {
+    ...answers,
+    "path=bench/src": commit(AFFECTING.sha, "2026-10-18T00:00:00Z"),
+  };
+  const read = withGh(quiet, [], root);
+  assert.equal(read.status, 0, read.stderr);
+  assert.match(
+    read.stdout,
+    /^publish 42: a pass on main finished 2026-10-19T05:30:00Z; the reports \(c71bd43, generated at 0ddba11 2026-10-19T01:00:00Z\) were generated before its head \(2026-10-19T04:00:00Z\)\./,
+  );
+  // Published, the same pass is the generator and nothing is owed.
+  const published = {
+    ...quiet,
+    "path=docs/benchmarks/canterbury.md": commit(
+      FRESH.sha,
+      FRESH.date,
+      "bench: publish the reports regenerated at deadbeefdead (#1500)",
+    ),
+    "path=docs/benchmarks/silesia.md": commit(
+      FRESH.sha,
+      FRESH.date,
+      "bench: publish the reports regenerated at deadbeefdead (#1500)",
+    ),
+    "commits/deadbeefdead": answers["commits/deadbeef"],
+  };
+  const settled = withGh(published, [], root);
+  assert.equal(settled.status, 0, settled.stderr);
+  assert.match(
+    settled.stdout,
+    /^fresh: the reports \(f0e0d0c, generated at deadbee 2026-10-19T04:00:00Z\) are at or after the newest pin commit \(a23a7b0, 2026-10-18T00:00:00Z\) and no pass on main is newer\./,
+  );
 });
 
 test("end to end: a reports commit naming no generator is stale by rule even when newer, and --publish overwrites it", () => {
