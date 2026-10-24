@@ -379,7 +379,7 @@ record.
   larger tree named as still open. Measured with a throwaway (uncommitted)
   scratch binary, `bench/src/bin/window_experiment.rs` (deleted after this
   measurement, per S2-R6's own convention), `codec::
-  ideal_cost_bits_with_window` at `old_window = lz::WINDOW` (1,048,576)
+  ideal_cost_bits_with_window` (left main in #1584) at `old_window = lz::WINDOW` (1,048,576)
   vs `new_window = 2,097,151` (`2^21 - 1`), release build, at 4,000,000
   bytes per case (`bench::baseline`'s own `CASE_LEN`, 50,000, cannot show
   any window effect at all — every distance in a case that small sits
@@ -2800,7 +2800,9 @@ record.
   regressing gated case into an improvement, closing both of S2-R9's
   failure modes for real. Eleventh slice, S2-A94: built the real-bitstream
   counterpart to `ideal_cost_bits_with_window`/`ideal_cost_bits_adaptive_window`
-  (`codec::compressed_len_with_window`/`compressed_len_adaptive_window`),
+  (`codec::compressed_len_with_window`/`compressed_len_adaptive_window`;
+  `compressed_len_with_window` and `ideal_cost_bits_with_window` left main
+  in #1584, `lz::Reach` replacing them),
   still not wired to `encode_tokens` itself, so the next slice's
   real-bitstream measurement would not be flying blind on the
   ideal-vs-real coder gap ADR-0038 documents. Twelfth slice, S2-R11: used
@@ -2835,7 +2837,7 @@ record.
   only whether the detector confirms a real recurrence, or the
   large-file-mode alternative, still open. Fourteenth slice, S2-A96:
   standalone capability for the next question this scope note raised —
-  `codec::compressed_len_with_seed_and_search_window` exposes the seed
+  `codec::compressed_len_with_seed_and_search_window` (left main in #1584) exposes the seed
   and search windows as independent parameters, the real-bitstream
   counterpart `parse_optimal_adaptive_window`'s own matched-window
   contract does not let through. Fifteenth slice, S2-R12: used it to
@@ -2895,7 +2897,10 @@ record.
   finals S2-A127 left unread, all shrink and all seven losses to zstd -19
   remain; full record in S2-A128's own entry. Twenty-third slice, S2-A129:
   the wide trial started early on the idle trial thread, output bytes
-  unchanged, encode 8% to 23% faster on the files measured.
+  unchanged, encode 8% to 23% faster on the files measured. The window
+  instruments of the earlier slices left main in #1584; the shipped
+  `lz::Reach` is measured through `compress`. S1-P4 stays open: S2-A128
+  lists a reach past the offset code's ceiling unmeasured.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -4666,7 +4671,7 @@ record.
   thin wrapper passing `WINDOW`; `parse_greedy`'s seed pass stays bound by
   the wired `WINDOW` regardless, since it only shapes the first round's
   starting price table, not correctness) and
-  `codec::ideal_cost_bits_with_window(data, window)` (`ideal_cost_bits`
+  `codec::ideal_cost_bits_with_window(data, window)` (left main in #1584; `ideal_cost_bits`
   likewise now wraps it), mirroring S2-A61's parameterize-the-primitive
   pattern one level up the call stack. `dp_round` itself gained a
   `debug_assert!` that `window`'s bucket stays inside `OFFSET_BUCKETS`,
@@ -4992,7 +4997,7 @@ record.
   where a real recurrence past `WINDOW` exists. Measured with a throwaway
   (uncommitted) scratch binary, `bench/src/bin/window_detector_experiment.rs`
   (deleted after this measurement, per S2-R6/S2-R7's own convention),
-  `codec::ideal_cost_bits_with_window` at `old_window = lz::WINDOW` vs
+  `codec::ideal_cost_bits_with_window` (left main in #1584) at `old_window = lz::WINDOW` vs
   `new_window = 2,097,151`, gated per-case by
   `likely_benefits_from_larger_window(data, old_window)`, release build:
   S2-R7's own four train-eligible non-ladder kinds at 4,000,000 bytes,
@@ -5236,7 +5241,7 @@ record.
   detector finds a real recurrence past it, in which case
   `lz::ADAPTIVE_WINDOW` (`2^21 - 1`, S2-A63's proven-free-of-format-cost
   ceiling); `codec::ideal_cost_bits_adaptive_window` measures it through
-  the real adaptive models the way `ideal_cost_bits_with_window` measures
+  the real adaptive models the way `ideal_cost_bits_with_window` (left main in #1584) measures
   a fixed window. First measurement reproduced S2-R9's own rejection
   almost exactly: `access_log` (sealed) still regressed (+0.000189 b/B)
   even gated on the confirmed detector, and tracing the exact anchor pair
@@ -5311,7 +5316,7 @@ record.
 - S2-A94 | ACCEPTED | S1-P4's own remaining scope after S2-A93: before
   wiring `parse_optimal_adaptive_window` into `encode`'s real
   `Method::Lz` path, built the real-bitstream counterpart to
-  `ideal_cost_bits_with_window`/`ideal_cost_bits_adaptive_window`, so
+  `ideal_cost_bits_with_window` (left main in #1584)/`ideal_cost_bits_adaptive_window`, so
   the next slice's measurement would not be flying blind on the
   ideal-vs-real coder gap ADR-0038 documents. `codec::
   encode_tokens` factored into a thin wrapper over a new
@@ -5336,7 +5341,7 @@ record.
   same as S2-A1/S2-A50/S2-A61 before it; `research/progress.jsonl`
   records it as `kind: "patch"` with null bpb deltas.
 - S2-R11 | REJECTED | S1-P4's own remaining scope after S2-A94: used
-  `compressed_len_with_window`/`compressed_len_adaptive_window` to
+  `compressed_len_with_window` (left main in #1584)/`compressed_len_adaptive_window` to
   re-measure S2-A93's wiring decision through a real bitstream, not
   just ideal cost, at S2-R9/S2-A93's exact scale (4,000,000 bytes, train
   seed `0xC0FFEE123456789A`) but across every train-eligible non-ladder
@@ -5421,7 +5426,8 @@ record.
   `lz::parse_optimal_with_seed_and_search_window` as `pub(crate)` (was
   private to `lz.rs`) and added `codec::
   compressed_len_with_seed_and_search_window(data, seed_window,
-  search_window)`, the real-`Encoder` counterpart to
+  search_window)` (left main in #1584, as was
+  `lz::parse_optimal_with_seed_and_search_window`), the real-`Encoder` counterpart to
   `compressed_len_with_window`/`compressed_len_adaptive_window` that
   exposes both windows as independent parameters instead of only the two
   matched policies those two already wire. `encode_tokens` itself is
@@ -5453,7 +5459,7 @@ record.
   throwaway, uncommitted scratch binary
   (`bench/src/bin/adaptive_window_seed_ablation.rs`, deleted after this
   measurement, same convention as S2-A93/S2-A94/S2-R11/S2-A95's own),
-  using S2-A96's new capability: `base64_wrapped(4_000_000,
+  using S2-A96's new capability (left main in #1584): `base64_wrapped(4_000_000,
   0xC0FFEE123456789A)`, baseline `compressed_len_with_window(data,
   WINDOW)` = 235,024 bytes (0.470048 b/B, reproducing S2-R11's own number
   exactly, confirming this harness measures the identical thing), matched
@@ -8771,7 +8777,8 @@ record.
   of `docs/benchmarks/silesia.md`), `dickens` from the `bench/corpus.toml` pin
   (10,192,446 bytes, download hash checked), one process, one thread, timers
   around the public stages (`select::pick`, `filters::*::encode`,
-  `lz::parse_greedy`, `lz::parse_optimal`, `codec::compressed_len_with_window`;
+  `lz::parse_greedy`, `lz::parse_optimal`, `codec::compressed_len_with_window`
+  (left main in #1584);
   coder is the last minus `parse_optimal`) and, in a scratch copy of the crate,
   a match-finder-only loop (`BinaryTreeMatchFinder::insert_and_find` at every
   position, one round, times three). The real CLI, `mothergod -v` on the whole
@@ -8993,6 +9000,7 @@ record.
   2 MiB reach needs a `FORMAT_VERSION`, an ADR, a golden, and a streaming
   decode bound of 2 MiB (CLAUDE.md rule 5). | Measured, release build, AMD
   EPYC 7763 4 logical cores runner. Basis: `codec::compressed_len_with_window`
+  (left main in #1584)
   summed over 16 MiB blocks of the raw file, real bitstream bytes, no filter
   selection and no trial threads, so the figures are the token stage only and
   sit above `docs/benchmarks/silesia.md` where a filter wins (`ooffice` 3.29
