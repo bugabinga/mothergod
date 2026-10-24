@@ -2403,7 +2403,8 @@ record.
   (`research/corpus/POLICY.md`). Full mechanism, numbers, and the five
   slices that built it (S2-A40/S2-A41/S2-A58/S2-A59/S2-A60): S2-A60's own
   entry below.
-- S1-P2 | LEAD | btultra2-class parse: binary-tree match finder with exact
+- S1-P2 | EXHAUSTED 2026-09-22, closed by S2-R15 (pricing: S2-R3, S2-R5;
+  search quality: S2-R10; field-class modeling: S2-R15) | btultra2-class parse: binary-tree match finder with exact
   price feedback + per-position adaptive prices (ours were frozen per round).
   Targets sqlite/json/jsonl residue. First slice: S2-A42 (standalone
   binary-tree match finder, not yet wired). Second slice, wiring it
@@ -2521,7 +2522,8 @@ record.
   this evidence; what is left is either a different modeling primitive
   entirely or accepting that sqlite/json/jsonl residue sits near this
   architecture's ceiling absent one.
-- S1-P3 | LEAD | PPM-style escape for literal contexts (see S1-R4). First
+- S1-P3 | EXHAUSTED 2026-09-25, closed by S2-R22 (every named branch, S2-R6
+  through S2-R22, failed) | PPM-style escape for literal contexts (see S1-R4). First
   slice: S2-A57 (standalone `Ppm` primitive, PPM Method C escape pricing,
   not yet wired), whose own module doc named three candidate fallback
   targets: order-0, one of `Literal`'s other five experts, or a fresh
@@ -3626,7 +3628,8 @@ record.
   `forbid(unsafe_code)` (ADR-0017's call, not this lead's). CHANGELOG.md
   untouched: nothing wired to a `Method`, no public API or user-visible
   behavior changed.
-- S1-P6 | LEAD | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
+- S1-P6 | EXHAUSTED 2026-09-20, closed by S2-A88 and S2-A90 within the
+  current format (ADR-0053 closes SIMD on decode) | Speed tier: bit-decomposed coding (LPAQ-style, ~10×), tANS
   fast path (~100×, zstd-class -1 mode). Concrete target as of S2-A27:
   `Literal::decode`'s all-literal worst case measures ~1170 ns/byte
   (~854 KB/s), under the ROADMAP SPEED floor (≥1 MB/s decode) —
