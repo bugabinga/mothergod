@@ -146,17 +146,23 @@ wirings had shipped under #1123 and #1222 in one week). Resolved, by id:
 SSE (S1-P1), per-column modeling (S1-P5), the logit-domain mixer (S1-P8,
 S2-A102), the learned baseline (S2-A104, S2-A105), the length split
 (S2-A109, S2-A110), the offset split (S2-A111, S2-A112), the low-bit
-length models (S2-A114, S2-A115). Exhausted, each under its own id, pending a
-genuinely new mechanism and not a variant: btultra2-class parse (S1-P2),
-PPM escape (S1-P3), large windows (S1-P4), per-expert rate gating
+length models (S2-A114, S2-A115), the declared reach to the offset code's
+ceiling (S2-A127 to S2-A129, `FORMAT_VERSION` 17). Exhausted, each under
+its own id, pending a genuinely new mechanism and not a variant:
+btultra2-class parse (S1-P2), PPM escape (S1-P3), per-expert rate gating
 (S2-R33), the previous-token flag state (S2-R34).
 
-Live thread: the filter bank. Base64 unwrap, reverse and reverse-then-delta
-are wired as selector kinds 4 to 6 (`FORMAT_VERSION` 14 to 16, it193 to
-it195); the per-field byte-order candidate was rejected (it196). No
-standing lead is open after it: the next candidate is a literature idea or
-a cheap wild swing per the `compression-experiment` skill, or a charter
-issue labeled research + product (ADR-0062). Target: beat zstd -19
+Live thread: large windows (S1-P4), the one `LEAD` header left among
+S1-P1 to S1-P8. The reach to the offset code's ceiling shipped as a
+per-frame trial and narrowed six of the seven Silesia losses to zstd -19
+(`xml` unchanged) while flipping none (S2-A128); a reach past that
+ceiling, a wider offset code, is the remainder the journal lists
+unmeasured. The filter bank thread (selector kinds 4 to 6,
+`FORMAT_VERSION` 14 to 16, it193 to it195) ended with the per-field
+byte-order rejection (it196). Past S1-P4 the next candidate is a
+literature idea or a cheap wild swing per the `compression-experiment`
+skill, or a charter issue labeled research + product (ADR-0062). Target:
+beat zstd -19
 per-file on all of Silesia/Canterbury with real bitstreams; then xz -9e.
 
 ## M4: Production hardening ✅
