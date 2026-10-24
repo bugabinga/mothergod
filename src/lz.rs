@@ -1365,26 +1365,10 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 /// `window >= 2^21`.
 #[must_use]
 pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
-    parse_optimal_with_seed_and_search_window(data, WINDOW, window)
-}
-
-/// [`parse_optimal_with_window`] with the seed pass's window a parameter
-/// too: [`DP_ROUNDS`] `dp_round` rounds at `search_window`, seeded by
-/// [`parse_greedy_with_window`] at `seed_window`. A seed narrower than the
-/// search measured as the cause of S2-R9's regression (`research/JOURNAL.md`
-/// S1-P4).
-///
-/// `pub(crate)` for [`crate::codec::compressed_len_with_seed_and_search_window`],
-/// which measures both seed policies.
-pub(crate) fn parse_optimal_with_seed_and_search_window(
-    data: &[u8],
-    seed_window: usize,
-    search_window: usize,
-) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
-    let mut round = parse_greedy_with_window(data, seed_window);
+    let mut round = parse_greedy_with_window(data, WINDOW);
     for _ in 0..DP_ROUNDS {
         let prices = PriceCounts::tally(&round, data).prices(round.len());
         // The prices are all the next round takes from these tokens, and a
@@ -1392,12 +1376,12 @@ pub(crate) fn parse_optimal_with_seed_and_search_window(
         // capacity for a 16 MiB block: kept, it is live beside `parent` and
         // the match finder, the peak (`research/JOURNAL.md` S2-A124).
         drop(round);
-        round = dp_round(data, &prices, search_window);
+        round = dp_round(data, &prices, window);
     }
     round
 }
 
-/// Number of `dp_round` reseed-and-relax passes [`parse_optimal_with_seed_and_search_window`]
+/// Number of `dp_round` reseed-and-relax passes [`parse_optimal_with_window`]
 /// runs. S2-A56 measured a third round winning and S2-R4 a fourth losing on
 /// the sealed split, so the count stays three until new evidence reopens it
 /// (`research/JOURNAL.md` S1-P2).
