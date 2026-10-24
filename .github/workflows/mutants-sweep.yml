@@ -15,9 +15,10 @@
 # suite's baseline test phase takes 60 s (it took 8 s on the 2026-08-30
 # sweep, run 33334414262, 1,531 mutants in 3h10m); a caught mutant still
 # runs the rest of the suite because `cargo test` has no fail-fast within a
-# binary, and at `-j 4` on a four-vCPU runner eight mutants took 226 s,
-# 28 s each. One job would run about 14.5 h; ten shards run about 90 min
-# each. The release profile was measured too and rejected: the suite drops
+# binary, and at `-j 4` eight mutants took 226 s, 28 s each. One job would
+# run about 14.5 h; the first sharded run (40132179750, 3f089bc) took 65 to
+# 130 min per shard of 188 mutants, under the 140 the step allows. The
+# release profile was measured too and rejected: the suite drops
 # to 40 s but every mutant rebuilds at opt-level 3, and the two slowest
 # binaries (the lib's unit tests and tests/encode_memory.rs, 25 s each in
 # the test profile) are CPU-bound either way.
@@ -105,6 +106,20 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
+          # 4 GiB of address space per process, every rustc and test binary
+          # under this shell. A mutant that multiplies a table size (`+` to
+          # `*` in literal.rs's bank bases) asks for gigabytes the kernel
+          # overcommits; the tests then touch them and the runner swaps until
+          # GitHub reports "lost communication": four shards of the first
+          # run (40132179750) died that way, one eight minutes in, on exactly
+          # those mutants. Under the cap the request fails, Rust aborts,
+          # cargo test reports the failure and the mutant is caught, the
+          # right verdict for a mutation that changes what the crate
+          # allocates. A limit on a runaway, never a budget: measured on a
+          # runner at 7eb643a, the suite's largest binary peaks at 1.5 GiB
+          # of address space and rustc under 0.5, and four jobs at the cap
+          # still fit the runner's 16 GiB.
+          ulimit -v 4194304
           set +e
           timeout --signal=INT --kill-after=120 8400 \
             cargo mutants --config tests/mutants.toml --package mothergod \
