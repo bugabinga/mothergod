@@ -549,8 +549,8 @@
       const cells = [
         stat(hours == null ? null : hours.toFixed(2), 'fuzz CPU-hours'),
         stat(data.crashers_total, 'crashers found'),
-        stat(data.trend?.mutation_score?.latest, 'mutation score',
-          'mutation score, not yet measured'),
+        stat(data.trend?.mutation_score?.latest, 'mutation score %',
+          'mutation score %, not yet measured'),
         stat(data.trend?.coverage_region_pct?.latest, 'region coverage %',
           'region coverage %, not yet measured'),
       ];

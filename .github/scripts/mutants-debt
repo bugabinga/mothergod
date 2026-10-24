@@ -64,6 +64,9 @@ this script exists to end.
 `triage`, `decide`, `render` and `in_territory` are pure so
 mutants-debt.test.mjs can pin both failure directions without spawning gh;
 `read_report` reads the three files cargo-mutants leaves and nothing else.
+`in_territory`, `decide_command` and `answers` are the territory rule, the
+deciding run and the answer order stated once; `mutants-sweep` imports them
+for the monthly whole-crate issue (#455).
 """
 
 import json
@@ -295,7 +298,19 @@ def render(pr, debt, run_url):
             f"{debt.outside} more {'survivors sit' if debt.outside != 1 else 'survivor sits'} outside decode-safety territory:",
             "scaffold, not debt (ADR-0056), left on the PR's annotations.",
         ]
-    lines += [
+    lines += answers(debt.missed, debt.undecided)
+    lines += ["", f"Run: {run_url}"]
+    return title, "\n".join(lines)
+
+
+def answers(missed, undecided):
+    """The three answers a survivor takes and the run that decides each listed mutant.
+
+    One text for every filing of mutation debt: this script's per-PR issue
+    and the whole-crate sweep's refreshed one (mutants-sweep), so the house
+    order (delete, test, proven exclusion) is stated once.
+    """
+    lines = [
         "",
         "Each survivor takes one of three answers, in this order: delete the line",
         "(a survivor in code nothing calls is dead code, not a missing test, unless",
@@ -303,7 +318,7 @@ def render(pr, debt, run_url):
         "that fails under the mutation, or an exclusion in `tests/mutants.toml` with",
         "the equivalence proof (#391's shape). Procedure: the `test-craft` skill.",
     ]
-    if debt.undecided:
+    if undecided:
         lines += ["An undecided mutant is run first, then answered as a survivor or closed as caught."]
     lines += [
         "",
@@ -313,12 +328,10 @@ def render(pr, debt, run_url):
         "in no function keeps its line and column, exact as of this filing:",
         "",
         "```",
-        *(decide_command(name) for name in [*debt.missed, *debt.undecided]),
+        *(decide_command(name) for name in [*missed, *undecided]),
         "```",
-        "",
-        f"Run: {run_url}",
     ]
-    return title, "\n".join(lines)
+    return lines
 
 
 def pr_merged(repo, pr):

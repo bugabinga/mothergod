@@ -1,0 +1,486 @@
+#!/usr/bin/env python3
+"""Merge a sharded whole-crate mutation sweep into one score, one ledger entry and one refreshed issue (#455).
+
+Extensionless and executable, like mutants-debt: the report job of
+mutants-sweep.yml runs it once the shards have uploaded.
+
+mutants-check mutates a PR's own diff, so code nobody touches accumulates
+survivors invisibly; cargo-mutants' docs name this caveat. The sweep is the
+backstop: every mutant of `src/` on main, split across a matrix with
+`--shard k/n`, each shard uploading its `mutants.out` listing and outcomes.
+This script reads the shard directories and does three things, in this
+order, so the first two survive a failure of the third:
+
+    the entry      `entry.json` in the trust ledger's schema (trust-telemetry.py),
+                   role `mutants`, `mutation_score` a percent: caught over
+                   caught plus missed, rounded to two places. Timed-out
+                   mutants are undecided (mutants-check's verdict rule) and
+                   unviable ones never built, so neither is in the ratio.
+                   The score is null, unmeasured, when a shard is missing or
+                   unreadable or any listed mutant never ran: a ratio over
+                   part of the crate is not the crate's score, and the
+                   status page renders the previous measurement rather than
+                   a wrong one.
+    the report     `--report DIR` gets the merged `missed.txt`, `caught.txt`,
+                   `timeout.txt`, `unviable.txt`, `undecided.txt` and
+                   `summary.md`, the artifact a human opens.
+    the issue      one issue, refreshed, never one per mutant (the monster
+                   report's shape): decode-safety survivors (ADR-0056, the
+                   territory rule `mutants-debt` holds) and undecided
+                   mutants in that territory are the debt listed; survivors
+                   outside it are scaffold, counted per file and left in the
+                   artifact. Survivors an open `mutants-debt` issue already
+                   carries (title mark `outlived PR #`) are excluded and the
+                   issues named, so a line is open work in one place.
+                   Owed: the issue is edited, or reopened, or created with
+                   `gh-comment --new` as `product` + `bug`, slot a of the
+                   heartbeat's product queue, the same rule and labels as a
+                   merged PR's survivors. Nothing owed: an open sweep issue
+                   is closed with one comment. The issue is found by the
+                   marker in its body and the bot author, never by title,
+                   because the title changes with every refresh.
+
+Fail direction: a filed-elsewhere read that fails excludes nothing and says
+so, because a dedup read must not suppress the filing (mutants-debt's rule);
+an issue list that cannot be read or a write that fails exits 1 after the
+entry and the report are written, so the run's red says why and the ledger
+still gets its row.
+
+`read_shard`, `merge`, `triage`, `render`, `select_issue`, `filed_elsewhere`
+and `decide` are pure so mutants-sweep.test.mjs pins both directions without
+spawning gh or cargo.
+
+Usage: mutants-sweep <shards-dir> <entry.json> [--report DIR] [--no-issue]
+"""
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+from collections import Counter
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import footer  # noqa: E402, the scripts directory is the import root
+
+_loader = importlib.machinery.SourceFileLoader("mutants_debt", str(HERE / "mutants-debt"))
+_spec = importlib.util.spec_from_loader("mutants_debt", _loader)
+debt = importlib.util.module_from_spec(_spec)
+_loader.exec_module(debt)
+
+ROLE_NAME = "mutants"
+LABELS = ("product", "bug")
+MARKER = "<!-- mutants-sweep -->"
+TITLE_MARK = "whole-crate sweep"
+# `gh issue list --json author` prints the App as `app/github-actions`, the
+# REST login is `github-actions[bot]` (monster-report's lesson, #1593).
+BOT_LOGINS = frozenset({"app/github-actions", "github-actions[bot]"})
+SHARD_SPEC = re.compile(r"^(\d+)/(\d+)$")
+# A mutant outcome's summary, cargo-mutants 27.1.0 `SummaryOutcome`; the
+# baseline's `Success` and `Failure` name no mutant.
+SUMMARIES = {"CaughtMutant": "caught", "MissedMutant": "missed", "Unviable": "unviable", "Timeout": "timeout"}
+
+
+@dataclass
+class Shard:
+    """One shard's `mutants.out`: what it listed, what it decided, and why it could not be read."""
+
+    name: str
+    spec: str = None  # "k/n" from shard.txt
+    listed: list = field(default_factory=list)
+    outcomes: dict = field(default_factory=dict)  # mutant name -> caught|missed|unviable|timeout
+    error: str = None
+
+
+@dataclass
+class Sweep:
+    """Every shard merged: each mutant in exactly one bucket, and the problems that void the score."""
+
+    caught: list
+    missed: list
+    unviable: list
+    timeout: list
+    never_ran: list  # listed by a shard, no outcome: cut by the budget or an unreadable outcomes file
+    shards: int  # shard directories received
+    denominator: int  # n from the shard specs when they agree, else None
+    problems: list  # each voids the score
+
+    @property
+    def decided(self):
+        return len(self.caught) + len(self.missed) + len(self.unviable) + len(self.timeout)
+
+    @property
+    def listed(self):
+        return self.decided + len(self.never_ran)
+
+    @property
+    def score(self):
+        """Percent caught over caught plus missed; None when any part of the crate is unmeasured."""
+        viable = len(self.caught) + len(self.missed)
+        if self.problems or self.never_ran or not viable:
+            return None
+        return round(100.0 * len(self.caught) / viable, 2)
+
+    @property
+    def unmeasured(self):
+        """Why the score is None, one line each; empty when it is measured."""
+        reasons = list(self.problems)
+        if self.never_ran:
+            reasons.append(f"{len(self.never_ran)} listed mutants never ran: a shard cut by its budget")
+        if not reasons and not (self.caught or self.missed):
+            reasons.append("no viable mutant was decided")
+        return reasons
+
+
+def read_shard(path):
+    """One shard directory as a Shard; an unreadable file is the shard's `error`, never a raise."""
+    path = Path(path)
+    shard = Shard(name=path.name)
+    spec_file = path / "shard.txt"
+    if spec_file.is_file():
+        spec = spec_file.read_text().strip()
+        if SHARD_SPEC.match(spec):
+            shard.spec = spec
+        else:
+            shard.error = f"shard.txt holds {spec!r}, not k/n"
+    else:
+        shard.error = "no shard.txt"
+    try:
+        listing = path / "mutants.json"
+        if listing.is_file():
+            shard.listed = [m["name"] for m in json.loads(listing.read_text())]
+        else:
+            shard.error = shard.error or "no mutants.json"
+        outcomes = path / "outcomes.json"
+        if outcomes.is_file():
+            for outcome in json.loads(outcomes.read_text()).get("outcomes", []):
+                scenario = outcome.get("scenario")
+                if isinstance(scenario, dict) and "Mutant" in scenario:
+                    bucket = SUMMARIES.get(outcome.get("summary"))
+                    if bucket:
+                        shard.outcomes[scenario["Mutant"]["name"]] = bucket
+        else:
+            shard.error = shard.error or "no outcomes.json"
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        shard.error = f"{type(exc).__name__}: {exc}"
+    return shard
+
+
+def merge(shards):
+    """Shards into one Sweep. Problems: a shard unreadable, specs disagreeing, an index missing or repeated."""
+    buckets = {"caught": [], "missed": [], "unviable": [], "timeout": []}
+    never_ran = []
+    problems = []
+    seen = set()
+    denominators = set()
+    indices = Counter()
+    for shard in sorted(shards, key=lambda s: s.name):
+        if shard.error:
+            problems.append(f"{shard.name}: {shard.error}")
+        if shard.spec:
+            k, n = (int(x) for x in SHARD_SPEC.match(shard.spec).groups())
+            denominators.add(n)
+            indices[k] += 1
+        for name in shard.listed:
+            if name in seen:
+                continue
+            seen.add(name)
+            bucket = shard.outcomes.get(name)
+            if bucket:
+                buckets[bucket].append(name)
+            else:
+                never_ran.append(name)
+    denominator = None
+    if len(denominators) == 1:
+        denominator = next(iter(denominators))
+        missing = [k for k in range(denominator) if indices[k] == 0]
+        repeated = sorted(k for k, c in indices.items() if c > 1)
+        if len(missing) > 5:
+            problems.append(f"{len(missing)} of {denominator} shards missing, received {', '.join(map(str, sorted(indices)))}")
+        elif missing:
+            problems.append(f"shard{'s' if len(missing) != 1 else ''} {', '.join(map(str, missing))} of {denominator} missing")
+        if repeated:
+            problems.append(f"shard{'s' if len(repeated) != 1 else ''} {', '.join(map(str, repeated))} received twice")
+    elif denominators:
+        problems.append(f"shards disagree on the denominator: {sorted(denominators)}")
+    elif shards:
+        problems.append("no shard names its k/n")
+    else:
+        problems.append("no shard directory")
+    return Sweep(
+        caught=sorted(buckets["caught"]),
+        missed=sorted(buckets["missed"]),
+        unviable=sorted(buckets["unviable"]),
+        timeout=sorted(buckets["timeout"]),
+        never_ran=sorted(never_ran),
+        shards=len(shards),
+        denominator=denominator,
+        problems=problems,
+    )
+
+
+def filed_elsewhere(body):
+    """Mutant names one open `mutants-debt` issue's body lists, read from its code blocks."""
+    return {line.strip() for line in body.splitlines() if debt.NAME.match(line.strip())}
+
+
+@dataclass
+class Owed:
+    """What the sweep issue lists: decode-safety debt not filed elsewhere, and the counts around it."""
+
+    missed: list
+    undecided: list  # timed out or never ran, in territory
+    elsewhere: list  # issue numbers already carrying a territory mutant of this sweep
+    excluded: int  # territory mutants those issues carry, left off the lists
+    scaffold: Counter  # survivors outside territory, per file
+
+    @property
+    def summary(self):
+        parts = []
+        if self.missed:
+            parts.append(debt.plural(len(self.missed), "survivor"))
+        if self.undecided:
+            parts.append(f"{len(self.undecided)} undecided")
+        return ", ".join(parts)
+
+
+def triage(sweep, filed):
+    """Sort the sweep by territory and by what is filed already; `filed` maps issue number to its names."""
+    territory = [m for m in sweep.missed if debt.in_territory(m)]
+    undecided = [m for m in [*sweep.timeout, *sweep.never_ran] if debt.in_territory(m)]
+    named = set().union(*filed.values()) if filed else set()
+    carried = set(territory) | set(undecided)
+    return Owed(
+        missed=[m for m in territory if m not in named],
+        undecided=[m for m in undecided if m not in named],
+        elsewhere=sorted(n for n, names in filed.items() if names & carried),
+        excluded=len(carried & named),
+        scaffold=Counter(m.split(":", 1)[0] for m in sweep.missed if not debt.in_territory(m)),
+    )
+
+
+def render(sweep, owed, head, date, run_url, dedup_error=None):
+    """(title, body) of the sweep issue; the body minus its marker is the run's summary."""
+    sha = head[:7] if head else "main"
+    title = f"mutants: {owed.summary or 'nothing owed'} on main, {TITLE_MARK} {date} at {sha}"
+    counts = (
+        f"{len(sweep.caught)} caught, {len(sweep.missed)} missed, {len(sweep.unviable)} unviable, "
+        f"{len(sweep.timeout)} timed out"
+    )
+    if sweep.never_ran:
+        counts += f", {len(sweep.never_ran)} never ran"
+    score = f"{sweep.score}%" if sweep.score is not None else "unmeasured"
+    lines = [
+        MARKER,
+        f"The monthly whole-crate sweep at `{sha}` decided {sweep.decided} of {sweep.listed} mutants of `src/`",
+        f"across {sweep.shards} shard{'s' if sweep.shards != 1 else ''}: {counts}.",
+        f"Mutation score {score}, caught over caught plus missed; a timed-out or never-run mutant is",
+        "undecided and outside the ratio.",
+    ]
+    if sweep.unmeasured:
+        lines += ["", "The score is unmeasured this month because:", *(f"- {reason}" for reason in sweep.unmeasured)]
+    if owed.missed:
+        lines += [
+            "",
+            "Decode-safety survivors (ADR-0056), each a line on main no test distinguishes from its mutation:",
+            "",
+            "```",
+            *owed.missed,
+            "```",
+        ]
+    if owed.undecided:
+        lines += [
+            "",
+            "Undecided in decode-safety territory, timed out or never run: debt in the same sense as a",
+            "survivor until a run decides it (#947):",
+            "",
+            "```",
+            *owed.undecided,
+            "```",
+        ]
+    if owed.excluded:
+        where = ", ".join(f"#{n}" for n in owed.elsewhere)
+        lines += ["", f"{owed.excluded} more in decode-safety territory already filed, left to {where}."]
+    if dedup_error:
+        lines += ["", f"Open `mutants-debt` issues could not be read ({dedup_error}), so a line above may be filed twice."]
+    scaffold_total = sum(owed.scaffold.values())
+    if scaffold_total:
+        per_file = ", ".join(f"`{f}` {n}" for f, n in owed.scaffold.most_common())
+        lines += [
+            "",
+            f"{scaffold_total} survivor{'s sit' if scaffold_total != 1 else ' sits'} outside decode-safety territory: scaffold, not debt (ADR-0056).",
+            f"Per file: {per_file}. The full lists are the run's `mutants-sweep-report` artifact.",
+        ]
+    if owed.missed or owed.undecided:
+        lines += debt.answers(owed.missed, owed.undecided)
+    lines += ["", "Refreshed by every sweep; closed by one that finds nothing owed.", "", f"Run: {run_url}"]
+    return title, "\n".join(lines)
+
+
+def select_issue(issues):
+    """The sweep issue among `issues`: marker in the body, bot author; open before closed, then lowest number."""
+    candidates = [
+        i for i in issues
+        if MARKER in (i.get("body") or "") and (i.get("author") or {}).get("login") in BOT_LOGINS
+    ]
+    candidates.sort(key=lambda i: (0 if i.get("state") == "OPEN" else 1, i.get("number", 0)))
+    if not candidates:
+        return None
+    return {"number": candidates[0]["number"], "state": candidates[0].get("state")}
+
+
+def decide(owed, selected):
+    """The write the issue needs: create, edit, reopen, close or nothing."""
+    if owed.missed or owed.undecided:
+        if selected is None:
+            return "create"
+        return "edit" if selected["state"] == "OPEN" else "reopen"
+    if selected is not None and selected["state"] == "OPEN":
+        return "close"
+    return "nothing"
+
+
+def entry(score):
+    return {
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "role": ROLE_NAME,
+        "fuzz_cpu_s": None,
+        "crashers_new": None,
+        "mutation_score": score,
+        "coverage_region_pct": None,
+    }
+
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, indent=1)
+        fh.write("\n")
+
+
+def write_report(directory, sweep, body):
+    out = Path(directory)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, lines in (
+        ("missed", sweep.missed), ("caught", sweep.caught), ("timeout", sweep.timeout),
+        ("unviable", sweep.unviable), ("undecided", [*sweep.timeout, *sweep.never_ran]),
+    ):
+        (out / f"{name}.txt").write_text("".join(f"{line}\n" for line in lines))
+    (out / "summary.md").write_text(body.replace(MARKER + "\n", "", 1) + "\n")
+
+
+def gh_json(args):
+    """(parsed stdout, error text): gh's JSON or why it could not be read."""
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None, proc.stderr.strip() or f"gh exited {proc.returncode}"
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError as exc:
+        return None, f"gh printed non-JSON: {exc}"
+
+
+def call(args, body=None):
+    """(ok, text) of one gh or gh-comment call: stdout on success, the complaint on failure."""
+    proc = subprocess.run(args, input=body, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return False, proc.stderr.strip() or proc.stdout.strip() or f"{args[0]} exited {proc.returncode}"
+    return True, proc.stdout.strip()
+
+
+def refresh_issue(repo, owed, title, body, date, head, run_url):
+    """Apply `decide`'s write; (ok, detail)."""
+    issues, err = gh_json([
+        "issue", "list", "--repo", repo, "--state", "all", "--search", f'in:title "{TITLE_MARK}"',
+        "--limit", "50", "--json", "number,state,body,author",
+    ])
+    if err:
+        return False, f"issue list unreadable: {err}"
+    selected = select_issue(issues)
+    action = decide(owed, selected)
+    number = selected["number"] if selected else None
+    comment = str(HERE / "gh-comment")
+    if action == "create":
+        labels = [x for label in LABELS for x in ("--label", label)]
+        ok, out = call([comment, "--new", title, *labels], body)
+        return ok, f"issue filed {out}" if ok else f"create failed: {out}"
+    if action in ("edit", "reopen"):
+        if action == "reopen":
+            ok, out = call(["gh", "issue", "reopen", str(number), "--repo", repo])
+            if not ok:
+                return False, f"reopen failed: {out}"
+        body_file = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "mutants-sweep-issue.md"
+        body_file.write_text(footer.attribute(body, os.environ.get("ROLE", "reviewer"))[0] + "\n")
+        ok, out = call([
+            "gh", "issue", "edit", str(number), "--repo", repo, "--title", title,
+            "--body-file", str(body_file), "--add-label", LABELS[1],
+        ])
+        return ok, f"issue {action}ed #{number}" if ok else f"{action} failed: {out}"
+    if action == "close":
+        ok, out = call(
+            [comment, str(number), "--close"],
+            f"The {TITLE_MARK} {date} at `{head[:7]}` decided every mutant it listed and owes nothing "
+            f"in decode-safety territory. Run: {run_url}",
+        )
+        return ok, f"issue closed #{number}" if ok else f"close failed: {out}"
+    return True, "issue none"
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("shards_dir", help="directory holding one downloaded shard artifact per subdirectory")
+    parser.add_argument("entry", help="where to write the trust-ledger entry")
+    parser.add_argument("--report", metavar="DIR", help="write the merged lists and summary.md here")
+    parser.add_argument("--no-issue", action="store_true", help="score and report only, never touch GitHub")
+    opts = parser.parse_args(argv[1:])
+    repo = os.environ.get("GITHUB_REPOSITORY", "bugabinga/mothergod")
+    head = os.environ.get("GITHUB_SHA", "")
+    run_url = os.environ.get("RUN_URL", "(run url unset)")
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    root = Path(opts.shards_dir)
+    shard_dirs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    sweep = merge([read_shard(p) for p in shard_dirs])
+    write_json(opts.entry, entry(sweep.score))
+
+    filed, dedup_error = {}, None
+    if not opts.no_issue:
+        data, dedup_error = gh_json([
+            "issue", "list", "--repo", repo, "--state", "open", "--label", LABELS[1],
+            "--search", f'in:title "{debt.TITLE_MARK}"', "--limit", "100", "--json", "number,body",
+        ])
+        if data is not None:
+            filed = {i["number"]: filed_elsewhere(i.get("body") or "") for i in data}
+    owed = triage(sweep, filed)
+    title, body = render(sweep, owed, head, date, run_url, dedup_error)
+    if opts.report:
+        write_report(opts.report, sweep, body)
+
+    score = f"{sweep.score}%" if sweep.score is not None else "unmeasured"
+    status = (
+        f"score {score} | caught {len(sweep.caught)} missed {len(sweep.missed)} unviable {len(sweep.unviable)} "
+        f"timeout {len(sweep.timeout)} never-ran {len(sweep.never_ran)} "
+        f"| shards {sweep.shards}/{sweep.denominator or '?'} | owed {owed.summary or 'nothing'}"
+    )
+    for reason in sweep.unmeasured:
+        print(f"::warning::mutants-sweep: {reason}")
+    if opts.no_issue:
+        print(f"mutants-sweep: {status} | issue skipped")
+        return 0
+    ok, detail = refresh_issue(repo, owed, title, body, date, head, run_url)
+    if not ok:
+        print(f"::error::mutants-sweep: {status} | {detail}")
+        return 1
+    print(f"mutants-sweep: {status} | {detail}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -18,7 +18,7 @@ hours rather than at the next cron.
 | Advisory | every PR | no, annotates; survivors of a merged PR become a `bug` issue | `mutants-check` (diff-scoped) |
 | Nightly | schedule | no, alarmed | fuzz with persistent corpus; structure-aware targets (#451); allocation torture (`torture-check`) |
 | Weekly | schedule | no, alarmed | monster matrix, coverage, CLI memory bound (`memory-check`), Miri (#456) |
-| Monthly | schedule | no, alarmed | whole-crate mutation sweep (planned, #455) |
+| Monthly | schedule | no, alarmed | whole-crate mutation sweep (`mutants-sweep`, sharded) |
 
 Effectiveness is audited by the trust ledger (#449): fuzz CPU-hours,
 new crashers, mutation score, and region coverage, rendered on the
@@ -33,9 +33,8 @@ opens; the row is the series, reconciled from the artifacts every Sunday.
 `site/trust-data.json` at deploy time, cumulative since the first row,
 and `status.html` renders it under "Is it tested?". Writers landed:
 `fuzz-check`, timed fuzz seconds and new-crasher count per run (#462);
-`coverage-check`, region coverage percent per run (#454).
-Writers pending: mutation score (#455), shown as not yet measured
-until its sweep lands.
+`coverage-check`, region coverage percent per run (#454);
+`mutants-sweep`, mutation score percent per monthly sweep (#455).
 Ledger numbers are maps, never gates; the only merge-blocking
 checks are behavioral. An issue number is a pointer to the issue that
 tracked the work; a row not yet built says "planned" in its own cell.
@@ -124,7 +123,20 @@ of a `time(1)` recipe of its own.
 
 The advisory `mutants-check` workflow runs on pull requests that touch
 `src/` or the crate's build inputs, mutating only the changed lines
-(layer 4). A whole-crate sweep runs on manual dispatch only.
+(layer 4).
+
+The advisory `mutants-sweep` workflow runs on the first of each month at
+07:41 UTC and on manual dispatch: every mutant of `src/` under
+`tests/mutants.toml`, split across ten shards of `cargo mutants --shard`,
+merged by `.github/scripts/mutants-sweep` (layer 4, #455). The mutation
+score, caught over caught plus missed, goes to the trust ledger; it is
+written null when a shard is missing or was cut by its budget, because a
+ratio over part of the crate is not the crate's score. Decode-safety
+survivors and undecided mutants land in one refreshed `product` + `bug`
+issue, minus the lines an open `mutants-debt` issue already carries;
+scaffold survivors are counted per file and left in the run's artifact.
+Never a gate; the workflow header carries the measured cost and the
+cadence decision.
 
 The advisory `monster` workflow runs Saturdays at 03:17 UTC and on manual
 dispatch, never on pull requests. Every runtime lane runs
@@ -343,10 +355,9 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `undecided N of M` on every run and files a merged PR's decode-safety
   ones with its survivors, because an untested line on main is debt in the
   same sense (#947).
-- Whole-crate sweeps run on manual dispatch, not a schedule: 1,531 mutants
-  at ~3.8h is a one-time backlog measurement, not weekly news.
-- Planned (#455): a monthly sharded whole-crate sweep, mutation score to
-  the trust ledger, survivors in one refreshed issue.
+- The whole crate is swept monthly by `mutants-sweep`, sharded, the score
+  to the trust ledger and the decode-safety survivors in one refreshed
+  issue (#455): the backstop for every line a PR gate never mutates again.
 
 ## 5. Determinism
 

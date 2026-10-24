@@ -1,0 +1,202 @@
+# Monthly whole-crate mutation sweep: the mutation score on the trust ledger
+# and the survivors nobody's PR will ever show (#455, ADR-0043, ADR-0056;
+# docs/TESTING.md tier "Monthly").
+#
+# mutants-check mutates a PR's own diff, so a line nobody touches is never
+# mutated again after the PR that wrote it, and a survivor it left is
+# invisible until something edits that line. This sweep mutates every line
+# of `src/` on main once a month: the score is the suite measured as a
+# whole, "checked, not merely reached" (ADR-0043), and the decode-safety
+# survivors are debt filed in one refreshed issue, the same rule and labels
+# `mutants-debt` applies to a merged PR's.
+#
+# Sharded because one runner cannot: measured locally on 2026-10-24 at
+# 31deb96, the crate lists 1,865 mutants under tests/mutants.toml and the
+# suite's baseline test phase takes 60 s (it took 8 s on the 2026-08-30
+# sweep, run 33334414262, 1,531 mutants in 3h10m); a caught mutant still
+# runs the rest of the suite because `cargo test` has no fail-fast within a
+# binary, and at `-j 4` on a four-vCPU runner eight mutants took 226 s,
+# 28 s each. One job would run about 14.5 h; ten shards run about 90 min
+# each. The release profile was measured too and rejected: the suite drops
+# to 40 s but every mutant rebuilds at opt-level 3, and the two slowest
+# binaries (the lib's unit tests and tests/encode_memory.rs, 25 s each in
+# the test profile) are CPU-bound either way.
+#
+# Every shard runs with the same arguments and denominator, cargo-mutants'
+# one sharding rule; SHARDS and the matrix list below are the two places
+# that number lives, and a shard writes its own `k/n` into the artifact so
+# the report job refuses a set that disagrees or is short. The baseline is
+# kept, not skipped: it costs one build and one 60 s test run per shard and
+# it is what `--timeout-multiplier` anchors on (the docs: the multiplier
+# has no effect with `--baseline=skip`, and the fallback is a flat 300 s);
+# `--baseline=skip` would save about two minutes of a ninety-minute job
+# and lose the measured timeout, so #455's "skip" is overridden here.
+#
+# A shard cut by its budget is not red: the mutants it never reached are
+# undecided (#947), the report lists the decode-safety ones as debt and
+# writes no score, because a ratio over part of the crate is not the
+# crate's score. Red means cargo-mutants could not run or the report could
+# not write, which agent-alarm wakes the BDFL for and `recheck` retries
+# after the next push to main; a retry costs the whole matrix, so the
+# cut-is-not-red rule above is what keeps a slow month from costing two.
+#
+# Monthly first (#455's gate): about 15 runner-hours a run on a public
+# repository's free minutes, ten of the account's twenty concurrent jobs
+# for ninety minutes. Weekly only if that stays cheap and the score still
+# moves; the cadence decision lives in this comment, not in an issue.
+#
+# The 1st at 07:41 UTC is clear of every other cron (`grep -n cron:
+# .github/workflows/*.yml` lists them): the nightlies end by 03:00, the
+# weekend sweeps by 07:00 when the 1st is a weekend day.
+#
+# No rust-cache: a monthly job's cache is evicted after seven idle days,
+# so it would be saved every run and restored never, and the crate has no
+# runtime dependencies to make the cold build worth caching. The
+# cargo-mutants binary cache is mutants-check's, kept warm by every PR.
+name: mutants-sweep
+
+on:
+  schedule:
+    - cron: "41 7 1 * *"
+  workflow_dispatch:
+
+# Raised per job below; the report job writes one issue.
+permissions: {}
+
+concurrency:
+  group: mutants-sweep
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_MUTANTS_VERSION: "27.1.0"
+  # The matrix below lists 0..SHARDS-1; change both together.
+  SHARDS: "10"
+
+jobs:
+  mutate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout
+    timeout-minutes: 160
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
+      # Guarded by the binary, not by `cargo install`'s own check: the cache
+      # restores the binary without ~/.cargo/.crates.toml, so an unguarded
+      # install rebuilds from source on every hit (mutants-check.yml).
+      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
+
+      # 140 minutes inside the step, under the step's own 150: the inner
+      # `timeout` interrupts cargo-mutants, which has written every decided
+      # outcome by then, and exits 124 (137 when the kill was needed), the
+      # cut the report reads as undecided. 0, 2 and 3 are cargo-mutants'
+      # own verdicts (clean, missed, timeouts), judged by the report, not
+      # here. Anything else is a run that could not complete, and red.
+      - name: Mutate shard
+        timeout-minutes: 150
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set +e
+          timeout --signal=INT --kill-after=120 8400 \
+            cargo mutants --config tests/mutants.toml --package mothergod \
+              --shard "$SHARD/$SHARDS" --timeout-multiplier 10 -j 4
+          status=$?
+          set -e
+          case $status in
+            0 | 2 | 3) ;;
+            124 | 137) echo "::warning::shard $SHARD/$SHARDS cut at 140 min; its unreached mutants are undecided" ;;
+            *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
+          esac
+
+      # The shard names itself for the report, whatever happened above; a
+      # crashed run leaves no listing and the report says which shard.
+      - name: Name the shard
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          mkdir -p mutants.out
+          echo "$SHARD/$SHARDS" > mutants.out/shard.txt
+
+      # The listing and outcomes only; `log/` is a build log per mutant,
+      # gigabytes nobody opens, and the report reads none of it.
+      - name: Upload shard
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mutants-sweep-shard-${{ matrix.shard }}
+          path: |
+            mutants.out/*.json
+            mutants.out/*.txt
+          if-no-files-found: ignore
+          retention-days: 90
+
+  # always(): a cut or crashed shard is exactly the run whose report has to
+  # say so, and the ledger row is owed whatever the matrix did.
+  report:
+    needs: mutate
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout
+      issues: write # the refreshed survivor issue
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutants-sweep-shard-*
+          path: shards
+
+      # Writes entry.json first and the report second, so both survive a
+      # failed issue write; its docstring is the contract. The survivor rule
+      # is the reviewer's (agent-review.yml step 3), as for mutants-debt.
+      - name: Score, ledger entry, survivor issue
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          GH_WORKFLOW_TOKEN: ${{ github.token }}
+          ROLE: reviewer
+        run: .github/scripts/mutants-sweep shards entry.json --report report
+
+      - name: Summary
+        if: always()
+        run: test -f report/summary.md && cat report/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: upload trust-ledger entry
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: trust-mutants-${{ github.run_id }}-${{ github.run_attempt }}
+          path: entry.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+      # The row beside the artifact (#891 slice 4, ADR-0060): the artifact
+      # is the record a human opens for 90 days, the row is the series the
+      # TRUST scorecard reads past that horizon. trust-row.py exits 0 on
+      # every path; a write that failed is a warning the Sunday backfill
+      # in agent-model-intel.yml repairs.
+      - name: write trust row
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: test -f entry.json && python3 .github/scripts/trust-row.py entry.json || echo "::warning::no entry.json to write"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mutants-sweep-report
+          path: report/
+          if-no-files-found: ignore
+          retention-days: 90

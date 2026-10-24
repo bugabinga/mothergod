@@ -91,10 +91,11 @@ CREATE TABLE IF NOT EXISTS guard (
 CREATE INDEX IF NOT EXISTS guard_role_at ON guard (role, at);
 
 -- trust: one row per trust-ledger entry a scheduled test workflow wrote
--- (#891 slice 4; the ledger is #449, ADR-0043). Written by fuzz-check.yml
--- and coverage-check.yml through trust-row.py beside the entry.json
--- artifact each uploads, and by `trust-row.py backfill` from the
--- unexpired artifacts every Sunday (agent-model-intel.yml); read by
+-- (#891 slice 4; the ledger is #449, ADR-0043). Written by the scheduled
+-- test workflows (`grep -l trust-row.py .github/workflows/*.yml`) through
+-- trust-row.py beside the entry.json artifact each uploads, and by
+-- `trust-row.py backfill` from the unexpired artifacts every Sunday
+-- (agent-model-intel.yml); read by
 -- trust-telemetry.py at site deploy, where "cumulative" means since the
 -- first row and no longer the artifact retention window. A writer leaves
 -- the fields it does not measure NULL, never 0.
