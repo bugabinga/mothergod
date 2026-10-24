@@ -16,7 +16,8 @@
 //! should not block the whole gate). A source that fails with an I/O
 //! error is retried [`FETCH_ATTEMPTS`] times before the next source
 //! is tried (issue #1568: one connection reset on a mirrorless origin
-//! was the whole pass). The pinned bytes
+//! was the whole pass); an HTTP status answer is not retried (issue
+//! #1572). The pinned bytes
 //! are the compressed download, not the corpus file itself:
 //! [`decompress_silesia`] unwraps one Silesia file's bzip2 stream, and
 //! [`extract_canterbury`] lists every file inside Canterbury's
@@ -32,7 +33,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Attempts per source on an I/O error. A checksum mismatch is never
-/// retried: the same URL serves the same wrong bytes.
+/// retried: the same URL serves the same wrong bytes. Neither is an HTTP
+/// status answer ([`FetchError::Status`]): a 404 stays a 404, and a 429
+/// or 503 asks the client to back off, which an immediate retry ignores.
 const FETCH_ATTEMPTS: usize = 3;
 
 /// Longest a socket read may block, so a hung origin fails in about a
@@ -111,6 +114,8 @@ pub enum FetchError {
     UnknownName(String),
     /// The download failed or the local cache couldn't be read/written.
     Io(std::io::Error),
+    /// The origin answered with an HTTP status of 400 or above.
+    Status(u16),
     /// The fetched bytes' SHA-256 doesn't match the manifest's pin.
     ChecksumMismatch {
         /// The entry that failed verification.
@@ -127,6 +132,7 @@ impl fmt::Display for FetchError {
         match self {
             Self::UnknownName(name) => write!(f, "no corpus.toml entry named {name:?}"),
             Self::Io(err) => write!(f, "fetch-and-cache I/O error: {err}"),
+            Self::Status(code) => write!(f, "origin answered HTTP status {code}"),
             Self::ChecksumMismatch {
                 name,
                 expected,
@@ -178,6 +184,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// Returns [`FetchError::UnknownName`] if `manifest` has no entry called
 /// `name`. If every source (`url` and `mirrors`) fails, returns the last
 /// source's error: [`FetchError::Io`] if it was a download/cache failure,
+/// [`FetchError::Status`] if the origin answered an HTTP error status,
 /// or [`FetchError::ChecksumMismatch`] if it was a hash that didn't match
 /// the entry's pin.
 pub fn fetch_and_cache(
@@ -256,10 +263,20 @@ fn http_get(url: &str) -> Result<Vec<u8>, FetchError> {
         .build()
         .get(url)
         .call()
-        .map_err(|err| FetchError::Io(std::io::Error::other(err.to_string())))?;
+        .map_err(|err| fetch_error(&err))?;
     let mut bytes = Vec::new();
     response.into_reader().read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+/// Maps a `ureq` error to the one [`FetchError`] variant whose retry
+/// policy fits it: an answered status is [`FetchError::Status`], every
+/// transport failure is [`FetchError::Io`].
+fn fetch_error(err: &ureq::Error) -> FetchError {
+    match err {
+        ureq::Error::Status(code, _) => FetchError::Status(*code),
+        ureq::Error::Transport(_) => FetchError::Io(std::io::Error::other(err.to_string())),
+    }
 }
 
 /// Decompresses one Silesia corpus file from its pinned bzip2 download
@@ -476,6 +493,41 @@ mod tests {
         assert_eq!(result.unwrap(), payload);
         assert_eq!(calls.get(), 2);
         assert!(cache_dir.join(&expected).exists());
+    }
+
+    #[test]
+    fn fetch_and_cache_requests_a_source_once_when_it_answers_a_status() {
+        let manifest = manifest_with_one_entry(&super::sha256_hex(b"never served"));
+        let cache_dir = temp_cache_dir("status-once");
+
+        let calls = std::cell::Cell::new(0);
+        let result = fetch_and_cache_with(&manifest, "fixture", &cache_dir, |_url| {
+            calls.set(calls.get() + 1);
+            Err(FetchError::Status(429))
+        });
+        assert_eq!(calls.get(), 1);
+        assert!(matches!(result, Err(FetchError::Status(429))));
+    }
+
+    #[test]
+    fn fetch_error_maps_an_answered_status_to_status() {
+        for code in [403, 404, 429, 503] {
+            let response = ureq::Response::new(code, "refused", "").unwrap();
+            assert!(matches!(
+                super::fetch_error(&ureq::Error::Status(code, response)),
+                FetchError::Status(c) if c == code
+            ));
+        }
+    }
+
+    #[test]
+    fn http_get_maps_a_refused_connection_to_io() {
+        // A bound-then-dropped loopback port refuses the connection: a
+        // real `ureq::Error::Transport`, which has no public constructor.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        drop(listener);
+        assert!(matches!(super::http_get(&url), Err(FetchError::Io(_))));
     }
 
     #[test]
