@@ -102,13 +102,15 @@ export function buildReport(jobs, logsById, runUrl) {
   return lines.join("\n");
 }
 
+// `gh issue list --json author` prints a GitHub App's login as `app/<slug>`
+// while the REST `user.login` is `<slug>[bot]`; the workflow feeds this the
+// former, and matching only the latter filed nine issues for nine reds and
+// reopened none (#1593 duplicated #1588 while it was open, 2026-10-24).
+const BOT_LOGINS = new Set(["app/github-actions", "github-actions[bot]"]);
+
 export function selectIssue(issues) {
   const candidates = issues
-    .filter(
-      (issue) =>
-        issue?.body?.includes(ISSUE_MARKER)
-        && issue?.author?.login === "github-actions[bot]",
-    )
+    .filter((issue) => issue?.body?.includes(ISSUE_MARKER) && BOT_LOGINS.has(issue?.author?.login))
     .sort((left, right) => {
       const leftClosed = left.state === "OPEN" ? 0 : 1;
       const rightClosed = right.state === "OPEN" ? 0 : 1;
