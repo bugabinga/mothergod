@@ -2,9 +2,9 @@
 
 # Baseline snapshot
 
-As of 2026-10-23T21:34:36Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 12 fixed-seed cases, each 50000 bytes except `wide_reach_repeat`, 1376256 bytes (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
+As of 2026-10-24T13:09:34Z. Source: `bench/baseline.json`, measured by `mothergod::compress` on 12 fixed-seed cases, each 50000 bytes except `wide_reach_repeat`, 1376256 bytes (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: this table is mothergod against itself, run over run; see `docs/benchmarks/canterbury.md` for real numbers against the pinned reference compressors on the Canterbury held-out final (`research/JOURNAL.md` S2-A37).
 
-![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-10-23T21:34:36Z](baseline.svg)
+![Bar chart of mothergod bits/byte per baseline case, sorted ascending, as of 2026-10-24T13:09:34Z](baseline.svg)
 
 | case | bits/byte |
 |---|---|
