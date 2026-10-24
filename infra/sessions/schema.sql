@@ -103,10 +103,10 @@ CREATE TABLE IF NOT EXISTS trust (
   run_id              INTEGER NOT NULL,
   attempt             INTEGER NOT NULL,
   at                  TEXT    NOT NULL,   -- ISO-8601 UTC, the entry's own date
-  role                TEXT    NOT NULL,   -- the writer: fuzz, coverage; mutation when #455 lands
+  role                TEXT    NOT NULL,   -- the writer: fuzz, coverage, mutants
   fuzz_cpu_s          REAL,               -- seconds the fuzz targets ran, timed around the run
   crashers_new        INTEGER,            -- crash-, oom-, timeout-, leak- files libFuzzer left; NULL before 2026-09-13T06:00:00Z, when slow units counted too
-  mutation_score      REAL,
+  mutation_score      REAL,               -- percent, caught over caught plus missed, one whole-crate sweep (mutants-sweep)
   coverage_region_pct REAL,               -- cargo-llvm-cov region coverage of the crate
   PRIMARY KEY (run_id, attempt)
 );
