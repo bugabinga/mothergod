@@ -75,12 +75,15 @@ do not:
                     do this wake, the next one publishes.
     publish <id>    the newest pass is owed, succeeded, and its artifact is
                     live: `bench-report --publish` writes the five files
-                    into the tree, `cargo x check` then names the README
-                    and site quotes the new timing columns moved
-                    (tests/claims.rs pins them, so a PR of the five files
-                    alone fails `test`, #1384), and push-branch and gh-pr
-                    ship all of it under the title this prints, which is
-                    where the next read learns the generator.
+                    into the tree and stamps the figures README.md,
+                    site/index.html and CHANGELOG.md copy from them
+                    (tests/claims.rs in bless mode, #1486), `cargo x
+                    check` then proves it, and push-branch and gh-pr ship
+                    all of it under the title this prints, which is where
+                    the next read learns the generator. The words around
+                    a figure ("more than nine times") are not stamped; a
+                    floor the new reports break fails the stamp, and the
+                    seat rewrites that sentence.
     dispatch        a pin moved and no pass is at or after it, or the
                     owed pass failed, was cancelled, or its artifact
                     expired: one `gh workflow run` on GH_WORKFLOW_TOKEN.
@@ -96,11 +99,13 @@ Liveness: the footer always names the three facts it read, so a reader can
 tell fresh reports from a detector that stopped reading.
 
 Usage: bench-report              print the state and the next action
-       bench-report --publish    in state publish: download the artifact and
-                                 write its files into the tree
+       bench-report --publish    in state publish: download the artifact,
+                                 write its files into the tree and stamp the
+                                 figures the surfaces copy from them
 
 Exits 0 whichever state it prints; a state is a duty, not an error.
-`--publish` exits 1 when the state is not publish or the download fails.
+`--publish` exits 1 when the state is not publish, the download fails or a
+sentence the new reports falsify fails the stamp.
 """
 
 import argparse
@@ -132,9 +137,13 @@ DISPATCH = f'GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run {WORKFLOW} --ref main
 # the generator is recorded, and GENERATOR is how the next read finds it.
 TITLE = "bench: publish the reports regenerated at {sha}"
 FULL_SHA = 40
+# What a publish moves besides FILES: the copies of their figures. The stamp
+# is tests/claims.rs, the one parser of those sentences (#1486).
+SURFACES = ("README.md", "site/index.html", "CHANGELOG.md")
+STAMP = ("cargo", "test", "--test", "claims")
 # Twelve characters, because seven resolved once as no object (the docstring
-# of `commit`); the regex admits seven for the five publish subjects on main
-# that carry them.
+# of `commit`); the regex admits seven for the publish subjects already on
+# main that carry them.
 SHORT_SHA = 12
 GENERATOR = re.compile(rf"regenerated at ([0-9a-f]{{7,{FULL_SHA}}})\b")
 
@@ -355,10 +364,9 @@ def render(facts, error, out=sys.stdout):
         print(f"    {newest['url']}", file=out)
     elif state == "publish":
         print(f"publish {newest['databaseId']}: a pass on main finished {newest['updatedAt']}; {stale}.", file=out)
-        print("    Next: .github/scripts/bench-report --publish, which writes the five files into the tree;", file=out)
-        print("    then `cargo x check`: tests/claims.rs pins README.md and site/index.html to the reports'", file=out)
-        print("    date, CPU model and MB/s and names each quote the new reports moved, so fix those in", file=out)
-        print("    the same diff (#1384); then push-branch and gh-pr ship it all, under this title and no", file=out)
+        print("    Next: .github/scripts/bench-report --publish, which writes the five files into the tree", file=out)
+        print("    and stamps the figures README.md, site/index.html and CHANGELOG.md copy from them;", file=out)
+        print("    then `cargo x check`; then push-branch and gh-pr ship it all, under this title and no", file=out)
         print("    other, because the next read learns the generator from it:", file=out)
         print(f'    "{TITLE.format(sha=newest["headSha"][:SHORT_SHA])}"', file=out)
         print(f"    {newest['url']}", file=out)
@@ -379,7 +387,14 @@ def render(facts, error, out=sys.stdout):
 
 
 def publish(repo, run_id, root, out=sys.stdout):
-    """Download the pass's artifact and write FILES into the tree under `root`. Returns the exit code."""
+    """Download the pass's artifact, write FILES into the tree under `root`, stamp their figures. Returns the exit code.
+
+    The stamp is tests/claims.rs run with MOTHERGOD_BLESS_CLAIMS=1: it
+    rewrites each figure README.md, site/index.html and CHANGELOG.md
+    copied from a report to the report's value, and fails on a sentence
+    the new numbers falsify ("more than nine times"), which is the seat's
+    to reword. Exit 1 then, with the files written and the failure printed.
+    """
     with tempfile.TemporaryDirectory() as scratch:
         proc = subprocess.run(
             ["gh", "run", "download", str(run_id), "--repo", repo, "-n", ARTIFACT, "-D", scratch],
@@ -396,9 +411,23 @@ def publish(repo, run_id, root, out=sys.stdout):
                 return 1
         for rel in FILES:
             shutil.copyfile(Path(scratch) / rel, root / rel)
-    status = subprocess.run(["git", "-C", str(root), "status", "--short", "--", *FILES], capture_output=True, text=True)
     print(f"published run {run_id}: {len(FILES)} files written into the tree", file=out)
+    stamp = subprocess.run(
+        STAMP,
+        cwd=root,
+        env={**os.environ, "MOTHERGOD_BLESS_CLAIMS": "1"},
+        capture_output=True,
+        text=True,
+    )
+    status = subprocess.run(
+        ["git", "-C", str(root), "status", "--short", "--", *FILES, *SURFACES], capture_output=True, text=True
+    )
     print(status.stdout.rstrip() or "    identical to the tree: nothing to ship", file=out)
+    if stamp.returncode != 0:
+        tail = (stamp.stdout + stamp.stderr).strip().splitlines()[-20:]
+        print(f"bench-report: `{' '.join(STAMP)}` failed under MOTHERGOD_BLESS_CLAIMS=1; its last lines:", file=out)
+        print("\n".join(f"    {line}" for line in tail), file=out)
+        return 1
     return 0
 
 
