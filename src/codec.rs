@@ -201,26 +201,15 @@ struct Models {
 
 impl Models {
     fn new() -> Self {
-        Self {
-            literal: Literal::new(),
-            logit_sse: SurpriseLogisticMix::new(),
-            flag: [Model::new(FLAG_ALPHABET), Model::new(FLAG_ALPHABET)],
-            length_match: Model::new(lz::LENGTH_BUCKETS),
-            length_rep: Model::new(lz::LENGTH_BUCKETS),
-            length_match_residual: ResidualTree::new(lz::LENGTH_BUCKETS),
-            length_rep_residual: ResidualTree::new(lz::LENGTH_BUCKETS),
-            offset_len: std::array::from_fn(|_| Model::new(lz::OFFSET_BUCKETS)),
-            slot: Model::new(lz::REP_SLOTS),
-        }
+        crate::abort_on_oom(Self::try_new())
     }
 
-    /// Fallible counterpart to [`Self::new`]: the same fresh tables, but
-    /// returns `Err` instead of aborting if the allocator cannot satisfy
-    /// one of them. [`decode`] and [`decode_to_writer`] use this
-    /// (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); every encode path keeps [`Self::new`],
-    /// where an allocator failure this small is already a fatal condition
-    /// for the whole process.
+    /// The one statement of the fresh tables, returning `Err` if the
+    /// allocator cannot satisfy one of them. [`decode`] and
+    /// [`decode_to_writer`] use this (hard rule 2, `rust-craft` skill's
+    /// allocation-discipline, `tests/torture.rs`, #453); every encode path
+    /// keeps [`Self::new`], this with an abort, where an allocator failure
+    /// this small is already a fatal condition for the whole process.
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             literal: Literal::try_new()?,
@@ -629,14 +618,7 @@ struct ResidualTree {
 }
 
 impl ResidualTree {
-    fn new(buckets: usize) -> Self {
-        Self {
-            nodes: vec![Model::new(2); buckets << RESIDUAL_MODELED_BITS],
-        }
-    }
-
-    /// Fallible counterpart to [`Self::new`], for [`Models::try_new`]'s
-    /// decode path (hard rule 2).
+    /// A fresh tree, or `Err` if the allocator refuses (hard rule 2).
     fn try_new(buckets: usize) -> Result<Self, std::collections::TryReserveError> {
         let count = buckets << RESIDUAL_MODELED_BITS;
         let mut nodes = Vec::new();

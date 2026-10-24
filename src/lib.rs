@@ -549,6 +549,12 @@ pub(crate) fn try_filled_vec<T: Clone>(
     Ok(v)
 }
 
+/// `built`'s value, or an abort if the allocator refused: what `vec!` does,
+/// stated once for every `new` that is its `try_new` with no `Err` to return.
+pub(crate) fn abort_on_oom<T>(built: Result<T, std::collections::TryReserveError>) -> T {
+    built.unwrap_or_else(|_| std::process::abort())
+}
+
 /// The value of a joined worker thread, or its panic resumed here: a panic on
 /// a thread of an encode is the panic a serial encode raises.
 pub(crate) fn rejoin<T>(joined: std::thread::Result<T>) -> T {

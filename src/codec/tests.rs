@@ -840,7 +840,7 @@ fn fresh_residual_tree_costs_exactly_the_raw_residual_bits() {
     // update a tree costs what raw residual bits cost: the whole S2-A114
     // gain comes from adaptation, none from accounting.
     for value in [1u32, 2, 3, 7, 16, 31, 1_000, 65_535, (1 << 16) + 12_345] {
-        let mut tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+        let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
         let raw = f64::from(bucket_bits(lz::bucket(value)));
         let cost = tree.ideal_cost_bits(value);
         assert!((cost - raw).abs() < 1e-12, "value {value}: {cost} vs {raw}");
@@ -852,7 +852,7 @@ fn residual_tree_learns_only_its_modeled_bits() {
     // 1_000 sits in bucket 9: four modeled residual bits, five raw. A
     // repeated value drives the modeled four toward free, never the raw
     // five, so the cost converges to just above 5 and never below it.
-    let mut tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let mut last = f64::INFINITY;
     for _ in 0..50 {
         last = tree.ideal_cost_bits(1_000);
@@ -863,7 +863,7 @@ fn residual_tree_learns_only_its_modeled_bits() {
 #[test]
 fn residual_tree_buckets_do_not_share_nodes() {
     // Training bucket 9 must leave bucket 10's walk at its fresh price.
-    let mut tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     for _ in 0..50 {
         let _ = tree.ideal_cost_bits(1_000);
     }
@@ -888,7 +888,7 @@ fn residual_tree_values() -> Vec<u32> {
 #[test]
 fn residual_tree_decode_inverts_encode_in_every_bucket() {
     let values = residual_tree_values();
-    let mut tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let mut ac = Encoder::new();
     for &value in &values {
         tree.encode(&mut ac, value);
@@ -911,14 +911,14 @@ fn residual_tree_decode_leaves_the_encoders_node_state() {
     // stream, the decoder's nodes must sit where the encoder's did, so a
     // walk priced through either tree costs the same.
     let values = residual_tree_values();
-    let mut encoder_tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut encoder_tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let mut ac = Encoder::new();
     for &value in &values {
         encoder_tree.encode(&mut ac, value);
     }
     let bytes = ac.finish();
 
-    let mut decoder_tree = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut decoder_tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let mut ac = Decoder::new(&bytes);
     for &value in &values {
         assert_eq!(decoder_tree.decode(&mut ac, lz::bucket(value)), value);
@@ -939,9 +939,9 @@ fn residual_tree_price_matches_what_it_codes() {
     // stream and its real coded size agree to the coder's few bytes of
     // flush and quantization slack.
     let values = residual_tree_values();
-    let mut priced = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut priced = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let ideal: f64 = values.iter().map(|&v| priced.ideal_cost_bits(v)).sum();
-    let mut coded = ResidualTree::new(lz::LENGTH_BUCKETS);
+    let mut coded = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let mut ac = Encoder::new();
     for &value in &values {
         coded.encode(&mut ac, value);
