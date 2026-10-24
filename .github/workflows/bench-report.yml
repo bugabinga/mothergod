@@ -13,18 +13,20 @@
 # and no pinned bpb (#1434 is the long case the gate lacks).
 # `bench/corpus.toml` because a moved pin is a different corpus.
 # `bench/src/**` was on the list so that a change to the report binaries
-# would regenerate what they print (#1356, #1367, #1373, #1376): the ten
-# passes of those seven days answered frame_probe, corpus-fetch and
-# gate-message merges, none moved a ratio, and each cost about fifty
-# runner minutes plus a maintainer and a reviewer run to publish timing
-# jitter (#1486 counts the hand edits). A change to the binaries now waits
-# for the week's pass, which also carries the speed-only codec change
-# nothing else triggers. A native cron, because this workflow exchanges no
-# OIDC token (ADR-0035). `.github/scripts/bench-report` reads the push
-# paths from this file, so the trigger and the detector cannot disagree,
-# and tells the next heartbeat whether the newest pass is running,
-# finished and waiting to be published, or owed a dispatch, the healing
-# for one that failed or expired unpublished:
+# would regenerate what they print (#1356, #1367, #1373, #1376): of the
+# ten passes published in those seven days, eight answered a merge that
+# touched none of the paths kept (frame_probe, the corpus fetcher, gate
+# messages), and the one ratio move among the ten (#1444, the late finals
+# of #1423) rode a pass its pin merge had asked for. Each pass costs about
+# fifty runner minutes plus a maintainer and a reviewer run to publish
+# timing jitter (#1486 counts the hand edits). A change to the binaries
+# now waits for the week's pass, which also carries the speed-only codec
+# change nothing else triggers. A native cron, because this workflow
+# exchanges no OIDC token (ADR-0035). `.github/scripts/bench-report`
+# reads the push paths from this file, so the trigger and the detector
+# cannot disagree, and tells the next heartbeat whether the newest pass is
+# running, finished and waiting to be published, or owed a dispatch, the
+# healing for one that failed or expired unpublished:
 #   GH_TOKEN="$GH_WORKFLOW_TOKEN" gh workflow run bench-report.yml --ref main
 # The publish PR the heartbeat cuts from the artifact is the reports' one
 # writer, titled with the pass head so the next read learns the generator

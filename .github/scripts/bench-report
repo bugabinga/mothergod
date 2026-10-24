@@ -31,11 +31,11 @@ not depend on the caller's checkout or branch:
                 commits a day. `check` does not read the reports
                 (ADR-0076), so the list is the only demand. Neither is
                 `bench/src`: it was, so a change to the report binaries
-                would regenerate what they print, and in the seven days
-                to 2026-10-24 that was ten passes for no ratio move, each
-                a publish PR of runner jitter (every pass is serial by
-                design, #1321, and every regenerated report differs in
-                its timing columns). What escapes the list, a change that
+                would regenerate what they print, and of the ten passes
+                published in the seven days to 2026-10-24, eight answered
+                a merge no kept path saw, each a publish PR of runner
+                jitter (every pass is serial by design, #1321, and every
+                regenerated report differs in its timing columns). What escapes the list, a change that
                 leaves every digest intact while moving inputs the gate
                 cases do not resemble (the one long case, #1434), one
                 that moves speed alone, and the binaries themselves, the
