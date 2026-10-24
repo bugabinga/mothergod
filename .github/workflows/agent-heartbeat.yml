@@ -149,8 +149,9 @@ jobs:
             4. Otherwise ship progress from ONE queue of product work,
                issues included. First `.github/scripts/bench-report`:
                `publish <id>` is the item: `bench-report --publish`,
-               then `cargo x check`, which names the README and site
-               quotes the new reports moved, then one PR of all of it
+               which stamps the figures the surfaces copy and exits 1
+               naming any sentence the new reports falsify, yours to
+               reword; then `cargo x check`, then one PR of all of it
                (#1384); `dispatch` is the one command it prints, run
                it and read on. Then a
                product issue labeled ready-to-ship: its thread holds
