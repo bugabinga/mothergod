@@ -997,68 +997,6 @@ fn length_residual_trees_adapt_independently_by_kind() {
 }
 
 #[test]
-fn ideal_cost_bits_with_window_drops_once_a_repeat_becomes_reachable() {
-    // research/JOURNAL.md S1-P4: a repeat past the window is priced as
-    // fresh literals; the same repeat within a larger window is priced
-    // as a match, so the real adaptive models must report meaningfully
-    // fewer bits once `window` grows to reach it. Same disjoint
-    // template/filler byte ranges as lz::tests::
-    // optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss,
-    // so the only structure in `data` is the planted repeat itself.
-    let template: Vec<u8> = (0u8..80).collect();
-    let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
-        .take(420)
-        .map(|s| 128 + u8::try_from(s % 128).unwrap())
-        .collect();
-    let mut data = template.clone();
-    data.extend_from_slice(&filler);
-    data.extend_from_slice(&template);
-
-    let small_window = 300;
-    let large_window = 700;
-    let small_bits = ideal_cost_bits_with_window(&data, small_window);
-    let large_bits = ideal_cost_bits_with_window(&data, large_window);
-    assert!(
-        large_bits < small_bits - f64::from(u16::try_from(template.len()).unwrap()),
-        "a window reaching the planted repeat ({large_bits} bits) should cost at least a \
-         template's worth of bits less than one that cannot ({small_bits} bits)"
-    );
-}
-
-#[test]
-fn compressed_len_with_window_matches_wired_encode_tokens_at_wired_window() {
-    // Real-Encoder counterpart to the fixed-window ideal-cost test
-    // above: lz::parse_optimal(data) is defined as
-    // parse_optimal_with_window(data, WINDOW), so
-    // compressed_len_with_window at that same window must match
-    // encode_tokens's own wired length exactly, not just
-    // approximately.
-    let data: Vec<u8> = (0..5000u32)
-        .map(|i| u8::try_from(i % 251).unwrap())
-        .collect();
-    assert_eq!(
-        compressed_len_with_window(&data, lz::WINDOW),
-        encode_tokens(&data, None, Reach::Standard).len()
-    );
-}
-
-#[test]
-fn compressed_len_with_seed_and_search_window_matches_matched_window_call() {
-    // compressed_len_with_window(data, w) is
-    // parse_optimal_with_seed_and_search_window(data, lz::WINDOW, w)
-    // by lz::parse_optimal_with_window's own documented contract, so
-    // this capability must match it exactly at seed_window = lz::WINDOW,
-    // not just approximately.
-    let data: Vec<u8> = (0..5000u32)
-        .map(|i| u8::try_from(i % 251).unwrap())
-        .collect();
-    assert_eq!(
-        compressed_len_with_seed_and_search_window(&data, lz::WINDOW, lz::WINDOW),
-        compressed_len_with_window(&data, lz::WINDOW)
-    );
-}
-
-#[test]
 fn streaming_rejects_bad_match_distance_not_panicking() {
     // Same hand-crafted single-Match-token payload as
     // bad_match_distance_is_rejected_not_panicking, driven through

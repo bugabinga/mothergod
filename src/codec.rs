@@ -529,49 +529,7 @@ fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>, reach: Reach) -> Ve
     )
 }
 
-/// `encode_tokens`'s real-bitstream length, but parsed with
-/// [`lz::parse_optimal_with_window`] under `window` instead of the wired
-/// [`lz::WINDOW`] (`research/JOURNAL.md` S1-P4): the real-`Encoder`
-/// counterpart to [`ideal_cost_bits_with_window`], which prices the same
-/// candidate through modeled cost only. Lets a candidate window's actual
-/// compressed size be measured without wiring it into `encode_tokens` or
-/// `compress`/`encode`, and without bumping `FORMAT_VERSION`: the returned
-/// length is a real payload byte count, but not itself guaranteed
-/// decodable by this crate's current [`decode`] if `window` exceeds
-/// [`lz::WINDOW`] (`ensure_within_window` still rejects a distance past
-/// it, same as [`ideal_cost_bits_with_window`]'s own ideal-cost-only
-/// caveat). See [`lz::parse_optimal_with_window`]'s docs for the bucket
-/// ceiling `window` must stay under.
-#[must_use]
-pub fn compressed_len_with_window(data: &[u8], window: usize) -> usize {
-    encode_tokens_with(data, None, &lz::parse_optimal_with_window(data, window)).len()
-}
-
-/// Same as [`compressed_len_with_window`], but exposes both of
-/// `lz::parse_optimal_with_seed_and_search_window`'s windows as
-/// independent parameters instead of fixing the seed pass to [`lz::WINDOW`]
-/// (`research/JOURNAL.md` S1-P4), so a mismatch can be re-measured on a new
-/// candidate data class. S2-R9 found a mismatch (seed capped at
-/// [`lz::WINDOW`] while every `dp_round` searched past it) that regressed
-/// `access_log`/`json_records`; S2-A93 fixed it by matching the windows. Whether the same mismatch helps or
-/// hurts `Base64Wrapped`, whose far matches are S1-P4's current open
-/// failure (S2-R11/S2-A95), is exactly what this measures.
-#[must_use]
-pub fn compressed_len_with_seed_and_search_window(
-    data: &[u8],
-    seed_window: usize,
-    search_window: usize,
-) -> usize {
-    encode_tokens_with(
-        data,
-        None,
-        &lz::parse_optimal_with_seed_and_search_window(data, seed_window, search_window),
-    )
-    .len()
-}
-
-/// Shared body of [`encode_tokens`], [`compressed_len_with_window`] and
-/// [`compressed_len_with_seed_and_search_window`]: encodes already-parsed
+/// Shared body of [`encode_tokens`] and the codec tests: encodes already-parsed
 /// `tokens` through the context-mixing pipeline and returns the real payload
 /// bytes.
 ///
@@ -629,26 +587,9 @@ fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Toke
 /// it).
 #[must_use]
 pub fn ideal_cost_bits(data: &[u8]) -> f64 {
-    ideal_cost_bits_with_window(data, lz::WINDOW)
-}
-
-/// Same as [`ideal_cost_bits`], but parses `data` with [`lz::parse_optimal_with_window`]
-/// under `window` instead of the wired [`lz::WINDOW`] (`research/JOURNAL.md`
-/// S1-P4): measures a candidate window's real coding-cost effect through
-/// this crate's actual adaptive models, without wiring it into
-/// [`encode`] or bumping `FORMAT_VERSION`. See
-/// [`lz::parse_optimal_with_window`]'s docs for the bucket ceiling
-/// `window` must stay under.
-#[must_use]
-pub fn ideal_cost_bits_with_window(data: &[u8], window: usize) -> f64 {
     let mut models = Models::new();
     let mut sink = CostSink::default();
-    walk_tokens(
-        &lz::parse_optimal_with_window(data, window),
-        data,
-        &mut models,
-        &mut sink,
-    );
+    walk_tokens(&lz::parse_optimal(data), data, &mut models, &mut sink);
     sink.bits
 }
 
