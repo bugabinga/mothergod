@@ -86,8 +86,10 @@ jobs:
             Read first: .claude/skills/deslop/SKILL.md, your operating
             manual.
 
-            Your territory is src/ and nothing else; a slop finding
-            elsewhere is somebody else's, no PR for it.
+            Your territory is src/, plus the research/JOURNAL.md clause
+            the skill's step 4 asks for: it rides in the deleting PR,
+            never in an issue for the maintainer (#1409, #1585). A slop
+            finding elsewhere is somebody else's, no PR for it.
 
             Work in strict priority order and STOP after ONE unit of
             work:
