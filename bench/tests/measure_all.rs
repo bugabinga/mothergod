@@ -103,6 +103,10 @@ fn child(program: &str, mode: &str, input: &[u8]) -> (Vec<u8>, bool) {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "android-runner ships only the test executable; CARGO_BIN_EXE_bench_child is a host path (#518)"
+)]
 fn child_mode_round_trips_and_rejects_bad_input() {
     let data = fixture();
     let (packed, ok) = child(CHILD, "compress", &data);
