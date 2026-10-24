@@ -151,8 +151,17 @@ Rust has no `aarch64-pc-windows-gnu` target; its supported native ARM64
 GNU-family target is `aarch64-pc-windows-gnullvm`. The matrix explicitly
 excludes alternate macOS slots because Rust exposes only the Darwin libc ABI
 for each host architecture. Failed monster lanes update and reopen one
-`bug`/`agent-system` issue with the run, job, lane identity, and first useful
+`bug`/`product` issue with the run, job, lane identity, and first useful
 failure.
+
+The Android lane runs each test executable on the emulator after
+`.github/scripts/android-runner` pushes it with the golden and adversarial
+fixtures, and nothing else: a test that spawns a sibling binary by its
+`CARGO_BIN_EXE_*` path finds a host path that does not exist on the device.
+Such a test carries `#[cfg_attr(target_os = "android", ignore = "...")]`
+with this reason, or its file sits behind `cfg(not(target_os = "android"))`
+when every test in it spawns (`tests/cli.rs`). #518 and #1588 each cost a
+week of red monster for a missing one, because no PR lane runs Android.
 
 The advisory `coverage-check` workflow runs Sundays at 04:51 UTC and on
 manual dispatch: `cargo llvm-cov --package mothergod --json`, region
