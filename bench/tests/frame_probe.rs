@@ -104,6 +104,10 @@ fn run(args: &[&str]) -> (i32, String, String) {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "android-runner ships only the test executable; CARGO_BIN_EXE_frame_probe is a host path (#518)"
+)]
 fn the_binary_prints_one_line_per_file_and_exits_zero_when_none_is_silent() {
     let dir = std::env::temp_dir().join(format!("frame_probe-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("scratch dir");
@@ -128,6 +132,10 @@ fn the_binary_prints_one_line_per_file_and_exits_zero_when_none_is_silent() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "android-runner ships only the test executable; CARGO_BIN_EXE_frame_probe is a host path (#518)"
+)]
 fn the_binary_fails_on_a_missing_file_and_on_no_arguments() {
     let (code, stdout, stderr) = run(&["/nonexistent/frame_probe_input"]);
     assert_eq!((code, stdout.as_str()), (1, ""));
