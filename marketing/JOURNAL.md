@@ -20,6 +20,25 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-25: Editorial: the trust grid grew a tile its paragraph never introduced
+
+#1615 put a mutation score in `/status`'s "Is it tested?" grid, between
+the fuzz cells and coverage. The paragraph above the grid names what each
+number is, and named fuzz and coverage only, so a reader met a third
+figure, today "n/a, not yet measured", with no word on what it measures.
+The paragraph now says a monthly sweep plants small bugs and counts how
+many the tests catch, and why that differs from coverage: a line ran
+versus a test noticed it break. That distinction is the whole reason to
+show both numbers, and the reader who has seen a coverage badge has not
+necessarily met it.
+
+**Deferred: the homepage and README.** The live `trust-data.json` holds
+no score yet (`trend.mutation_score.latest` null on 2026-10-25); the first
+sweep lands on the first of the month. The 2026-10-13 entry carried the
+CRC-32 from the changelog to both Principles lists because a trust fact
+belongs where readers judge; this one follows once there is a score to
+cite, because "we measure it" with no number answers no question.
+
 ## 2026-10-24: Editorial: the fuzz totals stopped being a 90-day window on 2026-10-11
 
 `/status`'s "Is it tested?" paragraph said fuzz time and crashes are

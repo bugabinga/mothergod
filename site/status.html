@@ -222,10 +222,13 @@
           Every night, fuzzers spend half an hour throwing random and corrupted
           input at the codec, hunting for a crash or a round trip that comes
           back different. Every week, a coverage run measures how much of the
-          code the tests reach. The numbers below are what those runs recorded
+          code the tests reach. Every month, a mutation sweep plants small bugs
+          across the whole codec, one at a time, and counts how many the tests
+          catch: coverage says a line ran, the mutation score says a test
+          noticed when it broke. The numbers below are what those runs recorded
           themselves: fuzz time and crashes totalled over every night recorded,
-          the first one dated under the numbers, and the latest coverage. What
-          runs when, and why:
+          the first one dated under the numbers, the latest mutation score, and
+          the latest coverage. What runs when, and why:
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/TESTING.md"
           >the testing strategy</a>.
