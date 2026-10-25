@@ -103,6 +103,8 @@ jobs:
         run: |
           set -euo pipefail
           # REST cannot undraft; the GraphQL mutation is the only way.
+          # `$id` is a GraphQL variable, not a shell one.
+          # shellcheck disable=SC2016
           gh api graphql -f query='
             mutation($id: ID!) {
               markPullRequestReadyForReview(input: {pullRequestId: $id}) {

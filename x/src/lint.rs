@@ -97,9 +97,10 @@ pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
         let path = selection.root.join(relative);
         let source = fs::read_to_string(&path)
             .map_err(|error| format!("{}: cannot read UTF-8 text: {error}", relative.display()))?;
-        let unpinned = check_action_pins(relative, &source);
-        findings += unpinned.len();
-        for finding in &unpinned {
+        let mut workflow_findings = check_action_pins(relative, &source);
+        workflow_findings.extend(check_run_expressions(relative, &source));
+        findings += workflow_findings.len();
+        for finding in &workflow_findings {
             eprintln!("{finding}");
         }
     }
@@ -269,6 +270,62 @@ fn check_action_pins(relative: &Path, source: &str) -> Vec<String> {
     findings
 }
 
+/// Rejects a `${{ }}` expression inside a `run:` body (issue #556). GitHub
+/// substitutes the expression's value into the script before the shell
+/// parses it, so a value an outsider controls (a branch name, a PR title)
+/// arrives as a statement; through `env:` it is a string by construction.
+/// No allowlist of GitHub-controlled values: the safe path costs one `env:`
+/// line, and a rule with no exceptions needs no judgment at the keyboard
+/// (the two sites main carried moved to `env:` in the PR that added this).
+/// Line-based like `check_action_pins`: a `run:` opening a block scalar
+/// (`|` or `>`, any indicator suffix) owns every following line indented
+/// past the key, blank lines included, and an inline `run:` owns its own
+/// line. A shell comment in the body counts, because the substitution is
+/// textual and a value carrying a newline leaves the comment. A `run:`
+/// inside a flow mapping is not seen.
+fn check_run_expressions(relative: &Path, source: &str) -> Vec<String> {
+    let mut findings = Vec::new();
+    // Column of the `run:` key whose block scalar body is open, if any.
+    let mut open_body: Option<usize> = None;
+    for (index, line) in source.lines().enumerate() {
+        let item = line.trim_start();
+        let column = line.len() - item.len();
+        if let Some(key_column) = open_body {
+            if item.is_empty() || column > key_column {
+                if line.contains("${{") {
+                    findings.push(run_expression_finding(relative, index));
+                }
+                continue;
+            }
+            open_body = None;
+        }
+        let key = item.strip_prefix("- ").map_or(item, str::trim_start);
+        let Some(value) = key.strip_prefix("run:") else {
+            continue;
+        };
+        if !(value.is_empty() || value.starts_with(char::is_whitespace)) {
+            continue;
+        }
+        let value = value.trim();
+        if value.starts_with(['|', '>']) {
+            open_body = Some(line.len() - key.len());
+        } else if value.contains("${{") {
+            findings.push(run_expression_finding(relative, index));
+        }
+    }
+    findings
+}
+
+fn run_expression_finding(relative: &Path, index: usize) -> String {
+    format!(
+        "{}:{}: `${{{{ }}}}` inside a `run:` body: GitHub substitutes the value before the \
+         shell parses the script, so one an outsider controls is a statement; name it \
+         under the step's `env:` and read `\"$NAME\"`",
+        relative.display(),
+        index + 1,
+    )
+}
+
 fn run_clippy(root: &Path, files: &[PathBuf]) -> Result<bool, String> {
     let mut core = false;
     let mut bench = false;
@@ -426,6 +483,46 @@ mod tests {
                 .iter()
                 .all(|finding| finding.contains("git/ref/tags"))
         );
+    }
+
+    #[test]
+    fn run_expressions_accept_env_and_blocks_that_are_not_run() {
+        let source = "steps:\n\
+            \x20 - name: Detect\n\
+            \x20   env:\n\
+            \x20     PR_NUMBER: ${{ github.event.pull_request.number }}\n\
+            \x20   run: |\n\
+            \x20     gh api \"repos/$REPOSITORY/pulls/$PR_NUMBER/files\"\n\
+            \n\
+            \x20     echo done >> \"$GITHUB_OUTPUT\"\n\
+            \x20 - uses: ./.github/actions/rust-ci\n\
+            \x20   with:\n\
+            \x20     prompt: |\n\
+            \x20       The run is ${{ github.run_id }}.\n\
+            \x20 - run: echo \"$RUNNER_TEMP\"\n";
+        let findings = check_run_expressions(Path::new("a.yml"), source);
+        assert_eq!(findings, [] as [String; 0]);
+    }
+
+    #[test]
+    fn run_expressions_reject_inline_and_block_bodies_until_the_dedent() {
+        let source = "steps:\n\
+            \x20 - run: echo ${{ github.ref }}\n\
+            \x20 - run: |\n\
+            \x20     one\n\
+            \n\
+            \x20     two ${{ github.event.pull_request.title }}\n\
+            \x20   env:\n\
+            \x20     AFTER: ${{ github.sha }}\n\
+            \x20 - shell: bash\n\
+            \x20   run: >-\n\
+            \x20     # ${{ github.head_ref }}\n";
+        let findings = check_run_expressions(Path::new("w.yml"), source);
+        assert_eq!(findings.len(), 3);
+        assert!(findings[0].starts_with("w.yml:2: `${{ }}` inside a `run:` body"));
+        assert!(findings[1].starts_with("w.yml:6:"));
+        assert!(findings[2].starts_with("w.yml:11:"));
+        assert!(findings.iter().all(|finding| finding.contains("`env:`")));
     }
 
     #[test]
