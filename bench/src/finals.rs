@@ -163,7 +163,7 @@ pub fn format_report(
          (`research/corpus/POLICY.md`'s held-out finals, fetched and \
          pin-verified by `bench::corpus`, never committed). Reference \
          compressors, versions as actually run: `{}` (gzip -9), `{}` \
-         (zstd -19), `{}` (xz -9e) — `research/corpus/POLICY.md` pins the \
+         (zstd -19), `{}` (xz -9e); `research/corpus/POLICY.md` pins the \
          flags, not the installed binary, so this line is the version \
          record CLAUDE.md rule 4 asks for. `regret` is mothergod's \
          bits/byte minus the stronger (lower) of zstd/xz on the same \

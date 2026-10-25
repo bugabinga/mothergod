@@ -57,7 +57,7 @@ fn main() -> ExitCode {
     };
 
     let subtitle = format!(
-        "as of {generated_at} \u{2014} own generator corpus (bench/baseline.json, research/JOURNAL.md S2-A35), not Silesia/Canterbury"
+        "as of {generated_at}: own generator corpus (bench/baseline.json, research/JOURNAL.md S2-A35), not Silesia/Canterbury"
     );
     let svg = render_svg(
         "mothergod bits/byte on the fixed baseline cases",
@@ -83,7 +83,7 @@ fn main() -> ExitCode {
          # Baseline snapshot\n\n\
          As of {generated_at}. Source: `bench/baseline.json`, measured by \
          `mothergod::compress` on {} fixed-seed cases, each {CASE_LEN} bytes \
-         except `{REACH_CASE_NAME}`, {REACH_CASE_LEN} bytes (`research/JOURNAL.md` S2-A35) — mothergod's own generator corpus, not the \
+         except `{REACH_CASE_NAME}`, {REACH_CASE_LEN} bytes (`research/JOURNAL.md` S2-A35): mothergod's own generator corpus, not the \
          pinned Silesia/Canterbury held-out finals. No gzip/zstd/xz comparison here: \
          this table is mothergod against itself, run over run; see \
          `docs/benchmarks/canterbury.md` for real numbers against the pinned \

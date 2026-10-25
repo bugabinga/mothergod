@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deny a Bash command that posts or commits text carrying an em dash (PreToolUse hook).
+"""Deny a tool call that posts, commits or writes prose carrying an em dash (PreToolUse hook).
 
 CLAUDE.md's Voice rules: "No em dash, ever. Comma, colon, semicolon,
 period. The em dash is the LLM default; this shop's prose is not." Prose
@@ -41,15 +41,27 @@ for one is a defect the retrospect will show before this guard widens. No
 segment splitting, deliberately: a heredoc body spans lines and may carry
 `;` or `|`, and the command word that posts it sits before the `<<`. The
 residual false deny, a search for the character piped into a post, is a
-post of em dashes and correctly denied. Repo prose written through Edit
-or Write is not this guard's either: 655 lines of it carry the dash today,
-nineteen ADRs among them, and a lint there starts with a cleanup nobody
-has asked for.
+post of em dashes and correctly denied.
+
+Prose written through Edit or Write is the other exit, and it leaked:
+research/JOURNAL.md carried 524 em-dash lines when #774 was filed and 571
+three weeks later, every one added by a session and passed by two review
+rounds, because the character never crossed a command. So an Edit whose
+new text, or a Write whose content, carries it and targets a prose file
+(prose.py's suffixes, the escape `\\u2014` counted where TOML and JSON
+decode it) is denied the same way. The new text as a whole, not the net
+count: an existing em dash inside an edit's span is the editor's to fix
+or to leave outside the span, which is how the backlog in the tree, about
+800 lines, shrinks without the rewrite nobody asked for. Code files stay
+out, because they carry the character as data (this guard's own tests).
+What reaches main without this hook, a human's push first among them, is
+read by ci.yml's `em-dash` job (`em-dash-diff`) on the added lines of the
+same files.
 
 Contract: reads the PreToolUse JSON on stdin. Outside GitHub Actions or
-for any tool but Bash everything is allowed, as are malformed JSON and a
-null tool_input (the #324 shape). Exit 2 denies; stderr is shown to the
-model.
+for any tool but Bash, Edit and Write everything is allowed, as are
+malformed JSON and a null tool_input (the #324 shape). Exit 2 denies;
+stderr is shown to the model.
 
 Liveness: every deny appends a fixed-vocabulary line to
 GITHUB_STEP_SUMMARY and the audit's record (`walls.py`), so the run page
@@ -62,6 +74,7 @@ import os
 import re
 import sys
 
+import prose
 import walls
 
 EM_DASH = "—"
@@ -81,6 +94,12 @@ MESSAGE = (
     "This command posts or commits text carrying an em dash (U+2014). "
     "CLAUDE.md Voice: no em dash, ever; comma, colon, semicolon or period. "
     "Rewrite the sentence with the punctuation you meant, then rerun."
+)
+MESSAGE_PROSE = (
+    "This edit writes text carrying an em dash (U+2014) into a prose file. "
+    "CLAUDE.md Voice: no em dash, ever; comma, colon, semicolon or period. "
+    "Rewrite with the punctuation you meant; one already in the file is yours "
+    "to fix or to leave outside the edit."
 )
 
 
@@ -107,6 +126,16 @@ def body_files(command: str):
             continue
 
 
+def written(tool_name: str, tool_input: dict):
+    """The text an Edit or Write puts into a prose file; None when the
+    path is not prose (prose.py) or the text is not a string."""
+    path = tool_input.get("file_path")
+    if not isinstance(path, str) or not prose.is_prose(path):
+        return None
+    text = tool_input.get("new_string" if tool_name == "Edit" else "content")
+    return text if isinstance(text, str) else None
+
+
 def main() -> int:
     """Allow (0) or deny (2) the tool call described on stdin."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -115,16 +144,24 @@ def main() -> int:
         call = json.load(sys.stdin)
     except json.JSONDecodeError:
         return 0
-    if call.get("tool_name") != "Bash":
-        return 0
+    tool_name = call.get("tool_name")
     tool_input = call.get("tool_input")
     if not isinstance(tool_input, dict):
         return 0
-    command = tool_input.get("command")
-    if not isinstance(command, str) or not denied(command):
+    if tool_name == "Bash":
+        command = tool_input.get("command")
+        if not isinstance(command, str) or not denied(command):
+            return 0
+        message = MESSAGE
+    elif tool_name in ("Edit", "Write"):
+        text = written(tool_name, tool_input)
+        if text is None or not prose.carries(text):
+            return 0
+        message = MESSAGE_PROSE
+    else:
         return 0
-    walls.denied("deny-em-dash", "Bash", "denied")
-    print(MESSAGE, file=sys.stderr)
+    walls.denied("deny-em-dash", tool_name, "denied")
+    print(message, file=sys.stderr)
     return 2
 
 
