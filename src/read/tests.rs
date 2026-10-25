@@ -203,6 +203,36 @@ fn a_source_error_comes_back_as_it_was() {
     );
 }
 
+#[test]
+fn a_source_error_is_returned_not_retried_even_if_the_source_would_recover() {
+    /// Fails its first `read` with `BrokenPipe`, then serves the stream, so
+    /// a decoder that retried any error would decode it whole.
+    struct FailsOnce<'a> {
+        rest: &'a [u8],
+        failed: bool,
+    }
+    impl Read for FailsOnce<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if !std::mem::replace(&mut self.failed, true) {
+                return Err(io::Error::from(ErrorKind::BrokenPipe));
+            }
+            let n = buf.len().min(self.rest.len());
+            buf[..n].copy_from_slice(&self.rest[..n]);
+            self.rest = &self.rest[n..];
+            Ok(n)
+        }
+    }
+    let frame = compress(b"abc");
+    let source = FailsOnce {
+        rest: &frame,
+        failed: false,
+    };
+    assert_eq!(
+        drain(Decoder::new(source)),
+        (Vec::new(), Some(ErrorKind::BrokenPipe))
+    );
+}
+
 /// The `Read` contract lets a call with an empty buffer return `Ok(0)`,
 /// which a decoder must not mistake for the end of the stream, so it asks
 /// only with room to fill: this source panics on a call without it.
