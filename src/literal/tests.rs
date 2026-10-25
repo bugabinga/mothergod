@@ -209,8 +209,7 @@ fn column_expert_state_new_starts_at_the_laplace_floor() {
 
 /// Round-trips bytes through [`Literal::encode_column`]/`decode_column`
 /// under a fixed `column_bank` per byte (`columns` cycles through
-/// `banks`), the real-wiring counterpart of `roundtrip_bytes_sse`
-/// above.
+/// `banks`), the column counterpart of `roundtrip_bytes_logit_sse`.
 fn roundtrip_bytes_column(bytes: &[u8], banks: usize) {
     let mut model = Literal::new();
     let mut column_state = ColumnExpertState::new(crate::test_support::nz(banks));

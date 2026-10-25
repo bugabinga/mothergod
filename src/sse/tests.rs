@@ -267,7 +267,7 @@ fn logit_sse_update_advances_the_lower_and_upper_bin_separately() {
         reason = "lower_index + 1 <= BINS - 1 (32): exact in f64"
     )]
     let upper_s = -bound + (lower_index + 1) as f64 / (BINS - 1) as f64 * (2.0 * bound);
-    // Oracle: `fill_identity_logit`'s own starting values for these
+    // Oracle: `Logit::identity`'s own starting values for these
     // two bins, then update()'s documented per-bin recurrence
     // applied to each in isolation. If `update` really writes two
     // distinct slots, this must match `refine` reading the real
