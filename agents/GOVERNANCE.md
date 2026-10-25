@@ -516,6 +516,24 @@ Withhold a tool only where withholding states a real role boundary — the
 reviewer and the curator get no `Edit`/`Write` because they judge and do
 not modify, and that denial is the design working.
 
+`--tools` is the other half, and it hides where `--allowedTools` only
+pre-approves (#725): a built-in the seat never calls is schema on every
+turn, and the agent, cron, monitor and workflow tools are traps besides,
+because hard rule 12 makes every one of them unwaitable in a headless run.
+So each seat's `--tools` is the set its sessions call, measured, never
+guessed: the `tools` table grouped by tool for the seat is the census, and
+the retrospect's "offered N" per session is the liveness. A seat offered
+the harness's whole set shows it there, which is how the herald was found
+(#1307) and, on 2026-10-25, the deslopper and the maintainer at 29. The
+comment beside the flag names the window the set was measured over; this
+re-measures it for a seat:
+
+```
+sessions sql "select t.tool, count(distinct s.run_id) runs, sum(t.uses) uses
+  from tools t join sessions s on s.run_id = t.run_id and s.attempt = t.attempt
+  where s.role = '<seat>' group by 1 order by 2 desc"
+```
+
 One wall no allowlist opens: the harness denies every write under its
 protected paths (`.git`, `.cargo`, `.claude`, `.vscode` and the rest of the
 list in Claude Code's permission-modes reference) in every restricted seat,
