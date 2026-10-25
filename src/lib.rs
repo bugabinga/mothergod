@@ -76,9 +76,9 @@ pub enum Method {
     /// compression.
     Stored = 0,
     /// Optimal-parse LZ tokens, entropy-coded by adaptive flag/length/
-    /// offset/rep-slot models and a six-expert context-mixing literal
-    /// model, over an adaptive range coder, behind whichever filter
-    /// (delta, BCJ, transpose, or none) trial-selection found smallest.
+    /// offset/rep-slot models and a context-mixing literal model, over an
+    /// adaptive range coder, behind whichever filter
+    /// ([`filters::select::Candidate`]) trial-selection found smallest.
     /// See [`codec`] for the payload layout.
     Lz = 1,
 }
