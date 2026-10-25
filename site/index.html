@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>mothergod — general-purpose lossless compression</title>
+    <title>mothergod: general-purpose lossless compression</title>
     <meta
       name="description"
       content="A general-purpose lossless compressor in Rust, built for compression ratio rather than speed. Beats zstd -19 and xz -9e on Canterbury, trails both on Silesia. Pre-alpha, built in public by an autonomous AI development team."
@@ -14,7 +14,7 @@
     <meta property="og:url" content="https://mothergod.dev/">
     <meta
       property="og:title"
-      content="mothergod — general-purpose lossless compression"
+      content="mothergod: general-purpose lossless compression"
     >
     <meta
       property="og:description"
@@ -157,7 +157,8 @@
 
     .principles { list-style: none; display: flex; flex-direction: column; gap: .6rem; padding: 0; }
     .principles li { color: var(--muted); padding-left: 1.4rem; position: relative; }
-    .principles li::before { content: "—"; position: absolute; left: 0; color: var(--gold); }
+    /* The marker is a glyph, not prose, so it is spelled as an escape. */
+    .principles li::before { content: "\2014"; position: absolute; left: 0; color: var(--gold); }
 
     .links { display: flex; flex-wrap: wrap; gap: .7rem; }
     .links a {
@@ -186,7 +187,7 @@
         <img
           class="mark"
           src="/logo.svg"
-          alt="mothergod — chevrons compressing the golden byte"
+          alt="mothergod: chevrons compressing the golden byte"
         >
         <h1>mother<span style="color: var(--gold)">god</span></h1>
         <p class="tagline">

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Decisions — mothergod</title>
+    <title>Decisions · mothergod</title>
     <meta
       name="description"
       content="Every architecturally significant decision mothergod has made, current and superseded, rendered from the project's own ADR series and searchable in the browser."
@@ -12,7 +12,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="mothergod">
     <meta property="og:url" content="https://mothergod.dev/decisions">
-    <meta property="og:title" content="Decisions — mothergod">
+    <meta property="og:title" content="Decisions · mothergod">
     <meta
       property="og:description"
       content="Every architecturally significant decision mothergod has made, current and superseded, rendered from the project's own ADR series and searchable in the browser."
@@ -343,7 +343,7 @@
                 run in the order they were made; the badge shows whether it
                 still governs today or was superseded by a later one.
               </p>`;
-          document.title = 'Decisions — mothergod';
+          document.title = 'Decisions · mothergod';
           return;
         }
         const idx = adrs.indexOf(adr);
@@ -362,7 +362,7 @@
             ${next ? `<a href="#${next.number}" class="next">ADR-${next.number}: ${escapeHtml(next.title)} →</a>` : ''}
           </nav>
         `;
-        document.title = `ADR-${adr.number}: ${adr.title} — Decisions — mothergod`;
+        document.title = `ADR-${adr.number}: ${adr.title} · Decisions · mothergod`;
         contentEl.focus();
         const activeLink = indexEl.querySelector(`a[data-number="${number}"]`);
         activeLink?.scrollIntoView({ block: 'nearest' });

@@ -20,6 +20,23 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-25: Editorial: page titles separate with the dot the site already used
+
+#1653. Twelve of the site's em dashes sat in titles, `og:title`s and
+the logo's alt text, the strings a reader meets in a tab, a search
+result and a link preview. A title that leads with the project and
+names what it is takes a colon ("mothergod: page not found"); a title
+that names a section takes ` · `, the separator `/decisions` already
+prints between status, date and relations. The thirteenth is the gold
+list marker on the homepage's Principles: a glyph, not a sentence, so
+it stays and is spelled `"\2014"`, the CSS escape, which says "data"
+in source.
+
+**Not done here: `.html` in the em-dash gate's suffix set.** The set
+lives in `.github/scripts/prose.py`, the factory's, and
+`assets/mark.html` still carries five prose em dashes outside the
+site; both are named on the issue for the seat that owns them.
+
 ## 2026-10-25: Editorial: the trust grid grew a tile its paragraph never introduced
 
 #1615 put a mutation score in `/status`'s "Is it tested?" grid, between
