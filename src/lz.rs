@@ -1157,28 +1157,21 @@ impl DpState {
 /// reaches, corrupting round-trip whenever a fresh match's distance
 /// coincides with a cached one (hard rule 1).
 ///
-/// `window` bounds [`BinaryTreeMatchFinder`]'s reach, the [`Reach::window`]
-/// of the frame being encoded (`research/JOURNAL.md` S2-A61). Must keep
-/// `bucket(window as u32) < OFFSET_BUCKETS`, i.e. `window < 2^21`:
-/// `prices.offset` has exactly `OFFSET_BUCKETS` entries, and a distance
-/// whose bucket falls outside that range panics on the index below rather
-/// than silently mispricing. [`WIDE_WINDOW`] is the last window in range,
-/// and a window past it is wired behind its own `FORMAT_VERSION` bump.
+/// `reach` bounds [`BinaryTreeMatchFinder`]'s reach, the frame being encoded's
+/// (`research/JOURNAL.md` S2-A61). Both [`Reach`] windows keep
+/// `bucket(window as u32) < OFFSET_BUCKETS`, so every distance the finder
+/// returns indexes `prices.offset`.
 ///
 /// `ring_cap` is [`DpState`]'s ring cap, a parameter so a test can compare
 /// the wrapped ring against one that never wraps; [`RING_LEN`] otherwise.
-fn dp_round(data: &[u8], prices: &PriceTable, window: usize, ring_cap: usize) -> Vec<Token> {
+fn dp_round(data: &[u8], prices: &PriceTable, reach: Reach, ring_cap: usize) -> Vec<Token> {
     debug_assert!(
         ring_cap.is_power_of_two() && ring_cap > MAX_MATCH_LEN,
         "a ring of MAX_MATCH_LEN or fewer lets a move's target land on its own start's slot"
     );
-    debug_assert!(
-        window < (1usize << OFFSET_BUCKETS),
-        "window's bucket must stay within OFFSET_BUCKETS or offset pricing indexes out of range"
-    );
     let n = data.len();
     let mut state = DpState::new(n, ring_cap);
-    let mut finder = BinaryTreeMatchFinder::new(data, window);
+    let mut finder = BinaryTreeMatchFinder::new(data, reach.window());
     // Per-slot carry for `relax_rep_candidates`' match_len scan (issue
     // #179): unlike parse_greedy, which jumps ahead by a chosen token's
     // length, this loop visits every position, so a long run's rep-length
@@ -1315,24 +1308,20 @@ fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
 /// price-seeding first pass).
 #[must_use]
 pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
-    parse_optimal_with_window(data, WINDOW)
+    parse_optimal_with_window(data, Reach::Standard)
 }
 
 /// [`parse_optimal`], with the `dp_round` rounds' match reach bound by
-/// `window`, a [`Reach::window`], instead of [`WINDOW`]. The
-/// [`parse_greedy`] seed pass stays bound by [`WINDOW`]: it only informs
-/// the first round's price table, so a seed that sees less than `window`
-/// costs a worse initial guess, not correctness. See `dp_round`'s docs for
-/// the bucket ceiling `window` must stay under.
+/// `reach` instead of [`Reach::Standard`]. The [`parse_greedy`] seed pass
+/// stays bound by [`WINDOW`]: it only informs the first round's price
+/// table, so a seed that sees less than `reach` costs a worse initial
+/// guess, not correctness.
 ///
 /// # Panics
 ///
-/// Same as [`parse_optimal`]. Also panics (via `dp_round`'s
-/// `debug_assert!` in debug, an out-of-range index in release) if
-/// `window`'s bucket does not stay under `OFFSET_BUCKETS`, i.e.
-/// `window >= 2^21`.
+/// Same as [`parse_optimal`].
 #[must_use]
-pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
+pub fn parse_optimal_with_window(data: &[u8], reach: Reach) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
@@ -1344,7 +1333,7 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
         // capacity for a 16 MiB block: kept, it is live beside `parent` and
         // the match finder, the peak (`research/JOURNAL.md` S2-A124).
         drop(round);
-        round = dp_round(data, &prices, window, RING_LEN);
+        round = dp_round(data, &prices, reach, RING_LEN);
     }
     round
 }

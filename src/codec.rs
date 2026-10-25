@@ -511,11 +511,7 @@ impl TokenSink for CostSink {
 /// Panics under the same condition as [`encode_tokens_with`], which this
 /// delegates to.
 fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>, reach: Reach) -> Vec<u8> {
-    encode_tokens_with(
-        data,
-        columns,
-        &lz::parse_optimal_with_window(data, reach.window()),
-    )
+    encode_tokens_with(data, columns, &lz::parse_optimal_with_window(data, reach))
 }
 
 /// Shared body of [`encode_tokens`] and the codec tests: encodes already-parsed

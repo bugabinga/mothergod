@@ -20,7 +20,7 @@
 //! 280s under a debug build, because `encode` trials every shortlisted
 //! filter candidate through the full optimal-parse and entropy-coding
 //! pipeline per call — disproportionate cost for one corpus seed.
-//! `lz.rs`'s `optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss`
+//! `lz.rs`'s `optimal_wide_reaches_a_repeat_past_standard_window`
 //! and its greedy counterpart already cover window-boundary distance
 //! behavior directly, without materializing a multi-megabyte buffer.
 

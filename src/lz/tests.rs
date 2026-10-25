@@ -236,50 +236,6 @@ fn optimal_roundtrip_short_close_repeats() {
 }
 
 #[test]
-fn optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss() {
-    // research/JOURNAL.md S1-P4: parse_optimal_with_window must thread
-    // its window parameter through all three dp_round rounds, not just
-    // the first, and produce a lossless parse either way. Template
-    // (low-range bytes) and filler (high-range pseudo-random bytes)
-    // stay in disjoint byte ranges so no accidental cross-half match
-    // confounds the planted repeat's distance.
-    let template: Vec<u8> = (0u8..80).collect();
-    let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
-        .take(420)
-        .map(|s| 128 + u8::try_from(s % 128).unwrap())
-        .collect();
-    let mut data = template.clone();
-    data.extend_from_slice(&filler);
-    data.extend_from_slice(&template);
-    let distance = filler.len() + template.len();
-
-    let small_window = 300;
-    let large_window = 700;
-    assert!(small_window < distance && distance <= large_window);
-
-    let small = parse_optimal_with_window(&data, small_window);
-    assert_eq!(replay(&small), data);
-    assert!(
-        small.iter().all(|t| !matches!(
-            t,
-            Token::Match { distance: d, .. } if d.get() as usize > small_window
-        )),
-        "a window of {small_window} must never produce a fresh match past it"
-    );
-
-    let large = parse_optimal_with_window(&data, large_window);
-    assert_eq!(replay(&large), data);
-    assert!(
-        large.iter().any(|t| matches!(
-            t,
-            Token::Match { distance: d, .. } if d.get() as usize == distance
-        )),
-        "a window of {large_window} must find the planted repeat at distance {distance}, \
-         unreachable through {small_window}"
-    );
-}
-
-#[test]
 fn optimal_roundtrip_random_like_binary_never_worse_than_stored() {
     // A pseudo-random byte stream (no real structure): the DP must
     // still round-trip even when literals dominate.
@@ -774,11 +730,13 @@ fn price_counts_observe_matches_tally_for_the_same_sequence() {
 }
 
 #[test]
-fn optimal_with_window_roundtrips_a_repeat_past_the_wired_window() {
-    // A window past WINDOW carries a match distance beyond it through all
-    // three dp_round rounds and must stay lossless (hard rule 1). Disjoint
-    // template and filler byte ranges, as above, keep the planted repeat
-    // the only structure in `data`.
+fn optimal_wide_reaches_a_repeat_past_standard_window() {
+    // research/JOURNAL.md S1-P4: parse_optimal_with_window must thread
+    // its reach through all three dp_round rounds, not just the first, and
+    // stay lossless (hard rule 1) either way. Template (low-range bytes)
+    // and filler (high-range pseudo-random bytes) stay in disjoint byte
+    // ranges so no accidental cross-half match confounds the planted
+    // repeat's distance.
     let template: Vec<u8> = (0u8..80).collect();
     let filler: Vec<u8> = crate::test_support::Xorshift32::new(0x5EED)
         .take(WINDOW + 4096)
@@ -788,15 +746,27 @@ fn optimal_with_window_roundtrips_a_repeat_past_the_wired_window() {
     data.extend_from_slice(&filler);
     data.extend_from_slice(&template);
     let distance = filler.len() + template.len();
+    assert!(WINDOW < distance && distance <= WIDE_WINDOW);
 
-    let tokens = parse_optimal_with_window(&data, distance);
-    assert_eq!(replay(&tokens), data, "roundtrip mismatch");
+    let standard = parse_optimal_with_window(&data, Reach::Standard);
+    assert_eq!(replay(&standard), data, "standard roundtrip mismatch");
     assert!(
-        tokens.iter().any(|t| matches!(
+        standard.iter().all(|t| !matches!(
+            t,
+            Token::Match { distance: d, .. } if d.get() as usize > WINDOW
+        )),
+        "Reach::Standard must never produce a fresh match past WINDOW"
+    );
+
+    let wide = parse_optimal_with_window(&data, Reach::Wide);
+    assert_eq!(replay(&wide), data, "wide roundtrip mismatch");
+    assert!(
+        wide.iter().any(|t| matches!(
             t,
             Token::Match { distance: d, .. } if d.get() as usize == distance
         )),
-        "a window of {distance} must find the planted repeat past WINDOW"
+        "Reach::Wide must find the planted repeat at distance {distance}, \
+         unreachable through WINDOW"
     );
 }
 
@@ -890,8 +860,13 @@ fn dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks() {
     }
     let seed = parse_greedy(&data);
     let prices = PriceCounts::tally(&seed, &data).prices(seed.len());
-    let wrapped = dp_round(&data, &prices, WINDOW, RING_LEN);
+    let wrapped = dp_round(&data, &prices, Reach::Standard, RING_LEN);
     assert_eq!(replay(&wrapped), data, "roundtrip mismatch");
-    let unwrapped = dp_round(&data, &prices, WINDOW, (data.len() + 1).next_power_of_two());
+    let unwrapped = dp_round(
+        &data,
+        &prices,
+        Reach::Standard,
+        (data.len() + 1).next_power_of_two(),
+    );
     assert_eq!(wrapped, unwrapped);
 }
