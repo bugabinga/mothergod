@@ -404,7 +404,7 @@ const LOGISTIC_INITIAL_WEIGHT: f64 = 1.0 / 6.0;
 /// One gradient step of [`SurpriseLogisticMix`]'s weight vector for a single
 /// bit-tree node: the node's error, target bit minus the pre-refine mix
 /// `p`, nudges each expert's weight by `rate` scaled by that expert's own
-/// stretched input. Split out of [`Literal::logistic_cost_bits`] so this
+/// stretched input. Split out of [`Literal::code_bit_walk`] so this
 /// arithmetic is checkable against the walk's chained state.
 fn logistic_gradient_step(
     weights: &mut [f64; EXPERTS],
@@ -422,10 +422,9 @@ fn logistic_gradient_step(
 /// One bit-tree node's six-expert logit-domain mix: `prefix`'s per-expert
 /// prefix sums at `(lo, mid, hi)` give each expert's upper-half
 /// probability, [`stretch`]ed and weighted-summed against `weights`.
-/// Shared by every [`Literal::code_bit_walk`] instantiation, the one step
-/// they all take before diverging into their own rate schedules. Split out
-/// so it is checkable against directly-chosen prefix sums, independent of
-/// the walk's chained state.
+/// [`Literal::code_bit_walk`]'s first step at each node, before its rate
+/// schedule. Split out so it is checkable against directly-chosen prefix
+/// sums, independent of the walk's chained state.
 fn logistic_mix_node(
     prefix: &[[u64; ALPHABET + 1]; EXPERTS],
     weights: &[f64; EXPERTS],
