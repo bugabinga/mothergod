@@ -137,6 +137,10 @@ test("an Edit or Write that puts an em dash into a prose file is denied", () => 
       ],
       [write("research/progress.jsonl", "{\"note\":\"x \\u2014 y\"}"), "the escape, which JSON lines decode"],
       [write("bench/corpus.toml", "description = \"a — b\""), "a Write to TOML"],
+      [
+        write("site/index.html", "<title>mothergod — compression</title>"),
+        "a Write to HTML: the site is posted text (#1653)",
+      ],
     ]
   ) {
     const r = run(input);
