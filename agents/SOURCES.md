@@ -152,9 +152,9 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   to the herald, measured on the `tools` table (eight of 29 built-ins
   called in 107 runs); `--max-budget-usd` rejected, it caps a
   client-side API estimate and this fleet's auth is subscription-only
-  (ADR-0009); `--effort ultracode` rejected, xhigh is the director's
-  ceiling (ADR-0021) and ultracode is a multi-agent mode nothing here
-  opts into; `--json-schema` noted, no seat emits output a script
+  (ADR-0009); `--effort ultracode` rejected, the director's effort is
+  `xhigh` in `agents/models.json` and ultracode is a multi-agent mode
+  nothing here opts into; `--json-schema` noted, no seat emits output a script
   parses as JSON yet (the verdict stamp is a comment the scripts grep).
   hooks re-read: `onFailure: "block"` stands at v2.1.295+ (#1310); the
   `if` field and exec-form `args` rejected, the four deny hooks already
@@ -168,11 +168,13 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   stand. skills: `description` plus `when_to_use` cap is 1,536
   characters, the largest here is test-craft at 648 (measured on
   2026-10-25); `/doctor prompt-audit` (v2.1.221+) noted as an
-  instrument for #486's audits, untried, documented interactive only.
+  instrument, untried, documented interactive only; no open issue
+  consumes it (#486, the context-engineering issue, is closed).
   Ladders (`agents/models.json`): reviewed, unchanged. #164's
   2026-10-18 snapshot (its body is overwritten weekly) has the same top
-  rungs, #110 lists no live entry (the fable row expired 2026-10-15), and no seat's retrospect read its
-  tier or effort wrong (`sessions roles --since 7d` on 2026-10-25: 437
+  rungs, #110 lists no live entry (the fable row
+  expired 2026-10-15), and no seat's retrospect read its tier or effort
+  wrong (`sessions roles --since 7d` on 2026-10-25: 437
   runs, 0 errors, reviewer denials 25 from 53). No Cloudflare work.
 - 2026-10-18: deep survey. Docs-intel round 2026-10-17 (#578): seven
   Code Review pages, eleven translation indexes, one auto-mode billing
