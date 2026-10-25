@@ -479,13 +479,22 @@ jobs:
           # An unavailable model id fails the action outright (there is no
           # fallback for invalid ids, only for overload), so any change
           # here is verified by a manual run before it is trusted.
+          # `--tools` hides, `--allowedTools` only pre-approves (#725): a
+          # built-in the seat never calls is context on every turn, so the
+          # offered set is what its sessions call (#1307 for the herald;
+          # `.github/scripts/sessions` on the `tools` table is the measure,
+          # the retrospect's "offered N" the liveness). Of 29 offered, the
+          # director called these eight across 107 runs to 2026-10-25, and
+          # none of the agent, cron, monitor or workflow tools: hard rule
+          # 12 makes every one of those unwaitable here.
           claude_args: |
             --append-system-prompt-file agents/personas/bdfl.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 500
             --permission-mode bypassPermissions
-            --allowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebSearch,WebFetch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
+            --tools "Bash,Edit,Write,Read,WebSearch,WebFetch,Skill,ToolSearch"
+            --allowedTools "Bash,Edit,Write,WebSearch,WebFetch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause
