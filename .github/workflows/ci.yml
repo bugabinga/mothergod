@@ -1,6 +1,6 @@
 # Quality gate for every change. This is the ground truth all other
 # automation (including agent-driven workflows) trusts: nothing merges red.
-# The required job names (fmt, clippy, test, doc, ratio, worker) are
+# The required job names (fmt, clippy, test, doc, ratio, worker, em-dash) are
 # load-bearing: the main ruleset requires exactly these check names. Rename
 # only together with the ruleset: a mismatch blocks every merge.
 name: ci
@@ -234,6 +234,31 @@ jobs:
             echo "Duplicate ADR number(s), rename one: $dupes"
             exit 1
           fi
+
+  # CLAUDE.md's Voice forbids the em dash in every posted text, and the
+  # deny-em-dash hook holds it where text leaves a session: as a Bash
+  # argument, and since #774 as an Edit or Write to a prose file. A human's
+  # push has no hook, so this is the gate: the lines a change adds to a
+  # prose file (prose.py's suffixes) are read, and one carrying U+2014 is
+  # red with its path and line. Diff-scoped because about 800 lines of the
+  # tree carry the character; a whole-file rule starts with a rewrite
+  # nobody asked for, and this holds the line from the day it lands.
+  # fetch-depth 2 brings HEAD's parents: on a pull_request HEAD is the
+  # merge of the PR into its base and HEAD^1 the base, on a push HEAD^1
+  # the previous tip, so the diff is what the change adds in either case.
+  # A required check, because the reviewer reads a non-required red as
+  # "unverified" and may still pass the PR; seconds on every PR, so no
+  # path filter.
+  em-dash:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+      - run: |
+          set -euo pipefail
+          git diff --unified=0 HEAD^1 HEAD | .github/scripts/em-dash-diff
 
   # The workflow YAML is the agent system itself, and until 2026-10-25
   # nothing read it but a reviewer (#556). actionlint checks every file

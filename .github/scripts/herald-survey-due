@@ -28,11 +28,11 @@ The case that was ambiguous at exactly six is now not-due at six and due at
 seven, by subtraction, not reading.
 
 The heading is the marker. The journal's own header defines the entry kind as
-`Survey`, written first after the date: `## 2026-10-01`, a dash, `Survey:`,
-the title. The match is tolerant of the dash (an em dash today, which CLAUDE.md
-forbids in prose and #774 may one day enforce here) and strict about the kind
-word sitting right after it, so an Editorial whose title mentions a survey
-does not count as one.
+`Survey`, written first after the date: `## 2026-10-01: Survey:` and the
+title. The match is tolerant of the separator (a colon since #1445; the em
+dash it was is one ci.yml's `em-dash` job refuses on an added line, #774)
+and strict about the kind word sitting right after it, so an Editorial whose
+title mentions a survey does not count as one.
 
 Deliberately NOT read: an open survey PR. The reviewer lands herald PRs
 within the hour; a duplicate costs one survey, in the open, on the next
