@@ -231,6 +231,9 @@ def main() -> int:
     # Stripped once, so the verdict-label guard below checks the string that
     # is sent; a padded name must not pass a guard the API might still match.
     args.label = [l.strip() for l in args.label]
+    if any(not l for l in args.label):
+        die("--label needs a name: an empty one passes the verdict guard, posts the comment, "
+            "then dies at the labels call with the two halves apart (#1637)")
 
     # `is not None`, because an empty --new is a typo, not an absent flag, and
     # falsiness would send it to the "give me an issue number" error instead.

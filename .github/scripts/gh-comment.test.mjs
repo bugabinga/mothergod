@@ -296,6 +296,17 @@ test("--label refuses the reviewer's verdict labels on a number, whatever the ca
   }
 });
 
+// An empty name clears the verdict guard, so the comment posts and the
+// labels call dies, the two halves apart (#1637): refused before either.
+test("--label refuses an empty or blank name before anything posts", () => {
+  for (const args of [["1621", "--label", ""], ["1621", "--label", "  "], ["--new", "t", "--label", ""]]) {
+    const { status, stderr, calls } = run(args);
+    assert.equal(status, 1, JSON.stringify(args));
+    assert.match(stderr, /--label needs a name/);
+    assert.equal(calls.length, 0, "nothing posts when a label is empty");
+  }
+});
+
 test("--close with --label closes first, then labels", () => {
   const { status, verbs, calls } = run(["489", "--close", "--label", "wontfix"]);
   assert.equal(status, 0);
