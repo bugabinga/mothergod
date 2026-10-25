@@ -185,7 +185,10 @@ jobs:
 
       - name: Summary
         if: always()
-        run: test -f report/summary.md && cat report/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: |
+          if [ -f report/summary.md ]; then
+            cat report/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: upload trust-ledger entry
         if: always()

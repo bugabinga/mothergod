@@ -79,12 +79,9 @@ new script's tests are picked up with no wiring.
 
 - `set -euo pipefail`.
 - Never interpolate `${{ }}` into a shell body. Pass it through `env:` so a
-  branch named `"; rm -rf /` is a string and not a statement. A few lines in
-  this tree still do it, every one interpolating a value GitHub controls
-  rather than one a contributor does, which is why they are debt and not an
-  incident. `grep -n '\${{' <file>` lists a file's expressions; the ones
-  inside a `run:` block are the debt, and you fix the one in the file you are
-  touching.
+  branch named `"; rm -rf /` is a string and not a statement. `cargo x lint`
+  refuses one inside a `run:` body, no exceptions (#556), and its message
+  names the `env:` rewrite.
 - A `prompt:` block takes no `${{ }}` either, for an unrelated reason worth
   knowing before you reach for one. A single expression makes the **whole
   block** an expression, and an expression is capped at 21,000 characters.
@@ -229,13 +226,14 @@ A run that fails and says nothing costs more than a run that never happened.
       rule above.
 - [ ] `cargo x check` passes.
 
-One item on that list is not yet enforceable here and is named rather than
-quietly dropped: **nothing lints the workflow YAML.** `actionlint` is not in
-`cargo x check` and not in `ci.yml`, so every item above is checked by a
-reader or not at all. A checklist whose enforcement does not exist is one the
-next worker learns to skip, so it is on the record as debt, not as a rule this
-repository keeps.
+Two items are machine-checked, the rest are yours: `cargo x lint` holds the
+`uses:` pin and the `${{ }}` rule, and `actionlint` runs over every workflow
+in `ci.yml`'s `workflows` job, shellcheck over each `run:` body included,
+with the one message it ignores named beside the step. Install it from its
+[release page][actionlint] to run it before pushing; the job is not required,
+so a red there is the reviewer's to read.
 
+[actionlint]: https://github.com/rhysd/actionlint/releases
 [billing]: https://docs.github.com/en/billing/concepts/product-billing/github-actions
 [cache]: https://docs.github.com/en/actions/reference/dependency-caching-reference
 [events]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows

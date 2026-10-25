@@ -68,14 +68,19 @@ jobs:
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "quality=true" >> "$GITHUB_OUTPUT"
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "ratio=true" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            {
+              echo "quality=true"
+              echo "rust=true"
+              echo "ratio=true"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
+          files="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
           if echo "$files" | grep -qE '\.(rs|md|markdown|json|jsonl|toml|ya?ml|[cm]?js|[cm]?ts|html|svg)$|(^|/)Cargo\.lock$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/'; then
             echo "quality=true" >> "$GITHUB_OUTPUT"
           else
@@ -224,20 +229,43 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: |
-          dupes="$(ls docs/adr | grep -oE '^[0-9]{4}' | sort | uniq -d)"
+          dupes="$(basename -a docs/adr/* | grep -oE '^[0-9]{4}' | sort | uniq -d)"
           if [ -n "$dupes" ]; then
             echo "Duplicate ADR number(s), rename one: $dupes"
             exit 1
           fi
 
+  # The workflow YAML is the agent system itself, and until 2026-10-25
+  # nothing read it but a reviewer (#556). actionlint checks every file
+  # under .github/workflows/, shellcheck over each `run:` body included;
+  # a release binary pinned by checksum, because it runs on every PR and
+  # a tag is a pointer. One message is ignored by name: actionlint 1.7.12
+  # does not know the `vulnerability-alerts` permission scope, and GitHub
+  # grants it (`.github/scripts/security-alerts` reads Dependabot alerts
+  # on the job token with it and the session token without it gets 403,
+  # measured 2026-10-25). The `${{ }}`-inside-`run:` rule is `cargo x
+  # lint`'s, in the clippy job above, where it is red one turn after the
+  # edit. The second step is the one check actionlint cannot express:
   # agent-bdfl.yml carries its wake predicate twice (concurrency.group and
   # jobs.bdfl.if) because GitHub gives no way to single-source it (issue
-  # #145). Not a required check; a few seconds on every PR either way, so
-  # no path filter needed.
-  bdfl-wake-predicate:
+  # #145). Not a required check; seconds on every PR either way, so no
+  # path filter.
+  workflows:
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/actionlint"
+          mkdir -p "$dir"
+          curl -sSfL -o "$dir/actionlint.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v$VERSION/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "$SHA256  $dir/actionlint.tar.gz" | sha256sum --check --quiet
+          tar -xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
+          "$dir/actionlint" -no-color -ignore 'unknown permission scope "vulnerability-alerts"'
       - run: pip install --quiet pyyaml
       - run: python3 .github/scripts/check-bdfl-wake-predicate.py
