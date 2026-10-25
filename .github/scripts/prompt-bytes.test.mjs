@@ -31,10 +31,10 @@ if fn == "prompts":
 elif fn == "measure":
     print(json.dumps(mod.measure(raw["text"])))
 elif fn == "findings":
-    print(json.dumps(mod.findings(raw["seen"], raw["pinned"])))
+    print(json.dumps(mod.findings(raw["seen"], raw["pinned"], raw.get("ceiling", mod.CEILING))))
 else:
     buf = io.StringIO()
-    n = mod.render(raw["seen"], raw["pinned"], out=buf)
+    n = mod.render(raw["seen"], raw["pinned"], out=buf, ceiling=raw.get("ceiling", mod.CEILING))
     print(json.dumps({"n": n, "out": buf.getvalue()}))
 `;
 
@@ -109,17 +109,41 @@ test("an em dash is a finding even at the pinned size", () => {
   assert.deepEqual(lines, ["herald: 4 em dash(es). CLAUDE.md Voice: none, ever. Comma, colon, semicolon, period."]);
 });
 
+// Issue #1629: the total grew three surveys running with every move pinned
+// and reasoned, because the pins say a prompt moved and nothing said which
+// direction was free. The ceiling is the budget; a PR past it cuts or raises
+// the line with its reason.
+test("the fleet total past the ceiling is a finding naming the cut and the raise", () => {
+  const [line] = call("findings", {
+    seen: { a: seat(600), b: seat(500) },
+    pinned: { a: 600, b: 500 },
+    ceiling: 1000,
+  });
+  assert.match(line, /^fleet: 1,100 bytes, ceiling 1,000, over by 100\./);
+  assert.match(
+    line,
+    /Cut 100 bytes in this PR, or raise CEILING to 1100 in \.github\/scripts\/prompt-bytes and say why in the body\./,
+  );
+});
+
+test("a total at or under the ceiling is no finding: the room below is a budget, not a shrink", () => {
+  const pinned = { a: 600, b: 400 };
+  assert.deepEqual(call("findings", { seen: { a: seat(600), b: seat(400) }, pinned, ceiling: 1000 }), []);
+  assert.deepEqual(call("findings", { seen: { a: seat(1), b: seat(1) }, pinned: { a: 1, b: 1 }, ceiling: 1000 }), []);
+});
+
 test("render prints the table largest first, the footer, then the findings", () => {
   const { n, out } = call("render", {
     seen: { small: seat(10), big: seat(2000) },
     pinned: { small: 10, big: 1999 },
+    ceiling: 2010,
   });
   assert.equal(n, 1);
   const lines = out.split("\n");
   assert.match(lines[0], /^seat\s+bytes\s+pinned\s+lines\s+em$/);
   assert.match(lines[1], /^big\s+2,000\s+1,999\s+10\s+0$/);
   assert.match(lines[2], /^small\s+10\s+10\s+10\s+0$/);
-  assert.match(out, /\nprompt-bytes: seats 2 \| total 2,010 bytes \| pins 2 \| findings 1\n/);
+  assert.match(out, /\nprompt-bytes: seats 2 \| total 2,010 bytes \| ceiling 2,010 \| pins 2 \| findings 1\n/);
   assert.match(out, /\n    big: 2,000 bytes, pinned 1,999, grew 1\./);
 });
 
@@ -128,5 +152,5 @@ test("every seat's prompt on this branch matches its pin", () => {
   // the script's own output below says which seat and what to do.
   const run = spawnSync(`${scriptsDir}/prompt-bytes`, [], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  assert.match(run.stdout, /prompt-bytes: seats 6 \| total [\d,]+ bytes \| pins 6 \| findings 0/);
+  assert.match(run.stdout, /prompt-bytes: seats 6 \| total [\d,]+ bytes \| ceiling [\d,]+ \| pins 6 \| findings 0/);
 });
