@@ -98,6 +98,9 @@ on a thread with no diff behind it is a claim the queue ranks first, while
 a diff with no label is the case `stalled-prs` already catches. The REST
 labels endpoint, one path for an issue and a PR, so the number needs no
 verb chosen by kind.
+`agent-approved` and `changes-requested` are refused: they are the
+reviewer's typed verdict, `merge-pr` reads the label without asking who set
+it, and `post-verdict` sets it on the ambient token, not through here.
 
 Usage: gh-comment <issue-or-pr-number> [--label NAME]... [--close [--delete-branch]] < body
        gh-comment --new "<title>" [--label NAME]... [--anyway] < body
@@ -121,6 +124,9 @@ def die(*lines):
         print(f"gh-comment: {line}", file=sys.stderr)
     sys.exit(1)
 
+
+# The reviewer's typed verdict; `post-verdict` alone sets it (CLAUDE.md, labels).
+VERDICT_LABELS = {"agent-approved", "changes-requested"}
 
 # A backticked span that is one token: `mutants`, `probe`, `cargo-mutants`.
 BACKTICKED = re.compile(r"`([\w.:/-]{3,})`")
@@ -234,6 +240,11 @@ def main() -> int:
         if not args.number or not args.number.isdigit():
             die("usage: gh-comment <issue-or-pr-number> [--label NAME]... [--close [--delete-branch]] < body",
                 "       gh-comment --new \"<title>\" [--label NAME]... < body")
+        reserved = sorted({l for l in args.label if l.lower() in VERDICT_LABELS})
+        if reserved:
+            die(f"--label {', '.join(reserved)} is the reviewer's verdict, typed (CLAUDE.md, labels); "
+                "`post-verdict` is the only path that sets it, because `merge-pr` merges on "
+                "the label without asking who set it (#181)")
         if args.anyway:
             die("--anyway applies to --new only; a comment has no duplicate to override")
         if args.delete_branch and not args.close:

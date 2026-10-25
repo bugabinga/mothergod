@@ -283,6 +283,17 @@ test("--label on a number posts the comment first, then the labels through the i
   assert.equal(labels.admin, null);
 });
 
+// The refusal removed with `gh issue edit` was the only gate on the verdict:
+// `merge-pr` merges on the `agent-approved` label and never asks who set it.
+test("--label refuses the reviewer's verdict labels on a number, whatever the case", () => {
+  for (const label of ["agent-approved", "changes-requested", "Agent-Approved"]) {
+    const { status, stderr, calls } = run(["1621", "--label", "ready-to-ship", "--label", label]);
+    assert.equal(status, 1, label);
+    assert.match(stderr, /reviewer's verdict/);
+    assert.equal(calls.length, 0, "nothing posts when a label is refused");
+  }
+});
+
 test("--close with --label closes first, then labels", () => {
   const { status, verbs, calls } = run(["489", "--close", "--label", "wontfix"]);
   assert.equal(status, 0);
