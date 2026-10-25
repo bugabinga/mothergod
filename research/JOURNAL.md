@@ -4697,6 +4697,9 @@ record.
   generator config plants, proportionally smaller on one with less.
   `cargo x check`: 4 stages green, 209 lib tests (up from 207: one new
   `lz::tests::optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss`
+  (left main in #1642, folded into
+  `optimal_wide_reaches_a_repeat_past_standard_window` when the `window`
+  argument became a `Reach`)
   proving `window` gates `parse_optimal_with_window`'s reach end to end,
   round-trip included; one new
   `codec::tests::ideal_cost_bits_with_window_drops_once_a_repeat_becomes_reachable`
@@ -4779,7 +4782,8 @@ record.
   it. | 1 new unit test (216 lib tests total, up from 215):
   `greedy_with_window_reaches_a_repeat_a_smaller_window_would_miss`, the
   same planted-repeat shape as S2-A63's own
-  `optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss`,
+  `optimal_with_window_reaches_a_repeat_a_smaller_window_would_miss`
+  (left main in #1642),
   proving a small window never reports a match past it and a large one
   finds the planted repeat, round-tripping either way. `cargo x check`:
   4 stages green (lint first caught a `clippy::doc_markdown` finding on
