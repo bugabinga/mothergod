@@ -834,6 +834,40 @@ fn parse_greedy_defers_a_short_match_to_a_longer_one_a_byte_later() {
 }
 
 #[test]
+fn parse_greedy_finds_match_exactly_at_window_boundary_but_not_past_it() {
+    // The hash-chain finder's reach guard, the pair
+    // `binary_tree_finds_match_exactly_at_window_boundary_but_not_past_it`
+    // pins for the tree finder. The marker's 3-byte prefix hash is distinct
+    // from the filler's, so its chain holds the two marker positions only.
+    let marker = b"wxyz";
+    let mut at_boundary = vec![0xAAu8; WINDOW + marker.len()];
+    at_boundary[..marker.len()].copy_from_slice(marker);
+    at_boundary[WINDOW..].copy_from_slice(marker);
+    let tokens = parse_greedy(&at_boundary);
+    assert_eq!(replay(&tokens), at_boundary, "roundtrip mismatch");
+    assert!(
+        tokens.iter().any(|t| matches!(
+            *t,
+            Token::Match { len: 4, distance } if distance.get() as usize == WINDOW
+        )),
+        "distance == WINDOW is still in range"
+    );
+
+    let mut past_boundary = vec![0xAAu8; WINDOW + 1 + marker.len()];
+    past_boundary[..marker.len()].copy_from_slice(marker);
+    past_boundary[WINDOW + 1..].copy_from_slice(marker);
+    let tokens = parse_greedy(&past_boundary);
+    assert_eq!(replay(&tokens), past_boundary, "roundtrip mismatch");
+    assert!(
+        tokens.iter().all(|t| match *t {
+            Token::Match { distance, .. } => distance.get() as usize <= WINDOW,
+            Token::Literal(_) | Token::Rep { .. } => true,
+        }),
+        "distance == WINDOW + 1 must never be reported"
+    );
+}
+
+#[test]
 fn dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks() {
     // `DpState`'s `dp` and `cache` are rings; the parse must not depend on
     // their length (JOURNAL S2-A123). Over twice RING_LEN, with a run past
