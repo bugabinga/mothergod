@@ -269,6 +269,35 @@ fn check_stops_at_the_first_failing_stage_before_running_later_ones() {
     assert!(!stdout.contains("test:"));
 }
 
+/// Pins the feature flag itself: the fixture's bench member breaks only
+/// with `corpus-fetch` on, so a gate back on default features (#1645's
+/// shape) would pass it. Doc, the workspace lint and the bench-scoped lint
+/// each refuse it, one per `BENCH_CORPUS_FETCH` use in x.
+#[test]
+fn doc_and_lint_refuse_a_bench_crate_broken_only_under_corpus_fetch() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write(
+        "bench/src/lib.rs",
+        "//! The bench member.\n#[cfg(feature = \"corpus-fetch\")]\ncompile_error!(\"corpus-fetch is on\");\n",
+    );
+    repository.track();
+
+    for arguments in [
+        &["doc"][..],
+        &["lint"][..],
+        &["lint", "--", "bench/src/lib.rs"][..],
+    ] {
+        let output = repository.x(arguments);
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{arguments:?}: {stderr}");
+        assert!(
+            stderr.contains("corpus-fetch is on"),
+            "{arguments:?}: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn check_runs_passing_stages_in_order_and_names_the_failing_one() {
     let repository = Repository::new();
@@ -292,6 +321,9 @@ fn check_runs_passing_stages_in_order_and_names_the_failing_one() {
 /// `cargo x doc` turn `mothergod-bench/corpus-fetch` on and cargo refuses a
 /// feature of a package the workspace does not have.
 fn write_passing_fixture(repository: &Repository) {
+    // As in the repository: an un-ignored `target/` would put rustdoc's
+    // generated Markdown in front of `x lint` once `x doc` has run.
+    repository.write(".gitignore", "target/\n");
     repository.write(
         "Cargo.toml",
         "[workspace]\nmembers = [\"bench\"]\ndefault-members = [\".\", \"bench\"]\n\n[package]\nname = \"fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n",
