@@ -2,6 +2,9 @@
 
 Falsification record and institutional memory. Append-only in spirit: never
 delete an entry; a revived idea gets a NEW entry referencing the old one.
+Code an entry names existed when the entry was written: an entry may carry
+`left main in #PR` for code deleted since, and absence proves nothing, so a
+name is a grep, not a promise.
 Audience: agents. Terse. Mechanisms over scores.
 
 Format per entry: `id | verdict | claim | mechanism/evidence | conditions`.
@@ -2815,9 +2818,9 @@ record.
   `Base64Wrapped`'s confirmed far matches net-lose before either
   tightening the detector with a fourth condition or accepting that
   closing this lead needs gating per-kind local-match density, not just
-  a byte-content anchor; `parse_optimal_adaptive_window` stays unwired
-  from `compress`/`encode`. A window past `2^21 - 1` itself still
-  separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
+  a byte-content anchor; `parse_optimal_adaptive_window` (left main in
+  #1298) stayed unwired from `compress`/`encode`. A window past
+  `2^21 - 1` itself still separately needs `OFFSET_BUCKETS`/`bucket()` widened and a
   `FORMAT_VERSION` bump before it is measurable at all, which still
   leaves the Silesia finals named above (several 10s of MiB) out of
   reach regardless of any of this. Thirteenth slice, S2-A95: isolated
