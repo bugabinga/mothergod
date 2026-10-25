@@ -228,6 +228,9 @@ def main() -> int:
     parser.add_argument("--anyway", action="store_true",
                         help="with --new, file even when an open issue names the same identifier and claim")
     args = parser.parse_args()
+    # Stripped once, so the verdict-label guard below checks the string that
+    # is sent; a padded name must not pass a guard the API might still match.
+    args.label = [l.strip() for l in args.label]
 
     # `is not None`, because an empty --new is a typo, not an absent flag, and
     # falsiness would send it to the "give me an issue number" error instead.
