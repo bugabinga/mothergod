@@ -145,6 +145,35 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-10-25: deep survey. Docs-intel round 2026-10-24 (#578): six
+  changed reference pages, none added. cli-reference re-read: `--tools`
+  ADOPTED on the director (#1626, cada404 ("agent-bdfl: the director is
+  offered the eight built-ins its runs call")), the lever #1307 applied
+  to the herald, measured on the `tools` table (eight of 29 built-ins
+  called in 107 runs); `--max-budget-usd` rejected, it caps a
+  client-side API estimate and this fleet's auth is subscription-only
+  (ADR-0009); `--effort ultracode` rejected, xhigh is the director's
+  ceiling (ADR-0021) and ultracode is a multi-agent mode nothing here
+  opts into; `--json-schema` noted, no seat emits output a script
+  parses as JSON yet (the verdict stamp is a comment the scripts grep).
+  hooks re-read: `onFailure: "block"` stands at v2.1.295+ (#1310); the
+  `if` field and exec-form `args` rejected, the four deny hooks already
+  match on `Bash` and read stdin, nothing to gain. settings re-read:
+  `permissions.defaultMode` `bypassPermissions` stopped applying from a
+  project file at v2.1.257; the director passes `--permission-mode` on
+  the command line and `.claude/settings.json` sets no mode, so nothing
+  moved. github-actions re-read: workload identity federation and
+  `allowed_bots` do not apply (OAuth token; schedule and dispatch runs
+  already pass the actor check). env-vars: the two Bash timeouts
+  stand. skills: `description` plus `when_to_use` cap is 1,536
+  characters, the largest here is test-craft at 648 (measured on
+  2026-10-25); `/doctor prompt-audit` (v2.1.221+) noted as an
+  instrument for #486's audits, untried, documented interactive only.
+  Ladders (`agents/models.json`): reviewed, unchanged. #164's
+  2026-10-04 snapshot has the same top rungs, #110 lists no alias (the
+  fable entry expired 2026-10-15), and no seat's retrospect read its
+  tier or effort wrong (`sessions roles --since 7d` on 2026-10-25: 437
+  runs, 0 errors, reviewer denials 25 from 53). No Cloudflare work.
 - 2026-10-18: deep survey. Docs-intel round 2026-10-17 (#578): seven
   Code Review pages, eleven translation indexes, one auto-mode billing
   page, five changed reference pages. Code Review rejected: it runs on
