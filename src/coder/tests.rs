@@ -318,3 +318,64 @@ fn interval_ending_exactly_at_half_is_not_renormalized() {
 fn interval_ending_exactly_at_three_quarters_is_not_shifted() {
     roundtrip_boundary_then_tail((QUARTER, THREE_QUARTERS + 1, MASK));
 }
+
+/// `target` maps `value` in `[low, high]` onto `[0, total)`: `low` is the
+/// first slot, `high` the last, for any `total` up to the interval's range
+/// (renormalization keeps the range above `QUARTER`). Random streams land on
+/// these edges once in `range` draws, so the edges are built directly: an
+/// off-by-one in the arithmetic moves only them, and an out-of-range
+/// `target` is the value a caller's model lookup would index with.
+#[test]
+fn target_maps_the_interval_edges_onto_the_first_and_last_slot() {
+    let state = |low: u64, high: u64, value: u64| Decoder {
+        low,
+        high,
+        value,
+        data: &[],
+        bit_pos: 0,
+    };
+    for (low, high) in [
+        (0, MASK),
+        (1_000, 1_000 + 4 * BIT_SCALE),
+        (QUARTER, THREE_QUARTERS),
+    ] {
+        for total in [1, 2, 7, BIT_SCALE] {
+            assert_eq!(
+                state(low, high, low).target(total),
+                0,
+                "[{low}, {high}] / {total}"
+            );
+            assert_eq!(
+                state(low, high, high).target(total),
+                total - 1,
+                "[{low}, {high}] / {total}"
+            );
+        }
+    }
+}
+
+/// A `0.0` or `1.0` estimate, clamped from outside `[0, 1]` too, must still
+/// leave the unlikely outcome a nonzero slot: `quantize_probability` clamps
+/// to `1..=BIT_SCALE - 1`, and a threshold of `BIT_SCALE` (or `0`) gives the
+/// other bit a zero-width range the decoder cannot find.
+#[test]
+fn encode_bit_round_trips_the_unlikely_outcome_at_a_certain_estimate() {
+    let plan = [
+        (false, 1.0),
+        (true, 0.0),
+        (false, 2.0),
+        (true, -1.0),
+        (false, f64::NAN),
+        (true, f64::NAN),
+    ];
+    let mut enc = Encoder::new();
+    for &(bit, p) in &plan {
+        enc.encode_bit(bit, p);
+    }
+    let bytes = enc.finish();
+
+    let mut dec = Decoder::new(&bytes);
+    for &(bit, p) in &plan {
+        assert_eq!(dec.decode_bit(p), bit, "p = {p}");
+    }
+}
