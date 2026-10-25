@@ -258,10 +258,36 @@ test("--new refuses a number or a close, which would mean two verbs at once", ()
   assert.match(stderr, /takes no number/);
 });
 
-test("--label without --new is refused rather than silently dropped", () => {
-  const { status, stderr } = run(["489", "--label", "bug"]);
-  assert.equal(status, 1);
-  assert.match(stderr, /gh issue edit/);
+// Issue #1621's handoff: the maintainer's token died at the hour, the diff
+// posted through this script, and `gh issue edit` for ready-to-ship
+// answered 401. The label is the queue's signal, so it rides the same
+// credential as the comment, after it: a label on a thread with no diff
+// behind it is a claim the queue ranks first.
+test("--label on a number posts the comment first, then the labels through the issues endpoint", () => {
+  const { status, calls, verbs } = run(["1621", "--label", "ready-to-ship", "--label", "product"]);
+  assert.equal(status, 0);
+  assert.deepEqual(verbs, ["issue comment", "api -X"]);
+  const [comment, labels] = calls;
+  assert.deepEqual(comment.argv.slice(0, 3), ["issue", "comment", "1621"]);
+  assert.deepEqual(labels.argv, [
+    "api",
+    "-X",
+    "POST",
+    "repos/{owner}/{repo}/issues/1621/labels",
+    "-f",
+    "labels[]=ready-to-ship",
+    "-f",
+    "labels[]=product",
+  ]);
+  assert.equal(labels.token, "workflow-token");
+  assert.equal(labels.admin, null);
+});
+
+test("--close with --label closes first, then labels", () => {
+  const { status, verbs, calls } = run(["489", "--close", "--label", "wontfix"]);
+  assert.equal(status, 0);
+  assert.deepEqual(verbs, ["issue close", "api -X"]);
+  assert.deepEqual(calls[1].argv.slice(3), ["repos/{owner}/{repo}/issues/489/labels", "-f", "labels[]=wontfix"]);
 });
 
 test("no verb reaches gh without GH_WORKFLOW_TOKEN", () => {

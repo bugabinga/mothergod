@@ -255,7 +255,9 @@ platform requirement). New files follow the placement rule in `agents/README.md`
   sorted into the BDFL's work queue where the only correct action is to
   leave it alone. `ready-to-ship` marks an issue whose thread holds a
   complete, verified diff with nothing left to build, waiting on a
-  credential or a review alone: whoever leaves the diff applies it,
+  credential or a review alone: whoever leaves the diff applies it
+  with the same `gh-comment --label` that posts the diff, because `gh
+  issue edit` dies with the session token at the hour (#1621);
   `agent-queue` and the heartbeat's ladder rank it ahead of every
   urgency tier, and it leaves with the ship (#454 sat built for 18 days
   behind fresh bugs, #840; #979 sat invisible to the heartbeat).
@@ -271,9 +273,10 @@ platform requirement). New files follow the placement rule in `agents/README.md`
   crate.
 - Never type an attribution footer: the two posting scripts assemble the
   role footer and strip any you typed (#590). Comments and closes on
-  issues and PRs are `.github/scripts/gh-comment <number> [--close]`, new
-  issues `gh-comment --new "<title>" --label <realm>`, both on the one
-  write credential that does not expire mid-run (issue #489). PRs open
+  issues and PRs are `.github/scripts/gh-comment <number> [--label
+  <name>] [--close]`, new issues `gh-comment --new "<title>" --label
+  <realm>`, both on the one write credential that does not expire
+  mid-run (issue #489). PRs open
   with `.github/scripts/gh-pr <branch> "<title>"`, on the session's
   token, the only one that raises `ci` and a review. Body on stdin for
   all three. `gh issue create`, `gh issue comment`, `gh pr create`,

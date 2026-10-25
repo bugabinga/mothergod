@@ -87,7 +87,19 @@ seat reads them, then comments there or files with `--anyway`. An issue
 list this cannot read files with a warning rather than refusing, because
 the refusal would cost the run its report.
 
-Usage: gh-comment <issue-or-pr-number> [--close [--delete-branch]] < body
+`--label` on an existing number rides the same credential, for the reason
+`--new` does: the session that leaves a verified diff past the hour has no
+token left for `gh issue edit`, and `ready-to-ship` is the label the queue
+and the heartbeat's ladder read for exactly that diff (CLAUDE.md, labels).
+The 2026-10-25 maintainer posted #1621's handoff through this script and
+then got a 401 on the label, so the diff sat where only `stalled-prs`
+would find it. The labels go on after the comment, never before: a label
+on a thread with no diff behind it is a claim the queue ranks first, while
+a diff with no label is the case `stalled-prs` already catches. The REST
+labels endpoint, one path for an issue and a PR, so the number needs no
+verb chosen by kind.
+
+Usage: gh-comment <issue-or-pr-number> [--label NAME]... [--close [--delete-branch]] < body
        gh-comment --new "<title>" [--label NAME]... [--anyway] < body
 Prints the comment's or the new issue's URL on stdout.
 """
@@ -206,7 +218,7 @@ def main() -> int:
                         help="with --close on a PR, delete its branch too")
     parser.add_argument("--new", metavar="TITLE", help="open a new issue with this title")
     parser.add_argument("--label", action="append", default=[], metavar="NAME",
-                        help="label for --new, repeatable")
+                        help="label to add, repeatable: on --new at creation, on a number after the comment posts")
     parser.add_argument("--anyway", action="store_true",
                         help="with --new, file even when an open issue names the same identifier and claim")
     args = parser.parse_args()
@@ -220,10 +232,8 @@ def main() -> int:
             die("--new opens an issue; it takes no number and cannot --close one")
     else:
         if not args.number or not args.number.isdigit():
-            die("usage: gh-comment <issue-or-pr-number> [--close [--delete-branch]] < body",
+            die("usage: gh-comment <issue-or-pr-number> [--label NAME]... [--close [--delete-branch]] < body",
                 "       gh-comment --new \"<title>\" [--label NAME]... < body")
-        if args.label:
-            die("--label applies to --new only; label an existing issue with `gh issue edit`")
         if args.anyway:
             die("--anyway applies to --new only; a comment has no duplicate to override")
         if args.delete_branch and not args.close:
@@ -303,6 +313,14 @@ def main() -> int:
     if result.returncode != 0:
         die(f"gh {' '.join(call[:2])} on {target} failed: {result.stderr.strip()}")
     print(result.stdout.strip())
+    if args.label and args.new is None:
+        call = ["api", "-X", "POST", f"repos/{{owner}}/{{repo}}/issues/{args.number}/labels"]
+        for label in args.label:
+            call += ["-f", f"labels[]={label}"]
+        result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
+        if result.returncode != 0:
+            die(f"the comment is on {target}; the label(s) {', '.join(args.label)} are not: "
+                f"{result.stderr.strip()}")
     return 0
 
 
