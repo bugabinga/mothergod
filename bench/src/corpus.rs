@@ -14,7 +14,7 @@
 //! order, against the one unchanged `sha256` pin, stopping at the first
 //! source whose bytes verify (issue #875: a host's download going dark
 //! should not block the whole gate). A source that fails with an I/O
-//! error is retried [`FETCH_ATTEMPTS`] times before the next source
+//! error is retried `FETCH_ATTEMPTS` times before the next source
 //! is tried (issue #1568: one connection reset on a mirrorless origin
 //! was the whole pass); an HTTP status answer is not retried (issue
 //! #1572). The pinned bytes
@@ -175,7 +175,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// a silently wrong result (`research/corpus/POLICY.md`, "refuses to run
 /// on a checksum mismatch"). Tries the entry's `url`, then each of its
 /// `mirrors` in order, stopping at the first source whose bytes verify;
-/// a source failing with an I/O error is tried up to [`FETCH_ATTEMPTS`]
+/// a source failing with an I/O error is tried up to `FETCH_ATTEMPTS`
 /// times before the next one, and one source refusing the request (issue #875) does not fail the fetch
 /// as long as a later source still produces the pinned bytes.
 ///

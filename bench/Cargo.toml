@@ -23,11 +23,11 @@ mothergod = { path = ".." }
 # `corpus-fetch` feature (off by default): `bench` is a root workspace
 # default-member, so an unconditional dependency here would tax every
 # PR's required `cargo test --all-targets` with this tree even though
-# only the `corpus` module needs it. CLAUDE.md's required checks build
-# default features only, so this keeps them at today's cost; a scheduled
-# workflow exercising `--features corpus-fetch` is remaining scope
-# (`research/JOURNAL.md` S1-D2), the same shape as `fuzz/`'s targets,
-# which aren't in the fast PR gate either.
+# only the `corpus` module needs it. `cargo x lint` and `cargo x doc` turn
+# the feature on (`x/src/lint.rs`, `BENCH_CORPUS_FETCH`), so the module is
+# linted and documented on every PR in check mode, where the tree costs
+# seconds; its tests, which hit the network, run in the weekly
+# `corpus-fetch-check` workflow.
 ureq = { version = "2", default-features = false, features = [
   "tls",
 ], optional = true }

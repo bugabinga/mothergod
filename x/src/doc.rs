@@ -3,16 +3,20 @@ use std::process::Command;
 
 use taplo::parser::parse as parse_toml;
 
-/// Builds crate documentation with rustdoc warnings denied, exactly the
-/// CLAUDE.md doc gate: `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`.
-/// Then checks `docs/api-surface.txt` against what rustdoc just built
+use crate::lint::BENCH_CORPUS_FETCH;
+
+/// Builds crate documentation with rustdoc warnings denied, the CLAUDE.md
+/// doc gate: `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`, with
+/// bench's `corpus-fetch` feature on so the gated module documents too
+/// (`lint::BENCH_CORPUS_FETCH` says why). Then checks `docs/api-surface.txt`
+/// against what rustdoc just built
 /// (issue #651): SIMPLICITY's public-API-surface half of the scorecard had
 /// no publisher, and this is its source of truth, kept honest the same way
 /// `bench/baseline.json` is -- a committed number the gate that can compute
 /// it verifies on every run.
 pub(crate) fn run(root: &Path) -> Result<bool, String> {
     let status = Command::new("cargo")
-        .args(["doc", "--no-deps"])
+        .args(["doc", "--no-deps", "--features", BENCH_CORPUS_FETCH])
         .env("RUSTDOCFLAGS", "--deny warnings")
         .current_dir(root)
         .status()
@@ -20,7 +24,9 @@ pub(crate) fn run(root: &Path) -> Result<bool, String> {
 
     if !status.success() {
         eprintln!("doc: documentation build failed");
-        eprintln!("  next: RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps");
+        eprintln!(
+            "  next: RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps --features {BENCH_CORPUS_FETCH}"
+        );
         return Ok(true);
     }
 

@@ -46,7 +46,7 @@ enum Task {
     Test,
     /// Build documentation with rustdoc warnings denied
     #[command(
-        after_help = "Runs `RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps`.\n\nNot file-scoped: the whole crate documents or the task fails, naming the command to re-run.\n\nExamples:\n  cargo x doc"
+        after_help = "Runs `RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps --features mothergod-bench/corpus-fetch`.\n\nNot file-scoped: the whole crate documents or the task fails, naming the command to re-run.\n\nExamples:\n  cargo x doc"
     )]
     Doc,
 }
@@ -67,7 +67,7 @@ struct FormatArgs {
 
 #[derive(Args)]
 #[command(
-    after_help = "Runs Clippy for selected Rust package scopes, rumdl for selected Markdown files, and the action-pin rule for YAML under .github/: every external `uses:` is a 40-hex commit SHA with a version comment.\n\nWithout PATH arguments, every supported tracked file is selected. Markdown files are checked exactly; Rust files select their containing Cargo package because Clippy works at package scope.\n\nThe repository Markdown profile is documented in x/README.md. --fix applies only fixes rumdl marks safe, then checks the result again.\n\nExamples:\n  cargo x lint\n  cargo x lint -- src\n  cargo x lint -- README.md\n  cargo x lint --fix -- README.md"
+    after_help = "Runs Clippy for selected Rust package scopes, rumdl for selected Markdown files, and the action-pin rule for YAML under .github/: every external `uses:` is a 40-hex commit SHA with a version comment.\n\nWithout PATH arguments, every supported tracked file is selected. Markdown files are checked exactly; Rust files select their containing Cargo package because Clippy works at package scope; the bench package is linted with its `corpus-fetch` feature on.\n\nThe repository Markdown profile is documented in x/README.md. --fix applies only fixes rumdl marks safe, then checks the result again.\n\nExamples:\n  cargo x lint\n  cargo x lint -- src\n  cargo x lint -- README.md\n  cargo x lint --fix -- README.md"
 )]
 struct LintArgs {
     /// Apply safe Markdown fixes before reporting remaining findings

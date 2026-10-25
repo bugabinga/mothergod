@@ -30,8 +30,8 @@ x/Cargo.toml`, then `cargo test --doc`, in that order. It is not
 file-scoped; it stops at the first failing suite and names the command to
 re-run just that one.
 
-`doc` runs `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps`, the
-CLAUDE.md doc gate. It is not file-scoped either; on failure it names the
+`doc` runs `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps --features
+mothergod-bench/corpus-fetch`, the CLAUDE.md doc gate. It is not file-scoped either; on failure it names the
 command to re-run.
 
 No paths selects every supported tracked file.
@@ -43,6 +43,7 @@ Archived files under `research/imports/` remain untouched.
 
 Rust formatting is file-scoped.
 Rust linting widens a selected file to its containing Cargo package because Clippy's semantic unit is a package.
+The bench package is linted and documented with its `corpus-fetch` feature on, so the gated `corpus` module is in the gate; its network tests are the weekly `corpus-fetch-check`'s.
 The separate nightly `fuzz/` workspace remains outside x lint.
 Every other operation remains file-scoped.
 
