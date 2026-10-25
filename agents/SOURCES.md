@@ -170,8 +170,8 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   2026-10-25); `/doctor prompt-audit` (v2.1.221+) noted as an
   instrument for #486's audits, untried, documented interactive only.
   Ladders (`agents/models.json`): reviewed, unchanged. #164's
-  2026-10-04 snapshot has the same top rungs, #110 lists no alias (the
-  fable entry expired 2026-10-15), and no seat's retrospect read its
+  2026-10-18 snapshot (its body is overwritten weekly) has the same top
+  rungs, #110 lists no live entry (the fable row expired 2026-10-15), and no seat's retrospect read its
   tier or effort wrong (`sessions roles --since 7d` on 2026-10-25: 437
   runs, 0 errors, reviewer denials 25 from 53). No Cloudflare work.
 - 2026-10-18: deep survey. Docs-intel round 2026-10-17 (#578): seven
