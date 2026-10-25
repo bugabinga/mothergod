@@ -124,13 +124,16 @@ jobs:
             body is not a queue. No severity ratings, no status
             headers. CHANGELOG.md only for a user-visible change, which
             most desloppings are not.
-          # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes".
+          # Bash unrestricted, and `--tools` the set this seat's sessions
+          # call, per agents/GOVERNANCE.md "Tool envelopes": Bash, Read,
+          # Edit and Write across 101 runs to 2026-10-25, Skill never.
           claude_args: |
             --append-system-prompt-file agents/personas/deslopper.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 400
-            --allowedTools "Edit,Write,MultiEdit,Bash"
+            --tools "Bash,Edit,Write,Read"
+            --allowedTools "Edit,Write,Bash"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause

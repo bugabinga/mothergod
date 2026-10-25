@@ -211,15 +211,18 @@ jobs:
             nobody verified. A duty you found empty, or a push refused
             as stale, is not a line. A run that changed nothing posts
             nothing.
-          # Bash unrestricted, per agents/GOVERNANCE.md "Tool envelopes":
-          # the old allowlist of binary names denied `ls` while granting
-          # `Write`, and cost 11 median permission denials per run.
+          # Bash unrestricted, and `--tools` the set this seat's sessions
+          # call, per agents/GOVERNANCE.md "Tool envelopes": Bash, Edit,
+          # Read, Write, Skill, WebFetch and ToolSearch across 213 runs to
+          # 2026-10-25, WebSearch never. The old allowlist of binary names
+          # denied `ls` while granting `Write`, 11 median denials a run.
           claude_args: |
             --append-system-prompt-file agents/personas/maintainer.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 400
-            --allowedTools "Edit,Write,MultiEdit,Bash"
+            --tools "Bash,Edit,Write,Read,Skill,WebFetch,ToolSearch"
+            --allowedTools "Edit,Write,Bash,WebFetch"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause
