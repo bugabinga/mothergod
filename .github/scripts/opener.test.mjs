@@ -24,6 +24,11 @@ const fixtures = [
     expect: { text: "- Checked the priority queue: no red PRs.", removed: ["Heartbeat done."] },
   },
   {
+    name: "a dotted file name is content: #1653's opener, 'posted' as an adjective, stays",
+    text: "CLAUDE.md Voice bans the em dash in every posted text. #1651 holds it on markdown.",
+    expect: { text: "CLAUDE.md Voice bans the em dash in every posted text. #1651 holds it on markdown.", removed: [] },
+  },
+  {
     name: "an eleven-word announcement is still an announcement",
     text: "Heartbeat's one substantial unit of work is done and posted. Summary:\n\n- Opened PR #643.",
     expect: {

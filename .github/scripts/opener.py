@@ -18,7 +18,9 @@ The predicate is the sentence, not the sentiment. The first sentence, cut
 at the first `.`, `!`, `?` or labelling `:`, is an announcement when it has
 at most twelve words, carries one of done/complete/completed/finished/sent/
 posted, and carries none of the marks that make a sentence content: a
-digit, `#`, a backtick, a bracket, a link. "PR #641 passes." and "Merged
+digit, `#`, a backtick, a bracket, a link, a dotted file name (#1653's
+first sentence named CLAUDE.md and used "posted" as an adjective, and
+gh-comment cut it). "PR #641 passes." and "Merged
 #545." pass through untouched; "Heartbeat's one substantial unit of work
 is done and posted." does not. A bare label the announcement introduced
 ("Summary:") goes with it. Trimming repeats while the front is still an
@@ -38,9 +40,10 @@ import re
 
 MAX_WORDS = 12
 KEYWORD = re.compile(r"\b(done|complete|completed|finished|sent|posted)\b", re.I)
-# A digit, an issue or PR reference, code, a bracketed link or a URL: any
-# one of them means the sentence says something.
-CONTENT = re.compile(r"[0-9#`\[]|https?://")
+# A digit, an issue or PR reference, code, a bracketed link, a URL or a
+# dotted file name (CLAUDE.md, run-notice.py; #1653): any one of them
+# means the sentence says something.
+CONTENT = re.compile(r"[0-9#`\[]|https?://|\b\w+\.[a-z]{2,4}\b")
 TERMINATOR = re.compile(r"[.!?:](?=\s|$)")
 # "Summary:" or "**Summary:**", alone on its line.
 LABEL = re.compile(r"^\**[A-Za-z][A-Za-z ]{0,24}:\**$")
