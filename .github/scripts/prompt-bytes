@@ -45,6 +45,16 @@ ratchet that fails only on growth lets a shrink leave silent room to regrow
 into. The pins are the audit program's rating in one place (#486 item 3),
 and `git log -p` on this file is every seat's size history.
 
+The fleet has a ceiling as well, CEILING below (#1629): the sum of every
+seat's bytes may not pass it. The pins say a prompt moved and by how much;
+nothing said which direction was free, and the total grew three surveys
+running, 24,854 bytes on 2026-10-11, 26,948 on 10-18, 29,717 on 10-25,
+every move pinned and reasoned. A ceiling rather than a second exact pin,
+because the pins already make every move visible; this line is the
+budget. A PR that grows a prompt past it cuts elsewhere in the same diff
+or raises CEILING with its reason in the PR body. Lowering it needs no
+reason.
+
 The parse is PyYAML, apt's python3-yaml on the ubuntu-24.04 image, the same
 one `check-bdfl-wake-predicate.py` uses.
 
@@ -73,6 +83,11 @@ PINNED = {
     "herald": 1947,
     "review": 5645,
 }
+
+# The fleet's budget, UTF-8 bytes summed over every seat (#1629). Raise it in
+# the PR that needs the room, with the reason in that PR's body; lower it
+# whenever the total allows.
+CEILING = 29717
 
 
 def prompts(doc):
@@ -108,7 +123,12 @@ def seats(root):
     return found
 
 
-def findings(seen, pinned):
+def fleet(seen):
+    """The sum of every seat's bytes, the number CEILING bounds."""
+    return sum(m["bytes"] for m in seen.values())
+
+
+def findings(seen, pinned, ceiling=CEILING):
     """One line per disagreement, each naming the next step."""
     out = []
     for name in sorted(set(seen) | set(pinned)):
@@ -137,10 +157,17 @@ def findings(seen, pinned):
                 f"{name}: {seen[name]['em_dashes']} em dash(es). CLAUDE.md Voice: none, ever. "
                 "Comma, colon, semicolon, period."
             )
+    total = fleet(seen)
+    if total > ceiling:
+        out.append(
+            f"fleet: {total:,} bytes, ceiling {ceiling:,}, over by {total - ceiling:,}. "
+            f"Cut {total - ceiling:,} bytes in this PR, or raise CEILING to {total} in "
+            ".github/scripts/prompt-bytes and say why in the body."
+        )
     return out
 
 
-def render(seen, pinned, out=sys.stdout):
+def render(seen, pinned, out=sys.stdout, ceiling=CEILING):
     """Print the table, the footer, the findings. Returns the finding count."""
     width = max([len("seat"), *(len(n) for n in seen)])
     print(f"{'seat':<{width}}   bytes  pinned  lines  em", file=out)
@@ -150,10 +177,10 @@ def render(seen, pinned, out=sys.stdout):
             f"{name:<{width}}  {m['bytes']:>6,}  {pin:>6}  {m['lines']:>5}  {m['em_dashes']:>2}",
             file=out,
         )
-    found = findings(seen, pinned)
-    total = sum(m["bytes"] for m in seen.values())
+    found = findings(seen, pinned, ceiling)
     print(
-        f"\nprompt-bytes: seats {len(seen)} | total {total:,} bytes | pins {len(pinned)} | findings {len(found)}",
+        f"\nprompt-bytes: seats {len(seen)} | total {fleet(seen):,} bytes | ceiling {ceiling:,} "
+        f"| pins {len(pinned)} | findings {len(found)}",
         file=out,
     )
     for line in found:
