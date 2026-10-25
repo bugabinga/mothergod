@@ -12,8 +12,7 @@ use crate::bittree::ALPHABET;
 use crate::codec::copy_checked;
 
 /// Largest backward distance a match may reference at [`Reach::Standard`]:
-/// 1 MiB. `BinaryTreeMatchFinder` takes its window as a parameter
-/// (`JOURNAL` S1-P4).
+/// 1 MiB.
 pub const WINDOW: usize = 1 << 20;
 
 /// Largest backward distance a match may reference at [`Reach::Wide`]:
@@ -520,9 +519,7 @@ impl Chain {
 struct BinaryTreeMatchFinder<'d> {
     data: &'d [u8],
     /// Largest backward distance [`Self::insert_and_find`] ever reports
-    /// or keeps linked in the tree (`JOURNAL` S1-P4): a per-instance
-    /// parameter, not the global [`WINDOW`], so a larger window can be
-    /// measured standalone without touching the wired parse. Must fit
+    /// or keeps linked in the tree: the frame's [`Reach::window`]. Must fit
     /// `u32` ([`to_u32`]'s obligation), same as `WINDOW` itself.
     window: usize,
     /// `head[hash]` is the current tree root for that hash bucket, or
@@ -538,7 +535,7 @@ struct BinaryTreeMatchFinder<'d> {
 
 impl<'d> BinaryTreeMatchFinder<'d> {
     /// A finder with no positions inserted yet, reporting no match past
-    /// `window`. The wired parse (`dp_round`) always passes [`WINDOW`].
+    /// `window`.
     #[must_use]
     fn new(data: &'d [u8], window: usize) -> Self {
         Self {
@@ -1160,28 +1157,17 @@ impl DpState {
 /// reaches, corrupting round-trip whenever a fresh match's distance
 /// coincides with a cached one (hard rule 1).
 ///
-/// `window` bounds [`BinaryTreeMatchFinder`]'s reach, same parameter
-/// [`BinaryTreeMatchFinder::new`] itself takes (`research/JOURNAL.md`
-/// S2-A61). Must keep `bucket(window as u32) < OFFSET_BUCKETS`, i.e.
-/// `window < 2^21`: `prices.offset` has exactly `OFFSET_BUCKETS` entries,
-/// and a distance whose bucket falls outside that range panics on the
-/// index below rather than silently mispricing. [`parse_optimal`] passes
-/// [`WINDOW`] (`bucket(WINDOW) == 20`, in range with headroom to `2^21 -
-/// 1`); a caller measuring a larger window (S1-P4) must stay under that
-/// ceiling too, until a window past it is wired behind its own
-/// `FORMAT_VERSION` bump.
-fn dp_round(data: &[u8], prices: &PriceTable, window: usize) -> Vec<Token> {
-    dp_round_with_ring(data, prices, window, RING_LEN)
-}
-
-/// [`dp_round`] with [`DpState`]'s ring cap a parameter, so a test can
-/// compare the wrapped ring against one that never wraps.
-fn dp_round_with_ring(
-    data: &[u8],
-    prices: &PriceTable,
-    window: usize,
-    ring_cap: usize,
-) -> Vec<Token> {
+/// `window` bounds [`BinaryTreeMatchFinder`]'s reach, the [`Reach::window`]
+/// of the frame being encoded (`research/JOURNAL.md` S2-A61). Must keep
+/// `bucket(window as u32) < OFFSET_BUCKETS`, i.e. `window < 2^21`:
+/// `prices.offset` has exactly `OFFSET_BUCKETS` entries, and a distance
+/// whose bucket falls outside that range panics on the index below rather
+/// than silently mispricing. [`WIDE_WINDOW`] is the last window in range,
+/// and a window past it is wired behind its own `FORMAT_VERSION` bump.
+///
+/// `ring_cap` is [`DpState`]'s ring cap, a parameter so a test can compare
+/// the wrapped ring against one that never wraps; [`RING_LEN`] otherwise.
+fn dp_round(data: &[u8], prices: &PriceTable, window: usize, ring_cap: usize) -> Vec<Token> {
     debug_assert!(
         ring_cap.is_power_of_two() && ring_cap > MAX_MATCH_LEN,
         "a ring of MAX_MATCH_LEN or fewer lets a move's target land on its own start's slot"
@@ -1333,8 +1319,7 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 }
 
 /// [`parse_optimal`], with the `dp_round` rounds' match reach bound by
-/// `window` instead of the wired [`WINDOW`] (`research/JOURNAL.md` S1-P4),
-/// so a candidate window can be measured through the real DP. The
+/// `window`, a [`Reach::window`], instead of [`WINDOW`]. The
 /// [`parse_greedy`] seed pass stays bound by [`WINDOW`]: it only informs
 /// the first round's price table, so a seed that sees less than `window`
 /// costs a worse initial guess, not correctness. See `dp_round`'s docs for
@@ -1359,7 +1344,7 @@ pub fn parse_optimal_with_window(data: &[u8], window: usize) -> Vec<Token> {
         // capacity for a 16 MiB block: kept, it is live beside `parent` and
         // the match finder, the peak (`research/JOURNAL.md` S2-A124).
         drop(round);
-        round = dp_round(data, &prices, window);
+        round = dp_round(data, &prices, window, RING_LEN);
     }
     round
 }

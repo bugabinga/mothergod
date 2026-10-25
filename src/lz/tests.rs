@@ -856,9 +856,8 @@ fn dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks() {
     }
     let seed = parse_greedy(&data);
     let prices = PriceCounts::tally(&seed, &data).prices(seed.len());
-    let wrapped = dp_round_with_ring(&data, &prices, WINDOW, RING_LEN);
+    let wrapped = dp_round(&data, &prices, WINDOW, RING_LEN);
     assert_eq!(replay(&wrapped), data, "roundtrip mismatch");
-    let unwrapped =
-        dp_round_with_ring(&data, &prices, WINDOW, (data.len() + 1).next_power_of_two());
+    let unwrapped = dp_round(&data, &prices, WINDOW, (data.len() + 1).next_power_of_two());
     assert_eq!(wrapped, unwrapped);
 }
