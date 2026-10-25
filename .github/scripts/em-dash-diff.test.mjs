@@ -67,6 +67,12 @@ test("a new prose file is read from line 1; a deleted one is not read", () => {
   assert.equal(run(deleted).status, 0);
 });
 
+test("an added HTML line is a finding: the site is posted text (#1653)", () => {
+  const r = run(file("site/index.html", ["@@ -5,0 +6,1 @@", `+<title>mothergod ${DASH} compression</title>`]));
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.split("\n")[0], `site/index.html:6: <title>mothergod ${DASH} compression</title>`);
+});
+
 test("code files carry the character as data and are outside the rule", () => {
   const diff = file(".github/scripts/deny-em-dash.test.mjs", ["@@ -1,0 +2,1 @@", `+const s = "${DASH}";`])
     + file("src/lz.rs", ["@@ -1,0 +2,1 @@", `+// a ${DASH} b`])
