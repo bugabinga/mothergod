@@ -519,6 +519,72 @@ fn ensure_room_rejects_growth_past_declared_len() {
     assert_eq!(ensure_room(0, 0, 0), Ok(()));
 }
 
+/// Literals the overrun frames carry past their [`OVERRUN_DECLARED_LEN`].
+const OVERRUN_TOKENS: u8 = 32;
+
+/// What the overrun frames declare: a quarter of what their tokens produce.
+const OVERRUN_DECLARED_LEN: u32 = 8;
+
+/// A `Method::Lz` payload of [`OVERRUN_TOKENS`] literal tokens whose header
+/// declares only [`OVERRUN_DECLARED_LEN`] bytes: every token is well formed
+/// and the stream is the right length, so only the declared bound rejects it.
+fn overrun_payload() -> Vec<u8> {
+    let data: Vec<u8> = (0..OVERRUN_TOKENS).collect();
+    let tokens: Vec<Token> = data.iter().map(|&byte| Token::Literal(byte)).collect();
+    let coded = encode_tokens_with(&data, None, &tokens);
+    let (header, stream) = split_token_header(&coded).expect("the encoder wrote a header");
+    lz_payload(
+        Candidate::Identity.to_header_bytes(),
+        OVERRUN_DECLARED_LEN,
+        header.token_count,
+        stream,
+    )
+}
+
+#[test]
+fn a_whole_buffer_decode_stops_producing_at_the_declared_len() {
+    // Through `decode_tokens`, not `decode`: `decode`'s final length check
+    // rejects the same frame with the same `Corrupt` after every token was
+    // pushed, so only the sink's own length shows `ensure_room` ran first
+    // (`output` was reserved to the declared length, and a push past it
+    // reallocates through the infallible path, hard rule 2).
+    let payload = overrun_payload();
+    let (_, _, filtered) = split_selector(&payload).expect("the selector is valid");
+    let (declared_len, token_count, ac_bytes) =
+        read_header(filtered, MAX_DECODED_LEN, Candidate::Identity).expect("the header is valid");
+    let mut output = Vec::new();
+    let mut sink = VecSink {
+        output: &mut output,
+        column: None,
+    };
+
+    let result = decode_tokens(
+        token_count,
+        declared_len,
+        Reach::Standard,
+        ac_bytes,
+        &mut sink,
+    );
+
+    assert_eq!(result, Err(Error::Corrupt));
+    assert_eq!(output.len(), OVERRUN_DECLARED_LEN as usize);
+}
+
+#[test]
+fn a_streaming_decode_writes_no_byte_past_the_declared_len() {
+    // The streamed bytes are already out when the final length check runs,
+    // so the writer sees the overrun unless `ensure_room` stops it first.
+    let mut written = Vec::new();
+
+    let result = decode_to_writer(&overrun_payload(), MAX_DECODED_LEN, &mut written);
+
+    assert_eq!(
+        result.as_ref().map_err(as_codec_error),
+        Err(Some(&Error::Corrupt))
+    );
+    assert_eq!(written.len(), OVERRUN_DECLARED_LEN as usize);
+}
+
 #[test]
 fn match_distance_beyond_window_is_rejected() {
     // OFFSET_BUCKETS (21) lets decode_offset represent distances up
