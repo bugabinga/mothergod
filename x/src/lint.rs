@@ -21,6 +21,16 @@ const DISABLED_MARKDOWN_RULES: &[&str] = &[
 // (issue #607: it once reached 87,159, 70% of the limit, unnoticed).
 const CHANGELOG_UNRELEASED_WARN_CHARS: usize = 100_000;
 
+/// `bench`'s opt-in feature, on whenever the bench package is linted or
+/// documented. The feature keeps `bench/src/corpus.rs` and its ureq/rustls
+/// tree out of `cargo test --all-targets` for cost; a gate that skipped it
+/// in check mode too left the module's only clippy and rustdoc to the
+/// Sunday `corpus-fetch-check`, where #1058 and #1645 each sat red for a
+/// week. Check mode types the tree in seconds, so lint and doc pay it and
+/// test does not. `package/feature` form, because the workspace root has
+/// no feature of that name.
+pub(crate) const BENCH_CORPUS_FETCH: &str = "mothergod-bench/corpus-fetch";
+
 pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
     let mut findings = 0;
     let mut fixed_files = 0;
@@ -278,12 +288,19 @@ fn run_clippy(root: &Path, files: &[PathBuf]) -> Result<bool, String> {
         let mut command = Command::new("cargo");
         command.args(["clippy", "--quiet"]).current_dir(root);
         match (core, bench) {
-            (true, true) => {}
+            (true, true) => {
+                command.args(["--features", BENCH_CORPUS_FETCH]);
+            }
             (true, false) => {
                 command.args(["--package", "mothergod"]);
             }
             (false, true) => {
-                command.args(["--package", "mothergod-bench"]);
+                command.args([
+                    "--package",
+                    "mothergod-bench",
+                    "--features",
+                    BENCH_CORPUS_FETCH,
+                ]);
             }
             (false, false) => unreachable!(),
         }
