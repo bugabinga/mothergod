@@ -230,14 +230,14 @@ case maps to Silesia's 1 MB/s (its files span 0.25 to 6.6), so
 what is held is "no unexplained slowdown", and the aggregate on the finals
 reports is still read at each regeneration.
 
-## M7: Trust engineering (ADR-0043) ✅
+## M7: Trust engineering (ADR-0043)
 
 Numbered by creation order, done when the last closes (ADR-0047); the
 last closed 2026-10-24 (#455, the monthly whole-crate sweep, whose first
 scored run is the 2026-11-01 tick after #1623). It ranked ahead of M6
 because correctness debt compounds worse than a late release. M3 stays
-the journal's program, worked by the heartbeat (ADR-0062). Strategy in
-`docs/TESTING.md`; mechanisms in the issues.
+the journal's program, worked by the heartbeat (ADR-0062), unaffected.
+Strategy in `docs/TESTING.md`; mechanisms in the issues.
 
 Items, in [milestone M7](https://github.com/bugabinga/mothergod/milestone/2):
 the trust ledger and the status page's TRUST panel (#449), which the
