@@ -37,6 +37,7 @@ is "can I rerun this".
 with its command in an HTML comment, which GitHub's rendered view
 hides, so "the command is in the report" is true only in raw view.
 The manual's anchor is where a rendered reader finds it.
+`/` made that raw-view claim too; #1670 sent it to the same anchor.
 
 ## 2026-10-25: Editorial: page titles separate with the dot the site already used
 
