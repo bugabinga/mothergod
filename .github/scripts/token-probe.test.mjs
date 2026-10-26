@@ -14,7 +14,8 @@ const script = `${scriptsDir}token-probe.py`;
 const validation =
   "Workflow validation failed. The workflow file must exist and have identical content to the version on the repository's default branch.";
 
-// `second` is the exchange's answer to the second round: "ok" or "refused".
+// `second` is the exchange's answer to the second round: "ok", "refused"
+// (401 with the action's validation body) or "down" (503, no error code).
 function serve(second) {
   const seen = { oidc: [], exchange: [], revoke: [] };
   let minted = 0;
@@ -30,6 +31,11 @@ function serve(second) {
         res.end(JSON.stringify({ value: `oidc-${seen.oidc.length}` }));
       } else if (req.method === "POST" && url.pathname === "/exchange") {
         seen.exchange.push({ auth, body });
+        if (seen.exchange.length === 2 && second === "down") {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: { message: "upstream unavailable" } }));
+          return;
+        }
         if (seen.exchange.length === 2 && second === "refused") {
           res.writeHead(401, { "content-type": "application/json" });
           res.end(
@@ -135,6 +141,55 @@ test("second round refused: exit 1, the error code on the line, only the first t
     );
     assert.match(r.stdout, /^token-probe: rounds 2 \| minted 1 \| re-mint refused$/m);
     assert.deepEqual(seen.revoke, ["Bearer ghs_secret1"]);
+  });
+});
+
+test("second round 503: exit 1, verdict inconclusive, never refused", async () => {
+  await withServer("down", async (base, seen) => {
+    const r = await run(["--gap", "0", "--exchange-url", `${base}/exchange`, "--github-api", base], {
+      ACTIONS_ID_TOKEN_REQUEST_URL: `${base}/oidc`,
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-bearer",
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assertNoSecret(r);
+    assert.match(r.stdout, /^round 2 \(after 0s\): oidc 200, exchange 503, no error code: upstream unavailable$/m);
+    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 1 \| inconclusive$/m);
+    assert.deepEqual(seen.revoke, ["Bearer ghs_secret1"]);
+  });
+});
+
+test("revoke endpoint unreachable: every line still prints, the verdict stands, no traceback", async () => {
+  await withServer("ok", async (base) => {
+    const r = await run(["--gap", "0", "--exchange-url", `${base}/exchange`, "--github-api", "http://127.0.0.1:1"], {
+      ACTIONS_ID_TOKEN_REQUEST_URL: `${base}/oidc`,
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-bearer",
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assertNoSecret(r);
+    assert.equal(r.stderr, "");
+    assert.match(
+      r.stdout,
+      /^round 1: oidc 200, exchange 201, expires_at 2026-10-26T19:01:00Z, revoke unreachable, token live until expires_at$/m,
+    );
+    assert.match(
+      r.stdout,
+      /^round 2 \(after 0s\): oidc 200, exchange 201, expires_at 2026-10-26T19:02:00Z, revoke unreachable, token live until expires_at$/m,
+    );
+    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 2 \| re-mint allowed$/m);
+  });
+});
+
+test("exchange unreachable: status 0 with the reason on the line, exit 1, inconclusive", async () => {
+  await withServer("ok", async (base) => {
+    const r = await run(["--gap", "0", "--exchange-url", "http://127.0.0.1:1/exchange", "--github-api", base], {
+      ACTIONS_ID_TOKEN_REQUEST_URL: `${base}/oidc`,
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-bearer",
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assertNoSecret(r);
+    assert.equal(r.stderr, "");
+    assert.match(r.stdout, /^round 1: oidc 200, exchange 0, no error code: URLError: .*refused/m);
+    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 0 \| inconclusive$/m);
   });
 });
 

@@ -3,17 +3,21 @@
 
 The action mints one token at the start of a job and GitHub expires it an
 hour later, inside a job that may run four (GOVERNANCE "Token lifetime").
-Each function here copies one step of the action's src/github/token.ts at
-the pin every workflow names (`grep -ho 'claude-code-action@[0-9a-f]*'
+Each function here copies one step of the action at the pin every
+workflow names (`grep -ho 'claude-code-action@[0-9a-f]*'
 .github/workflows/*.yml | sort -u`): the OIDC token is requested from the
-runner for the audience the action asks for, exchanged at the action's
-URL, and revoked at GitHub's the way the action's last step does. A pin
-bump that moves either constant moves this file; token-probe.py's first
-exchange status is the check.
+runner for the audience src/github/token.ts asks for and exchanged at the
+URL it POSTs to; the revoke is action.yml's last step, "Revoke app token",
+a DELETE at GitHub. A pin bump that moves either constant moves this file;
+token-probe.py's first exchange status is the check.
 
 Never prints or logs a token: every function returns it and the caller
 decides where it goes. A status code is the only thing a caller should
-print; a failure body carries no credential and may be shown.
+print; a failure body carries no credential and may be shown. A request
+that got no HTTP answer at all (refused connection, DNS, timeout) is
+status 0 with the reason in the body's error message, never an exception:
+the caller is a probe or a sidecar whose next line must still print, and
+a token minted a moment earlier must still reach its revoke.
 """
 
 import json
@@ -38,12 +42,16 @@ def _body(resp):
 
 
 def _send(req):
-    """(status, body dict) for a request, an HTTP error answered the same way."""
+    """(status, body dict) for a request; an HTTP error the same way, no HTTP answer as status 0."""
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return resp.status, _body(resp)
     except urllib.error.HTTPError as err:
         return err.code, _body(err)
+    except OSError as err:
+        # URLError (a refused connection, DNS) and TimeoutError are both OSError.
+        reason = getattr(err, "reason", None) or err
+        return 0, {"error": {"message": f"{type(err).__name__}: {reason}"}}
 
 
 def oidc_token(request_url, request_token, audience=AUDIENCE):
