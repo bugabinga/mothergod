@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Mint a claude app token the way the pinned claude-code-action does, as functions a sidecar can call (#1687).
+"""The claude app token beside a session: minted the way the pinned claude-code-action mints it, kept in a file the writers read (#1687).
 
-The action mints one token at the start of a job and GitHub expires it an
-hour later, inside a job that may run four (GOVERNANCE "Token lifetime").
-Each function here copies one step of the action at the pin every
-workflow names (`grep -ho 'claude-code-action@[0-9a-f]*'
-.github/workflows/*.yml | sort -u`): the OIDC token is requested from the
-runner for the audience src/github/token.ts asks for and exchanged at the
-URL it POSTs to; the revoke is action.yml's last step, "Revoke app token",
-a DELETE at GitHub. A pin bump that moves either constant moves this file;
-token-probe.py's first exchange status is the check.
+The action mints one token at the start of a job and GitHub expires it
+an hour later, inside a job that may run four (GOVERNANCE "Token
+lifetime"). token-sidecar.py re-mints with the two functions below and
+writes the newest to the file GH_TOKEN_FILE names; `prefer_file` is the
+reader, called by gh-pr, push-branch, merge-pr and settle-push at each
+gh call. Each minting function copies one step of the action at the pin
+every workflow names (`grep -ho 'claude-code-action@[0-9a-f]*'
+.github/workflows/*.yml | sort -u`): the OIDC token is requested from
+the runner for the audience src/github/token.ts asks for and exchanged
+at the URL it POSTs to. A pin bump that moves either constant moves this
+file; the sidecar's first exchange status in any seat's log is the check.
 
 Never prints or logs a token: every function returns it and the caller
 decides where it goes. A status code is the only thing a caller should
 print; a failure body carries no credential and may be shown. A request
 that got no HTTP answer at all (refused connection, DNS, timeout, a body
-cut short) is
-status 0 with the reason in the body's error message, never an exception:
-the caller is a probe or a sidecar whose next line must still print, and
-a token minted a moment earlier must still reach its revoke.
+cut short) is status 0 with the reason in the body's error message,
+never an exception: the caller is a sidecar whose next line must still
+print.
 """
 
 import http.client
@@ -29,7 +30,6 @@ import urllib.request
 
 AUDIENCE = "claude-code-github-action"
 EXCHANGE_URL = "https://api.anthropic.com/api/github/github-app-token-exchange"
-GITHUB_API = "https://api.github.com"
 TIMEOUT = 30
 
 
@@ -74,7 +74,7 @@ def exchange(oidc, url=EXCHANGE_URL):
 
     The token is body['token'] or body['app_token'] on a 2xx, as the action
     reads it; the body is returned so a caller can print a failure's error
-    code and message, which carry no credential.
+    code and message, which carry no credential, and a mint's expires_at.
     """
     req = urllib.request.Request(
         url,
@@ -86,12 +86,34 @@ def exchange(oidc, url=EXCHANGE_URL):
     return status, token or None, body
 
 
-def revoke(app_token, api=GITHUB_API):
-    """The status of DELETE /installation/token: what the action's last step does with a token it minted."""
-    req = urllib.request.Request(
-        f"{api}/installation/token",
-        method="DELETE",
-        headers={"Authorization": f"Bearer {app_token}", "Accept": "application/vnd.github+json"},
-    )
-    status, _ = _send(req)
-    return status
+def reason(body):
+    """`<error code>: <message>` from an exchange failure body, each part defaulted when absent."""
+    error = body.get("error") if isinstance(body.get("error"), dict) else {}
+    details = error.get("details") if isinstance(error.get("details"), dict) else {}
+    code = details.get("error_code") or "no error code"
+    message = error.get("message") or body.get("message") or "no message"
+    return f"{code}: {str(message)[:200]}"
+
+
+def prefer_file(environ):
+    """Point environ's GH_TOKEN at the sidecar's newest mint and return it; None, environ untouched, when GH_TOKEN_FILE is unset, unreadable or empty.
+
+    The file wins over the GH_TOKEN the session started with because it is
+    never older: the sidecar's first mint comes after the action's, and
+    every later one replaces it. A token a caller passes beside the
+    environment on purpose (the admin PAT for a workflow path, the
+    workflow token for a comment) is not this function's to change; the
+    writers apply it only where the session's own token would ride.
+    """
+    path = environ.get("GH_TOKEN_FILE")
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            token = f.read().strip()
+    except OSError:
+        return None
+    if not token:
+        return None
+    environ["GH_TOKEN"] = token
+    return token

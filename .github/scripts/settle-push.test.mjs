@@ -15,6 +15,7 @@ const scriptsDir = new URL(".", import.meta.url).pathname;
 
 const driver = `
 import importlib.machinery, importlib.util, json, os, sys
+sys.path.insert(0, sys.argv[1])
 
 def load(name, filename):
     loader = importlib.machinery.SourceFileLoader(name, os.path.join(sys.argv[1], filename))
@@ -60,6 +61,7 @@ test("settle-push's no---sha default is what push-branch recorded", () => {
 // because the actor they carry is their whole point.
 const fallbackDriver = `
 import importlib.machinery, importlib.util, json, os, subprocess, sys
+sys.path.insert(0, sys.argv[1])
 
 loader = importlib.machinery.SourceFileLoader("settle_push", os.path.join(sys.argv[1], "settle-push"))
 spec = importlib.util.spec_from_loader("settle_push", loader)
@@ -76,6 +78,7 @@ def fake_run(cmd, capture_output=True, text=True, env=None):
 
 sp.subprocess.run = fake_run
 os.environ.pop("GH_TOKEN", None)
+os.environ.pop("GH_TOKEN_FILE", None)
 os.environ["GH_WORKFLOW_TOKEN"] = "workflow"
 read = sp.gh("api", "repos/o/r/actions/runs")
 try:
@@ -98,4 +101,36 @@ test("settle-push reads retry on the workflow token past the hour, close and reo
     [["pr", "close"], null],
   ]);
   assert.match(run.stderr, /#81/);
+});
+
+// The token sidecar's file (#1687): where GH_TOKEN_FILE names it, every gh
+// call rides that token, read at the call, the attributed writes included.
+const sidecarDriver = `
+import importlib.machinery, importlib.util, json, os, subprocess, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("settle_push", os.path.join(sys.argv[1], "settle-push"))
+spec = importlib.util.spec_from_loader("settle_push", loader)
+sp = importlib.util.module_from_spec(spec)
+loader.exec_module(sp)
+
+calls = []
+def fake_run(cmd, capture_output=True, text=True, env=None):
+    calls.append((env or os.environ).get("GH_TOKEN"))
+    return subprocess.CompletedProcess(cmd, 0, "{}", "")
+
+sp.subprocess.run = fake_run
+fd, path = tempfile.mkstemp()
+os.write(fd, b"ghs_fresh\\n")
+os.close(fd)
+os.environ["GH_TOKEN"] = "started-with"
+os.environ["GH_TOKEN_FILE"] = path
+sp.gh("api", "repos/o/r/actions/runs")
+sp.gh("pr", "close", "1")
+print(json.dumps(calls))
+`;
+
+test("settle-push rides the sidecar's newest mint where GH_TOKEN_FILE names one, reads and attributed writes alike", () => {
+  const run = spawnSync("python3", ["-c", sidecarDriver, scriptsDir], { encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), ["ghs_fresh", "ghs_fresh"]);
 });

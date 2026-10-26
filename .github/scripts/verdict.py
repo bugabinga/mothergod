@@ -12,10 +12,15 @@ the repo: merge-pr pins GITHUB_REPOSITORY like its every other read, stalled-prs
 the `{owner}/{repo}` placeholder gh expands from the checkout, like its every
 other read. When this read chose for them it chose the placeholder, and
 `merge-pr --wait` from outside a checkout timed out naming no cause (#968).
+The read rides the token sidecar's newest mint where a seat runs one
+(#1687), because a `--wait` outlasts the token the session started with.
 """
 
 import json
+import os
 import subprocess
+
+from app_token import prefer_file
 
 
 def approved_at(number, repo):
@@ -27,10 +32,12 @@ def approved_at(number, repo):
     take the report and the footer down with it (reviewer's must on PR #572).
     Both callers hold the merge on None; neither reads None as "never".
     """
+    env = dict(os.environ)
+    prefer_file(env)
     proc = subprocess.run(
         ["gh", "api", f"repos/{repo}/issues/{number}/timeline?per_page=100",
          "--paginate", "--slurp"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     if proc.returncode != 0:
         return None

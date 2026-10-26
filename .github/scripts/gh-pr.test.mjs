@@ -171,3 +171,13 @@ test("refuses a title over 72 characters or ending in a period: it is the squash
   assert.equal(edge.status, 0);
   assert.equal(edge.called.argv[5], "y".repeat(72));
 });
+
+// The token sidecar's file (#1687): where GH_TOKEN_FILE names it, the PR
+// opens on that token, never on the one the session started with.
+test("GH_TOKEN_FILE's token wins over GH_TOKEN: the PR opens on the sidecar's newest mint", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "gh-pr-token-")), "app-token");
+  writeFileSync(file, "ghs_fresh\n");
+  const { status, called } = run(["claude/x", "t"], { env: { GH_TOKEN_FILE: file } });
+  assert.equal(status, 0);
+  assert.equal(called.token, "ghs_fresh");
+});

@@ -425,7 +425,15 @@ it is why the script exists and what it protects.
 Token lifetime (issue #81): the claude app token expires about an hour
 into a session; past that, every `gh` call riding the default
 credential returns 401 Bad credentials (first hit: run 32590951126,
-whose ops-log comment died seconds after its merges succeeded).
+whose ops-log comment died seconds after its merges succeeded). Since
+#1687 every model seat but the reviewer runs `token-sidecar.py`, which
+re-mints that token every 45 minutes into the file `GH_TOKEN_FILE`
+names, and `gh-pr`, `push-branch`, `merge-pr` and `settle-push` read it
+at each call, so their writes never meet the hour; the reviewer's runs
+end inside it and its `gh` rides `github.token`. The rest of this
+paragraph is the path without the sidecar, which an agent's own `gh`
+calls still walk, and the fallbacks it names stay until a week of runs
+shows the sidecar held (#1694).
 Front-load token-dependent writes; `.github/scripts/deny-unpushed-work`
 compiles that order, and its docstring holds the incidents that made
 a sentence insufficient. For comments that must land late in
