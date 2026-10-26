@@ -106,20 +106,10 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          # 4 GiB of address space per process, every rustc and test binary
-          # under this shell. A mutant that multiplies a table size (`+` to
-          # `*` in literal.rs's bank bases) asks for gigabytes the kernel
-          # overcommits; the tests then touch them and the runner swaps until
-          # GitHub reports "lost communication": four shards of the first
-          # run (40132179750) died that way, one eight minutes in, on exactly
-          # those mutants. Under the cap the request fails, Rust aborts,
-          # cargo test reports the failure and the mutant is caught, the
-          # right verdict for a mutation that changes what the crate
-          # allocates. A limit on a runaway, never a budget: measured on a
-          # runner at 7eb643a, the suite's largest binary peaks at 1.5 GiB
-          # of address space and rustc under 0.5, and four jobs at the cap
-          # still fit the runner's 16 GiB.
-          ulimit -v 4194304
+          # Each test binary runs under the 4 GiB address-space cap in
+          # .cargo/config.toml, cargo's Linux runner, so a mutant that
+          # allocates what it should not fails there instead of swapping
+          # the runner to death; four jobs at the cap fit 16 GiB.
           set +e
           timeout --signal=INT --kill-after=120 8400 \
             cargo mutants --config tests/mutants.toml --package mothergod \
