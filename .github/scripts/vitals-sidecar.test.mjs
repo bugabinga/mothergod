@@ -147,10 +147,14 @@ test("a database that refuses the write is one token-free line, the loop goes on
   });
 });
 
+// The loop writes its first row before it checks the budget, so a second row
+// needs the first to finish inside the budget. 1.2 s leaves that two orders of
+// magnitude over a row's cost; 60 ms failed 4 of 24 runs with four test files
+// in parallel, as `node --test` runs them.
 test("--max-minutes ends the loop: two rows at a short interval, then done", async () => {
   const proc = fixtureProc();
   await withStub({}, async (base, seen) => {
-    const r = await run(["--interval", "0.05", "--max-minutes", "0.001", "--proc", proc, "--root", proc], {
+    const r = await run(["--interval", "0.05", "--max-minutes", "0.02", "--proc", proc, "--root", proc], {
       D1_API_BASE: base,
     });
     assert.equal(r.code, 0, r.err);

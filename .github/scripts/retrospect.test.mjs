@@ -344,14 +344,26 @@ test("a Claude step without stamps adds no time", () => {
 // A killed run's line ends with its newest vitals row (#1665): the sidecar
 // agent-heartbeat.yml runs beside the session writes one a minute, so the
 // newest is the post-mortem the runner used to take with it.
-const vitalsDriver = `
+const vitalsPrelude = `
 import importlib.machinery, importlib.util, json, sys
 sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
 spec = importlib.util.spec_from_loader("retrospect", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
+`;
+const vitalsDriver = `${vitalsPrelude}
 print(mod.vitals_line(json.loads(sys.argv[2])))
+`;
+// last_vitals with the query injected: argv[2] is the rows it returns, or
+// "unreadable" for a database that raises d1.Unreadable.
+const lastVitalsDriver = `${vitalsPrelude}
+def query(sql, params):
+    assert params == [40263802968], params
+    if sys.argv[2] == "unreadable":
+        raise mod.d1.Unreadable("D1 answered 500")
+    return json.loads(sys.argv[2])
+print(mod.last_vitals("40263802968", query))
 `;
 
 function vitalsLine(rows) {
@@ -389,6 +401,35 @@ test("a field the sampler could not read prints as ?, never as 0", () => {
   assert.equal(
     vitalsLine([row]),
     "2026-10-26T03:38:21Z  mem avail ?, swap free 12 MB, disk avail 79.3 GB, load ?, heaviest ? ?",
+  );
+});
+
+function lastVitals(answer) {
+  const proc = spawnSync("python3", ["-c", lastVitalsDriver, scriptsDir, answer], { encoding: "utf8" });
+  assert.equal(proc.status, 0, proc.stderr);
+  return proc.stdout.trim();
+}
+
+test("a vitals table that cannot be read is UNREADABLE with the reason, never the calm no-row line", () => {
+  assert.equal(
+    lastVitals("unreadable"),
+    "UNREADABLE (D1 answered 500); the vitals table could not be read.",
+  );
+});
+
+test("last_vitals asks for the run's id and prints the newest row's line", () => {
+  const row = {
+    at: "2026-10-26T03:38:21Z",
+    mem_avail_mb: 409,
+    swap_free_mb: 12,
+    disk_avail_mb: 512,
+    load1: 1,
+    top_rss_mb: 7,
+    top_name: "claude",
+  };
+  assert.equal(
+    lastVitals(JSON.stringify([row])),
+    "2026-10-26T03:38:21Z  mem avail 409 MB, swap free 12 MB, disk avail 512 MB, load 1.00, heaviest claude 7 MB",
   );
 });
 
