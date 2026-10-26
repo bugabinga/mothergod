@@ -18,6 +18,7 @@ function run(
     body = "one [must]: the test is missing",
     env = {},
     failEdit = false,
+    editFlaky = false,
     armed = false,
     failView = false,
     failDisarm = false,
@@ -28,10 +29,13 @@ function run(
   const recorder = join(stub, "record.mjs");
   writeFileSync(
     recorder,
-    `import { appendFileSync } from "node:fs";
+    `import { appendFileSync, readFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, token: process.env.GH_TOKEN ?? null }) + "\\n");
 if (argv[1] === "edit" && ${failEdit}) { console.error("label not found"); process.exit(1); }
+if (argv[1] === "edit" && ${editFlaky} && readFileSync(${
+      JSON.stringify(log)
+    }, "utf8").split("\\n").filter((l) => l.includes('"edit"')).length === 1) { console.error("HTTP 502: Server Error"); process.exit(1); }
 if (argv[1] === "view" && ${failView}) { console.error("HTTP 502"); process.exit(1); }
 if (argv[1] === "view") { console.log(${armed} ? '{"enabledAt":"2026-10-20T20:26:51Z"}' : "null"); process.exit(0); }
 if (argv[1] === "merge" && ${failDisarm}) { console.error("not permitted"); process.exit(1); }
@@ -49,6 +53,7 @@ console.log("https://github.com/o/r/pull/1#issuecomment-9");
       GH_TOKEN: "app-token",
       GH_WORKFLOW_TOKEN: "workflow-token",
       DIFF_ID: ID,
+      GH_RETRY_DELAY: "0",
       ...env,
     },
   });
@@ -168,6 +173,21 @@ test("an empty body is refused before the label moves", () => {
   assert.equal(status, 1);
   assert.equal(calls.length, 0);
   assert.match(stderr, /empty body/);
+});
+
+// Three reviewer runs on 2026-10-26 each retried a verdict by hand after a
+// GitHub 5xx; the flip is idempotent, so gh_retry.once tries it again at once.
+test("a 5xx on the label edit gets one more try before the comment posts", () => {
+  const { status, stderr, calls } = run(["950", "fail"], { editFlaky: true });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "view"], ["pr", "edit"], ["pr", "edit"], ["issue", "comment"]],
+  );
+  assert.match(
+    stderr,
+    /post-verdict: gh pr edit on #950 answered a 5xx \(HTTP 502: Server Error\); one more try in 0 s/,
+  );
 });
 
 test("a failed label edit stops before the comment", () => {

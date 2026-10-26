@@ -31,6 +31,11 @@ is a label. The disarm is `gh pr merge --disable-auto`, read first through
 named on stderr and the verdict still posts, because a withheld FAIL
 stops nothing either.
 
+A 5xx from GitHub on the label flip gets one more try through
+`gh_retry.once` (its docstring names the three reviewer runs of 2026-10-26
+that retried by hand); the flip is idempotent, so no look precedes it.
+The comment's retry is gh-comment's own.
+
 The labels and the disarm ride the ambient GH_TOKEN, the app token the
 reviewer always used for them; the comment rides gh-comment's GH_WORKFLOW_TOKEN with its
 footer, opener trim and secret scrub, so a verdict stays one comment the
@@ -46,6 +51,8 @@ import argparse
 import os
 import subprocess
 import sys
+
+from gh_retry import once
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 LABELS = {
@@ -114,7 +121,9 @@ def main():
     if args.verdict == "fail":
         disarm(args.number)
     add, remove = LABELS[args.verdict]
-    edit = gh("pr", "edit", args.number, "--add-label", add, "--remove-label", remove)
+    edit = once(lambda: gh("pr", "edit", args.number, "--add-label", add, "--remove-label", remove),
+                name=f"gh pr edit on #{args.number}",
+                note=lambda line: print(f"post-verdict: {line}", file=sys.stderr))
     if edit.returncode != 0:
         die(f"gh pr edit on #{args.number} failed: {edit.stderr.strip()}")
 

@@ -30,7 +30,17 @@ const calls = existsSync(log) ? JSON.parse(readFileSync(log, "utf8")) : [];
 const argv = process.argv.slice(2);
 calls.push({ argv, token: process.env.GH_TOKEN ?? null, admin: process.env.GH_ADMIN_TOKEN ?? null });
 writeFileSync(log, JSON.stringify(calls));
-if (argv.slice(0, 2).join(" ") === "issue list") {
+const verb = argv.slice(0, 2).join(" ");
+const flaky = process.env.GH_STUB_FLAKY ?? "";
+if (flaky && verb === flaky && calls.filter((c) => c.argv.slice(0, 2).join(" ") === flaky).length === 1) {
+  console.error(process.env.GH_STUB_FLAKY_ERROR ?? "HTTP 502: Server Error (https://api.github.com/graphql)");
+  process.exit(1);
+}
+if (argv[0] === "api" && argv.some((a) => a.endsWith("/comments"))) {
+  console.log(process.env.GH_STUB_COMMENTS ?? "[]");
+} else if (argv[0] === "api" && argv.includes("--jq")) {
+  console.log(process.env.GH_STUB_STATE ?? "closed");
+} else if (verb === "issue list") {
   if (process.env.GH_STUB_ISSUES === "FAIL") {
     console.error("HTTP 500: edge down");
     process.exit(1);
@@ -52,6 +62,7 @@ if (argv.slice(0, 2).join(" ") === "issue list") {
       GH_WORKFLOW_TOKEN: "workflow-token",
       GH_ADMIN_TOKEN: "admin-token",
       GH_STUB_ISSUES: issues === "FAIL" ? "FAIL" : JSON.stringify(issues),
+      GH_RETRY_DELAY: "0",
       ...env,
     },
   });
@@ -312,6 +323,70 @@ test("--close with --label closes first, then labels", () => {
   assert.equal(status, 0);
   assert.deepEqual(verbs, ["issue close", "api -X"]);
   assert.deepEqual(calls[1].argv.slice(3), ["repos/{owner}/{repo}/issues/489/labels", "-f", "labels[]=wontfix"]);
+});
+
+// Three reviewer runs on 2026-10-26 each lost a verdict post to a GitHub
+// 5xx and each retried by hand after reading the thread; gh_retry.once is
+// that procedure. The stub's GH_STUB_FLAKY names the verb whose first call
+// answers 502; GH_STUB_COMMENTS is what the thread read returns.
+test("a 5xx on the post is tried once more, after a look at the thread finds nothing", () => {
+  const { status, stderr, verbs } = run(["950"], { env: { GH_STUB_FLAKY: "issue comment" } });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(verbs, ["issue comment", "api -X", "issue comment"]);
+  assert.match(stderr, /gh issue comment on #950 answered a 5xx \(HTTP 502: Server Error.*\); one more try in 0 s/);
+});
+
+test("a 5xx whose comment landed is the post, printed and never repeated", () => {
+  const sent = run(["950"]).called.argv[4];
+  const url = "https://github.com/o/r/issues/950#issuecomment-7";
+  const { status, stdout, stderr, verbs } = run(["950"], {
+    env: { GH_STUB_FLAKY: "issue comment", GH_STUB_COMMENTS: JSON.stringify([{ body: sent, html_url: url }]) },
+  });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(verbs, ["issue comment", "api -X"]);
+  assert.equal(stdout.trim(), url);
+  assert.match(stderr, /but had landed: https:\/\/github.com\/o\/r\/issues\/950#issuecomment-7/);
+});
+
+test("a close whose comment landed on a thread still open is tried once more", () => {
+  const sent = run(["489", "--close"]).called.argv[4];
+  const landed = JSON.stringify([{ body: sent, html_url: "https://github.com/o/r/issues/489#issuecomment-7" }]);
+  const open = run(["489", "--close"], {
+    env: { GH_STUB_FLAKY: "issue close", GH_STUB_COMMENTS: landed, GH_STUB_STATE: "open" },
+  });
+  assert.equal(open.status, 0, open.stderr);
+  assert.deepEqual(open.verbs, ["issue close", "api -X", "api repos/{owner}/{repo}/issues/489", "issue close"]);
+  const closed = run(["489", "--close"], { env: { GH_STUB_FLAKY: "issue close", GH_STUB_COMMENTS: landed } });
+  assert.deepEqual(closed.verbs, ["issue close", "api -X", "api repos/{owner}/{repo}/issues/489"]);
+});
+
+test("a 5xx on the labels call gets one more try, with no look first", () => {
+  const { status, stderr, verbs } = run(["1621", "--label", "ready-to-ship"], { env: { GH_STUB_FLAKY: "api -X" } });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(verbs, ["issue comment", "api -X", "api -X"]);
+  assert.match(stderr, /the labels call on #1621 answered a 5xx/);
+});
+
+test("a 5xx on --new is tried once more unless an open issue already carries the title", () => {
+  const url = "https://github.com/o/r/issues/7";
+  const found = run(["--new", "Late writes die", "--anyway"], {
+    env: { GH_STUB_FLAKY: "issue create" },
+    issues: [{ number: 7, title: "Late writes die", url }],
+  });
+  assert.equal(found.status, 0, found.stderr);
+  assert.deepEqual(found.verbs, ["issue create", "issue list"]);
+  assert.equal(found.stdout.trim(), url);
+  const missing = run(["--new", "Late writes die", "--anyway"], { env: { GH_STUB_FLAKY: "issue create" } });
+  assert.deepEqual(missing.verbs, ["issue create", "issue list", "issue create"]);
+});
+
+test("a 4xx is the caller's and is not tried again", () => {
+  const { status, stderr, verbs } = run(["950"], {
+    env: { GH_STUB_FLAKY: "issue comment", GH_STUB_FLAKY_ERROR: "HTTP 422: Validation Failed" },
+  });
+  assert.equal(status, 1);
+  assert.deepEqual(verbs, ["issue comment"]);
+  assert.match(stderr, /gh issue comment on #950 failed: HTTP 422/);
 });
 
 test("no verb reaches gh without GH_WORKFLOW_TOKEN", () => {
