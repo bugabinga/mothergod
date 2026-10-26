@@ -442,17 +442,11 @@ fn strip_suffix(path: &Path) -> Result<PathBuf, String> {
 
 /// Reads stdin, or `path` if given, whole.
 fn read_input(path: Option<&Path>) -> Result<Vec<u8>, String> {
-    match path {
-        None => {
-            let mut buf = Vec::new();
-            io::stdin()
-                .lock()
-                .read_to_end(&mut buf)
-                .map_err(|err| format!("reading stdin: {err}"))?;
-            Ok(buf)
-        }
-        Some(path) => fs::read(path).map_err(|err| format!("reading {}: {err}", path.display())),
-    }
+    let mut buf = Vec::new();
+    open_input(path)?
+        .read_to_end(&mut buf)
+        .map_err(|err| format!("reading {}: {err}", input_name(path)))?;
+    Ok(buf)
 }
 
 /// Opens stdin, or `path` if given, to be read as it is consumed.
