@@ -20,6 +20,24 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-26: Editorial: the README's evidence links land on the evidence
+
+The README's ratio and speed paragraphs both ended in
+`docs/benchmarks/`, which GitHub renders as that directory's README:
+a maintainer manual whose first bullet is the in-repo regression gate,
+cited by journal ids, and whose body is `gh workflow run` and publish
+machinery. The evaluating engineer who clicked "per-file tables" had
+to find the two report names in prose and click again. `/` has linked
+`canterbury.md` and `silesia.md` directly since the Measured section
+landed; the README now does the same, and keeps one link into the
+manual, to its `#regenerating` anchor, for the reader whose question
+is "can I rerun this".
+
+**Not linked: the reports' own generator line.** Each report opens
+with its command in an HTML comment, which GitHub's rendered view
+hides, so "the command is in the report" is true only in raw view.
+The manual's anchor is where a rendered reader finds it.
+
 ## 2026-10-25: Editorial: page titles separate with the dot the site already used
 
 #1653. Twelve of the site's em dashes sat in titles, `og:title`s and
