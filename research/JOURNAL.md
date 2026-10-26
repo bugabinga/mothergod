@@ -9215,3 +9215,79 @@ record.
   noise from above. `Kernel::Rows` is deleted, `MAX_SLOWDOWN` stays 0.25,
   and #1184 stays open on its symptom for the next candidate.
   `research/progress.jsonl` it207.
+- S2-R37 | REJECTED | Charter #1688, what an encoder tier ladder buys on
+  the Silesia frontier. Hypothesis: some encoder-only tier lands on the
+  field's frontier, meaning no gzip, zstd or xz level is both at least as
+  good and at least as fast (ROADMAP SPEED's two neighbours). No tier does.
+  Journal only, no codec
+  change, no flag; the tiers were scratch code, deleted with this verdict. |
+  Measured, release build, AMD EPYC 7763 4 logical cores runner (not the
+  EPYC 9V74 of `docs/benchmarks/silesia.md`: tier 1 here is 0.156 MB/s
+  against its 0.208, so ratios carry and seconds do not), all 12 Silesia
+  files at the `bench/corpus.toml` pins, whole, one process at a time under
+  `/usr/bin/time -f %M`, every output decoded and compared to its input. The
+  same session ran every gzip, zstd and xz level through the bench crate's
+  `field::measure`; their sizes equal the published table to the byte.
+  Tiers are `codec::encode` variants selected by an environment variable,
+  everything else (frames, 16 MiB blocks, two blocks at once, the stored
+  floor) the production path. Tier 1 is today's encoder and its 53,117,159
+  bytes equal the published 2.005002 b/B.
+
+  | tier | b/B | size vs 1 | encode MB/s | vs 1 | decode MB/s | peak MiB | as good | as fast |
+  |---|---|---|---|---|---|---|---|---|
+  | 1 today: shortlist trials, wide trial, 3 DP rounds | 2.005002 | 0 | 0.156 | 1.0x | 2.329 | 940 | xz -4 | xz -9e |
+  | 5 first filter, wide reach, 3 DP rounds | 2.177389 | +8.6% | 0.655 | 4.2x | 2.042 | 850 | xz -2 | xz -9e |
+  | 5b first filter, wide reach, 1 DP round | 2.204857 | +10.0% | 1.114 | 7.2x | 1.967 | 839 | zstd -11 | xz -9e |
+  | 2 first filter, narrow reach, 3 DP rounds | 2.205442 | +10.0% | 0.717 | 4.6x | 1.988 | 851 | zstd -11 | xz -9e |
+  | 4b first filter, narrow, 2 DP rounds | 2.206924 | +10.1% | 0.915 | 5.9x | 1.973 | 851 | zstd -11 | xz -9e |
+  | 4 first filter, narrow, 1 DP round | 2.213141 | +10.4% | 1.216 | 7.8x | 2.000 | 840 | zstd -10 | xz -9e |
+  | 3 first filter, `parse_greedy` | 2.361396 | +17.8% | 1.888 | 12.1x | 2.202 | 382 | zstd -6 | xz -9 |
+
+  "First filter" is `select::pick(data)[0]`, the order-1 probe's top
+  candidate, one encode and no trial. Tier 4 reads the charter's "next
+  largest encode cost after the parse" off S2-A121: the match finder is
+  56 to 58% of `parse_optimal` and runs once per DP round, so the cut is
+  `DP_ROUNDS` 3 to 1 (4b is 2). Tiers 5 and 5b are not the charter's four:
+  they are the attribution rows for tier 2, below. Neighbour speeds on this
+  runner, MB/s: xz -4 3.493, xz -2 8.132, zstd -11 26.492, zstd -10 37.535,
+  zstd -6 78.187, xz -9e 1.681. | Mechanism, four findings. (1) No rung is on
+  the frontier: at its own ratio each competitor neighbour encodes 22.4
+  (tier 1 against xz -4), 12.4 (5), 23.8 (5b), 30.9 (4) and 41.4 (3) times
+  faster. The ladder buys speed from mothergod's own default and moves no
+  neighbour that matters. (2) The floor is the model. Tier 3 spends 112.3 s
+  encoding and the decoder, which is the model alone, spends 96 s on the same
+  bytes, so the model's cost is 86% of the cheapest tier's encode and no
+  parse change goes under it; this is the bound the charter stated, now
+  measured. (3) Tier 1 to tier 5 costs +8.6% for 4.2x and is filter
+  selection, not reach: of tier 2's +10.0% against tier 1, tier 5 holds
+  8.6 points and the narrow reach adds 1.4.
+  Per file, 5 against 1: `nci` +50.1%, `mozilla` +21.2%, `ooffice` +12.0%,
+  `mr` +1.8%, the other eight within +0.2%. The order-1 probe puts the wrong
+  candidate first on those files (`nci` ranks `Delta(70)` first in both
+  blocks and a trial beats it by a third; `ooffice` shortlists `Bcj` third),
+  which is S1-A1's finding that filter proxies are falsified, priced again.
+  (4) The round count is the cheap knob and the wide reach pays for itself:
+  3 to 1 rounds is +0.4% of size for 1.7x on the narrow tiers (2 to 4) and
+  +1.3% for 1.7x on the wide ones (5 to 5b); the wide reach on top of 4 is
+  0.4% smaller for 9% more time (4 to 5b). So 5b is smaller and faster than
+  2 and 4b, and 4 buys 9% speed over 5b for 0.4% of size. |
+  Verdict: **rejected** as framed, and the ladder's use is as a speed
+  dial, not a frontier move. Rungs worth a level flag: 5b (7.2x for +10.0%)
+  and 3 (12.1x for +17.8%), one parse each with no trials, both already code
+  paths the encoder runs; tier 5 (4.2x for +8.6%) is the cheapest step per
+  byte and exists only because trials are expensive, so it waits on the
+  lead. Tiers 2 and 4b are beaten by 5b on both axes and 4 is too small a
+  step from it to be a rung; none is offered. Decode is the
+  same 2.0 to 2.3 MB/s at every rung (the token mix moves it), so a level
+  flag changes nothing a decoding user feels. Lead, unrun: choose the filter
+  from a trial of a prefix of the block (S2-A121's skip-a-losing-trial), which
+  would recover up to the 8.6% tier 5 pays at the cost of one more parse of
+  the prefix. | **Not measured:** which candidate won each file under
+  tier 1 (the 8.6 points are attributed to the first-ranked pick losing, not to a
+  named winner), tier 1's CPU seconds against its wall (it runs two trial
+  threads, tiers 2 to 5 run one per block, so a per-core comparison is wider
+  than the table), one run per file so seconds sit inside runner noise,
+  other corpora, and the 2.9 MB/s decode figure the charter cites against
+  this runner's 2.3 (EPYC 9V74 against 7763). The finals were read once as
+  a measurement charter and tuned against nothing, so the sealed-validation
+  rule has nothing to guard. `research/progress.jsonl` it208.
