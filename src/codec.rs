@@ -120,7 +120,7 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// stretch-domain `LogitSse` lookup per node), with no new loop or
 /// allocation, so the bound stays linear in `declared_len`; not
 /// separately remeasured. The length and distance model selection costs
-/// a cheap `FlagKind` branch or array index per copy token, strictly
+/// a cheap `CopyKind` branch or array index per copy token, strictly
 /// cheaper than the per-byte literal cost this bound is measured against.
 /// It bounds one `Lz` frame's output and the total `Lz` output of a stream
 /// [`crate::decompress`] buffers; it is no file-size ceiling, because
@@ -160,6 +160,14 @@ impl FlagKind {
             _ => Self::Rep,
         }
     }
+}
+
+/// The two token kinds that code a copy length, each through models of its
+/// own ([`length_models`]).
+#[derive(Clone, Copy)]
+enum CopyKind {
+    Match,
+    Rep,
 }
 
 /// Alphabet size of the flag [`Model`]s: exactly [`FlagKind`]'s three symbols.
@@ -259,22 +267,13 @@ fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
 
 /// A copy token's length models, bucket [`Model`] and the [`ResidualTree`]
 /// beside it: [`Models::length_match`] and its residual for
-/// [`FlagKind::Match`], `length_rep` and its residual for [`FlagKind::Rep`].
+/// [`CopyKind::Match`], `length_rep` and its residual for [`CopyKind::Rep`].
 /// Every real-path [`TokenSink`] and [`DecodeSink`], and the pricer that must
 /// price what they code, selects through here.
-///
-/// # Panics
-///
-/// Panics if `kind` is [`FlagKind::Literal`]: [`walk_tokens`] never calls
-/// [`TokenSink::length`] for a [`Token::Literal`], so every real caller
-/// already has a [`FlagKind::Match`] or [`FlagKind::Rep`] in hand.
-fn length_models(models: &mut Models, kind: FlagKind) -> (&mut Model, &mut ResidualTree) {
+fn length_models(models: &mut Models, kind: CopyKind) -> (&mut Model, &mut ResidualTree) {
     match kind {
-        FlagKind::Match => (&mut models.length_match, &mut models.length_match_residual),
-        FlagKind::Rep => (&mut models.length_rep, &mut models.length_rep_residual),
-        FlagKind::Literal => {
-            unreachable!("walk_tokens never calls length for a Token::Literal")
-        }
+        CopyKind::Match => (&mut models.length_match, &mut models.length_match_residual),
+        CopyKind::Rep => (&mut models.length_rep, &mut models.length_rep_residual),
     }
 }
 
@@ -344,9 +343,7 @@ fn undo_filter(candidate: Candidate, mut data: Vec<u8>) -> Result<Vec<u8>, Error
 trait TokenSink {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind);
     fn literal(&mut self, models: &mut Models, context: Context, byte: u8);
-    /// `kind` is always [`FlagKind::Match`] or [`FlagKind::Rep`]:
-    /// [`walk_tokens`] never calls this for a [`Token::Literal`].
-    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32);
+    fn length(&mut self, models: &mut Models, kind: CopyKind, value: u32);
     /// `len` is the triggering [`Token::Match`]'s own already-emitted
     /// length: [`walk_tokens`] never calls this for a [`Token::Rep`] (which
     /// has no `offset` symbol at all) or a [`Token::Literal`].
@@ -373,7 +370,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
             }
             Token::Match { len, distance } => {
                 sink.flag(models, flag_table, FlagKind::Match);
-                sink.length(models, FlagKind::Match, len);
+                sink.length(models, CopyKind::Match, len);
                 sink.offset(models, len, distance.get());
                 let end = pos + len as usize;
                 context = context.after_copy(&data[pos..end]);
@@ -382,7 +379,7 @@ fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut im
             Token::Rep { len, slot } => {
                 sink.flag(models, flag_table, FlagKind::Rep);
                 sink.slot(models, slot.index());
-                sink.length(models, FlagKind::Rep, len);
+                sink.length(models, CopyKind::Rep, len);
                 let end = pos + len as usize;
                 context = context.after_copy(&data[pos..end]);
                 pos = end;
@@ -443,7 +440,7 @@ impl TokenSink for EncodeSink<'_> {
         }
     }
 
-    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+    fn length(&mut self, models: &mut Models, kind: CopyKind, value: u32) {
         let (bucket, residual) = length_models(models, kind);
         bucket.encode(self.ac, lz::bucket(value));
         residual.encode(self.ac, value);
@@ -487,7 +484,7 @@ impl TokenSink for CostSink {
         );
     }
 
-    fn length(&mut self, models: &mut Models, kind: FlagKind, value: u32) {
+    fn length(&mut self, models: &mut Models, kind: CopyKind, value: u32) {
         let (bucket, residual) = length_models(models, kind);
         self.bits += bucket.ideal_cost_bits(lz::bucket(value)) + residual.ideal_cost_bits(value);
     }
@@ -1111,13 +1108,7 @@ trait DecodeSink {
 /// the model [`length_models`] selects by `kind`, the residual bits below it
 /// through the [`ResidualTree`] beside that model. Mirrors
 /// [`EncodeSink::length`].
-///
-/// # Panics
-///
-/// Panics if `kind` is [`FlagKind::Literal`]: both of [`decode_tokens`]'s
-/// call sites already have a [`FlagKind::Match`] or [`FlagKind::Rep`] in
-/// hand.
-fn decode_length(models: &mut Models, ac: &mut Decoder, kind: FlagKind) -> u32 {
+fn decode_length(models: &mut Models, ac: &mut Decoder, kind: CopyKind) -> u32 {
     let (bucket, residual) = length_models(models, kind);
     let b = bucket.decode(ac);
     residual.decode(ac, b)
@@ -1162,7 +1153,7 @@ fn decode_tokens<S: DecodeSink>(
                 context = context.after_literal(byte);
             }
             FlagKind::Match => {
-                let len = decode_length(&mut models, &mut ac, FlagKind::Match);
+                let len = decode_length(&mut models, &mut ac, CopyKind::Match);
                 let distance = decode_offset(&mut models, &mut ac, len);
                 let distance =
                     NonZeroU32::new(distance).expect("decode_offset's result is always >= 1");
@@ -1175,7 +1166,7 @@ fn decode_tokens<S: DecodeSink>(
                 // RepSlot::from_index documents why models.slot's decode
                 // is safe to feed it directly.
                 let slot = RepSlot::from_index(models.slot.decode(&mut ac));
-                let len = decode_length(&mut models, &mut ac, FlagKind::Rep);
+                let len = decode_length(&mut models, &mut ac, CopyKind::Rep);
                 let distance = reps.get(slot);
                 ensure_room(sink.len(), len as usize, declared_len)?;
                 context = sink.copy(len, distance, context)?;
