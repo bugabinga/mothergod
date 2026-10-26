@@ -579,11 +579,12 @@ fn binary_tree_finds_match_exactly_at_window_boundary_but_not_past_it() {
 fn binary_tree_larger_window_finds_matches_the_default_window_would_miss() {
     // S1-P4's first slice: window is now a per-instance parameter,
     // not just the wired WINDOW constant. A distance past WINDOW but
-    // within a caller-chosen larger window must be found when the
-    // finder is configured with that larger window, and still
-    // rejected when it is not -- proving the parameter actually
-    // gates reach rather than being plumbed through unused.
-    let larger_window = WINDOW * 2;
+    // within a larger window must be found when the finder is
+    // configured with that window, and still rejected when it is
+    // not -- proving the parameter actually gates reach rather than
+    // being plumbed through unused. The larger window is the one a
+    // frame can declare, `Reach::Wide`'s, as the field doc promises.
+    let larger_window = Reach::Wide.window();
     let mut data = vec![0xAAu8; larger_window + 3];
     data[0..3].copy_from_slice(b"xyz");
     data[larger_window..larger_window + 3].copy_from_slice(b"xyz");
