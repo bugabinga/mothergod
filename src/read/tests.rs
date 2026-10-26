@@ -182,21 +182,33 @@ fn a_failure_ends_the_stream_and_repeats() {
 
 #[test]
 fn a_source_error_comes_back_as_it_was() {
-    struct Broken<'a>(&'a [u8]);
+    /// Fails every `read` once its bytes run out, and panics on a second
+    /// failing call: a decoder that retried the error would otherwise loop
+    /// forever, a hang where a failure is meant.
+    struct Broken<'a> {
+        rest: &'a [u8],
+        failed: bool,
+    }
     impl Read for Broken<'_> {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            match (self.0.split_first(), buf.first_mut()) {
-                (Some((&byte, rest)), Some(slot)) => {
-                    *slot = byte;
-                    self.0 = rest;
-                    Ok(1)
-                }
-                _ => Err(io::Error::from(ErrorKind::BrokenPipe)),
+            if let (Some((&byte, rest)), Some(slot)) = (self.rest.split_first(), buf.first_mut()) {
+                *slot = byte;
+                self.rest = rest;
+                Ok(1)
+            } else {
+                assert!(
+                    !std::mem::replace(&mut self.failed, true),
+                    "read called again after it failed"
+                );
+                Err(io::Error::from(ErrorKind::BrokenPipe))
             }
         }
     }
     let frame = compress(b"abc");
-    let source = Broken(&frame[..frame.len() - 1]);
+    let source = Broken {
+        rest: &frame[..frame.len() - 1],
+        failed: false,
+    };
     assert_eq!(
         drain(Decoder::new(source)),
         (Vec::new(), Some(ErrorKind::BrokenPipe))
