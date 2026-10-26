@@ -191,19 +191,16 @@ fn a_source_error_comes_back_as_it_was() {
     }
     impl Read for Broken<'_> {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            match (self.rest.split_first(), buf.first_mut()) {
-                (Some((&byte, rest)), Some(slot)) => {
-                    *slot = byte;
-                    self.rest = rest;
-                    Ok(1)
-                }
-                _ => {
-                    assert!(
-                        !std::mem::replace(&mut self.failed, true),
-                        "read called again after it failed"
-                    );
-                    Err(io::Error::from(ErrorKind::BrokenPipe))
-                }
+            if let (Some((&byte, rest)), Some(slot)) = (self.rest.split_first(), buf.first_mut()) {
+                *slot = byte;
+                self.rest = rest;
+                Ok(1)
+            } else {
+                assert!(
+                    !std::mem::replace(&mut self.failed, true),
+                    "read called again after it failed"
+                );
+                Err(io::Error::from(ErrorKind::BrokenPipe))
             }
         }
     }
