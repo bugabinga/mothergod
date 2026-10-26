@@ -2,9 +2,11 @@
 
 Falsification record and institutional memory. Append-only in spirit: never
 delete an entry; a revived idea gets a NEW entry referencing the old one.
-Code an entry names existed when the entry was written: an entry may carry
-`left main in #PR` for code deleted since, and absence proves nothing, so a
-name is a grep, not a promise.
+Code an entry names existed when the entry was written, in a commit or, for
+scratch code, only in the experiment's working tree. An entry may carry
+`left main in #PR` for committed code deleted since; scratch code never
+reached a commit and carries none. Absence proves nothing, so a name is a
+grep, not a promise.
 Audience: agents. Terse. Mechanisms over scores.
 
 Format per entry: `id | verdict | claim | mechanism/evidence | conditions`.
