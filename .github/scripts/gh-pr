@@ -65,7 +65,6 @@ import subprocess
 import sys
 
 from app_token import prefer_file
-from app_token import prefer_file
 from footer import attribute
 from secret_scrub import scrub
 
