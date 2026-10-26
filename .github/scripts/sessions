@@ -246,9 +246,10 @@ RUNS_PER_CALL = 8
 # The kill scan's window when --since is absent. A debounced cancel never
 # gets a row, so every walk probes it anew, and the archive's 90 days would
 # be some 500 jobs calls a Sunday against a token allowed 1,000 an hour (43
-# cancelled agent runs in the week to 2026-10-26, 6 of them kills). Eight
-# days overlaps the weekly walk by a day; a kill older than that is
-# retrospect's to list and `--since` to write.
+# cancelled agent runs in the week to 2026-10-26; the census line of
+# `sessions backfill` prints the current week's kills). Eight days overlaps
+# the weekly walk by a day; a kill older than that is retrospect's to list
+# and `--since` to write.
 KILL_WINDOW = timedelta(days=8)
 
 
