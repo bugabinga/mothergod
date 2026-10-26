@@ -25,6 +25,25 @@ impl Read for OneByte<'_> {
     }
 }
 
+/// Passes `inner` through and panics once more than `left` bytes have come
+/// back: a reader whose position never advances yields the same bytes
+/// forever, which `io::copy` turns into a hang where a failure is meant.
+struct Capped<R> {
+    inner: R,
+    left: u64,
+}
+
+impl<R: Read> Read for Capped<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let len = self.inner.read(buf)?;
+        self.left = self
+            .left
+            .checked_sub(len as u64)
+            .expect("the reader yielded past its cap");
+        Ok(len)
+    }
+}
+
 /// What a reader yielded and the error that ended it, if any.
 fn drain(mut reader: impl Read) -> (Vec<u8>, Option<ErrorKind>) {
     let mut out = Vec::new();
@@ -398,7 +417,10 @@ fn a_streamed_lz_total_past_max_decoded_len_is_read_not_rejected() {
     // over the concatenation of large `Lz` outputs (ADR-0067) reads to the
     // end, as `decompress_to_writer` writes it (#1088).
     let stream = lz_total_past_max_decoded_len();
-    let copied = io::copy(&mut Decoder::new(stream.as_slice()), &mut io::sink())
-        .expect("the stream decodes to its end");
+    let mut reader = Capped {
+        inner: Decoder::new(stream.as_slice()),
+        left: 2 * u64::from(codec::MAX_DECODED_LEN),
+    };
+    let copied = io::copy(&mut reader, &mut io::sink()).expect("the stream decodes to its end");
     assert!(copied > u64::from(codec::MAX_DECODED_LEN));
 }
