@@ -726,14 +726,11 @@ pub fn encode(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
 /// candidate, and its body at [`Reach::Standard`].
 type Winner = (usize, Candidate, Vec<u8>);
 
-/// [`Candidate`] `candidate` at [`Reach::Wide`]: the body [`encode`]'s wide
-/// trial compares against the narrow one.
-fn wide_body(data: &[u8], candidate: Candidate) -> Vec<u8> {
-    encode_tokens(
-        &apply_filter(candidate, data),
-        candidate.columns(),
-        Reach::Wide,
-    )
+/// One trial: `data` through `candidate`'s filter, then [`encode_tokens`] at
+/// `reach`. The one statement of what a trial is, for [`search`]'s narrow
+/// trials and the wide trial [`encode`] documents alike.
+fn trial_body(data: &[u8], candidate: Candidate, reach: Reach) -> Vec<u8> {
+    encode_tokens(&apply_filter(candidate, data), candidate.columns(), reach)
 }
 
 /// The winner among `candidates` as `(candidate, reach, body)`: the first
@@ -777,8 +774,7 @@ fn search(
                 let Some(&candidate) = candidates.get(index) else {
                     break;
                 };
-                let filtered = apply_filter(candidate, data);
-                let body = encode_tokens(&filtered, candidate.columns(), Reach::Standard);
+                let body = trial_body(data, candidate, Reach::Standard);
                 sizes[index].store(body.len(), Ordering::Relaxed);
                 if best.as_ref().is_none_or(|(_, _, existing)| {
                     crate::candidate_beats_incumbent(body.len(), existing.len())
@@ -795,7 +791,7 @@ fn search(
             let trial = guess.and_then(|index| {
                 let candidate = candidates[index];
                 thread::Builder::new()
-                    .spawn_scoped(scope, move || wide_body(data, candidate))
+                    .spawn_scoped(scope, move || trial_body(data, candidate, Reach::Wide))
                     .ok()
                     .map(|handle| (index, handle))
             });
@@ -841,7 +837,7 @@ fn widen(
 ) -> (Candidate, Reach, Vec<u8>) {
     let wide = match trial {
         Some((guessed, handle)) if guessed == index => rejoin(handle.join()),
-        _ => wide_body(data, candidate),
+        _ => trial_body(data, candidate, Reach::Wide),
     };
     if crate::candidate_beats_incumbent(wide.len(), body.len()) {
         (candidate, Reach::Wide, wide)
