@@ -174,10 +174,27 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      # The app token the session writes with dies at the hour (#81); this
+      # re-mints it every 45 minutes into the file GH_TOKEN_FILE names
+      # below, which gh-pr, push-branch, merge-pr and settle-push read at
+      # each call (#1687; token-sidecar.py's docstring carries the why).
+      # Its own session, the runner's OIDC request token on stdin and
+      # scrubbed from its environment, ended by the job's orphan cleanup:
+      # the seam vitals-sidecar.py cut (#1666).
+      - if: steps.guard.outputs.paused != 'true'
+        run: |
+          printf '%s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            | env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN setsid --fork \
+              python3 .github/scripts/token-sidecar.py --path "$RUNNER_TEMP/app-token" \
+              > "$RUNNER_TEMP/token-sidecar.log" 2>&1
+
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1
         env:
+          # The token sidecar's newest mint; the four writers read it at
+          # each gh call (#1687).
+          GH_TOKEN_FILE: ${{ runner.temp }}/app-token
           # Operator-issued admin PAT (ADR-0009). gh keeps using the app
           # token by default; admin/settings calls opt in explicitly with
           # GH_TOKEN="$GH_ADMIN_TOKEN".
@@ -528,3 +545,9 @@ jobs:
             ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
             ${{ secrets.MOTHERGOD_STATUS_BOT_TOKEN }}
             ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # The token sidecar's account (#1687): a mint that failed shows in
+      # this run's log, not only as a long run's dead push.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        run: tail -n 2 "${RUNNER_TEMP}/token-sidecar.log"

@@ -28,11 +28,14 @@ decision is the one agents kept making by hand and kept getting wrong, and it
 fails on the remote rather than here, one turn later, in a 403 that reads like
 a permissions bug.
 
-Past the hour mark the app token answers 401 (issue #81). A push in flight
-then retries once on the admin PAT when the environment holds one, says so on
-stderr, and lands operator-attributed (issue #734). 401 only: a 403 is a
-permission answer, not a dead token, and is never routed around (merge-pr's
-rule). Without a PAT the failure names the expiry and the one write that still
+Where a seat runs the token sidecar, GH_TOKEN_FILE names its newest mint and
+the app token here is that one, at most 45 minutes old (#1687); the rest of
+this paragraph is the path without it. Past the hour mark the token the
+session started with answers 401 (issue #81). A push in flight then retries
+once on the admin PAT when the environment holds one, says so on stderr, and
+lands operator-attributed (issue #734). 401 only: a 403 is a permission
+answer, not a dead token, and is never routed around (merge-pr's rule).
+Without a PAT the failure names the expiry and the one write that still
 works, so the next context can post what the push held instead of retrying.
 
 Commit identity follows the credential, which follows the paths: app token
@@ -95,6 +98,8 @@ import subprocess
 import sys
 import time
 
+from app_token import prefer_file
+
 # The one path prefix the app token cannot write (issue #24).
 ADMIN_PREFIX = ".github/workflows/"
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -143,6 +148,16 @@ class Credential:
              "retrying on the admin PAT, so this commit is operator-attributed")
         self.token, self.identity = admin, "admin PAT"
         return True
+
+
+def session_credential():
+    """The app token as a push's credential: the sidecar's newest mint where a
+    seat runs one (#1687), else the token the session started with."""
+    prefer_file(os.environ)
+    return Credential(
+        os.environ.get("GH_TOKEN") or gh(["auth", "token"]).stdout.strip(),
+        "app token",
+    )
 
 
 def expired(proc):
@@ -497,10 +512,7 @@ def main() -> int:
             )
         cred = Credential(token, "admin PAT")
     else:
-        cred = Credential(
-            os.environ.get("GH_TOKEN") or gh(["auth", "token"]).stdout.strip(),
-            "app token",
-        )
+        cred = session_credential()
 
     branch = api("GET", f"pulls/{target}", cred)["head"]["ref"] if target.isdigit() else target
 

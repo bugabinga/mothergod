@@ -15,6 +15,7 @@ const scriptsDir = new URL(".", import.meta.url).pathname;
 const driver = `
 import importlib.machinery, importlib.util, json, os, subprocess, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -88,6 +89,7 @@ test("a 403 is never routed around, admin PAT present or not", () => {
 const scopeDriver = `
 import importlib.machinery, importlib.util, os, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -136,6 +138,7 @@ test("a bare branch name is never scoped, PR_NUMBER or not", () => {
 // return) so both directions pin without a network.
 const emptyDriver = `
 import importlib.machinery, importlib.util, json, os, sys
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -195,6 +198,7 @@ test("a tree identical to the base passes when the base is this run's own record
 const wiringDriver = `
 import importlib.machinery, importlib.util, json, os, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -250,6 +254,7 @@ test("a P2 retry against this run's own recorded push exempts the guard, nothing
 const confirmDriver = `
 import importlib.machinery, importlib.util, json, os, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -297,6 +302,7 @@ test("confirm_push ends the already_landed exemption; an unconfirmed push still 
 const shapeDriver = `
 import importlib.machinery, importlib.util, json, os, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -332,6 +338,7 @@ test("own_pushes stores sha and a confirmed bit, not a bare sha", () => {
 const fmtDriver = `
 import importlib.machinery, importlib.util, json, os, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -461,6 +468,7 @@ test("a path x refuses on its own account is noted with x's cause, and its neigh
 const staleDriver = `
 import importlib.machinery, importlib.util, json, os, sys
 
+sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
 spec = importlib.util.spec_from_loader("push_branch", loader)
 pb = importlib.util.module_from_spec(spec)
@@ -514,4 +522,35 @@ test("a HEAD that descends from the base passes the stale guard; a sibling of th
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+// The token sidecar's file (#1687): where GH_TOKEN_FILE names it, the push
+// rides that token, never the one the session started with. The driver
+// clears an inherited GH_TOKEN_FILE first: every seat session carries one.
+const credentialDriver = `
+import importlib.machinery, importlib.util, json, os, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("push_branch", os.path.join(sys.argv[1], "push-branch"))
+spec = importlib.util.spec_from_loader("push_branch", loader)
+pb = importlib.util.module_from_spec(spec)
+loader.exec_module(pb)
+
+os.environ.pop("GH_TOKEN_FILE", None)
+os.environ["GH_TOKEN"] = "started-with"
+without = pb.session_credential()
+fd, path = tempfile.mkstemp()
+os.write(fd, b"ghs_fresh\\n")
+os.close(fd)
+os.environ["GH_TOKEN_FILE"] = path
+with_file = pb.session_credential()
+print(json.dumps([[without.token, without.identity], [with_file.token, with_file.identity]]))
+`;
+
+test("the push's credential is the sidecar's newest mint where GH_TOKEN_FILE names one, else the session's", () => {
+  const proc = spawnSync("python3", ["-c", credentialDriver, scriptsDir], {
+    encoding: "utf8",
+    env: { ...process.env, GITHUB_REPOSITORY: "o/r" },
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.deepEqual(JSON.parse(proc.stdout), [["started-with", "app token"], ["ghs_fresh", "app token"]]);
 });

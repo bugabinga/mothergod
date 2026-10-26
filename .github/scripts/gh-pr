@@ -46,11 +46,13 @@ exist. A refusal at open costs one retry; a warning costs nothing and
 changes nothing. The squash appends ` (#N)`, which the cap deliberately
 ignores: 72 on the title is the rule as written.
 
-The app token expires about an hour into a session (issue #81), and this
-script cannot outlive it: a run whose work outlasts the token pushes its
-branch and dies here, which `stalled-prs` reports as `branch-orphaned` and
-GOVERNANCE's sixth signature rescues. Put the rationale in the commit
-message, where that rescue reads it.
+The token the session started with expires about an hour in (issue #81).
+Where a seat runs the token sidecar, GH_TOKEN_FILE names its newest mint
+and this script rides that instead, at most 45 minutes old (#1687).
+Without it, a run whose work outlasts the token pushes its branch and dies
+here, which `stalled-prs` reports as `branch-orphaned` and GOVERNANCE's
+sixth signature rescues. Put the rationale in the commit message, where
+that rescue reads it.
 
 Usage: gh-pr <head-branch> "<title>" [--label NAME]... < body
 Prints the PR's URL on stdout.
@@ -62,6 +64,7 @@ import re
 import subprocess
 import sys
 
+from app_token import prefer_file
 from footer import attribute
 from secret_scrub import scrub
 
@@ -154,6 +157,8 @@ def main() -> int:
     # An ambient admin PAT must not win this call: its PR wakes the BDFL on
     # its own thread (issue #141).
     env.pop("GH_ADMIN_TOKEN", None)
+    # The sidecar's newest mint, where a seat runs one (#1687).
+    prefer_file(env)
     token = env.get("GH_TOKEN") or subprocess.run(
         ["gh", "auth", "token"], env=env, capture_output=True, text=True
     ).stdout.strip()

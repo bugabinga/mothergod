@@ -21,6 +21,7 @@ const script = join(new URL(".", import.meta.url).pathname, "merge-pr");
 function run(args, { env = {}, responses = [] } = {}) {
   const stub = mkdtempSync(join(tmpdir(), "merge-pr-"));
   const log = join(stub, "calls.jsonl");
+  const tokens = join(stub, "tokens.txt");
   const counts = join(stub, "counts.json");
   const recorder = join(stub, "record.mjs");
   writeFileSync(join(stub, "responses.json"), JSON.stringify(responses));
@@ -29,6 +30,7 @@ function run(args, { env = {}, responses = [] } = {}) {
     `import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify(argv) + "\\n");
+appendFileSync(${JSON.stringify(tokens)}, (process.env.GH_TOKEN ?? "") + "\\n");
 const responses = JSON.parse(readFileSync(${JSON.stringify(join(stub, "responses.json"))}, "utf8"));
 const counts = existsSync(${JSON.stringify(counts)}) ? JSON.parse(readFileSync(${JSON.stringify(counts)}, "utf8")) : {};
 const line = argv.join(" ");
@@ -60,7 +62,8 @@ process.exit(answer.status ?? 0);
   const calls = existsSync(log)
     ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l))
     : [];
-  return { ...proc, calls, merges: calls.filter((c) => c.includes("PUT")) };
+  const rode = existsSync(tokens) ? readFileSync(tokens, "utf8").split("\n").slice(0, -1) : [];
+  return { ...proc, calls, merges: calls.filter((c) => c.includes("PUT")), tokens: rode };
 }
 
 // Issue #771: a review scoped to #768 commented on and merged #770 instead.
@@ -817,4 +820,31 @@ test("--wait never arms: a 405 after green gates exits 2 with nothing armed", ()
   assert.equal(status, 2, stderr);
   assert.ok(!calls.some((argv) => argv[1] === "graphql"), "no mutation under --wait");
   assert.match(stderr, /nothing armed/);
+});
+
+// The token sidecar's file (#1687): where GH_TOKEN_FILE names it, every call
+// of the wait and the merge itself ride that token, read fresh each time.
+test("--wait: with GH_TOKEN_FILE every call rides the sidecar's newest mint, never the session's GH_TOKEN", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "merge-pr-token-")), "app-token");
+  writeFileSync(file, "ghs_fresh\n");
+  const { status, stdout, merges, tokens } = run(WAIT, {
+    env: { GH_TOKEN: "started-with", GH_TOKEN_FILE: file },
+    responses: [
+      { match: "^api repos/o/r/pulls/42$", responses: [pr([]), pr(["agent-approved"])] },
+      ruleset,
+      {
+        match: "check-runs",
+        responses: [
+          runs(["review", "in_progress", null], ...GREEN_GATES),
+          runs(["review", "completed", "success"], ...GREEN_GATES),
+        ],
+      },
+      APPROVED_NOW,
+      merge,
+    ],
+  });
+  assert.equal(status, 0, stdout);
+  assert.equal(merges.length, 1);
+  assert.ok(tokens.length >= 2, `calls ${tokens.length}`);
+  assert.deepEqual([...new Set(tokens)], ["ghs_fresh"]);
 });

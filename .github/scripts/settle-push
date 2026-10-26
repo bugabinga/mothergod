@@ -35,6 +35,8 @@ exists not to rebuild.
 """
 import json, os, subprocess, sys, time
 
+from app_token import prefer_file
+
 TIMEOUT = 120  # seconds to wait for runs to appear; they normally show in <10
 HEAD_TIMEOUT = 30  # seconds for the PR's head to catch up with the push
 POLL = 5
@@ -47,15 +49,19 @@ ATTRIBUTED = (("pr", "close"), ("pr", "reopen"))
 
 
 def gh(*args):
-    """Run gh on the session's credential. Past the hour mark it answers 401
-    (issue #81); a read then retries once on GH_WORKFLOW_TOKEN, the job-scoped
-    token gh-comment already rides, because settling needs reads and nothing
-    else (issue #734). The two attributed writes never fall back."""
-    proc = subprocess.run(("gh",) + args, capture_output=True, text=True)
-    fallback = os.environ.get("GH_WORKFLOW_TOKEN", "")
+    """Run gh on the session's credential: the sidecar's newest mint where a
+    seat runs one (#1687), else the token the session started with. Past the
+    hour mark the latter answers 401 (issue #81); a read then retries once on
+    GH_WORKFLOW_TOKEN, the job-scoped token gh-comment already rides, because
+    settling needs reads and nothing else (issue #734). The two attributed
+    writes never fall back."""
+    session = dict(os.environ)
+    prefer_file(session)
+    proc = subprocess.run(("gh",) + args, capture_output=True, text=True, env=session)
+    fallback = session.get("GH_WORKFLOW_TOKEN", "")
     dead = proc.returncode != 0 and ("401" in proc.stderr or "Bad credentials" in proc.stderr)
     if dead and fallback and tuple(args[:2]) not in ATTRIBUTED:
-        env = dict(os.environ, GH_TOKEN=fallback)
+        env = dict(session, GH_TOKEN=fallback)
         proc = subprocess.run(("gh",) + args, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         hint = ("The app token expires about an hour into a session (issue #81);"

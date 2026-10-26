@@ -131,6 +131,7 @@ import subprocess
 import sys
 import time
 
+from app_token import prefer_file
 from verdict import approved_at, round_started
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -160,11 +161,16 @@ def note(msg):
 
 def gh_api(args, token=None, body=None):
     """Run gh api on an explicit credential; the token rides the environment,
-    never argv (hard rule 10). Returns (proc, http_status), status 0 when the
-    call succeeded and -1 when gh failed before speaking HTTP."""
+    never argv (hard rule 10). With none, the sidecar's newest mint where a
+    seat runs one (#1687), read at each call because a --wait outlasts the
+    token the session started with; else that token. Returns (proc,
+    http_status), status 0 when the call succeeded and -1 when gh failed
+    before speaking HTTP."""
     env = dict(os.environ)
     if token:
         env["GH_TOKEN"] = token
+    else:
+        prefer_file(env)
     proc = subprocess.run(
         ("gh", "api") + tuple(args),
         capture_output=True,
