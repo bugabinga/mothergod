@@ -1,0 +1,49 @@
+# One-shot probe for #1687: does the claude app token exchange allow a
+# second mint inside one job?
+#
+# The session's GitHub credential is minted once at the start of a job
+# and expires an hour later, inside a job that may run four; four fixes
+# routed writes around the hour and the PR open still has no late path
+# (GOVERNANCE "Token lifetime"). A sidecar that re-mints every 45 minutes
+# removes the class, if the exchange permits a second mint. This asks,
+# with the script that will become that sidecar's mint: two exchanges a
+# gap apart, statuses on the log, every minted token revoked at once.
+#
+# Dispatch only, by the operator or an agent on the admin PAT, as recheck
+# does (#1069); no cron and no model seat, so no actor rule applies. Not
+# in agent-alarm's watch list on purpose: a red here is the probe's
+# answer, not a check to fix. Costs the gap plus a minute of setup. Leaves
+# with the PR that acts on its answer, the sidecar or plan B on #1687.
+name: token-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      gap:
+        description: "Seconds between the two exchanges (under 85 minutes)"
+        default: "120"
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: token-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    # The gap bounds the run; 90 admits a gap long enough to test the
+    # runner's OIDC request token past the hour, should the first answer
+    # call for it.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      # Exposes ACTIONS_ID_TOKEN_REQUEST_URL and _TOKEN to the step, the
+      # same grant every model seat carries for the action's own mint.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - env:
+          GAP: ${{ inputs.gap }}
+        run: python3 .github/scripts/token-probe.py --gap "$GAP"
