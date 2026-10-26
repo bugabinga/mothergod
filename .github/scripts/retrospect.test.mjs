@@ -243,60 +243,102 @@ test("retrospect budget footer fixtures", async (t) => {
   }
 });
 
-// hollow() separates the runs that held no session, a guard-skipped run, a
-// phantom GitHub never gave a job (#553) and a script workflow with no Claude
-// step, from one that died before its audit step; all four have no artifact. The shapes are real, probed on
-// 2026-09-17: a skipped BDFL run (35165527435), a session that died (the
-// reviewer on #564, 34970585258), an alarm run with no Claude step at all
-// (34970888339) and a zero-job phantom on PR #571 (35205833235). Before this,
-// forty skipped runs after an outage printed as forty deaths (#525), and the
-// phantom printed as a death whose log to go read, when it has no log.
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-const skipDriver = `
+// classify() separates the runs that held no session, a guard-skipped run, a
+// phantom GitHub never gave a job (#553), a script workflow with no Claude
+// step and a cancelled run the debounce displaced (ADR-0014), from one that
+// died before its audit step and from one the runner stopped under; none has
+// an artifact. The shapes are real, probed on 2026-09-17: a skipped BDFL run
+// (35165527435), a session that died (the reviewer on #564, 34970585258), an
+// alarm run with no Claude step at all (34970888339) and a zero-job phantom
+// on PR #571 (35205833235); and on 2026-10-25: four heartbeats cancelled at
+// 47 to 80 minutes, Claude step `failure` on exit 143 with every step after
+// it skipped (40192857205 and three more, #1661), and a review the debounce
+// displaced before its session, Claude step `skipped` (40181349615). Before
+// this, forty skipped runs after an outage printed as forty deaths (#525),
+// the phantom printed as a death whose log to go read, when it has no log,
+// and the four killed heartbeats printed as nothing at all.
+const classifyDriver = `
 import importlib.machinery, importlib.util, json, sys
 sys.path.insert(0, sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
 spec = importlib.util.spec_from_loader("retrospect", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
-print(json.dumps(mod.hollow("o/r", 1)))
+jobs = json.loads(sys.argv[3])
+print(json.dumps(mod.classify(jobs, sys.argv[4]) if sys.argv[2] == "classify" else mod.claude_seconds(jobs)))
 `;
 
-function hollow(conclusions, jobs = 1, stepless = 0) {
-  const dir = mkdtempSync(join(tmpdir(), "retrospect-gh-"));
-  // gh api ... --jq already applied the selector; the stub prints its answer.
-  const answer = JSON.stringify({ jobs, stepless, claude: conclusions });
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho '${answer}'\n`);
-  chmodSync(join(dir, "gh"), 0o755);
-  const proc = spawnSync("python3", ["-c", skipDriver, scriptsDir], {
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
-  });
+// gh api ... --jq already applied the selector; `claude` is its answer, one
+// object per Claude step, a bare string standing for a step with no stamps.
+function probed(claude, { jobs = 1, stepless = 0 } = {}) {
+  const steps = claude.map((c) => (typeof c === "string" ? { conclusion: c } : c));
+  return JSON.stringify({ jobs, stepless, claude: steps });
+}
+
+function classify(claude, { conclusion = "failure", ...shape } = {}) {
+  const proc = spawnSync(
+    "python3",
+    ["-c", classifyDriver, scriptsDir, "classify", probed(claude, shape), conclusion],
+    { encoding: "utf8" },
+  );
   assert.equal(proc.status, 0, proc.stderr);
   return JSON.parse(proc.stdout.trim());
 }
 
+function claudeSeconds(claude) {
+  const proc = spawnSync(
+    "python3",
+    ["-c", classifyDriver, scriptsDir, "seconds", probed(claude), "cancelled"],
+    { encoding: "utf8" },
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  return JSON.parse(proc.stdout.trim());
+}
+
+const KILLED = { conclusion: "failure", started_at: "2026-10-25T21:23:21Z", completed_at: "2026-10-25T22:11:37Z" };
+
 test("a guard-skipped run: the Claude step concluded skipped", () => {
-  assert.equal(hollow(["skipped"]), "skipped");
+  assert.equal(classify(["skipped"]), "skipped");
 });
 
 test("a session that died is not skipped, whatever its post step says", () => {
-  assert.equal(hollow(["failure", "success"]), null);
+  assert.equal(classify(["failure", "success"]), null);
 });
 
 test("a run with jobs and no Claude step is a script workflow, not a death", () => {
-  assert.equal(hollow([], 3), "script");
+  assert.equal(classify([], { jobs: 3 }), "script");
 });
 
-test("run 37370936150: a job with no steps tells nothing, so it stays a death", () => {
-  assert.equal(hollow([], 1, 1), null);
+test("a job with no steps on a run that is not cancelled tells nothing, so it stays a death", () => {
+  assert.equal(classify([], { stepless: 1 }), null);
 });
 
 test("run 35205833235: zero jobs is a phantom, not a death with a log to read", () => {
-  assert.equal(hollow([], 0), "phantom");
+  assert.equal(classify([], { jobs: 0 }), "phantom");
+});
+
+test("run 40235230221: cancelled with the Claude step failed is a killed session", () => {
+  assert.equal(classify([KILLED], { conclusion: "cancelled" }), "killed");
+});
+
+test("run 40181349615: cancelled with the Claude step skipped is the debounce, not a skip to count", () => {
+  assert.equal(classify(["skipped"], { conclusion: "cancelled" }), "debounced");
+});
+
+test("run 37370936150: cancelled with a job that got no steps is the debounce, not a death", () => {
+  assert.equal(classify([], { stepless: 1, conclusion: "cancelled" }), "debounced");
+});
+
+test("a cancelled run with no job at all is the debounce, not a phantom", () => {
+  assert.equal(classify([], { jobs: 0, conclusion: "cancelled" }), "debounced");
+});
+
+test("a killed session's length is its Claude step's span, from the jobs API's stamps", () => {
+  assert.equal(claudeSeconds([KILLED]), 48 * 60 + 16);
+});
+
+test("a Claude step without stamps adds no time", () => {
+  assert.equal(claudeSeconds(["skipped", KILLED]), 48 * 60 + 16);
 });
 
 // The session line's "denied N (tool)" names no wall; run 35842553330's

@@ -97,6 +97,17 @@ needed. The bound assumes notional dollars are proportional to points
 between the interval and the window, which model and cache mix can break;
 a bound past one is printed as "at most all", never as "is all".
 
+KILLED is the tenth, one jobs call per cancelled run in the window. On
+2026-10-25 four heartbeats died at 47 to 80 minutes to a runner shutdown:
+SIGTERM to the Claude step, exit 143, step concluded `failure`, every
+`always()` step after it skipped, so no artifact, no session row, no
+notice; and this filtered `cancelled` out before asking the jobs API, so
+three hours of maintainer time read as calm (#1661). A cancelled run's
+Claude step is the tell: `failure` is a kill, anything else is the
+debounce (ADR-0014). A kill prints under its own heading with the step's
+length and the `claude/*` branches pushed while it ran, which is what the
+next wake rescues.
+
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
 
@@ -108,6 +119,9 @@ lacks:
   - a run that died before its audit step, which has no artifact. Reported by
     name with its URL, because that is the one case where `gh run view --log`
     still earns its cost.
+  - a cancelled run the debounce displaced (ADR-0014): a Claude step that
+    never ran, or no job at all. Neither counted nor listed. One the runner
+    stopped under is a killed session, listed (#1661).
   - a run of an agent workflow that has no Claude step by design (agent-alarm,
     agent-model-intel): a check, graded green or red by `state`, never a
     session. Counted on the last line, never listed: model-intel's Sunday run
@@ -134,7 +148,7 @@ a gap costs the finding.
 
 Liveness: the last line always prints how many sessions were read, how many
 opened with an announcement, how many runs were skipped, had no artifact,
-were script workflows, phantoms or still pending, how many artifacts and comments the window
+were killed, were script workflows, phantoms or still pending, how many artifacts and comments the window
 held and how many comments bypassed gh-comment, and the anchor, so a
 retrospect that returns nothing forever is distinguishable from a quiet
 hour.
@@ -164,8 +178,15 @@ from trend import report as trend_report
 AGENT_PREFIX = "agent-"
 
 # Conclusions with no session behind them: the workflow's own guards decided
-# not to run an agent at all.
-NOT_A_SESSION = frozenset({"skipped", "cancelled", "neutral"})
+# not to run an agent at all. `cancelled` is not here: a cancelled run is the
+# debounce (ADR-0014) until its Claude step says otherwise, and four
+# heartbeats on 2026-10-25 said otherwise (#1661), so `classify` reads it.
+NOT_A_SESSION = frozenset({"skipped", "neutral"})
+
+# The Claude step's conclusion under a runner shutdown: the runner sends the
+# step SIGTERM, it exits 143, and every step after it is skipped. A run the
+# debounce displaced carries a skipped step, or no job at all.
+KILLED_STEP = "failure"
 
 # Runs pulled from the API before filtering to the window. The common window
 # sits well inside the first fetch; a busy pipeline can breach it (2026-09-02:
@@ -231,9 +252,34 @@ def download(run_id, into):
     return None
 
 
-def hollow(repo, run_id):
+def probe(repo, run_id):
+    """The run's jobs, reduced to what `classify` reads.
+
+    A job count, the count of jobs with no steps, and each Claude step's
+    conclusion and span. Asked only about a run with no artifact, so an
+    ordinary window spends no extra call.
+    """
+    return json.loads(
+        gh(
+            "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
+            "--jq", '{jobs: (.jobs | length), '
+                    'stepless: ([.jobs[] | select(.steps | length == 0)] | length), '
+                    'claude: [.jobs[].steps[] '
+                    '| select(.name | test("claude-code-action")) '
+                    '| {conclusion, started_at, completed_at}]}',
+        )
+    )
+
+
+def classify(jobs, conclusion):
     """Why a run with no artifact held no session, or None when it did and died.
 
+    "killed": the run is `cancelled` and a Claude step concluded KILLED_STEP:
+    the runner stopped under a running session (#1661). The one cancelled
+    shape that is a session.
+    "debounced": any other `cancelled` run, displaced by the debounce
+    (ADR-0014) before a session: a skipped Claude step, no steps, no job.
+    Neither counted nor listed, as before `cancelled` reached this.
     "skipped": the guard skipped it, every Claude step concluded `skipped`.
     "phantom": GitHub raised the run and scheduled no job at all (#553), so
     there is no step, no session and no log; agent-alarm learned this class
@@ -242,29 +288,57 @@ def hollow(repo, run_id):
     with no session by design (agent-alarm, agent-model-intel); `state`
     grades it as a check, so the retrospect only counts it.
     None: a real session that died before its audit step, or a job that got
-    no runner and so has no steps to tell its workflow by (agent-deslop run
-    37370936150, cancelled, `steps: []`); it stays in the no-artifact list,
-    where the URL is the story.
-
-    Asked only about a run with no artifact, so an ordinary window spends no
-    extra call.
+    no runner and so has no steps to tell its workflow by; it stays in the
+    no-artifact list, where the URL is the story.
     """
-    jobs = json.loads(
-        gh(
-            "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
-            "--jq", '{jobs: (.jobs | length), '
-                    'stepless: ([.jobs[] | select(.steps | length == 0)] | length), '
-                    'claude: [.jobs[].steps[] '
-                    '| select(.name | test("claude-code-action")) | .conclusion]}',
-        )
-    )
+    claude = [step["conclusion"] for step in jobs["claude"]]
+    if conclusion == "cancelled":
+        return "killed" if KILLED_STEP in claude else "debounced"
     if jobs["jobs"] == 0:
         return "phantom"
-    if not jobs["claude"] and jobs["stepless"] == 0:
+    if not claude and jobs["stepless"] == 0:
         return "script"
-    if jobs["claude"] and all(c == "skipped" for c in jobs["claude"]):
+    if claude and all(c == "skipped" for c in claude):
         return "skipped"
     return None
+
+
+def claude_seconds(jobs):
+    """How long the Claude steps ran, from the jobs API's own stamps.
+
+    A killed session has no telemetry to say; the step's span is the one
+    duration that survives it.
+    """
+    total = 0
+    for step in jobs["claude"]:
+        if step.get("started_at") and step.get("completed_at"):
+            span = stamp_to_dt(step["completed_at"]) - stamp_to_dt(step["started_at"])
+            total += int(span.total_seconds())
+    return total
+
+
+def pushed_during(repo, start, end):
+    """The `claude/*` branches whose tip was committed between start and end.
+
+    What a killed session left on origin, which the next wake rescues under
+    GOVERNANCE "Stalled auto-merge": the 15:23Z heartbeat of 2026-10-25
+    pushed `claude/read-fill-error-test` at minute 40 and died at 55, and
+    `stalled-prs` naming it orphaned was the only trace (#1661). A branch
+    already rescued and deleted is not listed; nothing is left of it.
+    """
+    branches = json.loads(
+        gh(
+            "api", f"repos/{repo}/branches?per_page=100",
+            "--jq", '[.[] | select(.name | startswith("claude/")) | {name, sha: .commit.sha}]',
+        )
+    )
+    left = []
+    for branch in branches:
+        when = iso(gh("api", f"repos/{repo}/commits/{branch['sha']}",
+                      "--jq", ".commit.committer.date").strip())
+        if iso(start) <= when <= iso(end):
+            left.append(branch["name"])
+    return left
 
 
 def read_session(directory):
@@ -618,19 +692,26 @@ def main():
 
     workspace = tempfile.mkdtemp(prefix="retrospect-")
     read, skipped, scripts, openers = 0, 0, 0, 0
-    orphans, phantoms, samples, spent = [], [], [], []
+    orphans, phantoms, killed, samples, spent = [], [], [], [], []
     try:
         for run in window:
-            directory = download(run["databaseId"], workspace)
+            # A cancelled run has nothing worth a download: the debounce
+            # displaced it before a session (ADR-0014), or the runner stopped
+            # under it and the audit step never ran (#1661).
+            cancelled = run["conclusion"] == "cancelled"
+            directory = None if cancelled else download(run["databaseId"], workspace)
             if directory is None:
-                why = hollow(repo, run["databaseId"])
+                jobs = probe(repo, run["databaseId"])
+                why = classify(jobs, run["conclusion"])
                 if why == "skipped":
                     skipped += 1
                 elif why == "script":
                     scripts += 1
                 elif why == "phantom":
                     phantoms.append(run)
-                else:
+                elif why == "killed":
+                    killed.append((run, claude_seconds(jobs)))
+                elif why != "debounced":
                     orphans.append(run)
                 continue
             meta, response = read_session(directory)
@@ -654,6 +735,14 @@ def main():
         for run in orphans:
             print(f"    {iso(run['updatedAt'])}  {run['name']}  {run['conclusion']}  {run['url']}")
 
+    if killed:
+        print("\nkilled (the runner stopped under a running session: exit 143, "
+              "no artifact, no row, no notice; what it pushed is the rescue; #1661):")
+        for run, seconds in killed:
+            left = pushed_during(repo, run["startedAt"], run["updatedAt"])
+            print(f"    {iso(run['updatedAt'])}  {run['name']}  {seconds // 60} min into the session  {run['url']}")
+            print("        pushed: " + (", ".join(left) if left else "nothing that remains on origin"))
+
     if phantoms:
         print("\nphantom (GitHub raised the run and scheduled no job; no session, no log, nothing to read; #553):")
         for run in phantoms:
@@ -676,7 +765,7 @@ def main():
     trend_report()
     print(
         f"\nretrospect: sessions {read} | openers {openers} | skipped {skipped} "
-        f"| no-artifact {len(orphans)} | script {scripts} | phantom {len(phantoms)} | pending {len(pending)} "
+        f"| no-artifact {len(orphans)} | killed {len(killed)} | script {scripts} | phantom {len(phantoms)} | pending {len(pending)} "
         f"| artifacts {artifacts} | comments {len(comments)} | bypassed {bypassed} | since {anchor}"
     )
 
