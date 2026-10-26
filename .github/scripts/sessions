@@ -247,7 +247,7 @@ RUNS_PER_CALL = 8
 # gets a row, so every walk probes it anew, and the archive's 90 days would
 # be some 500 jobs calls a Sunday against a token allowed 1,000 an hour (43
 # cancelled agent runs in the week to 2026-10-26; the census line of
-# `sessions backfill` prints the current week's kills). Eight days overlaps
+# `sessions backfill` prints the kills the walk wrote). Eight days overlaps
 # the weekly walk by a day; a kill older than that is retrospect's to list
 # and `--since` to write.
 KILL_WINDOW = timedelta(days=8)
@@ -278,7 +278,9 @@ def killed(repo, since, present, rebuild, keys, unreadable):
     cancel (ADR-0014) is probed every walk, because it never gets a row.
     A run whose jobs could not be read is registered in `keys` without a
     row, so the census names it missing and the walk goes red, as an
-    unreadable artifact does, and the next walk tries again. The role is
+    unreadable artifact does, and the next walk tries again; so is a
+    listing without `updated_at`, the kill row's NOT NULL `at` (#1673),
+    before any jobs call is spent on it. The role is
     the guard table's; a run with no guard row carries its workflow's name,
     visibly not a seat.
     """
@@ -291,6 +293,10 @@ def killed(repo, since, present, rebuild, keys, unreadable):
         if key in present and not rebuild:
             continue
         name = f"run {key[0]} attempt {key[1]}"
+        if not run.get("updated_at"):
+            unreadable.append(f"{name}: the listing carries no updated_at, the kill row's at")
+            keys[name] = key
+            continue
         try:
             jobs = audit_facts.probe(repo, key[0])
             why = audit_facts.classify(jobs, "cancelled")
