@@ -21,10 +21,7 @@
 //! are the compressed download, not the corpus file itself:
 //! [`decompress_silesia`] unwraps one Silesia file's bzip2 stream, and
 //! [`extract_canterbury`] lists every file inside Canterbury's
-//! gzip-compressed tarball. See the module doc on `bench/corpus.toml`
-//! for the remaining `research/JOURNAL.md` S1-D2 scope (the
-//! train/sealed/finals split, regret scoring, the CI baseline gate,
-//! progress-graph rendering).
+//! gzip-compressed tarball.
 
 use sha2::{Digest, Sha256};
 use std::fmt;
