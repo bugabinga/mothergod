@@ -514,3 +514,142 @@ def walk(repo, artifacts):
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         yield from pool.map(one, artifacts)
+
+
+# A run with no artifact: what the jobs API still says (#1661). The runner
+# stopped under a running session sends the Claude step SIGTERM: the step
+# concludes KILLED_STEP, the job `cancelled`, every `always()` step after
+# it is skipped, so no artifact, no row, no notice. A run the debounce
+# displaced (ADR-0014) is `cancelled` too, with a skipped Claude step or no
+# job at all. Two readers, one test: retrospect lists a kill under its own
+# heading, `sessions backfill` writes its row from `killed_row`, so the
+# week's trend counts the lost hours instead of reading them as calm.
+
+# Only these produce a judgeable session. Everything else in the repository
+# is graded by exit code.
+AGENT_PREFIX = "agent-"
+
+# The Claude step's conclusion under a runner shutdown: the runner sends the
+# step SIGTERM, it exits 143, and every step after it is skipped. A run the
+# debounce displaced carries a skipped step, or no job at all.
+KILLED_STEP = "failure"
+
+# The jobs answer reduced to what `classify` reads: a job count, the count
+# of jobs with no steps, and each Claude step's conclusion and span.
+JOBS_JQ = ('{jobs: (.jobs | length), '
+           'stepless: ([.jobs[] | select(.steps | length == 0)] | length), '
+           'claude: [.jobs[].steps[] '
+           '| select(.name | test("claude-code-action")) '
+           '| {conclusion, started_at, completed_at}]}')
+
+
+def when(stamp):
+    """GitHub's own timestamp shape as an aware datetime."""
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def probe(repo, run_id):
+    """The run's jobs, reduced by JOBS_JQ.
+
+    Asked only about a run with no artifact, so an ordinary window spends
+    no extra call.
+    """
+    try:
+        return json.loads(gh("api", f"repos/{repo}/actions/runs/{run_id}/jobs", "--jq", JOBS_JQ))
+    except ValueError as error:
+        raise Unreadable(f"jobs of run {run_id} are not JSON: {error}") from None
+
+
+def classify(jobs, conclusion):
+    """Why a run with no artifact held no session, or None when it did and died.
+
+    "killed": the run is `cancelled` and a Claude step concluded KILLED_STEP:
+    the runner stopped under a running session (#1661). The one cancelled
+    shape that is a session.
+    "debounced": any other `cancelled` run, displaced by the debounce
+    (ADR-0014) before a session: a skipped Claude step, no steps, no job.
+    Neither counted nor listed, as before `cancelled` reached this.
+    "skipped": the guard skipped it, every Claude step concluded `skipped`.
+    "phantom": GitHub raised the run and scheduled no job at all (#553), so
+    there is no step, no session and no log; agent-alarm learned this class
+    first and this is the same test, a job count of zero.
+    "script": every job ran steps and none of them a Claude step, a workflow
+    with no session by design (agent-alarm, agent-model-intel); `state`
+    grades it as a check, so the retrospect only counts it.
+    None: a real session that died before its audit step, or a job that got
+    no runner and so has no steps to tell its workflow by; it stays in the
+    no-artifact list, where the URL is the story.
+    """
+    claude = [step["conclusion"] for step in jobs["claude"]]
+    if conclusion == "cancelled":
+        return "killed" if KILLED_STEP in claude else "debounced"
+    if jobs["jobs"] == 0:
+        return "phantom"
+    if not claude and jobs["stepless"] == 0:
+        return "script"
+    if claude and all(c == "skipped" for c in claude):
+        return "skipped"
+    return None
+
+
+def claude_seconds(jobs):
+    """How long the Claude steps ran, from the jobs API's own stamps.
+
+    A killed session has no telemetry to say; the step's span is the one
+    duration that survives it.
+    """
+    total = 0
+    for step in jobs["claude"]:
+        if step.get("started_at") and step.get("completed_at"):
+            span = when(step["completed_at"]) - when(step["started_at"])
+            total += int(span.total_seconds())
+    return total
+
+
+def cancelled_runs(repo, since):
+    """Every cancelled agent run created on or after `since`'s day, newest first.
+
+    The API's `created` filter is a date, so the day is whole: a window that
+    starts mid-day lists that day's earlier runs too, and a walk that
+    repeats weekly overlaps its predecessor by up to a day, never gaps.
+    Non-agent workflows (ci, CodeQL) are cancelled by their own
+    concurrency groups and hold no session, so they are dropped here and
+    cost no jobs call.
+    """
+    day = since.strftime("%Y-%m-%d")
+    try:
+        pages = json.loads(gh("api", "--paginate", "--slurp",
+                              f"repos/{repo}/actions/runs?status=cancelled"
+                              f"&per_page=100&created=>={day}"))
+    except ValueError as error:
+        raise Unreadable(f"run listing is not JSON: {error}") from None
+    found = []
+    for page in pages:
+        for run in page.get("workflow_runs", []):
+            if str(run.get("name", "")).startswith(AGENT_PREFIX):
+                found.append(run)
+    return found
+
+
+def killed_row(run, jobs, role):
+    """One sessions row for a run the runner stopped under, in COLUMNS order.
+
+    `run` is the listing's object, `jobs` its `probe`, `role` the seat it
+    declared to its gate. What the session would have reported is NULL,
+    never 0: `measured` 0 and `stop_reason` 'killed' are the two facts, `at`
+    is the run's last update (the kill, within seconds), `duration_ms` the
+    Claude step's span, the one length that survives a kill.
+    """
+    actor = run.get("actor") if isinstance(run.get("actor"), dict) else {}
+    values = (
+        as_int(run.get("id")), as_int(run.get("run_attempt")) or 1,
+        run.get("updated_at"), role,
+        run.get("event") or None, actor.get("login") or None, None,
+        run.get("head_sha") or None, 0, None,
+        None, None, None,
+        None, claude_seconds(jobs) * 1000, None, None,
+        "killed", None,
+        None, None, None,
+    )
+    values = tuple(bindable(v) for v in values)
+    return values[:3] + (values[3] or "?",) + values[4:]

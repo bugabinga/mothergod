@@ -247,7 +247,9 @@ test("retrospect budget footer fixtures", async (t) => {
 // phantom GitHub never gave a job (#553), a script workflow with no Claude
 // step and a cancelled run the debounce displaced (ADR-0014), from one that
 // died before its audit step and from one the runner stopped under; none has
-// an artifact. The shapes are real, probed on 2026-09-17: a skipped BDFL run
+// an artifact. It lives in audit_facts, because `sessions backfill` writes
+// the row for the kill this lists (#1661); the tests stay here, beside the
+// judge that reads the answer. The shapes are real, probed on 2026-09-17: a skipped BDFL run
 // (35165527435), a session that died (the reviewer on #564, 34970585258), an
 // alarm run with no Claude step at all (34970888339) and a zero-job phantom
 // on PR #571 (35205833235); and on 2026-10-25: four heartbeats cancelled at
@@ -258,12 +260,9 @@ test("retrospect budget footer fixtures", async (t) => {
 // the phantom printed as a death whose log to go read, when it has no log,
 // and the four killed heartbeats printed as nothing at all.
 const classifyDriver = `
-import importlib.machinery, importlib.util, json, sys
+import json, sys
 sys.path.insert(0, sys.argv[1])
-loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
-spec = importlib.util.spec_from_loader("retrospect", loader)
-mod = importlib.util.module_from_spec(spec)
-loader.exec_module(mod)
+import audit_facts as mod
 jobs = json.loads(sys.argv[3])
 print(json.dumps(mod.classify(jobs, sys.argv[4]) if sys.argv[2] == "classify" else mod.claude_seconds(jobs)))
 `;

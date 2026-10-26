@@ -165,30 +165,24 @@ import tempfile
 from datetime import datetime, timezone
 
 from allowance import WEEK, project, valid_fraction, valid_reset, window_readings
-from anchor import STAMP, gh, iso, previous_run_start, stamp_to_dt
+from anchor import STAMP, die, gh, iso, previous_run_start, stamp_to_dt
 from artifacts import report as artifacts_report
 from attribution import comments_since
 from attribution import report as attribution_report
-from audit_facts import notional_cost
+import audit_facts
+from audit_facts import AGENT_PREFIX, classify, claude_seconds, notional_cost, probe
 import d1
 from opener import trim
 from rounds import report as rounds_report
 from trend import report as trend_report
 
-# Only these produce a judgeable session. Everything else in the repository is
-# graded by exit code.
-AGENT_PREFIX = "agent-"
-
 # Conclusions with no session behind them: the workflow's own guards decided
 # not to run an agent at all. `cancelled` is not here: a cancelled run is the
 # debounce (ADR-0014) until its Claude step says otherwise, and four
 # heartbeats on 2026-10-25 said otherwise (#1661), so `classify` reads it.
+# The test lives in audit_facts, because `sessions backfill` writes the
+# rows for the same kills this lists.
 NOT_A_SESSION = frozenset({"skipped", "neutral"})
-
-# The Claude step's conclusion under a runner shutdown: the runner sends the
-# step SIGTERM, it exits 143, and every step after it is skipped. A run the
-# debounce displaced carries a skipped step, or no job at all.
-KILLED_STEP = "failure"
 
 # Runs pulled from the API before filtering to the window. The common window
 # sits well inside the first fetch; a busy pipeline can breach it (2026-09-02:
@@ -252,71 +246,6 @@ def download(run_id, into):
         if "metadata.json" in files:
             return root
     return None
-
-
-def probe(repo, run_id):
-    """The run's jobs, reduced to what `classify` reads.
-
-    A job count, the count of jobs with no steps, and each Claude step's
-    conclusion and span. Asked only about a run with no artifact, so an
-    ordinary window spends no extra call.
-    """
-    return json.loads(
-        gh(
-            "api", f"repos/{repo}/actions/runs/{run_id}/jobs",
-            "--jq", '{jobs: (.jobs | length), '
-                    'stepless: ([.jobs[] | select(.steps | length == 0)] | length), '
-                    'claude: [.jobs[].steps[] '
-                    '| select(.name | test("claude-code-action")) '
-                    '| {conclusion, started_at, completed_at}]}',
-        )
-    )
-
-
-def classify(jobs, conclusion):
-    """Why a run with no artifact held no session, or None when it did and died.
-
-    "killed": the run is `cancelled` and a Claude step concluded KILLED_STEP:
-    the runner stopped under a running session (#1661). The one cancelled
-    shape that is a session.
-    "debounced": any other `cancelled` run, displaced by the debounce
-    (ADR-0014) before a session: a skipped Claude step, no steps, no job.
-    Neither counted nor listed, as before `cancelled` reached this.
-    "skipped": the guard skipped it, every Claude step concluded `skipped`.
-    "phantom": GitHub raised the run and scheduled no job at all (#553), so
-    there is no step, no session and no log; agent-alarm learned this class
-    first and this is the same test, a job count of zero.
-    "script": every job ran steps and none of them a Claude step, a workflow
-    with no session by design (agent-alarm, agent-model-intel); `state`
-    grades it as a check, so the retrospect only counts it.
-    None: a real session that died before its audit step, or a job that got
-    no runner and so has no steps to tell its workflow by; it stays in the
-    no-artifact list, where the URL is the story.
-    """
-    claude = [step["conclusion"] for step in jobs["claude"]]
-    if conclusion == "cancelled":
-        return "killed" if KILLED_STEP in claude else "debounced"
-    if jobs["jobs"] == 0:
-        return "phantom"
-    if not claude and jobs["stepless"] == 0:
-        return "script"
-    if claude and all(c == "skipped" for c in claude):
-        return "skipped"
-    return None
-
-
-def claude_seconds(jobs):
-    """How long the Claude steps ran, from the jobs API's own stamps.
-
-    A killed session has no telemetry to say; the step's span is the one
-    duration that survives it.
-    """
-    total = 0
-    for step in jobs["claude"]:
-        if step.get("started_at") and step.get("completed_at"):
-            span = stamp_to_dt(step["completed_at"]) - stamp_to_dt(step["started_at"])
-            total += int(span.total_seconds())
-    return total
 
 
 VITALS = ("SELECT at, mem_avail_mb, swap_free_mb, disk_avail_mb, load1, top_rss_mb, top_name "
@@ -742,7 +671,10 @@ def main():
             cancelled = run["conclusion"] == "cancelled"
             directory = None if cancelled else download(run["databaseId"], workspace)
             if directory is None:
-                jobs = probe(repo, run["databaseId"])
+                try:
+                    jobs = probe(repo, run["databaseId"])
+                except audit_facts.Unreadable as error:
+                    die(f"jobs of run {run['databaseId']}: {error}")
                 why = classify(jobs, run["conclusion"])
                 if why == "skipped":
                     skipped += 1

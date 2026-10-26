@@ -37,10 +37,13 @@ The one run where the expensive reads are worth their tokens (ADR-0025).
 
 ## 2. Process health
 
-`.github/scripts/sessions roles --since 7d`, read beside the retrospect's
-trend block (this week against the prior, per role, the rows that
-moved): whose median turns climbed, whose denials returned, whose runs
-errored, which seat the guard held back. `gh run list` is for one run's
+`.github/scripts/sessions backfill`, then `.github/scripts/sessions
+roles --since 7d`, read beside the retrospect's trend block (this week
+against the prior, per role, the rows that moved): whose median turns
+climbed, whose denials returned, whose runs errored, which seat the
+guard held back, whose runs the runner killed. The walk comes first
+because a killed run's row is the walk's to write (#1661) and the
+Sunday walk in agent-model-intel.yml runs after this wake. `gh run list` is for one run's
 story, read before judging it, never for the census.
 
 ## 3. Scorecard
