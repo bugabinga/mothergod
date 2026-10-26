@@ -10,10 +10,7 @@
 #
 # Decompression is wired: `bench::corpus::decompress_silesia` (bzip2) and
 # `bench::corpus::extract_canterbury` (tar+gzip) turn a fetched entry's
-# bytes into raw corpus file(s). Remaining `research/JOURNAL.md` S1-D2
-# scope: the train/sealed/finals split plumbing, regret scoring, the CI
-# baseline gate, progress-graph rendering, and a scheduled workflow
-# exercising `--features corpus-fetch`.
+# bytes into raw corpus file(s).
 #
 # Silesia corpus (12 files), source: https://sun.aei.polsl.pl/~sdeor/corpus/
 [[file]]
