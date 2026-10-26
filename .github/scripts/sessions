@@ -37,12 +37,15 @@ Verbs:
              [--rebuild]          artifact the table lacks, `at` the artifact's
                                   creation, with its allowance readings, tool
                                   counts and walls beside it, eight runs a
-                                  call; prints the census and exits non-zero
-                                  on a gap. A statement that created a table
-                                  or added a column makes the walk whole,
-                                  present rows too: how a derived table gets
-                                  its history, no hand needed (#1355).
-                                  --rebuild forces that walk
+                                  call; then one row per agent run the runner
+                                  stopped under (#1661), from the jobs API,
+                                  stop_reason killed, measured 0, over --since
+                                  or the last eight days; prints the census
+                                  and exits non-zero on a gap. A statement
+                                  that created a table or added a column
+                                  makes the walk whole, present rows too: how
+                                  a derived table gets its history, no hand
+                                  needed (#1355). --rebuild forces that walk
 
 The table holds identifiers and API-authored numbers only (schema.sql names
 each column); a run's prose stays in its audit artifact for 90 days, linked
@@ -52,7 +55,10 @@ the archive holds and the table does not, keyed from the artifact's name so
 a present row costs no download, and then counts: every artifact the
 listing returned must have a row, or the verb names the ones without and
 exits 1. A partial backfill that reads as done is the same lie an empty
-table is.
+table is. A run the runner stopped under uploads nothing, so the archive
+cannot know it; its row comes from the jobs API's step conclusions, the
+test retrospect lists it by (#1661), so `roles` counts the lost hours
+instead of reading them as calm.
 
 Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py. `backfill`
 also reads GITHUB_REPOSITORY, or `--repo owner/name`.
@@ -237,6 +243,82 @@ def keys_in_table():
 RUNS_PER_CALL = 8
 
 
+# The kill scan's window when --since is absent. A debounced cancel never
+# gets a row, so every walk probes it anew, and the archive's 90 days would
+# be some 500 jobs calls a Sunday against a token allowed 1,000 an hour (43
+# cancelled agent runs in the week to 2026-10-26, 6 of them kills). Eight
+# days overlaps the weekly walk by a day; a kill older than that is
+# retrospect's to list and `--since` to write.
+KILL_WINDOW = timedelta(days=8)
+
+
+def roles_of(keys):
+    """The seat each run declared to its gate, from the guard table, by key.
+
+    A killed run uploaded no metadata to name its role; the guard row,
+    written before the Claude step (#891 slice 3), is the one record of it.
+    """
+    ids = sorted({run_id for run_id, _ in keys})
+    if not ids:
+        return {}
+    rows = d1.query("SELECT run_id, attempt, role FROM guard WHERE run_id IN "
+                    f"({', '.join('?' * len(ids))})", ids)
+    return {(r["run_id"], r["attempt"]): r["role"] for r in rows}
+
+
+def killed(repo, since, present, rebuild, keys, unreadable):
+    """One (name, key, script) per agent run the runner stopped under since `since` (#1661).
+
+    A kill has no artifact, every `always()` step after the Claude step
+    being skipped, so the archive walk cannot know it; the jobs API's step
+    conclusions can, by the test retrospect lists it with
+    (audit_facts.classify). One jobs call per cancelled agent run the table
+    lacks: a kill present costs nothing unless `rebuild`; a debounced
+    cancel (ADR-0014) is probed every walk, because it never gets a row.
+    A run whose jobs could not be read is registered in `keys` without a
+    row, so the census names it missing and the walk goes red, as an
+    unreadable artifact does, and the next walk tries again. The role is
+    the guard table's; a run with no guard row carries its workflow's name,
+    visibly not a seat.
+    """
+    found = []
+    for run in audit_facts.cancelled_runs(repo, since):
+        key = (audit_facts.as_int(run.get("id")), audit_facts.as_int(run.get("run_attempt")) or 1)
+        if key[0] is None:
+            unreadable.append(f"run {run.get('id')!r}: the listing carries no run id")
+            continue
+        if key in present and not rebuild:
+            continue
+        name = f"run {key[0]} attempt {key[1]}"
+        try:
+            jobs = audit_facts.probe(repo, key[0])
+            why = audit_facts.classify(jobs, "cancelled")
+        except audit_facts.Unreadable as error:
+            unreadable.append(f"{name}: {error}")
+            keys[name] = key
+            continue
+        except Exception as error:  # noqa: BLE001, the invariant on the artifact walk
+            unreadable.append(f"{name}: the jobs answer has a malformed field "
+                              f"({type(error).__name__}: {error})")
+            keys[name] = key
+            continue
+        if why == "killed":
+            found.append((name, key, run, jobs))
+    roles = roles_of([key for _, key, _, _ in found])
+    out = []
+    for name, key, run, jobs in found:
+        role = roles.get(key) or str(run.get("name") or "?")
+        try:
+            text = audit_facts.script(audit_facts.killed_row(run, jobs, role), [], [], [])
+        except Exception as error:  # noqa: BLE001, as above
+            unreadable.append(f"{name}: the jobs answer has a malformed field "
+                              f"({type(error).__name__}: {error})")
+            keys[name] = key
+            continue
+        out.append((name, key, text))
+    return out
+
+
 def backfill(repo, since, rebuild=False):
     """Migrate, write the archive's rows the table lacks, print the census; 1 on a gap.
 
@@ -264,6 +346,12 @@ def backfill(repo, since, rebuild=False):
     The table is read once either way, so the census's `present` counts
     the rows it held before the walk; deriving it from the walk printed
     `present 0` over a full table on that very rebuild (#1012).
+
+    The archive is the first source and the jobs API the second (#1661):
+    `killed` writes a row for every agent run the runner stopped under in
+    the window, after the artifacts, through the same calls. The census
+    counts them apart, and a run whose jobs could not be read is a gap
+    like an artifact that could not: named, and the exit red.
     """
     new = migrate(schema())
     rebuild = rebuild or bool(new)
@@ -312,6 +400,15 @@ def backfill(repo, since, rebuild=False):
             flush()
     if pending:
         flush()
+    archived = written
+    scan = since or datetime.now(timezone.utc) - KILL_WINDOW
+    for entry in killed(repo, scan, present, rebuild, keys, unreadable):
+        pending.append(entry)
+        if len(pending) == RUNS_PER_CALL:
+            flush()
+    if pending:
+        flush()
+    kills = written - archived
     have = keys_in_table()
     missing = [name for name, key in keys.items() if key not in have]
     for line in unreadable:
@@ -319,7 +416,7 @@ def backfill(repo, since, rebuild=False):
     floor = stamp(artifacts[0].made) if artifacts else "none"
     print(f"sessions backfill: schema new {', '.join(new) or 'none'}"
           f" | artifacts {len(artifacts)} since {floor}"
-          f" | present {held} | written {written}"
+          f" | present {held} | written {archived} | killed {kills}"
           f" | unreadable {len(unreadable)} | missing {len(missing)}")
     return 1 if missing else 0
 

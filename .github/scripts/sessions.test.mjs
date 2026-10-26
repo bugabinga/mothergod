@@ -376,9 +376,12 @@ test("an unknown verb prints the usage line and exits 2", async () => {
 
 // The archive, for `backfill`: a stub gh answers the listing with `artifacts`
 // and a zip download with the files `zips` holds for that id, or junk bytes
-// for an id mapped to null. Every call lands in calls.log, so a test can say
-// which artifacts were downloaded and which were skipped on their name.
-function stubGh(artifacts, zips) {
+// for an id mapped to null; the cancelled-run listing with `runs` and a
+// jobs probe with `jobs[id]`, already reduced as `--jq` would, or a failure
+// for an id it lacks (#1661). Every call lands in calls.log, so a test can
+// say which artifacts were downloaded, which runs were probed, and which
+// were skipped on their name.
+function stubGh(artifacts, zips, { runs = [], jobs = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "sessions-"));
   writeFileSync(
     join(dir, "gh"),
@@ -386,11 +389,20 @@ function stubGh(artifacts, zips) {
 import io, json, sys, zipfile
 artifacts = json.loads(${JSON.stringify(JSON.stringify(artifacts))})
 zips = json.loads(${JSON.stringify(JSON.stringify(zips))})
+runs = json.loads(${JSON.stringify(JSON.stringify(runs))})
+jobs = json.loads(${JSON.stringify(JSON.stringify(jobs))})
 args = sys.argv[1:]
 with open(${JSON.stringify(join(dir, "calls.log"))}, "a") as fh:
     fh.write(" ".join(args) + "\\n")
 if args[:3] == ["api", "--paginate", "--slurp"] and args[3].startswith("repos/o/r/actions/artifacts?"):
     print(json.dumps([{"artifacts": artifacts}]))
+elif args[:3] == ["api", "--paginate", "--slurp"] and args[3].startswith("repos/o/r/actions/runs?status=cancelled"):
+    print(json.dumps([{"workflow_runs": runs}]))
+elif args[0] == "api" and args[1].startswith("repos/o/r/actions/runs/") and args[1].endswith("/jobs"):
+    answer = jobs.get(args[1].split("/")[-2])
+    if answer is None:
+        sys.exit("stub gh: HTTP 500 for " + args[1])
+    print(json.dumps(answer))
 elif args[0] == "api" and args[1].startswith("repos/o/r/actions/artifacts/") and args[1].endswith("/zip"):
     files = zips.get(args[1].split("/")[-2])
     if files is None:
@@ -419,18 +431,17 @@ else:
   return dir;
 }
 
-function downloads(dir) {
-  let log = "";
+function calls(dir) {
   try {
-    log = readFileSync(join(dir, "calls.log"), "utf8");
+    return readFileSync(join(dir, "calls.log"), "utf8").split("\n");
   } catch {
     return [];
   }
-  return log
-    .split("\n")
-    .filter((l) => l.endsWith("/zip"))
-    .map((l) => l.split("/").at(-2));
 }
+
+const downloads = (dir) => calls(dir).filter((l) => l.endsWith("/zip")).map((l) => l.split("/").at(-2));
+const probes = (dir) => calls(dir).map((l) => l.match(/actions\/runs\/(\d+)\/jobs /)?.[1]).filter(Boolean);
+const scans = (dir) => calls(dir).filter((l) => l.includes("actions/runs?")).map((l) => l.split("created=>=").at(-1));
 
 const metadata = (run_id, role) => ({
   role,
@@ -494,7 +505,7 @@ test("backfill writes the rows the archive has and the table lacks, and names th
     assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
     assert.match(
       r.out,
-      /^sessions backfill: schema new none \\| artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 1 \| missing 1$/m,
+      /^sessions backfill: schema new none \\| artifacts 3 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| killed 0 \| unreadable 1 \| missing 1$/m,
     );
   });
 });
@@ -531,7 +542,7 @@ test("backfill writes an artifact's allowance readings beside its row; --rebuild
     // present 1, not 0: the row the table held before the walk counts, rewritten or not.
     assert.match(
       r.out,
-      /^sessions backfill: schema new none \\| artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 0 \| missing 0$/m,
+      /^sessions backfill: schema new none \\| artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| killed 0 \| unreadable 0 \| missing 0$/m,
     );
   });
 });
@@ -565,7 +576,7 @@ test("backfill writes an artifact's tool counts beside its row, none for an arti
       { run_id: 100, attempt: 1, tool: "Edit", uses: 0, denials: null },
       { run_id: 100, attempt: 1, tool: "Write", uses: 0, denials: null },
     ]);
-    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+    assert.match(r.out, /written 2 \| killed 0 \| unreadable 0 \| missing 0$/m);
   });
 });
 
@@ -617,7 +628,7 @@ test("a tool count that is not a count makes its artifact unreadable, never the 
       r.out,
       /^  unreadable audit-bdfl-100-1: metadata has a malformed field \(ValueError: tools.used\['Bash'\] is not a count\)$/m,
     );
-    assert.match(r.out, /written 1 \| unreadable 1 \| missing 1$/m);
+    assert.match(r.out, /written 1 \| killed 0 \| unreadable 1 \| missing 1$/m);
   });
 });
 
@@ -642,7 +653,7 @@ test("an artifact with more windows than the API reports is cut at sixteen rows,
     const rows = applied(seen);
     assert.equal(rows("allowance").length, 16); // the first sixteen by name
     assert.equal(rows("sessions").length, 2); // the next artifact was still written
-    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+    assert.match(r.out, /written 2 \| killed 0 \| unreadable 0 \| missing 0$/m);
   });
 });
 
@@ -669,7 +680,7 @@ test("backfill counts present by name before the walk rewrites keys from metadat
     assert.match(seen[1].body.sql, /INTO sessions \([^)]*\) VALUES \(100, 2, /); // written under the metadata key
     assert.match(
       r.out,
-      /^sessions backfill: schema new none \\| artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+      /^sessions backfill: schema new none \\| artifacts 1 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| killed 0 \| unreadable 0 \| missing 0$/m,
     );
   });
 });
@@ -687,7 +698,7 @@ test("backfill on a table equal to the archive downloads nothing and exits 0", a
     assert.deepEqual(downloads(gh), []);
     assert.match(
       r.out,
-      /artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 0 \| unreadable 0 \| missing 0$/m,
+      /artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 0 \| killed 0 \| unreadable 0 \| missing 0$/m,
     );
   });
 });
@@ -705,7 +716,7 @@ test("backfill --since keeps the artifacts created from that instant", async () 
     assert.match(seen[1].body.sql, /VALUES \(200, 1, /);
     assert.match(
       r.out,
-      /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| unreadable 0 \| missing 0$/m,
+      /artifacts 1 since 2026-09-01T00:00:00Z \| present 0 \| written 1 \| killed 0 \| unreadable 0 \| missing 0$/m,
     );
   });
 });
@@ -739,7 +750,7 @@ test("one artifact costs one unreadable line whatever broke it, never the walk",
     assert.match(r.out, /^  unreadable audit-curator-900-1: RuntimeError: .*encrypted/m);
     assert.match(
       r.out,
-      /artifacts 3 since 2026-08-28T00:00:00Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
+      /artifacts 3 since 2026-08-28T00:00:00Z \| present 0 \| written 1 \| killed 0 \| unreadable 2 \| missing 2$/m,
     );
   });
 });
@@ -772,7 +783,7 @@ test("a value D1 cannot bind becomes null in its row, never a dead walk", async 
     assert.equal(poisoned_row.cost_usd, null);
     assert.equal(poisoned_row.turns, null);
     assert.equal(valid.run_id, 200, "the valid artifact after it is written");
-    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+    assert.match(r.out, /written 2 \| killed 0 \| unreadable 0 \| missing 0$/m);
   });
 });
 
@@ -796,7 +807,7 @@ test("a text past the statement cap costs its artifact one unreadable line, neve
       r.out,
       /^  unreadable audit-herald-800-1: metadata has a malformed field \(ValueError: a statement of 15\d{4} bytes, over 50000\)$/m,
     );
-    assert.match(r.out, /written 1 \| unreadable 1 \| missing 1$/m);
+    assert.match(r.out, /written 1 \| killed 0 \| unreadable 1 \| missing 1$/m);
   });
 });
 
@@ -841,7 +852,7 @@ test("backfill counts a malformed or hostile artifact unreadable and writes the 
     assert.match(r.out, /^  unreadable audit-herald-300-2: /m);
     assert.match(
       r.out,
-      /artifacts 3 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| unreadable 2 \| missing 2$/m,
+      /artifacts 3 since 2026-08-22T08:14:32Z \| present 0 \| written 1 \| killed 0 \| unreadable 2 \| missing 2$/m,
     );
   });
 });
@@ -893,7 +904,7 @@ test("backfill writes an artifact's walls beside its row, none for an artifact w
       { run_id: 100, attempt: 1, tool: "Bash", wall: "deny-em-dash" },
       { run_id: 100, attempt: 1, tool: "Bash", wall: "mode" },
     ]);
-    assert.match(r.out, /written 2 \| unreadable 0 \| missing 0$/m);
+    assert.match(r.out, /written 2 \| killed 0 \| unreadable 0 \| missing 0$/m);
   });
 });
 
@@ -920,7 +931,7 @@ test("backfill applies the schema before reading the table, and a created table 
       assert.match(seen[1].body.sql, /^INSERT OR REPLACE INTO sessions /);
       assert.match(
         r.out,
-        /^sessions backfill: schema new walls \| artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| unreadable 0 \| missing 0$/m,
+        /^sessions backfill: schema new walls \| artifacts 1 since 2026-08-22T08:14:32Z \| present 1 \| written 1 \| killed 0 \| unreadable 0 \| missing 0$/m,
       );
     },
     { tables: [["sessions"], ["sessions", "walls"]] },
@@ -963,6 +974,107 @@ test("backfill writes eight runs a call, oldest first, each run's session row la
       many.map((_, i) => 1000 + i),
     );
     assert.equal(rows("allowance").length, 9);
-    assert.match(r.out, /written 9 \| unreadable 0 \| missing 0$/m);
+    assert.match(r.out, /written 9 \| killed 0 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+// The second source (#1661): a run the runner stopped under uploads no
+// artifact, so its row comes from the jobs API's step conclusions. The
+// shapes are real: 40235230221, the 21:23Z heartbeat of 2026-10-25,
+// cancelled at 48 min with its Claude step `failure`; 40181349615, a review
+// the debounce displaced, Claude step `skipped`; and a `ci` run, cancelled
+// by its own concurrency group, which holds no session and costs no call.
+const KILLED_STEP = { conclusion: "failure", started_at: "2026-10-25T21:23:21Z", completed_at: "2026-10-25T22:11:37Z" };
+const cancelled = (id, name, { event = "workflow_dispatch", actor = "bugabinga" } = {}) => ({
+  id,
+  run_attempt: 1,
+  name,
+  event,
+  actor: { login: actor },
+  head_sha: "0f75a2c43115f5f7a551d9bc1486e85328f9c396",
+  created_at: "2026-10-25T21:23:00Z",
+  updated_at: "2026-10-25T22:11:40Z",
+  conclusion: "cancelled",
+});
+const killed = cancelled(40235230221, "agent-heartbeat");
+const probedJobs = {
+  40235230221: { jobs: 1, stepless: 0, claude: [KILLED_STEP] },
+  40181349615: { jobs: 1, stepless: 0, claude: [{ conclusion: "skipped" }] },
+};
+const guardRow = d1([{ run_id: 40235230221, attempt: 1, role: "maintainer" }]);
+
+test("backfill writes a row for a run the runner stopped under: stop_reason killed, measured 0, the guard row's role (#1661)", async () => {
+  const runs = [
+    killed,
+    cancelled(40181349615, "agent-review", { event: "pull_request", actor: "claude[bot]" }),
+    cancelled(40181349616, "ci"),
+  ];
+  const gh = stubGh(listing.slice(0, 1), {}, { runs, jobs: probedJobs });
+  const answers = [keys([[100, 1]]), guardRow, d1([]), keys([[100, 1], [40235230221, 1]])];
+  await withStub(answers, async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual(downloads(gh), []); // the archive's one row is present
+    assert.deepEqual(probes(gh).sort(), ["40181349615", "40235230221"]); // the agent runs, never ci
+    const guard = seen.find((q) => q.body.sql.startsWith("SELECT run_id, attempt, role FROM guard"));
+    assert.deepEqual(
+      guard.body.params,
+      [40235230221],
+      "the guard is asked about the kill alone, never the debounced run",
+    );
+    const rows = applied(seen)("sessions");
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.deepEqual(
+      [row.run_id, row.attempt, row.at, row.role, row.event, row.actor, row.commit_sha],
+      [40235230221, 1, "2026-10-25T22:11:40Z", "maintainer", "workflow_dispatch", "bugabinga", killed.head_sha],
+    );
+    assert.deepEqual([row.measured, row.stop_reason, row.duration_ms], [0, "killed", (48 * 60 + 16) * 1000]);
+    // What the session would have reported is NULL, never 0.
+    assert.deepEqual([row.turns, row.out_tokens, row.denials, row.error, row.writes, row.number, row.model], [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    assert.match(r.out, /\| present 1 \| written 0 \| killed 1 \| unreadable 0 \| missing 0$/m);
+  });
+});
+
+test("a kill with no guard row carries its workflow's name; a jobs read that fails is one missing line, never the walk", async () => {
+  const runs = [killed, cancelled(40206666650, "agent-heartbeat")];
+  const gh = stubGh(listing.slice(0, 1), {}, { runs, jobs: { 40235230221: probedJobs[40235230221] } });
+  const answers = [keys([[100, 1]]), d1([]), d1([]), keys([[100, 1], [40235230221, 1]])];
+  await withStub(answers, async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.equal(applied(seen)("sessions")[0].role, "agent-heartbeat");
+    assert.match(r.out, /^  unreadable run 40206666650 attempt 1: .*HTTP 500/m);
+    assert.match(r.out, /\| written 0 \| killed 1 \| unreadable 1 \| missing 1$/m);
+  });
+});
+
+test("a kill already in the table costs no jobs call; the scan asks for the last eight days, or --since", async () => {
+  const gh = stubGh(listing.slice(0, 1), {}, { runs: [killed], jobs: probedJobs });
+  const present = keys([[100, 1], [40235230221, 1]]);
+  await withStub([present, present], async (base) => {
+    const before = new Date(Date.now() - 8 * 86400e3).toISOString().slice(0, 10);
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 0, r.out + r.err);
+    const after = new Date(Date.now() - 8 * 86400e3).toISOString().slice(0, 10);
+    assert.deepEqual(probes(gh), []);
+    assert.ok([before, after].includes(scans(gh)[0]), `scanned from ${scans(gh)[0]}`);
+    assert.match(r.out, /\| written 0 \| killed 0 \| unreadable 0 \| missing 0$/m);
+  });
+  await withStub([present, present], async (base) => {
+    const r = await run(["backfill", "--repo", "o/r", "--since", "2026-09-01"], {
+      D1_API_BASE: base,
+      PATH: `${gh}:${process.env.PATH}`,
+    });
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(scans(gh).at(-1), "2026-09-01");
   });
 });

@@ -13,7 +13,10 @@
 
 -- sessions: one row per agent run. Written by .github/actions/agent-audit
 -- through session-row.py as the run ends and by `sessions backfill` from
--- the archive; read by .github/scripts/sessions.
+-- the archive, and for a run the runner stopped under (#1661), which
+-- uploads nothing, from the jobs API: stop_reason 'killed', measured 0,
+-- duration_ms the Claude step's span, every field the session would have
+-- reported NULL. Read by .github/scripts/sessions.
 CREATE TABLE IF NOT EXISTS sessions (
   run_id         INTEGER NOT NULL,   -- GitHub Actions run id
   attempt        INTEGER NOT NULL,   -- run attempt, 1 unless re-run
@@ -32,7 +35,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   duration_ms    INTEGER,
   denials        INTEGER,            -- permission denials
   error          INTEGER,            -- is_error from the result entry
-  stop_reason    TEXT,
+  stop_reason    TEXT,               -- the harness's own (end_turn, max_turns, ...), or 'killed' (#1661)
   persona_sha    TEXT,               -- sha256 of the persona file carried
   prompt_bytes   INTEGER,
   response_bytes INTEGER,
