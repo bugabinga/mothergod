@@ -14,12 +14,14 @@ token-probe.py's first exchange status is the check.
 Never prints or logs a token: every function returns it and the caller
 decides where it goes. A status code is the only thing a caller should
 print; a failure body carries no credential and may be shown. A request
-that got no HTTP answer at all (refused connection, DNS, timeout) is
+that got no HTTP answer at all (refused connection, DNS, timeout, a body
+cut short) is
 status 0 with the reason in the body's error message, never an exception:
 the caller is a probe or a sidecar whose next line must still print, and
 a token minted a moment earlier must still reach its revoke.
 """
 
+import http.client
 import json
 import urllib.error
 import urllib.parse
@@ -48,8 +50,9 @@ def _send(req):
             return resp.status, _body(resp)
     except urllib.error.HTTPError as err:
         return err.code, _body(err)
-    except OSError as err:
-        # URLError (a refused connection, DNS) and TimeoutError are both OSError.
+    except (OSError, http.client.HTTPException) as err:
+        # URLError (a refused connection, DNS) and TimeoutError are OSError; a
+        # body cut short (IncompleteRead) or a malformed status line is not.
         reason = getattr(err, "reason", None) or err
         return 0, {"error": {"message": f"{type(err).__name__}: {reason}"}}
 

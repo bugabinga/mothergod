@@ -17,9 +17,12 @@ request that got no HTTP answer prints as status 0 with its reason, never
 as a traceback, and a token minted before it still reaches its revoke.
 
 The verdict reads the rounds: `re-mint allowed` when every round minted,
-`re-mint refused` when a round got a 4xx, `inconclusive` when the only
-misses were 5xx or no answer (the action retries those with backoff; the
-probe does not, so its reader re-dispatches). A revoke that got no answer
+`first mint failed, re-minting untested` when none did (the likeliest
+cause is the workflow not matching the default branch, which says nothing
+about a second mint), `re-mint refused` when a round after a mint got a
+4xx, `inconclusive` when the only misses after a mint were 5xx or no
+answer (the action retries those with backoff; the probe does not, so its
+reader re-dispatches). A revoke that got no answer
 is on its round's line, the token live until the expires_at beside it.
 
 Usage: token-probe.py [--gap SECONDS] [--rounds N] [--exchange-url URL] [--github-api URL]
@@ -63,7 +66,9 @@ def main():
             continue
         status, token, body = app_token.exchange(oidc, url=args.exchange_url)
         if token is None:
-            refused = refused or 400 <= status < 500
+            # Only a round after a mint says anything about re-minting: a first
+            # mint refused is usually the workflow missing from the default branch.
+            refused = refused or (minted > 0 and 400 <= status < 500)
             print(f"round {n}{when}: oidc 200, exchange {status}, {reason(body)}")
             continue
         minted += 1
@@ -74,6 +79,8 @@ def main():
 
     if minted == args.rounds:
         verdict = "re-mint allowed"
+    elif minted == 0:
+        verdict = "first mint failed, re-minting untested"
     elif refused:
         verdict = "re-mint refused"
     else:
@@ -89,6 +96,7 @@ def reason(body):
     code = details.get("error_code") or "no error code"
     message = error.get("message") or body.get("message") or "no message"
     return f"{code}: {str(message)[:200]}"
+
 
 if __name__ == "__main__":
     sys.exit(main())

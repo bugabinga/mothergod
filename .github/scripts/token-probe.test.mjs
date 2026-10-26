@@ -14,8 +14,11 @@ const script = `${scriptsDir}token-probe.py`;
 const validation =
   "Workflow validation failed. The workflow file must exist and have identical content to the version on the repository's default branch.";
 
-// `second` is the exchange's answer to the second round: "ok", "refused"
-// (401 with the action's validation body) or "down" (503, no error code).
+// `second` scripts the fake: "ok"; "refused" (the second exchange answers 401
+// with the action's validation body); "down" (the second exchange answers
+// 503, no error code); "first-refused" (every exchange answers 401);
+// "short-revoke" (the revoke answer promises 50 body bytes, sends none and
+// closes).
 function serve(second) {
   const seen = { oidc: [], exchange: [], revoke: [] };
   let minted = 0;
@@ -36,7 +39,7 @@ function serve(second) {
           res.end(JSON.stringify({ error: { message: "upstream unavailable" } }));
           return;
         }
-        if (seen.exchange.length === 2 && second === "refused") {
+        if (second === "first-refused" || (seen.exchange.length === 2 && second === "refused")) {
           res.writeHead(401, { "content-type": "application/json" });
           res.end(
             JSON.stringify({
@@ -51,6 +54,12 @@ function serve(second) {
         res.end(JSON.stringify({ [key]: `ghs_secret${minted}`, expires_at: `2026-10-26T19:0${minted}:00Z` }));
       } else if (req.method === "DELETE" && url.pathname === "/installation/token") {
         seen.revoke.push(auth);
+        if (second === "short-revoke") {
+          res.writeHead(200, { "content-length": "50" });
+          res.flushHeaders();
+          res.socket.destroy();
+          return;
+        }
         res.writeHead(204);
         res.end();
       } else {
@@ -179,7 +188,36 @@ test("revoke endpoint unreachable: every line still prints, the verdict stands, 
   });
 });
 
-test("exchange unreachable: status 0 with the reason on the line, exit 1, inconclusive", async () => {
+test("first mint refused: its own verdict, never refused or inconclusive", async () => {
+  await withServer("first-refused", async (base, seen) => {
+    const r = await run(["--gap", "0", "--exchange-url", `${base}/exchange`, "--github-api", base], {
+      ACTIONS_ID_TOKEN_REQUEST_URL: `${base}/oidc`,
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-bearer",
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assertNoSecret(r);
+    assert.match(r.stdout, /^round 1: oidc 200, exchange 401, workflow_not_found_on_default_branch: /m);
+    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 0 \| first mint failed, re-minting untested$/m);
+    assert.deepEqual(seen.revoke, []);
+  });
+});
+
+test("revoke answer cut short: no traceback, every line and the verdict still print", async () => {
+  await withServer("short-revoke", async (base, seen) => {
+    const r = await run(["--gap", "0", "--exchange-url", `${base}/exchange`, "--github-api", base], {
+      ACTIONS_ID_TOKEN_REQUEST_URL: `${base}/oidc`,
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-bearer",
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assertNoSecret(r);
+    assert.equal(r.stderr, "");
+    assert.match(r.stdout, /^round 1: oidc 200, exchange 201, expires_at 2026-10-26T19:01:00Z, revoke unreachable/m);
+    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 2 \| re-mint allowed$/m);
+    assert.equal(seen.revoke.length, 2);
+  });
+});
+
+test("exchange unreachable: status 0 with the reason on the line, exit 1, first mint failed", async () => {
   await withServer("ok", async (base) => {
     const r = await run(["--gap", "0", "--exchange-url", "http://127.0.0.1:1/exchange", "--github-api", base], {
       ACTIONS_ID_TOKEN_REQUEST_URL: `${base}/oidc`,
@@ -189,7 +227,7 @@ test("exchange unreachable: status 0 with the reason on the line, exit 1, inconc
     assertNoSecret(r);
     assert.equal(r.stderr, "");
     assert.match(r.stdout, /^round 1: oidc 200, exchange 0, no error code: URLError: .*refused/m);
-    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 0 \| inconclusive$/m);
+    assert.match(r.stdout, /^token-probe: rounds 2 \| minted 0 \| first mint failed, re-minting untested$/m);
   });
 });
 
