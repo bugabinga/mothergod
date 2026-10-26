@@ -776,7 +776,11 @@ fn wide_winning_search() -> (Vec<u8>, Winner, (Candidate, Reach, Vec<u8>)) {
     // The oracle is pinned apart from `widen`, which `search` itself calls.
     assert_eq!(
         serial,
-        (serial.0, Reach::Wide, wide_body(&data, serial.0)),
+        (
+            serial.0,
+            Reach::Wide,
+            trial_body(&data, serial.0, Reach::Wide)
+        ),
         "the wide trial wins on this input"
     );
     let index = candidates
@@ -796,7 +800,7 @@ fn widen_joins_a_right_guess_and_matches_the_serial_search() {
     let (data, winner, serial) = wide_winning_search();
     let (index, candidate, _) = winner;
     let widened = thread::scope(|scope| {
-        let handle = scope.spawn(|| wide_body(&data, candidate));
+        let handle = scope.spawn(|| trial_body(&data, candidate, Reach::Wide));
         widen(&data, winner, Some((index, handle)))
     });
     assert_eq!(widened, serial);
