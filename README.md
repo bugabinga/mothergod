@@ -34,18 +34,21 @@ Silesia. The wins are Canterbury's six smallest text and source files
 (`alice29.txt`, `asyoulik.txt`, `cp.html`, `fields.c`, `grammar.lsp`,
 `xargs.1`), its `kennedy.xls` spreadsheet, and Silesia's `ooffice` library.
 The widest losses are Silesia's `sao` star catalog, `mozilla` install archive
-and `mr` medical image, and Canterbury's `sum` executable. Closing Silesia heads [`ROADMAP.md`](ROADMAP.md), as open-ended
-research with no date attached.
-Per-file tables, the throughput columns, and the command that regenerates
-each report: [`docs/benchmarks/`](docs/benchmarks/).
+and `mr` medical image, and Canterbury's `sum` executable. Closing Silesia
+heads [`ROADMAP.md`](ROADMAP.md), as open-ended research with no date
+attached. Every file's numbers:
+[Canterbury](docs/benchmarks/canterbury.md),
+[Silesia](docs/benchmarks/silesia.md).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
 0.297 MB/s and decoded it at 4.568 MB/s; it encoded Silesia at 0.208 MB/s and
 decoded it at 2.868 MB/s. In the same run, `xz -9e` encoded Silesia at 2.121
 MB/s and decoded it at 87.638 MB/s, more than nine times faster to encode and
 more than twenty times faster to decode.
-Methodology, per-file rates, every level of gzip, zstd and xz, peak
-memory included, and the regeneration command: [`docs/benchmarks/`](docs/benchmarks/).
+The same two reports name the machine, give every file's rates, and end
+with every level of gzip, zstd and xz beside mothergod, peak memory
+included. The commands that regenerate them:
+[`docs/benchmarks/`](docs/benchmarks/README.md#regenerating).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
 format (`FORMAT_VERSION` 17) is specified but not frozen. Before the first
