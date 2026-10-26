@@ -436,14 +436,6 @@ pub mod base64_unwrap {
         table
     };
 
-    fn decode_char(b: u8) -> Option<u8> {
-        DECODE_TABLE[b as usize]
-    }
-
-    fn is_base64_byte(b: u8) -> bool {
-        decode_char(b).is_some() || b == b'='
-    }
-
     /// Strict standard-base64 decode: `=` padding is accepted only as the
     /// last group's trailing 1 or 2 characters, never elsewhere. Returns
     /// `None` on any invalid character or invalid padding placement;
@@ -464,7 +456,7 @@ pub mod base64_unwrap {
             }
             let mut vals = [0u8; 4];
             for (v, &b) in vals.iter_mut().zip(&group[..4 - pad]) {
-                *v = decode_char(b)?;
+                *v = DECODE_TABLE[b as usize]?;
             }
             out.push((vals[0] << 2) | (vals[1] >> 4));
             if pad < 2 {
@@ -478,8 +470,8 @@ pub mod base64_unwrap {
     }
 
     /// Appends the padded base64 text of `data` to `out`: the scan shared
-    /// by [`b64_encode`] and [`try_decode`], which differ only in how
-    /// `out` is allocated.
+    /// by [`decode`] and [`try_decode`], which differ only in how `out` is
+    /// allocated.
     fn encode_into(data: &[u8], out: &mut Vec<u8>) {
         for chunk in data.chunks(3) {
             let b0 = chunk[0];
@@ -498,12 +490,6 @@ pub mod base64_unwrap {
         }
     }
 
-    fn b64_encode(data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
-        encode_into(data, &mut out);
-        out
-    }
-
     /// Unwraps `data` to its decoded form when `data` is valid, canonical
     /// standard base64 (checked by decoding it and re-encoding the result:
     /// equal to `data` iff no information, such as non-canonical padding
@@ -514,11 +500,11 @@ pub mod base64_unwrap {
         if !data.len().is_multiple_of(4)
             || !data[..data.len().min(SCAN_LIMIT)]
                 .iter()
-                .all(|&b| is_base64_byte(b))
+                .all(|&b| b == b'=' || DECODE_TABLE[b as usize].is_some())
         {
             return None;
         }
-        strict_decode(data).filter(|decoded| b64_encode(decoded) == data)
+        strict_decode(data).filter(|decoded| decode(decoded) == data)
     }
 
     /// Inverts [`encode`]: the padded base64 text of `data`, `4 *
@@ -526,7 +512,9 @@ pub mod base64_unwrap {
     /// invalid unwrapped form.
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
-        b64_encode(data)
+        let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+        encode_into(data, &mut out);
+        out
     }
 
     /// Fallible [`decode`] (module docs of [`crate::filters`]).
