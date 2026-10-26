@@ -38,7 +38,7 @@ fn encode_rejects_non_canonical_padding_bits() {
     // non-zero padding bits, so re-encoding would not reproduce
     // this exact string: must be rejected, not silently accepted.
     let data = b"aGVsbG9=".as_slice();
-    let decoded_roundtrips = strict_decode(data).is_some_and(|d| b64_encode(&d) == data);
+    let decoded_roundtrips = strict_decode(data).is_some_and(|d| decode(&d) == data);
     assert!(!decoded_roundtrips, "fixture must exercise the guard");
     assert_eq!(encode(data), None);
 }
@@ -64,7 +64,7 @@ fn roundtrip_all_padding_lengths() {
         "abcdefgh",
         "abcdefghi",
     ] {
-        let wrapped = b64_encode(msg.as_bytes());
+        let wrapped = decode(msg.as_bytes());
         let unwrapped = encode(&wrapped).unwrap_or_else(|| panic!("message {msg:?} unwraps"));
         assert_eq!(unwrapped, msg.as_bytes());
         assert_eq!(decode(&unwrapped), wrapped, "message {msg:?}");
@@ -74,7 +74,7 @@ fn roundtrip_all_padding_lengths() {
 #[test]
 fn roundtrip_binary_payload() {
     let raw: Vec<u8> = (0..=255u8).cycle().take(300).collect();
-    let wrapped = b64_encode(&raw);
+    let wrapped = decode(&raw);
     assert_eq!(encode(&wrapped).as_deref(), Some(raw.as_slice()));
     assert_eq!(decode(&raw), wrapped);
 }
@@ -117,21 +117,18 @@ fn try_decode_reserves_exactly_the_padded_length() {
 }
 
 #[test]
-fn is_base64_byte_rejects_non_alphabet_characters() {
-    assert!(is_base64_byte(b'A'));
-    assert!(is_base64_byte(b'='));
-    assert!(!is_base64_byte(b'!'));
-}
-
-#[test]
-fn decode_char_inverts_alphabet_and_rejects_everything_else() {
+fn decode_table_inverts_alphabet_and_rejects_everything_else() {
     for (value, &symbol) in ALPHABET.iter().enumerate() {
         let value = u8::try_from(value).unwrap();
-        assert_eq!(decode_char(symbol), Some(value), "symbol {symbol:?}");
+        assert_eq!(
+            DECODE_TABLE[symbol as usize],
+            Some(value),
+            "symbol {symbol:?}"
+        );
     }
     for b in 0..=u8::MAX {
         if !ALPHABET.contains(&b) {
-            assert_eq!(decode_char(b), None, "byte {b:?}");
+            assert_eq!(DECODE_TABLE[b as usize], None, "byte {b:?}");
         }
     }
 }
@@ -150,7 +147,7 @@ fn strict_decode_rejects_length_not_a_multiple_of_four() {
 fn strict_decode_rejects_padding_in_a_non_final_group() {
     // Same fixture as `encode_rejects_invalid_padding_placement`,
     // asserted directly against `strict_decode`. `encode`'s outer
-    // round-trip check (`b64_encode(&decoded) == data`) independently
+    // round-trip check (`decode(&decoded) == data`) independently
     // rejects a wrongly-decoded result here, so it masks a mutant
     // that drops this guard (`||` -> `&&`, or `pad > 0` -> `pad < 0`,
     // both collapsing the guard to `pad > 2` alone) from any test
