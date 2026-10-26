@@ -507,12 +507,27 @@ pub mod base64_unwrap {
         strict_decode(data).filter(|decoded| decode(decoded) == data)
     }
 
-    /// Inverts [`encode`]: the padded base64 text of `data`, `4 *
-    /// data.len().div_ceil(3)` bytes. Total, so no byte string is an
-    /// invalid unwrapped form.
+    /// The length of the padded base64 text of `len` bytes. `u64` because
+    /// it can pass `u32::MAX`. The one statement of the length:
+    /// [`decode`], [`try_decode`] and [`select::Candidate::output_len`]
+    /// all read it.
+    pub(crate) const fn padded_len(len: u64) -> u64 {
+        len.div_ceil(3) * 4
+    }
+
+    /// [`padded_len`] of `data`, as an allocation size. A slice never
+    /// reaches the `usize::MAX` it saturates to, which no allocation
+    /// satisfies anyway.
+    fn padded_capacity(data: &[u8]) -> usize {
+        usize::try_from(padded_len(data.len() as u64)).unwrap_or(usize::MAX)
+    }
+
+    /// Inverts [`encode`]: the padded base64 text of `data`,
+    /// `padded_len` bytes. Total, so no byte string is an invalid
+    /// unwrapped form.
     #[must_use]
     pub fn decode(data: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+        let mut out = Vec::with_capacity(padded_capacity(data));
         encode_into(data, &mut out);
         out
     }
@@ -520,7 +535,7 @@ pub mod base64_unwrap {
     /// Fallible [`decode`] (module docs of [`crate::filters`]).
     pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
         let mut out = Vec::new();
-        out.try_reserve_exact(data.len().div_ceil(3) * 4)?;
+        out.try_reserve_exact(padded_capacity(data))?;
         encode_into(data, &mut out);
         Ok(out)
     }
@@ -565,7 +580,7 @@ pub mod reverse {
 /// when the reversed input's best delta stride beats none, [`reverse`]
 /// followed by that [`delta`].
 pub mod select {
-    use super::delta;
+    use super::{base64_unwrap, delta};
     use std::num::{NonZeroU8, NonZeroUsize};
 
     /// How much of `data` [`pick`] examines when scoring delta strides and
@@ -730,14 +745,14 @@ pub mod select {
         /// The length of the frame data this candidate reconstructs from
         /// `filtered_len` filtered bytes: the same length for every filter
         /// but [`Self::Base64`], which re-wraps three bytes into four
-        /// (`4 * filtered_len.div_ceil(3)`, the padded text). `u64`
+        /// (`base64_unwrap::padded_len`, the padded text). `u64`
         /// because that can pass `u32::MAX`. A frame's header declares the
         /// filtered length, so this is what a decoder budgets the output
         /// against before it allocates a byte.
         #[must_use]
         pub fn output_len(self, filtered_len: u32) -> u64 {
             match self {
-                Self::Base64 => u64::from(filtered_len).div_ceil(3) * 4,
+                Self::Base64 => base64_unwrap::padded_len(u64::from(filtered_len)),
                 Self::Identity
                 | Self::Delta(_)
                 | Self::Bcj
