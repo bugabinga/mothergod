@@ -276,6 +276,31 @@ test("show prints one run vertically, or says which run is missing", async () =>
   });
 });
 
+test("vitals prints a run's rows a minute apart, or says which run has none (#1665)", async () => {
+  const row = {
+    at: "2026-10-26T03:38:21Z",
+    mem_avail_mb: 409,
+    swap_free_mb: 12,
+    disk_avail_mb: 81234,
+    load1: 9.12,
+    top_rss_mb: 6400,
+    top_name: "rustc",
+  };
+  await withStub(d1([row]), async (base, seen) => {
+    const r = await run(["vitals", "40263802968"], { D1_API_BASE: base });
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(seen[0].body.params, [40263802968]);
+    assert.match(seen[0].body.sql, /FROM vitals WHERE run_id = \? ORDER BY at$/);
+    assert.match(r.out, /^at +mem_avail_mb +swap_free_mb +disk_avail_mb +load1 +top_rss_mb +top_name$/m);
+    assert.match(r.out, /^2026-10-26T03:38:21Z +409 +12 +81234 +9\.12 +6400 +rustc$/m);
+  });
+  await withStub(d1([]), async (base) => {
+    const r = await run(["vitals", "43"], { D1_API_BASE: base });
+    assert.equal(r.code, 0);
+    assert.equal(r.out.trim(), "no vitals for run id 43");
+  });
+});
+
 // One statement per call, because `ALTER TABLE ADD COLUMN` is not
 // idempotent in SQLite and a one-batch replay would stop at its "duplicate
 // column name" with every statement after it unapplied. The schema file's

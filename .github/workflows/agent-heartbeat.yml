@@ -74,6 +74,27 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         if: steps.guard.outputs.paused != 'true'
 
+      # One row a minute of this VM's vitals to the session table while
+      # the session runs (#1665): five heartbeats in 27 hours died to a
+      # SIGTERM that skips every `always()` step below, so nothing written
+      # at the end survives a kill, and the runner took its post-mortem
+      # with it. Its own session, output to a file, so this step ends at
+      # once and the job's orphan cleanup ends the writer with the job.
+      # `sessions vitals <run-id>` reads it; `retrospect` prints a killed
+      # run's newest row. The token is the one agent-guard writes with,
+      # handed over on stdin and scrubbed from the writer's environment:
+      # a process that lives beside the session for hours would otherwise
+      # hold it in `/proc/<pid>/environ`, one read away, where the Claude
+      # step's own env never carried it (#1666 review).
+      - if: steps.guard.outputs.paused != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          printf '%s\n' "$CLOUDFLARE_API_TOKEN" \
+            | env -u CLOUDFLARE_API_TOKEN setsid --fork \
+              python3 .github/scripts/vitals-sidecar.py \
+              > "$RUNNER_TEMP/vitals-sidecar.log" 2>&1
+
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1
@@ -270,3 +291,10 @@ jobs:
         run: |
           .github/scripts/run-notice.py "${RUNNER_TEMP}/agent-audit" heartbeat \
             | .github/scripts/tg-send --notice
+
+      # The sidecar's own account (#1665): its newest lines name how many
+      # rows left this VM, so a writer that died or was refused shows in
+      # every surviving run's log, not only as a killed run's missing row.
+      - if: always() && steps.claude.outcome != 'skipped'
+        continue-on-error: true
+        run: tail -n 2 "${RUNNER_TEMP}/vitals-sidecar.log"
