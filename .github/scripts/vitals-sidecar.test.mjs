@@ -36,14 +36,15 @@ function fixtureProc() {
   return proc;
 }
 
-// Serve one programmed D1 answer and record what the script sent.
+// Serve one programmed D1 answer and record what the script sent, the
+// bearer beside the body: the token reaches the request from stdin alone.
 async function withStub(answer, fn) {
   const seen = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
-      seen.push(JSON.parse(body));
+      seen.push({ ...JSON.parse(body), auth: req.headers.authorization });
       res.writeHead(answer.status ?? 200, { "content-type": "application/json" });
       res.end(JSON.stringify(answer.payload ?? { success: true, result: [{ success: true, results: [] }] }));
     });
@@ -56,12 +57,13 @@ async function withStub(answer, fn) {
   }
 }
 
-function run(args, env) {
+// The token on stdin, one line, as the workflow step feeds it; `stdin`
+// empty is a step that had none to give.
+function run(args, env, stdin = "test-token\n") {
   return new Promise((resolve) => {
     const child = spawn("python3", [script, ...args], {
       env: {
         ...process.env,
-        CLOUDFLARE_API_TOKEN: "test-token",
         D1_DATABASE: "db",
         GITHUB_RUN_ID: "40263802968",
         GITHUB_RUN_ATTEMPT: "1",
@@ -73,6 +75,7 @@ function run(args, env) {
     child.stdout.on("data", (c) => (out += c));
     child.stderr.on("data", (c) => (err += c));
     child.on("close", (code) => resolve({ code, out, err }));
+    child.stdin.end(stdin);
   });
 }
 
@@ -83,6 +86,7 @@ test("--once writes the schema's row from the fixture /proc: MB from kB, the hea
     assert.equal(r.code, 0, r.err);
     assert.equal(seen.length, 1);
     assert.equal(seen[0].sql, INSERT);
+    assert.equal(seen[0].auth, "Bearer test-token");
     const p = seen[0].params;
     assert.equal(p.length, 9);
     assert.equal(p[0], 40263802968);
@@ -114,23 +118,36 @@ test("a /proc field it cannot read is NULL in its column, the row still written"
   });
 });
 
-test("no token: one line, no request, exit 0; no run id the same", async () => {
+test("no token on stdin: one line, no request, exit 0; no run id the same", async () => {
   await withStub({}, async (base, seen) => {
-    const r = await run(["--once"], { D1_API_BASE: base, CLOUDFLARE_API_TOKEN: "" });
+    const r = await run(["--once"], { D1_API_BASE: base }, "");
     assert.equal(r.code, 0, r.err);
     assert.equal(seen.length, 0);
-    assert.equal(r.out.trim(), "vitals-sidecar: skipped, no CLOUDFLARE_API_TOKEN");
-    const env = { ...process.env, D1_API_BASE: base };
+    assert.equal(r.out.trim(), "vitals-sidecar: skipped, no token on stdin");
+    const env = { ...process.env, D1_API_BASE: base, D1_DATABASE: "db" };
     delete env.GITHUB_RUN_ID;
-    const child = spawn("python3", [script, "--once"], {
-      env: { ...env, CLOUDFLARE_API_TOKEN: "test-token", D1_DATABASE: "db" },
-    });
+    const child = spawn("python3", [script, "--once"], { env });
     let out = "";
     child.stdout.on("data", (c) => (out += c));
+    child.stdin.end("test-token\n");
     const code = await new Promise((resolve) => child.on("close", resolve));
     assert.equal(code, 0);
     assert.equal(out.trim(), "vitals-sidecar: skipped, no GITHUB_RUN_ID");
     assert.equal(seen.length, 0);
+  });
+});
+
+test("the token is read from stdin alone: one in the environment is not used", async () => {
+  const proc = fixtureProc();
+  await withStub({}, async (base, seen) => {
+    const r = await run(
+      ["--once", "--proc", proc, "--root", proc],
+      { D1_API_BASE: base, CLOUDFLARE_API_TOKEN: "env-token" },
+      "stdin-token\n",
+    );
+    assert.equal(r.code, 0, r.err);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].auth, "Bearer stdin-token");
   });
 });
 
@@ -147,18 +164,18 @@ test("a database that refuses the write is one token-free line, the loop goes on
   });
 });
 
-// The loop writes its first row before it checks the budget, so a second row
-// needs the first to finish inside the budget. 1.2 s leaves that two orders of
-// magnitude over a row's cost; 60 ms failed 4 of 24 runs with four test files
-// in parallel, as `node --test` runs them.
-test("--max-minutes ends the loop: two rows at a short interval, then done", async () => {
+// The end is the assertion, never a row count: under a 60 ms budget a loaded
+// runner wrote one row where two were pinned, 4 of 24 runs at four
+// concurrent (the reviewer's repro on #1666), and `node --test` runs files
+// in parallel.
+test("--max-minutes ends the loop where --once is absent", async () => {
   const proc = fixtureProc();
   await withStub({}, async (base, seen) => {
-    const r = await run(["--interval", "0.05", "--max-minutes", "0.02", "--proc", proc, "--root", proc], {
+    const r = await run(["--interval", "0.05", "--max-minutes", "0.01", "--proc", proc, "--root", proc], {
       D1_API_BASE: base,
     });
     assert.equal(r.code, 0, r.err);
-    assert.ok(seen.length >= 2, `rows ${seen.length}`);
+    assert.ok(seen.length >= 1, `rows ${seen.length}`);
     assert.match(r.out, /^vitals-sidecar: done, \d+ rows$/m);
   });
 });

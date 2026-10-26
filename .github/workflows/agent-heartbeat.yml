@@ -81,13 +81,19 @@ jobs:
       # with it. Its own session, output to a file, so this step ends at
       # once and the job's orphan cleanup ends the writer with the job.
       # `sessions vitals <run-id>` reads it; `retrospect` prints a killed
-      # run's newest row. The token is the one agent-guard writes with.
+      # run's newest row. The token is the one agent-guard writes with,
+      # handed over on stdin and scrubbed from the writer's environment:
+      # a process that lives beside the session for hours would otherwise
+      # hold it in `/proc/<pid>/environ`, one read away, where the Claude
+      # step's own env never carried it (#1666 review).
       - if: steps.guard.outputs.paused != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          setsid --fork python3 .github/scripts/vitals-sidecar.py \
-            > "$RUNNER_TEMP/vitals-sidecar.log" 2>&1 < /dev/null
+          printf '%s\n' "$CLOUDFLARE_API_TOKEN" \
+            | env -u CLOUDFLARE_API_TOKEN setsid --fork \
+              python3 .github/scripts/vitals-sidecar.py \
+              > "$RUNNER_TEMP/vitals-sidecar.log" 2>&1
 
       - id: claude
         if: steps.guard.outputs.paused != 'true'

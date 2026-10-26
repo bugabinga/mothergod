@@ -9,7 +9,12 @@ has to leave the VM while the session is still alive. This is that writer.
 agent-heartbeat.yml starts it in its own session before the Claude step
 (setsid, stdout and stderr in a file under RUNNER_TEMP), so the step that
 starts it ends at once and the job's orphan cleanup ends it with the job,
-the same cleanup that names `claude` at a kill. Each minute, one row:
+the same cleanup that names `claude` at a kill. The token arrives as one
+line on stdin and never in the environment: this process lives beside the
+session for hours, and `/proc/<pid>/environ` is one read away for any
+process of the same user, where a line read once into memory is not
+(Yama's ptrace scope; the reviewer's finding on #1666). The step scrubs
+its own environment of the token before the start. Each minute, one row:
 memory available and swap free from /proc/meminfo, space available on `/`
 from statvfs, the one-minute load from /proc/loadavg, and the heaviest
 process by resident size with its name from /proc/<pid>/status. The
@@ -19,11 +24,11 @@ killed run's newest row under its `killed` heading.
 Never fails the run and never holds it: exit 0 on every path, a row that
 could not be written is one line in its own log (token-free, d1.py scrubs),
 and the loop ends at --max-minutes, the job's own ceiling, should the
-cleanup miss it. No CLOUDFLARE_API_TOKEN is a valid configuration and gets
-one line, like guard-row.py. A field the sampler cannot read is NULL in
-its column, never 0, and never the row's loss.
+cleanup miss it. An empty stdin, or a terminal, is one line and exit 0. A
+field the sampler cannot read is NULL in its column, never 0, and never
+the row's loss.
 
-Usage: vitals-sidecar.py [--once] [--interval SECONDS] [--max-minutes N] [--proc DIR] [--root PATH]
+Usage: printf '%s\n' "$TOKEN" | vitals-sidecar.py [--once] [--interval SECONDS] [--max-minutes N] [--proc DIR] [--root PATH]
 
 --once writes one row and exits. --proc and --root point the sampler at a
 fixture tree and a path to statvfs for the test suite; no workflow sets
@@ -129,8 +134,9 @@ def parse(argv):
 
 def main(argv):
     args = parse(argv)
-    if not os.environ.get("CLOUDFLARE_API_TOKEN"):
-        print("vitals-sidecar: skipped, no CLOUDFLARE_API_TOKEN", flush=True)
+    token = "" if sys.stdin.isatty() else sys.stdin.readline().strip()
+    if not token:
+        print("vitals-sidecar: skipped, no token on stdin", flush=True)
         return 0
     if "GITHUB_RUN_ID" not in os.environ:
         print("vitals-sidecar: skipped, no GITHUB_RUN_ID", flush=True)
@@ -140,7 +146,7 @@ def main(argv):
     while True:
         values = row(os.environ, datetime.now(timezone.utc), sample(args.proc, args.root))
         try:
-            d1.query(INSERT, values)
+            d1.query(INSERT, values, token=token)
             written += 1
             print(f"vitals-sidecar: wrote row {written} at {values[2]}: mem avail {values[3]} MB, "
                   f"disk avail {values[5]} MB, load {values[6]}, heaviest {values[8]} {values[7]} MB", flush=True)
