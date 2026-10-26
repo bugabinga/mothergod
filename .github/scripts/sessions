@@ -25,6 +25,10 @@ Verbs:
                                   denials, errors, no-op runs over the runs
                                   with writes recorded, projected cost
     show <run-id>                 one run's row, one field per line
+    vitals <run-id>               the run's rows from the vitals table, one a
+                                  minute while its heartbeat ran (#1665),
+                                  oldest first; a killed run's newest row is
+                                  the post-mortem the runner took with it
     migrate                       apply infra/sessions/schema.sql one statement
                                   at a time and name what the database lacked;
                                   a column already present is skipped, not an
@@ -53,7 +57,7 @@ table is.
 Reads CLOUDFLARE_API_TOKEN; the database is named once in d1.py. `backfill`
 also reads GITHUB_REPOSITORY, or `--repo owner/name`.
 
-Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | migrate | backfill [--since W] [--rebuild] [--repo R]
+Usage: sessions sql <statement> [param ...] | roles [--since W] | show <run-id> | vitals <run-id> | migrate | backfill [--since W] [--rebuild] [--repo R]
 """
 
 import os
@@ -390,6 +394,11 @@ def main(argv):
             rows = d1.query("SELECT * FROM sessions WHERE run_id = ? ORDER BY attempt DESC LIMIT 1",
                             [int(args[0])])
             print("\n".join(render_show(rows, args[0])))
+        elif verb == "vitals" and len(args) == 1:
+            rows = d1.query("SELECT at, mem_avail_mb, swap_free_mb, disk_avail_mb, load1, "
+                            "top_rss_mb, top_name FROM vitals WHERE run_id = ? ORDER BY at",
+                            [int(args[0])])
+            print("\n".join(render(rows) if rows else [f"no vitals for run id {args[0]}"]))
         elif verb == "migrate":
             new = migrate(schema())
             print(f"sessions: schema applied from {os.path.relpath(SCHEMA)}: "

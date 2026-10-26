@@ -149,3 +149,24 @@ CREATE TABLE IF NOT EXISTS walls (
   wall     TEXT    NOT NULL,   -- the hook's name (deny-em-dash, deny-unpushed-work, ...) or the harness's decision type (mode, rule)
   PRIMARY KEY (run_id, attempt, tool, wall)
 );
+
+-- vitals: one row a minute from the VM a heartbeat session runs on
+-- (#1665). Written by .github/scripts/vitals-sidecar.py, which
+-- agent-heartbeat.yml starts in its own session before the Claude step;
+-- read by `sessions vitals <run-id>` and by retrospect, which prints a
+-- killed run's newest row under its `killed` heading. A runner stopped
+-- under a session skips every `always()` step after it (#1661), so the
+-- only record of its last minute is one that left the VM while the
+-- session was alive. A field the sampler could not read is NULL, never 0.
+CREATE TABLE IF NOT EXISTS vitals (
+  run_id        INTEGER NOT NULL,
+  attempt       INTEGER NOT NULL,
+  at            TEXT    NOT NULL,   -- ISO-8601 UTC, when the row was sampled
+  mem_avail_mb  INTEGER,            -- MemAvailable from /proc/meminfo
+  swap_free_mb  INTEGER,            -- SwapFree from /proc/meminfo
+  disk_avail_mb INTEGER,            -- space available on / to this user, from statvfs
+  load1         REAL,               -- one-minute load average
+  top_rss_mb    INTEGER,            -- resident size of the heaviest process
+  top_name      TEXT,               -- that process's name from /proc/<pid>/status
+  PRIMARY KEY (run_id, attempt, at)
+);

@@ -106,7 +106,9 @@ three hours of maintainer time read as calm (#1661). A cancelled run's
 Claude step is the tell: `failure` is a kill, anything else is the
 debounce (ADR-0014). A kill prints under its own heading with the step's
 length and the `claude/*` branches pushed while it ran, which is what the
-next wake rescues.
+next wake rescues, and ends with the run's newest vitals row, one a
+minute from the sidecar agent-heartbeat.yml runs beside the session
+(#1665): the post-mortem the runner used to take with it.
 
 What this does NOT cover, said plainly so nothing claims a completeness it
 lacks:
@@ -315,6 +317,45 @@ def claude_seconds(jobs):
             span = stamp_to_dt(step["completed_at"]) - stamp_to_dt(step["started_at"])
             total += int(span.total_seconds())
     return total
+
+
+VITALS = ("SELECT at, mem_avail_mb, swap_free_mb, disk_avail_mb, load1, top_rss_mb, top_name "
+          "FROM vitals WHERE run_id = ? ORDER BY at DESC LIMIT 1")
+
+
+def vitals_line(rows):
+    """A killed run's last minute as one line, from its newest vitals row (#1665).
+
+    The sidecar writes a row a minute beside the session, so the newest one
+    is the post-mortem the runner took with it before. No row is said so,
+    because a kill before the sidecar existed and one it could not write
+    both read as calm otherwise. Sizes print in GB past a gigabyte and in
+    MB below, where the number that matters is small.
+    """
+    if not rows:
+        return "no vitals row (a kill before #1665's sidecar, or one it could not write)"
+    r = rows[0]
+
+    def size(mb):
+        if not isinstance(mb, (int, float)):
+            return "?"
+        return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{int(mb)} MB"
+
+    load = r.get("load1")
+    load = f"{load:.2f}" if isinstance(load, (int, float)) else "?"
+    return (f"{r.get('at') or '?'}  mem avail {size(r.get('mem_avail_mb'))}, "
+            f"swap free {size(r.get('swap_free_mb'))}, disk avail {size(r.get('disk_avail_mb'))}, "
+            f"load {load}, heaviest {r.get('top_name') or '?'} {size(r.get('top_rss_mb'))}")
+
+
+def last_vitals(run_id, query=None):
+    """The one line for a killed run, UNREADABLE when the table could not be read."""
+    query = query or d1.query
+    try:
+        rows = query(VITALS, [int(run_id)])
+    except d1.Unreadable as error:
+        return f"UNREADABLE ({error}); the vitals table could not be read."
+    return vitals_line(rows)
 
 
 def pushed_during(repo, start, end):
@@ -742,6 +783,7 @@ def main():
             left = pushed_during(repo, run["startedAt"], run["updatedAt"])
             print(f"    {iso(run['updatedAt'])}  {run['name']}  {seconds // 60} min into the session  {run['url']}")
             print("        pushed: " + (", ".join(left) if left else "nothing that remains on origin"))
+            print("        last minute: " + last_vitals(run["databaseId"]))
 
     if phantoms:
         print("\nphantom (GitHub raised the run and scheduled no job; no session, no log, nothing to read; #553):")

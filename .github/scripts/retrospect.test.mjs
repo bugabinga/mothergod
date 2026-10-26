@@ -341,6 +341,61 @@ test("a Claude step without stamps adds no time", () => {
   assert.equal(claudeSeconds(["skipped", KILLED]), 48 * 60 + 16);
 });
 
+// A killed run's line ends with its newest vitals row (#1665): the sidecar
+// agent-heartbeat.yml runs beside the session writes one a minute, so the
+// newest is the post-mortem the runner used to take with it.
+const vitalsDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("retrospect", sys.argv[1] + "/retrospect")
+spec = importlib.util.spec_from_loader("retrospect", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(mod.vitals_line(json.loads(sys.argv[2])))
+`;
+
+function vitalsLine(rows) {
+  const proc = spawnSync("python3", ["-c", vitalsDriver, scriptsDir, JSON.stringify(rows)], { encoding: "utf8" });
+  assert.equal(proc.status, 0, proc.stderr);
+  return proc.stdout.trim();
+}
+
+test("a killed run's last minute is its newest vitals row on one line: GB past a gigabyte, MB below", () => {
+  const row = {
+    at: "2026-10-26T03:38:21Z",
+    mem_avail_mb: 409,
+    swap_free_mb: 12,
+    disk_avail_mb: 81234,
+    load1: 9.12,
+    top_rss_mb: 6400,
+    top_name: "rustc",
+  };
+  assert.equal(
+    vitalsLine([row]),
+    "2026-10-26T03:38:21Z  mem avail 409 MB, swap free 12 MB, disk avail 79.3 GB, load 9.12, heaviest rustc 6.2 GB",
+  );
+});
+
+test("a field the sampler could not read prints as ?, never as 0", () => {
+  const row = {
+    at: "2026-10-26T03:38:21Z",
+    mem_avail_mb: null,
+    swap_free_mb: 12,
+    disk_avail_mb: 81234,
+    load1: null,
+    top_rss_mb: null,
+    top_name: null,
+  };
+  assert.equal(
+    vitalsLine([row]),
+    "2026-10-26T03:38:21Z  mem avail ?, swap free 12 MB, disk avail 79.3 GB, load ?, heaviest ? ?",
+  );
+});
+
+test("no vitals row says so, never a calm line", () => {
+  assert.equal(vitalsLine([]), "no vitals row (a kill before #1665's sidecar, or one it could not write)");
+});
+
 // The session line's "denied N (tool)" names no wall; run 35842553330's
 // (2026-09-23) was the harness's protected-path check on .cargo/, and the
 // BDFL learned that from the docs, not the retrospect. Each distinct typed
