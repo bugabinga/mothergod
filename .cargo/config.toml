@@ -1,2 +1,22 @@
 [alias]
 x = "run --quiet --manifest-path x/Cargo.toml --"
+
+# Every binary cargo runs on Linux (a test binary, a `cargo run` target, x
+# and whatever x launches) gets 4 GiB of address space. A mutant, or a
+# guard not yet written, turns a bomb test into a real allocation: the
+# kernel overcommits the request, the test touches the pages, and the
+# runner swaps until GitHub reclaims the VM. Four mutants-sweep shards
+# died that way (run 40132179750), then six heartbeats between
+# 2026-10-25 and 2026-10-26 (#1672): the last one's vitals row shows a
+# test binary at 14.3 GiB RSS and swap at zero, one minute before the
+# kill. Under the cap the request fails, `try_reserve` returns Err or
+# Rust aborts, the test reports it, and a mutant that changes what the
+# crate allocates is caught, the right verdict. A limit on a runaway,
+# never a budget: measured at 7eb643a, the suite's largest binary peaks
+# at 1.5 GiB of address space and rustc under 0.5; four cargo-mutants
+# jobs at the cap fit a 16 GiB runner; the CLI's published bound is
+# 1 GiB (`.github/scripts/memory-check`). prlimit is util-linux.
+# fuzz/.cargo/config.toml lifts the cap for libFuzzer, whose
+# AddressSanitizer reserves terabytes of shadow at start.
+[target.'cfg(target_os = "linux")']
+runner = "prlimit --as=4294967296"

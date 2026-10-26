@@ -1,0 +1,7 @@
+# Lifts the root config's 4 GiB address-space cap for this workspace
+# alone: `cargo fuzz run` executes a target through `cargo run`, and
+# AddressSanitizer reserves terabytes of virtual shadow memory at start,
+# which the cap would refuse. libFuzzer bounds memory itself
+# (`-rss_limit_mb`, 2048 by default), so a bomb here still dies.
+[target.'cfg(target_os = "linux")']
+runner = "prlimit --as=unlimited"
