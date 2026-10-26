@@ -251,7 +251,7 @@ fn length_match_and_rep_models_adapt_independently() {
             ac: &mut ac,
             column: None,
         }
-        .length(&mut models, FlagKind::Match, 10);
+        .length(&mut models, CopyKind::Match, 10);
     }
     let trained_match_cost = ideal_cost_bucketed(&mut models.length_match, 10);
     let untrained_rep_cost = ideal_cost_bucketed(&mut models.length_rep, 10);
@@ -484,7 +484,7 @@ fn single_match_payload(distance: u32) -> Vec<u8> {
         ac: &mut ac,
         column: None,
     };
-    sink.length(&mut models, FlagKind::Match, 4);
+    sink.length(&mut models, CopyKind::Match, 4);
     sink.offset(&mut models, 4, distance);
 
     // declared_len 4, token_count 1
@@ -1052,7 +1052,7 @@ fn length_residual_trees_adapt_independently_by_kind() {
             ac: &mut ac,
             column: None,
         }
-        .length(&mut models, FlagKind::Match, 50);
+        .length(&mut models, CopyKind::Match, 50);
     }
     let trained = models.length_match_residual.ideal_cost_bits(50);
     let untrained = models.length_rep_residual.ideal_cost_bits(50);
