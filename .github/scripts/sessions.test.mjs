@@ -1057,6 +1057,23 @@ test("a kill with no guard row carries its workflow's name; a jobs read that fai
   });
 });
 
+test("a cancelled run whose listing lacks updated_at is one unreadable line, never a NULL at (#1673)", async () => {
+  const { updated_at: _, ...bare } = cancelled(40206666650, "agent-heartbeat");
+  const gh = stubGh(listing.slice(0, 1), {}, { runs: [killed, bare], jobs: probedJobs });
+  const answers = [keys([[100, 1]]), guardRow, d1([]), keys([[100, 1], [40235230221, 1]])];
+  await withStub(answers, async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.deepEqual(probes(gh), ["40235230221"], "no jobs call is spent on a run that cannot be written");
+    assert.deepEqual(applied(seen)("sessions").map((row) => row.run_id), [40235230221]);
+    assert.match(
+      r.out,
+      /^  unreadable run 40206666650 attempt 1: the listing carries no updated_at, the kill row's at$/m,
+    );
+    assert.match(r.out, /\| written 0 \| killed 1 \| unreadable 1 \| missing 1$/m);
+  });
+});
+
 test("a kill already in the table costs no jobs call; the scan asks for the last eight days, or --since", async () => {
   const gh = stubGh(listing.slice(0, 1), {}, { runs: [killed], jobs: probedJobs });
   const present = keys([[100, 1], [40235230221, 1]]);
