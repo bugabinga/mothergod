@@ -102,6 +102,16 @@ verb chosen by kind.
 reviewer's typed verdict, `merge-pr` reads the label without asking who set
 it, and `post-verdict` sets it on the ambient token, not through here.
 
+A 5xx from GitHub on the post or the labels gets one more try through
+`gh_retry.once` (its docstring names the three reviewer runs of
+2026-10-26 that did this by hand). Before the second post, the thread is
+read for the body this sent, since two minutes before the first try, and
+a comment found there is the post, printed and never repeated; a close
+counts as landed only when the thread is closed too, because gh closes
+after it comments. A create is landed when an open issue carries the
+exact title. A read that fails leaves the retry on, because a duplicate
+comment costs a reader a scroll and a missing verdict stalls a PR.
+
 Usage: gh-comment <issue-or-pr-number> [--label NAME]... [--close [--delete-branch]] < body
        gh-comment --new "<title>" [--label NAME]... [--anyway] < body
 Prints the comment's or the new issue's URL on stdout.
@@ -113,8 +123,10 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 
 from footer import attribute
+from gh_retry import once
 from opener import trim
 from secret_scrub import scrub
 
@@ -202,7 +214,7 @@ def duplicates(title, issues):
 def open_issues(env):
     """Every open issue's number and title, or None with the reason it could not be read."""
     result = subprocess.run(
-        ["gh", "issue", "list", "--state", "open", "--limit", "500", "--json", "number,title"],
+        ["gh", "issue", "list", "--state", "open", "--limit", "500", "--json", "number,title,url"],
         env=env, capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -214,6 +226,46 @@ def open_issues(env):
     if not isinstance(issues, list):
         return None, "gh issue list did not return a list"
     return issues, None
+
+
+def warn(line):
+    print(f"gh-comment: {line}", file=sys.stderr)
+
+
+def gh(call, env):
+    return subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
+
+
+def landed(env, number, body, since, closed):
+    """The URL of a comment carrying `body` on #number since `since`, or None.
+
+    With `closed`, the thread must be closed as well. A read that fails
+    is None with a line, so the caller's retry stays on.
+    """
+    path = f"repos/{{owner}}/{{repo}}/issues/{number}"
+    read = gh(["api", "-X", "GET", f"{path}/comments", "-f", f"since={since}", "-F", "per_page=100"], env)
+    if read.returncode != 0:
+        warn(f"could not read #{number}'s comments ({read.stderr.strip()}); trying the post again")
+        return None
+    try:
+        comments = json.loads(read.stdout)
+    except ValueError:
+        warn(f"#{number}'s comments did not parse; trying the post again")
+        return None
+    wanted = body.replace("\r\n", "\n").strip()
+    url = next((c.get("html_url") for c in comments if isinstance(c, dict)
+                and (c.get("body") or "").replace("\r\n", "\n").strip() == wanted), None)
+    if url and closed:
+        state = gh(["api", path, "--jq", ".state"], env)
+        if state.returncode != 0 or state.stdout.strip() != "closed":
+            return None
+    return url
+
+
+def landed_issue(env, title):
+    """The URL of an open issue carrying exactly `title`, or None."""
+    issues, _ = open_issues(env)
+    return next((i.get("url") for i in issues or [] if i.get("title") == title), None)
 
 
 def main() -> int:
@@ -326,7 +378,14 @@ def main() -> int:
         call = ["issue", "close" if args.close else "comment", args.number]
         call += ["--comment" if args.close else "--body", full_body]
         target = f"#{args.number}"
-    result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
+    since = (datetime.now(timezone.utc) - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if args.new is not None:
+        check = lambda: landed_issue(env, args.new)  # noqa: E731
+    else:
+        check = lambda: landed(env, args.number, full_body, since,  # noqa: E731
+                               closed=args.close or args.delete_branch)
+    result = once(lambda: gh(call, env), landed=check,
+                  name=f"gh {' '.join(call[:2])} on {target}", note=warn)
     if result.returncode != 0:
         die(f"gh {' '.join(call[:2])} on {target} failed: {result.stderr.strip()}")
     print(result.stdout.strip())
@@ -334,7 +393,7 @@ def main() -> int:
         call = ["api", "-X", "POST", f"repos/{{owner}}/{{repo}}/issues/{args.number}/labels"]
         for label in args.label:
             call += ["-f", f"labels[]={label}"]
-        result = subprocess.run(["gh"] + call, env=env, capture_output=True, text=True)
+        result = once(lambda: gh(call, env), name=f"the labels call on {target}", note=warn)
         if result.returncode != 0:
             die(f"the comment is on {target}; the label(s) {', '.join(args.label)} are not: "
                 f"{result.stderr.strip()}")
