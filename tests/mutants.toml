@@ -101,6 +101,21 @@ exclude_re = [
   "^src/coder\\.rs:261:43: replace \\| with &",
   "^src/coder\\.rs:248:26: replace >= with <",
 
+  # Non-terminating: the reader's two loops exit only on a state the
+  # mutant moves out of reach (#1621's undecided pair in src/read.rs).
+  #   read.rs:139:21  `read == 0` to `read != 0` in Decoder<R>::fill: the
+  #                   only `break` on end of source needs `read == 0`, so
+  #                   at EOF the loop reserves, reads 0, truncates and
+  #                   goes round again with `frame.len() < len` still
+  #                   true. Pinned: the function's other `==` (133:44)
+  #                   is caught by the Interrupted tests.
+  #   read_frame -> Ok(true): the body never loads a frame, so `read`'s
+  #                   `while self.pos == self.end` never leaves. Exact
+  #                   text: the `Ok(false)` twin is caught.
+  # 2 mutants, both timed out at 60s on the `read::` tests alone.
+  "^src/read\\.rs:139:21: replace == with != in Decoder<R>::fill$",
+  "replace Decoder<R>::read_frame -> io::Result<bool> with Ok\\(true\\)$",
+
   # Non-terminating, constant geometry: HALF doubled past TOP makes
   # `high < HALF` a tautology; MASK = TOP + 1 or TOP pins the interval
   # to {0, TOP} through the `& MASK` shifts. QUARTER's and
