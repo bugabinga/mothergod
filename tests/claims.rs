@@ -50,8 +50,45 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
+/// Every file a test here reads or runs the binary on: a path, or a
+/// directory prefix ending in `/`. `ci.yml`'s `changes` job runs `test` on
+/// a PR only for a changed path its `rust` filter names, so a claim about
+/// a file that filter misses passes every PR and fails on main's next
+/// push, where every job runs (issue #1009; `LICENSE` arrived that way in
+/// PR #1215). `input` holds this file to the list, and
+/// `.github/scripts/ci-filter.test.mjs` holds the filter to it, so a new
+/// input fails `claims` until it is listed and `worker` until the filter
+/// names it, both in the PR that adds it.
+const INPUTS: [&str; 8] = [
+    "README.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "LICENSE",
+    "bench/corpus.toml",
+    "research/progress.jsonl",
+    "docs/benchmarks/",
+    "site/",
+];
+
+/// `relative`, after checking it is a listed input: a file `INPUTS` names,
+/// or one under a listed directory.
+fn input(relative: &str) -> &str {
+    let listed = INPUTS.iter().any(|entry| {
+        if entry.ends_with('/') {
+            relative.starts_with(entry)
+        } else {
+            relative == *entry
+        }
+    });
+    assert!(
+        listed,
+        "{relative} is not in INPUTS: list it there and in ci.yml's `rust` filter, or a PR editing it skips `test`"
+    );
+    relative
+}
+
 fn read(relative: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(input(relative));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("cannot read {relative}: {error}"))
 }
 
@@ -1214,7 +1251,7 @@ fn published_first_run_transcript_matches_what_the_binary_prints() {
     // `LICENSE.mgdc`, so a reader can repeat it (issue #1216), and stdout is
     // not a terminal, which `-c` would refuse. The test runs it the same way.
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_mothergod"))
-        .args(["-v", "-c", "LICENSE"])
+        .args(["-v", "-c", input("LICENSE")])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .stdout(std::process::Stdio::null())
         .output()
