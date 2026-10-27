@@ -220,6 +220,7 @@ dependencies = [
  "dprint-plugin-typescript",
  "markup_fmt",
  "pretty_yaml",
+ "regex",
  "rumdl",
  "serde_json",
  "taplo",

@@ -27,83 +27,124 @@ pub(crate) struct Selection {
     pub(crate) files: Vec<PathBuf>,
 }
 
-pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, String> {
+/// The repository files a path list names, resolved once so one task, or
+/// `check` routing to several, can ask what each owns: a named file is
+/// kept whether or not a task owns it, so the caller can say why it was
+/// skipped; a directory contributes its tracked and non-ignored untracked
+/// regular files; no paths means the whole repository.
+pub(crate) struct Resolved {
+    pub(crate) root: PathBuf,
+    named: Vec<PathBuf>,
+    found: Vec<PathBuf>,
+}
+
+pub(crate) fn resolve(paths: &[PathBuf]) -> Result<Resolved, String> {
     let cwd = env::current_dir()
         .map_err(|error| format!("cannot read the current directory: {error}"))?;
     let root = repository_root(&cwd)?;
-    let explicit = !paths.is_empty();
-    let mut files = BTreeSet::new();
-    let mut skipped = Vec::new();
+    let mut named = Vec::new();
+    let mut found = Vec::new();
 
-    if explicit {
-        for path in paths {
-            let absolute = if path.is_absolute() {
-                path.clone()
-            } else {
-                cwd.join(path)
-            };
-            let metadata = fs::symlink_metadata(&absolute).map_err(|error| {
-                format!(
-                    "{}: path does not exist or cannot be read: {error}",
-                    path.display()
-                )
-            })?;
-            if metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "{}: symbolic links are not rewritten by x",
-                    path.display()
-                ));
-            }
-            let absolute = absolute.canonicalize().map_err(|error| {
-                format!(
-                    "{}: path does not exist or cannot be read: {error}",
-                    path.display()
-                )
-            })?;
-            let relative = absolute.strip_prefix(&root).map_err(|_| {
-                format!(
-                    "{}: path is outside repository {}",
-                    path.display(),
-                    root.display()
-                )
-            })?;
+    if paths.is_empty() {
+        found.extend(
+            git_files(&root, None)?
+                .into_iter()
+                .filter(|candidate| regular_file(&root, candidate) && !excluded(candidate)),
+        );
+    }
 
-            if excluded(relative) {
-                return Err(format!(
-                    "{}: archived imports are immutable and excluded from x",
-                    relative.display()
-                ));
-            }
-
-            if absolute.is_file() {
-                if let Some(advice) = unsupported(relative, task) {
-                    skipped.push(format!("{}: {advice}", relative.display()));
-                } else {
-                    files.insert(relative.to_path_buf());
-                }
-            } else if absolute.is_dir() {
-                for candidate in git_files(&root, Some(relative))? {
-                    if regular_file(&root, &candidate)
-                        && !excluded(&candidate)
-                        && supports(&candidate, task)
-                    {
-                        files.insert(candidate);
-                    }
-                }
-            } else {
-                return Err(format!("{}: expected a file or directory", path.display()));
-            }
+    for path in paths {
+        let absolute = if path.is_absolute() {
+            path.clone()
+        } else {
+            cwd.join(path)
+        };
+        let metadata = fs::symlink_metadata(&absolute).map_err(|error| {
+            format!(
+                "{}: path does not exist or cannot be read: {error}",
+                path.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "{}: symbolic links are not rewritten by x",
+                path.display()
+            ));
         }
-    } else {
-        for candidate in git_files(&root, None)? {
-            if regular_file(&root, &candidate)
-                && !excluded(&candidate)
-                && supports(&candidate, task)
-            {
-                files.insert(candidate);
-            }
+        let absolute = absolute.canonicalize().map_err(|error| {
+            format!(
+                "{}: path does not exist or cannot be read: {error}",
+                path.display()
+            )
+        })?;
+        let relative = absolute.strip_prefix(&root).map_err(|_| {
+            format!(
+                "{}: path is outside repository {}",
+                path.display(),
+                root.display()
+            )
+        })?;
+
+        if excluded(relative) {
+            return Err(format!(
+                "{}: archived imports are immutable and excluded from x",
+                relative.display()
+            ));
+        }
+
+        if absolute.is_file() {
+            named.push(relative.to_path_buf());
+        } else if absolute.is_dir() {
+            found.extend(
+                git_files(&root, Some(relative))?
+                    .into_iter()
+                    .filter(|candidate| regular_file(&root, candidate) && !excluded(candidate)),
+            );
+        } else {
+            return Err(format!("{}: expected a file or directory", path.display()));
         }
     }
+
+    Ok(Resolved { root, named, found })
+}
+
+impl Resolved {
+    /// The files `task` owns, sorted without duplicates, and the named
+    /// files it does not, each with the advice naming the command that can.
+    pub(crate) fn owned(&self, task: TaskKind) -> (Vec<PathBuf>, Vec<String>) {
+        let mut files = BTreeSet::new();
+        let mut skipped = Vec::new();
+        for path in &self.named {
+            match unsupported(path, task) {
+                Some(advice) => skipped.push(format!("{}: {advice}", path.display())),
+                None => {
+                    files.insert(path.clone());
+                }
+            }
+        }
+        files.extend(
+            self.found
+                .iter()
+                .filter(|path| supports(path, task))
+                .cloned(),
+        );
+        (files.into_iter().collect(), skipped)
+    }
+
+    /// The files named on the command line, repository-relative.
+    pub(crate) fn named(&self) -> &[PathBuf] {
+        &self.named
+    }
+
+    /// Every resolved file, named and found.
+    pub(crate) fn files(&self) -> impl Iterator<Item = &Path> {
+        self.named.iter().chain(&self.found).map(PathBuf::as_path)
+    }
+}
+
+pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, String> {
+    let resolved = resolve(paths)?;
+    let (files, skipped) = resolved.owned(task);
 
     if files.is_empty() {
         // A list where nothing was taken is an error carrying the first
@@ -113,10 +154,10 @@ pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, Str
         if let Some(reason) = skipped.first() {
             return Err(reason.clone());
         }
-        let scope = if explicit {
-            "selected paths"
-        } else {
+        let scope = if paths.is_empty() {
             "repository"
+        } else {
+            "selected paths"
         };
         return Err(format!(
             "no files supported by `cargo x {}` were found in {scope}",
@@ -129,8 +170,8 @@ pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, Str
     }
 
     Ok(Selection {
-        root,
-        files: files.into_iter().collect(),
+        root: resolved.root,
+        files,
     })
 }
 
@@ -204,15 +245,41 @@ fn git_files(root: &Path, path: Option<&Path>) -> Result<Vec<PathBuf>, String> {
         .collect()
 }
 
-fn supports(path: &Path, task: TaskKind) -> bool {
-    kind(path).is_some_and(|kind| match task {
-        TaskKind::Format => kind != FileKind::Markdown,
-        TaskKind::Lint => {
-            matches!(kind, FileKind::Rust | FileKind::Markdown)
-                && !(kind == FileKind::Rust && path.starts_with("fuzz"))
-                || kind == FileKind::Yaml && path.starts_with(".github")
-        }
+pub(crate) fn supports(path: &Path, task: TaskKind) -> bool {
+    match task {
+        TaskKind::Format => kind(path).is_some_and(|kind| kind != FileKind::Markdown),
+        TaskKind::Lint => clippy_input(path) || lints_by_kind(path),
+    }
+}
+
+fn lints_by_kind(path: &Path) -> bool {
+    kind(path).is_some_and(|kind| {
+        matches!(kind, FileKind::Rust | FileKind::Markdown)
+            && !(kind == FileKind::Rust && path.starts_with("fuzz"))
+            || kind == FileKind::Yaml && path.starts_with(".github")
     })
+}
+
+/// A file that is not Rust source but changes what Clippy sees: manifests,
+/// the lockfile, lint and toolchain configuration, and the CI definition of
+/// how Clippy runs. Clippy's input is the whole package set, so `lint`
+/// widens any of these to every package. These are the non-extension
+/// alternatives of ci.yml's `quality` filter that gate the `clippy` job
+/// (held to it by `filter::tests::every_clippy_input_is_under_the_quality_filter`),
+/// plus `clippy.toml` at any depth because `bench/clippy.toml` configures
+/// the bench package. The nightly `fuzz/` workspace is outside `lint`.
+pub(crate) fn clippy_input(path: &Path) -> bool {
+    if path.starts_with("fuzz") {
+        return false;
+    }
+    let name = path.file_name().and_then(|name| name.to_str());
+    matches!(
+        name,
+        Some("Cargo.toml" | "Cargo.lock" | "clippy.toml" | "rustfmt.toml")
+    ) || name.is_some_and(|name| name.starts_with("rust-toolchain"))
+        || path.starts_with(".cargo")
+        || path == Path::new(".github/workflows/ci.yml")
+        || path.starts_with(".github/actions/rust-ci")
 }
 
 /// Why `task` cannot take `path`, naming the command that can, or `None`

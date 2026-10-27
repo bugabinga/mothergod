@@ -24,10 +24,10 @@ governed by [`CLAUDE.md`](CLAUDE.md) instead.
   ```
 
   It runs formatting, lints, tests, and docs in order and stops at the
-  first failure, naming the command to re-run just that stage. Use the
-  constituent tasks with path arguments for narrow iteration, for example
-  `cargo x lint -- src`. Run `cargo x help` for the supported file types,
-  fixes, and scope rules.
+  first failure, naming the command to re-run just that stage. Scope it
+  to the files you changed with `cargo x check -- <paths>`, or run one
+  task, for example `cargo x lint -- src`. Run `cargo x help` for the
+  supported file types, fixes, and scope rules.
 
 - Lossless is non-negotiable: codec changes ship with round-trip tests.
 - The decoder must never panic on any input — compressed data is adversarial.

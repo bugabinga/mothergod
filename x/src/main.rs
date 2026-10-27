@@ -3,6 +3,7 @@
 mod check;
 mod doc;
 mod files;
+mod filter;
 mod format;
 mod lint;
 mod test;
@@ -30,11 +31,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Task {
-    /// Run the whole quality gate: fmt --check, lint, test, doc
+    /// Run the quality gate: fmt --check, lint, test, doc, whole or scoped to paths
     #[command(
-        after_help = "Runs `cargo x fmt --check`, `cargo x lint`, `cargo x test`, then `cargo x doc`, unscoped, in order.\n\nStops at the first failing stage and names the command to re-run just that one. This is the pre-push gate; CI enforces the same commands.\n\nExamples:\n  cargo x check"
+        after_help = "Without PATH arguments runs `cargo x fmt --check`, `cargo x lint`, `cargo x test`, then `cargo x doc`, unscoped, in order. This is the pre-push gate; CI enforces the same commands.\n\nWith PATH arguments each path goes to the stage that owns it: `fmt --check` for the formattable types, `lint` for Markdown, Rust, workflow YAML and the Clippy inputs (manifests, the lockfile, toolchain and lint configuration), and `test` then `doc` only when a path matches the `rust` filter of ci.yml's `changes` job, read from that file, so the check skips `test` and `doc` where CI does for a PR of the same paths. A named file no stage owns is noted and skipped; a list nothing owns is an error. A deleted file cannot be named: a change that deletes files runs the unscoped check.\n\nStops at the first failing stage and names the command to re-run just that one.\n\nExamples:\n  cargo x check\n  cargo x check -- .github/scripts/x.test.mjs docs/y.md\n  cargo x check -- src"
     )]
-    Check,
+    Check(CheckArgs),
     /// Format supported files, or verify formatting with --check
     Fmt(FormatArgs),
     /// Run Rust, Markdown and workflow-pin linters, optionally applying safe Markdown fixes
@@ -49,6 +50,13 @@ enum Task {
         after_help = "Runs `RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps --features mothergod-bench/corpus-fetch`, then again with `--document-private-items`, because rustdoc checks a link only in an item it renders.\n\nNot file-scoped: the whole crate documents or the task fails, naming the command to re-run.\n\nExamples:\n  cargo x doc"
     )]
     Doc,
+}
+
+#[derive(Args)]
+struct CheckArgs {
+    /// Files or directories to check; none runs the whole gate
+    #[arg(value_name = "PATH")]
+    paths: Vec<PathBuf>,
 }
 
 #[derive(Args)]
@@ -67,7 +75,7 @@ struct FormatArgs {
 
 #[derive(Args)]
 #[command(
-    after_help = "Runs Clippy for selected Rust package scopes, rumdl for selected Markdown files, and the action-pin rule for YAML under .github/: every external `uses:` is a 40-hex commit SHA with a version comment.\n\nWithout PATH arguments, every supported tracked file is selected. Markdown files are checked exactly; Rust files select their containing Cargo package because Clippy works at package scope; the bench package is linted with its `corpus-fetch` feature on.\n\nThe repository Markdown profile is documented in x/README.md. --fix applies only fixes rumdl marks safe, then checks the result again.\n\nExamples:\n  cargo x lint\n  cargo x lint -- src\n  cargo x lint -- README.md\n  cargo x lint --fix -- README.md"
+    after_help = "Runs Clippy for selected Rust package scopes, rumdl for selected Markdown files, and the action-pin rule for YAML under .github/: every external `uses:` is a 40-hex commit SHA with a version comment.\n\nWithout PATH arguments, every supported tracked file is selected. Markdown files are checked exactly; Rust files select their containing Cargo package because Clippy works at package scope; a manifest, the lockfile, toolchain or lint configuration, or the CI Clippy definition selects every package; the bench package is linted with its `corpus-fetch` feature on.\n\nThe repository Markdown profile is documented in x/README.md. --fix applies only fixes rumdl marks safe, then checks the result again.\n\nExamples:\n  cargo x lint\n  cargo x lint -- src\n  cargo x lint -- README.md\n  cargo x lint --fix -- README.md"
 )]
 struct LintArgs {
     /// Apply safe Markdown fixes before reporting remaining findings
@@ -88,7 +96,7 @@ fn main() -> ExitCode {
         Task::Lint(args) => execute(TaskKind::Lint, &args.paths, |selection| {
             lint::run(selection, args.fix)
         }),
-        Task::Check => run_at_root(check::run),
+        Task::Check(args) => check::run(&args.paths),
         Task::Test => run_at_root(test::run),
         Task::Doc => run_at_root(doc::run),
     };

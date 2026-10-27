@@ -8,7 +8,7 @@ use rumdl_lib::rule::{LintWarning, Rule};
 use rumdl_lib::rules::{all_rules, opt_in_rules};
 use rumdl_lib::utils::fix_utils::apply_warning_fixes;
 
-use crate::files::{FileKind, Selection, kind};
+use crate::files::{FileKind, Selection, clippy_input, kind};
 use crate::format::replace;
 
 const DISABLED_MARKDOWN_RULES: &[&str] = &[
@@ -34,10 +34,10 @@ pub(crate) const BENCH_CORPUS_FETCH: &str = "mothergod-bench/corpus-fetch";
 pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
     let mut findings = 0;
     let mut fixed_files = 0;
-    let rust_files = selection
+    let clippy_files = selection
         .files
         .iter()
-        .filter(|path| kind(path) == Some(FileKind::Rust))
+        .filter(|path| kind(path) == Some(FileKind::Rust) || clippy_input(path))
         .cloned()
         .collect::<Vec<_>>();
     let markdown_files = selection
@@ -105,12 +105,12 @@ pub(crate) fn run(selection: &Selection, fix: bool) -> Result<bool, String> {
         }
     }
 
-    if !rust_files.is_empty() && !run_clippy(&selection.root, &rust_files)? {
+    if !clippy_files.is_empty() && !run_clippy(&selection.root, &clippy_files)? {
         findings += 1;
         eprintln!("Rust linting failed");
         eprintln!(
             "  next: address the diagnostics, then rerun `cargo x lint -- {}`",
-            display_paths(&rust_files)
+            display_paths(&clippy_files)
         );
     }
 
@@ -331,7 +331,11 @@ fn run_clippy(root: &Path, files: &[PathBuf]) -> Result<bool, String> {
     let mut bench = false;
     let mut x = false;
     for path in files {
-        if path.starts_with("x") {
+        if clippy_input(path) {
+            // Not a source of one package: a manifest, lockfile or
+            // configuration reaches all three Clippy runs.
+            (core, bench, x) = (true, true, true);
+        } else if path.starts_with("x") {
             x = true;
         } else if path.starts_with("bench") {
             bench = true;

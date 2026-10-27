@@ -338,6 +338,128 @@ fn check_runs_passing_stages_in_order_and_names_the_failing_one() {
     assert!(!stdout.contains("doc:"));
 }
 
+/// ci.yml's `changes` job in miniature: the one guard a scoped
+/// `cargo x check` reads to decide whether `test` and `doc` run.
+fn write_ci_filter(repository: &Repository, pattern: &str) {
+    repository.write(
+        ".github/workflows/ci.yml",
+        &format!(
+            "          if echo \"$files\" | grep -qE '{pattern}'; then\n            echo \"rust=true\" >> \"$GITHUB_OUTPUT\"\n"
+        ),
+    );
+}
+
+#[test]
+fn check_scoped_to_paths_runs_the_stages_that_own_them_and_skips_the_crate() {
+    let repository = Repository::new();
+    repository.write("a.json", "{}\n");
+    repository.write("README.md", "# Title\n");
+    repository.write("scripts/run.py", "print(1)\n");
+    write_ci_filter(&repository, "\\.rs$|^LICENSE$");
+    repository.track();
+
+    let output = repository.x(&["check", "--", "a.json", "README.md", "scripts/run.py"]);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stderr}");
+    assert!(stdout.contains("fmt: 1 files checked"), "{stdout}");
+    assert!(stdout.contains("lint: 1 files checked"), "{stdout}");
+    assert!(
+        stdout.contains(
+            "check: fmt, lint passed; skipped test and doc (no path matches ci.yml's rust filter)"
+        ),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("test:"), "{stdout}");
+    assert!(stderr.contains("skipped scripts/run.py:"), "{stderr}");
+
+    let unowned = repository.x(&["check", "--", "scripts/run.py"]);
+    assert_eq!(unowned.status.code(), Some(2));
+    let stderr = String::from_utf8(unowned.stderr).unwrap();
+    assert!(
+        stderr.contains("error: scripts/run.py: not formatted"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn check_scoped_to_a_path_under_the_rust_filter_runs_test_and_doc() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write("LICENSE", "MIT\n");
+    write_ci_filter(&repository, "\\.rs$|^LICENSE$");
+    repository.track();
+
+    let output = repository.x(&["check", "--", "LICENSE"]);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stdout}{stderr}");
+    assert!(stdout.contains("test: 3 suites passed"), "{stdout}");
+    assert!(stdout.contains("doc: built without warnings"), "{stdout}");
+    assert!(
+        stdout.contains(
+            "check: test, doc passed; skipped fmt (nothing to format), lint (nothing to lint)"
+        ),
+        "{stdout}"
+    );
+    assert!(!stderr.contains("skipped LICENSE"), "{stderr}");
+}
+
+#[test]
+fn check_scoped_names_the_scoped_rerun_of_the_failing_stage() {
+    let repository = Repository::new();
+    repository.write("a.json", "{\"a\":1}");
+    write_ci_filter(&repository, "\\.rs$");
+    repository.track();
+
+    let output = repository.x(&["check", "--", "a.json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("check: fmt stage failed"), "{stderr}");
+    assert!(
+        stderr.contains("next: cargo x fmt --check -- a.json"),
+        "{stderr}"
+    );
+}
+
+/// CI's `clippy` job runs for a manifest, the lockfile and toolchain
+/// configuration, none of which `lint` owned by extension: a scoped
+/// check that left them out passed on the desk and went red on the server.
+#[test]
+fn check_scoped_to_a_cargo_input_runs_clippy_over_the_packages() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write(
+        "src/lib.rs",
+        "//! A crate Clippy refuses.\n\n/// Binds a name nothing reads.\npub fn noop() {\n    let unused = 1;\n}\n",
+    );
+    write_ci_filter(&repository, "\\.rs$");
+    repository.track();
+
+    let manifest = repository.x(&["check", "--", "Cargo.toml"]);
+    assert_eq!(manifest.status.code(), Some(1));
+    let stderr = String::from_utf8(manifest.stderr).unwrap();
+    assert!(stderr.contains("check: lint stage failed"), "{stderr}");
+    assert!(
+        stderr.contains("next: cargo x lint -- Cargo.toml"),
+        "{stderr}"
+    );
+
+    let member = repository.x(&["lint", "--", "x/Cargo.toml"]);
+    assert_eq!(
+        member.status.code(),
+        Some(1),
+        "any manifest reaches every package"
+    );
+
+    // A Markdown path alone changes nothing Clippy reads.
+    repository.write("README.md", "# Title\n");
+    repository.track();
+    let readme = repository.x(&["check", "--", "README.md"]);
+    let stderr = String::from_utf8(readme.stderr).unwrap();
+    assert!(readme.status.success(), "{stderr}");
+}
+
 /// The repository's shape in miniature: a root package with a `bench`
 /// member carrying the `corpus-fetch` feature, because `cargo x lint` and
 /// `cargo x doc` turn `mothergod-bench/corpus-fetch` on and cargo refuses a
