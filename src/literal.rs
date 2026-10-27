@@ -213,7 +213,7 @@ fn cumulate(mixed: impl IntoIterator<Item = u64>) -> [u64; ALPHABET + 1] {
 /// moves given `estimate` (this expert's own prediction) versus `mixed`
 /// (the blend's prediction), clamped to `[MIN_WEIGHT, MAX_WEIGHT]`.
 /// Shared by [`Literal::update`]'s six real experts and
-/// [`Literal::adapt_seventh_weight`]'s extra one, so both adapt by the same
+/// [`Literal::update_column_expert`]'s extra one, so both adapt by the same
 /// rule.
 fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) -> f64 {
     let denominator = mixed.max(MIN_DENOMINATOR);
@@ -801,29 +801,6 @@ impl Literal {
         scale6
     }
 
-    /// The extra expert's own weight, adapted toward how well
-    /// `estimate7` did against the six-real-experts-plus-extra mixed
-    /// estimate: [`Self::update_column_expert`]'s update rule.
-    fn adapt_seventh_weight(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        weights6: &[f64; EXPERTS],
-        weight_sum: f64,
-        symbol: usize,
-        w7: f64,
-        estimate7: f64,
-    ) -> f64 {
-        let estimate6 = self.expert_estimates(bank_indices, symbol);
-        let mixed_estimate = (weights6
-            .iter()
-            .zip(estimate6.iter())
-            .map(|(&w, &e)| w * e)
-            .sum::<f64>()
-            + w7 * estimate7)
-            / weight_sum;
-        adapt_weight(w7, estimate7, mixed_estimate, exp)
-    }
-
     /// Seven-wide counterpart of [`Self::mix`]: the same fixed-point blend
     /// with `column_state`'s bank folded in as a seventh expert, keyed by
     /// `column_bank`. Shared by [`Self::encode_column`] and
@@ -876,14 +853,15 @@ impl Literal {
         let column_estimate =
             f64::from(column_state.freq[bank_slot(column_bank, symbol)]) / column_total;
 
-        column_state.weight[weight_index] = self.adapt_seventh_weight(
-            bank_indices,
-            &weights6,
-            weight_sum,
-            symbol,
-            w7,
-            column_estimate,
-        );
+        let estimate6 = self.expert_estimates(bank_indices, symbol);
+        let mixed_estimate = (weights6
+            .iter()
+            .zip(estimate6.iter())
+            .map(|(&w, &e)| w * e)
+            .sum::<f64>()
+            + w7 * column_estimate)
+            / weight_sum;
+        column_state.weight[weight_index] = adapt_weight(w7, column_estimate, mixed_estimate, exp);
 
         crate::rescale_bank(
             &mut column_state.freq[bank_row(column_bank)],

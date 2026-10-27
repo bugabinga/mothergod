@@ -341,14 +341,15 @@ fn update_column_expert_estimates_from_bank_times_alphabet_plus_symbol() {
     let column_total = f64::from(column_state.total[column_bank]);
     let column_estimate =
         f64::from(column_state.freq[column_bank * ALPHABET + symbol]) / column_total;
-    let expected_weight = model.adapt_seventh_weight(
-        &bank_indices,
-        &weights6,
-        weight_sum,
-        symbol,
-        w7,
-        column_estimate,
-    );
+    let estimate6 = model.expert_estimates(&bank_indices, symbol);
+    let mixed_estimate = (weights6
+        .iter()
+        .zip(estimate6.iter())
+        .map(|(&w, &e)| w * e)
+        .sum::<f64>()
+        + w7 * column_estimate)
+        / weight_sum;
+    let expected_weight = adapt_weight(w7, column_estimate, mixed_estimate, exp);
 
     model.update_column_expert(
         &bank_indices,
