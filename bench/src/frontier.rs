@@ -140,12 +140,19 @@ pub fn neighbours<'a>(mothergod: &Row, field: &'a [Row]) -> Neighbours<'a> {
     Neighbours { as_good, as_fast }
 }
 
-/// `mothergod` and `field` as one markdown table, best-compressing first,
-/// mothergod's row in bold, followed by one line per neighbour.
+/// `mothergod`, its `faster` levels and `field` as one markdown table,
+/// best-compressing first, every mothergod row in bold, followed by one
+/// line per neighbour.
+///
+/// `mothergod` is the default level and carries the bare lines `/status`
+/// reads, `fastest level at least as good: <level>`. Each of `faster`, the
+/// other levels a user may pick, carries its own pair, `... as <its label>:
+/// <level>`, so a level no competitor row sits beside is still placed.
 #[must_use]
-pub fn format_table(mothergod: &Row, field: &[Row]) -> String {
+pub fn format_table(mothergod: &Row, faster: &[Row], field: &[Row]) -> String {
     let mut rows: Vec<(&Row, bool)> = field.iter().map(|r| (r, false)).collect();
     rows.push((mothergod, true));
+    rows.extend(faster.iter().map(|r| (r, true)));
     // A stable sort: a tie keeps `field`'s order and puts mothergod last.
     rows.sort_by(|(a, _), (b, _)| a.bpb().total_cmp(&b.bpb()));
 
@@ -173,13 +180,17 @@ pub fn format_table(mothergod: &Row, field: &[Row]) -> String {
         writeln!(out, "| {} |", cells.join(" | ")).expect("writing to a String never fails");
     }
 
-    let Neighbours { as_good, as_fast } = neighbours(mothergod, field);
-    for (what, row) in [
-        ("fastest level at least as good", as_good),
-        ("best level at least as fast", as_fast),
-    ] {
-        let named = row.map_or("none", |r| r.label.as_str());
-        writeln!(out, "\n{what}: {named}").expect("writing to a String never fails");
+    let lines = std::iter::once((mothergod, String::new()))
+        .chain(faster.iter().map(|r| (r, format!(" as {}", r.label))));
+    for (row, of) in lines {
+        let Neighbours { as_good, as_fast } = neighbours(row, field);
+        for (what, neighbour) in [
+            ("fastest level at least as good", as_good),
+            ("best level at least as fast", as_fast),
+        ] {
+            let named = neighbour.map_or("none", |r| r.label.as_str());
+            writeln!(out, "\n{what}{of}: {named}").expect("writing to a String never fails");
+        }
     }
     out
 }
@@ -190,16 +201,18 @@ pub fn format_table(mothergod: &Row, field: &[Row]) -> String {
 /// Starts with a blank line, so it follows `finals::format_report`'s last
 /// row directly.
 #[must_use]
-pub fn format_section(mothergod: &Row, field: &[Row]) -> String {
+pub fn format_section(mothergod: &Row, faster: &[Row], field: &[Row]) -> String {
     format!(
         "\n## Frontier: every level of gzip, zstd and xz beside mothergod\n\n\
          Each row sums this corpus's files. Every process ran one at a time, \
          on the machine named above, from a file on stdin: encode and decode \
          MB/s are total bytes over total wall-clock seconds, and peak MiB is \
          the largest resident set of any one process (`/usr/bin/time -f %M`). \
-         The speed axis of the two neighbour lines is encode MB/s (issue \
-         #1340).\n\n{}",
-        format_table(mothergod, field)
+         The speed axis of the neighbour lines is encode MB/s (issue \
+         #1340). `mothergod` is the default level, `-3`; `mothergod -1` and \
+         `mothergod -2` are the faster ones, each with its own neighbour \
+         lines (issue #1708).\n\n{}",
+        format_table(mothergod, faster, field)
     )
 }
 
@@ -342,7 +355,7 @@ mod tests {
         };
         let field = [row("gzip -9", 330_000, 0.5), row("xz -9e", 240_000, 10.0)];
         assert_eq!(
-            format_table(&mg, &field),
+            format_table(&mg, &[], &field),
             "\
 | level | b/B | encode MB/s | decode MB/s | peak MiB |
 |---|---|---|---|---|
@@ -353,6 +366,33 @@ mod tests {
 fastest level at least as good: xz -9e
 
 best level at least as fast: xz -9e
+"
+        );
+    }
+
+    #[test]
+    fn a_faster_level_is_a_bold_row_with_its_own_neighbour_lines() {
+        let mg = row("mothergod", 250_000, 25.0);
+        // 2.4 b/B at 0.5 MB/s.
+        let fast = row("mothergod -2", 300_000, 2.0);
+        let field = [row("zstd -3", 310_000, 1.0), row("xz -9e", 240_000, 30.0)];
+        assert_eq!(
+            format_table(&mg, &[fast], &field),
+            "\
+| level | b/B | encode MB/s | decode MB/s | peak MiB |
+|---|---|---|---|---|
+| xz -9e | 1.920000 | 0.033 | 2.000 | 1.0 |
+| **mothergod** | **2.000000** | **0.040** | **2.000** | **1.0** |
+| **mothergod -2** | **2.400000** | **0.500** | **2.000** | **1.0** |
+| zstd -3 | 2.480000 | 1.000 | 2.000 | 1.0 |
+
+fastest level at least as good: xz -9e
+
+best level at least as fast: zstd -3
+
+fastest level at least as good as mothergod -2: xz -9e
+
+best level at least as fast as mothergod -2: zstd -3
 "
         );
     }
@@ -385,8 +425,11 @@ best level at least as fast: xz -9e
     fn section_is_a_heading_and_the_table_after_a_blank_line() {
         let mg = row("mothergod", 250_000, 25.0);
         let field = [row("xz -9e", 240_000, 10.0)];
-        let section = format_section(&mg, &field);
+        let section = format_section(&mg, &[], &field);
         assert!(section.starts_with("\n## Frontier: "), "{section}");
-        assert!(section.ends_with(&format_table(&mg, &field)), "{section}");
+        assert!(
+            section.ends_with(&format_table(&mg, &[], &field)),
+            "{section}"
+        );
     }
 }

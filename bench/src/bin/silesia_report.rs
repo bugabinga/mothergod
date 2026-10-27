@@ -22,7 +22,8 @@
 //! MB/s published in `silesia.md` is a rate only if nothing runs beside
 //! it (issue #1321). Only the untimed reference compressors run one
 //! thread per file. `frontier_section` then times every gzip, zstd and xz
-//! level the same way and appends the frontier table (issue #1340).
+//! level and mothergod's two faster levels the same way and appends the
+//! frontier table (issues #1340, #1708).
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint
@@ -106,10 +107,15 @@ fn main() -> ExitCode {
         }
     };
 
-    let measurements = match std::env::current_exe()
-        .map_err(|err| format!("failed to locate this binary to time mothergod in: {err}"))
-        .and_then(|program| measure_all(&files, &program))
-    {
+    let program = match std::env::current_exe() {
+        Ok(program) => program,
+        Err(err) => {
+            eprintln!("failed to locate this binary to time mothergod in: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let measurements = match measure_all(&files, &program) {
         Ok(measurements) => measurements,
         Err(err) => {
             eprintln!("{err}");
@@ -117,7 +123,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let frontier = match frontier_section(&files, &measurements) {
+    let frontier = match frontier_section(&files, &measurements, &program) {
         Ok(section) => section,
         Err(err) => {
             eprintln!("{err}");
