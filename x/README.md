@@ -25,12 +25,16 @@ command to re-run just that one. It is the one pre-push command CLAUDE.md
 names.
 
 With paths, `check` routes each to the stage that owns it: `fmt --check` for
-the formattable types, `lint` for Markdown, Rust and workflow YAML, and
-`test` then `doc` only when a path matches the `rust` filter of
-`.github/workflows/ci.yml`'s `changes` job, read from that file at run time
-rather than copied, so the scoped check skips what CI skips for a PR of the
-same paths (#916). A named file no stage owns is noted on stderr and
-skipped; a list nothing owns is an error.
+the formattable types, `lint` for Markdown, Rust, workflow YAML and the
+Clippy inputs below, and `test` then `doc` only when a path matches the
+`rust` filter of `.github/workflows/ci.yml`'s `changes` job, read from that
+file at run time rather than copied, so the scoped check skips `test` and
+`doc` where CI does for a PR of the same paths (#916). A named file no stage
+owns is noted on stderr and skipped; a list nothing owns is an error.
+Two limits: CI's `quality` filter also runs Clippy for a PR of only
+Markdown or scripts, which a scoped check does not, because no Clippy run
+reads those files; and a deleted file cannot be named, so a change that
+deletes files runs the unscoped `cargo x check`.
 
 `test` runs the fixed plan CLAUDE.md's Commands block names as the test
 suites: `cargo test --all-targets`, `cargo test --manifest-path
@@ -53,6 +57,8 @@ Archived files under `research/imports/` remain untouched.
 
 Rust formatting is file-scoped.
 Rust linting widens a selected file to its containing Cargo package because Clippy's semantic unit is a package.
+A Clippy input that is not Rust source widens to every package: `Cargo.toml`, `Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain*`, `.cargo/`, `.github/workflows/ci.yml` and `.github/actions/rust-ci/`, outside `fuzz/`.
+`x/src/filter.rs` holds that list to ci.yml's `quality` filter.
 The bench package is linted and documented with its `corpus-fetch` feature on, so the gated `corpus` module is in the gate; its network tests are the weekly `corpus-fetch-check`'s.
 The separate nightly `fuzz/` workspace remains outside x lint.
 Every other operation remains file-scoped.

@@ -422,6 +422,44 @@ fn check_scoped_names_the_scoped_rerun_of_the_failing_stage() {
     );
 }
 
+/// CI's `clippy` job runs for a manifest, the lockfile and toolchain
+/// configuration, none of which `lint` owned by extension: a scoped
+/// check that left them out passed on the desk and went red on the server.
+#[test]
+fn check_scoped_to_a_cargo_input_runs_clippy_over_the_packages() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write(
+        "src/lib.rs",
+        "//! A crate Clippy refuses.\n\n/// Binds a name nothing reads.\npub fn noop() {\n    let unused = 1;\n}\n",
+    );
+    write_ci_filter(&repository, "\\.rs$");
+    repository.track();
+
+    let manifest = repository.x(&["check", "--", "Cargo.toml"]);
+    assert_eq!(manifest.status.code(), Some(1));
+    let stderr = String::from_utf8(manifest.stderr).unwrap();
+    assert!(stderr.contains("check: lint stage failed"), "{stderr}");
+    assert!(
+        stderr.contains("next: cargo x lint -- Cargo.toml"),
+        "{stderr}"
+    );
+
+    let member = repository.x(&["lint", "--", "x/Cargo.toml"]);
+    assert_eq!(
+        member.status.code(),
+        Some(1),
+        "any manifest reaches every package"
+    );
+
+    // A Markdown path alone changes nothing Clippy reads.
+    repository.write("README.md", "# Title\n");
+    repository.track();
+    let readme = repository.x(&["check", "--", "README.md"]);
+    let stderr = String::from_utf8(readme.stderr).unwrap();
+    assert!(readme.status.success(), "{stderr}");
+}
+
 /// The repository's shape in miniature: a root package with a `bench`
 /// member carrying the `corpus-fetch` feature, because `cargo x lint` and
 /// `cargo x doc` turn `mothergod-bench/corpus-fetch` on and cargo refuses a

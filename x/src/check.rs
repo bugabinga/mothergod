@@ -96,11 +96,7 @@ impl Plan {
         let unowned: Vec<&PathBuf> = resolved
             .named()
             .iter()
-            .filter(|path| {
-                !files::supports(path, TaskKind::Format)
-                    && !files::supports(path, TaskKind::Lint)
-                    && !matches(path)
-            })
+            .filter(|path| !fmt.contains(path) && !lint.contains(path) && !matches(path))
             .collect();
 
         if fmt.is_empty() && lint.is_empty() && !crate_stages {

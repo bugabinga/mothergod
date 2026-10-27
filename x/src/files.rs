@@ -246,14 +246,40 @@ fn git_files(root: &Path, path: Option<&Path>) -> Result<Vec<PathBuf>, String> {
 }
 
 pub(crate) fn supports(path: &Path, task: TaskKind) -> bool {
-    kind(path).is_some_and(|kind| match task {
-        TaskKind::Format => kind != FileKind::Markdown,
-        TaskKind::Lint => {
-            matches!(kind, FileKind::Rust | FileKind::Markdown)
-                && !(kind == FileKind::Rust && path.starts_with("fuzz"))
-                || kind == FileKind::Yaml && path.starts_with(".github")
-        }
+    match task {
+        TaskKind::Format => kind(path).is_some_and(|kind| kind != FileKind::Markdown),
+        TaskKind::Lint => clippy_input(path) || lints_by_kind(path),
+    }
+}
+
+fn lints_by_kind(path: &Path) -> bool {
+    kind(path).is_some_and(|kind| {
+        matches!(kind, FileKind::Rust | FileKind::Markdown)
+            && !(kind == FileKind::Rust && path.starts_with("fuzz"))
+            || kind == FileKind::Yaml && path.starts_with(".github")
     })
+}
+
+/// A file that is not Rust source but changes what Clippy sees: manifests,
+/// the lockfile, lint and toolchain configuration, and the CI definition of
+/// how Clippy runs. Clippy's input is the whole package set, so `lint`
+/// widens any of these to every package. These are the non-extension
+/// alternatives of ci.yml's `quality` filter that gate the `clippy` job
+/// (held to it by `filter::tests::every_clippy_input_is_under_the_quality_filter`),
+/// plus `clippy.toml` at any depth because `bench/clippy.toml` configures
+/// the bench package. The nightly `fuzz/` workspace is outside `lint`.
+pub(crate) fn clippy_input(path: &Path) -> bool {
+    if path.starts_with("fuzz") {
+        return false;
+    }
+    let name = path.file_name().and_then(|name| name.to_str());
+    matches!(
+        name,
+        Some("Cargo.toml" | "Cargo.lock" | "clippy.toml" | "rustfmt.toml")
+    ) || name.is_some_and(|name| name.starts_with("rust-toolchain"))
+        || path.starts_with(".cargo")
+        || path == Path::new(".github/workflows/ci.yml")
+        || path.starts_with(".github/actions/rust-ci")
 }
 
 /// Why `task` cannot take `path`, naming the command that can, or `None`
