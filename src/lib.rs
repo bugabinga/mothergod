@@ -95,6 +95,25 @@ impl TryFrom<u8> for Method {
     }
 }
 
+/// How hard the encoder looks for a small frame: the one dial between its
+/// speed and its ratio, measured in `research/JOURNAL.md` S2-R37. The
+/// decoder cannot tell which level wrote a frame, because the levels differ
+/// in the search that picks the filter and the tokens, never in the format.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Level {
+    /// The shortlist's first filter and a greedy parse, nothing tried
+    /// twice: the quickest encode.
+    Fastest,
+    /// The shortlist's first filter and one round of price-driven parsing,
+    /// reaching [`lz::Reach::Wide`] on input longer than [`lz::WINDOW`].
+    Fast,
+    /// Every filter the shortlist offers trial-encoded under the full
+    /// parse, then the wide trial: the slowest encode, and on real data the
+    /// smallest frame. What [`compress`] and [`copy_encode`] write.
+    #[default]
+    Best,
+}
+
 /// Errors produced when decoding a frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -650,19 +669,26 @@ const BLOCK_LEN: usize = 16 * 1024 * 1024;
 /// not one it may write.
 #[must_use]
 pub fn compress(input: &[u8]) -> Vec<u8> {
-    compress_blocks(input, BLOCK_LEN)
+    compress_level(input, Level::default())
 }
 
-/// [`compress`] with the block length a parameter, so a test cuts at a
+/// [`compress`] at `level`: the same frames and the same fallback to
+/// [`Method::Stored`], found by a search as wide as `level` says.
+#[must_use]
+pub fn compress_level(input: &[u8], level: Level) -> Vec<u8> {
+    compress_blocks(input, BLOCK_LEN, level)
+}
+
+/// [`compress_level`] with the block length a parameter, so a test cuts at a
 /// length it can afford. `block_len` is nonzero.
-fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
+fn compress_blocks(input: &[u8], block_len: usize, level: Level) -> Vec<u8> {
     if !u32::try_from(input.len()).is_ok_and(|len| len <= codec::MAX_DECODED_LEN) {
         return build_stored_frame(input);
     }
     if input.len() <= block_len {
-        return compress_block(input, write::concurrent_encodes());
+        return compress_block(input, write::concurrent_encodes(), level);
     }
-    let mut encoder = write::Encoder::with_block_len(Vec::new(), block_len);
+    let mut encoder = write::Encoder::with_block_len(Vec::new(), block_len, level);
     std::io::Write::write_all(&mut encoder, input).expect("a Vec sink does not fail");
     encoder.finish().expect("a Vec sink does not fail")
 }
@@ -689,26 +715,40 @@ fn compress_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
 /// The first error `source` or `sink` returns. `sink` then holds the frames
 /// of the blocks before the failing one, a stream that decodes to a prefix.
 pub fn copy_encode<R: std::io::Read, W: std::io::Write>(source: R, sink: W) -> std::io::Result<()> {
-    copy_encode_blocks(source, sink, BLOCK_LEN)
+    copy_encode_level(source, sink, Level::default())
 }
 
-/// [`copy_encode`] with the block length a parameter, as [`compress_blocks`]
-/// is for [`compress`]. `block_len` is nonzero.
+/// [`copy_encode`] at `level`, with the frames and the errors it documents.
+///
+/// # Errors
+///
+/// The first error `source` or `sink` returns, as [`copy_encode`].
+pub fn copy_encode_level<R: std::io::Read, W: std::io::Write>(
+    source: R,
+    sink: W,
+    level: Level,
+) -> std::io::Result<()> {
+    copy_encode_blocks(source, sink, BLOCK_LEN, level)
+}
+
+/// [`copy_encode_level`] with the block length a parameter, as
+/// [`compress_blocks`] is for [`compress_level`]. `block_len` is nonzero.
 fn copy_encode_blocks<R: std::io::Read, W: std::io::Write>(
     mut source: R,
     sink: W,
     block_len: usize,
+    level: Level,
 ) -> std::io::Result<()> {
-    let mut encoder = write::Encoder::with_block_len(sink, block_len);
+    let mut encoder = write::Encoder::with_block_len(sink, block_len, level);
     std::io::copy(&mut source, &mut encoder)?;
     encoder.finish().map(drop)
 }
 
 /// One frame for `block`: [`Method::Lz`] if it is smaller, else
 /// [`Method::Stored`]. Up to `workers` of the filter trials run at once
-/// ([`codec::encode`]); the frame is the same for any `workers`.
-fn compress_block(block: &[u8], workers: std::num::NonZeroUsize) -> Vec<u8> {
-    let body = codec::encode(block, workers);
+/// ([`codec::encode_level`]); the frame is the same for any `workers`.
+fn compress_block(block: &[u8], workers: std::num::NonZeroUsize, level: Level) -> Vec<u8> {
+    let body = codec::encode_level(block, workers, level);
     if candidate_beats_incumbent(body.len(), block.len()) {
         return build_frame(Method::Lz, &[&body]);
     }

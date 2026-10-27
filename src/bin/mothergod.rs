@@ -9,7 +9,9 @@
 //! is kept anyway. `-t` decodes without writing anything, so a silent exit 0
 //! says the file is intact (ADR-0066). `-v` reports each input's sizes on
 //! stderr and leaves stdout alone; `-q` cancels it, the later of the two
-//! winning, and no flag silences an error:
+//! winning, and no flag silences an error. `-1` to `-3` pick the encoder
+//! level, `-3` being the default and the smallest output, `-1` the
+//! quickest encode; decompression reads a file of any level the same way:
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -21,13 +23,14 @@
 //! mothergod -f input                        # replaces input.mgdc
 //! mothergod -t input.mgdc                   # writes nothing, exits 0 if intact
 //! mothergod -v input                        # also says: input: 2000 -> 640 bytes (32.0%)
+//! mothergod -1 input                        # the fastest level, a larger input.mgdc
 //! ```
 //!
 //! Operands are processed in order. A failure on one is reported and the run
 //! goes on to the next, then exits 1; a reader that went away ends the run at
 //! once with status 141.
 //!
-//! Compression streams through [`mothergod::copy_encode`], one 16 MiB block
+//! Compression streams through [`mothergod::copy_encode_level`], one 16 MiB block
 //! and one frame at a time, two blocks encoding at once on two cores, so its
 //! memory is bounded by the blocks and not by the input. Decompression streams
 //! through [`mothergod::decompress_to_writer`], whose docs name the frame kinds that
@@ -52,12 +55,15 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use mothergod::Level;
+
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod [-d] [-c] [-k] [-f] [-t] [-v] [-q] [--] [file ...]\n       \
+const USAGE: &str = "usage: mothergod [-1|-2|-3] [-d] [-c] [-k] [-f] [-t] [-v] [-q] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
+-1 is the fastest encoder level and the largest output, -3 the slowest and smallest, the default; the last digit wins and only compression takes one.\n\
 -k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
 -t (--test) checks that each input decompresses and writes nothing.\n\
 -v (--verbose) reports each input's sizes on stderr; -q (--quiet) cancels it, the later wins.\n\
@@ -94,6 +100,9 @@ struct Options {
     existing: Existing,
     /// Reports each input's sizes on stderr once it converted.
     verbose: bool,
+    /// The encoder level a compression runs at; a decompression has none to
+    /// choose, and [`parse`] refuses a digit beside it.
+    level: Level,
 }
 
 /// What the command line asked for.
@@ -125,16 +134,31 @@ fn main() -> ExitCode {
     }
 }
 
+/// The encoder level a digit option names: `-1` is the fastest, `-3` the
+/// default and smallest. The only digits there are, because an accepted digit
+/// that chose nothing is what `tests/fit/cli.txt`'s `level-digit` declined on.
+fn level_digit(digit: char) -> Option<Level> {
+    match digit {
+        '1' => Some(Level::Fastest),
+        '2' => Some(Level::Fast),
+        '3' => Some(Level::Best),
+        _ => None,
+    }
+}
+
 /// Reads the genre's grammar: option clusters (`-dc`), long options, `--` to
 /// end options, and `-` as an operand naming stdin. `-h` and `-V` answer at
 /// once, wherever they stand. `-k` is accepted and changes nothing: the
-/// input is kept without it.
+/// input is kept without it. A level digit (`-1` to `-3`) sets the encoder
+/// level, the last one winning, and is refused beside `-d` or `-t`, where it
+/// would choose nothing.
 fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
     let mut direction = Direction::Compress;
     let mut test_only = false;
     let mut to_stdout = false;
     let mut existing = Existing::Refuse;
     let mut verbose = false;
+    let mut level = None;
     let mut operands = Vec::new();
     let mut options_ended = false;
     for arg in args {
@@ -174,21 +198,34 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 'q' => verbose = false,
                 'h' => return Ok(Request::Help),
                 'V' => return Ok(Request::Version),
+                digit if digit.is_ascii_digit() => match level_digit(digit) {
+                    Some(named) => level = Some(named),
+                    None => {
+                        return Err(format!(
+                            "unknown option \"-{digit}\": the levels are -1 to -3"
+                        ));
+                    }
+                },
                 _ => return Err(format!("unknown option \"-{flag}\"")),
             }
         }
     }
+    // `-t` wins over `-d` wherever each stands, as in gzip.
+    let mode = if test_only {
+        Mode::Test
+    } else {
+        Mode::Convert(direction)
+    };
+    if level.is_some() && !matches!(mode, Mode::Convert(Direction::Compress)) {
+        return Err("-1 to -3 select an encoder level, which only compression has".to_owned());
+    }
     Ok(Request::Run {
-        // `-t` wins over `-d` wherever each stands, as in gzip.
-        mode: if test_only {
-            Mode::Test
-        } else {
-            Mode::Convert(direction)
-        },
+        mode,
         options: Options {
             to_stdout,
             existing,
             verbose,
+            level: level.unwrap_or_default(),
         },
         operands,
     })
@@ -259,6 +296,7 @@ fn convert(
         to_stdout,
         existing,
         verbose,
+        level,
     } = options;
     let source = operand.filter(|_| !to_stdout);
     let input_name = input_name(operand);
@@ -267,7 +305,7 @@ fn convert(
             let target = source.map(|source| (source, add_suffix(source)));
             let reader = open_input(operand)?;
             Ok(write_to(target, existing, |sink, dest_name| {
-                compress_into(reader, sink, dest_name, &input_name, verbose)
+                compress_into(reader, sink, dest_name, &input_name, verbose, level)
             }))
         }
         Direction::Decompress => {
@@ -352,7 +390,7 @@ fn share(read: u64, written: u64) -> String {
     format!(" ({}.{}%)", tenths / 10, tenths % 10)
 }
 
-/// Runs [`mothergod::copy_encode`] from `reader` into `writer`: a read
+/// Runs [`mothergod::copy_encode_level`] from `reader` into `writer`: a read
 /// failure is reported with `input_name`, a write failure with `dest_name`.
 /// With `verbose`, a success says the sizes on stderr.
 fn compress_into<R: Read, W: Write>(
@@ -361,6 +399,7 @@ fn compress_into<R: Read, W: Write>(
     dest_name: &str,
     input_name: &str,
     verbose: bool,
+    level: Level,
 ) -> ExitCode {
     let mut reader = Tracked {
         inner: reader,
@@ -371,7 +410,7 @@ fn compress_into<R: Read, W: Write>(
         inner: writer,
         bytes: 0,
     };
-    match mothergod::copy_encode(&mut reader, &mut writer) {
+    match mothergod::copy_encode_level(&mut reader, &mut writer, level) {
         Ok(()) => {
             if verbose {
                 let (read, written) = (reader.bytes, writer.bytes);

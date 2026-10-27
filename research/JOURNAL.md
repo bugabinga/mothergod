@@ -9289,3 +9289,28 @@ record.
   this runner's 2.3 (EPYC 9V74 against 7763). The finals were read once as
   a measurement charter and tuned against nothing, so the sealed-validation
   rule has nothing to guard. `research/progress.jsonl` it208.
+- S2-A130 | ACCEPTED | Issue #1698, S2-R37's two speed rungs shipped as
+  `Level::Fast` and `Level::Fastest`. Hypothesis: the shipped CLI levels
+  `-2` and `-1` reproduce S2-R37's tiers 5b and 3 on Silesia, which means the
+  library paths carry no cost the scratch tiers did not, and `-3`, the
+  default, writes the bytes it wrote before. | Mechanism: the levels are
+  encoder-only, so `decode` and `FORMAT_VERSION` are untouched. `Fast` is
+  `select::pick(data)[0]`, `Reach::Wide` past `lz::WINDOW` and one DP round;
+  `Fastest` is the same filter and `lz::parse_rounds` at zero rounds, which
+  is `parse_greedy` itself. The one wire fact a level leaves is the selector's
+  reach bit, which a test pins per level. | Measured, release build, AMD
+  EPYC 7763 4 logical cores runner (S2-R37's, so its `Best` row carries),
+  `mothergod -2 -c` and `mothergod -1 -c` on all 12 Silesia files at the
+  `bench/corpus.toml` pins (SHA-256 verified), whole, one process at a time,
+  every output decoded and `cmp`-equal to its input. `-2`: 58,411,774 bytes,
+  2.204857 b/B, 1.134 MB/s. `-1`: 62,558,853 bytes, 2.361396 b/B, 1.898
+  MB/s. Both b/B equal S2-R37's 5b and 3 rows to the last printed digit;
+  speeds are 1.02x and 1.01x of its 1.114 and 1.888. `baseline_gate check`:
+  12 cases, no regression, output unchanged, so the default level's bytes
+  are the ones `bench/baseline.json` records. | Verdict: **accepted**.
+  S2-R37's numbers survive the move from scratch code to the shipped path.
+  | **Not measured:** `Best` re-timed (its 0.156 MB/s is S2-R37's, same
+  runner class), peak RSS of the two levels, decode speed of their frames,
+  the levels against the competitor frontier in the published tables (the
+  bench crate's reports carry one mothergod row), and any corpus but
+  Silesia. `research/progress.jsonl` it209.

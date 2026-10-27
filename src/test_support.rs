@@ -31,11 +31,11 @@ impl Iterator for Xorshift32 {
 /// them, so a pipeline that reorders or drops a frame cannot agree with it.
 pub(crate) fn serial_blocks(input: &[u8], block_len: usize) -> Vec<u8> {
     if input.len() <= block_len {
-        return super::compress_block(input, nz(1));
+        return super::compress_block(input, nz(1), super::Level::default());
     }
     input
         .chunks(block_len)
-        .flat_map(|block| super::compress_block(block, nz(1)))
+        .flat_map(|block| super::compress_block(block, nz(1), super::Level::default()))
         .collect()
 }
 

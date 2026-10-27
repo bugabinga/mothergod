@@ -161,7 +161,7 @@ fn input_past_the_block_length_is_one_frame_per_block_and_round_trips() {
             .map(|word| word.to_le_bytes()[1]),
     );
     input.extend_from_slice(b"tail");
-    let stream = compress_blocks(&input, BLOCK);
+    let stream = compress_blocks(&input, BLOCK, Level::default());
     assert_eq!(
         frame_methods(&stream),
         [Method::Lz, Method::Stored, Method::Stored]
@@ -174,11 +174,11 @@ fn input_of_exactly_the_block_length_is_one_frame() {
     const BLOCK: usize = 4096;
     for len in [0, 1, BLOCK - 1, BLOCK] {
         let input = vec![b'a'; len];
-        let stream = compress_blocks(&input, BLOCK);
+        let stream = compress_blocks(&input, BLOCK, Level::default());
         assert_eq!(frame_methods(&stream).len(), 1, "input of {len} bytes");
         assert_eq!(decompress(&stream), Ok(input));
     }
-    let stream = compress_blocks(&vec![b'a'; BLOCK + 1], BLOCK);
+    let stream = compress_blocks(&vec![b'a'; BLOCK + 1], BLOCK, Level::default());
     assert_eq!(frame_methods(&stream).len(), 2);
 }
 
@@ -226,6 +226,7 @@ fn copy_encode_writes_the_bytes_compress_returns_at_every_block_boundary() {
                 },
                 &mut sink,
                 BLOCK,
+                Level::default(),
             )
             .expect("a slice and a Vec do not fail");
             assert_eq!(
@@ -1078,4 +1079,43 @@ fn decompress_to_writer_propagates_writer_errors_unwrapped() {
         WriteError::Io(err) => assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe),
         WriteError::Decode(err) => panic!("expected WriteError::Io, got Decode({err:?})"),
     }
+}
+
+#[test]
+fn every_level_roundtrips_a_multi_block_input_and_every_writer_agrees_on_the_stream() {
+    const BLOCK: usize = 4096;
+    let text = test_support::record_text(2000);
+    let input: Vec<u8> = text.iter().copied().take(3 * BLOCK + 100).collect();
+    let mut streams = Vec::new();
+    for level in [Level::Fastest, Level::Fast, Level::Best] {
+        let stream = compress_blocks(&input, BLOCK, level);
+        assert_eq!(decompress(&stream).as_ref(), Ok(&input), "{level:?}");
+
+        let mut copied = Vec::new();
+        copy_encode_blocks(&input[..], &mut copied, BLOCK, level).expect("a Vec does not fail");
+        assert_eq!(copied, stream, "copy_encode_level at {level:?}");
+
+        // Two workers send every block but the last through a thread of its
+        // own, the path that carries the level across it.
+        let mut encoder =
+            write::Encoder::with_workers(Vec::new(), BLOCK, test_support::nz(2), level);
+        std::io::Write::write_all(&mut encoder, &input).expect("a Vec does not fail");
+        assert_eq!(
+            encoder.finish().expect("a Vec does not fail"),
+            stream,
+            "write::Encoder at {level:?}"
+        );
+        streams.push(stream);
+    }
+    assert!(
+        streams[0] != streams[1] && streams[1] != streams[2] && streams[0] != streams[2],
+        "each level writes its own stream"
+    );
+}
+
+#[test]
+fn compress_is_compress_level_at_the_default_level_best() {
+    let input = test_support::record_text(50);
+    assert_eq!(Level::default(), Level::Best);
+    assert_eq!(compress(&input), compress_level(&input, Level::Best));
 }

@@ -1477,3 +1477,44 @@ fn leader_is_the_first_smallest_finished_trial() {
     );
     assert_eq!(leader(&sizes(&[5, 5])), Some(0));
 }
+
+#[test]
+fn every_level_writes_a_payload_decode_reads_and_declares_the_reach_it_parsed_at() {
+    // A record repeated one window plus its own length back: only a wide
+    // match reaches the first copy.
+    let record = crate::test_support::record_text(2);
+    let mut far = record.clone();
+    far.resize(lz::WINDOW + record.len() + 4096, 0);
+    far.extend_from_slice(&record);
+    let near = crate::test_support::record_text(300);
+    for (level, far_reach) in [
+        (Level::Fastest, Reach::Standard),
+        (Level::Fast, Reach::Wide),
+        (Level::Best, Reach::Wide),
+    ] {
+        for (data, reach) in [(&near, Reach::Standard), (&far, far_reach)] {
+            let payload = encode_level(data, NonZeroUsize::MIN, level);
+            let (_, declared, _) = split_selector(&payload).expect("a selector");
+            assert_eq!(declared, reach, "{level:?} on {} bytes", data.len());
+            assert_decode_matches(
+                &payload,
+                data,
+                &format!("{level:?} on {} bytes", data.len()),
+            );
+        }
+    }
+}
+
+#[test]
+fn each_level_runs_its_own_search_and_writes_its_own_payload() {
+    // Not an ordering: a greedy parse can beat the priced one on input as
+    // regular as this, so only that the three differ says each level
+    // reached its own parse.
+    let data = crate::test_support::record_text(2000);
+    let sizes = [Level::Fastest, Level::Fast, Level::Best]
+        .map(|level| encode_level(&data, NonZeroUsize::MIN, level).len());
+    assert!(
+        sizes[0] != sizes[1] && sizes[1] != sizes[2] && sizes[0] != sizes[2],
+        "{sizes:?}"
+    );
+}

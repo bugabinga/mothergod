@@ -7,7 +7,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use super::{BLOCK_LEN, compress_block, rejoin};
+use super::{BLOCK_LEN, Level, compress_block, rejoin};
 
 /// Encodes of one block of input that run at once at most, whether the block
 /// is one of a stream's or one of the trials of a block's filter search:
@@ -94,6 +94,7 @@ pub struct Encoder<W> {
     /// `workers`. Empty when `workers` is one.
     in_flight: VecDeque<JoinHandle<Vec<u8>>>,
     workers: NonZeroUsize,
+    level: Level,
     /// A stream is one or more frames (ADR-0067): an encoder that cut no
     /// block still owes one, for the empty input. Set when a block is cut,
     /// not when its frame reaches the sink, which a running block has not.
@@ -103,26 +104,39 @@ pub struct Encoder<W> {
 }
 
 impl<W: Write> Encoder<W> {
-    /// An encoder that writes its frames to `sink`.
+    /// An encoder that writes its frames to `sink` at [`Level::Best`].
     pub fn new(sink: W) -> Self {
-        Self::with_block_len(sink, BLOCK_LEN)
+        Self::with_level(sink, Level::default())
     }
 
-    /// [`new`](Self::new) with the block length a parameter, so a test cuts
-    /// at a length it can afford. `block_len` is nonzero.
-    pub(crate) fn with_block_len(sink: W, block_len: usize) -> Self {
-        Self::with_workers(sink, block_len, concurrent_encodes())
+    /// [`new`](Self::new) at `level`. Every block of the stream is encoded
+    /// at it, and the stream is the one [`copy_encode_level`](crate::copy_encode_level)
+    /// writes for the same input.
+    pub fn with_level(sink: W, level: Level) -> Self {
+        Self::with_block_len(sink, BLOCK_LEN, level)
+    }
+
+    /// [`with_level`](Self::with_level) with the block length a parameter, so
+    /// a test cuts at a length it can afford. `block_len` is nonzero.
+    pub(crate) fn with_block_len(sink: W, block_len: usize, level: Level) -> Self {
+        Self::with_workers(sink, block_len, concurrent_encodes(), level)
     }
 
     /// [`with_block_len`](Self::with_block_len) with the blocks encoded at
     /// once a parameter, so a test compares one worker against several.
-    pub(crate) fn with_workers(sink: W, block_len: usize, workers: NonZeroUsize) -> Self {
+    pub(crate) fn with_workers(
+        sink: W,
+        block_len: usize,
+        workers: NonZeroUsize,
+        level: Level,
+    ) -> Self {
         Self {
             sink,
             block: Vec::new(),
             block_len,
             in_flight: VecDeque::new(),
             workers,
+            level,
             cut_a_block: false,
             failed: None,
         }
@@ -164,7 +178,7 @@ impl<W: Write> Encoder<W> {
     fn emit(&mut self, last: bool) -> io::Result<()> {
         self.cut_a_block = true;
         if self.workers == NonZeroUsize::MIN || (last && self.in_flight.is_empty()) {
-            let frame = compress_block(&self.block, self.workers);
+            let frame = compress_block(&self.block, self.workers, self.level);
             self.block.clear();
             return self.write_frame(&frame);
         }
@@ -175,12 +189,13 @@ impl<W: Write> Encoder<W> {
         // (the process is out of threads) falls back to encoding here.
         let block = Arc::new(std::mem::take(&mut self.block));
         let shared = Arc::clone(&block);
+        let level = self.level;
         let spawned =
-            thread::Builder::new().spawn(move || compress_block(&shared, NonZeroUsize::MIN));
+            thread::Builder::new().spawn(move || compress_block(&shared, NonZeroUsize::MIN, level));
         if let Ok(handle) = spawned {
             self.in_flight.push_back(handle);
         } else {
-            let frame = compress_block(&block, NonZeroUsize::MIN);
+            let frame = compress_block(&block, NonZeroUsize::MIN, self.level);
             self.drain()?;
             self.write_frame(&frame)?;
         }
