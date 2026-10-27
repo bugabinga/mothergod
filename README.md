@@ -22,7 +22,7 @@ URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
 measurement time and never committed. Measured 2026-10-26 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
-| corpus | **mothergod** | gzip -9 | zstd -19 | xz -9e |
+| corpus | **mothergod -3** | gzip -9 | zstd -19 | xz -9e |
 |---|---|---|---|---|
 | Canterbury | **1.347** | 2.079 | 1.470 | 1.403 |
 | Silesia | **2.005** | 2.553 | 1.997 | 1.829 |
