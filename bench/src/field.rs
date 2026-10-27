@@ -17,6 +17,7 @@
 //! number from a different instrument.
 
 use crate::reference::write_temp_file;
+use mothergod::Level;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -233,42 +234,74 @@ pub fn measure(competitor: &Competitor, data: &[u8]) -> io::Result<FieldPoint> {
 /// The first argument that puts a report binary in child mode.
 const CHILD_FLAG: &str = "--child";
 
+/// Every encoder level, quickest first.
+pub const LEVELS: [Level; 3] = [Level::Fastest, Level::Fast, Level::Best];
+
+/// The digit the CLI selects `level` by.
+fn level_digit(level: Level) -> char {
+    match level {
+        Level::Fastest => '1',
+        Level::Fast => '2',
+        Level::Best => '3',
+    }
+}
+
+/// How a report names `level`: `mothergod -3`, as a user types it.
+#[must_use]
+pub fn level_label(level: Level) -> String {
+    format!("mothergod -{}", level_digit(level))
+}
+
 /// What a mothergod child process does to its stdin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Direction {
-    /// `mothergod::compress`.
-    Compress,
+    /// `mothergod::compress_level` at the level.
+    Compress(Level),
     /// `mothergod::decompress`.
     Decompress,
 }
 
 impl Direction {
-    const ALL: [Direction; 2] = [Direction::Compress, Direction::Decompress];
-
-    /// The second argument that selects it.
-    fn arg(self) -> &'static str {
+    /// The arguments after [`CHILD_FLAG`] that select it: `compress 3`, or
+    /// `decompress`.
+    fn child_args(self) -> Vec<String> {
+        let mut args = vec![CHILD_FLAG.to_string()];
         match self {
-            Direction::Compress => "compress",
-            Direction::Decompress => "decompress",
+            Direction::Compress(level) => {
+                args.extend(["compress".to_string(), level_digit(level).to_string()]);
+            }
+            Direction::Decompress => args.push("decompress".to_string()),
         }
+        args
     }
 
-    fn child_args(self) -> Vec<String> {
-        vec![CHILD_FLAG.to_string(), self.arg().to_string()]
+    /// The direction `args`, the child's whole command line after the
+    /// program, select.
+    fn parse(args: &[String]) -> Result<Direction, String> {
+        match args {
+            [flag, mode, digit] if flag == CHILD_FLAG && mode == "compress" => LEVELS
+                .into_iter()
+                .find(|&level| *digit == level_digit(level).to_string())
+                .map(Direction::Compress)
+                .ok_or_else(|| format!("unknown child level {digit:?}")),
+            [flag, mode] if flag == CHILD_FLAG && mode == "decompress" => Ok(Direction::Decompress),
+            _ => Err(format!("unknown child command line {args:?}")),
+        }
     }
 
     fn apply(self, input: &[u8]) -> Result<Vec<u8>, String> {
         match self {
-            Direction::Compress => Ok(mothergod::compress(input)),
+            Direction::Compress(level) => Ok(mothergod::compress_level(input, level)),
             Direction::Decompress => mothergod::decompress(input).map_err(|err| err.to_string()),
         }
     }
 }
 
 /// Serves the child mode [`measure_mothergod`] spawns: when the process was
-/// started as `<exe> --child compress` or `<exe> --child decompress`, runs
-/// mothergod over stdin to stdout and returns the exit code the binary must
-/// end with. Returns `None` for any other command line.
+/// started as `<exe> --child compress <digit>` or `<exe> --child
+/// decompress`, runs mothergod over stdin to stdout and returns the exit
+/// code the binary must end with. Returns `None` for any other command line
+/// that does not start with the flag.
 ///
 /// Every binary that passes its own path to [`measure_mothergod`] calls this
 /// first in `main`: a binary that does not would run its whole report again
@@ -276,28 +309,21 @@ impl Direction {
 #[must_use]
 pub fn run_child_if_requested() -> Option<ExitCode> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [flag, mode] = args.as_slice() else {
-        return None;
-    };
-    if flag != CHILD_FLAG {
+    if args.first().map(String::as_str) != Some(CHILD_FLAG) {
         return None;
     }
-    let result = Direction::ALL
-        .into_iter()
-        .find(|direction| direction.arg() == mode)
-        .ok_or_else(|| format!("unknown child mode {mode:?}"))
-        .and_then(|direction| {
-            let mut input = Vec::new();
-            io::stdin()
-                .lock()
-                .read_to_end(&mut input)
-                .map_err(|err| err.to_string())?;
-            let output = direction.apply(&input)?;
-            io::stdout()
-                .lock()
-                .write_all(&output)
-                .map_err(|err| err.to_string())
-        });
+    let result = Direction::parse(&args).and_then(|direction| {
+        let mut input = Vec::new();
+        io::stdin()
+            .lock()
+            .read_to_end(&mut input)
+            .map_err(|err| err.to_string())?;
+        let output = direction.apply(&input)?;
+        io::stdout()
+            .lock()
+            .write_all(&output)
+            .map_err(|err| err.to_string())
+    });
     Some(match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -307,8 +333,8 @@ pub fn run_child_if_requested() -> Option<ExitCode> {
     })
 }
 
-/// Compresses `data` with `mothergod::compress` in a child of `program`,
-/// decompresses it in another, and returns what [`measure`] returns for a
+/// Compresses `data` at `level` in a child of `program`, decompresses it in
+/// another, and returns what [`measure`] returns for a
 /// competitor, so mothergod's row and the field's share one instrument.
 ///
 /// `program` is a binary that calls [`run_child_if_requested`] first in
@@ -318,11 +344,11 @@ pub fn run_child_if_requested() -> Option<ExitCode> {
 ///
 /// Returns an error if GNU `time` or `program` is missing, either process
 /// exits non-zero, or the decoded bytes differ from `data`.
-pub fn measure_mothergod(program: &Path, data: &[u8]) -> io::Result<FieldPoint> {
+pub fn measure_mothergod(program: &Path, level: Level, data: &[u8]) -> io::Result<FieldPoint> {
     measure_processes(
-        "mothergod",
+        &level_label(level),
         program,
-        &Direction::Compress.child_args(),
+        &Direction::Compress(level).child_args(),
         &Direction::Decompress.child_args(),
         data,
     )

@@ -6,9 +6,10 @@
 //! behind `corpus-fetch`), but this module itself has no such dependency
 //! and compiles in CLAUDE.md's required checks like any other.
 
-use crate::field::{competitors, measure, measure_mothergod};
+use crate::field::{LEVELS, competitors, level_label, measure, measure_mothergod};
 use crate::finals::FileMeasurement;
 use crate::frontier::{Row, format_section};
+use mothergod::Level;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -237,7 +238,7 @@ pub fn measure_all(
         .iter()
         .map(|(name, data)| {
             println!("measuring {name} ({} bytes)...", data.len());
-            measure_mothergod(mothergod_program, data)
+            measure_mothergod(mothergod_program, Level::Best, data)
                 .map_err(|err| format!("mothergod failed on {name}: {err}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -278,7 +279,9 @@ pub fn measure_all(
 
 /// The frontier section of a finals report (issue #1340): every level of
 /// gzip, zstd and xz measured on `files`, one process at a time, beside the
-/// mothergod row `measurements` already holds.
+/// mothergod row `measurements` already holds and a row for each faster
+/// level, timed in a child of `mothergod_program` as [`measure_all`] times
+/// the default (issue #1708).
 ///
 /// Serial by design, the rule [`measure_all`] states for mothergod: a
 /// wall-clock taken beside another measurement is not a rate. It is the
@@ -287,11 +290,30 @@ pub fn measure_all(
 ///
 /// # Errors
 ///
-/// Returns an error naming the level and file if any `field::measure` fails.
+/// Returns an error naming the level and file if any `field::measure` or
+/// `field::measure_mothergod` fails.
 pub fn frontier_section(
     files: &[(String, Vec<u8>)],
     measurements: &[FileMeasurement],
+    mothergod_program: &Path,
 ) -> Result<String, String> {
+    let faster = LEVELS
+        .into_iter()
+        .filter(|&level| level != Level::Best)
+        .map(|level| {
+            let label = level_label(level);
+            println!("measuring {label} on {} file(s)...", files.len());
+            let points = files
+                .iter()
+                .map(|(name, data)| {
+                    measure_mothergod(mothergod_program, level, data)
+                        .map(|point| (data.len(), point))
+                        .map_err(|err| format!("{label} failed on {name}: {err}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Row::aggregate(&label, &points))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let field = competitors()
         .iter()
         .map(|competitor| {
@@ -308,7 +330,11 @@ pub fn frontier_section(
             Ok(Row::aggregate(&label, &points))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(format_section(&Row::mothergod(measurements), &field))
+    Ok(format_section(
+        &Row::mothergod(measurements),
+        &faster,
+        &field,
+    ))
 }
 
 #[cfg(test)]

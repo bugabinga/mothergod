@@ -58,15 +58,18 @@ fn frontier_section_has_a_row_per_level_and_mothergod() {
     let files = vec![("a.txt".to_string(), fixture())];
     let measurements = measure_all(&files, Path::new(CHILD))
         .expect("GNU time and the reference compressors must be installed");
-    let section = frontier_section(&files, &measurements).expect("every level must measure");
+    let section = frontier_section(&files, &measurements, Path::new(CHILD))
+        .expect("every level must measure");
     // The header, every competitor level and mothergod; the divider
     // starts `|-`.
     let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
-    assert_eq!(table_rows, 1 + competitors().len() + 1, "{section}");
+    assert_eq!(table_rows, 1 + competitors().len() + 3, "{section}");
     for label in [
         "| gzip -1 |",
         "| zstd -22 |",
         "| xz -9e |",
+        "| **mothergod -1** |",
+        "| **mothergod -2** |",
         "| **mothergod** |",
     ] {
         assert!(section.contains(label), "missing {label}: {section}");
@@ -81,10 +84,11 @@ fn frontier_section_has_a_row_per_level_and_mothergod() {
     );
 }
 
-/// Pipes `input` through `program --child <mode>`; stdout and success.
-fn child(program: &str, mode: &str, input: &[u8]) -> (Vec<u8>, bool) {
+/// Pipes `input` through `program --child <args>`; stdout and success.
+fn child(program: &str, args: &[&str], input: &[u8]) -> (Vec<u8>, bool) {
     let mut process = Command::new(program)
-        .args(["--child", mode])
+        .arg("--child")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -109,12 +113,23 @@ fn child(program: &str, mode: &str, input: &[u8]) -> (Vec<u8>, bool) {
 )]
 fn child_mode_round_trips_and_rejects_bad_input() {
     let data = fixture();
-    let (packed, ok) = child(CHILD, "compress", &data);
-    assert!(ok && packed.len() < data.len());
-    let (unpacked, ok) = child(CHILD, "decompress", &packed);
-    assert!(ok && unpacked == data);
-    let (_, ok) = child(CHILD, "decompress", b"not a mothergod frame");
+    for digit in ["1", "2", "3"] {
+        let (packed, ok) = child(CHILD, &["compress", digit], &data);
+        assert!(ok && packed.len() < data.len(), "-{digit}");
+        let (unpacked, ok) = child(CHILD, &["decompress"], &packed);
+        assert!(ok && unpacked == data, "-{digit}");
+    }
+    let (_, ok) = child(CHILD, &["decompress"], b"not a mothergod frame");
     assert!(!ok, "a decode error must exit non-zero");
-    let (_, ok) = child(CHILD, "sideways", &data);
-    assert!(!ok, "an unknown mode must exit non-zero");
+    for bad in [
+        &["sideways"][..],
+        &["compress"],
+        &["compress", "0"],
+        &["compress", "4"],
+        &["compress", "13"],
+        &["decompress", "3"],
+    ] {
+        let (_, ok) = child(CHILD, bad, &data);
+        assert!(!ok, "{bad:?} must exit non-zero");
+    }
 }
