@@ -129,8 +129,8 @@ URL and SHA-256 with the train/sealed/finals split of
 (`tests/adversarial/`, `docs/TESTING.md` layer 2); ideal-cost accounting
 inside the codec of record; the required `ratio` check against
 `bench/baseline.json` (layer 7); and the per-file reports in
-`docs/benchmarks/`, which no scheduled job regenerates yet. Done
-2026-08-28.
+`docs/benchmarks/`, regenerated weekly and on a pin merge by
+`bench-report.yml`. Done 2026-08-28.
 
 ## M3: Close the gaps (research program)
 

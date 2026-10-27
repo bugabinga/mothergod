@@ -884,13 +884,11 @@ record.
   done as of S2-A37; the scheduled `--features corpus-fetch` workflow
   done as of S2-A45; the CI baseline gate wired as the required `ratio`
   check in `ci.yml` (issue #284, ROADMAP M2's gate box checked).
-  Remaining, no longer milestone-blocking so carrying no tracking issue
-  per the #165 convention: real Silesia numbers (S2-A37's `finals_report`
-  binary covers Silesia too, in code — its remaining scope is throughput,
-  not a missing feature: ~0.14 MB/s measured means the full corpus needs
-  on the order of half an hour of `mothergod::compress` time, too slow
-  for a by-hand run; revisit when M3+ speed work lands, as a scheduled
-  job before a per-PR gate).
+  Nothing remains: real Silesia numbers shipped as S2-A54 (throughput
+  answered by parallelizing the per-file measurements), the scheduling
+  S2-A54 called unwired runs as `bench-report.yml`'s weekly cron and on a
+  pin merge (c68111f), and ideal-cost accounting is in ROADMAP M2's done
+  paragraph.
 - S2-A13 | ACCEPTED | ROADMAP M2's adversarial decode seed corpus + suite
   (`docs/TESTING.md` layer 2), independent of S2-D1's remaining
   fetch/generator scope: a new `tests/adversarial/` directory of 13 tiny
