@@ -33,6 +33,7 @@ pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, Str
     let root = repository_root(&cwd)?;
     let explicit = !paths.is_empty();
     let mut files = BTreeSet::new();
+    let mut skipped = Vec::new();
 
     if explicit {
         for path in paths {
@@ -75,8 +76,11 @@ pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, Str
             }
 
             if absolute.is_file() {
-                ensure_supported(relative, task)?;
-                files.insert(relative.to_path_buf());
+                if let Some(advice) = unsupported(relative, task) {
+                    skipped.push(format!("{}: {advice}", relative.display()));
+                } else {
+                    files.insert(relative.to_path_buf());
+                }
             } else if absolute.is_dir() {
                 for candidate in git_files(&root, Some(relative))? {
                     if regular_file(&root, &candidate)
@@ -102,6 +106,13 @@ pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, Str
     }
 
     if files.is_empty() {
+        // A list where nothing was taken is an error carrying the first
+        // path's advice; one where something was only notes the rest, so a
+        // mixed list of changed files never dies at the first script it
+        // does not own (#916).
+        if let Some(reason) = skipped.first() {
+            return Err(reason.clone());
+        }
         let scope = if explicit {
             "selected paths"
         } else {
@@ -111,6 +122,10 @@ pub(crate) fn select(paths: &[PathBuf], task: TaskKind) -> Result<Selection, Str
             "no files supported by `cargo x {}` were found in {scope}",
             task.name()
         ));
+    }
+
+    for reason in skipped {
+        eprintln!("skipped {reason}");
     }
 
     Ok(Selection {
@@ -200,12 +215,14 @@ fn supports(path: &Path, task: TaskKind) -> bool {
     })
 }
 
-fn ensure_supported(path: &Path, task: TaskKind) -> Result<(), String> {
+/// Why `task` cannot take `path`, naming the command that can, or `None`
+/// when it can.
+fn unsupported(path: &Path, task: TaskKind) -> Option<&'static str> {
     if supports(path, task) {
-        return Ok(());
+        return None;
     }
 
-    let advice = match (task, kind(path)) {
+    Some(match (task, kind(path)) {
         (TaskKind::Format, Some(FileKind::Markdown)) => {
             "Markdown is linted, not formatted; use `cargo x lint -- PATH`"
         }
@@ -216,8 +233,7 @@ fn ensure_supported(path: &Path, task: TaskKind) -> Result<(), String> {
             "this file type has no embedded linter; use `cargo x fmt --check -- PATH` for syntax and format validation"
         }
         _ => "this file type is not supported by x",
-    };
-    Err(format!("{}: {advice}", path.display()))
+    })
 }
 
 fn regular_file(root: &Path, path: &Path) -> bool {
@@ -269,5 +285,35 @@ mod tests {
             TaskKind::Lint
         ));
         assert!(!supports(Path::new("infra/wrangler.yml"), TaskKind::Lint));
+    }
+
+    #[test]
+    fn explains_why_a_task_cannot_take_a_path() {
+        assert_eq!(unsupported(Path::new("src/lib.rs"), TaskKind::Format), None);
+        assert!(
+            unsupported(Path::new("README.md"), TaskKind::Format)
+                .is_some_and(|advice| advice.contains("cargo x lint"))
+        );
+    }
+
+    /// Runs against the checkout: cargo sets a test's cwd to `x/`, and
+    /// `README.md` and `Cargo.toml` are the root's.
+    #[test]
+    fn an_explicit_list_skips_unowned_files_unless_nothing_remains() {
+        let mixed = select(
+            &[
+                PathBuf::from("../README.md"),
+                PathBuf::from("../Cargo.toml"),
+            ],
+            TaskKind::Format,
+        )
+        .map(|selection| selection.files)
+        .unwrap();
+        assert_eq!(mixed, vec![PathBuf::from("Cargo.toml")]);
+
+        let only = select(&[PathBuf::from("../README.md")], TaskKind::Format)
+            .err()
+            .expect("a list where nothing was taken is an error");
+        assert!(only.starts_with("README.md: Markdown is linted"), "{only}");
     }
 }
