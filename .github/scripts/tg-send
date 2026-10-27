@@ -52,6 +52,7 @@ import urllib.request
 # `scrub_token` below removes one known token from API error text.
 from secret_scrub import REDACTION, scrub
 import kv
+import stdin_body
 
 # The host is overridable so tg-send.test.mjs can stand in for Telegram and
 # pin what each exit prints; nothing in production sets it.
@@ -137,7 +138,7 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    body = sys.stdin.read().strip()
+    body = stdin_body.read()
     if not body:
         print("tg-send: empty body; refusing to send", file=sys.stderr)
         return 2

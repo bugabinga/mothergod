@@ -99,6 +99,7 @@ import sys
 import time
 
 from app_token import prefer_file
+import stdin_body
 
 # The one path prefix the app token cannot write (issue #24).
 ADMIN_PREFIX = ".github/workflows/"
@@ -497,7 +498,7 @@ def main() -> int:
     if not merge_sha:
         guard_formatted(paths)
 
-    message = sys.stdin.read().strip()
+    message = stdin_body.read("commit message")
     if not message:
         die("the commit message comes from stdin and it is empty")
 

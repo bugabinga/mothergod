@@ -53,6 +53,7 @@ import subprocess
 import sys
 
 from gh_retry import once
+import stdin_body
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 LABELS = {
@@ -110,7 +111,7 @@ def main():
         die(f"target #{args.number} does not match PR_NUMBER={scope} from the environment; "
             "a review session writes only to the PR it was scoped to (issue #771), "
             "and the label moves before the comment does")
-    body = sys.stdin.read().strip()
+    body = stdin_body.read("verdict")
     if not body:
         die("empty body; a verdict with no items is a label with nothing behind it")
     diff_id = os.environ.get("DIFF_ID", "")
