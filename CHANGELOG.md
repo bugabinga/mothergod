@@ -15,7 +15,7 @@ All notable changes to this project are documented here. Format follows
   `-t`, is refused. The library takes the same choice as `mothergod::Level`,
   through `compress_level`, `copy_encode_level` and
   `write::Encoder::with_level`. Every level writes frames the one decoder
-  reads, so nothing about decoding changes (#1708).
+  reads, so nothing about decoding changes (#1709).
 - site: the status page's TRUST panel shows the whole-crate mutation score,
   measured on the first of each month by a sharded `cargo-mutants` sweep of
   every line of the codec, so a reader sees how much of the code the test
