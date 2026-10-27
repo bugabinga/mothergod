@@ -438,10 +438,12 @@ cmp FILE FILE.out</pre>
           is it passing. Given a file, it writes <code>&lt;file&gt;.mgdc</code>
           beside it, and unlike <code>gzip</code> it never deletes the input.
           <code>--help</code> lists the rest on one screen: flags you know from
-          <code>gzip</code>, and no compression levels or tuning knobs.
+          <code>gzip</code>, three encoder levels, <code>-1</code> the fastest
+          and <code>-3</code> the default and slowest, and no tuning knobs.
+          Every level writes frames the one decoder reads.
           <code>--version</code> also prints the format version the build reads;
-          put it in a bug report. Expect the encode to take a while, at the
-          rates above.
+          put it in a bug report. Expect the encode to take a while at the
+          default, at the rates above.
         </p>
       </section>
 
