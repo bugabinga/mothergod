@@ -108,9 +108,12 @@ A 5xx from GitHub on the post or the labels gets one more try through
 read for the body this sent, since two minutes before the first try, and
 a comment found there is the post, printed and never repeated; a close
 counts as landed only when the thread is closed too, because gh closes
-after it comments. A create is landed when an open issue carries the
-exact title. A read that fails leaves the retry on, because a duplicate
-comment costs a reader a scroll and a missing verdict stalls a PR.
+after it comments. A create is landed when an open issue created inside
+that window carries the exact title: the title alone also matched an
+older issue of the same title, the one `--anyway` files past, and
+returned its URL as the create's result (#1692). A read that fails
+leaves the retry on, because a duplicate comment costs a reader a scroll
+and a missing verdict stalls a PR.
 
 Usage: gh-comment <issue-or-pr-number> [--label NAME]... [--close [--delete-branch]] < body
        gh-comment --new "<title>" [--label NAME]... [--anyway] < body
@@ -213,9 +216,9 @@ def duplicates(title, issues):
 
 
 def open_issues(env):
-    """Every open issue's number and title, or None with the reason it could not be read."""
+    """Every open issue's number, title, url and createdAt, or None with the reason it could not be read."""
     result = subprocess.run(
-        ["gh", "issue", "list", "--state", "open", "--limit", "500", "--json", "number,title,url"],
+        ["gh", "issue", "list", "--state", "open", "--limit", "500", "--json", "number,title,url,createdAt"],
         env=env, capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -263,10 +266,21 @@ def landed(env, number, body, since, closed):
     return url
 
 
-def landed_issue(env, title):
-    """The URL of an open issue carrying exactly `title`, or None."""
+def landed_issue(env, title, since):
+    """The URL of an open issue carrying exactly `title` created since `since`, or None.
+
+    `since` is the same `%Y-%m-%dT%H:%M:%SZ` string `landed` sends, and
+    `createdAt` arrives in that form, so the first 19 characters compare
+    as text. An issue with no readable `createdAt` does not count, so the
+    retry stays on: a doubled issue costs a scroll, a missing one stalls
+    the work that needed it.
+    """
     issues, _ = open_issues(env)
-    return next((i.get("url") for i in issues or [] if i.get("title") == title), None)
+    for issue in issues or []:
+        created = issue.get("createdAt")
+        if issue.get("title") == title and isinstance(created, str) and created[:19] >= since[:19]:
+            return issue.get("url")
+    return None
 
 
 def main() -> int:
@@ -381,7 +395,7 @@ def main() -> int:
         target = f"#{args.number}"
     since = (datetime.now(timezone.utc) - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     if args.new is not None:
-        check = lambda: landed_issue(env, args.new)  # noqa: E731
+        check = lambda: landed_issue(env, args.new, since)  # noqa: E731
     else:
         check = lambda: landed(env, args.number, full_body, since,  # noqa: E731
                                closed=args.close or args.delete_branch)
