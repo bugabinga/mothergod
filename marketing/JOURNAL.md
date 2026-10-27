@@ -20,6 +20,28 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-27: Editorial: the release notes promised a score the panel does not show
+
+Queue blocked (#1702 on #1698, #1640 on a measured sweep), so this is a
+defect found on the surface. The Unreleased `site:` line for #1615 said
+the status page "shows the whole-crate mutation score, measured on the
+first of each month ... of every line of the codec". On 2026-10-27 the
+live `trust-data.json` has `trend.mutation_score.latest` null and the
+tile reads "n/a, not yet measured"; the one sweep so far (run of
+2026-10-25) left mutants unrun, and the first scheduled one is
+`mutants-sweep.yml`'s `cron: "41 7 1 * *"`, 2026-11-01. "Every line"
+also outran `tests/mutants.toml`, which excludes classes by design. The
+line now says what the tile measures and what it reads until a sweep
+finishes, which stays true on both sides of the first score.
+
+**Also: "TRUST panel" named nothing a reader can find.** The panel's
+heading is "Is it tested?"; `TRUST` survived only in the changelog,
+twice. Both lines now use the heading on the page.
+
+**Cut: "survivors in the decoder's territory land in one refreshed
+issue".** That is how the factory routes a finding. It gains a user
+nothing (L1).
+
 ## 2026-10-26: Editorial: the README's evidence links land on the evidence
 
 The README's ratio and speed paragraphs both ended in

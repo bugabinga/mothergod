@@ -16,11 +16,11 @@ All notable changes to this project are documented here. Format follows
   through `compress_level`, `copy_encode_level` and
   `write::Encoder::with_level`. Every level writes frames the one decoder
   reads, so nothing about decoding changes (#1709).
-- site: the status page's TRUST panel shows the whole-crate mutation score,
-  measured on the first of each month by a sharded `cargo-mutants` sweep of
-  every line of the codec, so a reader sees how much of the code the test
-  suite actually checks, not only how much it reaches; survivors in the
-  decoder's territory land in one refreshed issue (#1615).
+- site: mothergod.dev/status's "Is it tested?" panel shows the mutation
+  score from a monthly `cargo-mutants` sweep of the whole crate, the share
+  of deliberately planted bugs the tests catch, so a reader sees how much
+  of the code the tests check and not only how much they reach. Until a
+  sweep finishes, the tile reads "not yet measured" (#1615).
 - codec: `compress` reaches 2 MiB back instead of 1 MiB on input over 1 MiB
   when that shrinks the frame, so repeats between 1 and 2 MiB apart now
   match: up to 2.4% smaller on Silesia text (`reymont`, `dickens`), nothing
@@ -209,7 +209,7 @@ All notable changes to this project are documented here. Format follows
   509 MiB, `dickens` from 355 to 312 MiB) because the optimal parse frees
   each round's token list before the next round allocates; output bytes are
   unchanged and 16 MiB of zeros stays at 364 MiB (#1382).
-- Status page: the TRUST panel's fuzz CPU-hours and crasher count are
+- Status page: the "Is it tested?" panel's fuzz CPU-hours and crasher count are
   cumulative since the ledger's first entry (2026-09-02) instead of a
   trailing 90-day window, because each entry is now a row of a table that
   outlives the artifact retention (#1077).
