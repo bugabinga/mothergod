@@ -1518,3 +1518,17 @@ fn each_level_runs_its_own_search_and_writes_its_own_payload() {
         "{sizes:?}"
     );
 }
+
+#[test]
+fn fast_reaches_wide_on_input_longer_than_the_window_and_not_on_input_as_long() {
+    // The boundary `search` shares: a window's worth has nothing past it to
+    // reach. `Fast` pays no trial to learn whether wide wins, so past the
+    // boundary its selector says wide even where the bodies tie.
+    for (len, reach) in [(lz::WINDOW, Reach::Standard), (lz::WINDOW + 1, Reach::Wide)] {
+        let data = vec![0u8; len];
+        let payload = encode_level(&data, NonZeroUsize::MIN, Level::Fast);
+        let (_, declared, _) = split_selector(&payload).expect("a selector");
+        assert_eq!(declared, reach, "{len} bytes");
+        assert_decode_matches(&payload, &data, "a run at the window");
+    }
+}
