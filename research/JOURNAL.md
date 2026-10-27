@@ -9314,3 +9314,39 @@ record.
   the levels against the competitor frontier in the published tables (the
   bench crate's reports carry one mothergod row), and any corpus but
   Silesia. `research/progress.jsonl` it209.
+- S2-A131 | ACCEPTED | Issue #1710, why `-3` wrote 4,438 bytes where `-2`
+  wrote 4,122, and the claim reworded to what holds. Hypothesis: `Best`
+  loses to `Fast` on the issue's input because its three DP rounds price
+  worse than `Fast`'s one, or because `search` picks the filter at
+  `Reach::Standard` and widens only that winner. | Mechanism: the rounds are
+  innocent. The filter pick is the cause. The input is 4,000 random bytes,
+  1,100,000 zero bytes, the same 4,000 again; only a parse that reaches
+  1,104,000 back sees the repeat. `search` ranks candidates by their
+  `Reach::Standard` body, and there `Transpose(96)` wins because the
+  transposition folds the 1,104,000 distance to 11,500, inside the window,
+  while every other candidate is blind to the repeat. `widen` then spends
+  the one wide trial on that winner, where the transposed form gains nothing,
+  and `Identity` at `Reach::Wide`, the trial `Fast` runs, is never encoded.
+  A filter that stands in for reach wins the narrow contest and hides the
+  candidate whose wide parse is smaller. | Measured, release build,
+  `mothergod -N -c` on the input above (Python `random.seed(7)`,
+  `randrange(256)` for the 4,000 bytes; the issue's own draw gave 6,121,
+  4,125, 4,439): `-1` 6,121, `-2` 4,122, `-3` 4,438, all `cmp`-equal after
+  `-d`. `codec::trial_body` per shortlist candidate, Standard then Wide:
+  `Delta(6)` 6,115 and 4,110; `Identity` 6,098 and 4,103; `Reverse` 6,112
+  and 4,103; `ReverseDelta(6)` 6,117 and 4,106; `Transpose(96)` 4,426 and
+  4,426. `lz::parse_rounds` at `Reach::Wide` on `Identity`, rounds 0 to 5:
+  6,092, then 4,103 for every count from one to five, one far match of 128
+  bytes at 1,104,000. | Verdict: **accepted**. The three places that promise
+  the smallest output unconditionally (the usage line, the module docs and
+  `level_digit`'s docs in `src/bin/mothergod.rs`) now say "on real data",
+  as `Level::Best`'s docs already did; the encoder is unchanged, so output
+  bytes, `FORMAT_VERSION` and `bench/baseline.json` are as before. Fixing
+  the selection costs a wide trial per extra candidate, and a wide trial is
+  the expensive one (S2-A129: `dickens` 300 s), so the trade is a measured
+  experiment of its own, not a docs slice. | **Not measured:** the fix
+  itself (widening the shortlist's first candidate too whenever it is not
+  the narrow winner, which would make `-3` at most `-2` beyond
+  `lz::WINDOW` by construction, filed as #1723), how often the narrow winner is not the
+  first candidate on Silesia, and any corpus but this one synthetic input.
+  `research/progress.jsonl` it210.
