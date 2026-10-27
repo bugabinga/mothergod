@@ -58,12 +58,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn golden_dir() -> PathBuf {
-    std::env::var_os("MOTHERGOD_GOLDEN_DIR").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
-        PathBuf::from,
-    )
-}
+// Shared with the other fixture suites; this one reads golden_dir alone.
+#[allow(dead_code)]
+#[path = "support/fixture_dirs.rs"]
+mod fixture_dirs;
+use fixture_dirs::golden_dir;
 
 fn superseded_dir() -> PathBuf {
     golden_dir().join("superseded")
