@@ -50,8 +50,46 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
+/// Every file a test here reads, lists or runs the binary on: a path, or a
+/// directory prefix ending in `/`. `ci.yml`'s `changes` job runs `test` on
+/// a PR only for a changed path its `rust` filter names, so a claim about
+/// a file that filter misses passes every PR and fails on main's next
+/// push, where every job runs (issue #1009; `LICENSE` arrived that way in
+/// PR #1215). `input` holds this file to the list, and
+/// `.github/scripts/ci-filter.test.mjs` holds the filter to it, so a new
+/// input fails `claims` until it is listed and `worker` until the filter
+/// names it, both in the PR that adds it.
+const INPUTS: &[&str] = &[
+    "README.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "LICENSE",
+    "bench/corpus.toml",
+    "research/progress.jsonl",
+    "docs/benchmarks/",
+    "fuzz/fuzz_targets/",
+    "site/",
+];
+
+/// `relative`, after checking it is a listed input: a file `INPUTS` names,
+/// a listed directory, or a path under one.
+fn input(relative: &str) -> &str {
+    let listed = INPUTS.iter().any(|entry| {
+        if entry.ends_with('/') {
+            relative.starts_with(entry)
+        } else {
+            relative == *entry
+        }
+    });
+    assert!(
+        listed,
+        "{relative} is not in INPUTS: list it there and in ci.yml's `rust` filter, or a PR editing it skips `test`"
+    );
+    relative
+}
+
 fn read(relative: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(input(relative));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("cannot read {relative}: {error}"))
 }
 
@@ -1214,7 +1252,7 @@ fn published_first_run_transcript_matches_what_the_binary_prints() {
     // `LICENSE.mgdc`, so a reader can repeat it (issue #1216), and stdout is
     // not a terminal, which `-c` would refuse. The test runs it the same way.
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_mothergod"))
-        .args(["-v", "-c", "LICENSE"])
+        .args(["-v", "-c", input("LICENSE")])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .stdout(std::process::Stdio::null())
         .output()
@@ -1320,7 +1358,7 @@ fn number_after(text: &str, marker: &str) -> u32 {
 #[test]
 fn fuzz_target_count_matches_fuzz_fuzz_targets() {
     let true_count =
-        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/fuzz_targets"))
+        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join(input("fuzz/fuzz_targets/")))
             .expect("fuzz/fuzz_targets should be readable")
             .filter_map(Result::ok)
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "rs"))
@@ -1529,7 +1567,7 @@ fn shared_frame_offers_the_same_links_on_every_page() {
     // of it: a page added to site/ and left out of the list ships unchecked
     // (issue #1284), and a listed page that is gone is a stale entry.
     let mut on_disk: Vec<String> =
-        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("site"))
+        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join(input("site/")))
             .expect("site/ should be readable")
             .map(|entry| entry.expect("site/ entry should be readable").path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "html"))
