@@ -68,7 +68,7 @@ use crate::filters::{
 use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
 use crate::lz::{self, Reach, RepCache, RepSlot, Token};
 use crate::model::Model;
-use crate::{Error, rejoin};
+use crate::{Error, Level, rejoin};
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -713,9 +713,36 @@ impl ResidualTree {
 /// docs, which this delegates to per candidate.
 #[must_use]
 pub fn encode(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
+    encode_level(data, workers, Level::Best)
+}
+
+/// [`encode`] at `level`. [`Level::Best`] is the search [`encode`]
+/// documents; the other two skip it and trial the shortlist's first
+/// candidate alone (`quick_trial`), so `workers` has nothing to spread and
+/// goes unused. Every level writes a payload [`decode`] reads the same way:
+/// the selector declares the filter and the reach, and nothing in the
+/// bitstream says how the parse was found.
+///
+/// # Panics
+///
+/// Same as [`encode`].
+#[must_use]
+pub fn encode_level(data: &[u8], workers: NonZeroUsize, level: Level) -> Vec<u8> {
     let candidates = filters::select::pick(data);
-    let (candidate, reach, body) = search(data, &candidates, workers)
-        .expect("filters::select::pick always returns at least Candidate::Identity");
+    let first = candidates.first().copied();
+    let (candidate, reach, body) = match level {
+        Level::Best => search(data, &candidates, workers),
+        Level::Fast => first.map(|candidate| {
+            let reach = if data.len() > lz::WINDOW {
+                Reach::Wide
+            } else {
+                Reach::Standard
+            };
+            quick_trial(data, candidate, reach, 1)
+        }),
+        Level::Fastest => first.map(|candidate| quick_trial(data, candidate, Reach::Standard, 0)),
+    }
+    .expect("filters::select::pick always returns at least Candidate::Identity");
     let mut out = Vec::with_capacity(SELECTOR_LEN + body.len());
     out.extend_from_slice(&selector(candidate, reach));
     out.extend(body);
@@ -731,6 +758,25 @@ type Winner = (usize, Candidate, Vec<u8>);
 /// trials and the wide trial [`encode`] documents alike.
 fn trial_body(data: &[u8], candidate: Candidate, reach: Reach) -> Vec<u8> {
     encode_tokens(&apply_filter(candidate, data), candidate.columns(), reach)
+}
+
+/// The one trial [`Level::Fast`] and [`Level::Fastest`] run, as `(candidate,
+/// reach, body)`: no search over filters, and `rounds` DP rounds where
+/// [`encode`]'s parse runs [`lz::DP_ROUNDS`]. [`Level::Fast`] passes one and
+/// reaches wide on input longer than [`lz::WINDOW`], where [`encode`] pays a
+/// second trial to find out whether wide wins; [`Level::Fastest`] passes
+/// zero, [`lz::parse_greedy`], which never sees past the standard window and
+/// so declares [`Reach::Standard`].
+fn quick_trial(
+    data: &[u8],
+    candidate: Candidate,
+    reach: Reach,
+    rounds: usize,
+) -> (Candidate, Reach, Vec<u8>) {
+    let filtered = apply_filter(candidate, data);
+    let tokens = lz::parse_rounds(&filtered, reach, rounds);
+    let body = encode_tokens_with(&filtered, candidate.columns(), &tokens);
+    (candidate, reach, body)
 }
 
 /// The winner among `candidates` as `(candidate, reach, body)`: the first

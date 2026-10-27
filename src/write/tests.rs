@@ -35,7 +35,7 @@ impl Write for &mut Flaky {
 /// What `write_all` of `input` in pieces of `chunk` bytes, then `finish`,
 /// leaves in the sink, with blocks of `block_len`.
 fn encode(input: &[u8], chunk: usize, block_len: usize) -> Vec<u8> {
-    let mut encoder = Encoder::with_block_len(Vec::new(), block_len);
+    let mut encoder = Encoder::with_block_len(Vec::new(), block_len, Level::default());
     for piece in input.chunks(chunk) {
         encoder.write_all(piece).expect("a Vec does not fail");
     }
@@ -44,7 +44,7 @@ fn encode(input: &[u8], chunk: usize, block_len: usize) -> Vec<u8> {
 
 /// [`encode`] with `workers` blocks encoding at once.
 fn encode_with(input: &[u8], block_len: usize, workers: usize) -> Vec<u8> {
-    let mut encoder = Encoder::with_workers(Vec::new(), block_len, nz(workers));
+    let mut encoder = Encoder::with_workers(Vec::new(), block_len, nz(workers), Level::default());
     encoder.write_all(input).expect("a Vec does not fail");
     encoder.finish().expect("a Vec does not fail")
 }
@@ -87,7 +87,7 @@ fn the_workers_in_flight_never_change_the_bytes() {
 fn a_flush_waits_for_every_running_block_and_the_stream_continues_in_order() {
     let (first, second) = (uneven_blocks(3), uneven_blocks(2));
     for workers in [1, 2, 3] {
-        let mut encoder = Encoder::with_workers(Vec::new(), BLOCK, nz(workers));
+        let mut encoder = Encoder::with_workers(Vec::new(), BLOCK, nz(workers), Level::default());
         encoder.write_all(&first).unwrap();
         encoder.flush().unwrap();
         // Everything written so far has reached the sink, running blocks too.
@@ -169,12 +169,12 @@ fn a_drop_writes_no_frame_and_a_full_block_is_framed_at_once_when_nothing_runs_b
         failures: 0,
         kind: ErrorKind::Other,
     };
-    let mut encoder = Encoder::with_block_len(&mut sink, BLOCK);
+    let mut encoder = Encoder::with_block_len(&mut sink, BLOCK, Level::default());
     encoder.write_all(&vec![b'a'; BLOCK - 1]).unwrap();
     drop(encoder);
     assert!(sink.bytes.is_empty(), "a drop writes no frame");
 
-    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(1));
+    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(1), Level::default());
     encoder.write_all(&vec![b'a'; BLOCK]).unwrap();
     drop(encoder);
     assert_eq!(sink.bytes, compress(&vec![b'a'; BLOCK]), "a full block");
@@ -214,7 +214,7 @@ fn a_sink_error_ends_the_encoder_and_no_later_byte_reaches_the_sink() {
         failures: 1,
         kind: ErrorKind::BrokenPipe,
     };
-    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(1));
+    let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(1), Level::default());
     let err = encoder.write_all(&vec![b'a'; BLOCK]).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::BrokenPipe);
     for result in [encoder.write(b"x").map(drop), encoder.flush()] {
@@ -233,7 +233,7 @@ fn a_sink_error_ends_a_threaded_encoder_with_the_frames_before_it_intact() {
             failures: 1,
             kind: ErrorKind::BrokenPipe,
         };
-        let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(workers));
+        let mut encoder = Encoder::with_workers(&mut sink, BLOCK, nz(workers), Level::default());
         // Six blocks: the first frame's write fails whichever call reaches it.
         let wrote = encoder.write_all(&uneven_blocks(6));
         let err = wrote
@@ -265,7 +265,7 @@ fn a_sink_error_from_finish_or_flush_is_returned_not_swallowed() {
 
 #[test]
 fn write_takes_at_most_the_room_left_in_the_block() {
-    let mut encoder = Encoder::with_block_len(Vec::new(), 8);
+    let mut encoder = Encoder::with_block_len(Vec::new(), 8, Level::default());
     assert_eq!(encoder.write(b"abcdef").unwrap(), 6);
     assert_eq!(encoder.write(b"ghijkl").unwrap(), 2);
     assert_eq!(encoder.write(b"ijkl").unwrap(), 4);

@@ -101,6 +101,7 @@ const PROBES: &[(&str, Probe)] = &[
     ("test-t", test_t),
     ("verbose-v", verbose_v),
     ("quiet-q", quiet_q),
+    ("level-digit", level_digit),
     ("help", help),
     ("version", version),
     ("end-of-options", end_of_options),
@@ -177,6 +178,14 @@ fn verbose_v() -> Seen {
 fn quiet_q() -> Seen {
     let (out, code) = run(bin().arg("-q"), &sample());
     seen(code == 0 && out.starts_with(MAGIC))
+}
+
+fn level_digit() -> Seen {
+    let encodes = |digit: &str| {
+        let (frame, code) = run(bin().arg(digit), &sample());
+        code == 0 && run(bin().arg("-d"), &frame) == (sample(), 0)
+    };
+    seen(["-1", "-2", "-3"].into_iter().all(encodes))
 }
 
 /// `true` when `flag` exits 0 having written something. The stream is not

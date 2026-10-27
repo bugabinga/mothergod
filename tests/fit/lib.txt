@@ -35,7 +35,7 @@ one-shot-compress | holds | a byte slice compresses to a `Vec<u8>` in one call |
 one-shot-decompress | holds | a compressed byte slice decompresses to a `Vec<u8>` in one call | zstd bulk::decompress, lz4_flex block::decompress_size_prepended, snap raw::Decoder::decompress_vec |
 output-bound | holds | the caller caps the decompressed size | zstd bulk::decompress `capacity`, lz4_flex block::decompress `min_uncompressed_size`, snap raw::decompress_len |
 decode-to-writer | holds | a frame decompresses into a caller-supplied `Write` | zstd stream::copy_decode, brotli BrotliDecompress, flate2 write::GzDecoder |
-level-argument | gap | compression takes a level | flate2 Compression, zstd bulk::compress `level`, xz2 write::XzEncoder::new `level`, brotli CompressorWriter::new `q` | one tier until M5; lz4_flex has no level
+level-argument | holds | compression takes a level | flate2 Compression, zstd bulk::compress `level`, xz2 write::XzEncoder::new `level`, brotli CompressorWriter::new `q` | #1698; `compress_level` and `copy_encode_level` take a `Level` of three tiers; lz4_flex has no level
 empty-roundtrip | holds | empty input compresses and decompresses to empty | observed in a scratch crate: zstd bulk, lz4_flex block, snap raw each return an empty `Vec` |
 error-std | holds | the error type implements `std::error::Error`, `Display` and `Debug` | Rust API Guidelines C-GOOD-ERR, lz4_flex block::DecompressError, snap Error |
 error-into-io | holds | a decode failure converts into `std::io::Error` | lz4_flex frame::Error, snap Error implement `From<_> for io::Error`; flate2, zstd, xz2 and brotli return `io::Error` itself |

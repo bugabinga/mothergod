@@ -1318,11 +1318,23 @@ pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
 /// Same as [`parse_optimal`].
 #[must_use]
 pub fn parse_optimal_with_window(data: &[u8], reach: Reach) -> Vec<Token> {
+    parse_rounds(data, reach, DP_ROUNDS)
+}
+
+/// [`parse_optimal_with_window`] with the number of `dp_round` rounds a
+/// parameter: the encoder's speed dial (`crate::Level`). Zero rounds is the
+/// [`parse_greedy`] seed itself, so `reach` has no effect there.
+///
+/// # Panics
+///
+/// Same as [`parse_optimal`].
+#[must_use]
+pub fn parse_rounds(data: &[u8], reach: Reach, rounds: usize) -> Vec<Token> {
     if data.len() < OPTIMAL_MIN_LEN {
         return parse_greedy(data);
     }
     let mut round = parse_greedy(data);
-    for _ in 0..DP_ROUNDS {
+    for _ in 0..rounds {
         let prices = PriceCounts::tally(&round, data).prices(round.len());
         // The prices are all the next round takes from these tokens, and a
         // token list the parse grew by doubling holds up to 192 MiB of
@@ -1338,7 +1350,7 @@ pub fn parse_optimal_with_window(data: &[u8], reach: Reach) -> Vec<Token> {
 /// runs. S2-A56 measured a third round winning and S2-R4 a fourth losing on
 /// the sealed split, so the count stays three until new evidence reopens it
 /// (`research/JOURNAL.md` S1-P2).
-const DP_ROUNDS: usize = 3;
+pub(crate) const DP_ROUNDS: usize = 3;
 
 #[cfg(test)]
 mod tests;

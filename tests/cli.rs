@@ -14,6 +14,7 @@
 mod common;
 
 use common::{bin, run, run_output, run_with_early_closing_reader, stored_frame};
+use mothergod::Level;
 
 #[test]
 fn compress_then_decompress_roundtrips_arbitrary_bytes() {
@@ -83,6 +84,66 @@ fn unknown_options_fail_with_usage_naming_the_option() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("unknown option"), "{option}: {stderr}");
         assert!(stderr.contains("usage:"), "{option}: {stderr}");
+    }
+}
+
+/// Text on which the three levels write three different sizes.
+fn records() -> Vec<u8> {
+    (0..2000)
+        .flat_map(|i| format!("{{\"id\":{i},\"score\":{}}}\n", i * 37 % 1000).into_bytes())
+        .collect()
+}
+
+#[test]
+fn a_level_digit_writes_the_frame_the_library_writes_at_that_level() {
+    let input = records();
+    for (flags, level) in [
+        (&["-1"][..], Level::Fastest),
+        (&["-2"], Level::Fast),
+        (&["-3"], Level::Best),
+        (&[], Level::Best),
+        // The last digit wins, whether it comes as an option or in a cluster.
+        (&["-1", "-3"], Level::Best),
+        (&["-3", "-1"], Level::Fastest),
+        (&["-31"], Level::Fastest),
+        (&["-1c", "-2"], Level::Fast),
+    ] {
+        let (frame, code) = run(bin().args(flags), &input);
+        assert_eq!(code, 0, "{flags:?}");
+        assert_eq!(frame, mothergod::compress_level(&input, level), "{flags:?}");
+        assert_eq!(
+            run(bin().arg("-d"), &frame),
+            (input.clone(), 0),
+            "{flags:?}"
+        );
+    }
+}
+
+#[test]
+fn a_digit_that_names_no_level_fails_with_usage_naming_the_levels() {
+    for option in ["-0", "-4", "-9", "-1d4"] {
+        let output = run_output(bin().arg(option), b"");
+        assert!(!output.status.success(), "{option} must fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("the levels are -1 to -3"),
+            "{option}: {stderr}"
+        );
+        assert!(stderr.contains("usage:"), "{option}: {stderr}");
+    }
+}
+
+#[test]
+fn a_level_digit_beside_decompress_or_test_fails_because_it_would_choose_nothing() {
+    let (frame, _) = run(&mut bin(), b"level level level level");
+    for flags in [&["-1", "-d"][..], &["-d", "-3"], &["-2t"], &["-t", "-1"]] {
+        let output = run_output(bin().args(flags), &frame);
+        assert!(!output.status.success(), "{flags:?} must fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("only compression has"),
+            "{flags:?}: {stderr}"
+        );
     }
 }
 
