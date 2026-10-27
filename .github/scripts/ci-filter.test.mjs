@@ -14,7 +14,7 @@ const repoRoot = new URL("../..", import.meta.url).pathname;
 
 // The entries of claims.rs's `INPUTS` const, in source order.
 function claimsInputs(source) {
-  const block = source.match(/const INPUTS: \[&str; \d+\] = \[([^\]]*)\];/);
+  const block = source.match(/const INPUTS: &\[&str\] = &\[([^\]]*)\];/);
   assert.ok(block, "tests/claims.rs declares `const INPUTS`");
   return [...block[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]);
 }
