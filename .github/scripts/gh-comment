@@ -129,6 +129,7 @@ from footer import attribute
 from gh_retry import once
 from opener import trim
 from secret_scrub import scrub
+import stdin_body
 
 
 def die(*lines):
@@ -317,7 +318,7 @@ def main() -> int:
     if not role:
         die("ROLE is not set; the calling workflow must export it")
 
-    body = sys.stdin.read().strip()
+    body = stdin_body.read()
     if not body:
         die("empty body; refusing to post")
     body, removed = trim(body)

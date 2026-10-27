@@ -67,6 +67,7 @@ import sys
 from app_token import prefer_file
 from footer import attribute
 from secret_scrub import scrub
+import stdin_body
 
 # CLAUDE.md Voice T1: the PR title is the squash subject on `main`, at most
 # 72 characters, no period. Counted in code points, the count a reader sees.
@@ -131,7 +132,7 @@ def main() -> int:
     if not role:
         die("ROLE is not set; the calling workflow must export it")
 
-    body = sys.stdin.read().strip()
+    body = stdin_body.read()
     if not body:
         die("empty body; a PR body states what changed and why, and becomes "
             "the squash commit's message")
