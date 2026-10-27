@@ -381,6 +381,9 @@ test("an unknown verb prints the usage line and exits 2", async () => {
 // for an id it lacks (#1661). Every call lands in calls.log, so a test can
 // say which artifacts were downloaded, which runs were probed, and which
 // were skipped on their name.
+// `runs` given as a string is the listing's JSON text as the API would
+// send it, for the shapes JSON.stringify cannot write: `Infinity`, an
+// integer past 2**53. Python's json reads both (#1685).
 function stubGh(artifacts, zips, { runs = [], jobs = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "sessions-"));
   writeFileSync(
@@ -389,7 +392,7 @@ function stubGh(artifacts, zips, { runs = [], jobs = {} } = {}) {
 import io, json, sys, zipfile
 artifacts = json.loads(${JSON.stringify(JSON.stringify(artifacts))})
 zips = json.loads(${JSON.stringify(JSON.stringify(zips))})
-runs = json.loads(${JSON.stringify(JSON.stringify(runs))})
+runs = json.loads(${JSON.stringify(typeof runs === "string" ? runs : JSON.stringify(runs))})
 jobs = json.loads(${JSON.stringify(JSON.stringify(jobs))})
 args = sys.argv[1:]
 with open(${JSON.stringify(join(dir, "calls.log"))}, "a") as fh:
@@ -1068,9 +1071,49 @@ test("a cancelled run whose listing lacks updated_at is one unreadable line, nev
     assert.deepEqual(applied(seen)("sessions").map((row) => row.run_id), [40235230221]);
     assert.match(
       r.out,
-      /^  unreadable run 40206666650 attempt 1: the listing carries no updated_at, the kill row's at$/m,
+      /^  unreadable run 40206666650 attempt 1: the listing's updated_at is None, not one D1 binds as the kill row's at$/m,
     );
     assert.match(r.out, /\| written 0 \| killed 1 \| unreadable 1 \| missing 1$/m);
+  });
+});
+
+test("a cancelled run whose updated_at is a list, inf, empty or past 64 bits is one unreadable line, never a NULL at (#1685)", async () => {
+  // The listing travels as text: a `[1]` passes the old truthiness guard,
+  // `Infinity` and 2**100 cannot be written by JSON.stringify at all.
+  const hostile = (id, raw) =>
+    JSON.stringify(cancelled(id, "agent-heartbeat")).replace(/"updated_at":"[^"]*"/, `"updated_at":${raw}`);
+  const runs = `[${
+    [
+      JSON.stringify(killed),
+      hostile(40206666651, "[1]"),
+      hostile(40206666652, "Infinity"),
+      hostile(40206666653, "\"\""),
+      hostile(40206666654, "1267650600228229401496703205376"),
+    ].join(",")
+  }]`;
+  const gh = stubGh(listing.slice(0, 1), {}, { runs, jobs: probedJobs });
+  const answers = [keys([[100, 1]]), guardRow, d1([]), keys([[100, 1], [40235230221, 1]])];
+  await withStub(answers, async (base, seen) => {
+    const r = await run(["backfill", "--repo", "o/r"], { D1_API_BASE: base, PATH: `${gh}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out + r.err);
+    assert.deepEqual(probes(gh), ["40235230221"], "no jobs call is spent on a run that cannot be written");
+    assert.deepEqual(applied(seen)("sessions").map((row) => row.run_id), [40235230221]);
+    for (
+      const [id, shown] of [
+        [40206666651, "[1]"],
+        [40206666652, "inf"],
+        [40206666653, "''"],
+        [40206666654, "1267650600228229401496703205376"],
+      ]
+    ) {
+      assert.ok(
+        r.out.includes(
+          `  unreadable run ${id} attempt 1: the listing's updated_at is ${shown}, not one D1 binds as the kill row's at`,
+        ),
+        `${id}: ${r.out}`,
+      );
+    }
+    assert.match(r.out, /\| written 0 \| killed 1 \| unreadable 4 \| missing 4$/m);
   });
 });
 
