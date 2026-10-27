@@ -36,24 +36,18 @@ impl Model {
     /// something adversarial input can trigger.
     #[must_use]
     pub fn new(alphabet_len: usize) -> Self {
-        Self::from_unit_freqs(vec![1; alphabet_len])
+        crate::abort_on_oom(Self::try_new(alphabet_len))
     }
 
-    /// [`Self::new`] returning `Err` instead of aborting if the allocator
-    /// cannot satisfy `alphabet_len` entries: the constructor
-    /// [`crate::codec::decode`] uses (hard rule 2, #453). Panics on zero
-    /// like [`Self::new`].
+    /// The one statement of a fresh table, returning `Err` instead of
+    /// aborting if the allocator cannot satisfy `alphabet_len` entries: the
+    /// constructor [`crate::codec::decode`] uses (hard rule 2, #453).
+    /// Panics on zero like [`Self::new`].
     pub(crate) fn try_new(alphabet_len: usize) -> Result<Self, std::collections::TryReserveError> {
-        Ok(Self::from_unit_freqs(crate::try_filled_vec(
-            alphabet_len,
-            1u32,
-        )?))
-    }
-
-    fn from_unit_freqs(freq: Vec<u32>) -> Self {
+        let freq = crate::try_filled_vec(alphabet_len, 1u32)?;
         assert!(!freq.is_empty(), "Model alphabet must be non-empty");
         let total = u32::try_from(freq.len()).expect("alphabet_len fits u32");
-        Self { freq, total }
+        Ok(Self { freq, total })
     }
 
     fn update(&mut self, symbol: usize) {

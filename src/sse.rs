@@ -174,43 +174,31 @@ impl<S: Spacing> Table<S> {
     /// never something adversarial input can trigger.
     #[must_use]
     pub fn new(contexts: usize) -> Self {
-        Self::filled(vec![0.0; contexts * BINS], contexts)
+        crate::abort_on_oom(Self::try_new(contexts))
     }
 
-    /// Fallible counterpart to [`Self::new`]: the same fresh, identity-
-    /// mapped table, but returns `Err` instead of aborting if the
-    /// allocator cannot satisfy `contexts * BINS` entries.
-    /// [`crate::literal::Literal::try_new`] uses this on the real decode
-    /// path (hard rule 2, `rust-craft` skill's allocation-discipline,
-    /// `tests/torture.rs`, #453); [`Self::new`] stays the panicking
-    /// constructor the encoder and every test use.
+    /// The one statement of a fresh, identity-mapped table, returning `Err`
+    /// instead of aborting if the allocator cannot satisfy `contexts * BINS`
+    /// entries. [`crate::literal::Literal::try_new`] uses this on the real
+    /// decode path (hard rule 2, `rust-craft` skill's allocation-discipline,
+    /// `tests/torture.rs`, #453).
     ///
     /// # Panics
     ///
     /// Same as [`Self::new`]: `contexts` zero is a caller bug, never
     /// something adversarial input can trigger.
     pub(crate) fn try_new(contexts: usize) -> Result<Self, std::collections::TryReserveError> {
-        Ok(Self::filled(
-            crate::try_filled_vec(contexts * BINS, 0.0)?,
-            contexts,
-        ))
-    }
-
-    /// Writes `S`'s identity row into every context of `table`, already
-    /// sized to `contexts * BINS`. [`Self::new`] and [`Self::try_new`]
-    /// differ only in how `table` was allocated, never in what fills it or
-    /// refuses zero `contexts`.
-    fn filled(mut table: Vec<f64>, contexts: usize) -> Self {
         assert!(contexts > 0, "{} must have at least one context", S::NAME);
+        let mut bins = crate::try_filled_vec(contexts * BINS, 0.0)?;
         let identity = S::identity();
-        for row in table.as_chunks_mut::<BINS>().0 {
+        for row in bins.as_chunks_mut::<BINS>().0 {
             *row = identity;
         }
-        Self {
+        Ok(Self {
             contexts,
-            bins: table,
+            bins,
             spacing: PhantomData,
-        }
+        })
     }
 
     /// `context`'s lower bin index for `p` into `self.bins`, and the
