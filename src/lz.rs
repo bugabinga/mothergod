@@ -297,10 +297,7 @@ fn match_len(data: &[u8], i: usize, distance: Distance) -> usize {
     if distance > i {
         return 0;
     }
-    let mut len = 0;
-    while len < MAX_MATCH_LEN && i + len < data.len() && data[i - distance + len] == data[i + len] {
-        len += 1;
-    }
+    let len = suffix_common_len(data, i - distance, i, 0, MAX_MATCH_LEN);
     #[cfg(test)]
     work::Scan::MatchLen.add(len);
     len
@@ -405,10 +402,9 @@ impl<'d> MatchFinder<'d> {
 /// Longest common run between `data[a..]` and `data[b..]`, given `a < b`
 /// (so `data[a..]` is never shorter than `data[b..]`), capped at `limit` in
 /// addition to [`MAX_MATCH_LEN`] and the data remaining from the later
-/// position `b`. Compares two arbitrary earlier positions instead of a
-/// position against itself at a backward distance — what
-/// [`BinaryTreeMatchFinder`] needs to order two candidates' suffixes
-/// against each other, not just measure one candidate's match length.
+/// position `b`. The one scan under [`match_len`] (`a = b - distance`) and
+/// [`BinaryTreeMatchFinder`], which compares two arbitrary earlier
+/// positions to order their suffixes against each other.
 /// `start` lets a caller resume from a length it already knows both
 /// suffixes share, rather than re-comparing from byte 0
 /// ([`BinaryTreeMatchFinder::insert_and_find`]'s length-prefix-reuse
@@ -426,8 +422,6 @@ fn suffix_common_len(data: &[u8], a: usize, b: usize, start: usize, limit: usize
     while len < max_len && data[a + len] == data[b + len] {
         len += 1;
     }
-    #[cfg(test)]
-    work::Scan::SuffixCommonLen.add(len - start);
     len
 }
 
@@ -601,6 +595,8 @@ impl<'d> BinaryTreeMatchFinder<'d> {
             }
             let start = less.common.min(greater.common);
             let common = suffix_common_len(self.data, cur_pos, i, start, nice_len);
+            #[cfg(test)]
+            work::Scan::SuffixCommonLen.add(common - start);
             if common > best_len {
                 best_len = common;
                 best_distance = NonZeroU32::new(to_u32(distance));
