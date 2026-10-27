@@ -763,13 +763,6 @@ pub mod select {
         }
     }
 
-    /// One `(from, to)` pair's contribution to an order-1 entropy sum:
-    /// `-count * log2(count / total)`, `total` being how often `from`
-    /// occurred as the first byte of a pair. Used by [`Order1::bits`].
-    fn surprisal_bits(count: u32, total: u32) -> f64 {
-        f64::from(count) * crate::surprisal(f64::from(count) / f64::from(total))
-    }
-
     /// Pair-count scratch for the order-1 entropy proxies, allocated once
     /// per [`pick`] and left all-zero between calls, so scoring a stream
     /// costs its length, not the table's 256 KiB.
@@ -798,23 +791,14 @@ pub mod select {
         /// each column of a fixed-width record is internally predictable.
         /// Not a compressibility measurement, but it separates structure
         /// from noise well enough to shortlist (`JOURNAL` S1-L3).
-        fn entropy(&mut self, data: &[u8], columns: NonZeroUsize) -> f64 {
-            let (bits, transitions) = self.bits(data, columns.get());
-            #[allow(
-                clippy::cast_precision_loss,
-                reason = "transitions <= PROBE_LEN (16384): exact in f64"
-            )]
-            let transitions = transitions.max(1) as f64;
-            bits / transitions
-        }
-
-        /// Total pair surprisal in bits and transition count over the
-        /// `columns` interleaved streams of `data`. Each pair is summed at
-        /// its first appearance in its column, so the float sum has one
+        ///
+        /// Each pair's surprisal, `-count * log2(count / firsts)`, is summed
+        /// at its first appearance in its column, so the float sum has one
         /// order for one input; a hash map's iteration order is seeded per
         /// process and would let two runs pick different filters on a
         /// near-tie. The same walk zeroes the scratch again.
-        fn bits(&mut self, data: &[u8], columns: usize) -> (f64, usize) {
+        fn entropy(&mut self, data: &[u8], columns: NonZeroUsize) -> f64 {
+            let columns = columns.get();
             let mut bits = 0f64;
             let mut transitions = 0usize;
             for start in 0..columns.min(data.len()) {
@@ -827,13 +811,20 @@ pub mod select {
                 for (&a, &b) in column().zip(column().skip(1)) {
                     let slot = &mut self.pairs[(usize::from(a) << 8) | usize::from(b)];
                     if *slot > 0 {
-                        bits += surprisal_bits(*slot, self.firsts[usize::from(a)]);
+                        let count = f64::from(*slot);
+                        let total = f64::from(self.firsts[usize::from(a)]);
+                        bits += count * crate::surprisal(count / total);
                         *slot = 0;
                     }
                 }
                 self.firsts.fill(0);
             }
-            (bits, transitions)
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "transitions <= PROBE_LEN (16384): exact in f64"
+            )]
+            let transitions = transitions.max(1) as f64;
+            bits / transitions
         }
     }
 
