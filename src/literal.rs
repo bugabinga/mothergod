@@ -213,7 +213,7 @@ fn cumulate(mixed: impl IntoIterator<Item = u64>) -> [u64; ALPHABET + 1] {
 /// moves given `estimate` (this expert's own prediction) versus `mixed`
 /// (the blend's prediction), clamped to `[MIN_WEIGHT, MAX_WEIGHT]`.
 /// Shared by [`Literal::update`]'s six real experts and
-/// [`Literal::adapt_seventh_weight`]'s extra one, so both adapt by the same
+/// [`Literal::update_column_expert`]'s extra one, so both adapt by the same
 /// rule.
 fn adapt_weight(weight: f64, estimate: f64, mixed: f64, exp_fn: fn(f64) -> f64) -> f64 {
     let denominator = mixed.max(MIN_DENOMINATOR);
