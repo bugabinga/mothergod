@@ -279,7 +279,8 @@ def killed(repo, since, present, rebuild, keys, unreadable):
     A run whose jobs could not be read is registered in `keys` without a
     row, so the census names it missing and the walk goes red, as an
     unreadable artifact does, and the next walk tries again; so is a
-    listing without `updated_at`, the kill row's NOT NULL `at` (#1673),
+    listing whose `updated_at` D1 cannot bind as the kill row's NOT NULL
+    `at`, absent, empty, a list, `inf` or past 64 bits (#1673, #1685),
     before any jobs call is spent on it. The role is
     the guard table's; a run with no guard row carries its workflow's name,
     visibly not a seat.
@@ -293,8 +294,10 @@ def killed(repo, since, present, rebuild, keys, unreadable):
         if key in present and not rebuild:
             continue
         name = f"run {key[0]} attempt {key[1]}"
-        if not run.get("updated_at"):
-            unreadable.append(f"{name}: the listing carries no updated_at, the kill row's at")
+        stamp = run.get("updated_at")
+        if not audit_facts.bindable(stamp):
+            unreadable.append(f"{name}: the listing's updated_at is {stamp!r:.80},"
+                              " not one D1 binds as the kill row's at")
             keys[name] = key
             continue
         try:
