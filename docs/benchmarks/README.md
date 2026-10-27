@@ -20,9 +20,11 @@ as the other:
   individually pinned files (`research/JOURNAL.md` S2-A52).
 
 Both finals reports end in a frontier section (issue #1340): every level of
-gzip 1 to 9, zstd 1 to 22 and xz 0 to 9e beside mothergod, one row each,
-with bits/byte, encode and decode MB/s and peak resident set, and the two
-competitor levels nearest mothergod on the ratio and encode-speed plane.
+gzip 1 to 9, zstd 1 to 22 and xz 0 to 9e beside mothergod at each of its
+levels (`mothergod -1`, `mothergod -2`, and `mothergod` for the default
+`-3`), one row each, with bits/byte, encode and decode MB/s and peak
+resident set, and the two competitor levels nearest each mothergod level on
+the ratio and encode-speed plane (issue #1708).
 
 **Read the `.md` files, not raw JSON**, for the current numbers.
 
@@ -61,9 +63,9 @@ so this takes about half an hour for ~200 MB. Each encode and decode runs
 in a child of the binary itself under `/usr/bin/time -f %M`, the
 competitors' instrument, which is where mothergod's peak resident set in
 the frontier section comes from (issue #1340). The frontier section then
-times every competitor level one process at a time as well
-(`mothergod_bench::reference::frontier_section`), serial for the same
-reason, so its cost is added on top; the first runner pass reads it.
+times every competitor level and mothergod's two faster levels one process
+at a time as well (`mothergod_bench::reference::frontier_section`), serial
+for the same reason, so its cost is added on top; the first runner pass reads it.
 Also by hand, re-run under the same conditions as `finals_report`.
 
 On a runner, all four at once, because the Silesia pass outgrew a
