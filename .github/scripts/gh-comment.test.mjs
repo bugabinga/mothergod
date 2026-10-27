@@ -367,17 +367,30 @@ test("a 5xx on the labels call gets one more try, with no look first", () => {
   assert.match(stderr, /the labels call on #1621 answered a 5xx/);
 });
 
-test("a 5xx on --new is tried once more unless an open issue already carries the title", () => {
+// The title alone is not the landed signal: an older open issue of the same
+// title is exactly what `--anyway` files past, and a plain `--new` whose title
+// has no identifier never met `duplicates()` either (#1692). The create landed
+// only when the issue was created inside the retry's two-minute window.
+test("a 5xx on --new is tried once more unless an issue of that title was created since", () => {
   const url = "https://github.com/o/r/issues/7";
-  const found = run(["--new", "Late writes die", "--anyway"], {
-    env: { GH_STUB_FLAKY: "issue create" },
+  const older = { number: 7, title: "Late writes die", url, createdAt: "2026-10-01T00:00:00Z" };
+  const flaky = { GH_STUB_FLAKY: "issue create" };
+  const past = run(["--new", "Late writes die", "--anyway"], { env: flaky, issues: [older] });
+  assert.equal(past.status, 0, past.stderr);
+  assert.deepEqual(past.verbs, ["issue create", "issue list", "issue create"]);
+  const plain = run(["--new", "Late writes die"], { env: flaky, issues: [older] });
+  assert.deepEqual(plain.verbs, ["issue list", "issue create", "issue list", "issue create"]);
+  const undated = run(["--new", "Late writes die", "--anyway"], {
+    env: flaky,
     issues: [{ number: 7, title: "Late writes die", url }],
   });
-  assert.equal(found.status, 0, found.stderr);
-  assert.deepEqual(found.verbs, ["issue create", "issue list"]);
-  assert.equal(found.stdout.trim(), url);
-  const missing = run(["--new", "Late writes die", "--anyway"], { env: { GH_STUB_FLAKY: "issue create" } });
-  assert.deepEqual(missing.verbs, ["issue create", "issue list", "issue create"]);
+  assert.deepEqual(undated.verbs, ["issue create", "issue list", "issue create"]);
+  const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const landed = run(["--new", "Late writes die", "--anyway"], { env: flaky, issues: [{ ...older, createdAt: now }] });
+  assert.equal(landed.status, 0, landed.stderr);
+  assert.deepEqual(landed.verbs, ["issue create", "issue list"]);
+  assert.equal(landed.stdout.trim(), url);
+  assert.match(landed.stderr, /but had landed: https:\/\/github.com\/o\/r\/issues\/7/);
 });
 
 test("a 4xx is the caller's and is not tried again", () => {
