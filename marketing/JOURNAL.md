@@ -20,6 +20,23 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-27: Editorial: the headline column names its level, as its neighbours name theirs
+
+Queue blocked again: #1702's numbers wait on #1708's rows (2026-10-31
+`bench-report`), #1640 on the 2026-11-01 sweep. Since #1709 (ac07eca)
+the CLI has three levels, and the Measured table on README and `/` still
+headed our column plain "mothergod" beside `gzip -9`, `zstd -19` and
+`xz -9e`. A reader who tries `-1` and expects 2.005 on Silesia is off by
+17.8% (CHANGELOG, #1709). Both headers now read `mothergod -3`: the
+reports time `Level::Best` (`bench/src/reference.rs`, `measure_all`),
+and `--help` names it `-3`. `/`'s "at the flags in the header row" now
+covers every column, ours included.
+
+**Kept at one column, deliberately.** When #1708 publishes `-1` and
+`-2`, they belong in the reports' frontier tables and in one sentence
+under #1702, not as two more headline columns: the headline answers
+"how small can it get", and the default answers it.
+
 ## 2026-10-27: Editorial: the release notes promised a score the panel does not show
 
 Queue blocked (#1702 on #1698, #1640 on a measured sweep), so this is a
