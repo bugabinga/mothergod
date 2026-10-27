@@ -237,6 +237,28 @@ fn test_doc_failure_names_the_rerun_command() {
 }
 
 #[test]
+fn test_doc_checks_links_in_private_items() {
+    let repository = Repository::new();
+    write_passing_fixture(&repository);
+    repository.write(
+        "src/lib.rs",
+        "/// A no-op.\npub fn noop() {}\n\nmod inner {\n    /// Links to [nonexistent_item].\n    pub(crate) fn hidden() {}\n}\n",
+    );
+
+    let output = repository.x(&["doc"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("doc: documentation build failed"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("cargo doc --no-deps --document-private-items --features"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn test_doc_reports_a_stale_api_surface_ledger() {
     let repository = Repository::new();
     write_passing_fixture(&repository);

@@ -31,7 +31,9 @@ file-scoped; it stops at the first failing suite and names the command to
 re-run just that one.
 
 `doc` runs `RUSTDOCFLAGS="--deny warnings" cargo doc --no-deps --features
-mothergod-bench/corpus-fetch`, the CLAUDE.md doc gate. It is not file-scoped either; on failure it names the
+mothergod-bench/corpus-fetch`, the CLAUDE.md doc gate, then once more with
+`--document-private-items`, because rustdoc checks a link only in an item it
+renders. It is not file-scoped either; on failure it names the
 command to re-run.
 
 No paths selects every supported tracked file.

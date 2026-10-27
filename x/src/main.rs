@@ -46,7 +46,7 @@ enum Task {
     Test,
     /// Build documentation with rustdoc warnings denied
     #[command(
-        after_help = "Runs `RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps --features mothergod-bench/corpus-fetch`.\n\nNot file-scoped: the whole crate documents or the task fails, naming the command to re-run.\n\nExamples:\n  cargo x doc"
+        after_help = "Runs `RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps --features mothergod-bench/corpus-fetch`, then again with `--document-private-items`, because rustdoc checks a link only in an item it renders.\n\nNot file-scoped: the whole crate documents or the task fails, naming the command to re-run.\n\nExamples:\n  cargo x doc"
     )]
     Doc,
 }
