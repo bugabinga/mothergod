@@ -14,9 +14,39 @@ use crate::lint::BENCH_CORPUS_FETCH;
 /// no publisher, and this is its source of truth, kept honest the same way
 /// `bench/baseline.json` is -- a committed number the gate that can compute
 /// it verifies on every run.
+///
+/// A second pass adds `--document-private-items` for the link check alone:
+/// rustdoc resolves links only in the items it renders, so a link in a
+/// `pub(crate)` item's docs is never checked by the public pass (issue
+/// #1716). The surface count reads the public pass's `all.html`, because
+/// private items would change what `docs/api-surface.txt` means.
 pub(crate) fn run(root: &Path) -> Result<bool, String> {
+    for private_items in [false, true] {
+        if !build(root, private_items)? {
+            return Ok(true);
+        }
+        if !private_items && let Err(message) = check_api_surface(root) {
+            eprintln!("doc: {message}");
+            return Ok(true);
+        }
+    }
+
+    println!("doc: built without warnings");
+    Ok(false)
+}
+
+/// One `cargo doc --no-deps`, warnings denied, documenting private items or
+/// not. False after printing the command that reproduces the failure.
+fn build(root: &Path, private_items: bool) -> Result<bool, String> {
+    let flag = if private_items {
+        " --document-private-items"
+    } else {
+        ""
+    };
     let status = Command::new("cargo")
-        .args(["doc", "--no-deps", "--features", BENCH_CORPUS_FETCH])
+        .args(["doc", "--no-deps"])
+        .args(private_items.then_some("--document-private-items"))
+        .args(["--features", BENCH_CORPUS_FETCH])
         .env("RUSTDOCFLAGS", "--deny warnings")
         .current_dir(root)
         .status()
@@ -25,18 +55,10 @@ pub(crate) fn run(root: &Path) -> Result<bool, String> {
     if !status.success() {
         eprintln!("doc: documentation build failed");
         eprintln!(
-            "  next: RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps --features {BENCH_CORPUS_FETCH}"
+            "  next: RUSTDOCFLAGS=\"--deny warnings\" cargo doc --no-deps{flag} --features {BENCH_CORPUS_FETCH}"
         );
-        return Ok(true);
     }
-
-    if let Err(message) = check_api_surface(root) {
-        eprintln!("doc: {message}");
-        return Ok(true);
-    }
-
-    println!("doc: built without warnings");
-    Ok(false)
+    Ok(status.success())
 }
 
 /// Compares the item count rustdoc just built against the committed

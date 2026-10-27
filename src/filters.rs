@@ -325,7 +325,7 @@ pub mod bcj {
         }
     }
 
-    /// Streaming counterpart to [`decode`], as [`delta::Undo`] is for delta
+    /// Streaming counterpart to [`decode`], as [`super::delta::Undo`] is for delta
     /// (ROADMAP M4's bounded-memory decode guarantee).
     ///
     /// Unlike delta's lookback, the scan needs *lookahead*: an opcode byte
@@ -509,7 +509,7 @@ pub mod base64_unwrap {
 
     /// The length of the padded base64 text of `len` bytes. `u64` because
     /// it can pass `u32::MAX`. The one statement of the length:
-    /// [`decode`], [`try_decode`] and [`select::Candidate::output_len`]
+    /// [`decode`], [`try_decode`] and [`super::select::Candidate::output_len`]
     /// all read it.
     pub(crate) const fn padded_len(len: u64) -> u64 {
         len.div_ceil(3) * 4
@@ -600,11 +600,11 @@ pub mod select {
     /// this many scanned bytes.
     const BCJ_DENSITY_DIVISOR: usize = 400;
 
-    /// Below this input length, [`pick`] never scores [`transpose`]: too
+    /// Below this input length, [`pick`] never scores [`super::transpose`]: too
     /// few rows for a column count to mean anything.
     const MIN_TRANSPOSE_LEN: usize = 4096;
 
-    /// Column counts [`pick`] scores for [`transpose`]: common fixed-width
+    /// Column counts [`pick`] scores for [`super::transpose`]: common fixed-width
     /// record sizes (small integer types, alignment-padded structs). The
     /// `unwrap()`s run over literals at compile time.
     const TRANSPOSE_COLUMNS: [NonZeroUsize; 14] = [
