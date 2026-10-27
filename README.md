@@ -96,9 +96,10 @@ cmp FILE FILE.out   # silence means the round trip was lossless
 
 Given a file, it writes `<file>.mgdc` beside it, and unlike `gzip` it never
 deletes the input. `--help` lists the rest on one screen: flags you know from
-`gzip`, and no compression levels or tuning knobs. `--version` also prints the
-format version the build reads; put it in a bug report. Expect the encode to
-take a while, at the rates above.
+`gzip`, three encoder levels, `-1` the fastest and `-3` the default and slowest,
+and no tuning knobs. Every level writes frames the one decoder reads.
+`--version` also prints the format version the build reads; put it in a bug
+report. Expect the encode to take a while at the default, at the rates above.
 
 Library API (subject to change until 1.0):
 
