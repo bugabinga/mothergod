@@ -966,21 +966,25 @@ fn published_speed_anchor_matches_its_generated_report() {
     }
 }
 
-/// Byte range of the CPU model token after "AMD EPYC ": the run of
-/// characters up to the next whitespace or comma, which strips the report's
-/// own "96-Core Processor" suffix (`"AMD EPYC 9V45 96-Core Processor,"` ->
-/// `"9V45"`) and the site prose's own trailing comma (`"AMD EPYC 9V45, 4
-/// logical"` -> `"9V45"`) the same way regardless of which form `text` uses.
-fn epyc_model_span(text: &str) -> Range<usize> {
-    let marker = "AMD EPYC ";
+/// Byte range of the CPU model name after `marker`: everything up to the
+/// ", N logical core" that follows it, so the report's `"Intel(R) Xeon(R)
+/// 6973P-C, 4 logical core(s)"` and the site prose's `"(Intel(R) Xeon(R)
+/// 6973P-C, 4 logical cores)"` end at the same place whatever vendor the CI
+/// runner's CPU is, and a name containing parentheses or digits needs no
+/// special case.
+fn cpu_model_span(text: &str, marker: &str) -> Range<usize> {
     let start = text
         .find(marker)
         .unwrap_or_else(|| panic!("{marker:?} not found"))
         + marker.len();
-    let end = text[start..]
-        .find(|c: char| c.is_whitespace() || c == ',')
-        .map_or(text.len(), |at| start + at);
-    start..end
+    let cores = start
+        + text[start..]
+            .find(" logical core")
+            .unwrap_or_else(|| panic!("\" logical core\" not found after {marker:?}"));
+    let end = text[start..cores]
+        .rfind(", ")
+        .unwrap_or_else(|| panic!("no \", \" before the core count after {marker:?}"));
+    start..start + end
 }
 
 /// Byte range of the date after `marker`: the run of digits and hyphens, so
@@ -1020,11 +1024,10 @@ fn published_cpu_model_matches_its_generated_reports() {
     check_figures(
         "site/index.html",
         BOTH_REPORTS,
-        |text| vec![epyc_model_span(text)],
-        &[from_both_reports(
-            "the benchmark CPU model",
-            epyc_model_span,
-        )],
+        |text| vec![cpu_model_span(text, "machine (")],
+        &[from_both_reports("the benchmark CPU model", |text| {
+            cpu_model_span(text, "cross-machine claim: ")
+        })],
         |_| "CPU model".to_owned(),
     );
 }
