@@ -10,8 +10,8 @@
 //! says the file is intact (ADR-0066). `-v` reports each input's sizes on
 //! stderr and leaves stdout alone; `-q` cancels it, the later of the two
 //! winning, and no flag silences an error. `-1` to `-3` pick the encoder
-//! level, `-3` being the default and the smallest output, `-1` the
-//! quickest encode; decompression reads a file of any level the same way:
+//! level, `-3` being the default and, on real data, the smallest output, `-1`
+//! the quickest encode; decompression reads a file of any level the same way:
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -63,7 +63,7 @@ const SUFFIX: &str = ".mgdc";
 const USAGE: &str = "usage: mothergod [-1|-2|-3] [-d] [-c] [-k] [-f] [-t] [-v] [-q] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
--1 is the fastest encoder level and the largest output, -3 the slowest and smallest, the default; the last digit wins and only compression takes one.\n\
+-1 is the fastest encoder level and the largest output, -3 the slowest and, on real data, the smallest, the default; the last digit wins and only compression takes one.\n\
 -k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
 -t (--test) checks that each input decompresses and writes nothing.\n\
 -v (--verbose) reports each input's sizes on stderr; -q (--quiet) cancels it, the later wins.\n\
@@ -135,7 +135,7 @@ fn main() -> ExitCode {
 }
 
 /// The encoder level a digit option names: `-1` is the fastest, `-3` the
-/// default and smallest. The only digits there are, because an accepted digit
+/// default and, on real data, the smallest. The only digits there are, because an accepted digit
 /// that chose nothing is what `tests/fit/cli.txt`'s `level-digit` declined on.
 fn level_digit(digit: char) -> Option<Level> {
     match digit {
