@@ -21,7 +21,8 @@ thread_local! {
 pub(super) enum Scan {
     /// [`super::match_len`], the rep-candidate and greedy-parse scan.
     MatchLen,
-    /// [`super::suffix_common_len`], the binary tree's candidate compare.
+    /// Bytes [`super::BinaryTreeMatchFinder::insert_and_find`]'s candidate
+    /// compares scanned past the length already proven.
     SuffixCommonLen,
     /// Candidates [`super::BinaryTreeMatchFinder::insert_and_find`] visited,
     /// one per node it compared. Counted apart from `SuffixCommonLen`
