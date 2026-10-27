@@ -57,10 +57,15 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitCode, ExitStatus};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+// Shared with the other fixture suites; this one reads both lookups.
+#[path = "support/fixture_dirs.rs"]
+mod fixture_dirs;
+use fixture_dirs::{adversarial_dir, golden_dir};
 
 /// Ceiling on one sabotaged-call child's runtime. A graceful `Err` or an
 /// abort both exit within milliseconds; the only way a child runs long is a
@@ -176,20 +181,6 @@ static ALLOC: TortureAlloc = TortureAlloc;
 struct Fixture {
     id: String,
     path: PathBuf,
-}
-
-fn golden_dir() -> PathBuf {
-    env::var_os("MOTHERGOD_GOLDEN_DIR").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
-        PathBuf::from,
-    )
-}
-
-fn adversarial_dir() -> PathBuf {
-    env::var_os("MOTHERGOD_ADVERSARIAL_DIR").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adversarial"),
-        PathBuf::from,
-    )
 }
 
 fn fixtures() -> Vec<Fixture> {

@@ -16,7 +16,12 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::mem::discriminant;
-use std::path::{Path, PathBuf};
+
+// Shared with the other fixture suites; this one reads adversarial_dir alone.
+#[allow(dead_code)]
+#[path = "support/fixture_dirs.rs"]
+mod fixture_dirs;
+use fixture_dirs::adversarial_dir;
 
 use mothergod::Error;
 
@@ -61,10 +66,7 @@ const PINS: &[(&str, Error)] = &[
 
 #[test]
 fn seed_corpus_decodes_to_pinned_errors() {
-    let dir = std::env::var_os("MOTHERGOD_ADVERSARIAL_DIR").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adversarial"),
-        PathBuf::from,
-    );
+    let dir = adversarial_dir();
     let mut seen = BTreeSet::new();
     for entry in fs::read_dir(&dir).expect("tests/adversarial must exist") {
         let path = entry.expect("readable dir entry").path();

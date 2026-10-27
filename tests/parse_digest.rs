@@ -27,7 +27,13 @@
 //! host, as there.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+// Shared with the other fixture suites; this one reads golden_dir alone.
+#[allow(dead_code)]
+#[path = "support/fixture_dirs.rs"]
+mod fixture_dirs;
+use fixture_dirs::golden_dir;
 
 use mothergod::lz::{RepSlot, Token, parse_greedy, parse_optimal};
 
@@ -93,13 +99,6 @@ fn token_digest(tokens: &[Token]) -> u64 {
         }
     }
     hash.0
-}
-
-fn golden_dir() -> PathBuf {
-    std::env::var_os("MOTHERGOD_GOLDEN_DIR").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
-        PathBuf::from,
-    )
 }
 
 /// Uniform random bytes over the alphabet `0..alphabet`.
