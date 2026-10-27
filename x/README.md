@@ -12,7 +12,7 @@ cargo x help lint
 ## Commands
 
 ```text
-cargo x check
+cargo x check [PATH...]
 cargo x fmt [--check] [PATH...]
 cargo x lint [--fix] [PATH...]
 cargo x test
@@ -23,6 +23,14 @@ cargo x doc
 unscoped, in that order. It stops at the first failing stage and names the
 command to re-run just that one. It is the one pre-push command CLAUDE.md
 names.
+
+With paths, `check` routes each to the stage that owns it: `fmt --check` for
+the formattable types, `lint` for Markdown, Rust and workflow YAML, and
+`test` then `doc` only when a path matches the `rust` filter of
+`.github/workflows/ci.yml`'s `changes` job, read from that file at run time
+rather than copied, so the scoped check skips what CI skips for a PR of the
+same paths (#916). A named file no stage owns is noted on stderr and
+skipped; a list nothing owns is an error.
 
 `test` runs the fixed plan CLAUDE.md's Commands block names as the test
 suites: `cargo test --all-targets`, `cargo test --manifest-path
@@ -105,7 +113,8 @@ The exclusions live in `x/src/lint.rs` beside the executable rule selection.
 
 Path arguments are the integration boundary for agents and hooks.
 During iteration, pass only the files or directories being changed.
-Before a push, run `cargo x check`.
+Before a push, run `cargo x check`, or `cargo x check -- <paths>` on the
+files the push carries.
 
 Git integrations must produce NUL-delimited paths with `git diff --name-only -z --diff-filter=ACMR`.
 `git diff --stat` is display output, not a safe filename protocol.

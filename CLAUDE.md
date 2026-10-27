@@ -23,9 +23,10 @@ cargo x check
 
 The whole gate: fmt --check, lint, test, doc, in order, stopping at the
 first failure and naming the command to re-run just that stage. Scope
-iteration with the constituent tasks and path arguments (`cargo x fmt
---check -- src`, `cargo x lint -- README.md`); `cargo x help` and task
-`--help` are the usage source of truth. Use `cargo x` rather than the
+it to the files you changed with `cargo x check -- <paths>`: each path
+goes to the stage that owns it, and test and doc run only when ci.yml's
+rust filter would run them for a PR of those paths; `cargo x help` and
+task `--help` are the usage source of truth. Use `cargo x` rather than the
 tools it embeds because x owns repository discovery and configuration.
 Invoke an underlying tool directly only to repair x when x cannot build.
 
