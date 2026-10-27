@@ -299,12 +299,12 @@ jobs:
               label, say the merge is the BDFL's, and stop.
               A [nit] on a PASS, or a defect you observed that the PR did
               not cause, is work this run defers: before the merge, file it
-              (`.github/scripts/gh-comment --new "<symptom>" --label
-              <realm>`) or drop it, because nobody reads a merged PR's
-              thread. #949 named a seed pin twice and #951 a stale hint;
-              neither existed as an issue until a retrospect filed #954;
-              #987's review saw a truncated Stored frame decode clean and
-              left it unfiled until a retrospect filed #988.
+              or drop it, because nobody reads a merged PR's thread (#949
+              named a seed pin twice; no issue existed until a retrospect
+              filed #954). `.github/scripts/gh-comment --new "<symptom>"
+              --label <realm>`, plus `--label bug` for a defect: the
+              heartbeat ranks bug first, and a realm label alone sank
+              #1710 under every roadmap item for a run.
             - FAIL: `.github/scripts/post-verdict $PR_NUMBER fail`, body on
               stdin, each item tagged [must] or [nit], specific and
               actionable. Courteous and explanatory, especially to human
