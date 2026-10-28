@@ -1,7 +1,7 @@
 //! `Method::Lz` wiring (`research/JOURNAL.md` S2-D2):
 //! [`crate::filters::select::pick`] shortlists candidate filters, each is
 //! trial-encoded through the optimal-parse LZ parser ([`crate::lz`]), the
-//! flag/length/offset/rep-slot adaptive tables ([`crate::model`]), the
+//! flag/length/offset/rep-slot adaptive tables (`crate::model`), the
 //! six-expert literal mixer ([`crate::literal`]), and the range coder
 //! ([`crate::coder`]), and whichever candidate produces the smallest payload
 //! wins.
@@ -31,7 +31,7 @@
 //! ([`crate::literal::Literal::encode_column`]/`decode_column`,
 //! `docs/adr/0046-wire-the-column-expert-into-the-literal-mixer.md`,
 //! `research/JOURNAL.md` S1-P5). A [`Token::Match`]'s and a [`Token::Rep`]'s
-//! length code through two independent [`Model`]s
+//! length code through two independent `Model`s
 //! (`docs/adr/0057-wire-the-match-rep-length-model-split.md`), the bits
 //! below a length's `lz::bucket` through an adaptive tree per model and
 //! bucket (`docs/adr/0061-wire-the-length-residual-trees.md`), and a

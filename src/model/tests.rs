@@ -1,6 +1,10 @@
 use super::*;
 
 impl Model {
+    pub(crate) fn new(alphabet_len: usize) -> Self {
+        Self::try_new(alphabet_len).expect("test alphabets fit in memory")
+    }
+
     /// Bits it would cost to code `symbol` under this table's current
     /// distribution, `-log2(freq[symbol] / total)`, then updates the table
     /// the same way [`Self::encode`] does. The probe for what a trained
@@ -198,14 +202,6 @@ fn decoding_truncated_stream_does_not_panic() {
     // ground truth here.
 }
 
-#[test]
-#[should_panic(expected = "Model alphabet must be non-empty")]
-fn new_over_no_symbols_panics() {
-    let _ = Model::new(0);
-}
-
-// `try_new` reaches the assert through `try_filled_vec`, `new` through
-// `vec!`: two paths into one assert, so each is pinned.
 #[test]
 #[should_panic(expected = "Model alphabet must be non-empty")]
 fn try_new_over_no_symbols_panics() {

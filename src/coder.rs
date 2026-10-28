@@ -297,7 +297,7 @@ impl<'a> Decoder<'a> {
 /// threshold: bit `1` occupies `[0, threshold)`, bit `0` occupies
 /// `[threshold, BIT_SCALE)`. Clamped to `1..=BIT_SCALE - 1` so neither
 /// outcome is ever assigned zero width, mirroring
-/// [`crate::model::Model::new`]'s "nothing is ever impossible to code".
+/// [`crate::model::Model`]'s "nothing is ever impossible to code".
 /// [`Encoder::encode_bit`] and [`Decoder::decode_bit`] both call this with
 /// identical inputs and only `+ - * /`, [`f64::clamp`], and rounding, no libm
 /// transcendental, so both sides compute the same threshold bit-for-bit

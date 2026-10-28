@@ -17,15 +17,13 @@
 //! assert_eq!(mothergod::decompress(&frame), Ok(original));
 //! ```
 
-// Every module but `filters`, `read` and `write` is `#[doc(hidden)]`: the engine's
-// internals, not a surface downstream crates are meant to call (ROADMAP M6).
-// They stay `pub` because `bench` and `fuzz` call into `lz`, `literal` and
-// `codec`. `model` stays `pub` because `Model::new` has only test callers:
-// under `pub(crate)` it is a `dead_code` error with `-D warnings`, and
-// narrowing waits on removing it (#1758). `filters` is documented: S2-A2
-// judged it "a defensible standalone library surface on their own merits"
-// (`research/JOURNAL.md`). `read` and `write` are the library idiom matrix's
-// front page (ADR-0064, #979).
+// Every `pub` module but `filters`, `read` and `write` is `#[doc(hidden)]`: the
+// engine's internals, not a surface downstream crates are meant to call
+// (ROADMAP M6). They stay `pub` because `bench` and `fuzz` call into `lz`,
+// `literal` and `codec`. `filters` is documented: S2-A2 judged it "a defensible
+// standalone library surface on their own merits" (`research/JOURNAL.md`).
+// `read` and `write` are the library idiom matrix's front page (ADR-0064,
+// #979).
 #[doc(hidden)]
 pub mod bittree;
 #[doc(hidden)]
@@ -43,8 +41,7 @@ pub mod literal;
 pub mod logistic;
 #[doc(hidden)]
 pub mod lz;
-#[doc(hidden)]
-pub mod model;
+pub(crate) mod model;
 pub mod read;
 #[doc(hidden)]
 pub mod sse;
