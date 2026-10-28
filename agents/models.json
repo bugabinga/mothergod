@@ -31,15 +31,21 @@
     "is an ordinary app-token commit. Each seat's $comment carries its current",
     "reason; the history is agents/SOURCES.md's adoption log."
   ],
-  "reviewed": "2026-10-25",
+  "reviewed": "2026-10-28",
   "roles": {
     "bdfl": {
-      "$comment": "Thrift suspended (#897): speed up the director, slow down the rest, until the agent-system backlog (#486 et al.) is down. The allowance projection is one shared reading, so a heavier bdfl burn tightens the discretionary keep_fraction (ADR-0039) for the other seats on the next agent-audit cycle, no cadence hand-pulled. Restore a thrift block once the queue is clear; a wake under ~20 turns posting nothing would restore it sooner.",
+      "$comment": "Thrift restored (ADR-0077): #897 suspended it until the agent-system backlog was down, and on 2026-10-28 it was (0 bugs, 0 red checks, 0 stalled PRs, 11 enhancements), weeks after the condition held. Fable while the projection reaches the reset, opus when it does not; the clock tick is every eight hours (CLOCK). The codec's seat holds the strong rung from here, and the director's week is the cheaper one.",
       "ladder": [
         "fable",
         "opus"
       ],
-      "effort": "xhigh"
+      "effort": "xhigh",
+      "thrift": {
+        "ladder": [
+          "opus"
+        ],
+        "effort": "high"
+      }
     },
     "curator": {
       "$comment": "Opus first, sonnet floor: adversarial critique is this seat's whole output, and weak sparring trains authors to ignore it (ADR-0044). One daily wake; thrift sheds the opus delta first.",
@@ -75,10 +81,18 @@
       }
     },
     "maintainer": {
+      "$comment": "Opus first, sonnet floor and thrift (ADR-0077): the one seat on the journal (ADR-0062) ran its slices on the floor rung while the director took two thirds of the fleet's fourteen days (`sessions roles --since 14d`, 2026-10-28), and research/progress.jsonl holds two modeling experiments in three weeks. ADR-0062 named this ladder as the lever when the slices read thin.",
       "ladder": [
+        "opus",
         "sonnet"
       ],
-      "effort": "high"
+      "effort": "high",
+      "thrift": {
+        "ladder": [
+          "sonnet"
+        ],
+        "effort": "high"
+      }
     },
     "reviewer": {
       "$comment": "Sonnet held deliberately: highest session count in the fleet and the cheapest seat per run (22.9% of fleet cost at a $0.71 median, run-telemetry 2026-09-19). The opus raise is pricable and is not taken while the governor reads SLOW DOWN.",

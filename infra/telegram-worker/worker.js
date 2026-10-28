@@ -1007,8 +1007,11 @@ async function commandResult(env, updateId, parsed) {
 // (incidents 2026-08-23 and 2026-08-27). A dispatch below is
 // attributed to the PAT's owner by API semantics, immune to git blame.
 export const CLOCK = {
-  "11 */4 * * *": [
-    // agent-bdfl. `source: cron` lets the seat report
+  "11 */8 * * *": [
+    // agent-bdfl, three times a day (ADR-0077): the tick runs the delta
+    // core, and at six a day the director took two thirds of the fleet's
+    // fourteen days; alarms, operator events and Telegram dispatches
+    // wake it off the clock. `source: cron` lets the seat report
     // TRIGGER_EVENT=schedule downstream, telling a tick from an
     // operator dispatch.
     { workflow: "agent-bdfl.yml", inputs: { source: "cron" } },
