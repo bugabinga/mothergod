@@ -133,7 +133,7 @@ All notable changes to this project are documented here. Format follows
   `OutOfMemory`, every other failure is `InvalidData`; the conversion boxes
   nothing, so a decode error cannot abort under memory pressure.
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
-  interface, with no compression levels and no tuning knobs (#1036).
+  interface beside the three levels, with no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact
   a bug report or packaging script needs to say which files decode (#977).
 - Library crate (`mothergod::compress`/`decompress`, plus

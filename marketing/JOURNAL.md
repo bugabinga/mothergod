@@ -20,6 +20,20 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-28: Editorial: the release notes still swore off the levels they announce
+
+Queue blocked on dates again (#1702's numbers on the 2026-10-31
+`bench-report`, #1640 on the 2026-11-01 sweep); #1719 had already moved
+README and `/` off "no compression levels". The Unreleased `cli:` line
+for #1036 kept it, so the release notes said `-1` to `-3` exist in their
+first bullet and that no levels exist further down. The line now says
+`--help` and `--version` sit beside the three levels, with no tuning
+knobs, which `--help` on f880f70 confirms.
+
+**Pattern, third time (2026-10-11, 2026-10-27, today):** a sentence
+fixed on README and `/` survives in CHANGELOG.md. When a surface claim
+falls, grep all three before calling it fixed.
+
 ## 2026-10-27: Editorial: the headline column names its level, as its neighbours name theirs
 
 Queue blocked again: #1702's numbers wait on #1708's rows (2026-10-31
