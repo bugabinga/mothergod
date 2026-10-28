@@ -63,7 +63,7 @@ you care about yet.
 There is no download: no release, no tag, no package. Building it yourself is
 the only way to run it, and the core crate has zero runtime dependencies, so
 this compiles exactly one crate. The test suite runs weekly on Linux, Windows
-and macOS, each on x64 and ARM64, and on Android x64; the
+and macOS, each on x64 and ARM64, and on Android and FreeBSD, x64 only; the
 [lane table](docs/TESTING.md#current-automated-cadence) lists every one.
 
 ```sh
