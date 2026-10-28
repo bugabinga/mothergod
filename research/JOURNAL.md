@@ -9435,3 +9435,67 @@ record.
   measured:** a candidate beyond the six experts (the match model of
   S2-R23, hashed orders 3 to 6), any corpus larger than `CASE_LEN`, and the
   speed of a whole-stream path. `research/progress.jsonl` it213.
+- S2-A133 | ACCEPTED, unwired | Charter #1763 step 2, the candidate by
+  cheap tries (ADR-0070's loop). Hypothesis: a context-mixing path over
+  every byte, the shipped experts plus a match model and hashed orders 3
+  to 6 under one outer logistic mixer (lpaq1, Matt Mahoney, 2007), prices
+  the train cases at least 0.15 b/B below the hybrid's real bitstream and
+  holds on the sealed set. | Mechanism: `cm_path::CmPath` takes the wire
+  model's own refined probability per bit-tree node through the new
+  `Literal::walk_logit_sse` (the walk `encode_logit_sse` and
+  `decode_logit_sse` now share), stretches it beside a match model's and
+  four hashed order counters' probabilities, and mixes them under weights
+  selected by the match length bucket and the nibble; a fresh mixer weighs
+  the wire model 1 and the rest 0, so the candidate starts as the wire
+  model. The match model follows the most recent verified earlier
+  occurrence of the last 6 bytes, which is the repetition S1-L6 says the
+  parse removes before a literal model sees it. Tries in order, train mean
+  against the real bitstream over the 11 `baseline::cases()` at
+  `CASE_LEN` 50,000, each delta against the champion it was applied to:
+  it214 the wire walk in place of `ideal_cost_bits_sse`, which is no
+  frame's wire path, +0.100477 to +0.048083 (-0.052394, kept: the wire walk
+  halves S2-A132's first reading); it215 the
+  outer mixer over that one input, -0.012861, kept; it216 the match model,
+  -0.063486, kept, the largest move (across it215 and it216, `base64_wrapped`
+  +0.697 to +0.306 and `json_records` +0.313 to +0.022);
+  it217 to it220 orders 3, 4, 5, 6 one at a time, -0.010702, -0.004852,
+  -0.003492, -0.001929, all kept; it221 mixer rate 0.002 to 0.005,
+  -0.002583, kept; it222 rate 0.001, +0.008160, reverted; it223 an APM
+  whose bins start at one half and take three quarters of the final
+  probability, applied to it220's champion in the same batch as it221,
+  +0.128300, reverted, because every cold bin drags a confident mix
+  toward one bit; it224 rate 0.01, +0.002942, reverted; it225 the APM with
+  bins warm-started at their bucket's own probability and an even blend,
+  +0.006760, reverted; it226 counter limit 255 to 1023, -0.000149, kept;
+  it227 match minimum length 8, +0.001187, reverted (a first read against
+  it221's champion gave +0.001177). The kept code reproduces the scratch
+  keeper within 0.0002 per case (the hash seeds differ): train mean
+  **-0.051999**, sealed `access_log` **-0.153312** and `gradient_image`
+  **-0.145958**, both improving, at `sealed_seed(CASE_SEED)` through
+  `cm_path::train_and_sealed_vs_real_bitstream`. Per train case: the
+  entropy ladder h1 to h6, `markov_h8_2_trap`, `json_records` and
+  `interleaved_audio16` fall by 0.099 to 0.338; `sqlite_like_records`
+  +0.547, `base64_wrapped` +0.188, `x86_dense_code` +0.118 and
+  `entropy_ladder_h8` +0.002 stay above the hybrid. `gradient_image`, the
+  sealed case that sank the matched-byte signal three times inside the
+  hybrid (S2-R20, S2-R22, S2-R23), improves here; which component carries
+  that is not attributed, because the per-try reads were train only. |
+  Verdict: **accepted, unwired** under the corpus policy's rule, train
+  improvement and no sealed regression. The hypothesis's magnitude is
+  **falsified on train**: -0.052, not -0.15. `access_log`, the sealed
+  text-shaped kind, met it. Speed, the
+  kept code as measured, release build, AMD EPYC 7763 4 logical cores
+  runner, the 11 train cases summed, three runs: the candidate prices
+  0.138 to 0.144 MB/s, against `compress` 0.169 to 0.171 and `decompress`
+  1.177 to 1.180 on the same bytes, so a wired symmetric path as written
+  decodes about 8x slower than the hybrid and encodes no faster, against
+  the charter's expectation that encode speeds up. Memory: four
+  2^22-slot order tables at 6 bytes a slot, 96 MiB, plus the 4 MiB match
+  table and the wire model. | **Not measured:** the real coder (ideal
+  cost, no frame header, which favours the candidate), the filter bank in
+  front of the candidate (the champion filters, the candidate sees raw
+  bytes; S2-A132 measured that bias on `base64_wrapped` only), Silesia or
+  any case above `CASE_LEN`, the deterministic `stretch`/`squash` a
+  decoder needs (ADR-0024; the candidate uses libm `f64`), where the
+  candidate's time goes, and each component's share of the sealed gain.
+  `research/progress.jsonl` it214 to it227.

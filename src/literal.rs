@@ -966,15 +966,13 @@ impl Literal {
         byte: u8,
         mixer: &mut SurpriseLogisticMix,
     ) {
-        let (bank_indices, weight_index) = banks(context);
         let symbol = usize::from(byte);
-        let landed = self.code_bit_walk(&bank_indices, weight_index, mixer, |mid, p| {
+        let landed = self.walk_logit_sse(context, mixer, |mid, p| {
             let bit = symbol >= mid;
             encoder.encode_bit(bit, p);
             bit
         });
         debug_assert_eq!(landed, byte, "the walk must land on the coded byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
@@ -991,10 +989,24 @@ impl Literal {
         context: Context,
         mixer: &mut SurpriseLogisticMix,
     ) -> u8 {
+        self.walk_logit_sse(context, mixer, |_mid, p| decoder.decode_bit(p))
+    }
+
+    /// One byte's walk under `context` and `mixer`, the step
+    /// [`Self::encode_logit_sse`], [`Self::decode_logit_sse`] and the
+    /// benchmark harness's whole-stream pricing share: `code_bit` receives
+    /// each node's midpoint and refined probability that the node's bit is
+    /// `1` (the byte is at or above the midpoint) and returns the bit the
+    /// node resolved to; the six expert banks then update on the landed
+    /// byte, which is returned.
+    pub fn walk_logit_sse(
+        &mut self,
+        context: Context,
+        mixer: &mut SurpriseLogisticMix,
+        code_bit: impl FnMut(usize, f64) -> bool,
+    ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
-        let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, |_mid, p| {
-            decoder.decode_bit(p)
-        });
+        let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, code_bit);
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
         byte
     }
