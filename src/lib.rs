@@ -19,7 +19,7 @@
 
 // Every module but `filters`, `read` and `write` is `#[doc(hidden)]`: the engine's
 // internals, not a surface downstream crates are meant to call (ROADMAP M6).
-// `bench` and `fuzz` call into `lz`, `literal`, `codec` and `crc`, so those
+// `bench` and `fuzz` call into `lz`, `literal`, `codec` and `crc32`, so those
 // stay `pub`. `bittree`, `coder`, `column`, `logistic`, `model` and `sse` have
 // no caller outside the crate; narrowing them to `pub(crate)` is #1756.
 // `filters` is documented: S2-A2 judged it "a defensible standalone library
