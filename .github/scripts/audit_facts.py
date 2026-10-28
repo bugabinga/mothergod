@@ -263,9 +263,11 @@ def wall_of(entry):
 
     A hook-path denial's reason is `hook: line` (walls.py), the hook being
     the wall; a denial the harness decided itself carries its
-    decision_reason_type (mode, rule) as `type`, which is the wall. Fixed
-    vocabulary both ways, so the name is an identifier, never the model's
-    text, and the keys-only rule for model prose (ADR-0019) holds.
+    decision_reason_type (mode, rule) as `type`, which is the wall, or
+    `unlisted` where it carried none, a tool outside `--allowedTools`
+    (audit-extract.py, #1742). Fixed vocabulary all three ways, so the
+    name is an identifier, never the model's text, and the keys-only
+    rule for model prose (ADR-0019) holds.
     """
     if not isinstance(entry, dict):
         return None

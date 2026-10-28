@@ -206,8 +206,11 @@ test("token-shaped strings are scrubbed from every audit file", () => {
 // nothing else, for a session refused a protected-path write it then died
 // asking about. The typed system entry carries the wall; this pins that
 // the audit keeps it, once per distinct wall, capped, beside the count
-// the result entry already gave.
-test("a denial's typed reason reaches metadata.json, distinct and capped", () => {
+// the result entry already gave. The fourth entry is the shape run
+// 40609901966 carried (#1742): no decision type, no reason, a `message`
+// the harness wrote around the call; it is named `unlisted` and the
+// message, which can quote what the model typed, never reaches the file.
+test("a denial's reason reaches metadata.json, typed or unlisted, distinct and capped", () => {
   const directory = mkdtempSync(join(tmpdir(), "agent-audit-test-"));
   try {
     const out = join(directory, "agent-audit");
@@ -228,12 +231,20 @@ test("a denial's typed reason reaches metadata.json, distinct and capped", () =>
         { ...wall, tool_use_id: "toolu_2" },
         { ...wall, tool_use_id: "toolu_3", decision_reason: { hook: "deny-em-dash" }, decision_reason_type: "hook" },
         {
+          type: "system",
+          subtype: "permission_denied",
+          tool_name: "mcp__github_file_ops__commit_files",
+          tool_use_id: "toolu_4",
+          message:
+            "Claude requested permissions to use mcp__github_file_ops__commit_files on typed-by-the-model.txt, but you haven't granted it yet.",
+        },
+        {
           type: "result",
           result: "done",
           permission_denials: [{ tool_name: "Edit", tool_input: {} }, { tool_name: "Edit", tool_input: {} }, {
             tool_name: "Edit",
             tool_input: {},
-          }],
+          }, { tool_name: "mcp__github_file_ops__commit_files", tool_input: {} }],
         },
       ]),
     );
@@ -249,14 +260,25 @@ test("a denial's typed reason reaches metadata.json, distinct and capped", () =>
       },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    const denials = JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")).telemetry.permission_denials;
-    assert.equal(denials.count, 3, "the result entry's count stays authoritative");
-    assert.deepEqual(denials.tools, ["Edit"]);
-    assert.deepEqual(denials.by_tool, { Edit: 3 }, "the count per name, the tools table's column");
-    assert.equal(denials.reasons.length, 2, "one wall hit twice is one line");
+    const metadata = readFileSync(join(out, "metadata.json"), "utf8");
+    const denials = JSON.parse(metadata).telemetry.permission_denials;
+    assert.equal(denials.count, 4, "the result entry's count stays authoritative");
+    assert.deepEqual(denials.tools, ["Edit", "mcp__github_file_ops__commit_files"]);
+    assert.deepEqual(
+      denials.by_tool,
+      { Edit: 3, mcp__github_file_ops__commit_files: 1 },
+      "the count per name, the tools table's column",
+    );
+    assert.equal(denials.reasons.length, 3, "one wall hit twice is one line");
     assert.equal(denials.reasons[0].type, "protectedPath");
     assert.equal(denials.reasons[0].reason.length, 240, "capped");
     assert.deepEqual(denials.reasons[1], { tool: "Edit", type: "hook", reason: "{\"hook\": \"deny-em-dash\"}" });
+    assert.deepEqual(denials.reasons[2], {
+      tool: "mcp__github_file_ops__commit_files",
+      type: "unlisted",
+      reason: "outside --allowedTools",
+    }, "a typeless harness denial is named, never `?`");
+    assert.ok(!metadata.includes("typed-by-the-model"), "the harness's message is never kept");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

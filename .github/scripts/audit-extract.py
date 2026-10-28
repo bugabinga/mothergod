@@ -188,20 +188,34 @@ for e in entries:
 # and REASON_CAP bounds the exposure should either ever start echoing an
 # input. Distinct triples only: one wall hit three times is one line to
 # read.
+#
+# A third shape carries neither field (#1742): `tool_name`, `tool_use_id`
+# and a `message`, the harness's own prose for a call no rule, mode or
+# hook decided and nobody was present to approve, which in a headless
+# seat means the tool is outside `--allowedTools`: every row the
+# sessions table held on 2026-10-28 was (the reviewer's Write, Edit and
+# WebFetch until #952 hid them, the maintainer's WebFetch until #1652
+# listed it, the deslopper's commit_files, run 40609901966). Until then
+# the audit named it `?`, a question mark the trend row printed as if it
+# were a hook's file name. It is `unlisted` now, a constant like the
+# hooks' names; its `message` is never kept, because the harness writes
+# it around the call, so a path or URL the model typed could ride in it,
+# and the keys-only rule for model text holds for the record.
 REASON_CAP = 240
+UNLISTED = {"type": "unlisted", "reason": "outside --allowedTools"}
 walls_hit = []
 for e in entries:
     if not (isinstance(e, dict) and e.get("type") == "system"
             and e.get("subtype") == "permission_denied"):
         continue
-    why = e.get("decision_reason")
+    tool = str(e.get("tool_name") or "?")
+    kind, why = e.get("decision_reason_type"), e.get("decision_reason")
+    if kind is None and why is None:
+        walls_hit.append({"tool": tool, **UNLISTED})
+        continue
     if not isinstance(why, str):
         why = json.dumps(why, sort_keys=True) if why is not None else ""
-    walls_hit.append({
-        "tool": str(e.get("tool_name") or "?"),
-        "type": str(e.get("decision_reason_type") or "?"),
-        "reason": why,
-    })
+    walls_hit.append({"tool": tool, "type": str(kind or "?"), "reason": why})
 reasons = []
 for wall in walls_hit + walls.read():
     entry = {**wall, "reason": wall["reason"][:REASON_CAP]}
