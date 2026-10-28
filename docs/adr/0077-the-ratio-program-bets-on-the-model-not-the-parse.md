@@ -41,7 +41,7 @@ A negative sealed verdict is a measurement: the direction is re-decided on it un
 ## Rejected alternatives
 
 **Keep working the hybrid's leads.**
-The gap to xz -9e on Silesia is 8.8%; S2-A128's reach shipped 0.3 to 2.4% per file and flipped no loss, and the journal's remaining headers ask for a new mechanism.
+The gap to xz -9e on Silesia is 8.8% of the codec's size (9.6% over xz's); S2-A128's reach shipped 0.3 to 2.4% per file and flipped no loss, and the journal's remaining headers ask for a new mechanism.
 
 **Chase zstd's speed class.**
 S2-A88 and S2-A90 measured a static fast coder losing on ten of ten buffers inside this format, and zstd exists.
