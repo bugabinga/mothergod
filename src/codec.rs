@@ -764,7 +764,7 @@ fn search(
             .into_iter()
             .min_by_key(|(index, _, body)| (body.len(), *index))?;
         Some(if has_wide_trial {
-            widen(data, winner, trial)
+            widen(data, candidates[0], winner, trial)
         } else {
             let (_, candidate, body) = winner;
             (candidate, Reach::Standard, body)
@@ -780,18 +780,27 @@ fn search(
 /// what a serial search writes.
 fn widen(
     data: &[u8],
+    first: Candidate,
     (index, candidate, body): Winner,
-    trial: Option<(usize, WideTrial<'_>)>,
+    mut trial: Option<(usize, WideTrial<'_>)>,
 ) -> (Candidate, Reach, Vec<u8>) {
-    let wide = match trial {
-        Some((guessed, handle)) if guessed == index => rejoin(handle.join()),
-        _ => trial_body(data, candidate, Reach::Wide),
+    let mut wide_of = |at: usize, candidate: Candidate| match trial.take_if(|(g, _)| *g == at) {
+        Some((_, handle)) => rejoin(handle.join()),
+        None => trial_body(data, candidate, Reach::Wide),
     };
-    if crate::candidate_beats_incumbent(wide.len(), body.len()) {
+    let wide = wide_of(index, candidate);
+    let mut best = if crate::candidate_beats_incumbent(wide.len(), body.len()) {
         (candidate, Reach::Wide, wide)
     } else {
         (candidate, Reach::Standard, body)
+    };
+    if index != 0 {
+        let first_wide = wide_of(0, first);
+        if crate::candidate_beats_incumbent(first_wide.len(), best.2.len()) {
+            best = (first, Reach::Wide, first_wide);
+        }
     }
+    best
 }
 
 /// A wide trial running on a thread of [`search`]'s scope.
