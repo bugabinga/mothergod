@@ -162,6 +162,12 @@ jobs:
         with:
           toolchain: msrv
           checks: setup
+      # setup's minimal profile lacks the two components x's gate runs,
+      # Clippy under lint and rustfmt under fmt, the ones
+      # rust-toolchain.toml declares for the desk; a test that runs lint
+      # was red for their absence from #1647's merge to this step.
+      - name: Install x's gate components
+        run: rustup component add clippy rustfmt
       - run: cargo test --manifest-path x/Cargo.toml
 
   android:
