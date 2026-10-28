@@ -42,6 +42,16 @@ repeat it), or kill the pids and hand the work off to the next wake.
 The name list is a blocklist grown on observation, not a proof of
 coverage, like deny-ci-background's idiom list.
 
+The process table is Linux's /proc, one directory per pid whose
+`status` file carries the name and the state; every seat runs on an
+ubuntu runner, and a host without it gives no evidence and allows.
+DENY_PARKED_TURN_PROC points the scan at another directory of the same
+shape, the seam the test stages its cases through: the first version
+scanned the host and planted a real process named `cargo` to block on,
+and ci.yml's worker job, which runs every test file in one parallel
+`node --test`, turned the no-process case red whenever a sibling's
+cargo spawn was alive at the wrong moment (#1736).
+
 Liveness: every decision that mattered appends a line to
 GITHUB_STEP_SUMMARY, the durable trace: a block, or a second-stop
 allow that carried live processes out the door. The block alone is also
@@ -51,7 +61,6 @@ loudly in-session.
 
 import json
 import os
-import subprocess
 import sys
 
 import walls
@@ -62,6 +71,8 @@ import walls
 # cargo-clippy) report their own comm.
 TOOLCHAIN = ("rustc", "rustdoc", "clippy-driver")
 TOOLCHAIN_PREFIX = "cargo"
+# The process table's root; see the docstring for why it is a seam.
+PROC_ENV = "DENY_PARKED_TURN_PROC"
 
 HOOK = "deny-parked-turn"
 MESSAGE = (
@@ -80,30 +91,28 @@ MESSAGE = (
 
 def live_toolchain() -> list[tuple[int, str]]:
     """Return (pid, comm) for every live rust-toolchain process."""
+    root = os.environ.get(PROC_ENV) or "/proc"
     try:
-        table = subprocess.run(
-            ["ps", "-eo", "pid=,state=,comm="],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=10,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
+        pids = [entry for entry in os.listdir(root) if entry.isdigit()]
+    except OSError:
         # No process table means no evidence; a guard that cannot see
         # fails open, same posture as its siblings.
         return []
     found = []
-    for line in table.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) != 3 or not parts[0].isdigit():
+    for pid in pids:
+        try:
+            with open(os.path.join(root, pid, "status"), encoding="utf-8", errors="replace") as fh:
+                fields = dict(line.rstrip("\n").split(":\t", 1) for line in fh if ":\t" in line)
+        except OSError:
+            # The process ended between the listing and the read.
             continue
-        pid, state, comm = int(parts[0]), parts[1], parts[2].strip()
+        comm, state = fields.get("Name", "").strip(), fields.get("State", "")
         # A zombie is dead work awaiting reaping, not live work; it can
         # produce no result, so blocking on it would be a false alarm.
         if state.startswith("Z"):
             continue
         if comm in TOOLCHAIN or comm.startswith(TOOLCHAIN_PREFIX):
-            found.append((pid, comm))
+            found.append((int(pid), comm))
     return found
 
 
