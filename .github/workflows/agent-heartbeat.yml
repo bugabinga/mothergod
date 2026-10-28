@@ -140,7 +140,6 @@ jobs:
           # `github-actions` is only ever this repository's own workflows,
           # and agent-review.yml has been running that same value green.
           allowed_bots: github-actions
-          use_commit_signing: true
           prompt: |
             You are on duty for today's heartbeat.
             Read ROADMAP.md when duty 4 sends you there, and

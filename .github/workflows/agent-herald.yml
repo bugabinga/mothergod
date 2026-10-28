@@ -99,7 +99,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          use_commit_signing: true
           prompt: |
             Read marketing/JOURNAL.md through its headings (ADR-0025):
             your institutional memory; ADR-0040 is your charter.

@@ -82,12 +82,16 @@ The system is inert until these are done:
   after a flake rides the PAT too (#1736).
   Dispatching a seat workflow on the PAT is the operator-attributed wake the
   BDFL prompt calls a self-trigger loop (#50); never.
-- All agent commits are made with `use_commit_signing: true`: they go
-  through the GitHub API and carry GitHub's verified signature. Squash
-  merges into `main` are GitHub-created and therefore always signed
-  regardless of branch signature status (mechanism: `agents/GOVERNANCE.md`
-  "Merging") — optionally add "require signed commits" to the `main`
-  ruleset for enforcement.
+- Every agent commit is a `push-branch` commit, created through the git
+  data API; `git commit` never runs in a seat (`push-branch`'s
+  docstring). On the app token GitHub signs it (committer `GitHub`,
+  verification `valid`: a452c70); on the admin PAT it is unsigned
+  (419c47b), which is why the squash is what makes `main` signed
+  (ADR-0013). `use_commit_signing` is off on every seat since
+  2026-10-28: on, it installed the action's `github_file_ops` MCP
+  server, whose `commit_files` reaches only the run's start branch
+  (`agents/GOVERNANCE.md` "Push identity"), and no seat ever completed a
+  call on it (#1742).
 - `.github/CODEOWNERS` runs in visibility mode: you are auto-requested as
   reviewer on constitution-level paths (governance, ADRs, pause machinery),
   but nothing blocks. Tick "Require review from Code Owners" in the ruleset
