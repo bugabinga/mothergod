@@ -242,7 +242,6 @@ jobs:
           TRIGGER_URL: ${{ github.event.comment.html_url || github.event.review.html_url || '' }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          use_commit_signing: true
           # No ${{ }} in this block, here or in any agent workflow. One
           # expression makes the whole block an expression, capped at
           # 21,000 characters; this one is ~26,000 and GitHub rejected the
@@ -507,7 +506,7 @@ jobs:
             --max-turns 500
             --permission-mode bypassPermissions
             --tools "Bash,Edit,Write,Read,WebSearch,WebFetch,Skill,ToolSearch"
-            --allowedTools "Bash,Edit,Write,WebSearch,WebFetch,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
+            --allowedTools "Bash,Edit,Write,WebSearch,WebFetch"
 
       - if: always() && steps.claude.outcome != 'skipped'
         uses: ./.github/actions/agent-pause

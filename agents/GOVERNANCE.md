@@ -393,11 +393,13 @@ it is why the script exists and what it protects.
 - The claude app (actor `claude[bot]`): the default session token, and
   what `push-branch` uses for every path outside `.github/workflows/`.
   Triggered runs start unheld and the reviewer accepts the actor
-  (`allowed_bots`). Do not substitute
-  `mcp__github_file_ops__commit_files`: it reaches only the branch its
-  run started on, which on review- and comment-triggered runs is the
-  PR's merge ref, where it creates a literal `<n>/merge` branch off
-  main and misses the PR branch entirely (observed on #78).
+  (`allowed_bots`). The action's own `mcp__github_file_ops__commit_files`
+  is no longer offered (`use_commit_signing` off since 2026-10-28): it
+  reached only the branch its run started on, which on review- and
+  comment-triggered runs is the PR's merge ref, where it created a
+  literal `<n>/merge` branch off main and missed the PR branch entirely
+  (observed on #78), and the only calls a seat ever made on it were the
+  deslopper's two, both denied (#1742).
 - The admin PAT (actor `bugabinga`): operator-attributed, and
   operator-attributed events wake the BDFL (issue #50). Reserved for
   what the app cannot do: workflow-file pushes (issue #24), cron-line

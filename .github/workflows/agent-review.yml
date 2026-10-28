@@ -202,7 +202,6 @@ jobs:
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          use_commit_signing: true
           # PRs authored by our own agents carry the claude[bot] actor,
           # and a residual github.token push carries github-actions[bot];
           # claude-code-action refuses bot actors by default ("Workflow
