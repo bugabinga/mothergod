@@ -3,7 +3,7 @@
 //! trial-encoded through the optimal-parse LZ parser ([`crate::lz`]), the
 //! flag/length/offset/rep-slot adaptive tables (`crate::model`), the
 //! six-expert literal mixer ([`crate::literal`]), and the range coder
-//! ([`crate::coder`]), and whichever candidate produces the smallest payload
+//! (`crate::coder`), and whichever candidate produces the smallest payload
 //! wins.
 //!
 //! # Payload layout

@@ -19,32 +19,28 @@
 
 // Every `pub` module but `filters`, `read` and `write` is `#[doc(hidden)]`: the
 // engine's internals, not a surface downstream crates are meant to call
-// (ROADMAP M6). They stay `pub` because `bench` and `fuzz` call into `lz`,
-// `literal` and `codec`. `filters` is documented: S2-A2 judged it "a defensible
+// (ROADMAP M6). They stay `pub` because `bench`, `fuzz` and `tests` call into
+// `codec`, `crc32`, `literal` and `lz`; every other engine module is
+// `pub(crate)`. `filters` is documented: S2-A2 judged it "a defensible
 // standalone library surface on their own merits" (`research/JOURNAL.md`).
 // `read` and `write` are the library idiom matrix's front page (ADR-0064,
 // #979).
-#[doc(hidden)]
-pub mod bittree;
+pub(crate) mod bittree;
 #[doc(hidden)]
 pub mod codec;
-#[doc(hidden)]
-pub mod coder;
-#[doc(hidden)]
-pub mod column;
+pub(crate) mod coder;
+pub(crate) mod column;
 #[doc(hidden)]
 pub mod crc32;
 pub mod filters;
 #[doc(hidden)]
 pub mod literal;
-#[doc(hidden)]
-pub mod logistic;
+pub(crate) mod logistic;
 #[doc(hidden)]
 pub mod lz;
 pub(crate) mod model;
 pub mod read;
-#[doc(hidden)]
-pub mod sse;
+pub(crate) mod sse;
 pub mod write;
 
 /// First bytes of every mothergod frame.

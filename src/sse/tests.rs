@@ -1,6 +1,13 @@
 use super::*;
 use crate::coder::{Decoder, Encoder};
 
+impl<S: Spacing> Table<S> {
+    /// [`Self::try_new`] for a table that fits: the tests' constructor.
+    pub(crate) fn new(contexts: usize) -> Self {
+        crate::abort_on_oom(Self::try_new(contexts))
+    }
+}
+
 #[test]
 #[should_panic(expected = "at least one context")]
 fn zero_contexts_panics() {
