@@ -783,18 +783,12 @@ const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63]
 /// on (16 contexts of [`ALPHABET`] symbols each).
 const LITERAL_CONTEXTS: usize = 16;
 
-/// The byte of `data` before position `pos`, the literal-context input to
-/// [`literal_price_index`]; `None` at the very start of the stream.
-fn byte_before(data: &[u8], pos: usize) -> Option<u8> {
-    data[..pos].last().copied()
-}
-
-/// Flat index into a [`LITERAL_CONTEXTS`]-by-[`ALPHABET`] literal table for `byte`,
-/// given the byte preceding it in the stream (`None` at the very start,
-/// context 0).
-fn literal_price_index(prev_byte: Option<u8>, byte: u8) -> usize {
-    let context = prev_byte.map_or(0, |b| usize::from(b >> 4));
-    context * ALPHABET + usize::from(byte)
+/// Flat index into a [`LITERAL_CONTEXTS`]-by-[`ALPHABET`] literal table for
+/// the byte at `data[pos]`, in the context of its predecessor's high nibble
+/// (context 0 at the very start of the stream).
+fn literal_price_index(data: &[u8], pos: usize) -> usize {
+    let context = data[..pos].last().map_or(0, |&b| usize::from(b >> 4));
+    context * ALPHABET + usize::from(data[pos])
 }
 
 /// [`bucket`] values a match/rep length ever falls into: `bucket(1)` is 0,
@@ -915,8 +909,8 @@ impl PriceCounts {
         let mut pos = 0usize;
         for token in tokens {
             match *token {
-                Token::Literal(byte) => {
-                    counts.literal[literal_price_index(byte_before(data, pos), byte)] += 1;
+                Token::Literal(_) => {
+                    counts.literal[literal_price_index(data, pos)] += 1;
                     pos += 1;
                 }
                 Token::Match { len, distance } => {
@@ -1168,9 +1162,7 @@ fn dp_round(data: &[u8], prices: &PriceTable, reach: Reach, ring_cap: usize) -> 
         let base = state.price_at(i);
         let reps = state.cache_at(i);
 
-        let literal_cost = base
-            + prices.literal[literal_price_index(byte_before(data, i), data[i])]
-            + FLAG_BIT_PRICE;
+        let literal_cost = base + prices.literal[literal_price_index(data, i)] + FLAG_BIT_PRICE;
         state.relax(literal_cost, i + 1, Token::Literal(data[i]), reps);
 
         state.relax_rep_candidates(prices, data, i, base, reps, &mut rep_carry);
