@@ -71,17 +71,11 @@ With no file, or the file -, reads stdin and writes stdout.\n\
 With a file, compression writes <file>.mgdc; decompression reads a .mgdc file and writes <file> \
 (the name with the suffix stripped). Never overwrites an existing output file without -f.";
 
-/// Which way a conversion goes.
-#[derive(Clone, Copy)]
-enum Direction {
-    Compress,
-    Decompress,
-}
-
 /// What a run does with each input.
 #[derive(Clone, Copy)]
 enum Mode {
-    Convert(Direction),
+    Compress,
+    Decompress,
     /// Decodes and discards, so the exit status alone reports the input's health.
     Test,
 }
@@ -153,7 +147,7 @@ fn level_digit(digit: char) -> Option<Level> {
 /// level, the last one winning, and is refused beside `-d` or `-t`, where it
 /// would choose nothing.
 fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
-    let mut direction = Direction::Compress;
+    let mut mode = Mode::Compress;
     let mut test_only = false;
     let mut to_stdout = false;
     let mut existing = Existing::Refuse;
@@ -174,7 +168,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         if let Some(long) = text.strip_prefix('-') {
             match long {
                 "" => options_ended = true,
-                "decompress" => direction = Direction::Decompress,
+                "decompress" => mode = Mode::Decompress,
                 "test" => test_only = true,
                 "stdout" => to_stdout = true,
                 "keep" => {}
@@ -189,7 +183,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         }
         for flag in text.chars() {
             match flag {
-                'd' => direction = Direction::Decompress,
+                'd' => mode = Mode::Decompress,
                 't' => test_only = true,
                 'c' => to_stdout = true,
                 'k' => {}
@@ -211,12 +205,8 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
         }
     }
     // `-t` wins over `-d` wherever each stands, as in gzip.
-    let mode = if test_only {
-        Mode::Test
-    } else {
-        Mode::Convert(direction)
-    };
-    if level.is_some() && !matches!(mode, Mode::Convert(Direction::Compress)) {
+    let mode = if test_only { Mode::Test } else { mode };
+    if level.is_some() && !matches!(mode, Mode::Compress) {
         return Err("-1 to -3 select an encoder level, which only compression has".to_owned());
     }
     Ok(Request::Run {
@@ -241,17 +231,15 @@ fn run(mode: Mode, options: Options, operands: &[Option<PathBuf>]) -> ExitCode {
         operands
     };
     let writes_stdout = options.to_stdout || operands.iter().any(Option::is_none);
-    if matches!(mode, Mode::Convert(Direction::Compress))
-        && writes_stdout
-        && io::stdout().is_terminal()
-    {
+    if matches!(mode, Mode::Compress) && writes_stdout && io::stdout().is_terminal() {
         return fail("compressed data not written to a terminal");
     }
     let mut status = ExitCode::SUCCESS;
     for operand in operands {
         let operand = operand.as_deref();
         let code = match mode {
-            Mode::Convert(direction) => convert(direction, operand, options),
+            Mode::Compress => compress(operand, options),
+            Mode::Decompress => decompress(operand, options),
             Mode::Test => test(operand, options.verbose),
         }
         .unwrap_or_else(|err| fail(&err));
@@ -283,41 +271,43 @@ fn input_name(operand: Option<&Path>) -> String {
     operand.map_or_else(|| "stdin".to_owned(), |path| path.display().to_string())
 }
 
-/// Converts one input, stdin when `operand` is `None`, to stdout when there
-/// is no operand or `options.to_stdout` is set, else to the file named from
-/// `operand` by [`add_suffix`] or [`strip_suffix`]. An `Err` is a failure
-/// before any output was opened.
-fn convert(
-    direction: Direction,
-    operand: Option<&Path>,
-    options: Options,
-) -> Result<ExitCode, String> {
-    let Options {
-        to_stdout,
-        existing,
-        verbose,
-        level,
-    } = options;
-    let source = operand.filter(|_| !to_stdout);
-    let input_name = input_name(operand);
-    match direction {
-        Direction::Compress => {
-            let target = source.map(|source| (source, add_suffix(source)));
-            let reader = open_input(operand)?;
-            Ok(write_to(target, existing, |sink, dest_name| {
-                compress_into(reader, sink, dest_name, &input_name, verbose, level)
-            }))
-        }
-        Direction::Decompress => {
-            let target = source
-                .map(|source| strip_suffix(source).map(|out_path| (source, out_path)))
-                .transpose()?;
-            let input = read_input(operand)?;
-            Ok(write_to(target, existing, |sink, dest_name| {
-                decompress_into(&input, sink, dest_name, &input_name, verbose)
-            }))
-        }
-    }
+/// Compresses one input, stdin when `operand` is `None`, to stdout when there
+/// is no operand or `options.to_stdout` is set, else to the file [`add_suffix`]
+/// names from `operand`. An `Err` is a failure before any output was opened.
+fn compress(operand: Option<&Path>, options: Options) -> Result<ExitCode, String> {
+    let target = operand
+        .filter(|_| !options.to_stdout)
+        .map(|source| (source, add_suffix(source)));
+    let reader = open_input(operand)?;
+    Ok(write_to(target, options.existing, |sink, dest_name| {
+        compress_into(
+            reader,
+            sink,
+            dest_name,
+            &input_name(operand),
+            options.verbose,
+            options.level,
+        )
+    }))
+}
+
+/// [`compress`]'s inverse: the output file is named by [`strip_suffix`], and
+/// the input is read whole.
+fn decompress(operand: Option<&Path>, options: Options) -> Result<ExitCode, String> {
+    let target = operand
+        .filter(|_| !options.to_stdout)
+        .map(|source| strip_suffix(source).map(|out_path| (source, out_path)))
+        .transpose()?;
+    let input = read_input(operand)?;
+    Ok(write_to(target, options.existing, |sink, dest_name| {
+        decompress_into(
+            &input,
+            sink,
+            dest_name,
+            &input_name(operand),
+            options.verbose,
+        )
+    }))
 }
 
 /// Runs `write` against stdout when `target` is `None`, else against the new
