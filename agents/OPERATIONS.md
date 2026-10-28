@@ -62,12 +62,17 @@ The system is inert until these are done:
   fine-grained PAT scoped to **this repository only** (an account-wide rw
   token works but exposes your other repos to any bug here); set an expiry —
   the BDFL will nag via `blocked-on-human` when it starts failing.
-- Workflow dispatch is the PAT's too, so the BDFL's alone among seats, and
-  two script-only workflows hold it, `agent-alarm`'s wake and `recheck`'s
-  re-run of a red scheduled check after a push to main (#1069): the app token
-  and the workflow token answer 403 to `actions/workflows/<id>/dispatches`, so
-  proving a fix on lanes CI lacks (`GH_TOKEN="$GH_ADMIN_TOKEN" gh workflow
-  run monster --ref <branch>`, #1014's Windows evidence) rides it. Safe for
+- Dispatch as the operator is the PAT's, so the BDFL's alone among seats,
+  and two script-only workflows hold it, `agent-alarm`'s wake and
+  `recheck`'s re-run of a red scheduled check after a push to main (#1069).
+  The app token answers 403 to `actions/workflows/<id>/dispatches` (#1736).
+  The workflow token dispatches from a job granted `actions: write`, as
+  `github-actions`, an actor a seat admits only by naming it under
+  `allowed_bots`: agent-review.yml's `wake-maintainer` wakes the heartbeat
+  that way (#186), and agent-heartbeat.yml and agent-bdfl.yml hold the
+  grant for `bench-report.yml`'s healing. Proving a fix on lanes CI lacks
+  is `GH_TOKEN="$GH_ADMIN_TOKEN" gh workflow run monster --ref <branch>`
+  (#1014's Windows evidence). Safe for
   `monster` because a dispatch raises that one workflow and its red on a
   branch wakes nobody: `agent-alarm` names it under `workflow_run` since
   #1060 but ignores a `workflow_dispatch` red on any branch but `main`, so
