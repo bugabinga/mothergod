@@ -127,7 +127,8 @@ The Rust `bench/` harness (ADR-0006) pinning Silesia and Canterbury by
 URL and SHA-256 with the train/sealed/finals split of
 `research/corpus/POLICY.md`; the adversarial decode seed corpus and suite
 (`tests/adversarial/`, `docs/TESTING.md` layer 2); ideal-cost accounting
-inside the codec of record; the required `ratio` check against
+inside the codec of record (the whole-codec pass was retired in #1752,
+JOURNAL S2-A38); the required `ratio` check against
 `bench/baseline.json` (layer 7); and the per-file reports in
 `docs/benchmarks/`, regenerated weekly and on a pin merge by
 `bench-report.yml`. Done 2026-08-28.
