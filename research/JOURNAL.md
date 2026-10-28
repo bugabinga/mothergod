@@ -9401,3 +9401,37 @@ record.
   instead of serially (try 1's seconds are its upper bound, S2-A129 hid up
   to 23% that way), and peak RSS. `research/progress.jsonl` it211 and
   it212.
+- S2-A132 | ACCEPTED | Charter #1763 step 1, the capability slice: a
+  whole-stream ideal-cost driver. Hypothesis: a candidate model can be
+  priced over every byte of a case, no LZ parse before it, against the
+  champion's real bitstream on the same bytes, through one function the
+  next tries share. | Mechanism: `mothergod_bench::literal_pairing` prices
+  inside the parse's literal stream, the denominator S1-L6 says hides the
+  repetition a context-mixing path would model. `whole_stream_bits` walks
+  the case once, every byte a literal (`Context::after_literal`, so
+  `after_copy` never sets), and hands the closure the byte's context, its
+  prefix and the byte, so a match model reads history from the driver, not
+  a copy of its own. `case_delta_vs_real_bitstream` divides by the case's
+  length and subtracts `compress`'s real bits/byte;
+  `train_and_sealed_vs_real_bitstream` runs the 11 `baseline::cases()` and
+  both sealed kinds through the report `literal_pairing` already returns.
+  The case list and the sealed generators moved into one `pair_cases` that
+  both drivers call, so the two cannot read different corpora. | Not netted
+  out: the candidate pays no frame header, which favours it, and sees raw
+  bytes where the champion may have run a filter first, which biases against
+  it by a case-dependent amount: on `base64_wrapped` the six experts cost
+  1.2617 bits/byte raw and 0.7169 on the unwrapped bytes over the original
+  length, 0.545 of that case's delta, and the train mean below includes it. | Verdict: **accepted** on the focused
+  tests passing (prefix and context handed per byte, denominator is the case
+  length, empty case, same case list as the literal pairing); null deltas,
+  as `research/README.md` allows a patch whose purpose is measurement. The
+  driver's first run, the six shipped experts over the whole stream with no
+  change, gave a train mean of +0.1005 bits/byte against the champion over
+  the 11 `baseline::cases()` at `CASE_LEN` 50,000, release build; that
+  figure is the first try's starting reading, not a verdict. That run
+  also priced both sealed cases once, before this entry was written, so the
+  sealed read of the six-expert model is spent for try 1; the numbers are
+  not quoted. | **Not
+  measured:** a candidate beyond the six experts (the match model of
+  S2-R23, hashed orders 3 to 6), any corpus larger than `CASE_LEN`, and the
+  speed of a whole-stream path. `research/progress.jsonl` it213.

@@ -64,6 +64,7 @@ pub mod graph;
 pub mod literal_pairing;
 pub mod reference;
 pub mod speed;
+pub mod whole_stream;
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
