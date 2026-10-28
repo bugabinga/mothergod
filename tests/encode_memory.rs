@@ -6,15 +6,25 @@
 //! Nothing in the output shows whether it was freed: the bytes are the same
 //! either way, and only the peak differs, by the list's capacity, up to
 //! 12 bytes for each token the doubling `Vec` has room for. A zeros input
-//! parses into a handful of tokens and cannot see it, so this one is
-//! words: a few hundred distinct ones in a pseudo-random order.
+//! parses into a handful of tokens and cannot see it, so these tests use
+//! noise, which parses into one literal token per byte.
 //!
-//! One test in its own binary, because the allocator counts every thread:
-//! a second test running beside it would be in the peak.
+//! Two tests, because the freed round has two witnesses of different cost.
+//! The parse alone shows it at any length, in about a tenth of a second.
+//! The whole encode shows it only at 512 KiB, its peak without the drop
+//! being the same as with it up to 256 KiB, and costs 26 s there: it is the
+//! one that also holds the encoder's total and the pair of trials to their
+//! bounds.
+//! `tests/mutants.toml` skips the second under mutation, the first stays.
+//!
+//! The allocator counts every thread, so each test holds [`ONE_AT_A_TIME`]
+//! for its whole body: run on two threads, each peak would contain the
+//! other's.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 struct PeakAlloc;
 
@@ -22,6 +32,7 @@ struct PeakAlloc;
 // thread that ran it, and the counters synchronize nothing else.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 fn grow(bytes: usize) {
     let live = LIVE.fetch_add(bytes, Ordering::Relaxed) + bytes;
@@ -102,11 +113,41 @@ fn encode_peak(input: &[u8], workers: usize) -> (usize, Vec<u8>) {
     (peak.div_ceil(input.len()), payload)
 }
 
+/// Bytes of peak heap per input byte one `lz::parse_rounds` over [`noise`] may
+/// reach. The peak measures 39.1 with each round's tokens freed before the
+/// next DP round and 51.1 without, at [`PARSE_LEN`] on the 64-bit allocator
+/// this runs under; the bound sits between, so the test fails on the
+/// regression and not on a small drift.
+const MAX_PARSE_PEAK_PER_BYTE: usize = 45;
+
+/// The gap is 12 bytes per input byte at every length; the length sets how
+/// far the parse's fixed tables sit above it, 89.0 against 101.0 at 32 KiB,
+/// so a bound this tight wants the length it was measured at.
+const PARSE_LEN: usize = 1 << 18;
+
+#[test]
+fn the_parse_frees_each_rounds_tokens_before_the_next() {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let input = noise(PARSE_LEN);
+    let before = LIVE.load(Ordering::Relaxed);
+    PEAK.store(before, Ordering::Relaxed);
+    let tokens = mothergod::lz::parse_rounds(&input, mothergod::lz::Reach::Standard, 3);
+    let peak = (PEAK.load(Ordering::Relaxed) - before).div_ceil(PARSE_LEN);
+    assert!(
+        peak < MAX_PARSE_PEAK_PER_BYTE,
+        "parse peak {peak} bytes per input byte of {PARSE_LEN}, over {MAX_PARSE_PEAK_PER_BYTE}"
+    );
+    // The peak of a parse that returned nothing would pass the bound; noise
+    // has no match to find, so nearly every byte is a token of its own.
+    assert!(tokens.len() > PARSE_LEN / 2, "{} tokens", tokens.len());
+}
+
 #[test]
 fn the_peak_heap_of_an_encode_stays_under_its_bytes_per_input_byte() {
     // Under 512 KiB the peak is the models and tables, which do not grow with
     // the input, and the token lists are not in it.
     const LEN: usize = 1 << 19;
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
     let input = noise(LEN);
     let (serial_peak, serial) = encode_peak(&input, 1);
     assert!(
