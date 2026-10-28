@@ -145,6 +145,13 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-10-28: `sessions roles --since 14d` and `research/progress.jsonl`,
+  read for ADR-0077: maintainer ladder ADOPTED opus first, sonnet floor and
+  thrift (the one seat on the journal, two modeling experiments in three
+  weeks on the floor rung); BDFL thrift block RESTORED (#897's condition,
+  the agent-system backlog down, held: 0 bugs, 0 red, 0 stalled); BDFL
+  clock tick halved to every eight hours in `CLOCK` and `wrangler.toml`.
+
 - 2026-10-25: deep survey. Docs-intel round 2026-10-24 (#578): six
   changed reference pages, none added. cli-reference re-read: `--tools`
   ADOPTED on the director (#1626, cada404 ("agent-bdfl: the director is

@@ -53,7 +53,7 @@ GITHUB_REPO = "bugabinga/mothergod"
 # instead of adding a line; worker.test.mjs enforces the cap.
 [triggers]
 crons = [
-  "11 */4 * * *",
+  "11 */8 * * *",
   "22 */3 * * *",
   "37 */4 * * *",
   "37 */12 * * *",

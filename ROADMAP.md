@@ -153,18 +153,18 @@ its own id, pending a genuinely new mechanism and not a variant:
 btultra2-class parse (S1-P2), PPM escape (S1-P3), per-expert rate gating
 (S2-R33), the previous-token flag state (S2-R34).
 
-Live thread: large windows (S1-P4), the one `LEAD` header left among
-S1-P1 to S1-P8. The reach to the offset code's ceiling shipped as a
-per-frame trial and narrowed six of the seven Silesia losses to zstd -19
-(`xml` unchanged) while flipping none (S2-A128); a reach past that
-ceiling, a wider offset code, is the remainder the journal lists
-unmeasured. The filter bank thread (selector kinds 4 to 6,
-`FORMAT_VERSION` 14 to 16, it193 to it195) ended with the per-field
-byte-order rejection (it196). Past S1-P4 the next candidate is a
-literature idea or a cheap wild swing per the `compression-experiment`
-skill, or a charter issue labeled research + product (ADR-0062). Target:
-beat zstd -19
-per-file on all of Silesia/Canterbury with real bitstreams; then xz -9e.
+Live thread: the model, not the parse, under ADR-0077, with large windows
+(S1-P4) second. The hybrid's Silesia ceiling is measured: 2.005 b/B with every xz level from -4 up smaller and
+faster both ways (`docs/benchmarks/silesia.md`), and S2-R37 put the floor
+in the model, 86% of the cheapest encoder tier's time. A context-mixing
+path over every byte, a match model as an expert and no LZ tokens, is
+charter #1763, worked through `compression-experiment` ahead of S1-P4's
+remainder (a reach past the offset code's ceiling; S2-A128's shipped
+reach narrowed six of the seven Silesia losses to zstd -19 and flipped
+none). The filter bank thread (selector kinds 4 to 6, `FORMAT_VERSION`
+14 to 16, it193 to it195) ended with the per-field byte-order rejection
+(it196). Target: beat zstd -19 per-file on all of Silesia/Canterbury
+with real bitstreams; then xz -9e.
 
 ## M4: Production hardening ✅
 
