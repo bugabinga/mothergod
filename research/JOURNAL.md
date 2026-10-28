@@ -9417,18 +9417,21 @@ record.
   both sealed kinds through the report `literal_pairing` already returns.
   The case list and the sealed generators moved into one `pair_cases` that
   both drivers call, so the two cannot read different corpora. | Not netted
-  out: the candidate pays no frame header and sees raw bytes where the
-  champion may have run a filter first; both are small against a 50,000-byte
-  case and favour the candidate. | Verdict: **accepted** on the focused
+  out: the candidate pays no frame header, which favours it, and sees raw
+  bytes where the champion may have run a filter first, which biases against
+  it by a case-dependent amount: on `base64_wrapped` the six experts cost
+  1.2617 bits/byte raw and 0.7169 on the unwrapped bytes over the original
+  length, 0.545 of that case's delta, and the train mean below includes it. | Verdict: **accepted** on the focused
   tests passing (prefix and context handed per byte, denominator is the case
   length, empty case, same case list as the literal pairing); null deltas,
   as `research/README.md` allows a patch whose purpose is measurement. The
   driver's first run, the six shipped experts over the whole stream with no
   change, gave a train mean of +0.1005 bits/byte against the champion over
   the 11 `baseline::cases()` at `CASE_LEN` 50,000, release build; that
-  figure is the first try's starting reading, not a verdict. The same run
-  also priced both sealed cases once, before this entry was written; no
-  decision rides on those two numbers and they are not quoted. | **Not
+  figure is the first try's starting reading, not a verdict. That run
+  also priced both sealed cases once, before this entry was written, so the
+  sealed read of the six-expert model is spent for try 1; the numbers are
+  not quoted. | **Not
   measured:** a candidate beyond the six experts (the match model of
   S2-R23, hashed orders 3 to 6), any corpus larger than `CASE_LEN`, and the
   speed of a whole-stream path. `research/progress.jsonl` it213.

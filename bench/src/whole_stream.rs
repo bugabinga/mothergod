@@ -9,11 +9,15 @@
 //! a literal, and the candidate sees the whole prefix.
 //!
 //! The champion is `mothergod::compress` at its default level, the number
-//! `bench/baseline.json` holds. Two things the delta does not net out,
-//! both small against a [`crate::baseline::CASE_LEN`] case: the candidate pays no
-//! frame header, and sees the raw bytes where the champion may have run a
-//! filter first (`research/JOURNAL.md` S1-A2). A positive delta is a
-//! candidate worse than the bitstream; the verdict rules are
+//! `bench/baseline.json` holds. Two things the delta does not net out. The
+//! candidate pays no frame header, which favours it. The candidate sees
+//! the raw bytes where the champion may have run a filter first
+//! (`research/JOURNAL.md` S1-A2), which biases against it by an amount
+//! that depends on the case: on `base64_wrapped` at [`crate::baseline::CASE_LEN`]
+//! the six shipped experts cost 1.2617 bits/byte on the raw case and 0.7169
+//! on the unwrapped bytes, so the filter alone is 0.545 of that case's
+//! delta. A positive delta is a candidate worse than the bitstream, by at
+//! most the filter's share on a filtered case; the verdict rules are
 //! `research/corpus/POLICY.md`'s, unchanged.
 
 use crate::baseline::bits_per_byte;
