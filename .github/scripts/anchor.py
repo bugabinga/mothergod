@@ -178,7 +178,7 @@ def previous_run_start(repo, this_run, now=None):
         if (age := stale(stamp, now)) is not None:
             print(
                 f"{os.path.basename(sys.argv[0])}: anchor {stamp} (run {run['databaseId']}) "
-                f"is {age / 24:.1f} days old on a four-hour cron: a limit pause, an outage, "
+                f"is {age / 24:.1f} days old against the worker clock's tick: a limit pause, an outage, "
                 f"or a runs page served stale (#902). Every window measured from it is that "
                 "wide.",
                 file=sys.stderr,

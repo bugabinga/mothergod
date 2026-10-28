@@ -34,7 +34,7 @@ The values live in `agents/models.json` and the Telegram worker's `CLOCK`, under
 
 Heartbeat duty 4c is where the project's main work happens; bugs, blockers and red PRs still outrank it, and a charter outranks the journal's standing lead as ADR-0062 wrote.
 The director's delta loop runs three times a day; alarms, operator events and Telegram dispatches wake it off the clock as before, and a stall waits up to eight hours for a rescue instead of four.
-Fleet cost stays about flat: the director's share halves and the maintainer's run grows by the opus multiple.
+Fleet cost falls, in projected list cost over the fourteen days (`sessions roles --since 14d`): the director's 97 runs at $6.06 lose the clock half, about $250, and the maintainer's 177 runs at $0.51 grow to about $0.80 at the per-token rate the curator pays on opus ($1.02 a run at 16k output tokens), about $50 more.
 CLAUDE.md's architecture target line, the `Method` table in `docs/format/SPEC.md` and the M5 decode ratchet move with the wiring slice, not with this record; the M5 clause that a faster decode is a second codec path is untouched, because this path is the smaller and slower one.
 A negative sealed verdict is a measurement: the direction is re-decided on it under a superseding ADR, and the two configuration values move back under the same levers.
 
@@ -44,7 +44,7 @@ A negative sealed verdict is a measurement: the direction is re-decided on it un
 The gap to xz -9e on Silesia is 8.8% of the codec's size (9.6% over xz's); S2-A128's reach shipped 0.3 to 2.4% per file and flipped no loss, and the journal's remaining headers ask for a new mechanism.
 
 **Chase zstd's speed class.**
-S2-A88 and S2-A90 measured a static fast coder losing on ten of ten buffers inside this format, and zstd exists.
+S2-A90 measured a static fast coder losing on ten of ten literal streams inside this format, S2-A88 on nine of ten whole buffers, and zstd exists.
 
 **Re-seat a researcher.**
 ADR-0062's escape hatch for thin slices is the maintainer's ladder, not a second seat on the same journal.
