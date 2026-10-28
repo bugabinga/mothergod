@@ -72,7 +72,9 @@ The system is inert until these are done:
   branch wakes nobody: `agent-alarm` names it under `workflow_run` since
   #1060 but ignores a `workflow_dispatch` red on any branch but `main`, so
   a branch dispatch is the dispatcher's to read; its report job writes
-  with `github.token`, whose events start no workflow.
+  with `github.token`, whose events start no workflow. `gh run rerun`
+  answers the same 403 on both lesser tokens, so a required gate's rerun
+  after a flake rides the PAT too (#1736).
   Dispatching a seat workflow on the PAT is the operator-attributed wake the
   BDFL prompt calls a self-trigger loop (#50); never.
 - All agent commits are made with `use_commit_signing: true`: they go
