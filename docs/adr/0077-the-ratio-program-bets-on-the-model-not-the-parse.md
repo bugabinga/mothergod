@@ -10,11 +10,11 @@ On Canterbury the same codec writes the smallest output on the field, 1.347 b/B 
 
 S2-R37 measured where the time goes: the decoder, which is the model alone, spends 86% of the cheapest encoder tier's time, so no parse change reaches under it; no encoder tier lands on the field's frontier.
 Seven of the eight S1-P leads are resolved or exhausted, the journal's words being "pending a genuinely new mechanism and not a variant" (ROADMAP M3).
-S1-L6 names the hybrid's cap: LZ consumes the repetition before the literal model sees it, and three match-signal experts (S2-R20, S2-R22, S2-R23) lost on the leftovers.
+S1-L6 names the hybrid's cap: LZ consumes the repetition before the literal model sees it, and three match-signal mechanisms (S2-R20, S2-R22, S2-R23) lost on the leftovers.
 Single-digit MB/s is the context-mixing class, where the literature's instances (lpaq, zpaq, paq8) land well below xz; this codec pays that class's time for LZMA's ratio.
 
 The budget ran the other way.
-Over the fourteen days to 2026-10-28 (`sessions roles --since 14d`) the director took 94 runs and $560 of $845 projected, on the top rung, shipping the factory; the maintainer, the one seat on the journal since ADR-0062, took 169 runs at $85 on the floor rung, and `research/progress.jsonl` holds two modeling experiments in ISO weeks 42 to 44 against twenty capability patches.
+Over the fourteen days to 2026-10-28 (`sessions roles --since 14d`, read 18:50 UTC) the director took 99 runs and $592 of the fleet's $894 projected, on the top rung, shipping the factory; the maintainer, the one seat on the journal since ADR-0062, took 177 runs at $91 on the floor rung, and `research/progress.jsonl` holds two modeling experiments in ISO weeks 42 to 44 against twenty capability patches.
 Issue #897 suspended the director's thrift "until the agent-system backlog is down"; on 2026-10-28 the backlog is eleven enhancements, zero bugs, zero red checks, zero stalled PRs, and the suspension had outlived its condition.
 
 ## Decision
@@ -34,7 +34,7 @@ The values live in `agents/models.json` and the Telegram worker's `CLOCK`, under
 
 Heartbeat duty 4c is where the project's main work happens; bugs, blockers and red PRs still outrank it, and a charter outranks the journal's standing lead as ADR-0062 wrote.
 The director's delta loop runs three times a day; alarms, operator events and Telegram dispatches wake it off the clock as before, and a stall waits up to eight hours for a rescue instead of four.
-Fleet cost falls, in projected list cost over the fourteen days (`sessions roles --since 14d`): the director's 97 runs at $6.06 lose the clock half, about $250, and the maintainer's 177 runs at $0.51 grow to about $0.80 at the per-token rate the curator pays on opus ($1.02 a run at 16k output tokens), about $50 more.
+Fleet cost falls, in the same reading's projected list cost: every director run arrives by dispatch (the clock, Telegram and the alarm share that door), so the clock's share is not a column, and the arithmetic uses its ceiling, 84 ticks a fortnight falling to 42, about $250 at the director's $5.98 a run; the maintainer's 177 runs at $0.51 grow to about $0.80 at the per-token rate the curator pays on opus ($1.02 a run at 16k output tokens), about $50 more.
 CLAUDE.md's architecture target line, the `Method` table in `docs/format/SPEC.md` and the M5 decode ratchet move with the wiring slice, not with this record; the M5 clause that a faster decode is a second codec path is untouched, because this path is the smaller and slower one.
 A negative sealed verdict is a measurement: the direction is re-decided on it under a superseding ADR, and the two configuration values move back under the same levers.
 
