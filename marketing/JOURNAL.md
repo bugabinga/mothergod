@@ -20,6 +20,21 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-28: Editorial: "will it build here" now answers FreeBSD
+
+Queue blocked on dates (#1702 on the 2026-10-31 `bench-report`, #1640
+on a sweep that measures a score; `trust-data.json` still reads
+`mutation_score.latest: null`). 64428eb ("monster: a FreeBSD guest lane
+runs the runtime suite weekly (#1731)") added a lane, and monster run
+40609021537 at 463f134 passed it on stable and MSRV. Both "Try it"
+sentences listed every platform but that one, so a FreeBSD reader was
+told by omission that nobody had tried. They now say "Android and
+FreeBSD, x64 only".
+
+**Rule:** the sentence names a platform once a lane has passed, not
+when the lane merges; a red first run would have made the claim false
+on its first day.
+
 ## 2026-10-28: Editorial: the release notes still swore off the levels they announce
 
 Queue blocked on dates again (#1702's numbers on the 2026-10-31
