@@ -190,8 +190,8 @@ record.
   `dp_round`/`next_match_candidate` wiring and `MAX_TREE_DEPTH_OPTIMAL`)
   reverted in full; `BinaryTreeMatchFinder` itself (S2-A42) is unaffected.
 - S2-R3 | REJECTED | S1-P2's other wiring slice: fed `dp_round`'s own
-  forward pass into `PriceCounts::observe` (S2-A50; left main in #1747) as it advanced,
-  rebuilding `PriceTable` from the running counts every
+  forward pass into `PriceCounts::observe` (S2-A50; left main in #1747)
+  as it advanced, rebuilding `PriceTable` from the running counts every
   `PRICE_REBUILD_INTERVAL` (4,096) finalized moves instead of leaving
   prices frozen at the round's seed table for its whole pass. Every
   position's `dp[i]`/`parent[i]` is finalized in strictly increasing order
@@ -267,8 +267,8 @@ record.
   walk over `state.parent` every `OBSERVE_INTERVAL` (4,096) positions,
   from the current (already-finalized, per S2-A50) position back to the
   previous checkpoint, feeding only the moves actually on that walk into
-  `PriceCounts::observe` (left main in #1747) — unlike S2-R3, a discarded `relax` candidate is
-  never counted, only a move the DP kept. Not the round's *true* final
+  `PriceCounts::observe` (left main in #1747); unlike S2-R3, a discarded
+  `relax` candidate is never counted, only a move the DP kept. Not the round's *true* final
   backtrace either (that only exists once position `n` is reached, and an
   intermediate checkpoint's chain to reach position `i` can differ from
   the chain the eventual full backtrace uses to cross the same span), but
@@ -2338,8 +2338,8 @@ record.
   still untouched from S2-A42.
 - S2-A50 | ACCEPTED | First slice of S1-P2's other remaining gap
   (per-position adaptive prices, untouched since S2-A42): `PriceCounts`
-  gained `observe(token, prev_byte)` (left main in #1747), bumping one already-decided
-  token's counts, factored out of `tally`'s per-token match arm (`tally`
+  gained `observe(token, prev_byte)` (left main in #1747), bumping one
+  already-decided token's counts, factored out of `tally`'s per-token match arm (`tally`
   now calls it in a loop; identical behavior, proven by a dedicated
   test rather than assumed from the refactor). Standalone, not yet
   called from `dp_round`: the DP's forward pass processes positions in
