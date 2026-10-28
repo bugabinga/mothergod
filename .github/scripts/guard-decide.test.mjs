@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { CLOCK } from "../../infra/telegram-worker/worker.js";
 
 const scriptsDir = new URL(".", import.meta.url).pathname;
 
@@ -116,9 +117,17 @@ test("second gear: a discretionary wake under a missing projection (#375)", asyn
       ...wrangler.match(/crons\s*=\s*\[([^\]]*)\]/)[1]
         .matchAll(/"([^"]*)"/g),
     ].map((m) => m[1]);
-    // "<minute> */<n> * * *" is the only shape the clock uses; a governed seat
-    // written any other way needs this test taught how to read it.
-    const governed = ["11 */4 * * *", "22 */3 * * *"];
+    // The governed seats are the ones CLOCK dispatches with `source: cron`,
+    // read from CLOCK so a lever pull edits no third copy here (#1764 moved
+    // the director's tick and found one). "<minute> */<n> * * *" is the one
+    // shape this reads; the herald's "49 6,18 * * *" is the by-design
+    // exception above, and a new governed seat in another shape needs this
+    // test taught how to read it.
+    const governed = Object.entries(CLOCK)
+      .filter(([, seats]) => seats.some((seat) => seat.inputs?.source === "cron"))
+      .map(([cron]) => cron)
+      .filter((cron) => /^\d+ \*\/\d+ \* \* \*$/.test(cron));
+    assert.ok(governed.length >= 2, `CLOCK names ${governed.length} governed */n ticks`);
     for (const cron of governed) {
       assert.ok(crons.includes(cron), `${cron} must still be a live trigger`);
       const [minute, hours] = cron.split(" ");

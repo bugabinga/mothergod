@@ -153,8 +153,8 @@ its own id, pending a genuinely new mechanism and not a variant:
 btultra2-class parse (S1-P2), PPM escape (S1-P3), per-expert rate gating
 (S2-R33), the previous-token flag state (S2-R34).
 
-Live thread: the model, not the parse (ADR-0077). The hybrid's Silesia
-ceiling is measured: 2.005 b/B with every xz level from -4 up smaller and
+Live thread: the model, not the parse, under ADR-0077, with large windows
+(S1-P4) second. The hybrid's Silesia ceiling is measured: 2.005 b/B with every xz level from -4 up smaller and
 faster both ways (`docs/benchmarks/silesia.md`), and S2-R37 put the floor
 in the model, 86% of the cheapest encoder tier's time. A context-mixing
 path over every byte, a match model as an expert and no LZ tokens, is
