@@ -10,9 +10,7 @@
 //! `(prev-byte nibble, after-copy)` key, so the mixer favors different
 //! experts after a match than after a run of literals.
 //!
-//! The `ideal_cost_bits*` methods price a byte without driving an
-//! [`crate::coder::Encoder`]. The coding paths every frame this build
-//! decodes takes:
+//! The coding paths every frame this build decodes takes:
 //!
 //! - [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`]: each
 //!   expert's estimate [`crate::logistic::stretch`]ed into the logit domain
@@ -649,9 +647,9 @@ impl Literal {
         cumulate(mixed)
     }
 
-    /// [`banks`] plus [`Self::mix`] in one call: the prelude of the two
-    /// pricing methods that price the six-expert blend itself, which then call
-    /// [`Self::update`] with the same `bank_indices`/`weight_index`.
+    /// [`banks`] plus [`Self::mix`] in one call: the prelude of
+    /// [`Self::ideal_cost_bits_sse`], which then calls [`Self::update`]
+    /// with the same `bank_indices`/`weight_index`.
     fn banks_and_cum(&self, context: Context) -> ([usize; EXPERTS], usize, [u64; ALPHABET + 1]) {
         let (bank_indices, weight_index) = banks(context);
         let cum = self.mix(&bank_indices, weight_index);
@@ -712,35 +710,13 @@ impl Literal {
         }
     }
 
-    /// Bits it would cost to code `byte` under `context`'s current mixed
-    /// distribution — `-log2((cum[symbol+1] - cum[symbol]) /
-    /// cum[ALPHABET])` — then updates every expert bank and the mixing
-    /// weights, exactly as [`Self::ideal_cost_bits_sse`] does. No [`Encoder`]
-    /// involved: this is
-    /// [`crate::model::Model::ideal_cost_bits`]'s counterpart for the
-    /// six-expert mixer, the remaining scope `JOURNAL` S2-A30 flagged for
-    /// ROADMAP M2's ideal-cost accounting mode.
-    #[must_use]
-    pub fn ideal_cost_bits(&mut self, context: Context, byte: u8) -> f64 {
-        let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
-        let symbol = usize::from(byte);
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "cum entries are fixed-point sums bounded well under 2^53 (FIXED_POINT_SCALE is 2^32, ALPHABET is 256), so this loses no precision that matters"
-        )]
-        let probability = (cum[symbol + 1] - cum[symbol]) as f64 / cum[ALPHABET] as f64;
-        self.update(&bank_indices, weight_index, symbol, exp);
-        crate::surprisal(probability)
-    }
-
-    /// [`Self::ideal_cost_bits`]'s counterpart over the blended `cum`
-    /// table coded as 8 binary decisions: sums the ideal cost of `byte`'s
-    /// 8 `sse`-refined decisions through [`bittree::ideal_cost_bits_sse`]
-    /// instead of pricing the direct 256-way division, including this
-    /// model's own [`Sse`] table adapting call over call. No frame this
-    /// build decodes codes this way; the benchmark harness prices it as a
-    /// baseline. Updates the mixer state the same way
-    /// [`Self::ideal_cost_bits`] does.
+    /// Bits it would cost to code `byte` under `context`'s blended `cum`
+    /// table as 8 binary decisions: sums the ideal cost of `byte`'s 8
+    /// `sse`-refined decisions through [`bittree::ideal_cost_bits_sse`],
+    /// including this model's own [`Sse`] table adapting call over call,
+    /// then updates every expert bank and the mixing weights. No
+    /// [`Encoder`] involved. No frame this build decodes codes this way;
+    /// the benchmark harness prices it as a baseline.
     #[must_use]
     pub fn ideal_cost_bits_sse(&mut self, context: Context, byte: u8) -> f64 {
         let (bank_indices, weight_index, cum) = self.banks_and_cum(context);
