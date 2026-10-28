@@ -9,6 +9,25 @@ fn encode(data: &[u8]) -> Vec<u8> {
     super::encode(data, NonZeroUsize::MIN)
 }
 
+/// The bucket symbol's modeled `-log2(p)` cost plus the residual low bits'
+/// cost, which is their count: [`Encoder::encode_bits`] emits them raw and
+/// unmodeled, so there is no `Model` lookup to price. The probe for what
+/// [`EncodeSink::offset`] codes.
+fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
+    let b = lz::bucket(value);
+    model.ideal_cost_bits(b) + f64::from(bucket_bits(b))
+}
+
+impl ResidualTree {
+    /// Ideal cost of `value`'s residual bits below its bucket, priced
+    /// exactly as [`Self::encode`] codes them.
+    fn ideal_cost_bits(&mut self, value: u32) -> f64 {
+        let mut cost = f64::from(Self::raw_bits(value));
+        self.walk(value, |model, bit| cost += model.ideal_cost_bits(bit));
+        cost
+    }
+}
+
 /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
 /// [`std::io::Write`]) instead of streamed to a real sink, so tests can
 /// compare its output byte for byte against [`decode`]'s.
@@ -840,71 +859,6 @@ fn caller_supplied_max_len_below_max_decoded_len_is_honored() {
 }
 
 #[test]
-fn ideal_cost_bits_is_zero_on_empty_input() {
-    assert!(ideal_cost_bits(b"").abs() < 1e-9);
-}
-
-#[test]
-fn ideal_cost_bits_tracks_real_encoded_length_within_one_percent() {
-    // Named corpus (CLAUDE.md hard rule 4): the founding session's
-    // archived codec, real structured Rust source, 25,524 bytes — the
-    // same fixture roundtrip_founding_archive_source and literal.rs's
-    // vendored-exp accuracy test use. encode_tokens's real Encoder
-    // output is compared past its 8-byte declared-length/token-count
-    // header (no ideal_cost_bits call ever prices that header): summed
-    // ideal cost is an estimate, not the real coder's bit-exact output
-    // (integer cumulative-frequency division rounds; the coder also
-    // pays a handful of flush bits at the end), so this checks
-    // closeness, not equality — the same tolerance shape as
-    // model.rs's and literal.rs's own ideal-cost accuracy tests.
-    let data: &[u8] = include_bytes!("../../research/imports/session-1/mothergod.rs");
-
-    let ideal_bits = ideal_cost_bits(data);
-
-    let real = encode_tokens(data, None, Reach::Standard);
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "encoded length is far below f64's exact integer range (2^53)"
-    )]
-    let real_bits = ((real.len() - TOKEN_HEADER_LEN) * 8) as f64;
-
-    let relative_diff = (ideal_bits - real_bits).abs() / real_bits;
-    assert!(
-        relative_diff <= 0.01,
-        "ideal cost: {ideal_bits} bits vs real encoded length: {real_bits} bits, \
-         {relative_diff:.4} relative difference exceeds the 1% budget"
-    );
-}
-
-#[test]
-fn ideal_cost_bits_is_lower_for_repetitive_than_random_data() {
-    // A sanity check the accuracy test above can't give directly: the
-    // ideal-cost pass must actually reflect the LZ/model pipeline's own
-    // sense of compressibility, not just track real encoded length on
-    // one fixture. A 50x repeat of an 8-byte pattern (long enough to
-    // clear lz::OPTIMAL_MIN_LEN) must cost far fewer bits per byte than
-    // pseudo-random bytes of the same length.
-    let repetitive = b"abcdefgh".repeat(50);
-    let random: Vec<u8> = crate::test_support::Xorshift32::new(0x1234_5678)
-        .take(repetitive.len())
-        .map(|state| u8::try_from(state % 256).unwrap())
-        .collect();
-
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "byte lengths here are tiny, far below f64's exact integer range (2^53)"
-    )]
-    let (repetitive_len, random_len) = (repetitive.len() as f64, random.len() as f64);
-    let repetitive_bpb = ideal_cost_bits(&repetitive) / repetitive_len;
-    let random_bpb = ideal_cost_bits(&random) / random_len;
-    assert!(
-        repetitive_bpb < random_bpb / 2.0,
-        "repetitive data's ideal cost ({repetitive_bpb} bits/byte) should be far below \
-         random data's ({random_bpb} bits/byte)"
-    );
-}
-
-#[test]
 fn fresh_residual_tree_costs_exactly_the_raw_residual_bits() {
     // A fresh binary Model prices either bit at exactly 1.0, so before any
     // update a tree costs what raw residual bits cost: the whole S2-A114
@@ -1005,9 +959,9 @@ fn residual_tree_decode_leaves_the_encoders_node_state() {
 
 #[test]
 fn residual_tree_price_matches_what_it_codes() {
-    // CostSink must price what EncodeSink codes: the ideal cost of a
-    // stream and its real coded size agree to the coder's few bytes of
-    // flush and quantization slack.
+    // The probe the tests above price with must price what `encode` codes:
+    // the ideal cost of a stream and its real coded size agree to the
+    // coder's few bytes of flush and quantization slack.
     let values = residual_tree_values();
     let mut priced = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
     let ideal: f64 = values.iter().map(|&v| priced.ideal_cost_bits(v)).sum();

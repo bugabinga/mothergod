@@ -749,30 +749,6 @@ impl Literal {
         bits
     }
 
-    /// What [`Self::encode_logit_sse`] would pay for `byte`, summed over the
-    /// same [`Self::code_bit_walk`] without driving a coder, and the same
-    /// state updates: `crate::codec`'s `CostSink` and `EncodeSink` must price
-    /// and code the same thing.
-    #[must_use]
-    pub fn ideal_cost_bits_logistic_surprise_logit_sse(
-        &mut self,
-        context: Context,
-        byte: u8,
-        mixer: &mut SurpriseLogisticMix,
-    ) -> f64 {
-        let (bank_indices, weight_index) = banks(context);
-        let symbol = usize::from(byte);
-        let mut bits = 0.0f64;
-        let landed = self.code_bit_walk(&bank_indices, weight_index, mixer, |mid, p| {
-            let bit = symbol >= mid;
-            bits += bittree::ideal_cost_bit(bit, p);
-            bit
-        });
-        debug_assert_eq!(landed, byte, "the walk must land on the priced byte");
-        self.update(&bank_indices, weight_index, symbol, exp);
-        bits
-    }
-
     /// `weights6`, the extra expert's own weight, and their sum: the
     /// three-number prelude [`Self::mix7`] and [`Self::update_column_expert`]
     /// each start from, keyed by the same `weight_index` [`banks`] selected

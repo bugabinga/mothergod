@@ -512,50 +512,6 @@ fn surprise_logistic_mix_logit_sse_new_starts_at_uniform_weights_and_zero_error_
     assert_eq!(mix.baseline_sq_error, vec![0.0; WEIGHT_CONTEXTS]);
 }
 
-#[test]
-fn ideal_cost_bits_logistic_surprise_logit_sse_steps_only_its_own_weight_key_once_per_node() {
-    let mut model = Literal::new();
-    let context = Context {
-        prev1: 0x25,
-        ..Context::default()
-    };
-    for _ in 0..4 {
-        let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(
-            context,
-            b'x',
-            &mut SurpriseLogisticMix::new(),
-        );
-    }
-    let (_, weight_index) = banks(context);
-    let mut mixer = SurpriseLogisticMix::new();
-    let _ = model.ideal_cost_bits_logistic_surprise_logit_sse(context, b'x', &mut mixer);
-    for key in 0..WEIGHT_CONTEXTS {
-        if key == weight_index {
-            assert_ne!(mixer.recent_sq_error[key].to_bits(), 0.0f64.to_bits());
-            assert_ne!(mixer.baseline_sq_error[key].to_bits(), 0.0f64.to_bits());
-            assert_ne!(
-                mixer.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        } else {
-            assert_eq!(
-                mixer.recent_sq_error[key].to_bits(),
-                0.0f64.to_bits(),
-                "key {key}"
-            );
-            assert_eq!(
-                mixer.baseline_sq_error[key].to_bits(),
-                0.0f64.to_bits(),
-                "key {key}"
-            );
-            assert_eq!(
-                mixer.weights[key].map(f64::to_bits),
-                [LOGISTIC_INITIAL_WEIGHT.to_bits(); EXPERTS]
-            );
-        }
-    }
-}
-
 fn roundtrip_bytes_logit_sse(bytes: &[u8]) {
     let mut model = Literal::new();
     let mut mixer = SurpriseLogisticMix::new();

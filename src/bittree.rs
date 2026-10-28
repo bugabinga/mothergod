@@ -176,9 +176,7 @@ pub fn decode_symbol_sse(decoder: &mut Decoder, cum: &[u64], sse: &mut Sse) -> u
 }
 
 /// One node's ideal cost: `-log2(p)` if it resolved to `bit`, `-log2(1 - p)`
-/// otherwise. Shared by every bit-tree pricing path
-/// ([`ideal_cost_bits_sse`], [`crate::literal::Literal`]'s logistic-mix
-/// pricing) so the two outcomes of a node are priced alike.
+/// otherwise. [`ideal_cost_bits_sse`] sums it over a symbol's nodes.
 pub(crate) fn ideal_cost_bit(bit: bool, p: f64) -> f64 {
     crate::surprisal(if bit { p } else { 1.0 - p })
 }
