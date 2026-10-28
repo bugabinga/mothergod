@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Fail when a PR moves a permission envelope from a branch that is not the BDFL's.
+
+Extensionless and executable, like em-dash-diff: ci.yml's `worker` job runs
+it on every pull_request as `envelope-diff HEAD^1 HEAD --branch <head ref>
+--author <login>`, on a checkout two commits deep.
+
+ADR-0008: every agent's permission envelope is the BDFL's to set, and a
+change by anyone else escalates to the BDFL. The rule was prose in the
+reviewer's prompt (agent-review.yml step 5), read on every review and
+checked by nobody else, and it drifted: the bullet listed "workflow
+permissions, allowedTools, max-turns" and said nothing of `--tools`, the
+flag that hides a built-in from a seat (#1042). This is the rule as a
+check. The keys, from the census of every `claude_args` block in
+.github/workflows/ (envelope-diff.test.mjs holds FLAGS and IGNORED to it):
+
+    permissions         every `permissions` mapping, top-level or per job,
+                        one entry per scope, `{}` kept as its own value
+                        because no key and an empty map are different grants
+    claude_args         --max-turns, --tools, --allowedTools and
+                        --permission-mode (FLAGS); --append-system-prompt-file
+                        is the persona, prompt content and not a grant
+
+Files read: every .yml or .yaml under .github/workflows/ and
+.github/actions/ that `git diff --name-only <base> <head>` lists, each side
+through `git show <ref>:<path>`; a side the ref lacks is an empty envelope,
+so a new workflow's grants and a deleted workflow's are both moves.
+
+Exempt: a head branch named `claude/bdfl-*`, or an author equal to the
+operator, by default the owner of $GITHUB_REPOSITORY (`--operator` to
+name another). Both are the signals the prose rule trusted; whoever pushes
+picks the branch name, so this catches an accidental envelope edit, not a
+seat pushing to a bdfl-named branch. A `push` event has no author to judge
+and its envelope already passed as a PR, so ci.yml runs this on
+pull_request alone.
+
+Output: one line per moved key, `<file>: <path>: <before> -> <after>`, with
+`absent` for a side without the key; then on an exempt branch
+`envelope moved: N, allowed: <reason>` and exit 0, else the rule and exit
+1. No move prints nothing and exits 0. `envelope` and `moves` are pure;
+the test spawns this script on throwaway git repositories.
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+import yaml
+
+ROOTS = (".github/workflows/", ".github/actions/")
+SUFFIXES = (".yml", ".yaml")
+FLAGS = ("--max-turns", "--tools", "--allowedTools", "--permission-mode")
+IGNORED = ("--append-system-prompt-file",)
+BDFL_PREFIX = "claude/bdfl-"
+
+FLAG = re.compile(r"""(--[\w-]+)(?:[ =]("[^"]*"|'[^']*'|[^\s"']+))?""")
+
+
+def flags(args: str) -> dict[str, str]:
+    """FLAGS present in a claude_args scalar, quotes stripped, valueless as 'true'."""
+    found = {}
+    for match in FLAG.finditer(args):
+        name, value = match.group(1), match.group(2)
+        if name in FLAGS:
+            found[name] = "true" if value is None else value.strip("\"'")
+    return found
+
+
+def envelope(doc, path: str = "") -> dict[str, str]:
+    """Every envelope key in a parsed workflow or action, at its dotted path."""
+    found = {}
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            here = f"{path}.{key}" if path else str(key)
+            if key == "permissions":
+                if isinstance(value, dict):
+                    if value:
+                        for scope, level in value.items():
+                            found[f"{here}.{scope}"] = str(level)
+                    else:
+                        found[here] = "{}"
+                else:
+                    found[here] = str(value)
+            elif key == "claude_args" and isinstance(value, str):
+                for name, flag_value in flags(value).items():
+                    found[f"{here}.{name}"] = flag_value
+            else:
+                found.update(envelope(value, here))
+    elif isinstance(doc, list):
+        for index, item in enumerate(doc):
+            label = item.get("id") if isinstance(item, dict) and isinstance(item.get("id"), str) else None
+            found.update(envelope(item, f"{path}.{label}" if label else f"{path}[{index}]"))
+    return found
+
+
+def moves(base: dict[str, str], head: dict[str, str]) -> list[tuple[str, str, str]]:
+    """(path, before, after) for every key whose value differs between the sides."""
+    return [
+        (key, base.get(key, "absent"), head.get(key, "absent"))
+        for key in sorted(set(base) | set(head))
+        if base.get(key) != head.get(key)
+    ]
+
+
+def git(*args: str) -> str:
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+
+
+def side(ref: str, path: str):
+    """The parsed file at ref, or {} when the ref has no such path."""
+    shown = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+    if shown.returncode != 0:
+        return {}
+    return yaml.safe_load(shown.stdout) or {}
+
+
+def changed(base: str, head: str) -> list[str]:
+    listed = git("diff", "--name-only", base, head, "--", *ROOTS).split("\n")
+    return [p for p in listed if p.startswith(ROOTS) and p.endswith(SUFFIXES)]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Red when a non-BDFL PR moves a permission envelope (ADR-0008).")
+    parser.add_argument("base", help="ref of the side the PR starts from")
+    parser.add_argument("head", help="ref of the PR's side")
+    parser.add_argument("--branch", default="", help="head ref name; claude/bdfl-* is exempt")
+    parser.add_argument("--author", default="", help="PR author login; the operator is exempt")
+    parser.add_argument(
+        "--operator",
+        default=os.environ.get("GITHUB_REPOSITORY", "/").split("/")[0],
+        help="the operator's login; default is the owner of $GITHUB_REPOSITORY",
+    )
+    args = parser.parse_args()
+
+    found = []
+    for path in changed(args.base, args.head):
+        for key, before, after in moves(envelope(side(args.base, path)), envelope(side(args.head, path))):
+            found.append(f"{path}: {key}: {before} -> {after}")
+    if not found:
+        return 0
+    print("\n".join(found))
+    if args.branch.startswith(BDFL_PREFIX):
+        print(f"envelope moved: {len(found)}, allowed: branch {args.branch} is the BDFL's")
+        return 0
+    if args.author and args.author == args.operator:
+        print(f"envelope moved: {len(found)}, allowed: author {args.author} is the operator")
+        return 0
+    print(
+        f"envelope moved: {len(found)}, on branch {args.branch or '?'} by {args.author or '?'}. "
+        f"A permission envelope (permissions, {', '.join(FLAGS)}) is the BDFL's (ADR-0008): "
+        f"drop the move, or ship it from a {BDFL_PREFIX}* branch."
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

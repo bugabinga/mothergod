@@ -219,8 +219,23 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # HEAD^1 is the PR's base on a pull_request checkout; envelope-diff
+          # below reads both sides of every changed workflow from it.
+          fetch-depth: 2
       - run: node --test infra/telegram-worker/*.test.mjs
       - run: node --test .github/actions/agent-audit/*.test.mjs .github/scripts/*.test.mjs
+      # ADR-0008 as a check (#1042): a permission envelope (a `permissions`
+      # scope, --max-turns, --tools, --allowedTools, --permission-mode) moved
+      # by a branch that is not the BDFL's, nor the operator's own PR, is
+      # red here, a required job; the reviewer's prompt points at this step.
+      # pull_request only: a push to main is a merge whose PR already ran
+      # it, and carries no author to judge.
+      - if: github.event_name == 'pull_request'
+        env:
+          BRANCH: ${{ github.head_ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: .github/scripts/envelope-diff HEAD^1 HEAD --branch "$BRANCH" --author "$AUTHOR"
 
   # ADRs are numbered by listing the directory at branch-cut time (#195):
   # two PRs open at once can pick the same number and neither CI job

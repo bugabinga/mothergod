@@ -268,10 +268,9 @@ jobs:
                  one invariant is that the system still pauses at a
                  limit: name the test proving the limit cases still
                  pause, [must] without one.
-               - A permission envelope (workflow permissions, allowedTools,
-                 max-turns) changed by anyone but the BDFL or the operator
-                 (bugabinga): FAIL and say the envelope is the BDFL's
-                 (ADR-0008).
+               - A permission envelope moved: ci's `worker` job runs
+                 `envelope-diff`, red unless the branch is the BDFL's or
+                 the author the operator (ADR-0008); quote its lines.
                - Secrets route two ways (GOVERNANCE.md "Decision rules"). A
                  secret that does not exist yet: `blocked-on-human`, naming it.
                  An existing secret sent to a new host or API: the BDFL's call;
