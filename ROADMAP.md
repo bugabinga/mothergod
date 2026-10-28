@@ -259,11 +259,11 @@ moves.
 
 Items, in [milestone M8](https://github.com/bugabinga/mothergod/milestone/3):
 the CLI genre matrix with its conformance suite (#981) and the library
-idiom matrix (#982) landed, and every gap measured before a matrix existed
-(#976 to #979, #983) closed through them. What remains is the BSD lane
-(#980), without which "fits BSD" is a claim no run has made. A new gap is
-a row the suite flips in `tests/fit/*.txt`, then an issue; the count is on
-/status.
+idiom matrix (#982) landed, every gap measured before a matrix existed
+(#976 to #979, #983) closed through them, and the BSD lane (#980) runs
+the suite on FreeBSD 15 in the weekly monster matrix, so "fits BSD" is a
+claim a run makes. A new gap is a row the suite flips in
+`tests/fit/*.txt`, then an issue; the count is on /status.
 
 ## M6: Release 0.1
 

@@ -193,10 +193,63 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: bash .github/scripts/android-test
 
+  # FreeBSD has no hosted runner, so this lane boots a FreeBSD guest
+  # under KVM on an ubuntu runner and builds and tests inside it: the
+  # one lane where the crate meets a libc that is neither glibc, musl,
+  # MSVC, Darwin nor Bionic (#980). The pin covers the action's wrapper
+  # only: at c46abac the guest image and anyvm.py are fetched at run
+  # time by release tag from anyvm-org's GitHub releases, with no digest
+  # check, so #972's rule stops at the guest boundary. Accepted because
+  # nothing crosses it: the guest holds no credential (the sync copies
+  # .git, so checkout persists none into it, and `envs` names three
+  # variables) and writes nothing back (copyback off), so a substituted
+  # image can at most misreport FreeBSD fit on an advisory lane. The cache
+  # is off: one qcow2 would evict ten PR build caches from a cache at
+  # its limit to save a download of under a minute.
+  freebsd:
+    name: FreeBSD-15 | x86-64 | libc | ${{ matrix.toolchain }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, msrv]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # Resolves the version, msrv from Cargo.toml, into RUSTUP_TOOLCHAIN
+      # for the guest; the host install it also does is the price of one
+      # MSRV reader (docs/TESTING.md "Current automated cadence").
+      - uses: ./.github/actions/rust-ci
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          checks: setup
+      - name: Run tests in a FreeBSD guest
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
+        with:
+          release: "15"
+          envs: RUSTUP_TOOLCHAIN RUSTFLAGS CARGO_TERM_COLOR
+          copyback: false
+          disable-cache: true
+          # rustup's own FreeBSD binary, fetched by the base system's
+          # fetch(1): the guest has no curl, and the ports rust is neither
+          # stable nor the MSRV.
+          prepare: |
+            set -eu
+            fetch -o /tmp/rustup-init https://static.rust-lang.org/rustup/dist/x86_64-unknown-freebsd/rustup-init
+            chmod +x /tmp/rustup-init
+            /tmp/rustup-init -y --profile minimal --no-modify-path --default-toolchain "$RUSTUP_TOOLCHAIN"
+          run: |
+            set -eu
+            export PATH="$HOME/.cargo/bin:$PATH"
+            cargo test --all-targets
+            cargo test --doc
+
   report:
     name: report
-    if: ${{ always() && (needs.test.result == 'failure' || needs.test.result == 'cancelled' || needs.android.result == 'failure' || needs.android.result == 'cancelled' || needs.miri.result == 'failure' || needs.miri.result == 'cancelled') }}
-    needs: [test, android, miri]
+    if: ${{ always() && (needs.test.result == 'failure' || needs.test.result == 'cancelled' || needs.android.result == 'failure' || needs.android.result == 'cancelled' || needs.miri.result == 'failure' || needs.miri.result == 'cancelled' || needs.freebsd.result == 'failure' || needs.freebsd.result == 'cancelled') }}
+    needs: [test, android, miri, freebsd]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

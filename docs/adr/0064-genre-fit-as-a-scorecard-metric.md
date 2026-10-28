@@ -40,7 +40,7 @@ The CLI's grammar becomes a decision the matrix forces rather than a taste: the 
 That is an interface change and gets its own record when it ships (ADR-0030).
 Some rows need format work, a frame-stream rule (#978) or an integrity check (#982), and ride hard rule 5 when built.
 
-The suite spawns the binary, so it runs on no Miri or Android lane, and BSD has no lane at all (#980).
+The suite spawns the binary, so it runs on no Miri or Android lane, and BSD has no lane at all (#980). (Corrected 2026-10-28: BSD has had a lane since #980 closed with a FreeBSD 15 guest in monster that runs the suite weekly; this line first said it had none.)
 The cost is a test layer (`docs/TESTING.md` layer 12), a committed count, a status field and a milestone of items, bounded by the genre's own size: the matrix is finite, so M8 has a finish line where M3 and M5 do not.
 
 ## Rejected alternatives

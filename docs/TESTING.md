@@ -158,6 +158,7 @@ lane instead runs the whole `cargo x check` gate natively.
 | macOS Intel, Darwin libc | `macos-26-intel` | `x86_64-apple-darwin` |
 | macOS ARM64, Darwin libc | `macos-26` | `aarch64-apple-darwin` |
 | Android 15 x86-64, Bionic | `ubuntu-24.04` plus KVM emulator | `x86_64-linux-android` |
+| FreeBSD 15 x86-64, libc | `ubuntu-24.04` plus KVM guest | `x86_64-unknown-freebsd` |
 
 Rust has no `aarch64-pc-windows-gnu` target; its supported native ARM64
 GNU-family target is `aarch64-pc-windows-gnullvm`. The matrix explicitly
@@ -175,6 +176,11 @@ with this reason, or its file sits behind `cfg(not(target_os = "android"))`
 when every test in it spawns (`tests/cli.rs`). #518 stayed red a week;
 #1588 was caught by the first weekly run after the tests landed, because no
 PR lane runs Android.
+
+The FreeBSD lane builds and tests inside the guest, so the spawn guard
+does not apply there; the guest installs the toolchain from rustup's
+FreeBSD binary at the version the host resolved, so the lane shares the
+one MSRV reader.
 
 The advisory `coverage-check` workflow runs Sundays at 04:51 UTC and on
 manual dispatch: `cargo llvm-cov --package mothergod --json`, region
