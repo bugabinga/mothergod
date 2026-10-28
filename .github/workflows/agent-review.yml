@@ -410,7 +410,7 @@ jobs:
           # The deslopper fixes its own returned PRs on its next run
           # (ADR-0016), so its branches wake nobody. A bdfl branch wakes
           # the maintainer like any other (#998): the director's seat is
-          # the dearest and its clock four-hourly, and the maintainer's
+          # the dearest and its clock the slowest, and the maintainer's
           # tick fixed four bdfl rounds in the two days to 2026-10-11
           # (#995, #1037, #1043) and twice raced the live director to one
           # must.

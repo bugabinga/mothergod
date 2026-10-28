@@ -176,8 +176,8 @@ PARKED_LABEL = "blocked-on-human"
 DEAD = frozenset({"FAILURE", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "STALE"})
 
 # How long a fresh PR gets before an absent gate counts as absent forever.
-# Long enough for GitHub to schedule a queued job, short enough that a wake
-# on the next four-hourly cron still catches a birth conflict the same day.
+# Long enough for GitHub to schedule a queued job, short enough that the
+# director's next clock tick still catches a birth conflict the same day.
 GRACE = timedelta(minutes=15)
 
 # The branches this machinery pushes (CLAUDE.md "Issue/PR conventions").
