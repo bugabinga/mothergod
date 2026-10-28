@@ -73,6 +73,9 @@ When measurement is possible:
    (issue #828), never by a scratch binary of your own: S2-A104, S2-R27
    and S2-A106 each rewrote that driver by hand and the third divided by
    the wrong byte count (PR #823).
+   A candidate that models every byte with no LZ parse before it (charter
+   #1763) is priced by `whole_stream::train_and_sealed_vs_real_bitstream`
+   against `compress`'s real output, the same cases and report.
 6. Apply the corpus policy's verdict and number-provenance rules unchanged.
    A candidate that changes what `decode` does also records
    `decode_cost_delta` (`research/README.md`), measured with

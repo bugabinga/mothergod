@@ -81,7 +81,8 @@ pub struct CaseDelta {
     pub delta_bpb: f64,
 }
 
-/// A full [`train_and_sealed_delta_bpb`] run: the shape
+/// A full pairing run ([`train_and_sealed_delta_bpb`],
+/// [`crate::whole_stream::train_and_sealed_vs_real_bitstream`]): the shape
 /// `research/progress.jsonl` and a `research/JOURNAL.md` entry expect.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PairingReport {
@@ -101,7 +102,8 @@ pub struct PairingReport {
 /// `CASE_LEN` bytes at `sealed_seed(CASE_SEED)`: `baseline::cases()`
 /// excludes both by design (`research/corpus/POLICY.md`'s "no agent ever
 /// tunes against it"), so a pairing driver that also wants the sealed
-/// read generates them itself, same length and seed rule.
+/// read generates them itself, same length and seed rule. Every pairing
+/// driver in this crate reads them through [`pair_cases`].
 fn sealed_cases() -> [(&'static str, Vec<u8>); 2] {
     let seed = sealed_seed(CASE_SEED);
     [
@@ -111,6 +113,43 @@ fn sealed_cases() -> [(&'static str, Vec<u8>); 2] {
             crate::gradient_image(CASE_LEN, seed),
         ),
     ]
+}
+
+/// Builds a [`PairingReport`] from `delta_for_case`, the candidate-minus-
+/// champion bits/byte of one case's bytes: the eleven `baseline::cases()`
+/// train cases, then the two sealed cases. The one place that fixes which
+/// cases a pairing reads, in which order, so a driver over a different
+/// sub-stream ([`crate::whole_stream`]) differs from this module's in its
+/// pricing alone.
+pub(crate) fn pair_cases(mut delta_for_case: impl FnMut(&[u8]) -> f64) -> PairingReport {
+    let train: Vec<CaseDelta> = baseline::cases()
+        .into_iter()
+        .map(|case| CaseDelta {
+            name: case.name,
+            delta_bpb: delta_for_case(&case.data),
+        })
+        .collect();
+    let train_sum: f64 = train.iter().map(|c| c.delta_bpb).sum();
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "train case count is baseline::cases().len(), well under 2^53"
+    )]
+    let train_mean = train_sum / train.len() as f64;
+
+    let sealed: Vec<CaseDelta> = sealed_cases()
+        .into_iter()
+        .map(|(name, data)| CaseDelta {
+            name,
+            delta_bpb: delta_for_case(&data),
+        })
+        .collect();
+
+    PairingReport {
+        train,
+        train_mean,
+        train_sum,
+        sealed,
+    }
 }
 
 /// The standard ideal-cost pairing: every `baseline::cases()` train case
@@ -133,34 +172,7 @@ where
     DF: FnMut() -> D,
     D: FnMut(&mut Literal, Context, u8) -> f64,
 {
-    let train: Vec<CaseDelta> = baseline::cases()
-        .into_iter()
-        .map(|case| CaseDelta {
-            name: case.name,
-            delta_bpb: case_delta_bpb(&case.data, champion_for_case(), candidate_for_case()),
-        })
-        .collect();
-    let train_sum: f64 = train.iter().map(|c| c.delta_bpb).sum();
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "train case count is baseline::cases().len(), well under 2^53"
-    )]
-    let train_mean = train_sum / train.len() as f64;
-
-    let sealed: Vec<CaseDelta> = sealed_cases()
-        .into_iter()
-        .map(|(name, data)| CaseDelta {
-            name,
-            delta_bpb: case_delta_bpb(&data, champion_for_case(), candidate_for_case()),
-        })
-        .collect();
-
-    PairingReport {
-        train,
-        train_mean,
-        train_sum,
-        sealed,
-    }
+    pair_cases(|data| case_delta_bpb(data, champion_for_case(), candidate_for_case()))
 }
 
 #[cfg(test)]
