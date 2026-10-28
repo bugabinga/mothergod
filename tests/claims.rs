@@ -1174,6 +1174,94 @@ fn site_per_file_decode_range_matches_its_generated_reports() {
     );
 }
 
+/// `count` in English, one to twenty: the range the site's speed prose uses.
+/// Past it the sentence needs another shape, so this fails and asks for the
+/// table to grow with the sentence.
+fn number_word(count: usize) -> &'static str {
+    const WORDS: [&str; 20] = [
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
+        "nineteen",
+        "twenty",
+    ];
+    count
+        .checked_sub(1)
+        .and_then(|index| WORDS.get(index))
+        .unwrap_or_else(|| panic!("no word for {count}: extend number_word"))
+}
+
+/// `quarters` quarter minutes as the site says them: "a minute", "a minute
+/// and a quarter", "seventeen minutes", "two minutes and a half". Under one
+/// minute the prose would need another shape, so that fails like
+/// `number_word` past twenty.
+fn spoken_minutes(quarters: usize) -> String {
+    let whole = quarters / 4;
+    let tail = ["", " and a quarter", " and a half", " and three quarters"][quarters % 4];
+    match whole {
+        1 => format!("a minute{tail}"),
+        _ => format!("{} minutes{tail}", number_word(whole)),
+    }
+}
+
+/// The three words-not-figures of site/index.html's Silesia speed sentence,
+/// computed from the aggregate row of the generated report the figures beside
+/// them are stamped from (issue #1611): minutes to compress (rounded to whole
+/// minutes), minutes to read back (rounded to quarter minutes), and how many
+/// times slower the encode is (rounded to a whole multiplier). A bless run
+/// cannot stamp words, so this fails under it too: the sentence is reworded.
+#[test]
+fn site_silesia_speed_prose_matches_its_generated_report() {
+    let report = "silesia.md";
+    let text = read(&format!("docs/benchmarks/{report}"));
+    let bytes = markdown_numbers(line_containing(&text, "**aggregate"))[0];
+    let [encode, decode] = throughput_from_report(report);
+    let minutes = |rate: f64| bytes / (rate * 1e6) / 60.0;
+    // A rate or ratio that made these negative or huge would be a corrupt
+    // report, and the words lookups above refuse it.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let round = |value: f64| value.round() as usize;
+
+    let truth = [
+        format!(
+            "about {} to compress",
+            spoken_minutes(4 * round(minutes(encode)))
+        ),
+        format!(
+            "about {} to read back",
+            spoken_minutes(round(4.0 * minutes(decode)))
+        ),
+        format!(
+            "roughly {} times slower than decoding",
+            number_word(round(decode / encode))
+        ),
+    ];
+    let site = normalize_whitespace(&read("site/index.html"));
+    let missing: Vec<_> = truth
+        .iter()
+        .filter(|phrase| !site.contains(phrase.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "site/index.html no longer says {missing:?}, which docs/benchmarks/{report} supports"
+    );
+}
+
 /// What `mothergod --help` prints. The binary's own usage text is the source
 /// of truth for its interface: `src/bin/mothergod.rs` is where a rename
 /// happens, and running it is the only reading that cannot go stale.
