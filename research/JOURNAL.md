@@ -2904,7 +2904,9 @@ record.
   unchanged, encode 8% to 23% faster on the files measured. The window
   instruments of the earlier slices left main in #1584; the shipped
   `lz::Reach` is measured through `compress`. S1-P4 stays open: S2-A128
-  lists a reach past the offset code's ceiling unmeasured.
+  lists a reach past the offset code's ceiling unmeasured. Twenty-fourth
+  slice, S2-R38: the first candidate's wide trial beside the narrow winner's,
+  rejected; full record in S2-R38's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9352,3 +9354,48 @@ record.
   `lz::WINDOW` by construction, filed as #1723), how often the narrow winner is not the
   first candidate on Silesia, and any corpus but this one synthetic input.
   `research/progress.jsonl` it210.
+- S2-R38 | REJECTED | Issue #1723, `search` also runs the wide trial of the
+  shortlist's first candidate, so `-3` stays at or under `-2` past
+  `lz::WINDOW`. Hypothesis: when the narrow winner is not the first
+  candidate, the first candidate's wide body beats the winner's best body
+  often enough on Silesia to pay for the extra wide trial, and `-3` never
+  exceeds `-2` on #1710's input. | Mechanism: S2-A131's cause is a filter
+  standing in for reach, `Transpose(96)` folding a 1,104,000 repeat into
+  the window. On real data the stand-in does not occur: no Silesia frame
+  has a `Transpose` winner, and the 11 frames whose winner is not the first
+  candidate (a `Reverse` or `Bcj` or `Delta` where `-2`'s candidate is
+  `Identity`, or the reverse) lead by more than reach separates, so the
+  first candidate's wide body almost never beats them; that reading is
+  untested beyond the one `dickens` flip. The extra trial pays a full wide
+  parse on 11 of 19 frames to find that out. | Measured,
+  release build, AMD EPYC 9V45 4 logical cores runner (not S2-A130's EPYC
+  7763: `-3` over all 12 Silesia files took 834 s here, so ratios carry and
+  seconds do not), all 12 Silesia files at the `bench/corpus.toml` pins
+  (SHA-256 verified), whole, one process at a time, `mothergod -N -c` from
+  stdin under `/usr/bin/time`, main at `9956272` against the branch.
+  Champion: `-3` 53,117,159 bytes, no frame larger than `-2`'s, winner not
+  the first candidate on 7 of 12 files (`sao`, `ooffice`, `dickens`, `mr`,
+  `osdb`, `nci`, `mozilla`) and 11 of 19 frames, read off each frame's
+  selector against `-2`'s. Try 1, the extra wide trial whenever the winner
+  is not the first candidate, run serially: 53,116,615 bytes, one file
+  changed (`dickens` 2,899,385 to 2,898,841, `Reverse` narrow to `Identity`
+  wide), -544 bytes or -0.001%, and encode wall 834 to 987 s summed (+18%,
+  +27% to +31% on the files that pay it, one run each, so noise is not
+  separated); #1710's input `-3` 4,438 to 4,122. Try 2, the extra trial only
+  when the winner is a `Transpose`, the mechanism's one case: #1710's input
+  4,122, `xml`, `mr` and `dickens` byte-identical to the champion, so no
+  Silesia file pays; the other nine have no `Transpose` winner in the
+  champion's selectors and are unchanged by construction, not measured.
+  `baseline_gate -- delta` on both: train mean +0.000000 bits/byte over 11
+  cases, because every case is under `lz::WINDOW` and the widening is gated
+  on longer input. | Verdict: **rejected** under the corpus policy's rule,
+  accepted only with train improvement: try 1 buys 0.001% of Silesia for
+  18% of its encode time, try 2 moves no measured byte. Neither is kept;
+  the code is deleted, and `-3` still exceeds `-2` on #1710's input, which
+  S2-A131's wording fix already states. | **Not measured:** the sealed set
+  (no try fell on train, so none was generated), a corpus with a
+  `Transpose` winner over 1 MiB (try 2 stays a candidate the day one
+  exists, under a changed condition), the wide trial run on an idle thread
+  instead of serially (try 1's seconds are its upper bound, S2-A129 hid up
+  to 23% that way), and peak RSS. `research/progress.jsonl` it211 and
+  it212.
