@@ -26,7 +26,7 @@ pub(crate) const ALPHABET: usize = 256;
 const LEVELS: u32 = 8;
 
 /// One context per internal node of the depth-`LEVELS` tree: `2^LEVELS - 1`.
-/// `crate::sse::Sse::new`'s `contexts` argument for a table keyed by
+/// `crate::sse::Sse::try_new`'s `contexts` argument for a table keyed by
 /// [`sse_context`].
 pub const SSE_CONTEXTS: usize = (1 << LEVELS) - 1;
 

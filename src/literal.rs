@@ -13,15 +13,15 @@
 //! The coding paths every frame this build decodes takes:
 //!
 //! - [`Literal::encode_logit_sse`]/[`Literal::decode_logit_sse`]: each
-//!   expert's estimate [`crate::logistic::stretch`]ed into the logit domain
+//!   expert's estimate `crate::logistic::stretch`ed into the logit domain
 //!   and blended by [`SurpriseLogisticMix`], whose step size comes from a
 //!   fast EMA of a key's squared error against a slower one, the result
 //!   calibrated through [`SurpriseLogisticMix`]'s bins, even in
-//!   [`crate::logistic::stretch`]-space. The wire path of every frame
+//!   `crate::logistic::stretch`-space. The wire path of every frame
 //!   except a transposed one.
 //! - [`Literal::encode_column`]/[`Literal::decode_column`]: a seventh,
 //!   column-keyed expert ([`ColumnExpertState`]) blended into the six
-//!   before [`Sse`] calibration. The wire path of a transposed frame.
+//!   before `Sse` calibration. The wire path of a transposed frame.
 //!
 //! [`Literal::ideal_cost_bits_sse`] prices the blended `cum` table as 8
 //! calibrated binary decisions and is no frame's wire path; the benchmark
@@ -512,10 +512,10 @@ fn surprise_ema_update(previous: f64, error_sq: f64, decay: f64) -> f64 {
 
 /// Logit-domain mixer over [`Literal`]'s own six expert banks
 /// (`research/JOURNAL.md` S1-P8, S2-A101, S2-A104): per bit-tree node,
-/// each expert's probability of the upper half is [`stretch`]ed, the
+/// each expert's probability of the upper half is `stretch`ed, the
 /// stretches are summed under one weight vector per `WEIGHT_CONTEXTS`
 /// key (the same key `banks` selects [`Literal`]'s linear weights by), and
-/// the sum is [`squash`]ed back and refined through [`LogitSse`]. The per-key
+/// the sum is `squash`ed back and refined through `LogitSse`. The per-key
 /// step size separates a context's stable residual uncertainty from genuine
 /// drift by comparing a fast EMA of squared
 /// prediction error (`recent_sq_error`) against a slow EMA of the
