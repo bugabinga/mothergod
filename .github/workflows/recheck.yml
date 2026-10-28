@@ -3,9 +3,10 @@
 # BDFL dispatched one by hand three times in two days (#1069). This runs
 # on every push to main and dispatches each scheduled check whose newest
 # concluded run on main is red, one retry per RETRY_HOURS per workflow,
-# on the PAT, so the retry arrives operator-attributed, the actor
-# agent-alarm admits on main (agents/OPERATIONS.md "Admin token &
-# signing"). The decision lives in recheck-decide.py with its tests; this
+# on the PAT, the one credential this job holds that can: its own token
+# is granted `actions: read` (agents/OPERATIONS.md "Admin token &
+# signing"), and a retry on `github.token` under `actions: write` is
+# untried. The decision lives in recheck-decide.py with its tests; this
 # file holds the credential ruling.
 #
 # Why MOTHERGOD_ADMIN_TOKEN is safe here:
@@ -54,8 +55,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/recheck-decide.py > "$RUNNER_TEMP/dispatch"
 
-      # The PAT, not github.token: the retry arrives operator-attributed,
-      # the ruling in the header, and this job grants actions: read.
+      # The PAT, not github.token: this job grants actions: read, the
+      # ruling in the header.
       - name: Dispatch each on the PAT
         env:
           GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
