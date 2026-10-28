@@ -137,3 +137,11 @@ exclude_re = [
   # nothing.
   "::try_new -> Result<Self, std::collections::TryReserveError> with Ok\\((Default|Self)::default\\(\\)\\)$",
 ]
+
+# The whole-encode peak test is 26 of the suite's 60 s and runs once per
+# mutant (#1617). Its freed-round witness is the parse-level test beside it
+# (tests/encode_memory.rs), 0.1 s, which stays. A mutant only the encode-level
+# bound catches survives mutation; CI's `cargo test` still runs it. The
+# filter is a substring of the test's name: renamed, it matches nothing and
+# the suite is slow again, never weaker.
+additional_cargo_test_args = ["--", "--skip", "the_peak_heap_of_an_encode"]
