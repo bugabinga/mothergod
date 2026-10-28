@@ -961,17 +961,12 @@ impl PriceCounts {
     }
 }
 
-/// Which move [`dp_round`]'s DP used to reach a position: [`Token`]'s own
-/// fields, packed for backtracking rather than emission order.
-#[derive(Debug, Clone, Copy)]
-enum Move {
-    Literal,
-    Match { len: u32, distance: Distance },
-    Rep { len: u32, slot: RepSlot },
-}
+// `DpState::parent` holds one `Option<Token>` per position, so a `Token` that
+// outgrew 12 bytes would grow the parse's per-position budget (`BLOCK_LEN`).
+const _: () = assert!(size_of::<Option<Token>>() == 12);
 
 /// [`dp_round`]'s working state: cheapest price to reach each position
-/// (`dp`), the move that achieved it (`parent`), and the repeat-offset
+/// (`dp`), the token that achieved it (`parent`), and the repeat-offset
 /// cache that move leaves behind (`cache`) — carried alongside `dp`/
 /// `parent` because later positions' rep candidates need to know it
 /// without re-deriving it from the whole path so far.
@@ -985,7 +980,7 @@ enum Move {
 /// three arrays held 32 (`research/JOURNAL.md` S2-A123).
 struct DpState {
     dp: Vec<f64>,
-    parent: Vec<Option<Move>>,
+    parent: Vec<Option<Token>>,
     cache: Vec<RepCache>,
     /// `ring_len - 1`; `ring_len` is a power of two, so `position & mask`
     /// is the slot.
@@ -1034,13 +1029,13 @@ impl DpState {
         self.dp[position & self.mask] = f64::INFINITY;
     }
 
-    /// Records reaching `target` via `mv` with total price `cost`, if
+    /// Records reaching `target` via `token` with total price `cost`, if
     /// that beats the best price already known for `target`.
-    fn relax(&mut self, cost: f64, target: usize, mv: Move, new_cache: RepCache) {
+    fn relax(&mut self, cost: f64, target: usize, token: Token, new_cache: RepCache) {
         let slot = target & self.mask;
         if cost < self.dp[slot] {
             self.dp[slot] = cost;
-            self.parent[target] = Some(mv);
+            self.parent[target] = Some(token);
             self.cache[slot] = new_cache;
         }
     }
@@ -1069,7 +1064,7 @@ impl DpState {
             new_cache.promote(slot);
             let mut relax_len = |len: u32| {
                 let cost = base + prices.length_price(len) + prices.rep;
-                self.relax(cost, i + len as usize, Move::Rep { len, slot }, new_cache);
+                self.relax(cost, i + len as usize, Token::Rep { len, slot }, new_cache);
             };
 
             let rep_len = to_u32(rep_len);
@@ -1109,11 +1104,11 @@ impl DpState {
             prices.offset[offset_bucket] + extra_bits(offset_bucket) + EXTRA_HEADER_BITS_PRICE;
         let mut relax_len = |len: u32| {
             let cost = base + prices.length_price(len) + offset_cost;
-            let mv = Move::Match {
+            let token = Token::Match {
                 len,
                 distance: distance_here,
             };
-            self.relax(cost, i + len as usize, mv, new_cache);
+            self.relax(cost, i + len as usize, token, new_cache);
         };
 
         if match_len_here == SHORT_MATCH_LEN as usize
@@ -1189,7 +1184,7 @@ fn dp_round(data: &[u8], prices: &PriceTable, reach: Reach, ring_cap: usize) -> 
         let literal_cost = base
             + prices.literal[literal_price_index(byte_before(data, i), data[i])]
             + FLAG_BIT_PRICE;
-        state.relax(literal_cost, i + 1, Move::Literal, reps);
+        state.relax(literal_cost, i + 1, Token::Literal(data[i]), reps);
 
         state.relax_rep_candidates(prices, data, i, base, reps, &mut rep_carry);
 
@@ -1199,7 +1194,7 @@ fn dp_round(data: &[u8], prices: &PriceTable, reach: Reach, ring_cap: usize) -> 
         state.retire(i);
     }
 
-    reconstruct(data, &state.parent)
+    reconstruct(&state.parent)
 }
 
 /// [`match_len`] against `distance` at `i`, reusing a previous position's
@@ -1262,27 +1257,21 @@ fn rep_match_len(
     len
 }
 
-/// Walks `parent` backward from `data.len()` to `0`: at each step, the
-/// recorded move's length says how far back its start was, and (for a
-/// literal) `data` at that start says which byte it was.
-fn reconstruct(data: &[u8], parent: &[Option<Move>]) -> Vec<Token> {
+/// Walks `parent` backward from its last position to `0`: at each step, the
+/// recorded token's length says how far back its start was.
+fn reconstruct(parent: &[Option<Token>]) -> Vec<Token> {
     let mut tokens = Vec::new();
-    let mut i = data.len();
+    let mut i = parent.len() - 1;
     while i > 0 {
-        let mv = parent[i].expect(
+        let token = parent[i].expect(
             "every position on the DP path was reached by a recorded relax; dp_round never \
              leaves a gap between 0 and data.len()",
         );
-        let len = match mv {
-            Move::Literal => 1,
-            Move::Match { len, .. } | Move::Rep { len, .. } => len as usize,
+        i -= match token {
+            Token::Literal(_) => 1,
+            Token::Match { len, .. } | Token::Rep { len, .. } => len as usize,
         };
-        i -= len;
-        tokens.push(match mv {
-            Move::Literal => Token::Literal(data[i]),
-            Move::Match { len, distance } => Token::Match { len, distance },
-            Move::Rep { len, slot } => Token::Rep { len, slot },
-        });
+        tokens.push(token);
     }
     tokens.reverse();
     tokens

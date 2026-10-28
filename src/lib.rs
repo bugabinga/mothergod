@@ -642,7 +642,7 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 ///
 /// | bytes | array | why it is that wide |
 /// |---|---|---|
-/// | 12 | `parent` | one `Option<Move>` per position: a tag, a length and a distance, walked backward by `reconstruct`, so it cannot be a ring |
+/// | 12 | `parent` | one `Option<Token>` per position: a tag, a length and a distance, walked backward by `reconstruct`, so it cannot be a ring |
 /// | 4 | match finder `left` | one `u32` tree link per position, the window's candidates |
 /// | 4 | match finder `right` | the other link |
 /// | 1 | the input | borrowed, counted because the block holds it |
