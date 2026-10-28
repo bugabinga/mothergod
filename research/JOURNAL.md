@@ -1844,7 +1844,8 @@ record.
   blocked on throughput (S1-P6's speed-tier lead) rather than on missing
   code.
 - S2-A38 | ACCEPTED | ROADMAP M2's ideal-cost accounting mode (ADR-0006),
-  closing slice: `codec::ideal_cost_bits`, the whole-codec pass S2-A30 and
+  closing slice: `codec::ideal_cost_bits` (left main in #1752, with
+  `CostSink` and `TokenSink`), the whole-codec pass S2-A30 and
   S2-A31 each flagged as remaining scope after building
   `Model::ideal_cost_bits` and `Literal::ideal_cost_bits`. Runs
   `lz::parse_optimal` over already-filtered data, then walks the same
@@ -7495,7 +7496,8 @@ record.
   `literal::SurpriseLogisticMixLogitSse` mirrors `SurpriseLogisticMix`
   field-for-field except its own calibration table is a `LogitSse`;
   `Literal::logit_sse_code_bit`/`ideal_cost_bits_logistic_surprise_logit_sse`
-  mirror `surprise_code_bit`/`ideal_cost_bits_logistic_surprise` exactly,
+  (the latter left main in #1752) mirror
+  `surprise_code_bit`/`ideal_cost_bits_logistic_surprise` exactly,
   changing only which table's `refine`/`update` the walk calls. 13 new
   `LogitSse` unit tests (mirroring `Sse`'s own suite, plus one proving the
   bin-concentration property directly: the same 0.02 probability step

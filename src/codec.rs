@@ -50,10 +50,6 @@
 //! [`crate::decompress_bounded`], so a tiny payload cannot declare an
 //! unbounded length and force unbounded decode work; see [`MAX_DECODED_LEN`]'s
 //! docs for why, and [`decode`]'s docs for the rest.
-//!
-//! [`ideal_cost_bits`] is the whole-codec `-log2(p)` pass (ROADMAP M2's
-//! ideal-cost accounting mode) across the flag/length/offset/slot streams and
-//! literal bytes together, without touching an [`Encoder`].
 
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -255,21 +251,10 @@ fn bucket_bits(b: usize) -> u32 {
     u32::try_from(b).expect("bucket index is small, always fits u32")
 }
 
-/// [`ideal_cost_bits`]'s counterpart to [`EncodeSink::offset`]: the bucket
-/// symbol's modeled `-log2(p)` cost plus the residual low bits' cost, which
-/// is their count: [`crate::coder::Encoder::encode_bits`] emits them raw and
-/// unmodeled, so there is no `Model` lookup to price.
-fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
-    let b = lz::bucket(value);
-    let cost = model.ideal_cost_bits(b);
-    cost + f64::from(bucket_bits(b))
-}
-
 /// A copy token's length models, bucket [`Model`] and the [`ResidualTree`]
 /// beside it: [`Models::length_match`] and its residual for
 /// [`CopyKind::Match`], `length_rep` and its residual for [`CopyKind::Rep`].
-/// Every real-path [`TokenSink`] and [`DecodeSink`], and the pricer that must
-/// price what they code, selects through here.
+/// [`EncodeSink`] and every [`DecodeSink`] select through here.
 fn length_models(models: &mut Models, kind: CopyKind) -> (&mut Model, &mut ResidualTree) {
     match kind {
         CopyKind::Match => (&mut models.length_match, &mut models.length_match_residual),
@@ -333,29 +318,10 @@ fn undo_filter(candidate: Candidate, mut data: Vec<u8>) -> Result<Vec<u8>, Error
     }
 }
 
-/// Where a token's flag/length/offset/slot symbols and literal bytes go:
-/// real arithmetic coding for [`encode_tokens`]'s [`EncodeSink`], summed
-/// `-log2(p)` pricing for [`ideal_cost_bits`]'s [`CostSink`]. The two walks
-/// must code the same fields, in the same order, off the same token stream,
-/// or [`ideal_cost_bits`] silently stops pricing what [`encode_tokens`]
-/// actually emits; routing both through [`walk_tokens`] makes that a single
-/// piece of code instead of two loops kept in sync by hand.
-trait TokenSink {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind);
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8);
-    fn length(&mut self, models: &mut Models, kind: CopyKind, value: u32);
-    /// `len` is the triggering [`Token::Match`]'s own already-emitted
-    /// length: [`walk_tokens`] never calls this for a [`Token::Rep`] (which
-    /// has no `offset` symbol at all) or a [`Token::Literal`].
-    fn offset(&mut self, models: &mut Models, len: u32, value: u32);
-    fn slot(&mut self, models: &mut Models, symbol: usize);
-}
-
-/// The shared skeleton behind [`encode_tokens`] and [`ideal_cost_bits`]:
-/// walks `tokens` (already parsed from `data`) in coding order, routing
-/// every symbol through `sink`, and advancing the literal-model context
-/// exactly as [`Context::after_literal`]/[`Context::after_copy`] require.
-fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut impl TokenSink) {
+/// [`encode_tokens`]'s walk: codes `tokens` (already parsed from `data`) in
+/// order through `sink`, advancing the literal-model context exactly as
+/// [`Context::after_literal`]/[`Context::after_copy`] require.
+fn walk_tokens(tokens: &[Token], data: &[u8], models: &mut Models, sink: &mut EncodeSink<'_>) {
     let mut context = Context::default();
     let mut pos = 0usize;
 
@@ -408,10 +374,10 @@ impl ColumnCoding {
     }
 }
 
-/// [`TokenSink`] that drives a real [`Encoder`], [`walk_tokens`]'s use in
-/// [`encode_tokens`]. `column` is `Some` exactly when the candidate under
-/// trial is [`Candidate::Transpose`] (`encode`'s caller), selecting
-/// [`crate::literal::Literal::encode_column`] over
+/// Codes a token's flag/length/offset/slot symbols and literal bytes through
+/// a real [`Encoder`], for [`walk_tokens`]. `column` is `Some` exactly when
+/// the candidate under trial is [`Candidate::Transpose`] (`encode`'s caller),
+/// selecting [`crate::literal::Literal::encode_column`] over
 /// [`crate::literal::Literal::encode_logit_sse`] for every literal in this
 /// trial (`research/JOURNAL.md` S1-P5).
 struct EncodeSink<'a> {
@@ -419,7 +385,7 @@ struct EncodeSink<'a> {
     column: Option<ColumnCoding>,
 }
 
-impl TokenSink for EncodeSink<'_> {
+impl EncodeSink<'_> {
     fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
         models.flag[flag_table].encode(self.ac, kind.index());
     }
@@ -448,7 +414,10 @@ impl TokenSink for EncodeSink<'_> {
 
     /// The [`lz::bucket`] symbol through the model [`offset_len_state`]
     /// selects, then `value`'s residual low bits within that bucket as raw,
-    /// unmodeled bits.
+    /// unmodeled bits. `len` is the triggering [`Token::Match`]'s own
+    /// already-emitted length: [`walk_tokens`] never calls this for a
+    /// [`Token::Rep`] (which has no `offset` symbol at all) or a
+    /// [`Token::Literal`].
     fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
         let b = lz::bucket(value);
         models.offset_len[offset_len_state(len)].encode(self.ac, b);
@@ -457,44 +426,6 @@ impl TokenSink for EncodeSink<'_> {
 
     fn slot(&mut self, models: &mut Models, symbol: usize) {
         models.slot.encode(self.ac, symbol);
-    }
-}
-
-/// [`TokenSink`] that sums `-log2(p)` instead of coding, [`walk_tokens`]'s
-/// use in [`ideal_cost_bits`]. Each method prices through the same models as
-/// [`EncodeSink`]'s method of that name codes through.
-#[derive(Default)]
-struct CostSink {
-    bits: f64,
-}
-
-impl TokenSink for CostSink {
-    fn flag(&mut self, models: &mut Models, flag_table: usize, kind: FlagKind) {
-        self.bits += models.flag[flag_table].ideal_cost_bits(kind.index());
-    }
-
-    fn literal(&mut self, models: &mut Models, context: Context, byte: u8) {
-        // No filter selection here, so `Candidate::Transpose`'s
-        // `encode_column` never arises: this prices `EncodeSink::literal`'s
-        // `None` branch.
-        self.bits += models.literal.ideal_cost_bits_logistic_surprise_logit_sse(
-            context,
-            byte,
-            &mut models.logit_sse,
-        );
-    }
-
-    fn length(&mut self, models: &mut Models, kind: CopyKind, value: u32) {
-        let (bucket, residual) = length_models(models, kind);
-        self.bits += bucket.ideal_cost_bits(lz::bucket(value)) + residual.ideal_cost_bits(value);
-    }
-
-    fn offset(&mut self, models: &mut Models, len: u32, value: u32) {
-        self.bits += ideal_cost_bucketed(&mut models.offset_len[offset_len_state(len)], value);
-    }
-
-    fn slot(&mut self, models: &mut Models, symbol: usize) {
-        self.bits += models.slot.ideal_cost_bits(symbol);
     }
 }
 
@@ -552,27 +483,6 @@ fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Toke
     out.extend_from_slice(&coded_len.to_le_bytes());
     out.extend(stream);
     out
-}
-
-/// Sums the whole-codec ideal coding cost of already-filtered `data`, in
-/// bits: ROADMAP M2's ideal-cost accounting mode (ADR-0006), the slice
-/// `research/JOURNAL.md` S2-A30 and S2-A31 each flagged as remaining scope
-/// after building `Model::ideal_cost_bits` and `Literal::ideal_cost_bits`
-/// respectively. Walks the same `lz::parse_optimal` token stream this
-/// module's private `encode_tokens` would encode and prices every
-/// flag/length/offset/slot symbol and every literal byte through those two
-/// methods instead of an [`Encoder`], so an experiment loop can price a
-/// whole file's coding cost under this crate's real adaptive models without
-/// paying for real arithmetic coding or trialing candidate filters (this
-/// operates on one already-chosen filter's output, the same layer
-/// `encode_tokens` does, not on [`encode`]'s filter-selection loop above
-/// it).
-#[must_use]
-pub fn ideal_cost_bits(data: &[u8]) -> f64 {
-    let mut models = Models::new();
-    let mut sink = CostSink::default();
-    walk_tokens(&lz::parse_optimal(data), data, &mut models, &mut sink);
-    sink.bits
 }
 
 /// How many independent [`Model`]s [`Models::offset_len`] holds, and the
@@ -638,7 +548,7 @@ impl ResidualTree {
 
     /// Hands `code` each node on the path of `value`'s modeled residual
     /// bits, most significant first, with the bit taken there: the one walk
-    /// that [`Self::encode`] codes and [`Self::ideal_cost_bits`] prices.
+    /// that [`Self::encode`] codes.
     fn walk(&mut self, value: u32, mut code: impl FnMut(&mut Model, usize)) {
         let b = lz::bucket(value);
         let (modeled, raw) = Self::split(b);
@@ -675,14 +585,6 @@ impl ResidualTree {
         // shifting it left by `raw` already places the bucket's own bit.
         let top = u32::try_from(node).expect("node stays below 1 << (RESIDUAL_MODELED_BITS + 1)");
         (top << raw) | ac.decode_bits(raw)
-    }
-
-    /// Ideal cost of `value`'s residual bits below its bucket, priced
-    /// exactly as [`Self::encode`] codes them.
-    fn ideal_cost_bits(&mut self, value: u32) -> f64 {
-        let mut cost = f64::from(Self::raw_bits(value));
-        self.walk(value, |model, bit| cost += model.ideal_cost_bits(bit));
-        cost
     }
 }
 
@@ -1119,7 +1021,7 @@ pub(crate) fn copy_checked(
 /// order, off the same token stream, or one silently drifts from what the
 /// other produces; routing both through [`decode_tokens`] makes that a
 /// single piece of code instead of two loops kept in sync by hand, mirroring
-/// [`TokenSink`]/[`walk_tokens`] on the encode side.
+/// [`EncodeSink`]/[`walk_tokens`] on the encode side.
 trait DecodeSink {
     /// Widens with every accepted output byte, checked against
     /// `declared_len` before decoding one more.
