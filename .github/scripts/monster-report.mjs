@@ -46,25 +46,23 @@ export function firstUsefulFailure(raw, conclusion = "failure") {
   return excerpt;
 }
 
-export function parseLaneName(name) {
-  const parts = name.split(" | ");
-  if (parts.length !== 4 || parts.some((part) => !part)) return null;
-  const [os, architecture, abi, toolchain] = parts;
-  return { os, architecture, abi, toolchain };
+// monster.yml names every lane by its columns joined with " | ": four for
+// the matrix (os | architecture | abi | toolchain), three for Miri, two for
+// x | MSRV. The report job alone is bare. Demanding exactly four columns
+// dropped the Miri and MSRV reds on the floor (#1732).
+export function isLane(name) {
+  return name.includes(" | ");
 }
 
-export function failedMatrixJobs(jobs) {
-  return jobs
-    .filter((job) => failedConclusions.has(job.conclusion))
-    .map((job) => ({ job, lane: parseLaneName(job.name) }))
-    .filter(({ lane }) => lane !== null);
+export function failedLanes(jobs) {
+  return jobs.filter((job) => failedConclusions.has(job.conclusion) && isLane(job.name));
 }
 
 export function buildReport(jobs, logsById, runUrl) {
-  const failures = failedMatrixJobs(jobs).sort((left, right) => left.job.name.localeCompare(right.job.name));
+  const failures = failedLanes(jobs).sort((left, right) => left.name.localeCompare(right.name));
 
   if (failures.length === 0) {
-    throw new Error("no failed monster matrix jobs found");
+    throw new Error("no failed monster lane found");
   }
 
   const lines = [
@@ -76,15 +74,13 @@ export function buildReport(jobs, logsById, runUrl) {
     "## Failed lanes",
   ];
 
-  for (const { job, lane } of failures) {
+  for (const job of failures) {
     const excerpt = firstUsefulFailure(logsById.get(String(job.id)) ?? "", job.conclusion);
     lines.push(
       "",
-      `### \`${lane.os} | ${lane.architecture} | ${lane.abi} | ${lane.toolchain}\``,
+      `### \`${job.name}\``,
       "",
       `- Job: [${job.html_url}](${job.html_url})`,
-      `- OS: \`${lane.os}\``,
-      `- Architecture / ABI / toolchain: \`${lane.architecture}\` / \`${lane.abi}\` / \`${lane.toolchain}\``,
       "- First useful failure:",
       "",
       ...excerpt.map((line) => `    ${line}`),
@@ -137,7 +133,7 @@ function main([command, ...args]) {
       break;
     }
     case "failures":
-      process.stdout.write(`${failedMatrixJobs(readJson(args[0]).jobs).length}\n`);
+      process.stdout.write(`${failedLanes(readJson(args[0]).jobs).length}\n`);
       break;
     case "report": {
       const [jobsPath, logsDirectory, runUrl, output] = args;

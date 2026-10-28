@@ -265,8 +265,12 @@ jobs:
 
   report:
     name: report
-    if: ${{ always() && (needs.test.result == 'failure' || needs.test.result == 'cancelled' || needs.android.result == 'failure' || needs.android.result == 'cancelled' || needs.miri.result == 'failure' || needs.miri.result == 'cancelled' || needs.freebsd.result == 'failure' || needs.freebsd.result == 'cancelled') }}
-    needs: [test, android, miri, freebsd]
+    # Every needed result, so wiring a lane is its id in `needs` and nothing
+    # else: x | MSRV sat outside both this list and the old per-job `if`
+    # from #1647 to #1732. monster-report.test.mjs holds `needs` to the
+    # job list.
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    needs: [test, android, miri, freebsd, x-msrv]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -289,7 +293,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" > "$jobs"
           failure_count="$(node .github/scripts/monster-report.mjs failures "$jobs")"
           if [ "$failure_count" -eq 0 ]; then
-            echo 'No failed or timed-out matrix job; no issue update needed.'
+            echo 'No failed or timed-out lane; no issue update needed.'
             exit 0
           fi
 

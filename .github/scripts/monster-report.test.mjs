@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { buildReport, failedMatrixJobs, firstUsefulFailure, ISSUE_MARKER, selectIssue } from "./monster-report.mjs";
+import { buildReport, failedLanes, firstUsefulFailure, ISSUE_MARKER, selectIssue } from "./monster-report.mjs";
 
 test("failure parsing skips runner noise and keeps the first useful diagnostic", () => {
   const log = [
@@ -72,7 +73,7 @@ test("report generation includes each failed lane once and excludes green lanes"
   assert.equal((body.match(/## Failed lanes/g) ?? []).length, 1);
 });
 
-test("failed matrix detection ignores cancellation without a failed lane", () => {
+test("failed lane detection ignores cancellation without a failed lane", () => {
   const jobs = [
     {
       id: 1,
@@ -82,10 +83,10 @@ test("failed matrix detection ignores cancellation without a failed lane", () =>
     { id: 2, name: "report", conclusion: "failure" },
   ];
 
-  assert.deepEqual(failedMatrixJobs(jobs), []);
+  assert.deepEqual(failedLanes(jobs), []);
 });
 
-test("failed matrix detection includes failures and timeouts", () => {
+test("failed lane detection includes failures and timeouts", () => {
   const jobs = [
     {
       id: 1,
@@ -105,9 +106,49 @@ test("failed matrix detection includes failures and timeouts", () => {
   ];
 
   assert.deepEqual(
-    failedMatrixJobs(jobs).map(({ job }) => job.id),
+    failedLanes(jobs).map((job) => job.id),
     [1, 2],
   );
+});
+
+// The names and conclusions of run 40609021537, the one #1732 cites: both
+// reds have fewer than four columns, and a four-column parser counted 0.
+test("failed lane detection keeps the three-column Miri and two-column MSRV lanes", () => {
+  const jobs = [
+    { id: 122555688893, name: "x | MSRV", conclusion: "failure" },
+    { id: 122555688903, name: "Miri | x86-64 | nightly", conclusion: "failure" },
+    { id: 122555688987, name: "Android-15 | x86-64 | Bionic | stable", conclusion: "success" },
+    { id: 122557940581, name: "report", conclusion: "success" },
+  ];
+
+  assert.deepEqual(
+    failedLanes(jobs).map((job) => job.id),
+    [122555688893, 122555688903],
+  );
+});
+
+test("report headings print a lane's name whatever its column count", () => {
+  const jobs = [
+    { id: 1, name: "x | MSRV", conclusion: "failure", html_url: "https://example.test/jobs/1" },
+    { id: 2, name: "Miri | x86-64 | nightly", conclusion: "failure", html_url: "https://example.test/jobs/2" },
+  ];
+
+  const body = buildReport(jobs, new Map(), "https://example.test/runs/9");
+  assert.match(body, /^### `Miri \| x86-64 \| nightly`$/m);
+  assert.match(body, /^### `x \| MSRV`$/m);
+});
+
+// A lane the report job does not `need` never starts it, however red: x |
+// MSRV sat outside `needs` from #1647 to #1732. The job's `if` reads every
+// needed result, so listing the id is the whole wiring, and this holds the
+// list to the workflow's jobs.
+test("the report job needs every other job in monster.yml", () => {
+  const workflow = readFileSync(new URL("../workflows/monster.yml", import.meta.url), "utf8");
+  const jobs = workflow.slice(workflow.indexOf("\njobs:\n"));
+  const ids = [...jobs.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(([, id]) => id).filter((id) => id !== "report");
+  const needs = jobs.match(/^  report:\n(?:    .*\n)*?    needs: \[([^\]]*)\]$/m)[1].split(",").map((id) => id.trim());
+
+  assert.deepEqual(needs.sort(), ids.sort());
 });
 
 test("dedup selects one bot-authored marked issue deterministically", () => {
