@@ -90,7 +90,10 @@ jobs:
           # .mgdc/.plaintext: golden fixture pairs, discovered by extension
           # scan in tests/golden.rs, so the test binary is their only
           # consumer; they gate `rust` (test/doc), not quality/ratio (#407).
-          if echo "$files" | grep -qE '\.(rs|mgdc|plaintext)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/|^tests/|^(README|CHANGELOG|CLAUDE)\.md$|^LICENSE$|^site/|^docs/benchmarks/|^bench/corpus\.toml$|^research/progress\.jsonl$|^fuzz/fuzz_targets/'; then
+          # ROADMAP.md, research/JOURNAL.md: tests/claims.rs reads them for
+          # the M3 lead-id check (#1583); a read input this filter misses
+          # passes every PR and fails on main's next push (#1009).
+          if echo "$files" | grep -qE '\.(rs|mgdc|plaintext)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain|^\.cargo/|^rustfmt\.toml$|^clippy\.toml$|^\.github/workflows/ci\.yml$|^\.github/actions/rust-ci/|^tests/|^(README|CHANGELOG|CLAUDE)\.md$|^LICENSE$|^site/|^docs/benchmarks/|^bench/corpus\.toml$|^research/progress\.jsonl$|^fuzz/fuzz_targets/|^ROADMAP\.md$|^research/JOURNAL\.md$'; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
