@@ -5310,7 +5310,7 @@ record.
   (`encode`'s `Method::Lz` path) and re-measuring through a real
   bitstream against `bench::baseline`'s sealed set (not just ideal cost)
   is the next slice; that wiring is encoder-only (`dp_round`'s
-  `Token`/`Move` shape (`Move` left main in #1742) and `bucket()`'s ceiling are unchanged, so decode
+  `Token`/`Move` shape (`Move` left main in #1745) and `bucket()`'s ceiling are unchanged, so decode
   needs no new case and no `FORMAT_VERSION` bump, CLAUDE.md hard rule 5's
   encoder-only carve-out) but regenerates the current-version golden
   fixture per `tests/golden.rs` (issue #290's ruling) and updates
@@ -8854,7 +8854,7 @@ record.
   byte, and the parse's per-position state falls from 41 bytes to 21, encoder
   only, bytes unchanged. | Budget before, by array: `dp` 8, `parent` 12,
   `cache` 12, match finder `left` 4 and `right` 4, input 1, 41 in all
-  (`size_of::<Option<Move>>()` (`Move` left main in #1742; `Option<Token>` is 12 too) and `size_of::<RepCache>()` are 12; 16 MiB of
+  (`size_of::<Option<Move>>()` (`Move` left main in #1745; `Option<Token>` is 12 too) and `size_of::<RepCache>()` are 12; 16 MiB of
   zeros peaked at 691 MB in S2-A116, 41.2 per byte). After: `parent` 12,
   `left` 4, `right` 4, input 1, 21, plus 1.25 MiB of rings. Measured,
   release build, AMD EPYC 7763 4 logical cores runner, `mothergod -c` on
@@ -8880,7 +8880,7 @@ record.
   tokens equal a ring that never wraps, and the test fails with the price
   reset in `retire` deleted. | **Not measured:** four blocks live (about 4 x 372 MB, 1.5 GB
   against the 1 GiB `memory-check` pins, is #1322's to bound), `parent`
-  packed from 12 to 8 bytes (a manual encoding of `Option<Move>` (left main in #1742), 4 bytes per
+  packed from 12 to 8 bytes (a manual encoding of `Option<Move>` (left main in #1745), 4 bytes per
   position, untried), what the 2.3 bytes per position above the 21 on
   zeros are (input copies in the filter trials are the first suspect, not
   isolated), the 256 MiB `memory-check` peak (946 MB in S2-A116, weekly
