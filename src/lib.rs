@@ -19,14 +19,13 @@
 
 // Every module but `filters`, `read` and `write` is `#[doc(hidden)]`: the engine's
 // internals, not a surface downstream crates are meant to call (ROADMAP M6).
-// They stay `pub` for two reasons. `bench` and `fuzz` call into `lz`, `literal`
-// and `codec`. And the live codec path does not reach the research
-// primitives (`Model::ideal_cost_bits`, `Literal::ideal_cost_bits`), whose
-// callers are tests: under `pub(crate)` they become `dead_code` errors with
-// `-D warnings`. Narrowing waits on wiring or removing those items. `filters` is
-// documented: S2-A2 judged it "a defensible standalone library surface on
-// their own merits" (`research/JOURNAL.md`). `read` and `write` are the
-// library idiom matrix's front page (ADR-0064, #979).
+// They stay `pub` because `bench` and `fuzz` call into `lz`, `literal` and
+// `codec`. `model` stays `pub` because `Model::new` has only test callers:
+// under `pub(crate)` it is a `dead_code` error with `-D warnings`, and
+// narrowing waits on removing it (#1758). `filters` is documented: S2-A2
+// judged it "a defensible standalone library surface on their own merits"
+// (`research/JOURNAL.md`). `read` and `write` are the library idiom matrix's
+// front page (ADR-0064, #979).
 #[doc(hidden)]
 pub mod bittree;
 #[doc(hidden)]

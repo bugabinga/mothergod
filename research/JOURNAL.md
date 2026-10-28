@@ -1561,7 +1561,8 @@ record.
   gate, progress-graph rendering, and the scheduled `corpus-fetch`
   workflow.
 - S2-A30 | ACCEPTED | ROADMAP M2's ideal-cost accounting mode (ADR-0006),
-  first slice: `Model::ideal_cost_bits` sums `-log2(freq[symbol] /
+  first slice: `Model::ideal_cost_bits` (left `src/model.rs` for a
+  test-only helper in #1759) sums `-log2(freq[symbol] /
   total)` against the same adaptive state `Model::encode` drives, then
   applies the same `update` call, without touching an `Encoder` at all —
   the Rust-native replacement ADR-0006 calls for the archive's Python
@@ -1589,7 +1590,8 @@ record.
   S2-A11), and nothing yet sums a whole-codec ideal-cost pass across
   `lz`'s flag/length/offset streams and `literal`'s bytes together.
 - S2-A31 | ACCEPTED | ROADMAP M2's ideal-cost accounting mode (ADR-0006),
-  second slice: `Literal::ideal_cost_bits`, S2-A30's flagged
+  second slice: `Literal::ideal_cost_bits` (left main in #1759),
+  S2-A30's flagged
   counterpart for the six-expert mixer. Reuses `Literal::mix` to build
   the same mixed cumulative-frequency table `encode` codes against,
   prices the requested byte as `-log2((cum[symbol+1] - cum[symbol]) /

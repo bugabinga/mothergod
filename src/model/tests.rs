@@ -1,5 +1,17 @@
 use super::*;
 
+impl Model {
+    /// Bits it would cost to code `symbol` under this table's current
+    /// distribution, `-log2(freq[symbol] / total)`, then updates the table
+    /// the same way [`Self::encode`] does. The probe for what a trained
+    /// table prices, no [`Encoder`] involved.
+    pub(crate) fn ideal_cost_bits(&mut self, symbol: usize) -> f64 {
+        let probability = f64::from(self.freq[symbol]) / f64::from(self.total);
+        self.update(symbol);
+        crate::surprisal(probability)
+    }
+}
+
 pub(super) fn roundtrip_symbols(symbols: &[usize], alphabet_len: usize) {
     let mut model = Model::new(alphabet_len);
     let mut enc = Encoder::new();
