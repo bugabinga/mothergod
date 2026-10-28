@@ -1978,7 +1978,7 @@ record.
   threshold bit-for-bit — ADR-0024's determinism rule, the same reasoning
   that led `Sse` to linear-domain bins). Threshold clamped to
   `1..=BIT_SCALE - 1` so neither outcome is ever assigned zero width,
-  mirroring `Model::new`'s "nothing is ever impossible to code" guarantee.
+  mirroring `Model::new`'s (left main in #1762) "nothing is ever impossible to code" guarantee.
   Proved the two primitives compose: a new `sse.rs` integration test drives
   `Encoder::encode_bit`/`Decoder::decode_bit` from `Sse::refine`'s output
   (constant, uninformative 0.5 "primary" estimate, same shape as

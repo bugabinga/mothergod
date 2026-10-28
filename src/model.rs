@@ -23,22 +23,14 @@ pub struct Model {
 
 impl Model {
     /// A fresh table over `alphabet_len` symbols, each starting at
-    /// frequency 1.
+    /// frequency 1, returning `Err` instead of aborting if the allocator
+    /// cannot satisfy `alphabet_len` entries (hard rule 2, #453).
     ///
     /// # Panics
     ///
     /// Panics if `alphabet_len` is zero: a model over no symbols could
     /// encode nothing, which is a caller bug fixed at construction, never
     /// something adversarial input can trigger.
-    #[must_use]
-    pub fn new(alphabet_len: usize) -> Self {
-        crate::abort_on_oom(Self::try_new(alphabet_len))
-    }
-
-    /// The one statement of a fresh table, returning `Err` instead of
-    /// aborting if the allocator cannot satisfy `alphabet_len` entries: the
-    /// constructor [`crate::codec::decode`] uses (hard rule 2, #453).
-    /// Panics on zero like [`Self::new`].
     pub(crate) fn try_new(alphabet_len: usize) -> Result<Self, std::collections::TryReserveError> {
         let freq = crate::try_filled_vec(alphabet_len, 1u32)?;
         assert!(!freq.is_empty(), "Model alphabet must be non-empty");
