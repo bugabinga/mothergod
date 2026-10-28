@@ -642,92 +642,72 @@ fn binary_tree_evicts_stale_positions_from_the_tree_structure() {
 }
 
 #[test]
-fn price_counts_observe_bumps_literal_by_prev_byte_context() {
-    let mut counts = PriceCounts::new();
-    counts.observe(Token::Literal(b'x'), Some(0x35));
+fn price_counts_tally_bumps_literal_by_prev_byte_context() {
+    let tokens = [Token::Literal(0x35), Token::Literal(b'x')];
+    let counts = PriceCounts::tally(&tokens, &[0x35, b'x']);
     assert_eq!(counts.literal[3 * 256 + usize::from(b'x')], 2);
+    assert_eq!(counts.literal[usize::from(0x35_u8)], 2);
     assert_eq!(counts.length, vec![1; LENGTH_BUCKETS]);
     assert_eq!(counts.offset, vec![1; OFFSET_BUCKETS]);
     assert_eq!(counts.rep, 1);
 }
 
 #[test]
-fn price_counts_observe_literal_at_stream_start_uses_context_zero() {
-    let mut counts = PriceCounts::new();
-    counts.observe(Token::Literal(b'z'), None);
+fn price_counts_tally_literal_at_stream_start_uses_context_zero() {
+    let counts = PriceCounts::tally(&[Token::Literal(b'z')], b"z");
     assert_eq!(counts.literal[usize::from(b'z')], 2);
 }
 
 #[test]
-fn price_counts_observe_match_bumps_length_and_offset_only() {
-    let mut counts = PriceCounts::new();
+fn price_counts_tally_match_bumps_length_and_offset_only() {
     let distance = NonZeroU32::new(100).unwrap();
-    counts.observe(Token::Match { len: 10, distance }, Some(0));
+    let mut tokens = vec![Token::Literal(b'a'); 100];
+    tokens.push(Token::Match { len: 10, distance });
+    let counts = PriceCounts::tally(&tokens, &[b'a'; 110]);
     assert_eq!(counts.length[bucket(10)], 2);
     assert_eq!(counts.offset[bucket(100)], 2);
     assert_eq!(counts.rep, 1);
 }
 
 #[test]
-fn price_counts_observe_rep_bumps_length_and_rep_only() {
-    let mut counts = PriceCounts::new();
-    counts.observe(
+fn price_counts_tally_rep_bumps_length_and_rep_only() {
+    let tokens = [
+        Token::Literal(b'a'),
         Token::Rep {
             len: 6,
             slot: RepSlot::First,
         },
-        Some(0),
-    );
+    ];
+    let counts = PriceCounts::tally(&tokens, &[b'a'; 7]);
     assert_eq!(counts.length[bucket(6)], 2);
     assert_eq!(counts.rep, 2);
     assert_eq!(counts.offset, vec![1; OFFSET_BUCKETS]);
 }
 
 #[test]
-fn price_counts_observe_accumulates_across_calls() {
-    let mut counts = PriceCounts::new();
-    counts.observe(Token::Literal(b'a'), None);
-    counts.observe(Token::Literal(b'a'), None);
-    assert_eq!(counts.literal[usize::from(b'a')], 3);
+fn price_counts_tally_accumulates_across_tokens() {
+    let tokens = [Token::Literal(b'a'); 3];
+    let counts = PriceCounts::tally(&tokens, b"aaa");
+    assert_eq!(counts.literal[usize::from(b'a')], 2);
+    assert_eq!(counts.literal[6 * 256 + usize::from(b'a')], 3);
 }
 
 #[test]
 fn price_counts_prices_computes_shannon_price_per_literal_context() {
-    let mut counts = PriceCounts::new();
-    counts.observe(Token::Literal(b'a'), None);
-    counts.observe(Token::Literal(b'a'), None);
-    counts.observe(Token::Literal(b'b'), Some(b'a'));
-    let table = counts.prices(3);
+    let tokens = [
+        Token::Literal(b'a'),
+        Token::Literal(b'a'),
+        Token::Literal(b'b'),
+    ];
+    let table = PriceCounts::tally(&tokens, b"aab").prices(3);
 
-    assert_eq!(table.literal[usize::from(b'a')], price(3, 258));
-    assert_eq!(table.literal[0], price(1, 258));
+    assert_eq!(table.literal[usize::from(b'a')], price(2, 257));
+    assert_eq!(table.literal[0], price(1, 257));
 
     let context6 = 6 * 256;
-    assert_eq!(table.literal[context6 + usize::from(b'b')], price(2, 257));
-    assert_eq!(table.literal[context6], price(1, 257));
-}
-
-#[test]
-fn price_counts_observe_matches_tally_for_the_same_sequence() {
-    let data = b"abracadabra";
-    let tokens = parse_greedy(data);
-    let via_tally = PriceCounts::tally(&tokens, data);
-
-    let mut via_observe = PriceCounts::new();
-    let mut pos = 0usize;
-    for token in &tokens {
-        let prev_byte = if pos > 0 { Some(data[pos - 1]) } else { None };
-        via_observe.observe(*token, prev_byte);
-        pos += match *token {
-            Token::Literal(_) => 1,
-            Token::Match { len, .. } | Token::Rep { len, .. } => len as usize,
-        };
-    }
-
-    assert_eq!(via_tally.literal, via_observe.literal);
-    assert_eq!(via_tally.length, via_observe.length);
-    assert_eq!(via_tally.offset, via_observe.offset);
-    assert_eq!(via_tally.rep, via_observe.rep);
+    assert_eq!(table.literal[context6 + usize::from(b'a')], price(2, 258));
+    assert_eq!(table.literal[context6 + usize::from(b'b')], price(2, 258));
+    assert_eq!(table.literal[context6], price(1, 258));
 }
 
 #[test]

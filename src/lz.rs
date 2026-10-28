@@ -914,37 +914,24 @@ impl PriceCounts {
         let mut counts = Self::new();
         let mut pos = 0usize;
         for token in tokens {
-            counts.observe(*token, byte_before(data, pos));
-            pos += match *token {
-                Token::Literal(_) => 1,
-                Token::Match { len, .. } | Token::Rep { len, .. } => len as usize,
-            };
+            match *token {
+                Token::Literal(byte) => {
+                    counts.literal[literal_price_index(byte_before(data, pos), byte)] += 1;
+                    pos += 1;
+                }
+                Token::Match { len, distance } => {
+                    counts.length[bucket(len)] += 1;
+                    counts.offset[bucket(distance.get())] += 1;
+                    pos += len as usize;
+                }
+                Token::Rep { len, .. } => {
+                    counts.length[bucket(len)] += 1;
+                    counts.rep += 1;
+                    pos += len as usize;
+                }
+            }
         }
         counts
-    }
-
-    /// Bumps the counts for one already-decided `token`, whose preceding
-    /// byte (for a literal's context; `None` at the start of the stream,
-    /// as [`byte_before`] gives) is `prev_byte`.
-    ///
-    /// Lets a caller build up counts one finalized token at a time, which
-    /// [`Self::tally`] cannot (it replays a complete sequence). [`dp_round`]
-    /// freezes its price table per round and does not call this
-    /// (`JOURNAL` S1-P2's named gap).
-    fn observe(&mut self, token: Token, prev_byte: Option<u8>) {
-        match token {
-            Token::Literal(byte) => {
-                self.literal[literal_price_index(prev_byte, byte)] += 1;
-            }
-            Token::Match { len, distance } => {
-                self.length[bucket(len)] += 1;
-                self.offset[bucket(distance.get())] += 1;
-            }
-            Token::Rep { len, .. } => {
-                self.length[bucket(len)] += 1;
-                self.rep += 1;
-            }
-        }
     }
 
     /// Derives a [`PriceTable`] from these counts. `total_tokens` prices
