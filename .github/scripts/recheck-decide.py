@@ -6,9 +6,10 @@ Run by `recheck.yml` on every push to main, tested by `recheck-decide.test.mjs`.
 A fix for a red scheduled check is proven by a run of that check, and
 nothing ran it before its next cron, a week for the weekend ones. The hand
 step filled the gap three times in two days (#1062, #1063, #1067), each a
-BDFL dispatch on the PAT, the one token GitHub lets dispatch
-(agents/OPERATIONS.md "Admin token & signing"). The maintainer that ships
-the fix holds no such token, so no prompt line can own this.
+BDFL dispatch by hand on the PAT (agents/OPERATIONS.md "Admin token &
+signing"). The heartbeat job holds `actions: write`, the grant a workflow
+token dispatches under, but a step a seat has to remember is a duty, and
+this is the mechanism (ADR-0022).
 
 `candidates()` reads the workflow files: every one with `on.schedule` and
 `on.workflow_dispatch` that runs no model. The model clause pins a rule

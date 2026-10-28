@@ -3,9 +3,11 @@
 # BDFL dispatched one by hand three times in two days (#1069). This runs
 # on every push to main and dispatches each scheduled check whose newest
 # concluded run on main is red, one retry per RETRY_HOURS per workflow,
-# on the PAT, the one token GitHub lets dispatch (agents/OPERATIONS.md
-# "Admin token & signing"). The decision lives in recheck-decide.py with
-# its tests; this file holds the credential ruling.
+# on the PAT, the one credential this job holds that can: its own token
+# is granted `actions: read` (agents/OPERATIONS.md "Admin token &
+# signing"), and a retry on `github.token` under `actions: write` is
+# untried. The decision lives in recheck-decide.py with its tests; this
+# file holds the credential ruling.
 #
 # Why MOTHERGOD_ADMIN_TOKEN is safe here:
 # - Its only use is `gh workflow run` on main for the files the script
@@ -14,7 +16,8 @@
 #   that loops (#50). No PR code executes; the only tree on the runner
 #   is main at the triggering SHA, just through the gate.
 # - Trigger surface is pushes to main, gate-merged PRs or the operator,
-#   and a dispatch, which is the PAT's alone.
+#   and a dispatch, which takes write on actions: the operator, the PAT,
+#   or a job of this repository's own.
 # - The retry is operator-attributed, which agent-alarm admits on main;
 #   a wrong fix's red is red-after-red there, which its dedup swallows,
 #   so the gain is a green within hours and a re-armed alarm, never a
@@ -52,7 +55,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/recheck-decide.py > "$RUNNER_TEMP/dispatch"
 
-      # The PAT, not github.token: dispatch answers 403 to every other token.
+      # The PAT, not github.token: this job grants actions: read, the
+      # ruling in the header.
       - name: Dispatch each on the PAT
         env:
           GH_TOKEN: ${{ secrets.MOTHERGOD_ADMIN_TOKEN }}
