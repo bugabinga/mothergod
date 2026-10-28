@@ -144,13 +144,24 @@ jobs:
           checks: setup
       - name: Install Miri
         run: rustup component add miri rust-src
+      # From above the checkout, because cargo reads .cargo/config.toml
+      # from the working directory up and never from the manifest's, and
+      # the repository's config sets a cfg() runner (the 4 GiB cap,
+      # #1683) that cargo refuses beside the cfg(all()) runner
+      # cargo-miri passes on its command line. A cfg(not(miri)) guard
+      # does not help, cargo never sets miri when it evaluates config;
+      # a triple-keyed runner would be worse, it wins over Miri's
+      # outright and runs the tests natively under a green name. Miri
+      # interprets the tests inside its own process, which the cap was
+      # never for.
       - name: Miri sweep
+        working-directory: ${{ runner.temp }}
         env:
           # The fixture directories live on the real filesystem.
           MIRIFLAGS: -Zmiri-disable-isolation
         run: |
-          cargo miri test -p mothergod --test adversarial
-          cargo miri test -p mothergod --lib filters:: -- --skip filters::select
+          cargo miri test --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" -p mothergod --test adversarial
+          cargo miri test --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" -p mothergod --lib filters:: -- --skip filters::select
 
   x-msrv:
     name: x | MSRV

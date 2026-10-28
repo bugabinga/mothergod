@@ -17,6 +17,9 @@ x = "run --quiet --manifest-path x/Cargo.toml --"
 # jobs at the cap fit a 16 GiB runner; the CLI's published bound is
 # 1 GiB (`.github/scripts/memory-check`). prlimit is util-linux.
 # fuzz/.cargo/config.toml lifts the cap for libFuzzer, whose
-# AddressSanitizer reserves terabytes of shadow at start.
+# AddressSanitizer reserves terabytes of shadow at start. cargo miri
+# cannot share a working directory with this entry: cargo refuses two
+# matching cfg() runners and Miri's own is one, so the Miri lane runs
+# from above the checkout (monster.yml, docs/TESTING.md section 10).
 [target.'cfg(target_os = "linux")']
 runner = "prlimit --as=4294967296"

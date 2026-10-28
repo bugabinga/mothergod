@@ -460,6 +460,11 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `.github/workflows/monster.yml`. The crate forbids unsafe,
   so Miri is insurance that the claim stays true transitively, priced
   by test selection (`cfg(miri)` excludes the slow storms).
+  Run it from a directory above the checkout with `--manifest-path`,
+  as the job does: cargo reads `.cargo/config.toml` from the working
+  directory up, never from the manifest's, and the repository's config
+  sets the 4 GiB cap as a `cfg()` runner (#1683) that cargo refuses
+  beside the `cfg(all())` runner cargo-miri passes.
 
 ## 11. FFI / C ABI end-to-end (planned, #41)
 
