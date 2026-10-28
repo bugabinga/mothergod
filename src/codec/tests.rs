@@ -9,23 +9,15 @@ fn encode(data: &[u8]) -> Vec<u8> {
     super::encode(data, NonZeroUsize::MIN)
 }
 
-/// The bucket symbol's modeled `-log2(p)` cost plus the residual low bits'
-/// cost, which is their count: [`Encoder::encode_bits`] emits them raw and
-/// unmodeled, so there is no `Model` lookup to price. The probe for what
-/// [`EncodeSink::offset`] codes.
-fn ideal_cost_bucketed(model: &mut Model, value: u32) -> f64 {
-    let b = lz::bucket(value);
-    model.ideal_cost_bits(b) + f64::from(bucket_bits(b))
-}
-
-impl ResidualTree {
-    /// Ideal cost of `value`'s residual bits below its bucket, priced
-    /// exactly as [`Self::encode`] codes them.
-    fn ideal_cost_bits(&mut self, value: u32) -> f64 {
-        let mut cost = f64::from(Self::raw_bits(value));
-        self.walk(value, |model, bit| cost += model.ideal_cost_bits(bit));
-        cost
+/// The bytes `count` runs of `code` emit into one fresh [`Encoder`]. Two
+/// pieces of state that must be independent emit identical bytes however
+/// the other was trained first; one that leaks into the other emits fewer.
+fn coded_bytes(count: usize, mut code: impl FnMut(&mut Encoder)) -> Vec<u8> {
+    let mut ac = Encoder::new();
+    for _ in 0..count {
+        code(&mut ac);
     }
+    ac.finish()
 }
 
 /// [`decode_to_writer`], collected into a `Vec<u8>` (which implements
@@ -256,28 +248,32 @@ fn length_streams_through_both_split_models_roundtrip() {
 #[test]
 fn length_match_and_rep_models_adapt_independently() {
     // Guards against a future refactor collapsing Models::length_match/
-    // length_rep back onto one shared Model (which would still round-trip
-    // correctly, since encode and decode would agree either way, so
+    // length_rep, or their residual trees, back onto one shared state
+    // (which would still round-trip correctly, since encode and decode
+    // would agree either way, so
     // length_streams_through_both_split_models_roundtrip can't catch it):
-    // trains length_match on value 10 many times through
-    // the real EncodeSink path, then checks that a fresh models.length_rep
-    // (never trained) still prices 10 at its untrained, higher cost —
-    // proving the two fields are genuinely independent state, not aliases.
-    let mut models = Models::new();
+    // trains the match side on value 50 through the real EncodeSink path,
+    // then checks that coding the rep side emits what a never-trained
+    // Models emits, bucket symbol and residual bits alike.
+    let mut trained = Models::new();
     let mut ac = Encoder::new();
     for _ in 0..50 {
         EncodeSink {
             ac: &mut ac,
             column: None,
         }
-        .length(&mut models, CopyKind::Match, 10);
+        .length(&mut trained, CopyKind::Match, 50);
     }
-    let trained_match_cost = ideal_cost_bucketed(&mut models.length_match, 10);
-    let untrained_rep_cost = ideal_cost_bucketed(&mut models.length_rep, 10);
-    assert!(
-        trained_match_cost < untrained_rep_cost,
-        "trained length_match cost ({trained_match_cost}) should be cheaper than \
-         untrained length_rep cost ({untrained_rep_cost}) for the same value"
+    let rep_after_match = coded_bytes(50, |ac| {
+        EncodeSink { ac, column: None }.length(&mut trained, CopyKind::Rep, 50);
+    });
+    let mut fresh = Models::new();
+    let rep_fresh = coded_bytes(50, |ac| {
+        EncodeSink { ac, column: None }.length(&mut fresh, CopyKind::Rep, 50);
+    });
+    assert_eq!(
+        rep_after_match, rep_fresh,
+        "match-side training leaked into the rep side"
     );
 }
 
@@ -333,27 +329,32 @@ fn offset_models_adapt_independently_by_length_state() {
     // correctly, since encode and decode would agree either way, so
     // offsets_through_length_keyed_models_roundtrip can't catch it): trains
     // offset_len[0] (a length-MIN_MATCH_LEN match) on distance 10 many times
-    // through the real EncodeSink path, then
-    // checks that a fresh offset_len[OFFSET_LEN_STATES - 1] (never
-    // trained, a far longer match's own state) still prices 10 at its
-    // untrained, higher cost — proving the four entries are genuinely
-    // independent state, not aliases.
-    let mut models = Models::new();
-    let mut ac = Encoder::new();
+    // through the real EncodeSink path, then checks that coding the last
+    // state (a far longer match's own) emits what a never-trained Models
+    // emits, proving the four entries are genuinely independent state, not
+    // aliases.
     let short_len = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN fits u32");
+    let long_len = short_len + u32::try_from(OFFSET_LEN_STATES).expect("tiny constant fits u32");
+    assert_eq!(offset_len_state(long_len), OFFSET_LEN_STATES - 1);
+    let mut trained = Models::new();
+    let mut ac = Encoder::new();
     for _ in 0..50 {
         EncodeSink {
             ac: &mut ac,
             column: None,
         }
-        .offset(&mut models, short_len, 10);
+        .offset(&mut trained, short_len, 10);
     }
-    let trained_cost = ideal_cost_bucketed(&mut models.offset_len[0], 10);
-    let untrained_cost = ideal_cost_bucketed(&mut models.offset_len[OFFSET_LEN_STATES - 1], 10);
-    assert!(
-        trained_cost < untrained_cost,
-        "trained offset_len[0] cost ({trained_cost}) should be cheaper than untrained \
-         offset_len[OFFSET_LEN_STATES - 1] cost ({untrained_cost}) for the same value"
+    let long_after_short = coded_bytes(50, |ac| {
+        EncodeSink { ac, column: None }.offset(&mut trained, long_len, 10);
+    });
+    let mut fresh = Models::new();
+    let long_fresh = coded_bytes(50, |ac| {
+        EncodeSink { ac, column: None }.offset(&mut fresh, long_len, 10);
+    });
+    assert_eq!(
+        long_after_short, long_fresh,
+        "short-match training leaked into the long-match offset model"
     );
 }
 
@@ -859,40 +860,20 @@ fn caller_supplied_max_len_below_max_decoded_len_is_honored() {
 }
 
 #[test]
-fn fresh_residual_tree_costs_exactly_the_raw_residual_bits() {
-    // A fresh binary Model prices either bit at exactly 1.0, so before any
-    // update a tree costs what raw residual bits cost: the whole S2-A114
-    // gain comes from adaptation, none from accounting.
-    for value in [1u32, 2, 3, 7, 16, 31, 1_000, 65_535, (1 << 16) + 12_345] {
-        let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
-        let raw = f64::from(bucket_bits(lz::bucket(value)));
-        let cost = tree.ideal_cost_bits(value);
-        assert!((cost - raw).abs() < 1e-12, "value {value}: {cost} vs {raw}");
-    }
-}
-
-#[test]
-fn residual_tree_learns_only_its_modeled_bits() {
-    // 1_000 sits in bucket 9: four modeled residual bits, five raw. A
-    // repeated value drives the modeled four toward free, never the raw
-    // five, so the cost converges to just above 5 and never below it.
-    let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
-    let mut last = f64::INFINITY;
-    for _ in 0..50 {
-        last = tree.ideal_cost_bits(1_000);
-    }
-    assert!(last > 5.0 && last < 5.5, "converged cost {last}");
-}
-
-#[test]
 fn residual_tree_buckets_do_not_share_nodes() {
-    // Training bucket 9 must leave bucket 10's walk at its fresh price.
-    let mut tree = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
+    // Training bucket 9 must leave bucket 10's walk where a fresh tree's is.
+    let mut trained = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
+    let mut ac = Encoder::new();
     for _ in 0..50 {
-        let _ = tree.ideal_cost_bits(1_000);
+        trained.encode(&mut ac, 1_000);
     }
-    let cost = tree.ideal_cost_bits(2_000);
-    assert!((cost - 10.0).abs() < 1e-12, "bucket 10 cost {cost}");
+    let after_bucket_9 = coded_bytes(50, |ac| trained.encode(ac, 2_000));
+    let mut fresh = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
+    let from_fresh = coded_bytes(50, |ac| fresh.encode(ac, 2_000));
+    assert_eq!(
+        after_bucket_9, from_fresh,
+        "bucket 9 training reached bucket 10"
+    );
 }
 
 /// Values spanning every length bucket: each bucket's smallest and largest
@@ -947,38 +928,14 @@ fn residual_tree_decode_leaves_the_encoders_node_state() {
     for &value in &values {
         assert_eq!(decoder_tree.decode(&mut ac, lz::bucket(value)), value);
     }
-    for &value in &values {
-        let encoded = encoder_tree.ideal_cost_bits(value);
-        let decoded = decoder_tree.ideal_cost_bits(value);
-        assert!(
-            (encoded - decoded).abs() < 1e-12,
-            "value {value}: encoder tree prices {encoded}, decoder tree {decoded}"
-        );
-    }
-}
-
-#[test]
-fn residual_tree_price_matches_what_it_codes() {
-    // The probe the tests above price with must price what `encode` codes:
-    // the ideal cost of a stream and its real coded size agree to the
-    // coder's few bytes of flush and quantization slack.
-    let values = residual_tree_values();
-    let mut priced = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
-    let ideal: f64 = values.iter().map(|&v| priced.ideal_cost_bits(v)).sum();
-    let mut coded = ResidualTree::try_new(lz::LENGTH_BUCKETS).expect("small allocation");
-    let mut ac = Encoder::new();
-    for &value in &values {
-        coded.encode(&mut ac, value);
-    }
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "a few hundred bytes of test output, far below f64's 2^53"
-    )]
-    let real = (ac.finish().len() * 8) as f64;
-    assert!(
-        (real - ideal).abs() < 64.0,
-        "coded {real} bits vs priced {ideal} bits"
-    );
+    let again = |tree: &mut ResidualTree| {
+        let mut ac = Encoder::new();
+        for &value in &values {
+            tree.encode(&mut ac, value);
+        }
+        ac.finish()
+    };
+    assert_eq!(again(&mut encoder_tree), again(&mut decoder_tree));
 }
 
 #[test]
@@ -996,28 +953,6 @@ fn length_residual_trees_roundtrip_through_a_frame() {
     frame.extend(encode_tokens_with(&data, None, &tokens));
 
     assert_decode_matches(&frame, &data, "residual bits through trees");
-}
-
-#[test]
-fn length_residual_trees_adapt_independently_by_kind() {
-    // Trains the match tree through the real EncodeSink path, then checks
-    // the rep tree still prices the same value at its fresh, higher cost:
-    // two genuinely separate trees, not aliases a round-trip cannot tell.
-    let mut models = Models::new();
-    let mut ac = Encoder::new();
-    for _ in 0..50 {
-        EncodeSink {
-            ac: &mut ac,
-            column: None,
-        }
-        .length(&mut models, CopyKind::Match, 50);
-    }
-    let trained = models.length_match_residual.ideal_cost_bits(50);
-    let untrained = models.length_rep_residual.ideal_cost_bits(50);
-    assert!(
-        trained < untrained,
-        "trained match tree ({trained}) should undercut the untrained rep tree ({untrained})"
-    );
 }
 
 #[test]

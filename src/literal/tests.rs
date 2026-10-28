@@ -94,7 +94,7 @@ fn word_hash_extends_on_alnum_and_resets_on_punctuation() {
 }
 
 #[test]
-fn ideal_cost_drops_as_a_byte_gets_more_likely() {
+fn ideal_cost_bits_sse_drops_as_a_byte_gets_more_likely() {
     // Coding the same byte repeatedly raises its own frequency across
     // every expert bank it touches, so its ideal cost must strictly
     // decrease call over call as the model adapts toward it. Context
@@ -102,50 +102,11 @@ fn ideal_cost_drops_as_a_byte_gets_more_likely() {
     // there), so this isolates the adaptation, not a context change.
     let mut model = Literal::new();
     let context = Context::default().after_literal(b'a');
-    let first = model.ideal_cost_bits(context, b'a');
-    let second = model.ideal_cost_bits(context, b'a');
-    let third = model.ideal_cost_bits(context, b'a');
-    assert!(second < first);
-    assert!(third < second);
-}
-
-#[test]
-fn ideal_cost_bits_sse_drops_as_a_byte_gets_more_likely() {
-    // Same shape as ideal_cost_drops_as_a_byte_gets_more_likely, for
-    // the SSE-calibrated path.
-    let mut model = Literal::new();
-    let context = Context::default().after_literal(b'a');
     let first = model.ideal_cost_bits_sse(context, b'a');
     let second = model.ideal_cost_bits_sse(context, b'a');
     let third = model.ideal_cost_bits_sse(context, b'a');
     assert!(second < first);
     assert!(third < second);
-}
-
-#[test]
-fn ideal_cost_bits_sse_leaves_the_mixer_where_ideal_cost_bits_does() {
-    // The two methods price differently but must adapt the banks and
-    // mixing weights identically (`ideal_cost_bits_sse`'s doc), and
-    // the benchmark baseline prices through the SSE one. `ideal_cost_bits`
-    // reads only the banks and weights, so on twin models its cost for
-    // a probe byte exposes any divergence the training left there.
-    let corpus: &[u8] = b"the cat sat on the mat. the cat sat on the hat. that is that.";
-    let mut plain = Literal::new();
-    let mut sse = Literal::new();
-    let mut context = Context::default();
-    for &byte in corpus {
-        let _ = plain.ideal_cost_bits(context, byte);
-        let _ = sse.ideal_cost_bits_sse(context, byte);
-        context = context.after_literal(byte);
-    }
-    for probe in *b"thez" {
-        let want = plain.ideal_cost_bits(context, probe);
-        let got = sse.ideal_cost_bits(context, probe);
-        assert!(
-            (want - got).abs() < 1e-9,
-            "probe {probe}: plain {want} bits, after the sse method {got} bits"
-        );
-    }
 }
 
 /// `f64::exp`, the pre-ADR-0024 reference this test diffs `exp`
@@ -292,11 +253,11 @@ fn decoding_truncated_stream_does_not_panic_through_column_expert() {
 }
 
 /// [`Literal::encode_column`] must leave the six real experts' weights
-/// exactly where [`Literal::ideal_cost_bits`] would, per the layering
+/// exactly where [`Literal::ideal_cost_bits_sse`] would, per the layering
 /// [`Literal::encode_column`]'s own docs claim: `update_column_expert`
 /// touches only `column_state`, never `self.weights`/`self.freq`.
 #[test]
-fn encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits() {
+fn encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits_sse() {
     let bytes = b"hello world hello again";
     let mut via_column = Literal::new();
     let mut column_state = ColumnExpertState::new(crate::test_support::nz(4));
@@ -310,7 +271,7 @@ fn encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits() {
     let mut via_ideal_cost = Literal::new();
     let mut context_ideal_cost = Context::default();
     for &b in bytes {
-        let _ = via_ideal_cost.ideal_cost_bits(context_ideal_cost, b);
+        let _ = via_ideal_cost.ideal_cost_bits_sse(context_ideal_cost, b);
         context_ideal_cost = context_ideal_cost.after_literal(b);
     }
 
@@ -598,13 +559,13 @@ fn decoding_truncated_stream_does_not_panic_through_logit_sse() {
 }
 
 /// [`Literal::encode_logit_sse`] must leave the six real experts' banks
-/// and linear weights exactly where [`Literal::ideal_cost_bits`] would, per
+/// and linear weights exactly where [`Literal::ideal_cost_bits_sse`] would, per
 /// the layering [`Literal::encode_logit_sse`]'s mixer reads the banks but
 /// never perturbs them or `self.weights`, the same guarantee
-/// `encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits`
+/// `encode_column_updates_the_six_real_experts_same_as_ideal_cost_bits_sse`
 /// checks for the seventh expert.
 #[test]
-fn encode_logit_sse_updates_the_six_real_experts_same_as_ideal_cost_bits() {
+fn encode_logit_sse_updates_the_six_real_experts_same_as_ideal_cost_bits_sse() {
     let bytes = b"hello world hello again";
     let mut via_logit_sse = Literal::new();
     let mut mixer = SurpriseLogisticMix::new();
@@ -618,7 +579,7 @@ fn encode_logit_sse_updates_the_six_real_experts_same_as_ideal_cost_bits() {
     let mut via_ideal_cost = Literal::new();
     let mut context_ideal_cost = Context::default();
     for &b in bytes {
-        let _ = via_ideal_cost.ideal_cost_bits(context_ideal_cost, b);
+        let _ = via_ideal_cost.ideal_cost_bits_sse(context_ideal_cost, b);
         context_ideal_cost = context_ideal_cost.after_literal(b);
     }
 

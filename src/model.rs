@@ -2,10 +2,6 @@
 //! cumulative-frequency source for [`crate::coder`]'s range coder. One
 //! instance per coded alphabet; the literal mixer in [`crate::literal`] is
 //! built on the coder directly, not on this type.
-//!
-//! [`Model::ideal_cost_bits`] prices a symbol as `-log2(p)` against the
-//! adaptive state without driving an [`crate::coder::Encoder`]
-//! (ROADMAP M2's ideal-cost accounting mode).
 
 use crate::Rate;
 use crate::coder::{Decoder, Encoder};
@@ -70,20 +66,6 @@ impl Model {
         let high = low + self.freq[symbol];
         encoder.encode(u64::from(low), u64::from(high), u64::from(self.total));
         self.update(symbol);
-    }
-
-    /// Bits it would cost to code `symbol` under this table's current
-    /// distribution, `-log2(freq[symbol] / total)`, then updates the table
-    /// the same way [`Self::encode`] does.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `symbol >= alphabet_len`, same bound as [`Self::encode`].
-    #[must_use]
-    pub fn ideal_cost_bits(&mut self, symbol: usize) -> f64 {
-        let probability = f64::from(self.freq[symbol]) / f64::from(self.total);
-        self.update(symbol);
-        crate::surprisal(probability)
     }
 
     /// Decodes one symbol from `decoder` under this table's current
