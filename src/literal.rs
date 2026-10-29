@@ -821,33 +821,35 @@ impl Literal {
         );
     }
 
-    /// Codes `byte` through `encoder` under `context`, blending
-    /// `column_state`'s bank in as a seventh expert via [`Self::mix7`] and
-    /// coding the result through the SSE-calibrated bittree decomposition
-    /// against `column_state`'s own [`Sse`] table (`research/JOURNAL.md`
-    /// S1-P5's real-wiring slice, `FORMAT_VERSION` 4). The six real
-    /// experts adapt exactly as [`Self::ideal_cost_bits_sse`] leaves them —
-    /// [`Self::update`] still runs, on the same six-way `mixed` estimate
-    /// it always has, unperturbed by the column expert — the same
-    /// layering [`bittree`]'s own SSE stage already uses on top of the
-    /// six-expert mix, not a new coupling. `column_state`'s own weight and
-    /// bank adapt separately via [`Self::update_column_expert`], against
-    /// the seven-way mixed estimate that was actually coded. Reproduces
-    /// exactly the update order `research/JOURNAL.md` S2-A76's
-    /// before-wiring measurement found correct: `update_column_expert`
-    /// first (reading the six real experts' pre-update state), then the
-    /// six-expert `update`.
-    pub fn encode_column(
+    /// One byte's coding under `context`, blending `column_state`'s bank in
+    /// as a seventh expert via [`Self::mix7`] and coding the result through
+    /// the SSE-calibrated bittree decomposition against `column_state`'s own
+    /// [`Sse`] table (`research/JOURNAL.md` S1-P5's real-wiring slice,
+    /// `FORMAT_VERSION` 4). `code` takes the seven-expert `cum` table and
+    /// that [`Sse`] and returns the byte it coded or decoded, which is
+    /// returned. Shared by [`Self::encode_column`] and [`Self::decode_column`]
+    /// so the two cannot drift apart.
+    ///
+    /// The six real experts adapt exactly as [`Self::ideal_cost_bits_sse`]
+    /// leaves them, [`Self::update`] on the same six-way `mixed` estimate it
+    /// always has, unperturbed by the column expert: the same layering
+    /// [`bittree`]'s own SSE stage already uses on top of the six-expert mix,
+    /// not a new coupling. `column_state`'s own weight and bank adapt
+    /// separately via [`Self::update_column_expert`], against the seven-way
+    /// mixed estimate that was actually coded. Reproduces exactly the update
+    /// order `research/JOURNAL.md` S2-A76's before-wiring measurement found
+    /// correct: `update_column_expert` first (reading the six real experts'
+    /// pre-update state), then the six-expert `update`.
+    fn code_column(
         &mut self,
-        encoder: &mut Encoder,
         context: Context,
-        byte: u8,
         column_bank: usize,
         column_state: &mut ColumnExpertState,
-    ) {
+        code: impl FnOnce(&[u64; ALPHABET + 1], &mut Sse) -> u8,
+    ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
         let cum7 = self.mix7(&bank_indices, weight_index, column_bank, column_state);
-        bittree::encode_symbol_sse(encoder, &cum7, byte, &mut column_state.sse);
+        let byte = code(&cum7, &mut column_state.sse);
         let symbol = usize::from(byte);
         self.update_column_expert(
             &bank_indices,
@@ -857,11 +859,28 @@ impl Literal {
             column_state,
         );
         self.update(&bank_indices, weight_index, symbol, exp);
+        byte
+    }
+
+    /// Codes `byte` through `encoder` under `context` with `column_state`'s
+    /// bank as a seventh expert; see [`Self::code_column`] for the coding and
+    /// update shape.
+    pub fn encode_column(
+        &mut self,
+        encoder: &mut Encoder,
+        context: Context,
+        byte: u8,
+        column_bank: usize,
+        column_state: &mut ColumnExpertState,
+    ) {
+        self.code_column(context, column_bank, column_state, |cum7, sse| {
+            bittree::encode_symbol_sse(encoder, cum7, byte, sse);
+            byte
+        });
     }
 
     /// Decodes one byte from `decoder` under `context`, the exact inverse
-    /// of [`Self::encode_column`]; see that method's docs for the coding
-    /// and update shape.
+    /// of [`Self::encode_column`].
     ///
     /// Never panics on adversarial `decoder` state:
     /// [`bittree::decode_symbol_sse`] is total over any coded bit pattern
@@ -876,19 +895,9 @@ impl Literal {
         column_bank: usize,
         column_state: &mut ColumnExpertState,
     ) -> u8 {
-        let (bank_indices, weight_index) = banks(context);
-        let cum7 = self.mix7(&bank_indices, weight_index, column_bank, column_state);
-        let byte = bittree::decode_symbol_sse(decoder, &cum7, &mut column_state.sse);
-        let symbol = usize::from(byte);
-        self.update_column_expert(
-            &bank_indices,
-            weight_index,
-            symbol,
-            column_bank,
-            column_state,
-        );
-        self.update(&bank_indices, weight_index, symbol, exp);
-        byte
+        self.code_column(context, column_bank, column_state, |cum7, sse| {
+            bittree::decode_symbol_sse(decoder, cum7, sse)
+        })
     }
 
     /// Each expert's cumulative frequency table over its selected bank:
