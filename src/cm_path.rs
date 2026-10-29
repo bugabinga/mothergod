@@ -25,8 +25,6 @@
 //! the codec's own [`logistic::stretch`] and [`logistic::squash`], never
 //! libm (ADR-0024, S2-A134).
 
-use std::collections::TryReserveError;
-
 use crate::coder::{Decoder, Encoder};
 use crate::literal::{Context, Literal, SurpriseLogisticMix};
 use crate::{Error, logistic, try_filled_vec};
@@ -99,7 +97,8 @@ fn stretch(p: f64) -> f64 {
     logistic::stretch(clamp(p))
 }
 
-/// The `SplitMix64` finalizer: the one hash every table index goes through.
+/// `MurmurHash3`'s `fmix64` finalizer: the one hash every table index goes
+/// through.
 fn mix64(mut h: u64) -> u64 {
     h ^= h >> 33;
     h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
@@ -143,7 +142,7 @@ struct Counter {
 }
 
 impl Counter {
-    fn try_new(slots: usize) -> Result<Self, TryReserveError> {
+    fn try_new(slots: usize) -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             probability: try_filled_vec(slots, 0.5)?,
             count: try_filled_vec(slots, 0)?,
@@ -300,7 +299,7 @@ struct MatchModel {
 }
 
 impl MatchModel {
-    fn try_new() -> Result<Self, TryReserveError> {
+    fn try_new() -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             table: try_filled_vec(1 << MATCH_TABLE_BITS, 0)?,
             pointer: 0,
@@ -326,7 +325,8 @@ impl MatchModel {
             let h = hash_bytes(0, &prefix[position - MATCH_MIN_LEN..]);
             let entry = slot(h, MATCH_TABLE_BITS);
             let candidate = self.table[entry] as usize;
-            if self.length == 0 && candidate > 0 {
+            // An empty slot verifies nothing: `0..0` counts zero bytes.
+            if self.length == 0 {
                 let verified = (0..candidate.min(MATCH_VERIFY_LIMIT))
                     .take_while(|&back| prefix[candidate - 1 - back] == prefix[position - 1 - back])
                     .count();
@@ -371,7 +371,7 @@ impl CmPath {
     /// [`Self::new`], returning `Err` if the allocator cannot satisfy a
     /// table: [`decode`]'s constructor (hard rule 2). Every size is a
     /// constant, none read from a stream.
-    fn try_new() -> Result<Self, TryReserveError> {
+    fn try_new() -> Result<Self, std::collections::TryReserveError> {
         let mut start = [0.0; INPUTS];
         start[0] = 1.0;
         let mut orders = Vec::new();

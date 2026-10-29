@@ -183,6 +183,76 @@ fn length_buckets_are_monotone_and_in_range() {
     assert!(buckets.windows(2).all(|w| w[0] <= w[1]));
     assert_eq!(buckets[0], 0);
     assert_eq!(*buckets.last().unwrap(), LENGTH_BUCKETS - 1);
+    for (length, bucket) in [
+        (15, 15),
+        (16, 16),
+        (31, 16),
+        (32, 17),
+        (64, 18),
+        (127, 18),
+        (128, 19),
+        (255, 19),
+        (256, 20),
+    ] {
+        assert_eq!(length_bucket(length), bucket, "length {length}");
+    }
+}
+
+#[test]
+fn a_check_is_the_hashs_top_sixteen_bits() {
+    assert_eq!(check_of(0xabcd_0000_0000_1234), 0xabcd);
+    assert_eq!(check_of(0x0000_ffff_ffff_ffff), 0);
+}
+
+/// A followed match grows a byte per hit, past the verify limit that caps
+/// the lookup that found it: the model follows its match, it does not
+/// re-find it.
+#[test]
+fn a_followed_match_grows_past_the_verify_limit() {
+    let block = random_bytes(13, 2 * MATCH_VERIFY_LIMIT);
+    let data = block.repeat(2);
+    let mut model = MatchModel::try_new().unwrap();
+    let mut longest = 0;
+    for i in 0..data.len() {
+        if let Some((byte, length)) = model.predict(&data[..i]) {
+            assert_eq!(byte, data[i], "a verbatim repeat predicts every byte");
+            longest = longest.max(length);
+        }
+    }
+    assert_eq!(longest, data.len() - 1 - block.len());
+}
+
+/// The coded stream of one mixed input, pinned: text, noise, a run and a
+/// repeat longer than the verify limit, so every input of the mixer
+/// speaks, then more noise than the order tables hold, so contexts collide
+/// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138) were
+/// read through this model, and the wiring slice ships the model that
+/// produced them; a change here is a new candidate, re-read on train and
+/// sealed, and this pin moves with its journal entry. Also a determinism
+/// check: every lane that runs the suite codes the same bytes.
+#[test]
+fn the_coded_stream_of_a_mixed_input_is_pinned() {
+    let text = b"the quick brown fox jumps over the lazy dog; pack my box with five \
+        dozen liquor jugs. "
+        .repeat(40);
+    let noise = random_bytes(17, 2 * MATCH_VERIFY_LIMIT);
+    let data = [
+        text.as_slice(),
+        &noise,
+        &[b'='; 300],
+        &noise,
+        &text[..1000],
+        &random_bytes(19, 1 << 16),
+    ]
+    .concat();
+
+    let stream = encode(&data);
+
+    assert_eq!(
+        (stream.len(), crate::crc32::crc32(&stream)),
+        (66_491, 2_313_715_878),
+        "the model changed: re-read it as a candidate"
+    );
 }
 
 /// An input at or past either end of `[0, 1]` would hand [`logistic::ln`]
@@ -230,12 +300,14 @@ fn an_owner_finds_its_bucket_from_any_index_in_its_set() {
     assert_eq!(table[ORDER_WAYS + 2].slots, before[ORDER_WAYS + 2].slots);
 }
 
+/// Claimed from the set's last index, so a set that started anywhere but
+/// its aligned first bucket would hold a different least-seen root.
 #[test]
 fn a_newcomer_evicts_the_least_seen_root_and_the_first_on_a_tie() {
     let mut table = second_set_owned([3, 1, 2, 1]);
     let before = table.clone();
 
-    let taken = claim(&mut table, ORDER_WAYS + 2, 9);
+    let taken = claim(&mut table, ORDER_WAYS + ORDER_WAYS - 1, 9);
 
     assert_eq!(taken, ORDER_WAYS + 1, "count 1 twice, the first wins");
     assert_eq!(table[taken].check, 9);
@@ -279,6 +351,20 @@ fn a_slot_driven_to_certainty_stays_in_its_field() {
         assert!((0.0..1.0).contains(&p), "{p}");
         assert!(if bit { p > 0.999 } else { p < 0.001 }, "{p}");
     }
+}
+
+/// Adaptation alone stalls short of the guard, the rounded step vanishing
+/// first, so the guard is reached from a slot built one unit below one at
+/// count zero, whose step toward one is a third of a unit and rounds up.
+#[test]
+fn a_step_that_rounds_to_one_holds_one_unit_below() {
+    let unit = 1.0 / f64::from(1u32 << PROBABILITY_BITS);
+    let mut slot = Slot(((1 << PROBABILITY_BITS) - 1) << COUNT_BITS);
+    assert_eq!((slot.p(), slot.count()), (1.0 - unit, 0));
+
+    slot.update(true);
+
+    assert_eq!((slot.p(), slot.count()), (1.0 - unit, 1));
 }
 
 #[test]
