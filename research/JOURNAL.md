@@ -9499,3 +9499,26 @@ record.
   decoder needs (ADR-0024; the candidate uses libm `f64`), where the
   candidate's time goes, and each component's share of the sealed gain.
   `research/progress.jsonl` it214 to it227.
+- S2-A134 | ACCEPTED | Issue #1775 question 1, deterministic math under
+  S2-A133's candidate. Hypothesis: moving `cm_path`'s `stretch` and
+  `squash` from libm `f64` onto the codec's own `logistic` pair (ADR-0024)
+  moves neither the train mean nor either sealed case by more than 1e-9
+  b/B. | Mechanism: every value a decoder would recompute, the six inputs'
+  logits and the mixed probability, now comes from `logistic::stretch` and
+  `logistic::squash`, IEEE-754 basic operations only; `cost_bits` keeps
+  libm `log2`, because it prices a decision a frame would code instead.
+  `logistic` widens from `pub(crate)` to `#[doc(hidden)] pub` for the
+  caller. Against main, same driver, both read at 12 decimals: train mean
+  -0.051999404484 to -0.051999404472 (+1.2e-11), no train case moving
+  more than 3.2e-11; sealed `access_log` -1.5e-11, `gradient_image`
+  -4e-12. The summed train bits agree to the third decimal. | Verdict:
+  **accepted** on its hypothesis; the moves are float rounding, so the
+  corpus rule's train-improvement clause has no ratio claim to grade, and
+  the sealed set does not regress. Speed, pricing alone over the 11
+  `baseline::cases()`, release build, AMD EPYC 7763 4 logical cores
+  runner, three interleaved runs: main 0.1353 to 0.1365 MB/s, the codec
+  pair 0.1116 to 0.1158, 14% to 18% slower. Untested reading: the codec's
+  `ln` is a 14-term series against libm's table-driven one, called six
+  times per bit-tree node. | **Not measured:** a faster deterministic
+  `ln` (a table over the clamped domain), and #1775's questions 2 to 5.
+  `research/progress.jsonl` it228.
