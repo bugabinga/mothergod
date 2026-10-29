@@ -687,6 +687,10 @@ pub fn encode_level(data: &[u8], workers: NonZeroUsize, level: Level) -> Vec<u8>
 /// candidate, and its body at [`Reach::Standard`].
 type Winner = (usize, Candidate, Vec<u8>);
 
+/// A trial's result, and what [`search`] settles on: the candidate, the
+/// [`Reach`] its body was parsed at, and the body.
+type Trial = (Candidate, Reach, Vec<u8>);
+
 /// One trial: `data` through `candidate`'s filter, then [`encode_tokens`] at
 /// `reach`. The one statement of what a trial is, for [`search`]'s narrow
 /// trials and the wide trial [`encode`] documents alike.
@@ -694,30 +698,24 @@ fn trial_body(data: &[u8], candidate: Candidate, reach: Reach) -> Vec<u8> {
     encode_tokens(&apply_filter(candidate, data), candidate.columns(), reach)
 }
 
-/// The one trial [`Level::Fast`] and [`Level::Fastest`] run, as `(candidate,
-/// reach, body)`: no search over filters, and `rounds` DP rounds where
-/// [`encode`]'s parse runs [`lz::DP_ROUNDS`]. [`Level::Fast`] passes one and
-/// reaches wide on input longer than [`lz::WINDOW`], where [`encode`] pays a
-/// second trial to find out whether wide wins; [`Level::Fastest`] passes
-/// zero, [`lz::parse_greedy`], which never sees past the standard window and
-/// so declares [`Reach::Standard`].
-fn quick_trial(
-    data: &[u8],
-    candidate: Candidate,
-    reach: Reach,
-    rounds: usize,
-) -> (Candidate, Reach, Vec<u8>) {
+/// The one trial [`Level::Fast`] and [`Level::Fastest`] run: no search over
+/// filters, and `rounds` DP rounds where [`encode`]'s parse runs
+/// [`lz::DP_ROUNDS`]. [`Level::Fast`] passes one and reaches wide on input
+/// longer than [`lz::WINDOW`], where [`encode`] pays a second trial to find
+/// out whether wide wins; [`Level::Fastest`] passes zero,
+/// [`lz::parse_greedy`], which never sees past the standard window and so
+/// declares [`Reach::Standard`].
+fn quick_trial(data: &[u8], candidate: Candidate, reach: Reach, rounds: usize) -> Trial {
     let filtered = apply_filter(candidate, data);
     let tokens = lz::parse_rounds(&filtered, reach, rounds);
     let body = encode_tokens_with(&filtered, candidate.columns(), reach, &tokens);
     (candidate, reach, body)
 }
 
-/// The winner among `candidates` as `(candidate, reach, body)`: the first
-/// candidate in the list to reach the smallest body at [`Reach::Standard`],
-/// what a serial loop that replaces its incumbent only on a strictly smaller
-/// body keeps, then the wide trial [`encode`] documents. `None` for no
-/// candidates.
+/// The winner among `candidates`: the first candidate in the list to reach
+/// the smallest body at [`Reach::Standard`], what a serial loop that replaces
+/// its incumbent only on a strictly smaller body keeps, then the wide trial
+/// [`encode`] documents. `None` for no candidates.
 ///
 /// Up to `workers` threads take the next untried candidate until none is
 /// left; each keeps its own winner, which is its first smallest because it
@@ -731,11 +729,7 @@ fn quick_trial(
 /// it is not, the real wide trial starts at once beside the wasted one, so
 /// the working sets stay at `workers` and the payload is the serial one
 /// either way (`research/JOURNAL.md` S2-A129).
-fn search(
-    data: &[u8],
-    candidates: &[Candidate],
-    workers: NonZeroUsize,
-) -> Option<(Candidate, Reach, Vec<u8>)> {
+fn search(data: &[u8], candidates: &[Candidate], workers: NonZeroUsize) -> Option<Trial> {
     let sizes: Vec<AtomicUsize> = candidates
         .iter()
         .map(|_| AtomicUsize::new(PENDING))
@@ -816,7 +810,7 @@ fn search(
 /// [`widen`] wrote. It runs after [`widen`], alone, because a trial on a
 /// block holds a block-sized working set and the narrow and wide trials
 /// already fill `workers` (`research/JOURNAL.md` S2-A126, S2-A137).
-fn reach_far(data: &[u8], kept: (Candidate, Reach, Vec<u8>)) -> (Candidate, Reach, Vec<u8>) {
+fn reach_far(data: &[u8], kept: Trial) -> Trial {
     let (candidate, _, body) = &kept;
     let far = trial_body(data, *candidate, Reach::Far);
     if crate::candidate_beats_incumbent(far.len(), body.len()) {
@@ -836,7 +830,7 @@ fn widen(
     data: &[u8],
     (index, candidate, body): Winner,
     trial: Option<(usize, WideTrial<'_>)>,
-) -> (Candidate, Reach, Vec<u8>) {
+) -> Trial {
     let wide = match trial {
         Some((guessed, handle)) if guessed == index => rejoin(handle.join()),
         _ => trial_body(data, candidate, Reach::Wide),
