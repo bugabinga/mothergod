@@ -126,6 +126,16 @@ DELIMITER = re.compile(r"^:?-+:?$")
 # in a cell, and one inside a code span is literal, as INLINE promises; each
 # is consumed whole here so only group 1 marks a boundary.
 PIPE = re.compile(r"\\.|`[^`]*`|(\|)")
+# A fenced block is quoted text: what the operator copies from the phone
+# must be what was sent, and a shell comment arriving bold or a fenced table
+# arriving as bullets is not (#1794). Telegram's form for it is `<pre>`, so
+# a fence's lines pass through as one, with no line or inline form applied.
+# GFM's rules, which GitHub renders the same text by: the opening fence is
+# three or more backticks after at most three spaces with no backtick in
+# its info string, the closing fence is at least as long and alone on its
+# line, and an unclosed fence runs to the end of the body.
+FENCE = re.compile(r"^ {0,3}(`{3,})(?!.*`)")
+CLOSE = re.compile(r"^ {0,3}(`{3,})[ \t]*$")
 
 
 def main() -> int:
@@ -235,14 +245,58 @@ def render(body: str, repo: str) -> str:
     by the time the patterns see it and cannot be read as a tag. Only the
     forms Telegram has a tag for survive; everything else stays literal,
     which is the honest outcome for a subset this small and the reason the
-    subset can stay small.
+    subset can stay small. A fenced block is the one run of lines no form
+    touches: it arrives as one `<pre>` block, as typed.
     """
-    lines = []
+    parts = []
     escaped = html.escape(body, quote=False).split("\n")
-    for is_row, block in groupby(escaped, key=lambda line: ROW.match(line) is not None):
+    for fenced, block in segments(escaped):
+        if fenced:
+            text = "\n".join(block)
+            if text:
+                parts.append(f"<pre>{text}</pre>")
+        else:
+            parts.append(INLINE.sub(lambda m: inline(m, repo), "\n".join(prose(block))))
+    return "\n".join(parts)
+
+
+def segments(lines: list[str]):
+    """Runs of lines, fenced or not, in order; the fence lines are consumed.
+
+    Yields `(fenced, lines)`. A prose run is never empty; a fenced run can
+    be. A backtick run shorter than the opening fence is content inside it,
+    which is how a fence shows a fence.
+    """
+    prose_lines, code, width = [], None, None
+    for line in lines:
+        if width is None:
+            opening = FENCE.match(line)
+            if opening:
+                if prose_lines:
+                    yield False, prose_lines
+                prose_lines, code, width = [], [], len(opening[1])
+            else:
+                prose_lines.append(line)
+        else:
+            closing = CLOSE.match(line)
+            if closing and len(closing[1]) >= width:
+                yield True, code
+                code, width = None, None
+            else:
+                code.append(line)
+    if width is not None:
+        yield True, code
+    elif prose_lines:
+        yield False, prose_lines
+
+
+def prose(lines: list[str]) -> list[str]:
+    """Lines outside a fence: a table as chat lines, every other line by form."""
+    out = []
+    for is_row, block in groupby(lines, key=lambda line: ROW.match(line) is not None):
         block = list(block)
-        lines.extend(table(block) if is_row else map(line_form, block))
-    return INLINE.sub(lambda m: inline(m, repo), "\n".join(lines))
+        out.extend(table(block) if is_row else map(line_form, block))
+    return out
 
 
 def line_form(line: str) -> str:
