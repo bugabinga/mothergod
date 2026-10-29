@@ -214,3 +214,26 @@ test("the redaction marker is literal text, not a bold run", async () => {
   assert.equal(seen.at(-1).text, "token ***REDACTED*** leaked");
   assert.match(stderr, /redacted 1 credential-shaped/);
 });
+
+// A fenced block is quoted text, so what the operator copies from the phone
+// is what was sent: no form touches its lines, and it arrives as one pre
+// block (#1794). Escaping still runs, because Telegram's HTML demands it.
+test("a fenced block arrives as one pre block, its lines as typed", async () => {
+  const { status } = await send("tok-ok", {
+    body: "before\n```sh\n# comment <x>\n- item **x** #1\n| a | b |\n|---|---|\n| 1 | 2 |\n```\nafter **b**",
+  });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    "before\n<pre># comment &lt;x&gt;\n- item **x** #1\n| a | b |\n|---|---|\n| 1 | 2 |</pre>\nafter <b>b</b>",
+  );
+});
+
+// GFM's two fence rules, pinned: a closing fence is at least as long as the
+// opening one, so a fence can show a fence, and an unclosed fence runs to
+// the end of the body.
+test("a shorter backtick run inside a fence is content, and an unclosed fence runs to the end", async () => {
+  const { status } = await send("tok-ok", { body: "````\n```\ncode\n```\n````\n```\ntail" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "<pre>```\ncode\n```</pre>\n<pre>tail</pre>");
+});
