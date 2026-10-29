@@ -19,16 +19,16 @@ recorded experiment in
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-10-26 against
+measurement time and never committed. Measured 2026-10-29 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod -3** | gzip -9 | zstd -19 | xz -9e |
 |---|---|---|---|---|
 | Canterbury | **1.347** | 2.079 | 1.470 | 1.403 |
-| Silesia | **2.005** | 2.553 | 1.997 | 1.829 |
+| Silesia | **1.976** | 2.553 | 1.997 | 1.829 |
 
-mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury, and
-loses to both in aggregate on Silesia. Per file, against whichever of the two
+mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury; on
+Silesia it beats `zstd -19` and loses to `xz -9e`. Per file, against whichever of the two
 is stronger on that file, it wins 7 of 11 on Canterbury and 1 of 12 on
 Silesia. The wins are Canterbury's six smallest text and source files
 (`alice29.txt`, `asyoulik.txt`, `cp.html`, `fields.c`, `grammar.lsp`,
@@ -41,9 +41,9 @@ attached. Every file's numbers:
 [Silesia](docs/benchmarks/silesia.md).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
-0.319 MB/s and decoded it at 5.018 MB/s; it encoded Silesia at 0.211 MB/s and
-decoded it at 3.464 MB/s. In the same run, `xz -9e` encoded Silesia at 1.949
-MB/s and decoded it at 88.426 MB/s, more than nine times faster to encode and
+0.287 MB/s and decoded it at 4.324 MB/s; it encoded Silesia at 0.153 MB/s and
+decoded it at 2.981 MB/s. In the same run, `xz -9e` encoded Silesia at 2.073
+MB/s and decoded it at 83.106 MB/s, more than nine times faster to encode and
 more than twenty times faster to decode.
 The same two reports name the machine, give every file's rates, and end
 with every level of gzip, zstd and xz beside mothergod, peak memory
