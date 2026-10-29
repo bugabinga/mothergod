@@ -44,10 +44,16 @@ const COUNTER_LIMIT: u16 = 1023;
 /// The hashed context orders, each one input, in mixer order.
 const ORDERS: [usize; 4] = [3, 4, 5, 6];
 
-/// Slots per order table, as a power of two. A 50,000-byte case makes at
-/// most 400,000 node contexts per order, so collisions stay rare at the
-/// case size every recorded number used, and are not detected.
-const ORDER_TABLE_BITS: u32 = 22;
+/// [`Bucket`]s per order table, as a power of two. A 50,000-byte case
+/// makes at most 100,000 nibble contexts per order, so collisions stay
+/// rare at the case size every recorded number used; a [`Bucket`]'s check
+/// detects one and resets the bucket instead of sharing it.
+const ORDER_BUCKET_BITS: u32 = 18;
+
+/// Bit-tree nodes per nibble, numbered `1..NIBBLE_NODES` from the
+/// nibble's root, `node * 2 + bit` per step, as the byte's tree is; so
+/// also the byte's node id at which the low nibble starts.
+const NIBBLE_NODES: usize = 16;
 
 /// Bytes the match model hashes to find a candidate, and the shortest
 /// verified match it follows.
@@ -69,10 +75,6 @@ const WEIGHT_SETS: usize = LENGTH_BUCKETS * 2;
 
 /// Inputs to the outer mixer: the wire model, the match model, the orders.
 const INPUTS: usize = 2 + ORDERS.len();
-
-/// The bit-tree node id at which the low nibble starts: nodes are numbered
-/// from 1 at the root, `node * 2 + bit` per step, so depth 4 starts at 16.
-const LOW_NIBBLE_NODE: usize = 16;
 
 fn clamp(p: f64) -> f64 {
     p.clamp(PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)
@@ -109,15 +111,29 @@ fn hash_bytes(seed: u64, bytes: &[u8]) -> u64 {
 /// `h` reduced to a table index under `bits`.
 #[allow(
     clippy::cast_possible_truncation,
-    reason = "masked to at most 22 bits first, which fits usize on every target"
+    reason = "masked to at most 20 bits first, which fits usize on every target"
 )]
 fn slot(h: u64, bits: u32) -> usize {
     (h & ((1u64 << bits) - 1)) as usize
 }
 
-/// A table of adaptive bit probabilities with count-scaled rates, lpaq1's
-/// `StateMap` shape: a slot moves `1 / (count + 1.5)` of the way to each
-/// bit it sees, so it learns fast when fresh and settles as it fills.
+/// One adaptive bit probability with a count-scaled rate, lpaq1's
+/// `StateMap` rule: it moves `1 / (count + 1.5)` of the way to each bit it
+/// sees, so it learns fast when fresh and settles as it fills.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "a probability in [0, 1] narrows to f32 by rounding only"
+)]
+fn adapt(probability: &mut f32, count: &mut u16, bit: bool) {
+    let p = f64::from(*probability);
+    let target = f64::from(u8::from(bit));
+    *probability = (p + (target - p) / (f64::from(*count) + 1.5)) as f32;
+    if *count < COUNTER_LIMIT {
+        *count += 1;
+    }
+}
+
+/// A table of [`adapt`]ed bit probabilities, one per slot.
 #[derive(Debug, Clone)]
 struct Counter {
     probability: Vec<f32>,
@@ -136,19 +152,50 @@ impl Counter {
         f64::from(self.probability[slot])
     }
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "a probability in [0, 1] narrows to f32 by rounding only"
-    )]
     fn update(&mut self, slot: usize, bit: bool) {
-        let count = self.count[slot];
-        let p = self.p(slot);
-        let target = f64::from(u8::from(bit));
-        self.probability[slot] = (p + (target - p) / (f64::from(count) + 1.5)) as f32;
-        if count < COUNTER_LIMIT {
-            self.count[slot] = count + 1;
+        adapt(&mut self.probability[slot], &mut self.count[slot], bit);
+    }
+}
+
+/// One order's [`adapt`]ed probabilities for one nibble context, a slot
+/// per node `1..NIBBLE_NODES`, lpaq1's layout: a nibble's nodes share 96
+/// bytes at a 32-byte alignment, so exactly two cache lines, and an order
+/// costs one table miss per nibble instead of one per node
+/// (`research/JOURNAL.md` S2-A136).
+#[derive(Debug, Clone, Copy)]
+#[repr(C, align(32))]
+struct Bucket {
+    /// The claiming context's [`check_of`]; a lookup under another check
+    /// resets the bucket, so a collision costs the evicted context its
+    /// history instead of sharing it with a stranger.
+    check: u16,
+    count: [u16; NIBBLE_NODES - 1],
+    probability: [f32; NIBBLE_NODES - 1],
+}
+
+impl Bucket {
+    const FRESH: Self = Self {
+        check: 0,
+        count: [0; NIBBLE_NODES - 1],
+        probability: [0.5; NIBBLE_NODES - 1],
+    };
+
+    /// Claims the bucket for `check`: kept when `check` already owns it,
+    /// reset to [`Bucket::FRESH`] otherwise.
+    fn claim(&mut self, check: u16) {
+        if self.check != check {
+            *self = Self {
+                check,
+                ..Self::FRESH
+            };
         }
     }
+}
+
+/// The bits of `h` a [`Bucket`] keeps as its check: the top 16, disjoint
+/// from the low [`ORDER_BUCKET_BITS`] that index it.
+fn check_of(h: u64) -> u16 {
+    u16::try_from(h >> 48).expect("a u64 shifted right 48 fits u16")
 }
 
 /// Bucket of a confirmed match length: `0` is no match, `1..=15` exact,
@@ -234,7 +281,7 @@ pub struct CmPath {
     literal: Literal,
     literal_mixer: SurpriseLogisticMix,
     match_model: MatchModel,
-    orders: Vec<Counter>,
+    orders: Vec<Vec<Bucket>>,
     weights: Vec<[f64; INPUTS]>,
 }
 
@@ -257,7 +304,7 @@ impl CmPath {
             match_model: MatchModel::new(),
             orders: ORDERS
                 .iter()
-                .map(|_| Counter::new(1 << ORDER_TABLE_BITS))
+                .map(|_| vec![Bucket::FRESH; 1 << ORDER_BUCKET_BITS])
                 .collect(),
             weights: vec![start; WEIGHT_SETS],
         }
@@ -281,6 +328,8 @@ impl CmPath {
 
         let mut bits = 0.0;
         let (mut lo, mut hi, mut node) = (0usize, 256usize, 1usize);
+        let mut nibble_node = 1usize;
+        let mut order_buckets = [0usize; ORDERS.len()];
         literal.walk_logit_sse(context, literal_mixer, |mid, literal_p| {
             let bit = symbol >= mid;
             let mut inputs = [0.0; INPUTS];
@@ -300,13 +349,26 @@ impl CmPath {
                 }
             }
 
-            let node_key = (node as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-            let order_slots = order_hashes.map(|h| slot(mix64(h ^ node_key), ORDER_TABLE_BITS));
-            for ((input, counter), &s) in inputs[2..].iter_mut().zip(&*orders).zip(&order_slots) {
-                *input = stretch(counter.p(s));
+            // A nibble starts at node 1 or at 16 to 31, which names the
+            // high nibble, so the low nibble's buckets key on it.
+            if nibble_node == 1 {
+                let nibble_key = (node as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                for ((index, &h), table) in order_buckets
+                    .iter_mut()
+                    .zip(&order_hashes)
+                    .zip(&mut *orders)
+                {
+                    let h = mix64(h ^ nibble_key);
+                    *index = slot(h, ORDER_BUCKET_BITS);
+                    table[*index].claim(check_of(h));
+                }
+            }
+            let i = nibble_node - 1;
+            for ((input, table), &b) in inputs[2..].iter_mut().zip(&*orders).zip(&order_buckets) {
+                *input = stretch(f64::from(table[b].probability[i]));
             }
 
-            let set = bucket * 2 + usize::from(node >= LOW_NIBBLE_NODE);
+            let set = bucket * 2 + usize::from(node >= NIBBLE_NODES);
             let w = &mut weights[set];
             let dot: f64 = w.iter().zip(&inputs).map(|(w, x)| w * x).sum();
             let p = logistic::squash(dot);
@@ -319,8 +381,9 @@ impl CmPath {
             if let Some(s) = confidence_slot {
                 match_model.confidence.update(s, bit);
             }
-            for (counter, &s) in orders.iter_mut().zip(&order_slots) {
-                counter.update(s, bit);
+            for (table, &b) in orders.iter_mut().zip(&order_buckets) {
+                let entry = &mut table[b];
+                adapt(&mut entry.probability[i], &mut entry.count[i], bit);
             }
 
             if bit {
@@ -329,6 +392,10 @@ impl CmPath {
                 hi = mid;
             }
             node = node * 2 + usize::from(bit);
+            nibble_node = nibble_node * 2 + usize::from(bit);
+            if nibble_node >= NIBBLE_NODES {
+                nibble_node = 1;
+            }
             bit
         });
         bits
@@ -462,6 +529,36 @@ mod tests {
             assert!((x - expected).abs() < 1e-12, "stretch({p}) = {x}");
         }
         assert!(stretch(0.5).abs() < 1e-15);
+    }
+
+    /// 96 bytes at a 32-byte alignment start at offset 0 or 32 of a
+    /// 64-byte line, so a bucket spans exactly two lines, the miss count
+    /// [`Bucket`]'s doc promises.
+    #[test]
+    fn a_bucket_spans_exactly_two_cache_lines() {
+        assert_eq!(std::mem::size_of::<Bucket>(), 96);
+        assert_eq!(std::mem::align_of::<Bucket>(), 32);
+    }
+
+    #[test]
+    fn a_bucket_keeps_its_owners_history_and_resets_for_another_check() {
+        let mut bucket = Bucket::FRESH;
+        bucket.claim(7);
+        adapt(&mut bucket.probability[3], &mut bucket.count[3], true);
+        let learned = bucket.probability[3];
+        assert!(learned > 0.5);
+
+        bucket.claim(7);
+        assert_eq!(
+            (bucket.probability[3], bucket.count[3]),
+            (learned, 1),
+            "same owner"
+        );
+
+        bucket.claim(8);
+        assert_eq!(bucket.check, 8);
+        assert_eq!(bucket.count, Bucket::FRESH.count, "a collision evicts");
+        assert_eq!(bucket.probability, Bucket::FRESH.probability);
     }
 
     #[test]

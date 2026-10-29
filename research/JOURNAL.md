@@ -9560,3 +9560,40 @@ record.
   every filter, `Transpose`'s column-coding state, which the candidate
   does not model, and #1775's questions 3 to 5.
   `research/progress.jsonl` it229.
+- S2-A136 | ACCEPTED, unwired | Issue #1775 question 3, the speed trade
+  under S2-A135's candidate, one idea in two tries (ADR-0070): where
+  `cm_path` spends its pricing time, and lpaq1's answers to it.
+  Hypothesis: the four order tables (24 MiB each, one random slot per
+  bit-tree node) cost most of the time a context-mixing decoder would
+  pay, and lpaq1's nibble bucket recovers it without a train or sealed
+  regression. | Mechanism, measured by ablation over the 11
+  `baseline::cases()`, release build, AMD EPYC 9V74 4 logical cores
+  runner (`perf` is not permitted there): the full candidate 4.5 s,
+  the shipped wire model alone (`Literal::walk_logit_sse` over every byte)
+  1.5 s, `logistic::stretch` at six calls per node 0.47 s, and the same
+  candidate with cache-sized order tables (2^16 slots) 2.8 s, so table
+  misses were about 38% of pricing. Try it231, kept: per order and nibble,
+  one hash picks a 96-byte, 32-aligned `Bucket` holding the nibble's 15
+  nodes, two cache lines instead of 16 scattered slots, same 24 MiB per
+  order, with a 16-bit check that resets the bucket on a collision instead
+  of sharing it. Train mean -0.228325694 to -0.228926073 (-0.000600);
+  `entropy_ladder_h8`, S2-A135's one train case above the hybrid, goes
+  from +0.001492 to -0.000046, so every train case now prices under it.
+  Pricing alone, interleaved with main in one session, three pairs: main
+  0.116 to 0.120 MB/s, keeper 0.171 to 0.175, 1.45x to 1.49x. Try it230,
+  reverted: a 2^16-step `stretch` table for the five counter inputs (the
+  wire input kept the exact `stretch`) moved train +7.0e-8 for about 11%
+  more speed (one non-interleaved run of three); the loop keeps only a
+  falling train mean, and quantizing a logit to the nearest 2^-16 of
+  probability buys speed with a little precision. Sealed, the keeper read
+  once through `cm_path::train_and_sealed_vs_real_bitstream`:
+  `access_log` -0.153312 to -0.154346, `gradient_image` -0.146934 to
+  -0.147981. | Verdict: **accepted, unwired**, train improvement and no
+  sealed regression. Untested reading: the decode slowdown #1775 states
+  shrinks by about the same factor, since a decoder walks the same
+  tables. Remaining time, by the same ablation: the wire model about
+  half, `stretch` about a seventh. | **Not measured:** `perf` counters (not
+  permitted on the runner), lpaq1's two- or three-way bucket replacement
+  by count, a finer or interpolated `stretch` table that holds the train
+  mean, the wire model's own cost, and #1775's questions 4 and 5.
+  `research/progress.jsonl` it230, it231.
