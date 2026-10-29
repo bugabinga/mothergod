@@ -372,6 +372,24 @@ struct ColumnCoding {
 }
 
 impl ColumnCoding {
+    /// The state for a frame of `data_len` filtered bytes whose candidate
+    /// has `columns`: `None` for a candidate with none. Fallible for the
+    /// decoder (hard rule 2); the encoder aborts on `Err`.
+    fn try_new(
+        columns: Option<NonZeroUsize>,
+        data_len: usize,
+    ) -> Result<Option<Self>, std::collections::TryReserveError> {
+        columns
+            .map(|columns| {
+                Ok(Self {
+                    columns,
+                    data_len,
+                    state: ColumnExpertState::try_new(MAX_COLUMN_BANKS)?,
+                })
+            })
+            .transpose()
+    }
+
     /// The [`ColumnExpertState`] bank the literal at `position` of the
     /// filtered stream codes under.
     fn bank(&self, position: usize) -> usize {
@@ -475,11 +493,7 @@ fn encode_tokens_with(
 
     let mut models = Models::new(reach);
     let mut ac = Encoder::new();
-    let column = columns.map(|columns| ColumnCoding {
-        columns,
-        data_len: data.len(),
-        state: ColumnExpertState::new(MAX_COLUMN_BANKS),
-    });
+    let column = crate::abort_on_oom(ColumnCoding::try_new(columns, data.len()));
     walk_tokens(
         tokens,
         data,
@@ -1260,16 +1274,7 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let (candidate, reach, payload) = split_selector(payload)?;
     let (declared_len, token_count, ac_bytes) = read_header(payload, max_len, candidate)?;
 
-    let column = candidate
-        .columns()
-        .map(|columns| {
-            ColumnExpertState::try_new(MAX_COLUMN_BANKS).map(|state| ColumnCoding {
-                columns,
-                data_len: declared_len,
-                state,
-            })
-        })
-        .transpose()?;
+    let column = ColumnCoding::try_new(candidate.columns(), declared_len)?;
     // Reserved fallibly and exactly up front, not left to grow through
     // `push`/`extend`'s doubling: `declared_len` is already bounded above,
     // so nothing past this point ever asks `output` to grow past what it
