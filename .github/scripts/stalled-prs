@@ -61,6 +61,18 @@ Signatures, most specific first, at most one reported per PR:
                          heartbeat was refused on it (#1369). Report only:
                          the BDFL reads the bump, release notes on a major,
                          and lands it on its sweep.
+    needs-bdfl           a PR whose files include `.claude/` and whose
+                         next move is its author's: a required gate red
+                         on its own head, or a changes-requested
+                         verdict. The maintainer wakes on a verdict to
+                         be every author's hands (#998), but only the
+                         BDFL's seat runs bypassPermissions (ADR-0033),
+                         the grant that clears the harness's own guard
+                         on `.claude/`: four maintainer runs were denied
+                         on #1777 in one day, each reporting the blocker
+                         by hand, while the BDFL's prompt waited for
+                         this script to name it. Report only: the BDFL
+                         fixes it on its sweep.
 
 One signature has no PR to hang on, which is the whole point of it:
 
@@ -131,7 +143,8 @@ touching no workflow file is the heartbeat's duty 3 and lands within its
 cadence. A PR with a still running
 gate is not stalled, and neither is a red one whose red is its own (a head
 that carries main, or a changes-requested verdict): its author owns the
-next move. An open PR that is simply old and abandoned is a different
+next move, and the maintainer makes it (#998), unless the files are under
+`.claude/`, which is needs-bdfl above. An open PR that is simply old and abandoned is a different
 class, and this detector does not pretend to find it.
 
 Liveness: the footer always prints how many PRs and branches were read, how
@@ -214,6 +227,12 @@ DRIFT_GRACE = timedelta(hours=1)
 # credential on; a PR under it is never landed by this script.
 WORKFLOW_PREFIX = ".github/workflows/"
 
+# The one path prefix no seat but the BDFL's can write. The harness guards
+# `.claude/` itself, bypassPermissions (ADR-0033) is what clears the guard,
+# and only agent-bdfl.yml runs under it, so a returned PR with a file here
+# waits on the BDFL's sweep and nobody else.
+CLAUDE_PREFIX = ".claude/"
+
 # gh prefixes a bot's login with `app/`; dependabot's PRs carry this one.
 DEPENDABOT = "app/dependabot"
 
@@ -268,14 +287,33 @@ def suppress(pr):
     return PARKED_LABEL in labels or pr["isDraft"] or pr["isCrossRepository"]
 
 
+def needs_bdfl(pr, files, move, **when):
+    """The finding for a PR under `.claude/` whose next move (`move`, the
+    red gates or the verdict) is its author's, or None: unread paths stay
+    inert, and a PR outside the prefix is the maintainer's as #998 ruled."""
+    if files is None:
+        return None
+    factory = [path for path in files if path.startswith(CLAUDE_PREFIX)]
+    if not factory:
+        return None
+    return finding(
+        "needs-bdfl",
+        f"{move} on {len(factory)} file(s) under {CLAUDE_PREFIX}; the author's push, "
+        "and only the BDFL's seat can write there (bypassPermissions, ADR-0033)",
+        "the BDFL's, this wake: fix it, then "
+        f"push-branch {pr['number']} <paths> and settle-push {pr['number']}",
+        **when,
+    )
+
+
 def classify(pr, now, drift=None, files=None):
     """Return the one finding for this PR, or None. Pure: no network, no clock.
 
     `drift` is the caller's one network read for a red head, {"sha", "behind_by"}
     against main's newest green push run, or None when unread, which keeps
     red-from-drift inert rather than wrong. `files` is the caller's one read
-    of a dependabot PR's changed paths, or None when unread, which keeps
-    workflow-bump inert the same way.
+    of the changed paths of a dependabot, red or returned PR, or None when
+    unread, which keeps workflow-bump and needs-bdfl inert the same way.
 
     Order is specificity, not severity. A dirty PR whose reviewer also died
     needs the merge first; reporting both would be two lines describing one
@@ -320,22 +358,27 @@ def classify(pr, now, drift=None, files=None):
         # the head is behind a green main, no reviewer has returned it, and
         # no review is mid-flight that a new head would throw away.
         review = by_job.get(REVIEW_CHECK)
+        names = ", ".join(gate["name"] for gate in red)
+        ended = max(gate.get("completedAt") or "" for gate in red) or None
         if (
             drift
             and drift["behind_by"] > 0
             and "changes-requested" not in labels
             and (review is None or review["status"] == "COMPLETED")
         ):
-            names = ", ".join(gate["name"] for gate in red)
             return finding(
                 REFRESH,
                 f"{names} red on a head {drift['behind_by']} commit(s) behind main's "
                 f"green {drift['sha'][:7]}; nothing reruns a finished head",
                 f"`gh pr update-branch {pr['number']}`: the new head refires ci and "
                 "the review",
-                ended=max(gate.get("completedAt") or "" for gate in red) or None,
+                ended=ended,
             )
-        return None
+        # A red of its own is the author's, and under `.claude/` the author
+        # is the one seat that can push it (needs-bdfl, below for the
+        # verdict case). The heartbeat skips every `.claude/` PR in its
+        # duty 1, so an unreported red one here would be nobody's.
+        return needs_bdfl(pr, files, f"{names} red", ended=ended)
     if len(gates) < len(REQUIRED_GATES):
         present = {gate["name"] for gate in gates}
         missing = ", ".join(n for n in REQUIRED_GATES if n not in present)
@@ -420,7 +463,11 @@ def classify(pr, now, drift=None, files=None):
             review,
             started=started,
         )
-    return None
+    # Returned is the author's, and the maintainer wakes on the verdict to
+    # be its hands (#998), except under `.claude/`, which its harness
+    # refuses: four denied maintainer runs on #1777 in a day, and until this
+    # branch nothing handed the PR to the one seat that can write it.
+    return needs_bdfl(pr, files, "changes-requested", review=review, started=started)
 
 
 def plan(pr, found, now, files=None, approved_at=None):
@@ -708,11 +755,13 @@ def main():
         drift = None
         files = None
         if not suppress(pr):
-            if green and any(gate["conclusion"] in DEAD for gate in required_gates(pr)):
+            red = any(gate["conclusion"] in DEAD for gate in required_gates(pr))
+            if green and red:
                 drift = drift_of(green, pr["headRefOid"])
-            # One file read per dependabot PR: the workflow-bump signature is
-            # the only one that needs the paths before a plan.
-            if (pr.get("author") or {}).get("login") == DEPENDABOT:
+            # One file read per PR whose signature keys on paths: a dependabot
+            # bump (workflow-bump), a red head or a returned one (needs-bdfl).
+            returned = any(label["name"] == "changes-requested" for label in pr["labels"])
+            if (pr.get("author") or {}).get("login") == DEPENDABOT or red or returned:
                 files = changed_files(pr["number"])
         rows.append((pr, classify(pr, now, drift, files)))
     branch_rows, branches = orphans({pr["headRefName"] for pr in pulls}, now)

@@ -79,7 +79,7 @@ PINNED = {
     "bdfl": 11308,
     "curator": 3580,
     "deslop": 2024,
-    "heartbeat": 5213,
+    "heartbeat": 5205,
     "herald": 1947,
     "review": 5614,
 }
@@ -87,7 +87,7 @@ PINNED = {
 # The fleet's budget, UTF-8 bytes summed over every seat (#1629). Raise it in
 # the PR that needs the room, with the reason in that PR's body; lower it
 # whenever the total allows.
-CEILING = 29686
+CEILING = 29678
 
 
 def prompts(doc):
