@@ -126,19 +126,24 @@ SHELL_DETACH_MESSAGE = (
 )
 
 
-def span_class(pattern: "re.Pattern[str]", scanned: str) -> str:
-    """Where the idiom `pattern` matched in `scanned` sat, for the record only.
+def span_class(scanned: str) -> str:
+    """Where the detach idioms matched in `scanned` sat, for the record only.
 
-    `unquoted` when the pattern still matches with every quoted span and
-    comment masked (heredoc.mask_quoted), so at least one match is live
-    shell; `quoted` when masking removes every match; `unparsed` when the
-    text ends inside a quote the scan could not close, or after a `$'`
-    it does not model, so the masking is not trusted to say. The newline
-    closes a comment that runs to the end, which is closed text, as
-    `heredoc.continues` reads it; a quote stays open across it.
+    `unquoted` when any SHELL_DETACH pattern still matches with every
+    quoted span and comment masked (heredoc.mask_quoted), so at least one
+    match is live shell; `quoted` when masking removes every match;
+    `unparsed` when the text ends inside a quote the scan could not
+    close, or after a `$'` it does not model, so the masking is not
+    trusted to say. Every pattern is tested, not only the one the reason
+    names: in `echo "fish & chips"; setsid -f x` the reason is the
+    quoted `&`, and the live setsid makes the class `unquoted`. The
+    newline closes a comment that runs to the end, which is closed text,
+    as `heredoc.continues` reads it; a quote stays open across it.
+    "Quoted" is literal: a `$(...)` inside double quotes is masked too,
+    though bash runs it.
     """
     masked, open_span = heredoc.mask_quoted(scanned + "\n")
-    if pattern.search(masked):
+    if any(pattern.search(masked) for pattern, _ in SHELL_DETACH):
         return "unquoted"
     return "unparsed" if open_span else "quoted"
 
@@ -167,7 +172,7 @@ def main() -> int:
             for pattern, why in SHELL_DETACH:
                 if pattern.search(scanned):
                     reason = why
-                    detail = span_class(pattern, scanned)
+                    detail = span_class(scanned)
                     break
     elif tool in DEFAULT_BACKGROUND and background is not False:
         reason = "in background"

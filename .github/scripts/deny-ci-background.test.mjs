@@ -198,6 +198,8 @@ test("a shell-detach deny names where its match sat, and the class never changes
     ["cargo test # fish & chips", "via shell & [quoted]"],
     ["sh -c 'setsid -f cargo test'", "via setsid fork [quoted]"], // the hole #355 named, counted
     ["echo \"a\" & echo 'b & c'", "via shell & [unquoted]"], // one live match outranks the quoted one
+    ["echo \"fish & chips\"; setsid -f x", "via shell & [unquoted]"], // across patterns too
+    ["echo \"$(sleep 1 &)\"", "via shell & [quoted]"], // literal: bash runs it, the label says quote
     ["echo 'unterminated &", "via shell & [unparsed]"],
     ["echo $'a' &", "via shell & [unparsed]"],
   ];
