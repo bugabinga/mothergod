@@ -45,6 +45,7 @@ import json
 import os
 import re
 import sys
+from itertools import groupby, zip_longest
 import urllib.error
 import urllib.request
 
@@ -112,6 +113,14 @@ INLINE = re.compile(
 HEADING = re.compile(r"^ {0,3}#{1,6} +(.*?) *#* *$")
 BULLET = re.compile(r"^( *)[-*] +")
 DOT = "•"  # Telegram has no list markup; this is what a human would type
+# A table has no Telegram form either: GitHub draws the grid, a phone shows
+# the pipes (operator, 2026-10-29). Each body row becomes one line led by
+# its first cell, the other cells each named by their header, which is what
+# a human types to say a table in a chat. A row is a line opening with a
+# pipe; a block is a table only when its second row is the delimiter row,
+# so a lone piped line stays the text it is.
+ROW = re.compile(r"^ {0,3}\|(.*?)\|?[ \t]*$")
+DELIMITER = re.compile(r"^:?-+:?$")
 
 
 def main() -> int:
@@ -224,13 +233,35 @@ def render(body: str, repo: str) -> str:
     subset can stay small.
     """
     lines = []
-    for line in html.escape(body, quote=False).split("\n"):
-        heading = HEADING.match(line)
-        if heading:
-            lines.append(f"<b>{heading[1]}</b>" if heading[1] else "")
-            continue
-        lines.append(BULLET.sub(rf"\1{DOT} ", line))
+    escaped = html.escape(body, quote=False).split("\n")
+    for is_row, block in groupby(escaped, key=lambda line: ROW.match(line) is not None):
+        block = list(block)
+        lines.extend(table(block) if is_row else map(line_form, block))
     return INLINE.sub(lambda m: inline(m, repo), "\n".join(lines))
+
+
+def line_form(line: str) -> str:
+    """One line outside a table: a heading goes bold, a bullet gets its dot."""
+    heading = HEADING.match(line)
+    if heading:
+        return f"<b>{heading[1]}</b>" if heading[1] else ""
+    return BULLET.sub(rf"\1{DOT} ", line)
+
+
+def table(rows: list[str]) -> list[str]:
+    """Consecutive piped lines as chat lines; without a delimiter row, as typed."""
+    cells = [[cell.strip() for cell in ROW.match(row)[1].split("|")] for row in rows]
+    if len(cells) < 2 or not all(DELIMITER.match(cell) for cell in cells[1]):
+        return rows
+    header = cells[0]
+    lines = []
+    for row in cells[2:]:
+        named = (f"{name} {cell}".strip()
+                 for name, cell in zip_longest(header[1:], row[1:], fillvalue="")
+                 if cell)
+        pairs = ", ".join(named)
+        lines.append(f"{DOT} {row[0]}" + (f": {pairs}" if pairs else ""))
+    return lines
 
 
 def inline(match: re.Match, repo: str) -> str:

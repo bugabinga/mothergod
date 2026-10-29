@@ -130,6 +130,27 @@ test("an em dash becomes the comma the house rule names first", async () => {
   assert.equal(seen.at(-1).text, "shipped, verified, twice\ntrailing");
 });
 
+// A table has no Telegram form, so the pipes reached the phone as typed
+// (operator, 2026-10-29). Each body row is one line led by its first cell,
+// the rest named by their headers; an empty cell says nothing.
+test("a table becomes one line per row, cells named by their header", async () => {
+  const { status } = await send("tok-ok", {
+    body:
+      "| corpus | ours | xz -9e |\n|---|---:|---|\n| Canterbury | **1.347** | 1.403 |\n| Silesia | 2.005 | |\nafter",
+  });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    "• Canterbury: ours <b>1.347</b>, xz -9e 1.403\n• Silesia: ours 2.005\nafter",
+  );
+});
+
+test("piped lines without a delimiter row stay the text they are", async () => {
+  const { status } = await send("tok-ok", { body: "| not a table |\nplain" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "| not a table |\nplain");
+});
+
 test("a code span is literal, markup and refs inside it included", async () => {
   const { status } = await send("tok-ok", { body: "`**x**` and `#1` stay literal" });
   assert.equal(status, 0);
