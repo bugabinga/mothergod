@@ -644,17 +644,17 @@ fn binary_tree_evicts_stale_positions_from_the_tree_structure() {
 #[test]
 fn price_counts_tally_bumps_literal_by_prev_byte_context() {
     let tokens = [Token::Literal(0x35), Token::Literal(b'x')];
-    let counts = PriceCounts::tally(&tokens, &[0x35, b'x']);
+    let counts = PriceCounts::tally(&tokens, &[0x35, b'x'], Reach::Standard);
     assert_eq!(counts.literal[3 * 256 + usize::from(b'x')], 2);
     assert_eq!(counts.literal[usize::from(0x35_u8)], 2);
     assert_eq!(counts.length, vec![1; LENGTH_BUCKETS]);
-    assert_eq!(counts.offset, vec![1; OFFSET_BUCKETS]);
+    assert_eq!(counts.offset, vec![1; Reach::Standard.offset_buckets()]);
     assert_eq!(counts.rep, 1);
 }
 
 #[test]
 fn price_counts_tally_literal_at_stream_start_uses_context_zero() {
-    let counts = PriceCounts::tally(&[Token::Literal(b'z')], b"z");
+    let counts = PriceCounts::tally(&[Token::Literal(b'z')], b"z", Reach::Standard);
     assert_eq!(counts.literal[usize::from(b'z')], 2);
 }
 
@@ -663,7 +663,7 @@ fn price_counts_tally_match_bumps_length_and_offset_only() {
     let distance = NonZeroU32::new(100).unwrap();
     let mut tokens = vec![Token::Literal(b'a'); 100];
     tokens.push(Token::Match { len: 10, distance });
-    let counts = PriceCounts::tally(&tokens, &[b'a'; 110]);
+    let counts = PriceCounts::tally(&tokens, &[b'a'; 110], Reach::Standard);
     assert_eq!(counts.length[bucket(10)], 2);
     assert_eq!(counts.offset[bucket(100)], 2);
     assert_eq!(counts.rep, 1);
@@ -678,16 +678,16 @@ fn price_counts_tally_rep_bumps_length_and_rep_only() {
             slot: RepSlot::First,
         },
     ];
-    let counts = PriceCounts::tally(&tokens, &[b'a'; 7]);
+    let counts = PriceCounts::tally(&tokens, &[b'a'; 7], Reach::Standard);
     assert_eq!(counts.length[bucket(6)], 2);
     assert_eq!(counts.rep, 2);
-    assert_eq!(counts.offset, vec![1; OFFSET_BUCKETS]);
+    assert_eq!(counts.offset, vec![1; Reach::Standard.offset_buckets()]);
 }
 
 #[test]
 fn price_counts_tally_accumulates_across_tokens() {
     let tokens = [Token::Literal(b'a'); 3];
-    let counts = PriceCounts::tally(&tokens, b"aaa");
+    let counts = PriceCounts::tally(&tokens, b"aaa", Reach::Standard);
     assert_eq!(counts.literal[usize::from(b'a')], 2);
     assert_eq!(counts.literal[6 * 256 + usize::from(b'a')], 3);
 }
@@ -699,7 +699,7 @@ fn price_counts_prices_computes_shannon_price_per_literal_context() {
         Token::Literal(b'a'),
         Token::Literal(b'b'),
     ];
-    let table = PriceCounts::tally(&tokens, b"aab").prices(3);
+    let table = PriceCounts::tally(&tokens, b"aab", Reach::Standard).prices(3);
 
     assert_eq!(table.literal[usize::from(b'a')], price(2, 257));
     assert_eq!(table.literal[0], price(1, 257));
@@ -840,7 +840,7 @@ fn dp_round_ring_wrapped_picks_the_tokens_an_unwrapped_ring_picks() {
         data.extend_from_within(from..from + 200);
     }
     let seed = parse_greedy(&data);
-    let prices = PriceCounts::tally(&seed, &data).prices(seed.len());
+    let prices = PriceCounts::tally(&seed, &data, Reach::Standard).prices(seed.len());
     let wrapped = dp_round(&data, &prices, Reach::Standard, RING_LEN);
     assert_eq!(replay(&wrapped), data, "roundtrip mismatch");
     let unwrapped = dp_round(

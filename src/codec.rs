@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! offset  size  field
-//! 0       2     selector: [kind | reach << 7, param] (`filters::select::Candidate`, `lz::Reach`)
+//! 0       2     selector: [kind | reach << 6, param] (`filters::select::Candidate`, `lz::Reach`)
 //! 2       4     declared length of the filtered bytes, u32 LE
 //! 6       4     token count, u32 LE
 //! 10      8     range-coded stream length in bytes, u64 LE
@@ -197,15 +197,16 @@ struct Models {
     /// [`OFFSET_LEN_STATES`] independent match-distance [`Model`]s, indexed
     /// by [`offset_len_state`] of the triggering [`Token::Match`]'s own
     /// length (`research/JOURNAL.md` S2-A111/S2-A112,
-    /// `docs/adr/0058-wire-the-offset-length-state-split.md`). Never
-    /// consulted for a [`Token::Rep`], which has no `offset` symbol at all.
+    /// `docs/adr/0058-wire-the-offset-length-state-split.md`), each over
+    /// the frame's [`Reach::offset_buckets`]. Never consulted for a
+    /// [`Token::Rep`], which has no `offset` symbol at all.
     offset_len: [Model; OFFSET_LEN_STATES],
     slot: Model,
 }
 
 impl Models {
-    fn new() -> Self {
-        crate::abort_on_oom(Self::try_new())
+    fn new(reach: Reach) -> Self {
+        crate::abort_on_oom(Self::try_new(reach))
     }
 
     /// The one statement of the fresh tables, returning `Err` if the
@@ -214,7 +215,10 @@ impl Models {
     /// allocation-discipline, `tests/torture.rs`, #453); every encode path
     /// keeps [`Self::new`], this with an abort, where an allocator failure
     /// this small is already a fatal condition for the whole process.
-    fn try_new() -> Result<Self, std::collections::TryReserveError> {
+    /// `reach` sizes the offset alphabet, the one table a frame's reach
+    /// changes.
+    fn try_new(reach: Reach) -> Result<Self, std::collections::TryReserveError> {
+        let offset_buckets = reach.offset_buckets();
         Ok(Self {
             literal: Literal::try_new()?,
             logit_sse: SurpriseLogisticMix::try_new()?,
@@ -233,10 +237,10 @@ impl Models {
             // that constant without updating this list fails to build
             // rather than silently constructing the wrong count.
             offset_len: [
-                Model::try_new(lz::OFFSET_BUCKETS)?,
-                Model::try_new(lz::OFFSET_BUCKETS)?,
-                Model::try_new(lz::OFFSET_BUCKETS)?,
-                Model::try_new(lz::OFFSET_BUCKETS)?,
+                Model::try_new(offset_buckets)?,
+                Model::try_new(offset_buckets)?,
+                Model::try_new(offset_buckets)?,
+                Model::try_new(offset_buckets)?,
             ],
             slot: Model::try_new(lz::REP_SLOTS)?,
         })
@@ -245,8 +249,8 @@ impl Models {
 
 /// Converts a [`lz::bucket`] alphabet index to the residual bit count
 /// [`Encoder::encode_bits`]/[`Decoder::decode_bits`] take: `b` is at most
-/// `OFFSET_BUCKETS - 1` (20), the largest bucket alphabet in use, so it
-/// always fits `u32`.
+/// `Reach::Far.offset_buckets() - 1` (23), the largest bucket alphabet in
+/// use, so it always fits `u32`.
 fn bucket_bits(b: usize) -> u32 {
     u32::try_from(b).expect("bucket index is small, always fits u32")
 }
@@ -440,12 +444,17 @@ impl EncodeSink<'_> {
 /// Panics under the same condition as [`encode_tokens_with`], which this
 /// delegates to.
 fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>, reach: Reach) -> Vec<u8> {
-    encode_tokens_with(data, columns, &lz::parse_optimal_with_window(data, reach))
+    encode_tokens_with(
+        data,
+        columns,
+        reach,
+        &lz::parse_optimal_with_window(data, reach),
+    )
 }
 
 /// Shared body of [`encode_tokens`] and the codec tests: encodes already-parsed
-/// `tokens` through the context-mixing pipeline and returns the real payload
-/// bytes.
+/// `tokens`, every distance of which is within `reach`, through the
+/// context-mixing pipeline and returns the real payload bytes.
 ///
 /// # Panics
 ///
@@ -453,13 +462,18 @@ fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>, reach: Reach) -> Ve
 /// header field is a `u32`, the same bound [`lz::parse_greedy`] already
 /// enforces. [`crate::compress`] checks this before calling in, so
 /// nothing reachable from the public API hits it today.
-fn encode_tokens_with(data: &[u8], columns: Option<NonZeroUsize>, tokens: &[Token]) -> Vec<u8> {
+fn encode_tokens_with(
+    data: &[u8],
+    columns: Option<NonZeroUsize>,
+    reach: Reach,
+    tokens: &[Token],
+) -> Vec<u8> {
     let declared_len = u32::try_from(data.len())
         .expect("codec::encode: input longer than u32::MAX is not supported yet");
     let token_count = u32::try_from(tokens.len())
         .expect("token count bounded by input length, already checked to fit u32 above");
 
-    let mut models = Models::new();
+    let mut models = Models::new(reach);
     let mut ac = Encoder::new();
     let column = columns.map(|columns| ColumnCoding {
         columns,
@@ -602,8 +616,10 @@ impl ResidualTree {
 /// repeats between 1 and 2 MiB back that real files have shrink them, and
 /// where the wide parse loses (`research/JOURNAL.md` S2-R35's
 /// `interleaved_audio16`, `access_log`, `gradient_image`) the payload is the
-/// one a narrow encode writes. A shorter input has nothing to reach, so it
-/// pays no trial.
+/// one a narrow encode writes. Input longer than [`lz::WIDE_WINDOW`] gets
+/// a third, the same candidate at [`Reach::Far`], kept only when strictly
+/// smaller than both (S2-A137). A shorter input has nothing to reach, so
+/// it pays no trial.
 ///
 /// Up to `workers` trials run at once, the calling thread being one of them.
 /// The trials are independent encodes, so the payload is the one a serial
@@ -679,7 +695,7 @@ fn quick_trial(
 ) -> (Candidate, Reach, Vec<u8>) {
     let filtered = apply_filter(candidate, data);
     let tokens = lz::parse_rounds(&filtered, reach, rounds);
-    let body = encode_tokens_with(&filtered, candidate.columns(), &tokens);
+    let body = encode_tokens_with(&filtered, candidate.columns(), reach, &tokens);
     (candidate, reach, body)
 }
 
@@ -765,13 +781,35 @@ fn search(
         let winner = winners
             .into_iter()
             .min_by_key(|(index, _, body)| (body.len(), *index))?;
-        Some(if has_wide_trial {
+        let kept = if has_wide_trial {
             widen(data, winner, trial)
         } else {
             let (_, candidate, body) = winner;
             (candidate, Reach::Standard, body)
+        };
+        Some(if data.len() > lz::WIDE_WINDOW {
+            reach_far(data, kept)
+        } else {
+            kept
         })
     })
+}
+
+/// [`search`]'s step after [`widen`] on input longer than
+/// [`lz::WIDE_WINDOW`]: the kept candidate at [`Reach::Far`], its body
+/// kept only when strictly smaller than `kept`'s, at whichever reach
+/// [`widen`] chose, so where the far parse loses the payload is the one
+/// [`widen`] wrote. It runs after [`widen`], alone, because a trial on a
+/// block holds a block-sized working set and the narrow and wide trials
+/// already fill `workers` (`research/JOURNAL.md` S2-A126, S2-A137).
+fn reach_far(data: &[u8], kept: (Candidate, Reach, Vec<u8>)) -> (Candidate, Reach, Vec<u8>) {
+    let (candidate, _, body) = &kept;
+    let far = trial_body(data, *candidate, Reach::Far);
+    if crate::candidate_beats_incumbent(far.len(), body.len()) {
+        (*candidate, Reach::Far, far)
+    } else {
+        kept
+    }
 }
 
 /// [`search`]'s last step: the narrow `winner` against its wide trial, the
@@ -835,20 +873,22 @@ const TOKEN_HEADER_LEN: usize = 2 * size_of::<u32>() + size_of::<u64>();
 /// Byte length of the selector that opens a `Method::Lz` payload.
 const SELECTOR_LEN: usize = 2;
 
-/// The bit of a selector's `kind` byte that declares [`Reach::Wide`];
-/// [`Candidate::to_header_bytes`] leaves it clear, its kinds being under
-/// 128.
-const WIDE_REACH_BIT: u8 = 0x80;
+/// Where a selector's `kind` byte holds the frame's [`Reach`]: its top two
+/// bits, 0 [`Reach::Standard`], 1 [`Reach::Wide`], 2 [`Reach::Far`], 3
+/// rejected. [`Candidate::to_header_bytes`] leaves them clear, its kinds
+/// being under 64.
+const REACH_SHIFT: u32 = 6;
 
 /// The 2-byte selector that opens a `Method::Lz` payload: `candidate`'s
-/// bytes, `kind` carrying `reach` in its top bit.
+/// bytes, `kind` carrying `reach` in its top two bits.
 fn selector(candidate: Candidate, reach: Reach) -> [u8; SELECTOR_LEN] {
     let [kind, param] = candidate.to_header_bytes();
-    let wide = match reach {
+    let code: u8 = match reach {
         Reach::Standard => 0,
-        Reach::Wide => WIDE_REACH_BIT,
+        Reach::Wide => 1,
+        Reach::Far => 2,
     };
-    [kind | wide, param]
+    [kind | code << REACH_SHIFT, param]
 }
 
 /// Splits a `Method::Lz` payload into the filter [`Candidate`] and the
@@ -858,16 +898,18 @@ fn selector(candidate: Candidate, reach: Reach) -> [u8; SELECTOR_LEN] {
 /// # Errors
 ///
 /// Returns [`Error::Truncated`] if `payload` is shorter than the selector,
-/// [`Error::Corrupt`] if the selector names no [`Candidate`].
+/// [`Error::Corrupt`] if the selector names no [`Candidate`] or reach code
+/// 3, which names no [`Reach`].
 pub(crate) fn split_selector(payload: &[u8]) -> Result<(Candidate, Reach, &[u8]), Error> {
     let (&[kind, param], rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
-    let reach = if kind & WIDE_REACH_BIT == 0 {
-        Reach::Standard
-    } else {
-        Reach::Wide
+    let reach = match kind >> REACH_SHIFT {
+        0 => Reach::Standard,
+        1 => Reach::Wide,
+        2 => Reach::Far,
+        _ => return Err(Error::Corrupt),
     };
-    let candidate =
-        Candidate::from_header_bytes([kind & !WIDE_REACH_BIT, param]).ok_or(Error::Corrupt)?;
+    let filter_kind = kind & ((1 << REACH_SHIFT) - 1);
+    let candidate = Candidate::from_header_bytes([filter_kind, param]).ok_or(Error::Corrupt)?;
     Ok((candidate, reach, rest))
 }
 
@@ -971,13 +1013,13 @@ fn ensure_room(output_len: usize, additional: usize, declared_len: usize) -> Res
 }
 
 /// Rejects a match distance past the frame's declared [`Reach`].
-/// [`decode_offset`] can return distances up to `2 * WINDOW - 1`
-/// (`OFFSET_BUCKETS`'s docs, bucket 20's residual bits), which is
-/// [`lz::WIDE_WINDOW`]; a [`Reach::Standard`] frame's encoder never
-/// searches past `WINDOW`, so a wider distance there is adversarial, and
-/// rejecting it here, before it ever reaches `RepCache`, keeps every cached
-/// rep distance within the reach too, so this is the only place that needs
-/// the check.
+/// [`decode_offset`] can return distances up to `2^offset_buckets - 1`,
+/// the top bucket plus its residual bits: [`lz::WIDE_WINDOW`] for a
+/// [`Reach::Standard`] or [`Reach::Wide`] frame, [`lz::FAR_WINDOW`] for a
+/// [`Reach::Far`] one. A [`Reach::Standard`] frame's encoder never searches
+/// past `WINDOW`, so a wider distance there is adversarial, and rejecting it
+/// here, before it ever reaches `RepCache`, keeps every cached rep distance
+/// within the reach too, so this is the only place that needs the check.
 fn ensure_within_window(distance: NonZeroU32, reach: Reach) -> Result<(), Error> {
     if distance.get() as usize > reach.window() {
         Err(Error::Corrupt)
@@ -1087,7 +1129,7 @@ fn decode_tokens<S: DecodeSink>(
     sink: &mut S,
 ) -> Result<(), S::Err> {
     let mut ac = Decoder::new(ac_bytes);
-    let mut models = Models::try_new().map_err(Error::from)?;
+    let mut models = Models::try_new(reach).map_err(Error::from)?;
     let mut reps = RepCache::initial();
     let mut context = Context::default();
     for _ in 0..token_count {
@@ -1289,7 +1331,7 @@ pub(crate) fn decode_to_writer<W: std::io::Write>(
     };
     let (declared_len, token_count, ac_bytes) = read_header(filtered_payload, max_len, candidate)?;
 
-    let mut window = lz::Window::try_new(reach).map_err(Error::from)?;
+    let mut window = lz::Window::try_new(reach, declared_len).map_err(Error::from)?;
 
     let mut sink = StreamingSink {
         window: &mut window,
