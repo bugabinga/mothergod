@@ -9522,3 +9522,41 @@ record.
   times per bit-tree node. | **Not measured:** a faster deterministic
   `ln` (a table over the clamped domain), and #1775's questions 2 to 5.
   `research/progress.jsonl` it228.
+- S2-A135 | ACCEPTED, unwired | Issue #1775 question 2, the filter bank
+  in front of S2-A133's candidate. Hypothesis: pricing `cm_path` behind
+  every filter `filters::select::pick` shortlists and keeping the cheapest,
+  the search `codec::encode` runs, closes the train cases S2-A133 left
+  above the hybrid (`sqlite_like_records`, `base64_wrapped`,
+  `x86_dense_code`) and lowers the train mean without a sealed regression.
+  | Mechanism: `whole_stream::case_delta_vs_real_bitstream` now takes a
+  model factory, prices each shortlisted filter's bytes through
+  `codec::apply_filter` (widened to `pub` for the caller) with a fresh
+  model per trial, keeps the fewest bits and divides by the original
+  length, so both sides choose among the same filters and S2-A132's raw-
+  bytes bias is gone. One try, it229, against main's candidate, same
+  driver, 11 `baseline::cases()` at `CASE_LEN` 50,000: train mean
+  -0.051999 to **-0.228326** (-0.176326). Per case, with the filter the
+  candidate kept: `x86_dense_code` +0.117994 to -0.758014 (`Bcj`),
+  `sqlite_like_records` +0.546981 to -0.061588 (`Delta(80)`),
+  `base64_wrapped` +0.187716 to -0.072178 (`Base64`), `markov_h8_2_trap`
+  -0.150653 to -0.338417 (`Delta(1)`), `interleaved_audio16` -0.004788
+  (`Reverse`); `json_records` unchanged (`Identity`); the entropy ladder
+  moves under 0.001 per rung (`Reverse`, `Transpose(96)`, and
+  `ReverseDelta(95)` on h8, which stays +0.001492, the one train case
+  above the hybrid). Sealed, at `sealed_seed(CASE_SEED)` through
+  `cm_path::train_and_sealed_vs_real_bitstream`: `access_log` -0.153312,
+  unchanged (`Identity` stays cheapest), `gradient_image` -0.145958 to
+  **-0.146934**. | Verdict: **accepted, unwired** under the corpus
+  policy's rule, train improvement and no sealed regression. The three
+  named cases close, so S2-A133's train shortfall against its own
+  hypothesis (-0.052, not -0.15) was the filter bias, not the model.
+  Untested reading: a context model gains more from a filter than the
+  hybrid does where the filter turns structure into short contexts
+  (`Delta(1)` on the trap, `Bcj` on code), because the hybrid's parse
+  already captures part of that structure as matches. | **Not
+  measured:** pricing time behind the filter trials (each case prices once
+  per shortlisted filter, two to six here, the multiple the hybrid's
+  `Level::Best` search already pays), a cheaper selection than trialing
+  every filter, `Transpose`'s column-coding state, which the candidate
+  does not model, and #1775's questions 3 to 5.
+  `research/progress.jsonl` it229.
