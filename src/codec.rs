@@ -499,8 +499,9 @@ const OFFSET_LEN_STATES: usize = 4;
 /// construction), so the saturating subtraction only ever guards against
 /// that invariant being violated, never a real underflow.
 fn offset_len_state(len: u32) -> usize {
-    let min = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN (4) always fits u32");
-    (len.saturating_sub(min) as usize).min(OFFSET_LEN_STATES - 1)
+    (len as usize)
+        .saturating_sub(lz::MIN_MATCH_LEN)
+        .min(OFFSET_LEN_STATES - 1)
 }
 
 /// How many of a bucketed length's residual bits, counted from the most

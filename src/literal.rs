@@ -302,9 +302,7 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let order2 = ((prev1 << u8::BITS) | prev2) & (ORDER2_BANKS - 1);
     let nibble = prev1 >> NIBBLE_BITS;
     let align = ((context.position % ALIGN_PHASES) * NIBBLES) | nibble;
-    let word_hash = usize::try_from(context.word_hash)
-        .expect("word_hash is a u32, always fits usize")
-        & (WORD_BANKS - 1);
+    let word_hash = context.word_hash as usize & (WORD_BANKS - 1);
     let weight_index = nibble | (after_copy * NIBBLES);
     (
         [
