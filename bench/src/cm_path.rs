@@ -18,14 +18,16 @@
 //! other input 0, so the candidate starts as the wire model and the mixer
 //! only adds what it learns pays.
 //!
-//! Unwired: nothing here reaches a bitstream. The math is libm `f64`
-//! (`bench/clippy.toml`), which a decoder may not use (ADR-0024); the
-//! wiring slice moves it onto the codec's own `stretch`/`squash` and
-//! re-measures, because the two differ in the last ulp.
+//! Unwired: nothing here reaches a bitstream. Every value a decoder would
+//! recompute goes through the codec's own [`logistic::stretch`] and
+//! [`logistic::squash`] (ADR-0024, S2-A134); `cost_bits` stays libm
+//! `log2` (`bench/clippy.toml`) because it prices a decision, and a frame
+//! codes that decision instead.
 
 use crate::literal_pairing::PairingReport;
 use crate::whole_stream;
 use mothergod::literal::{Context, Literal, SurpriseLogisticMix};
+use mothergod::logistic;
 
 /// Every probability the outer mixer stretches or prices is clamped to
 /// `[PROBABILITY_FLOOR, 1 - PROBABILITY_FLOOR]`, bounding a stretch to
@@ -76,13 +78,10 @@ fn clamp(p: f64) -> f64 {
     p.clamp(PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)
 }
 
+/// [`logistic::stretch`] of `p` clamped, so its odds ratio stays normal,
+/// the precondition [`logistic::ln`] states.
 fn stretch(p: f64) -> f64 {
-    let p = clamp(p);
-    (p / (1.0 - p)).ln()
-}
-
-fn squash(x: f64) -> f64 {
-    1.0 / (1.0 + (-x).exp())
+    logistic::stretch(clamp(p))
 }
 
 /// Bits a decision costs: `bit` coded at `probability_of_one`, clamped.
@@ -310,7 +309,7 @@ impl CmPath {
             let set = bucket * 2 + usize::from(node >= LOW_NIBBLE_NODE);
             let w = &mut weights[set];
             let dot: f64 = w.iter().zip(&inputs).map(|(w, x)| w * x).sum();
-            let p = squash(dot);
+            let p = logistic::squash(dot);
             bits += cost_bits(bit, p);
 
             let error = f64::from(u8::from(bit)) - clamp(p);
@@ -450,6 +449,19 @@ mod tests {
         assert!(buckets.windows(2).all(|w| w[0] <= w[1]));
         assert_eq!(buckets[0], 0);
         assert_eq!(*buckets.last().unwrap(), LENGTH_BUCKETS - 1);
+    }
+
+    /// An input at or past either end of `[0, 1]` would hand
+    /// [`logistic::ln`] a zero or infinite odds ratio; the clamp holds it
+    /// to the floor's logit instead.
+    #[test]
+    fn stretch_of_a_certain_input_is_the_floors_finite_logit() {
+        let bound = (1.0 / PROBABILITY_FLOOR - 1.0).ln();
+        for (p, expected) in [(0.0, -bound), (-1.0, -bound), (1.0, bound), (2.0, bound)] {
+            let x = stretch(p);
+            assert!((x - expected).abs() < 1e-12, "stretch({p}) = {x}");
+        }
+        assert!(stretch(0.5).abs() < 1e-15);
     }
 
     #[test]
