@@ -130,6 +130,47 @@ test("an em dash becomes the comma the house rule names first", async () => {
   assert.equal(seen.at(-1).text, "shipped, verified, twice\ntrailing");
 });
 
+// A table has no Telegram form, so the pipes reached the phone as typed
+// (operator, 2026-10-29). Each body row is one line led by its first cell,
+// the rest named by their headers; an empty cell says nothing, and a cell
+// past the header's width is dropped as GitHub drops it.
+test("a table becomes one line per row, cells named by their header", async () => {
+  const { status } = await send("tok-ok", {
+    body:
+      "| corpus | ours | xz -9e |\n|---|---:|---|\n| Canterbury | **1.347** | 1.403 |\n| Silesia | 2.005 | |\n| | 3.1 | 3.2 | extra |\nafter",
+  });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    "• Canterbury: ours <b>1.347</b>, xz -9e 1.403\n• Silesia: ours 2.005\n• ours 3.1, xz -9e 3.2\nafter",
+  );
+});
+
+// The renderer's job is delivering the operator's text, so the two ways a
+// naive table loses content are pinned: a header with nothing under it, and
+// a pipe that belongs to a cell (PR #1792 review).
+test("a table with no body rows keeps its header as one line", async () => {
+  const { status } = await send("tok-ok", { body: "| a | b |\n|---|---|\nafter" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "a, b\nafter");
+});
+
+test("an escaped pipe and a pipe in a code span stay inside their cell", async () => {
+  const { status } = await send("tok-ok", {
+    body: "| cmd | note |\n|---|---|\n| `a|b` | x\\|y |",
+  });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "• <code>a|b</code>: note x|y");
+});
+
+test("piped lines without a delimiter row of the header's width stay the text they are", async () => {
+  const { status } = await send("tok-ok", {
+    body: "| not a table |\nplain\n| a | b |\n|---|\n| 1 | 2 |",
+  });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "| not a table |\nplain\n| a | b |\n|---|\n| 1 | 2 |");
+});
+
 test("a code span is literal, markup and refs inside it included", async () => {
   const { status } = await send("tok-ok", { body: "`**x**` and `#1` stay literal" });
   assert.equal(status, 0);
