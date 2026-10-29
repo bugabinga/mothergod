@@ -33,7 +33,7 @@ All notable changes to this project are documented here. Format follows
   no file grows, because the encoder keeps the narrower frame when the far
   one is not smaller. Encode takes 1.3x to 1.6x as long on those files;
   decode time is unchanged, and streaming decode of such a frame holds up to
-  16 MiB. `FORMAT_VERSION` 17 to 18, ADR-0078 (#PR).
+  16 MiB. `FORMAT_VERSION` 17 to 18, ADR-0078 (#1790).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
   status first, each superseded decision linked to the one that replaced
   it, searchable in the browser, so a reader learns what is decided today
