@@ -273,7 +273,8 @@ fn length_models(models: &mut Models, kind: CopyKind) -> (&mut Model, &mut Resid
 /// If `candidate` is [`Candidate::Base64`] and `data` is not canonical
 /// base64: [`filters::select::pick`] shortlists it only for data
 /// [`filters::base64_unwrap::encode`] accepted.
-fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
+#[must_use]
+pub fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
     match candidate {
         Candidate::Identity => data.to_vec(),
         Candidate::Delta(stride) => filters::delta::encode(data, stride),
