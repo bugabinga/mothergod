@@ -9702,3 +9702,29 @@ record.
   decoder's fallible allocation, which only a wired path has, and the
   match model's 4 MiB table, untouched. `research/progress.jsonl` it233
   to it240.
+- S2-A139 | ACCEPTED, unwired | Issue #1775's first wiring step, a
+  capability patch: S2-A138's candidate codes through the range coder.
+  Hypothesis: the model moves from `bench/` into the codec crate behind
+  one walk that pricing, encoding and decoding share, and the moved
+  walk prices every train and sealed case exactly as the bench copy did.
+  | Mechanism: `cm_path::CmPath::walk` hands each node's clamped mixed
+  probability to a callback, as `Literal::walk_logit_sse` does;
+  `cm_path::encode` codes each byte's bits through `coder::Encoder`,
+  `cm_path::decode` inverts it given the length, and
+  `mothergod_bench::cm_path` prices the same walk at ideal cost. The
+  decoder checks its declared length against a caller bound before it
+  allocates, allocates every table fallibly, and reads only indices its
+  own state derives, never a coded bit, so a damaged stream decodes to
+  wrong bytes of the asked length. The match model drops a position
+  past `u32::MAX` instead of failing a conversion, on both sides alike.
+  A pin on one mixed input's coded stream fixes the model the journal's
+  numbers were read through. | Verdict: **accepted**, a capability. The
+  S2-A133 driver's train and sealed report, run on main and on the moved
+  walk, matched case for case to the last bit, the sealed pair being
+  S2-A138's keeper; no decision rests on that read. | **Not measured:**
+  the real coder's overhead over ideal cost on train or sealed (a test
+  bounds it on one text input only); decode speed; any input past
+  `CASE_LEN`. Open for the wiring slice, from S2-A138: tables sized to
+  the declared length under a cap, a `Method`, `FORMAT_VERSION` 19, its
+  ADR and golden fixture, and the finals read. `research/progress.jsonl`
+  it241.

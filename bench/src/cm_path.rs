@@ -1,467 +1,40 @@
-//! Charter #1763's candidate: a context-mixing path over every byte, no
-//! LZ tokens, priced by [`crate::whole_stream`] against the hybrid's real
-//! bitstream (`research/JOURNAL.md` S2-A133, ADR-0077).
+//! Charter #1763's candidate, [`mothergod::cm_path::CmPath`], priced by
+//! [`crate::whole_stream`] against the hybrid's real bitstream
+//! (`research/JOURNAL.md` S2-A133, ADR-0077).
 //!
-//! Per bit-tree node of each byte, an outer logistic mixer blends:
-//!
-//! ```text
-//!   Literal (six experts, SurpriseLogisticMix, LogitSse) ─ p ─┐
-//!   match model: predicted byte, confirmed length ───────── p ─┤ stretch,
-//!   hashed order-3 context, per node ────────────────────── p ─┤ weighted sum,
-//!   hashed order-4 ─────────────────────────────────────── p ─┤ squash ─> p
-//!   hashed order-5 ─────────────────────────────────────── p ─┤
-//!   hashed order-6 ─────────────────────────────────────── p ─┘
-//! ```
-//!
-//! The first input is the shipped wire model's own refined probability,
-//! [`Literal::walk_logit_sse`], and a fresh mixer weighs it 1 and every
-//! other input 0, so the candidate starts as the wire model and the mixer
-//! only adds what it learns pays.
-//!
-//! Unwired: nothing here reaches a bitstream. Every value a decoder would
-//! recompute goes through the codec's own [`logistic::stretch`] and
-//! [`logistic::squash`] (ADR-0024, S2-A134); `cost_bits` stays libm
-//! `log2` (`bench/clippy.toml`) because it prices a decision, and a frame
-//! codes that decision instead.
+//! The model lives in the codec crate, where [`mothergod::cm_path::encode`]
+//! codes it through the range coder; this module prices the same walk at
+//! ideal cost. `cost_bits` stays libm `log2` (`bench/clippy.toml`) because
+//! it prices a decision, and a stream codes that decision instead.
 
 use crate::literal_pairing::PairingReport;
 use crate::whole_stream;
-use mothergod::literal::{Context, Literal, SurpriseLogisticMix};
-use mothergod::logistic;
+use mothergod::cm_path::CmPath;
+use mothergod::literal::Context;
 
-/// Every probability the outer mixer stretches or prices is clamped to
-/// `[PROBABILITY_FLOOR, 1 - PROBABILITY_FLOOR]`, bounding a stretch to
-/// `ln(4095)` and a node's cost to 12 bits.
-const PROBABILITY_FLOOR: f64 = 1.0 / 4096.0;
-
-/// The outer mixer's gradient step.
-const MIXER_RATE: f64 = 0.005;
-
-/// A [`Counter`] slot's rate is `1 / (count + 1.5)`, its count capped
-/// here, so a slot's adaptation slows to this floor and no further.
-const COUNTER_LIMIT: u16 = 1023;
-
-/// The hashed context orders, each one input, in mixer order.
-const ORDERS: [usize; 4] = [3, 4, 5, 6];
-
-/// [`Bucket`]s per order table, as a power of two, the size the train
-/// mean picked at `CASE_LEN` (`research/JOURNAL.md` S2-A138). Under
-/// [`claim`]'s replacement a smaller table forgets rarely seen contexts
-/// sooner, which priced lower at that length; a longer input fills the
-/// same table faster, so this is a load per case byte, not a size for
-/// every input.
-const ORDER_BUCKET_BITS: u32 = 16;
-
-/// Buckets in the set a context may occupy: the aligned run of this many
-/// holding its hashed index.
-const ORDER_WAYS: usize = 4;
-
-const _: () = assert!(
-    ORDER_WAYS.is_power_of_two() && ORDER_WAYS <= 1 << ORDER_BUCKET_BITS,
-    "a table splits into whole sets"
-);
-
-/// Bit-tree nodes per nibble, numbered `1..NIBBLE_NODES` from the
-/// nibble's root, `node * 2 + bit` per step, as the byte's tree is; so
-/// also the byte's node id at which the low nibble starts.
-const NIBBLE_NODES: usize = 16;
-
-/// Bytes the match model hashes to find a candidate, and the shortest
-/// verified match it follows.
-const MATCH_MIN_LEN: usize = 6;
-
-/// Slots in the match model's hash table, as a power of two.
-const MATCH_TABLE_BITS: u32 = 20;
-
-/// The longest a lookup verifies a candidate backward; a match found
-/// longer grows past it one byte at a time.
-const MATCH_VERIFY_LIMIT: usize = 400;
-
-/// Values [`length_bucket`] returns.
-const LENGTH_BUCKETS: usize = 21;
-
-/// Weight sets in the outer mixer: one per length bucket, split by
-/// whether the node is in the byte's high or low nibble.
-const WEIGHT_SETS: usize = LENGTH_BUCKETS * 2;
-
-/// Inputs to the outer mixer: the wire model, the match model, the orders.
-const INPUTS: usize = 2 + ORDERS.len();
-
-fn clamp(p: f64) -> f64 {
-    p.clamp(PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)
-}
-
-/// [`logistic::stretch`] of `p` clamped, so its odds ratio stays normal,
-/// the precondition [`logistic::ln`] states.
-fn stretch(p: f64) -> f64 {
-    logistic::stretch(clamp(p))
-}
-
-/// Bits a decision costs: `bit` coded at `probability_of_one`, clamped.
+/// Bits a decision costs: `bit` coded at `probability_of_one`, which
+/// [`CmPath::walk`] has already clamped off certainty.
 fn cost_bits(bit: bool, probability_of_one: f64) -> f64 {
-    let p = clamp(probability_of_one);
-    -(if bit { p } else { 1.0 - p }).log2()
+    -(if bit {
+        probability_of_one
+    } else {
+        1.0 - probability_of_one
+    })
+    .log2()
 }
 
-/// The `SplitMix64` finalizer: the one hash every table index goes through.
-fn mix64(mut h: u64) -> u64 {
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-    h ^ (h >> 33)
-}
-
-/// `mix64` folded over `bytes`, starting from `seed`.
-fn hash_bytes(seed: u64, bytes: &[u8]) -> u64 {
-    bytes
-        .iter()
-        .fold(mix64(seed), |h, &b| mix64(h ^ u64::from(b)))
-}
-
-/// `h` reduced to a table index under `bits`.
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "masked to at most 20 bits first, which fits usize on every target"
-)]
-fn slot(h: u64, bits: u32) -> usize {
-    (h & ((1u64 << bits) - 1)) as usize
-}
-
-/// One step of lpaq1's `StateMap` rule: `p` moves `1 / (count + 1.5)` of
-/// the way to `bit`, so a probability learns fast when fresh and settles
-/// as it fills. Returns the probability and the count after `bit`.
-fn adapt(p: f64, count: u16, bit: bool) -> (f64, u16) {
-    let target = f64::from(u8::from(bit));
-    (
-        p + (target - p) / (f64::from(count) + 1.5),
-        (count + 1).min(COUNTER_LIMIT),
-    )
-}
-
-/// A table of [`adapt`]ed bit probabilities, one per slot.
-#[derive(Debug, Clone)]
-struct Counter {
-    probability: Vec<f32>,
-    count: Vec<u16>,
-}
-
-impl Counter {
-    fn new(slots: usize) -> Self {
-        Self {
-            probability: vec![0.5; slots],
-            count: vec![0; slots],
-        }
-    }
-
-    fn p(&self, slot: usize) -> f64 {
-        f64::from(self.probability[slot])
-    }
-
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "a probability in [0, 1] narrows to f32 by rounding only"
-    )]
-    fn update(&mut self, slot: usize, bit: bool) {
-        let (p, count) = adapt(self.p(slot), self.count[slot], bit);
-        self.probability[slot] = p as f32;
-        self.count[slot] = count;
-    }
-}
-
-/// Low bits of a [`Slot`] holding its count; the high bits hold its
-/// probability in units of `2^-PROBABILITY_BITS`.
-const COUNT_BITS: u32 = 10;
-
-/// Fraction bits of a [`Slot`]'s probability.
-const PROBABILITY_BITS: u32 = u32::BITS - COUNT_BITS;
-
-const _: () = assert!(
-    COUNTER_LIMIT < 1 << COUNT_BITS,
-    "a count at the limit fits its field"
-);
-
-/// One [`adapt`]ed probability and its count packed in a `u32`, lpaq1's
-/// `StateMap` entry, so a [`Bucket`] fits one cache line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Slot(u32);
-
-impl Slot {
-    /// Probability one half, count zero.
-    const FRESH: Self = Self(1 << (u32::BITS - 1));
-
-    fn p(self) -> f64 {
-        f64::from(self.0 >> COUNT_BITS) / f64::from(1u32 << PROBABILITY_BITS)
-    }
-
-    fn count(self) -> u16 {
-        u16::try_from(self.0 % (1 << COUNT_BITS)).expect("COUNT_BITS fits u16")
-    }
-
-    /// Applies [`adapt`], rounding the probability to the nearest unit and
-    /// holding it below one, which the field cannot represent.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "adapt keeps p in [0, 1], so the rounded scale is in [0, 2^PROBABILITY_BITS)"
-    )]
-    fn update(&mut self, bit: bool) {
-        let (p, count) = adapt(self.p(), self.count(), bit);
-        let max = (1u32 << PROBABILITY_BITS) - 1;
-        let units = (p * f64::from(1u32 << PROBABILITY_BITS))
-            .round()
-            .min(f64::from(max)) as u32;
-        self.0 = (units << COUNT_BITS) | u32::from(count);
-    }
-}
-
-/// One order's [`Slot`]s for one nibble context, a slot per node
-/// `1..NIBBLE_NODES`, lpaq1's layout: a nibble's nodes share one 64-byte
-/// cache line, so an order reads one aligned set of [`ORDER_WAYS`] lines
-/// per nibble instead of a line per node (`research/JOURNAL.md` S2-A136,
-/// S2-A138).
-#[derive(Debug, Clone, Copy)]
-#[repr(C, align(64))]
-struct Bucket {
-    /// The owning context's [`check_of`]; [`claim`] finds a context by it.
-    check: u16,
-    slots: [Slot; NIBBLE_NODES - 1],
-}
-
-impl Bucket {
-    const FRESH: Self = Self {
-        check: 0,
-        slots: [Slot::FRESH; NIBBLE_NODES - 1],
-    };
-}
-
-/// The bucket `check`'s context owns in the [`ORDER_WAYS`] set holding
-/// `index`, lpaq1's replacement: a context already in the set keeps its
-/// bucket; otherwise the bucket whose nibble root was seen least is reset
-/// to [`Bucket::FRESH`] under `check`, the first such on a tie. A
-/// collision costs the evicted context its history instead of sharing it
-/// with a stranger.
-fn claim(table: &mut [Bucket], index: usize, check: u16) -> usize {
-    let set = index - index % ORDER_WAYS..index - index % ORDER_WAYS + ORDER_WAYS;
-    if let Some(owned) = set.clone().find(|&i| table[i].check == check) {
-        return owned;
-    }
-    let victim = set
-        .min_by_key(|&i| table[i].slots[0].count())
-        .expect("ORDER_WAYS is at least one");
-    table[victim] = Bucket {
-        check,
-        ..Bucket::FRESH
-    };
-    victim
-}
-
-/// The bits of `h` a [`Bucket`] keeps as its check: the top 16, disjoint
-/// from the low [`ORDER_BUCKET_BITS`] that index it.
-fn check_of(h: u64) -> u16 {
-    u16::try_from(h >> 48).expect("a u64 shifted right 48 fits u16")
-}
-
-/// Bucket of a confirmed match length: `0` is no match, `1..=15` exact,
-/// then one bucket per doubling up to 256 and one past it.
-fn length_bucket(length: usize) -> usize {
-    match length {
-        0..=15 => length,
-        16..=31 => 16,
-        32..=63 => 17,
-        64..=127 => 18,
-        128..=255 => 19,
-        _ => 20,
-    }
-}
-
-/// lpaq1's match model over the reconstructed stream: the most recent
-/// earlier position whose `MATCH_MIN_LEN` bytes equal the current ones,
-/// verified byte by byte (a hash collision never predicts), followed while
-/// its predictions hold.
-///
-/// Invariant: `length > 0` implies `pointer < position` of the byte being
-/// predicted, so a prediction only ever reads the prefix.
-#[derive(Debug, Clone)]
-struct MatchModel {
-    /// Position just after each hashed `MATCH_MIN_LEN`-byte context; `0`
-    /// is empty, which no stored position can be.
-    table: Vec<u32>,
-    /// Position of the predicted byte, valid while `length > 0`.
-    pointer: usize,
-    /// Bytes confirmed equal before `pointer`.
-    length: usize,
-    /// Probability that the node's bit is the predicted byte's, per
-    /// `(length_bucket, predicted bit)`.
-    confidence: Counter,
-}
-
-impl MatchModel {
-    fn new() -> Self {
-        Self {
-            table: vec![0; 1 << MATCH_TABLE_BITS],
-            pointer: 0,
-            length: 0,
-            confidence: Counter::new(LENGTH_BUCKETS * 2),
-        }
-    }
-
-    /// The byte at `prefix.len()` this model predicts and the match length
-    /// behind it, after folding in `prefix`'s last byte; `None` when no
-    /// verified match is live.
-    fn predict(&mut self, prefix: &[u8]) -> Option<(u8, usize)> {
-        let position = prefix.len();
-        if self.length > 0 {
-            if prefix[self.pointer] == prefix[position - 1] {
-                self.length += 1;
-                self.pointer += 1;
-            } else {
-                self.length = 0;
-            }
-        }
-        if position >= MATCH_MIN_LEN {
-            let h = hash_bytes(0, &prefix[position - MATCH_MIN_LEN..]);
-            let entry = slot(h, MATCH_TABLE_BITS);
-            let candidate = self.table[entry] as usize;
-            if self.length == 0 && candidate > 0 {
-                let verified = (0..candidate.min(MATCH_VERIFY_LIMIT))
-                    .take_while(|&back| prefix[candidate - 1 - back] == prefix[position - 1 - back])
-                    .count();
-                if verified >= MATCH_MIN_LEN {
-                    self.length = verified;
-                    self.pointer = candidate;
-                }
-            }
-            self.table[entry] = u32::try_from(position).expect("a priced case is far below 4 GiB");
-        }
-        (self.length > 0).then(|| (prefix[self.pointer], self.length))
-    }
-}
-
-/// The candidate: [`Literal`]'s wire walk plus the match model and the
-/// hashed orders under one outer logistic mixer. Fresh per case.
-#[derive(Debug, Clone)]
-pub struct CmPath {
-    literal: Literal,
-    literal_mixer: SurpriseLogisticMix,
-    match_model: MatchModel,
-    orders: Vec<Vec<Bucket>>,
-    weights: Vec<[f64; INPUTS]>,
-}
-
-impl Default for CmPath {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CmPath {
-    /// A fresh candidate: every counter at one half, the outer mixer
-    /// weighing the wire model 1 and every other input 0.
-    #[must_use]
-    pub fn new() -> Self {
-        let mut start = [0.0; INPUTS];
-        start[0] = 1.0;
-        Self {
-            literal: Literal::new(),
-            literal_mixer: SurpriseLogisticMix::new(),
-            match_model: MatchModel::new(),
-            orders: ORDERS
-                .iter()
-                .map(|_| vec![Bucket::FRESH; 1 << ORDER_BUCKET_BITS])
-                .collect(),
-            weights: vec![start; WEIGHT_SETS],
-        }
-    }
-
-    /// Bits `byte` costs after `prefix` under `context`, then every part
-    /// of the model learns `byte`: the shape
-    /// [`whole_stream::whole_stream_bits`] hands a candidate.
-    pub fn price(&mut self, context: Context, prefix: &[u8], byte: u8) -> f64 {
-        let symbol = usize::from(byte);
-        let predicted = self.match_model.predict(prefix);
-        let order_hashes = ORDERS
-            .map(|order| hash_bytes(order as u64, &prefix[prefix.len().saturating_sub(order)..]));
-        let Self {
-            literal,
-            literal_mixer,
-            match_model,
-            orders,
-            weights,
-        } = self;
-
-        let mut bits = 0.0;
-        let (mut lo, mut hi, mut node) = (0usize, 256usize, 1usize);
-        let mut nibble_node = 1usize;
-        let mut order_buckets = [0usize; ORDERS.len()];
-        literal.walk_logit_sse(context, literal_mixer, |mid, literal_p| {
-            let bit = symbol >= mid;
-            let mut inputs = [0.0; INPUTS];
-            inputs[0] = stretch(literal_p);
-
-            // The match input speaks only while the predicted byte is still
-            // inside this node's range, so a diverged prediction is silent.
-            let mut bucket = 0;
-            let mut confidence_slot = None;
-            if let Some((predicted_byte, length)) = predicted {
-                let predicted_symbol = usize::from(predicted_byte);
-                if (lo..hi).contains(&predicted_symbol) {
-                    bucket = length_bucket(length);
-                    let slot = bucket * 2 + usize::from(predicted_symbol >= mid);
-                    inputs[1] = stretch(match_model.confidence.p(slot));
-                    confidence_slot = Some(slot);
-                }
-            }
-
-            // A nibble starts at node 1 or at 16 to 31, which names the
-            // high nibble, so the low nibble's buckets key on it.
-            if nibble_node == 1 {
-                let nibble_key = (node as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-                for ((index, &h), table) in order_buckets
-                    .iter_mut()
-                    .zip(&order_hashes)
-                    .zip(&mut *orders)
-                {
-                    let h = mix64(h ^ nibble_key);
-                    *index = claim(table, slot(h, ORDER_BUCKET_BITS), check_of(h));
-                }
-            }
-            let i = nibble_node - 1;
-            for ((input, table), &b) in inputs[2..].iter_mut().zip(&*orders).zip(&order_buckets) {
-                *input = stretch(table[b].slots[i].p());
-            }
-
-            let set = bucket * 2 + usize::from(node >= NIBBLE_NODES);
-            let w = &mut weights[set];
-            let dot: f64 = w.iter().zip(&inputs).map(|(w, x)| w * x).sum();
-            let p = logistic::squash(dot);
-            bits += cost_bits(bit, p);
-
-            let error = f64::from(u8::from(bit)) - clamp(p);
-            for (w, x) in w.iter_mut().zip(&inputs) {
-                *w += MIXER_RATE * error * x;
-            }
-            if let Some(s) = confidence_slot {
-                match_model.confidence.update(s, bit);
-            }
-            for (table, &b) in orders.iter_mut().zip(&order_buckets) {
-                table[b].slots[i].update(bit);
-            }
-
-            if bit {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-            node = node * 2 + usize::from(bit);
-            nibble_node = nibble_node * 2 + usize::from(bit);
-            if nibble_node >= NIBBLE_NODES {
-                nibble_node = 1;
-            }
-            bit
-        });
-        bits
-    }
+/// Bits `byte` costs after `prefix` under `context`, then every part of
+/// `model` learns `byte`: the shape [`whole_stream::whole_stream_bits`]
+/// hands a candidate.
+pub fn price(model: &mut CmPath, context: Context, prefix: &[u8], byte: u8) -> f64 {
+    let symbol = usize::from(byte);
+    let mut bits = 0.0;
+    model.walk(context, prefix, |mid, p| {
+        let bit = symbol >= mid;
+        bits += cost_bits(bit, p);
+        bit
+    });
+    bits
 }
 
 /// The recorded experiment: a fresh [`CmPath`] per case over the 11
@@ -471,13 +44,14 @@ impl CmPath {
 pub fn train_and_sealed_vs_real_bitstream() -> PairingReport {
     whole_stream::train_and_sealed_vs_real_bitstream(|| {
         let mut candidate = CmPath::new();
-        move |context, prefix, byte| candidate.price(context, prefix, byte)
+        move |context, prefix, byte| price(&mut candidate, context, prefix, byte)
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mothergod::literal::{Literal, SurpriseLogisticMix};
 
     /// Prices `data` through `model`, byte by byte, as the driver does.
     fn price_all(model: &mut CmPath, data: &[u8]) -> Vec<f64> {
@@ -485,7 +59,7 @@ mod tests {
         data.iter()
             .enumerate()
             .map(|(position, &byte)| {
-                let bits = model.price(context, &data[..position], byte);
+                let bits = price(model, context, &data[..position], byte);
                 context = context.after_literal(byte);
                 bits
             })
@@ -504,7 +78,7 @@ mod tests {
             bit
         });
 
-        let bits = CmPath::new().price(Context::default(), &[], byte);
+        let bits = price(&mut CmPath::new(), Context::default(), &[], byte);
 
         assert!(
             (bits - wire_bits).abs() < 1e-9,
@@ -523,169 +97,29 @@ mod tests {
         assert_eq!(first, second, "no state leaks between fresh candidates");
     }
 
-    /// The match model is what a whole-stream path has that the wire model
-    /// alone lacks: on a long verbatim repeat of random bytes, which no
-    /// short context predicts, the second copy must cost far less than
-    /// the first.
+    /// The range coder pays the ideal price plus its quantization and
+    /// flush: on text the model learns, the real stream lands within a
+    /// fraction of a percent and a few bytes of the bits this module
+    /// prices, so a verdict read at ideal cost is the size a frame would
+    /// carry.
     #[test]
-    fn a_verbatim_repeat_of_random_bytes_costs_a_fraction_of_its_first_copy() {
-        let mut state = 0x2545_f491_4f6c_dd1du64;
-        let half: Vec<u8> = (0..4000)
-            .map(|_| {
-                state = mix64(state);
-                state.to_le_bytes()[0]
-            })
-            .collect();
-        let data = [half.as_slice(), half.as_slice()].concat();
+    fn the_coded_stream_is_the_priced_bits_within_the_coders_overhead() {
+        let data = b"the quick brown fox jumps over the lazy dog; pack my box with \
+            five dozen liquor jugs. sphinx of black quartz, judge my vow. "
+            .repeat(80);
 
-        let bits = price_all(&mut CmPath::new(), &data);
-        let first: f64 = bits[..half.len()].iter().sum();
-        let second: f64 = bits[half.len()..].iter().sum();
+        let priced: f64 = price_all(&mut CmPath::new(), &data).iter().sum();
+        let coded = mothergod::cm_path::encode(&data).len();
 
-        assert!(second < first / 8.0, "first {first}, second {second}");
-    }
-
-    #[test]
-    fn the_match_model_predicts_only_from_a_verified_earlier_context() {
-        let mut model = MatchModel::new();
-        let data = b"abcdefgh--abcdefgX";
-        let predictions: Vec<_> = (0..data.len()).map(|i| model.predict(&data[..i])).collect();
-
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "a coded test stream is far below 2^53 bytes"
+        )]
+        let coded_bits = (coded * 8) as f64;
+        assert!(coded_bits >= priced - 8.0, "{coded_bits} vs {priced}");
         assert!(
-            predictions[..16].iter().all(Option::is_none),
-            "{predictions:?}"
+            coded_bits <= priced * 1.005 + 64.0,
+            "{coded_bits} vs {priced}"
         );
-        assert_eq!(
-            predictions[16],
-            Some((b'g', 6)),
-            "abcdef recurs, g follows it"
-        );
-        assert_eq!(
-            predictions[17],
-            Some((b'h', 7)),
-            "the hit extends the match"
-        );
-        assert_eq!(
-            model.predict(data),
-            None,
-            "X broke the match, nothing recurs"
-        );
-    }
-
-    #[test]
-    fn length_buckets_are_monotone_and_in_range() {
-        let buckets: Vec<usize> = (0..1000).map(length_bucket).collect();
-        assert!(buckets.windows(2).all(|w| w[0] <= w[1]));
-        assert_eq!(buckets[0], 0);
-        assert_eq!(*buckets.last().unwrap(), LENGTH_BUCKETS - 1);
-    }
-
-    /// An input at or past either end of `[0, 1]` would hand
-    /// [`logistic::ln`] a zero or infinite odds ratio; the clamp holds it
-    /// to the floor's logit instead.
-    #[test]
-    fn stretch_of_a_certain_input_is_the_floors_finite_logit() {
-        let bound = (1.0 / PROBABILITY_FLOOR - 1.0).ln();
-        for (p, expected) in [(0.0, -bound), (-1.0, -bound), (1.0, bound), (2.0, bound)] {
-            let x = stretch(p);
-            assert!((x - expected).abs() < 1e-12, "stretch({p}) = {x}");
-        }
-        assert!(stretch(0.5).abs() < 1e-15);
-    }
-
-    /// 64 bytes at a 64-byte alignment are exactly one line, the layout
-    /// [`Bucket`]'s doc promises.
-    #[test]
-    fn a_bucket_fills_exactly_one_cache_line() {
-        assert_eq!(std::mem::size_of::<Bucket>(), 64);
-        assert_eq!(std::mem::align_of::<Bucket>(), 64);
-    }
-
-    /// A table of two sets whose buckets hold checks 1 to 4 in the second
-    /// set, each root seen `visits[way]` times.
-    fn second_set_owned(visits: [u16; ORDER_WAYS]) -> Vec<Bucket> {
-        let mut table = vec![Bucket::FRESH; 2 * ORDER_WAYS];
-        for (way, &n) in visits.iter().enumerate() {
-            let bucket = &mut table[ORDER_WAYS + way];
-            bucket.check = u16::try_from(way + 1).expect("a way fits u16");
-            for _ in 0..n {
-                bucket.slots[0].update(true);
-            }
-        }
-        table
-    }
-
-    #[test]
-    fn an_owner_finds_its_bucket_from_any_index_in_its_set() {
-        let mut table = second_set_owned([1, 1, 1, 1]);
-        let before = table.clone();
-        for index in ORDER_WAYS..2 * ORDER_WAYS {
-            assert_eq!(claim(&mut table, index, 3), ORDER_WAYS + 2);
-        }
-        assert_eq!(table[ORDER_WAYS + 2].slots, before[ORDER_WAYS + 2].slots);
-    }
-
-    #[test]
-    fn a_newcomer_evicts_the_least_seen_root_and_the_first_on_a_tie() {
-        let mut table = second_set_owned([3, 1, 2, 1]);
-        let before = table.clone();
-
-        let taken = claim(&mut table, ORDER_WAYS + 2, 9);
-
-        assert_eq!(taken, ORDER_WAYS + 1, "count 1 twice, the first wins");
-        assert_eq!(table[taken].check, 9);
-        assert_eq!(table[taken].slots, Bucket::FRESH.slots, "evicted whole");
-        for kept in [ORDER_WAYS, ORDER_WAYS + 2, ORDER_WAYS + 3] {
-            assert_eq!(table[kept].check, before[kept].check);
-            assert_eq!(table[kept].slots, before[kept].slots);
-        }
-        assert!(
-            table[..ORDER_WAYS].iter().all(|b| b.check == 0),
-            "the first set is untouched"
-        );
-    }
-
-    #[test]
-    fn a_slot_adapts_as_adapt_does_within_one_unit() {
-        let unit = 1.0 / f64::from(1u32 << PROBABILITY_BITS);
-        let mut slot = Slot::FRESH;
-        let (mut p, mut count) = (0.5, 0);
-        assert_eq!((slot.p(), slot.count()), (p, count));
-        for bit in [true, true, false, true, false, false, true] {
-            slot.update(bit);
-            (p, count) = adapt(p, count, bit);
-            assert!((slot.p() - p).abs() <= unit, "{} vs {p}", slot.p());
-            assert_eq!(slot.count(), count);
-        }
-    }
-
-    /// A probability driven to certainty would round to one, which the
-    /// field cannot hold: it would carry into nothing and wrap. It holds
-    /// one unit below, and the count beside it is intact at the limit.
-    #[test]
-    fn a_slot_driven_to_certainty_stays_in_its_field() {
-        for bit in [true, false] {
-            let mut slot = Slot::FRESH;
-            for _ in 0..4 * usize::from(COUNTER_LIMIT) {
-                slot.update(bit);
-            }
-            assert_eq!(slot.count(), COUNTER_LIMIT);
-            let p = slot.p();
-            assert!((0.0..1.0).contains(&p), "{p}");
-            assert!(if bit { p > 0.999 } else { p < 0.001 }, "{p}");
-        }
-    }
-
-    #[test]
-    fn a_counter_learns_fast_when_fresh_and_its_count_stops_at_the_limit() {
-        let mut counter = Counter::new(1);
-        counter.update(0, true);
-        let after_one = counter.p(0);
-        assert!((after_one - (0.5 + 0.5 / 1.5)).abs() < 1e-6, "{after_one}");
-        for _ in 0..2 * usize::from(COUNTER_LIMIT) {
-            counter.update(0, true);
-        }
-        assert_eq!(counter.count[0], COUNTER_LIMIT);
-        assert!(counter.p(0) > 0.99);
     }
 }
