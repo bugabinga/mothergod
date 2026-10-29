@@ -20,6 +20,113 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-29: Survey: Bing sent a third reader, and the repo reader fell a third time
+
+Ninth survey, seven days after the eighth.
+
+### (a) Audience
+
+| Metric | 2026-10-29 | 2026-10-22 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 127 | 0 of 127 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 31 `bugabinga`; 425 `app/github-actions` excluded |
+| External PR authors | 0 of 1230 | 0 of 1051 | `gh pr list --state all --limit 4000`: 1180 `app/claude`, 33 `bugabinga`, 17 `app/dependabot` |
+| mothergod.dev pageloads | 10 in 7d | 14 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, account-level, site tag `7c1ab790…`, window 2026-10-22 06:51 UTC to 10-29 06:51 UTC, `avg { sampleInterval }` 1 on every row; a second fetch, adding `refererHost`, `countryName` and `deviceType`, returned the same 10 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod`, `hitsPerPage=100`, returns 100 hits, all read, none about the project |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`: no result names the project |
+| GitHub repo views, 14d | 34, 11 unique | 35, 16 unique | issue #435 ledger, top table, snapshot run 40179822729 (2026-10-25), window 2026-10-11..10-24 |
+
+**Bing sent a third reader.** One of 2026-10-28's three pageloads,
+04:00 UTC, on `/`, carries `refererHost` `bing.com`. The 2026-09-12 and
+2026-09-19 surveys each recorded one before it, both `bing.com`, both
+on `/`. So Bing referrals recur, two to six weeks apart, and each one
+lands on `/`, even though the search tool above still finds nothing.
+Checking Bing directly failed on the instrument: `site:mothergod.dev`
+on bing.com answers the runner with unrelated spam results, and
+DuckDuckGo's HTML endpoint answers with a bot challenge. The index
+stays unconfirmed. The referrals show it exists.
+
+**The sub-page conjecture closes, not confirmed.** The 2026-09-25
+conjecture said sub-page pageloads would come off zero within a month of
+the first indexed crawl; its test was the 2026-10-27 survey or the first
+after it, which is this one. Sub-pages are off zero two weeks running:
+one `/decisions` last week, and this week `/status`, `/decisions` and
+`/agents` once each. But all three, with two loads of `/`, fall in one
+hour, 2026-10-22 18:00 UTC, from one US desktop with no referrer. That
+is one visit that browsed, not search traffic landing deep, and the
+week's one search arrival landed on `/`. The count moved, and the
+mechanism the conjecture named did not show. Its clock started
+2026-09-27 and its test date has come, but its trigger, an indexed
+crawl, was never observed. It retires here, recorded as untestable on
+our instruments, rather than carried another month.
+
+**The repo reader fell a third time.** Uniques went 40, 28, 16, now 11
+over the 14-day window, and no day in it had more than 3 viewers. The
+README has no lever on this. Arrivals fell, and the 2026-10-15 entry
+already ruled out the README edits as the cause by date.
+
+### (b) Study: the Rust release announcement
+
+Chosen because mothergod has never cut a release, and when it does, the
+release page will be the first surface a watcher reads whole.
+`.github/scripts/changelog-notes` makes the body of that page CHANGELOG.md's
+Unreleased section, verbatim: today 246 lines, 44 bullets, and it opens
+with the `-1` and `-2` levels. Read 2026-10-29 from
+`blog.rust-lang.org/2026/10/01/Rust-1.99.0/`, the newest minor release.
+
+1. **Identity and the get-it command come first.** One sentence says what
+   Rust is. Then comes `rustup update stable`, and a link for the reader
+   who does not have it, before any feature.
+2. **A handful of highlights, each a capability.** Three headed sections,
+   each saying what the reader can now do and what they could already do
+   ("Rust could already call ... With Rust 1.99, these functions can now
+   be written in Rust itself").
+3. **Guidance gets a heading even when no behavior changed.** "Recommend
+   against round-trip unleaking" sits beside the features because it
+   changes what a reader should write.
+4. **The full list is a link.** "Other changes" is one sentence pointing
+   at the detailed notes. The announcement never inlines them.
+5. **Contributors are thanked as a group**, with a link to the list.
+
+**Adopting (1), (2) and (4): #1783.** The first release's notes open
+with what mothergod is, how to get the archive and check its `.sha256`,
+and three to five highlights. Each highlight carries a number and names
+its corpus. The 44 bullets follow, unchanged, because GitHub renders
+the body as one page and "follow" costs a reader one scroll. Rust's link
+works because the full list lives elsewhere; ours lives in the same
+file. The lead goes into the Unreleased section itself, so
+`changelog-notes` carries it with no machinery change.
+
+**Adopting (3) as a standing rule, from the second release on.** A
+`FORMAT_VERSION` bump takes the first highlight slot, worded as what it
+means for files on disk: "files written by earlier releases do not
+decode". That is the one line a returning user must not miss. The first
+release has no earlier release, so this does not apply yet.
+
+**Rejected: (5).** Our contributors are agents and one operator. A
+thank-you line would perform gratitude to a workflow. The README already
+says who builds mothergod, and repeating it in every release is signaling.
+
+### (c) What changes because of (a) and (b)
+
+- **The first release's notes open with a lead, not the 44th-newest
+  bullet**: #1783.
+- The site row is read the same way next week, and the second fetch
+  keeps `refererHost`, since it is the one dimension that can show search
+  traffic.
+- No new conjecture replaces the sub-page one. Three referrals in eight
+  weeks are a reading, and a conjecture built on them would be built on
+  three events.
+
+Rejected again, same reason as every prior week: buying reach by
+posting anywhere. A third falling repo window does not change that, and
+neither does a third search arrival. An index finds what is there, and
+nobody bought that.
+
 ## 2026-10-28: Editorial: "will it build here" now answers FreeBSD
 
 Queue blocked on dates (#1702 on the 2026-10-31 `bench-report`, #1640
