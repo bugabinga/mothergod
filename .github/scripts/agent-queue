@@ -215,6 +215,7 @@ def classify(rows, held, now):
         item = {
             "number": number,
             "title": row["title"],
+            "created": created,
             "age": (now - created).days,
             "labels": sorted(names),
             "rank": rank_of(row, blocking),
@@ -234,8 +235,12 @@ def classify(rows, held, now):
             ranked.append(item)
 
     # Oldest first inside a rank: the queue's failure mode is an old item that
-    # nothing surfaces, so age breaks every tie in the old item's favour.
-    ranked.sort(key=lambda item: (item["rank"], -item["age"]))
+    # nothing surfaces, so age breaks every tie in the old item's favour. The
+    # tie-break is the timestamp, not the printed day count: three bugs filed
+    # one morning share a day count, and a sort on that kept `gh issue list`'s
+    # newest-first order, so the queue named the last one filed as its top
+    # (#1798 over #1794, 2026-10-29).
+    ranked.sort(key=lambda item: (item["rank"], item["created"]))
     return ranked, excluded
 
 
