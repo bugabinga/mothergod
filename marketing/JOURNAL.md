@@ -20,6 +20,38 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-29: Editorial: the first release's notes open with what it is and how to check it
+
+#1783, from this morning's survey study of the Rust release announcement.
+CHANGELOG.md's Unreleased section now opens with one sentence of identity,
+the three `release.yml` archives and their `sha256sum -c` check, and three
+highlights: ratio against `zstd -19` and `xz -9e`, the `-1`/`-2` speed
+trade, and damage being an error. The bullets follow as before.
+
+**Each fact lives once.** The ratio highlight is the old "Ratio" bullet,
+moved, not copied; the level numbers moved out of the `-1`/`-2` bullet,
+which now says "as measured above". A highlight that restated a bullet
+would drift from it the first time a codec PR updated one and not the
+other, the pattern most entries below record. The integrity highlight
+carries no number, so it summarizes and points at the bullets instead.
+`changelog_ratio_claim_matches_its_generated_reports` reads the first
+"Canterbury (" in the file, which is now the lead's; a mutated 1.347 fails
+it.
+
+**Links in the lead are absolute.** The release body is rendered on
+`/releases`, where a repository-relative link may not resolve. The older
+bullets' relative links are untouched and unverified there.
+
+**Ruling on "Changed" and "Fixed": kept, and framed in one sentence.**
+They compare against earlier source builds, which a first-release reader
+never had. Folding them into Added, as the 2026-10-11 entry did for two CLI
+bullets, would cost 14 rewrites and drop the before/after numbers
+that are their evidence. One sentence above "Added" says what they compare
+against.
+
+**Rejected: a link to the full list instead of the list** (Rust's point 4),
+same reason as the survey: ours lives in the same file.
+
 ## 2026-10-29: Survey: Bing sent a third reader, and the repo reader fell a third time
 
 Ninth survey, seven days after the eighth.
