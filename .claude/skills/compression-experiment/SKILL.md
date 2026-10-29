@@ -59,8 +59,8 @@ When measurement is possible:
    and target data class.
 3. Route the idea by what a try changes (ADR-0070).
    A cheap try leaves `decode` unchanged: an encoder-only choice measured
-   on the real bitstream, or an unwired model variant priced by the
-   pairing driver.
+   on the real bitstream, or an unwired model variant priced by its
+   class's driver (Drivers below).
    An idea made of cheap tries runs the loop below.
    A try that changes what `decode` does is one candidate, steps 4 to 8
    once, with `decode_cost_delta`.
@@ -123,12 +123,12 @@ denominator, the parse's literal count, hides the repetition it models
   `whole_stream::case_delta_vs_real_bitstream` over `baseline::cases()`;
   keeper `whole_stream::train_and_sealed_vs_real_bitstream`, which reads
   both sealed kinds.
-- Wired change on real bitstreams, an encoder-only choice or the one
-  decode-changing candidate: try `baseline_gate -- measure > <champion
-  file>` on the champion, then `baseline_gate -- delta <champion file>` on
-  the try, which prints each case's move and the train mean and never
-  writes `bench/baseline.json`; keeper the two sealed kinds at
-  `sealed_seed(CASE_SEED)`.
+- Wired change on real bitstreams, an encoder-only choice (the one
+  decode-changing candidate takes the keeper alone): try `baseline_gate --
+  measure > <champion file>` on the champion, then `baseline_gate -- delta
+  <champion file>` on the try, which prints each case's move and the train
+  mean and never writes `bench/baseline.json`; keeper the two sealed kinds
+  at `sealed_seed(CASE_SEED)`.
 
 ## Loop
 
