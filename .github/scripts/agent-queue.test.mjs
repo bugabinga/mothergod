@@ -176,6 +176,17 @@ test("age breaks ties in the older item's favour", () => {
   assert.deepEqual(call("classify", { rows }).ranked, [1, 3, 2]);
 });
 
+test("same-day items sort by the clock, not the day count", () => {
+  // Three bugs filed one morning share a day count; a sort on it kept the
+  // list's newest-first order and named the last one filed as the top.
+  const rows = [
+    issue(3, { createdAt: "2026-09-17T12:30:00Z" }),
+    issue(1, { createdAt: "2026-09-17T12:01:00Z" }),
+    issue(2, { createdAt: "2026-09-17T12:05:00Z" }),
+  ];
+  assert.deepEqual(call("classify", { rows }).ranked, [1, 2, 3]);
+});
+
 test("a claimed issue is printed but never ranked", () => {
   // ADR-0014 runs agents concurrently; taking a claimed issue duplicates work.
   const rows = [issue(500), issue(501)];
