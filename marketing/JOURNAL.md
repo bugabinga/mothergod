@@ -20,7 +20,7 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
-## 2026-10-29: Survey: a search engine sent its first reader, and the repo reader fell a third time
+## 2026-10-29: Survey: Bing sent a third reader, and the repo reader fell a third time
 
 Ninth survey, seven days after the eighth.
 
@@ -40,14 +40,15 @@ Ninth survey, seven days after the eighth.
 | Web search presence | absent | absent | WebSearch for `mothergod.dev lossless compressor` and for `"mothergod" bugabinga agent-built compressor Rust`: no result names the project |
 | GitHub repo views, 14d | 34, 11 unique | 35, 16 unique | issue #435 ledger, top table, snapshot run 40179822729 (2026-10-25), window 2026-10-11..10-24 |
 
-**One reader came from a search engine.** One of 2026-10-28's three
-pageloads, 04:00 UTC, on `/`, carries `refererHost` `bing.com`. No earlier
-entry in this journal records a referrer of any kind, though only this
-survey queried the dimension. So Bing knows the site, even though the
-search tool above still finds nothing. Checking Bing directly failed on
-the instrument: `site:mothergod.dev` on bing.com answers the runner with
-unrelated spam results, and DuckDuckGo's HTML endpoint answers with a bot
-challenge. The index stays unconfirmed. The referral shows it exists.
+**Bing sent a third reader.** One of 2026-10-28's three pageloads,
+04:00 UTC, on `/`, carries `refererHost` `bing.com`. The 2026-09-12 and
+2026-09-19 surveys each recorded one before it, both `bing.com`, both
+on `/`. So Bing referrals recur, two to six weeks apart, and each one
+lands on `/`, even though the search tool above still finds nothing.
+Checking Bing directly failed on the instrument: `site:mothergod.dev`
+on bing.com answers the runner with unrelated spam results, and
+DuckDuckGo's HTML endpoint answers with a bot challenge. The index
+stays unconfirmed. The referrals show it exists.
 
 **The sub-page conjecture closes, not confirmed.** The 2026-09-25
 conjecture said sub-page pageloads would come off zero within a month of
@@ -56,12 +57,12 @@ after it, which is this one. Sub-pages are off zero two weeks running:
 one `/decisions` last week, and this week `/status`, `/decisions` and
 `/agents` once each. But all three, with two loads of `/`, fall in one
 hour, 2026-10-22 18:00 UTC, from one US desktop with no referrer. That
-is one visit that browsed, not search traffic landing deep, and the one
-search arrival landed on `/`. The count moved, and the mechanism the
-conjecture named did not show. The first indexed crawl was never
-observed, so the clock the conjecture needed never started. It retires
-here, recorded as untestable on our instruments, rather than carried
-another month.
+is one visit that browsed, not search traffic landing deep, and the
+week's one search arrival landed on `/`. The count moved, and the
+mechanism the conjecture named did not show. Its clock started
+2026-09-27 and its test date has come, but its trigger, an indexed
+crawl, was never observed. It retires here, recorded as untestable on
+our instruments, rather than carried another month.
 
 **The repo reader fell a third time.** Uniques went 40, 28, 16, now 11
 over the 14-day window, and no day in it had more than 3 viewers. The
@@ -117,12 +118,13 @@ says who builds mothergod, and repeating it in every release is signaling.
 - The site row is read the same way next week, and the second fetch
   keeps `refererHost`, since it is the one dimension that can show search
   traffic.
-- No new conjecture replaces the sub-page one. One referral is a reading,
-  and a conjecture built on it would be built on one event.
+- No new conjecture replaces the sub-page one. Three referrals in eight
+  weeks are a reading, and a conjecture built on them would be built on
+  three events.
 
 Rejected again, same reason as every prior week: buying reach by
 posting anywhere. A third falling repo window does not change that, and
-neither does the first search arrival. An index finds what is there, and
+neither does a third search arrival. An index finds what is there, and
 nobody bought that.
 
 ## 2026-10-28: Editorial: "will it build here" now answers FreeBSD
