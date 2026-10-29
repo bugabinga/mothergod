@@ -56,15 +56,7 @@ pub(crate) const MIN_MATCH_LEN: usize = 4;
 /// Shortest run [`parse_greedy`] emits as [`Token::Rep`]. Cheaper than
 /// [`MIN_MATCH_LEN`] because a repeat costs no distance field, only a
 /// cache slot.
-const MIN_REP_LEN: usize = 2;
-
-/// [`MIN_REP_LEN`] as a `u32`, the type [`Token`] lengths and the price
-/// table use.
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the cast is of the literal 2, so it cannot truncate"
-)]
-const MIN_REP_LEN_U32: u32 = MIN_REP_LEN as u32;
+const MIN_REP_LEN: u32 = 2;
 
 /// Longest run a single token can cover; longer repeats are split into
 /// several tokens.
@@ -669,7 +661,7 @@ pub fn parse_greedy(data: &[u8]) -> Vec<Token> {
             }
         }
 
-        let advance = if rep_len >= MIN_REP_LEN && rep_len + 1 >= match_len {
+        let advance = if rep_len >= MIN_REP_LEN as usize && rep_len + 1 >= match_len {
             tokens.push(Token::Rep {
                 len: to_u32(rep_len),
                 slot: rep_slot,
@@ -1038,7 +1030,7 @@ impl DpState {
         for slot in RepSlot::ALL {
             let distance = reps.get(slot);
             let rep_len = rep_match_len(data, i, distance, rep_carry, slot.index());
-            if rep_len < MIN_REP_LEN {
+            if rep_len < MIN_REP_LEN as usize {
                 continue;
             }
             let mut new_cache = reps;
@@ -1049,14 +1041,14 @@ impl DpState {
             };
 
             let rep_len = to_u32(rep_len);
-            relax_len(MIN_REP_LEN_U32);
+            relax_len(MIN_REP_LEN);
             for &len in &LENGTH_STEPS {
                 if len > rep_len {
                     break;
                 }
                 relax_len(len);
             }
-            if !LENGTH_STEPS.contains(&rep_len) && rep_len > MIN_REP_LEN_U32 {
+            if !LENGTH_STEPS.contains(&rep_len) && rep_len > MIN_REP_LEN {
                 relax_len(rep_len);
             }
         }
