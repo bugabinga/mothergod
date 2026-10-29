@@ -31,16 +31,18 @@ ANCHOR_WORKFLOW = "agent-bdfl.yml"
 
 # Successful runs the anchor walk may cross before giving up. A guard-skipped
 # run (pause, throttle, exhausted ladder) concludes `success` in seconds with
-# no session behind it, six a day on the BDFL cron alone, so a week-long
-# outage stacks some forty of them in front of the last real run (#517, #525).
+# no session behind it, one per tick of `CLOCK` in
+# infra/telegram-worker/worker.js, so a week-long outage stacks a week of
+# them in front of the last real run (#517, #525).
 RUN_WALK = 60
 
 # GitHub's timestamp shape, shared by every endpoint we read, which is what
 # makes plain string comparison chronological.
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 
-# Hours past which an anchor is not a cadence. The BDFL cron fires every four
-# hours, so three days means a limit pause or an outage (the hollow-run walk
+# Hours past which an anchor is not a cadence. The BDFL's tick is `CLOCK` in
+# infra/telegram-worker/worker.js, hours apart, so three days means a limit
+# pause or an outage (the hollow-run walk
 # above already counts those, #525) or a runs page served stale: run 37152004054 anchored a
 # month back on one such page, read 166 sessions and printed a footer nobody
 # could tell was wrong (#902). Both cases get one loud line and no retry,
