@@ -333,7 +333,8 @@ test("a workflow-bump has no mechanical rescue: the read is judgement", () => {
   assert.equal(plan, null);
 });
 
-// returned-to-bdfl: a changes-requested PR whose files include .claude/. The
+// needs-bdfl: a PR whose files include .claude/ and whose next move is its
+// author's, a red required gate or a changes-requested verdict. The
 // maintainer wakes on the verdict to fix a returned PR (#998), but only
 // agent-bdfl.yml runs bypassPermissions (ADR-0033), the grant that clears the
 // harness's own guard on .claude/, so the maintainer is refused the write:
@@ -350,11 +351,41 @@ const returned = (overrides = {}) =>
     ...overrides,
   });
 
+const CLAUDE_FILES = { files: [".claude/skills/compression-experiment/SKILL.md"] };
+
 test("PR #1777: a returned PR under .claude/ is the BDFL's, and this names it", () => {
-  const found = classify(returned(), NOW, { files: [".claude/skills/compression-experiment/SKILL.md"] });
-  assert.equal(found.kind, "returned-to-bdfl");
-  assert.match(found.detail, /1 file\(s\) under \.claude\//);
+  const found = classify(returned(), NOW, CLAUDE_FILES);
+  assert.equal(found.kind, "needs-bdfl");
+  assert.match(found.detail, /changes-requested on 1 file\(s\) under \.claude\//);
   assert.match(found.rescue, /push-branch 1777 <paths> and settle-push 1777/);
+});
+
+test("a returned .claude/ PR whose gate is also red is still the BDFL's", () => {
+  // The red branch of classify() returns before the verdict branch; without
+  // this the heartbeat's skip would strand exactly this PR (review on #1785).
+  const found = classify(returned({ statusCheckRollup: redClippy("SUCCESS") }), NOW, CLAUDE_FILES);
+  assert.equal(found.kind, "needs-bdfl");
+  assert.match(found.detail, /clippy red on 1 file\(s\) under \.claude\//);
+});
+
+test("a red .claude/ PR with no verdict label needs the BDFL too: nobody else can push it", () => {
+  const found = classify(returned({ labels: [], statusCheckRollup: redClippy("SUCCESS") }), NOW, CLAUDE_FILES);
+  assert.equal(found.kind, "needs-bdfl");
+});
+
+test("a red .claude/ PR behind a green main is red-from-drift first: the refresh may clear it", () => {
+  const found = classify(returned({ labels: [], statusCheckRollup: redClippy("SUCCESS") }), NOW, {
+    ...CLAUDE_FILES,
+    drift: DRIFT,
+  });
+  assert.equal(found.kind, "red-from-drift");
+});
+
+test("a red PR outside .claude/ is its author's, not a stall", () => {
+  const found = classify(returned({ labels: [], statusCheckRollup: redClippy("SUCCESS") }), NOW, {
+    files: ["agents/GOVERNANCE.md"],
+  });
+  assert.equal(found, null);
 });
 
 test("a returned PR outside .claude/ is the maintainer's, not a stall", () => {
@@ -372,14 +403,14 @@ test("a returned PR under .claude/ with its review still running is nobody's yet
       statusCheckRollup: [...GREEN_GATES, review(null, { status: "IN_PROGRESS", completedAt: null })],
     }),
     NOW,
-    { files: [".claude/skills/compression-experiment/SKILL.md"] },
+    CLAUDE_FILES,
   );
   assert.equal(found, null);
 });
 
-test("returned-to-bdfl has no mechanical rescue: the fix is judgement", () => {
-  const { found, plan } = planFor(returned(), { files: [".claude/skills/compression-experiment/SKILL.md"] });
-  assert.equal(found.kind, "returned-to-bdfl");
+test("needs-bdfl has no mechanical rescue: the fix is judgement", () => {
+  const { found, plan } = planFor(returned(), CLAUDE_FILES);
+  assert.equal(found.kind, "needs-bdfl");
   assert.equal(plan, null);
 });
 
