@@ -38,9 +38,9 @@ use fixture_dirs::golden_dir;
 use mothergod::lz::{RepSlot, Token, parse_greedy, parse_optimal};
 
 /// Digest of the per-input digests of `parse_optimal`.
-const OPTIMAL_DIGEST: u64 = 0x7101_0cfd_75b9_584a;
+const OPTIMAL_DIGEST: u64 = 0xd788_54fa_ba56_7995;
 /// Digest of the per-input digests of `parse_greedy`.
-const GREEDY_DIGEST: u64 = 0xbd01_80cb_88e5_acf6;
+const GREEDY_DIGEST: u64 = 0xc89d_e5bb_b3b6_60b8;
 
 /// Seeded xorshift64*: the generated inputs must be identical on every
 /// platform and toolchain, which `std` offers no source for.

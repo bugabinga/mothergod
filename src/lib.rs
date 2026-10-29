@@ -101,8 +101,8 @@ pub enum Level {
     /// reaching [`lz::Reach::Wide`] on input longer than [`lz::WINDOW`].
     Fast,
     /// Every filter the shortlist offers trial-encoded under the full
-    /// parse, then the wide trial: the slowest encode, and on real data the
-    /// smallest frame. What [`compress`] and [`copy_encode`] write.
+    /// parse, then the wide and far trials: the slowest encode, and on real
+    /// data the smallest frame. What [`compress`] and [`copy_encode`] write.
     #[default]
     Best,
 }
@@ -891,8 +891,9 @@ impl<W: std::io::Write> Drop for TryBufWriter<'_, W> {
 /// lookahead (a no-op, a stride, or a 5-byte call/jmp instruction), so the
 /// decoded LZ token stream needs no whole-buffer pass afterward, and
 /// `codec::decode_to_writer` bounds memory to the frame's declared
-/// [`lz::Reach`] (1 MiB, or 2 MiB for a wide frame) for any of them
-/// regardless of the frame's declared length.
+/// [`lz::Reach`] (1 MiB, 2 MiB for a wide frame, 16 MiB for a far one) for
+/// any of them regardless of the frame's declared length, and to that
+/// length when it is shorter.
 /// [`Method::Stored`] writes its payload slice of `input` through the same
 /// bounded writer and allocates no decoded buffer, so resident memory is the
 /// input plus the write buffer. [`filters::select::Candidate::Transpose`],

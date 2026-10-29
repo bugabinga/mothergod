@@ -159,9 +159,8 @@ faster both ways (`docs/benchmarks/silesia.md`), and S2-R37 put the floor
 in the model, 86% of the cheapest encoder tier's time. A context-mixing
 path over every byte, a match model as an expert and no LZ tokens, is
 charter #1763, worked through `compression-experiment` ahead of S1-P4's
-remainder (a reach past the offset code's ceiling; S2-A128's shipped
-reach narrowed six of the seven Silesia losses to zstd -19 and flipped
-none). The filter bank thread (selector kinds 4 to 6, `FORMAT_VERSION`
+remainder (S2-A137's far reach, a whole 16 MiB block, flipped `reymont`
+and narrowed the six Silesia losses to zstd -19 that remain). The filter bank thread (selector kinds 4 to 6, `FORMAT_VERSION`
 14 to 16, it193 to it195) ended with the per-field byte-order rejection
 (it196). Target: beat zstd -19 per-file on all of Silesia/Canterbury
 with real bitstreams; then xz -9e.
@@ -197,8 +196,9 @@ were rejected, and what shipped is a trial, a frame declaring a 1 MiB or
 12 Silesia files shrink, 0.3% to 2.4% (`xml` unchanged), encode costs
 1.24x to 1.52x, peak RSS stays under 1 GiB, and all seven losses to
 zstd -19 remain (S2-A128): the window was part of the correlation, not
-all of it. What remains open rides the journal's leads, a reach past the
-offset code's ceiling and the wide trial beside the narrow ones on idle
+all of it. The far reach followed, any distance in the block
+(`FORMAT_VERSION` 18, ADR-0078, S2-A137). What remains open rides the
+journal's leads, the wide and far trials beside the narrow ones on idle
 cores.
 
 Items, in [milestone M5](https://github.com/bugabinga/mothergod/milestone/4),

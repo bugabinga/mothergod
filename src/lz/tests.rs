@@ -582,8 +582,8 @@ fn binary_tree_larger_window_finds_matches_the_default_window_would_miss() {
     // within a larger window must be found when the finder is
     // configured with that window, and still rejected when it is
     // not -- proving the parameter actually gates reach rather than
-    // being plumbed through unused. The larger window is the one a
-    // frame can declare, `Reach::Wide`'s, as the field doc promises.
+    // being plumbed through unused. The larger window is one a frame
+    // can declare, `Reach::Wide`'s, as the field doc promises.
     let larger_window = Reach::Wide.window();
     let mut data = vec![0xAAu8; larger_window + 3];
     data[0..3].copy_from_slice(b"xyz");

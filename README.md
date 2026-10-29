@@ -51,7 +51,7 @@ included. The commands that regenerate them:
 [`docs/benchmarks/`](docs/benchmarks/README.md#regenerating).
 
 **Pre-alpha: no release, no packaged binary, no version tag.** The container
-format (`FORMAT_VERSION` 17) is specified but not frozen. Before the first
+format (`FORMAT_VERSION` 18) is specified but not frozen. Before the first
 release, each format change retires the version before it, so the next build
 that changes the format will not read a file you compress today. After that,
 until 1.0 a version can still be retired; from 1.0 on, none ever is. The
