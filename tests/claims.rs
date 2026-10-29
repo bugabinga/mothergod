@@ -46,6 +46,7 @@
 // claims are true (issue #518).
 #![cfg(not(any(miri, target_os = "android")))]
 
+use std::cmp::Ordering;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -821,20 +822,32 @@ fn verdict_items(page: &str) -> Vec<(String, String)> {
     items
 }
 
-/// Whether the aggregate in `report_file` beats, or loses to, both
-/// reference compressors: the only two outcomes the verdict strip's
-/// binary Wins/Loses word can represent honestly.
-fn verdict_truth(report_file: &str) -> &'static str {
+/// What the verdict strip must say of the aggregate in `report_file`: the
+/// judgment word, "Wins" or "Loses" against both reference compressors or
+/// "Splits" between them, and the caption fragments a split must carry so
+/// the reader learns which reference it beats and which it trails.
+fn verdict_truth(report_file: &str) -> (&'static str, &'static [&'static str]) {
     let [mothergod, _gzip, zstd, xz] = aggregate_from_report(report_file);
-    if mothergod < zstd && mothergod < xz {
-        "Wins"
-    } else if mothergod > zstd && mothergod > xz {
-        "Loses"
-    } else {
-        panic!(
-            "docs/benchmarks/{report_file}'s aggregate beats one reference and loses to the \
-             other; the verdict strip's binary Wins/Loses word cannot represent that honestly"
-        )
+    let order = |reference: f64| {
+        mothergod.partial_cmp(&reference).unwrap_or_else(|| {
+            panic!("docs/benchmarks/{report_file}'s aggregate holds a NaN ratio")
+        })
+    };
+    match (order(zstd), order(xz)) {
+        (Ordering::Less, Ordering::Less) => ("Wins", &[]),
+        (Ordering::Greater, Ordering::Greater) => ("Loses", &[]),
+        (Ordering::Less, Ordering::Greater) => (
+            "Splits",
+            &["beats <code>zstd -19</code>", "trails <code>xz -9e</code>"],
+        ),
+        (Ordering::Greater, Ordering::Less) => (
+            "Splits",
+            &["beats <code>xz -9e</code>", "trails <code>zstd -19</code>"],
+        ),
+        _ => panic!(
+            "docs/benchmarks/{report_file}'s aggregate ties a reference compressor; no \
+             verdict word represents a tie honestly"
+        ),
     }
 }
 
@@ -842,8 +855,8 @@ fn verdict_truth(report_file: &str) -> &'static str {
 fn verdict_strip_words_match_their_aggregate_comparisons() {
     // The header's verdict strip restates a qualitative claim the Measured
     // section's numbers already prove (issue #604 item 1), but as a second,
-    // separate location: nothing but this test ties its "Wins"/"Loses"
-    // words to the comparison they name, so a regenerated report that flips
+    // separate location: nothing but this test ties its "Wins"/"Loses"/
+    // "Splits" words to the comparison they name, so a regenerated report that flips
     // one could leave the header stale (site/index.html itself calls
     // closing Silesia the head of the roadmap, i.e. the exact word this
     // strip hardcodes for Silesia today is a live target).
@@ -851,8 +864,8 @@ fn verdict_strip_words_match_their_aggregate_comparisons() {
     let items = verdict_items(&site);
 
     for (corpus, report_file) in [("Canterbury", "canterbury.md"), ("Silesia", "silesia.md")] {
-        let truth = verdict_truth(report_file);
-        let (word, _caption) = items
+        let (truth, fragments) = verdict_truth(report_file);
+        let (word, caption) = items
             .iter()
             .find(|(_, caption)| caption.starts_with(corpus))
             .unwrap_or_else(|| {
@@ -862,6 +875,13 @@ fn verdict_strip_words_match_their_aggregate_comparisons() {
             word, truth,
             "site/index.html's verdict strip says {corpus} {word:?}, but docs/benchmarks/{report_file} says mothergod {truth} it"
         );
+        let caption = normalize_whitespace(caption);
+        for fragment in fragments {
+            assert!(
+                caption.contains(fragment),
+                "site/index.html's {corpus} verdict caption {caption:?} lacks {fragment:?}, which docs/benchmarks/{report_file}'s aggregate makes true"
+            );
+        }
     }
 }
 
@@ -1174,11 +1194,11 @@ fn site_per_file_decode_range_matches_its_generated_reports() {
     );
 }
 
-/// `count` in English, one to twenty: the range the site's speed prose uses.
-/// Past it the sentence needs another shape, so this fails and asks for the
-/// table to grow with the sentence.
-fn number_word(count: usize) -> &'static str {
-    const WORDS: [&str; 20] = [
+/// `count` in English, one to ninety-nine: the range the site's speed prose
+/// uses. Past it the sentence needs another shape, so this fails and asks
+/// for the sentence to change.
+fn number_word(count: usize) -> String {
+    const ONES: [&str; 19] = [
         "one",
         "two",
         "three",
@@ -1198,18 +1218,24 @@ fn number_word(count: usize) -> &'static str {
         "seventeen",
         "eighteen",
         "nineteen",
-        "twenty",
     ];
-    count
-        .checked_sub(1)
-        .and_then(|index| WORDS.get(index))
-        .unwrap_or_else(|| panic!("no word for {count}: extend number_word"))
+    const TENS: [&str; 8] = [
+        "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    ];
+    match count {
+        1..=19 => ONES[count - 1].to_string(),
+        20..=99 => match (TENS[count / 10 - 2], count % 10) {
+            (tens, 0) => tens.to_string(),
+            (tens, unit) => format!("{tens}-{}", ONES[unit - 1]),
+        },
+        _ => panic!("no word for {count}: reshape the sentence"),
+    }
 }
 
 /// `quarters` quarter minutes as the site says them: "a minute", "a minute
 /// and a quarter", "seventeen minutes", "two minutes and a half". Under one
 /// minute the prose would need another shape, so that fails like
-/// `number_word` past twenty.
+/// `number_word` past ninety-nine.
 fn spoken_minutes(quarters: usize) -> String {
     let whole = quarters / 4;
     let tail = ["", " and a quarter", " and a half", " and three quarters"][quarters % 4];
