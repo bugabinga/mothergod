@@ -59,25 +59,16 @@ When measurement is possible:
    and target data class.
 3. Route the idea by what a try changes (ADR-0070).
    A cheap try leaves `decode` unchanged: an encoder-only choice measured
-   on the real bitstream, or an unwired model variant priced by the
-   pairing driver.
+   on the real bitstream, or an unwired model variant priced by its
+   class's driver (Drivers below).
    An idea made of cheap tries runs the loop below.
    A try that changes what `decode` does is one candidate, steps 4 to 8
    once, with `decode_cost_delta`.
 4. Implement the candidate without changing its benchmark, corpus, or
    acceptance guard.
 5. Apply the required round-trip and adversarial guards, then measure through
-   the corpus policy's train and sealed-validation procedure.
-   An unwired literal candidate is priced by the bench crate's pairing
-   driver, `mothergod_bench::literal_pairing::train_and_sealed_delta_bpb`
-   (issue #828), never by a scratch binary of your own: S2-A104, S2-R27
-   and S2-A106 each rewrote that driver by hand and the third divided by
-   the wrong byte count (PR #823).
-   A candidate that models every byte with no LZ parse before it (charter
-   #1763) is priced against `compress`'s real output: a try by
-   `whole_stream::case_delta_vs_real_bitstream` over `baseline::cases()`,
-   the keeper once by `whole_stream::train_and_sealed_vs_real_bitstream`,
-   which reads both sealed kinds.
+   the corpus policy's train and sealed-validation procedure, by the
+   candidate class's keeper driver (Drivers below).
 6. Apply the corpus policy's verdict and number-provenance rules unchanged.
    A candidate that changes what `decode` does also records
    `decode_cost_delta` (`research/README.md`), measured with
@@ -111,6 +102,34 @@ When measurement is possible:
    correct them all.
 8. Run the project quality gates and leave exactly the recorded PR scope.
 
+## Drivers
+
+Every number comes from the bench crate, `mothergod_bench`, never from a
+scratch binary of your own: S2-A104, S2-R27 and S2-A106 each rewrote the
+pairing driver by hand and the third divided by the wrong byte count
+(PR #823).
+The candidate's class picks the pair: the try driver reads train only,
+the keeper driver reads sealed once.
+The class is the stream the candidate prices, not what it changes: a
+whole-stream candidate is a model variant too, and the literal pair
+prices only the parse's literal stream, which hides the repetition it
+models (S1-L6).
+
+- Literal candidate, an unwired model variant priced inside the parse's
+  literal stream (issue #828): try `literal_pairing::case_delta_bpb` over
+  `baseline::cases()`; keeper `literal_pairing::train_and_sealed_delta_bpb`.
+- Whole-stream candidate, one that models every byte with no LZ parse
+  before it (charter #1763), priced against `compress`'s real output: try
+  `whole_stream::case_delta_vs_real_bitstream` over `baseline::cases()`;
+  keeper `whole_stream::train_and_sealed_vs_real_bitstream`, which reads
+  both sealed kinds.
+- Wired change on real bitstreams: try `baseline_gate -- measure >
+  <champion file>` on the champion, then `baseline_gate -- delta <champion
+  file>` on the try, which prints each case's move and the train mean and
+  never writes `bench/baseline.json`; keeper the two sealed kinds at
+  `sealed_seed(CASE_SEED)`. A candidate that changes what `decode` does
+  has no try (route step 3) and takes the keeper alone.
+
 ## Loop
 
 One idea, many tries, one PR (ADR-0070).
@@ -119,12 +138,8 @@ for the next.
 Per try:
 
 1. State the change and its expected train effect in one sentence.
-2. Apply it and measure its train delta against the champion through the
-   bench crate, in the foreground: `literal_pairing::case_delta_bpb` over
-   `baseline::cases()` for a model variant; for an encoder-only change
-   `baseline_gate -- measure > <champion file>` on the champion, then
-   `baseline_gate -- delta <champion file>` on the try, which prints each
-   case's move and the train mean and never writes `bench/baseline.json`.
+2. Apply it and measure its train delta against the champion by the
+   candidate class's try driver (Drivers above), in the foreground.
    No try generates a sealed case.
 3. Keep the try when the train mean falls; otherwise revert it whole.
 4. Append a reverted try's `research/progress.jsonl` line now:
@@ -139,10 +154,8 @@ No try starts past 60% of the heartbeat's `timeout-minutes` from the job's
 start (preflight step 4); that mark or the idea's last try ends the loop,
 and the session lands:
 
-5. Measure the keeper, main plus every kept try, once on the sealed set:
-   `literal_pairing::train_and_sealed_delta_bpb` for a model variant, the
-   two sealed kinds at `sealed_seed(CASE_SEED)` on real bitstreams for an
-   encoder-only change.
+5. Measure the keeper, main plus every kept try, once on the sealed set,
+   by the candidate class's keeper driver (Drivers above).
    The corpus policy's verdict applies to the keeper whole: a sealed
    regression reverts every kept try. Then append every kept try's line,
    in the order the tries ran: its own train delta, the keeper's
