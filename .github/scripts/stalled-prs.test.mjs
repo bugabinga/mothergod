@@ -333,6 +333,56 @@ test("a workflow-bump has no mechanical rescue: the read is judgement", () => {
   assert.equal(plan, null);
 });
 
+// returned-to-bdfl: a changes-requested PR whose files include .claude/. The
+// maintainer wakes on the verdict to fix a returned PR (#998), but only
+// agent-bdfl.yml runs bypassPermissions (ADR-0033), the grant that clears the
+// harness's own guard on .claude/, so the maintainer is refused the write:
+// four denied runs on #1777 on 2026-10-29, each reporting the blocker by hand,
+// while this script said nothing and the BDFL's prompt waited on it.
+const returned = (overrides = {}) =>
+  pr({
+    number: 1777,
+    title: "skill: compression-experiment names each driver once, by candidate class",
+    headRefName: "claude/bdfl-skill-drivers",
+    headRefOid: "367e62ca38488c85dd0d2b3ed1164c4fbc6964f5",
+    labels: [{ name: "changes-requested" }],
+    statusCheckRollup: [...GREEN_GATES, review("SUCCESS")],
+    ...overrides,
+  });
+
+test("PR #1777: a returned PR under .claude/ is the BDFL's, and this names it", () => {
+  const found = classify(returned(), NOW, { files: [".claude/skills/compression-experiment/SKILL.md"] });
+  assert.equal(found.kind, "returned-to-bdfl");
+  assert.match(found.detail, /1 file\(s\) under \.claude\//);
+  assert.match(found.rescue, /push-branch 1777 <paths> and settle-push 1777/);
+});
+
+test("a returned PR outside .claude/ is the maintainer's, not a stall", () => {
+  const found = classify(returned(), NOW, { files: ["agents/GOVERNANCE.md", ".github/scripts/stalled-prs"] });
+  assert.equal(found, null);
+});
+
+test("a returned PR whose file list did not read stays inert, never wrong", () => {
+  assert.equal(classify(returned()), null);
+});
+
+test("a returned PR under .claude/ with its review still running is nobody's yet", () => {
+  const found = classify(
+    returned({
+      statusCheckRollup: [...GREEN_GATES, review(null, { status: "IN_PROGRESS", completedAt: null })],
+    }),
+    NOW,
+    { files: [".claude/skills/compression-experiment/SKILL.md"] },
+  );
+  assert.equal(found, null);
+});
+
+test("returned-to-bdfl has no mechanical rescue: the fix is judgement", () => {
+  const { found, plan } = planFor(returned(), { files: [".claude/skills/compression-experiment/SKILL.md"] });
+  assert.equal(found.kind, "returned-to-bdfl");
+  assert.equal(plan, null);
+});
+
 for (
   const [why, overrides] of [
     ["blocked-on-human is parked on purpose", { labels: [{ name: "blocked-on-human" }] }],

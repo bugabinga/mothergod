@@ -61,6 +61,17 @@ Signatures, most specific first, at most one reported per PR:
                          heartbeat was refused on it (#1369). Report only:
                          the BDFL reads the bump, release notes on a major,
                          and lands it on its sweep.
+    returned-to-bdfl     changes-requested on a PR whose files include
+                         `.claude/`. A returned PR is its author's, and
+                         the maintainer wakes on the verdict to be every
+                         author's hands (#998), but only the BDFL's seat
+                         runs bypassPermissions (ADR-0033), the grant
+                         that clears the harness's own guard on
+                         `.claude/`: four maintainer runs were denied on
+                         #1777 in one day, each reporting the blocker by
+                         hand, while the BDFL's prompt waited for this
+                         script to name it. Report only: the BDFL
+                         applies the review's items on its sweep.
 
 One signature has no PR to hang on, which is the whole point of it:
 
@@ -130,8 +141,9 @@ carries no secrets and belongs to the heartbeat. A green dependabot bump
 touching no workflow file is the heartbeat's duty 3 and lands within its
 cadence. A PR with a still running
 gate is not stalled, and neither is a red one whose red is its own (a head
-that carries main, or a changes-requested verdict): its author owns the
-next move. An open PR that is simply old and abandoned is a different
+that carries main, or a changes-requested verdict outside `.claude/`): its
+author owns the next move, and the maintainer wakes on the verdict to make
+it (#998). An open PR that is simply old and abandoned is a different
 class, and this detector does not pretend to find it.
 
 Liveness: the footer always prints how many PRs and branches were read, how
@@ -214,6 +226,12 @@ DRIFT_GRACE = timedelta(hours=1)
 # credential on; a PR under it is never landed by this script.
 WORKFLOW_PREFIX = ".github/workflows/"
 
+# The one path prefix no seat but the BDFL's can write. The harness guards
+# `.claude/` itself, bypassPermissions (ADR-0033) is what clears the guard,
+# and only agent-bdfl.yml runs under it, so a returned PR with a file here
+# waits on the BDFL's sweep and nobody else.
+CLAUDE_PREFIX = ".claude/"
+
 # gh prefixes a bot's login with `app/`; dependabot's PRs carry this one.
 DEPENDABOT = "app/dependabot"
 
@@ -274,8 +292,8 @@ def classify(pr, now, drift=None, files=None):
     `drift` is the caller's one network read for a red head, {"sha", "behind_by"}
     against main's newest green push run, or None when unread, which keeps
     red-from-drift inert rather than wrong. `files` is the caller's one read
-    of a dependabot PR's changed paths, or None when unread, which keeps
-    workflow-bump inert the same way.
+    of a dependabot or returned PR's changed paths, or None when unread,
+    which keeps workflow-bump and returned-to-bdfl inert the same way.
 
     Order is specificity, not severity. A dirty PR whose reviewer also died
     needs the merge first; reporting both would be two lines describing one
@@ -420,7 +438,24 @@ def classify(pr, now, drift=None, files=None):
             review,
             started=started,
         )
-    return None
+    # Returned is the author's, and the maintainer wakes on the verdict to
+    # be its hands (#998), except under `.claude/`, which its harness
+    # refuses: four denied maintainer runs on #1777 in a day, and until this
+    # branch nothing handed the PR to the one seat that can write it.
+    if files is None:
+        return None
+    factory = [path for path in files if path.startswith(CLAUDE_PREFIX)]
+    if not factory:
+        return None
+    return finding(
+        "returned-to-bdfl",
+        f"changes-requested on {len(factory)} file(s) under {CLAUDE_PREFIX}; "
+        "only the BDFL's seat can write there (bypassPermissions, ADR-0033)",
+        "the BDFL's, this wake: apply the review's items, then "
+        f"push-branch {pr['number']} <paths> and settle-push {pr['number']}",
+        review,
+        started=started,
+    )
 
 
 def plan(pr, found, now, files=None, approved_at=None):
@@ -710,9 +745,10 @@ def main():
         if not suppress(pr):
             if green and any(gate["conclusion"] in DEAD for gate in required_gates(pr)):
                 drift = drift_of(green, pr["headRefOid"])
-            # One file read per dependabot PR: the workflow-bump signature is
-            # the only one that needs the paths before a plan.
-            if (pr.get("author") or {}).get("login") == DEPENDABOT:
+            # One file read per PR whose signature keys on paths: a dependabot
+            # bump (workflow-bump) or a returned PR (returned-to-bdfl).
+            returned = any(label["name"] == "changes-requested" for label in pr["labels"])
+            if (pr.get("author") or {}).get("login") == DEPENDABOT or returned:
                 files = changed_files(pr["number"])
         rows.append((pr, classify(pr, now, drift, files)))
     branch_rows, branches = orphans({pr["headRefName"] for pr in pulls}, now)

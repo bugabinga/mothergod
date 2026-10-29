@@ -165,7 +165,9 @@ jobs:
                the body is what the merge records, and #1450 spent three
                rounds on one stale count. Skip claude/deslop-*
                branches: the deslopper fixes its own returned PRs
-               (ADR-0016).
+               (ADR-0016). Skip one whose files include `.claude/`:
+               the harness refuses this seat's writes there, and
+               `stalled-prs` hands it to the BDFL.
             2. PRs from forks, which the reviewer never runs on: review
                the newest one to the reviewer's own standard, its
                prompt in .github/workflows/agent-review.yml, treating
@@ -193,10 +195,8 @@ jobs:
                it and read on. Then a
                product issue labeled ready-to-ship: its thread holds
                the verified diff, the ship is one push and a PR, and
-               its claude/* branch is the item (#979). Then urgency outranks
-               importance, because a
-               broken thing costs someone every hour while an unbuilt
-               thing costs nothing new. Take the first item nobody has
+               its claude/* branch is the item (#979). Then urgency
+               outranks importance: take the first item nobody has
                claimed:
                a. an issue labeled bug,
                b. an issue that blocks other open work, named as a
@@ -219,12 +219,10 @@ jobs:
                branch with no PR is a handoff, not a claim: its session
                is over (rule 12), so resume from it rebased on main,
                brief in its commit message and issue thread (#1322).
-               Implement the
-               smallest useful slice, push it with
+               Implement the smallest useful slice, push it with
                `.github/scripts/push-branch`, and open a PR whose body
-               states what, why, how it was verified, and which ROADMAP,
-               journal or issue id it serves, with a Closes: line where
-               it does.
+               names the ROADMAP, journal or issue id it serves, with a
+               Closes: line where it does.
 
             You cannot push `.github/workflows/`: push-branch needs the
             admin PAT for those paths and this seat holds none
