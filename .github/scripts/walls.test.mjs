@@ -69,3 +69,27 @@ test("denied writes the summary line and the record, note the line alone", () =>
     reason: "h: blocked stop",
   });
 });
+
+// #1793: a hook's class for the hit rides the line as a bracketed suffix,
+// the one shape audit_facts.wall_of lifts into walls.detail; both readers
+// see the same line.
+test("denied with a detail suffixes the line and the record alike", () => {
+  const temp = mkdtempSync(join(tmpdir(), "walls-"));
+  const summary = join(temp, "summary.md");
+  const r = spawnSync(
+    "python3",
+    ["-c", "import walls; walls.denied(\"h\", \"Bash\", \"denied Bash via x\", \"quoted\")"],
+    {
+      cwd: scripts,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, RUNNER_TEMP: temp, GITHUB_STEP_SUMMARY: summary },
+    },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(summary, "utf8"), "h: denied Bash via x [quoted]\n");
+  assert.deepEqual(JSON.parse(readFileSync(join(temp, "walls.jsonl"), "utf8")), {
+    tool: "Bash",
+    type: "hook",
+    reason: "h: denied Bash via x [quoted]",
+  });
+});

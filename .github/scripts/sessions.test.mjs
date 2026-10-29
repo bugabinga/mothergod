@@ -151,7 +151,7 @@ test("a statement the store refuses prints the tables and exits 2, never UNREADA
         r.out,
         /^    guard\(run_id, attempt, at, role, event, discretionary, decision, reason, rung, effort, projection\)$/m,
       );
-      assert.match(r.out, /^    walls\(run_id, attempt, tool, wall\)$/m);
+      assert.match(r.out, /^    walls\(run_id, attempt, tool, wall, detail\)$/m);
       assert.doesNotMatch(r.out, /sessions_role_at/);
     },
   );
@@ -327,7 +327,9 @@ test("migrate posts the schema one statement at a time, comments stripped, betwe
 });
 
 test("migrate skips a column already present, applies the statements after it, and names it not new", async () => {
-  // The ALTER is the fourth statement of the file: sessions, its two indexes, then the column.
+  // The first ALTER is the fourth statement of the file: sessions, its two
+  // indexes, then the column; every ALTER answers present (`whole`), so a
+  // column the file adds later is not new either.
   await withStub(
     d1([]),
     async (base, seen, schema) => {
@@ -338,7 +340,7 @@ test("migrate skips a column already present, applies the statements after it, a
       assert.ok(ddl.length > 4, "the statements after the present column were applied");
       assert.match(r.out, /schema applied from .*schema\.sql: new none$/m);
     },
-    { ddl: [d1([]), d1([]), d1([]), present, d1([])] },
+    { ddl: whole },
   );
 });
 
@@ -349,7 +351,7 @@ test("migrate names the table the database lacked and the column it added", asyn
     async (base) => {
       const r = await run(["migrate"], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.out + r.err);
-      assert.match(r.out, /schema applied from .*schema\.sql: new walls, sessions\.writes$/m);
+      assert.match(r.out, /schema applied from .*schema\.sql: new walls, sessions\.writes, walls\.detail$/m);
     },
     { ddl: [d1([])], tables: [before, [...before, "walls"]] },
   );
@@ -884,6 +886,7 @@ test("backfill writes an artifact's walls beside its row, none for an artifact w
         reasons: [
           { tool: "Bash", type: "hook", reason: "deny-em-dash: denied" },
           { tool: "Bash", type: "mode", reason: "plan mode" },
+          { tool: "Bash", type: "hook", reason: "deny-ci-background: denied Bash via shell & [quoted]" },
         ],
       },
     },
@@ -904,8 +907,9 @@ test("backfill writes an artifact's walls beside its row, none for an artifact w
       "INSERT OR REPLACE INTO sessions", // the reviewer artifact: a row, no walls
     ]);
     assert.deepEqual(applied(seen)("walls"), [
-      { run_id: 100, attempt: 1, tool: "Bash", wall: "deny-em-dash" },
-      { run_id: 100, attempt: 1, tool: "Bash", wall: "mode" },
+      { run_id: 100, attempt: 1, tool: "Bash", wall: "deny-ci-background", detail: "quoted" },
+      { run_id: 100, attempt: 1, tool: "Bash", wall: "deny-em-dash", detail: null },
+      { run_id: 100, attempt: 1, tool: "Bash", wall: "mode", detail: null },
     ]);
     assert.match(r.out, /written 2 \| killed 0 \| unreadable 0 \| missing 0$/m);
   });

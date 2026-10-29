@@ -422,15 +422,18 @@ test("a text past the statement cap is a warning and exit 0, no write attempted"
 // kept (#1110): the hook before the colon for a hook-path denial, the
 // harness's decision type for one it decided itself. An entry of another
 // shape is skipped, never a row of unknowns; two hits of one wall are one row.
+// #1793: a hook's bracketed class is the row's detail, one class as itself,
+// several as mixed, none as NULL; a suffix that is not one lowercase word
+// is the line's text and names no class.
 test("one row per wall hit precedes the session row, named from the reasons", async () => {
   const meta = {
     ...metadata,
     telemetry: {
       ...metadata.telemetry,
       permission_denials: {
-        count: 5,
-        tools: ["Bash", "Edit", "Write"],
-        by_tool: { Bash: 3, Edit: 1, Write: 1 },
+        count: 9,
+        tools: ["Bash", "Edit", "Write", "Task"],
+        by_tool: { Bash: 6, Edit: 1, Write: 1, Task: 1 },
         reasons: [
           { tool: "Bash", type: "hook", reason: "deny-unpushed-work: denied gh pr create with 2 files unpushed" },
           { tool: "Bash", type: "hook", reason: "deny-em-dash: denied" },
@@ -439,6 +442,11 @@ test("one row per wall hit precedes the session row, named from the reasons", as
           { tool: "Bash", type: "hook" },
           { tool: "Bash", type: "hook", reason: "" },
           { tool: 7, type: "mode", reason: "plan" },
+          { tool: "Bash", type: "hook", reason: "deny-ci-background: denied Bash via shell & [quoted]" },
+          { tool: "Bash", type: "hook", reason: "deny-ci-background: denied Bash via coproc [unquoted]" },
+          { tool: "Bash", type: "hook", reason: "deny-ci-background: denied Bash in background" },
+          { tool: "Task", type: "hook", reason: "deny-ci-background: denied Task in background" },
+          { tool: "Write", type: "hook", reason: "deny-review-recompute: denied [Not A Class]" },
         ],
       },
     },
@@ -448,7 +456,7 @@ test("one row per wall hit precedes the session row, named from the reasons", as
     await withStub({}, async (base, seen) => {
       const r = await run([dir], { D1_API_BASE: base });
       assert.equal(r.code, 0, r.err);
-      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 3, walls 3$/m);
+      assert.match(r.out, /^session-row: wrote run 37148994173 attempt 2 for reviewer, tools 4, walls 6$/m);
       assert.equal(seen.length, 1);
       assert.deepEqual(heads(seen[0].sql), [
         "INSERT OR REPLACE INTO tools",
@@ -456,9 +464,12 @@ test("one row per wall hit precedes the session row, named from the reasons", as
         "INSERT OR REPLACE INTO sessions", // last
       ]);
       assert.deepEqual(applied(seen)("walls"), [
-        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-em-dash" },
-        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-unpushed-work" },
-        { run_id: 37148994173, attempt: 2, tool: "Edit", wall: "rule" },
+        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-ci-background", detail: "mixed" },
+        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-em-dash", detail: null },
+        { run_id: 37148994173, attempt: 2, tool: "Bash", wall: "deny-unpushed-work", detail: null },
+        { run_id: 37148994173, attempt: 2, tool: "Edit", wall: "rule", detail: null },
+        { run_id: 37148994173, attempt: 2, tool: "Task", wall: "deny-ci-background", detail: null },
+        { run_id: 37148994173, attempt: 2, tool: "Write", wall: "deny-review-recompute", detail: null },
       ]);
     });
   } finally {
