@@ -44,11 +44,22 @@ const COUNTER_LIMIT: u16 = 1023;
 /// The hashed context orders, each one input, in mixer order.
 const ORDERS: [usize; 4] = [3, 4, 5, 6];
 
-/// [`Bucket`]s per order table, as a power of two. A 50,000-byte case
-/// makes at most 100,000 nibble contexts per order, so collisions stay
-/// rare at the case size every recorded number used; a [`Bucket`]'s check
-/// detects one and resets the bucket instead of sharing it.
-const ORDER_BUCKET_BITS: u32 = 18;
+/// [`Bucket`]s per order table, as a power of two, the size the train
+/// mean picked at `CASE_LEN` (`research/JOURNAL.md` S2-A138). Under
+/// [`claim`]'s replacement a smaller table forgets rarely seen contexts
+/// sooner, which priced lower at that length; a longer input fills the
+/// same table faster, so this is a load per case byte, not a size for
+/// every input.
+const ORDER_BUCKET_BITS: u32 = 16;
+
+/// Buckets in the set a context may occupy: the aligned run of this many
+/// holding its hashed index.
+const ORDER_WAYS: usize = 4;
+
+const _: () = assert!(
+    ORDER_WAYS.is_power_of_two() && ORDER_WAYS <= 1 << ORDER_BUCKET_BITS,
+    "a table splits into whole sets"
+);
 
 /// Bit-tree nodes per nibble, numbered `1..NIBBLE_NODES` from the
 /// nibble's root, `node * 2 + bit` per step, as the byte's tree is; so
@@ -117,20 +128,15 @@ fn slot(h: u64, bits: u32) -> usize {
     (h & ((1u64 << bits) - 1)) as usize
 }
 
-/// One adaptive bit probability with a count-scaled rate, lpaq1's
-/// `StateMap` rule: it moves `1 / (count + 1.5)` of the way to each bit it
-/// sees, so it learns fast when fresh and settles as it fills.
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "a probability in [0, 1] narrows to f32 by rounding only"
-)]
-fn adapt(probability: &mut f32, count: &mut u16, bit: bool) {
-    let p = f64::from(*probability);
+/// One step of lpaq1's `StateMap` rule: `p` moves `1 / (count + 1.5)` of
+/// the way to `bit`, so a probability learns fast when fresh and settles
+/// as it fills. Returns the probability and the count after `bit`.
+fn adapt(p: f64, count: u16, bit: bool) -> (f64, u16) {
     let target = f64::from(u8::from(bit));
-    *probability = (p + (target - p) / (f64::from(*count) + 1.5)) as f32;
-    if *count < COUNTER_LIMIT {
-        *count += 1;
-    }
+    (
+        p + (target - p) / (f64::from(count) + 1.5),
+        (count + 1).min(COUNTER_LIMIT),
+    )
 }
 
 /// A table of [`adapt`]ed bit probabilities, one per slot.
@@ -152,44 +158,102 @@ impl Counter {
         f64::from(self.probability[slot])
     }
 
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "a probability in [0, 1] narrows to f32 by rounding only"
+    )]
     fn update(&mut self, slot: usize, bit: bool) {
-        adapt(&mut self.probability[slot], &mut self.count[slot], bit);
+        let (p, count) = adapt(self.p(slot), self.count[slot], bit);
+        self.probability[slot] = p as f32;
+        self.count[slot] = count;
     }
 }
 
-/// One order's [`adapt`]ed probabilities for one nibble context, a slot
-/// per node `1..NIBBLE_NODES`, lpaq1's layout: a nibble's nodes share 96
-/// bytes at a 32-byte alignment, so exactly two cache lines, and an order
-/// costs one table miss per nibble instead of one per node
-/// (`research/JOURNAL.md` S2-A136).
+/// Low bits of a [`Slot`] holding its count; the high bits hold its
+/// probability in units of `2^-PROBABILITY_BITS`.
+const COUNT_BITS: u32 = 10;
+
+/// Fraction bits of a [`Slot`]'s probability.
+const PROBABILITY_BITS: u32 = u32::BITS - COUNT_BITS;
+
+const _: () = assert!(
+    COUNTER_LIMIT < 1 << COUNT_BITS,
+    "a count at the limit fits its field"
+);
+
+/// One [`adapt`]ed probability and its count packed in a `u32`, lpaq1's
+/// `StateMap` entry, so a [`Bucket`] fits one cache line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Slot(u32);
+
+impl Slot {
+    /// Probability one half, count zero.
+    const FRESH: Self = Self(1 << (u32::BITS - 1));
+
+    fn p(self) -> f64 {
+        f64::from(self.0 >> COUNT_BITS) / f64::from(1u32 << PROBABILITY_BITS)
+    }
+
+    fn count(self) -> u16 {
+        u16::try_from(self.0 % (1 << COUNT_BITS)).expect("COUNT_BITS fits u16")
+    }
+
+    /// Applies [`adapt`], rounding the probability to the nearest unit and
+    /// holding it below one, which the field cannot represent.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "adapt keeps p in [0, 1], so the rounded scale is in [0, 2^PROBABILITY_BITS)"
+    )]
+    fn update(&mut self, bit: bool) {
+        let (p, count) = adapt(self.p(), self.count(), bit);
+        let max = (1u32 << PROBABILITY_BITS) - 1;
+        let units = (p * f64::from(1u32 << PROBABILITY_BITS))
+            .round()
+            .min(f64::from(max)) as u32;
+        self.0 = (units << COUNT_BITS) | u32::from(count);
+    }
+}
+
+/// One order's [`Slot`]s for one nibble context, a slot per node
+/// `1..NIBBLE_NODES`, lpaq1's layout: a nibble's nodes share one 64-byte
+/// cache line, so an order reads one aligned set of [`ORDER_WAYS`] lines
+/// per nibble instead of a line per node (`research/JOURNAL.md` S2-A136,
+/// S2-A138).
 #[derive(Debug, Clone, Copy)]
-#[repr(C, align(32))]
+#[repr(C, align(64))]
 struct Bucket {
-    /// The claiming context's [`check_of`]; a lookup under another check
-    /// resets the bucket, so a collision costs the evicted context its
-    /// history instead of sharing it with a stranger.
+    /// The owning context's [`check_of`]; [`claim`] finds a context by it.
     check: u16,
-    count: [u16; NIBBLE_NODES - 1],
-    probability: [f32; NIBBLE_NODES - 1],
+    slots: [Slot; NIBBLE_NODES - 1],
 }
 
 impl Bucket {
     const FRESH: Self = Self {
         check: 0,
-        count: [0; NIBBLE_NODES - 1],
-        probability: [0.5; NIBBLE_NODES - 1],
+        slots: [Slot::FRESH; NIBBLE_NODES - 1],
     };
+}
 
-    /// Claims the bucket for `check`: kept when `check` already owns it,
-    /// reset to [`Bucket::FRESH`] otherwise.
-    fn claim(&mut self, check: u16) {
-        if self.check != check {
-            *self = Self {
-                check,
-                ..Self::FRESH
-            };
-        }
+/// The bucket `check`'s context owns in the [`ORDER_WAYS`] set holding
+/// `index`, lpaq1's replacement: a context already in the set keeps its
+/// bucket; otherwise the bucket whose nibble root was seen least is reset
+/// to [`Bucket::FRESH`] under `check`, the first such on a tie. A
+/// collision costs the evicted context its history instead of sharing it
+/// with a stranger.
+fn claim(table: &mut [Bucket], index: usize, check: u16) -> usize {
+    let set = index - index % ORDER_WAYS..index - index % ORDER_WAYS + ORDER_WAYS;
+    if let Some(owned) = set.clone().find(|&i| table[i].check == check) {
+        return owned;
     }
+    let victim = set
+        .min_by_key(|&i| table[i].slots[0].count())
+        .expect("ORDER_WAYS is at least one");
+    table[victim] = Bucket {
+        check,
+        ..Bucket::FRESH
+    };
+    victim
 }
 
 /// The bits of `h` a [`Bucket`] keeps as its check: the top 16, disjoint
@@ -359,13 +423,12 @@ impl CmPath {
                     .zip(&mut *orders)
                 {
                     let h = mix64(h ^ nibble_key);
-                    *index = slot(h, ORDER_BUCKET_BITS);
-                    table[*index].claim(check_of(h));
+                    *index = claim(table, slot(h, ORDER_BUCKET_BITS), check_of(h));
                 }
             }
             let i = nibble_node - 1;
             for ((input, table), &b) in inputs[2..].iter_mut().zip(&*orders).zip(&order_buckets) {
-                *input = stretch(f64::from(table[b].probability[i]));
+                *input = stretch(table[b].slots[i].p());
             }
 
             let set = bucket * 2 + usize::from(node >= NIBBLE_NODES);
@@ -382,8 +445,7 @@ impl CmPath {
                 match_model.confidence.update(s, bit);
             }
             for (table, &b) in orders.iter_mut().zip(&order_buckets) {
-                let entry = &mut table[b];
-                adapt(&mut entry.probability[i], &mut entry.count[i], bit);
+                table[b].slots[i].update(bit);
             }
 
             if bit {
@@ -531,34 +593,87 @@ mod tests {
         assert!(stretch(0.5).abs() < 1e-15);
     }
 
-    /// 96 bytes at a 32-byte alignment start at offset 0 or 32 of a
-    /// 64-byte line, so a bucket spans exactly two lines, the miss count
+    /// 64 bytes at a 64-byte alignment are exactly one line, the layout
     /// [`Bucket`]'s doc promises.
     #[test]
-    fn a_bucket_spans_exactly_two_cache_lines() {
-        assert_eq!(std::mem::size_of::<Bucket>(), 96);
-        assert_eq!(std::mem::align_of::<Bucket>(), 32);
+    fn a_bucket_fills_exactly_one_cache_line() {
+        assert_eq!(std::mem::size_of::<Bucket>(), 64);
+        assert_eq!(std::mem::align_of::<Bucket>(), 64);
+    }
+
+    /// A table of two sets whose buckets hold checks 1 to 4 in the second
+    /// set, each root seen `visits[way]` times.
+    fn second_set_owned(visits: [u16; ORDER_WAYS]) -> Vec<Bucket> {
+        let mut table = vec![Bucket::FRESH; 2 * ORDER_WAYS];
+        for (way, &n) in visits.iter().enumerate() {
+            let bucket = &mut table[ORDER_WAYS + way];
+            bucket.check = u16::try_from(way + 1).expect("a way fits u16");
+            for _ in 0..n {
+                bucket.slots[0].update(true);
+            }
+        }
+        table
     }
 
     #[test]
-    fn a_bucket_keeps_its_owners_history_and_resets_for_another_check() {
-        let mut bucket = Bucket::FRESH;
-        bucket.claim(7);
-        adapt(&mut bucket.probability[3], &mut bucket.count[3], true);
-        let learned = bucket.probability[3];
-        assert!(learned > 0.5);
+    fn an_owner_finds_its_bucket_from_any_index_in_its_set() {
+        let mut table = second_set_owned([1, 1, 1, 1]);
+        let before = table.clone();
+        for index in ORDER_WAYS..2 * ORDER_WAYS {
+            assert_eq!(claim(&mut table, index, 3), ORDER_WAYS + 2);
+        }
+        assert_eq!(table[ORDER_WAYS + 2].slots, before[ORDER_WAYS + 2].slots);
+    }
 
-        bucket.claim(7);
-        assert_eq!(
-            (bucket.probability[3], bucket.count[3]),
-            (learned, 1),
-            "same owner"
+    #[test]
+    fn a_newcomer_evicts_the_least_seen_root_and_the_first_on_a_tie() {
+        let mut table = second_set_owned([3, 1, 2, 1]);
+        let before = table.clone();
+
+        let taken = claim(&mut table, ORDER_WAYS + 2, 9);
+
+        assert_eq!(taken, ORDER_WAYS + 1, "count 1 twice, the first wins");
+        assert_eq!(table[taken].check, 9);
+        assert_eq!(table[taken].slots, Bucket::FRESH.slots, "evicted whole");
+        for kept in [ORDER_WAYS, ORDER_WAYS + 2, ORDER_WAYS + 3] {
+            assert_eq!(table[kept].check, before[kept].check);
+            assert_eq!(table[kept].slots, before[kept].slots);
+        }
+        assert!(
+            table[..ORDER_WAYS].iter().all(|b| b.check == 0),
+            "the first set is untouched"
         );
+    }
 
-        bucket.claim(8);
-        assert_eq!(bucket.check, 8);
-        assert_eq!(bucket.count, Bucket::FRESH.count, "a collision evicts");
-        assert_eq!(bucket.probability, Bucket::FRESH.probability);
+    #[test]
+    fn a_slot_adapts_as_adapt_does_within_one_unit() {
+        let unit = 1.0 / f64::from(1u32 << PROBABILITY_BITS);
+        let mut slot = Slot::FRESH;
+        let (mut p, mut count) = (0.5, 0);
+        assert_eq!((slot.p(), slot.count()), (p, count));
+        for bit in [true, true, false, true, false, false, true] {
+            slot.update(bit);
+            (p, count) = adapt(p, count, bit);
+            assert!((slot.p() - p).abs() <= unit, "{} vs {p}", slot.p());
+            assert_eq!(slot.count(), count);
+        }
+    }
+
+    /// A probability driven to certainty would round to one, which the
+    /// field cannot hold: it would carry into nothing and wrap. It holds
+    /// one unit below, and the count beside it is intact at the limit.
+    #[test]
+    fn a_slot_driven_to_certainty_stays_in_its_field() {
+        for bit in [true, false] {
+            let mut slot = Slot::FRESH;
+            for _ in 0..4 * usize::from(COUNTER_LIMIT) {
+                slot.update(bit);
+            }
+            assert_eq!(slot.count(), COUNTER_LIMIT);
+            let p = slot.p();
+            assert!((0.0..1.0).contains(&p), "{p}");
+            assert!(if bit { p > 0.999 } else { p < 0.001 }, "{p}");
+        }
     }
 
     #[test]

@@ -9660,3 +9660,45 @@ record.
   on idle cores, a far reach at `-2` behind a trial, `memory-check`'s CI
   reading of the new peak, and a far case in `baseline_gate check` beside
   `wide_reach_repeat`. `research/progress.jsonl` it232.
+- S2-A138 | ACCEPTED, unwired | Issue #1775 question 4, memory under
+  S2-A136's candidate, one idea in eight tries (ADR-0070): what the four
+  24 MiB order tables buy, and lpaq1's answers to spending less.
+  Hypothesis: lpaq1's packed `StateMap` entry and set-associative bucket
+  replacement shrink the order tables without a train or sealed
+  regression. | Mechanism: first an ablation of the champion's table size
+  at `CASE_LEN`, direct-mapped as S2-A136 left it, train mean against
+  2^18 buckets per order: 2^17 +0.000201, 2^16 +0.000619, 2^15 +0.001018,
+  2^14 +0.002014, so a direct-mapped table pays ratio at every halving,
+  because each collision evicts a live context. Tries in order, train
+  mean through `whole_stream::case_delta_vs_real_bitstream`, each delta
+  against the champion it was applied to: it233 one `u32` per slot, 22
+  probability bits over a 10-bit count (lpaq1's `StateMap` entry), so a
+  bucket is 64 bytes and one cache line, -2.5e-7, kept; it234 two-way
+  sets, a context keeping the bucket of its pair it owns or else evicting
+  the one whose nibble root was seen less, -0.000359, kept, more than the
+  last doubling of the direct-mapped table bought; it235 four-way sets,
+  -0.0000048, kept; it236 2^18 to 2^17 buckets, -0.0000041, kept; it237
+  2^17 to 2^16, -0.0000162, kept; it238 2^16 to 2^15, +0.0000095,
+  reverted; it239 2^16 to 2^14, +0.0000515, reverted; it240 eight-way
+  sets at 2^16, +0.0000096, reverted. Keeper train mean -0.228926073 to
+  **-0.229310545** (-0.000384). Sealed, read once through
+  `cm_path::train_and_sealed_vs_real_bitstream`: `access_log` -0.154346
+  to **-0.155078**, `gradient_image` -0.147981 to **-0.148004**.
+  Untested reading of it236 and it237: under eviction by visits, a
+  smaller table forgets contexts seen once sooner, and a fresh one half
+  predicts a once-seen context better than its one-sample probability;
+  the two halvings moved `entropy_ladder_h4` and `_h6` most, iid sources
+  where no order-3 or longer context carries information. | Verdict:
+  **accepted, unwired**, train improvement and no sealed regression.
+  Memory: the order tables 96 MiB to 16 MiB; peak RSS of pricing the 11
+  train cases, one model live at a time, 115,048 to 33,064 KiB. Speed,
+  pricing alone over the 11 `baseline::cases()`, release build, AMD EPYC
+  7763 4 logical cores runner, three interleaved pairs: main 0.1496 to
+  0.1506 MB/s, keeper 0.1653 to 0.1659, 1.10x. | **Not measured:** any
+  input longer than `CASE_LEN`. 2^16 buckets is a load per case byte, not
+  a size: a Silesia file is 100x to 1,000x longer and would overload it,
+  so the wiring slice sizes the tables to the declared length under a
+  cap, and the finals (question 5) read that rule. Also not measured: the
+  decoder's fallible allocation, which only a wired path has, and the
+  match model's 4 MiB table, untouched. `research/progress.jsonl` it233
+  to it240.
