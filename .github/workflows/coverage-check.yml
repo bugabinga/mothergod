@@ -55,7 +55,7 @@ jobs:
       # restores the binary without ~/.cargo/.crates.toml, so an unguarded
       # install rebuilds from source on every hit (fuzz-check learned this).
       - run: test -x ~/.cargo/bin/cargo-llvm-cov || cargo install cargo-llvm-cov --version 0.9.1 --locked
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: coverage
           workspaces: . -> target
