@@ -948,19 +948,27 @@ fn decodes_incrementally_pins_the_lz_version_boundary() {
 
 #[test]
 fn decodes_incrementally_reads_a_wide_reach_selector_as_decompress_does() {
-    // #1554: `codec::encode` sets `WIDE_REACH_BIT` in the selector's kind
-    // byte when the wide trial wins; the bit is reach, not filter, so the
-    // answer is the candidate's alone.
+    // #1554: `codec::encode` writes a reach code in the top two bits of the
+    // selector's kind byte when a wider trial wins, 1 wide and 2 far; the
+    // code is reach, not filter, so the answer is the candidate's alone.
     let data = b"the quick brown fox jumps over the lazy dog. ".repeat(50);
-    let mut frame = compress(&data);
-    assert_eq!(frame[METHOD_OFFSET], Method::Lz as u8);
-    assert_eq!(decodes_incrementally(&frame), Ok(true));
-    frame[HEADER_LEN] |= 0x80;
-    let check_at = frame.len() - 4;
-    let check = crc32::crc32(&frame[..check_at]);
-    frame[check_at..].copy_from_slice(&check.to_le_bytes());
-    assert_eq!(decompress(&frame), Ok(data));
-    assert_eq!(decodes_incrementally(&frame), Ok(true));
+    let narrow = compress(&data);
+    assert_eq!(narrow[METHOD_OFFSET], Method::Lz as u8);
+    assert_eq!(decodes_incrementally(&narrow), Ok(true));
+    for code in [0x40, 0x80] {
+        let mut frame = narrow.clone();
+        frame[HEADER_LEN] |= code;
+        let check_at = frame.len() - 4;
+        let check = crc32::crc32(&frame[..check_at]);
+        frame[check_at..].copy_from_slice(&check.to_le_bytes());
+        // The far code also changes the offset alphabet this stream was
+        // coded in, so only the wide twin still decodes to `data`; both
+        // are answered from the selector alone.
+        if code == 0x40 {
+            assert_eq!(decompress(&frame), Ok(data.clone()));
+        }
+        assert_eq!(decodes_incrementally(&frame), Ok(true));
+    }
 }
 
 #[test]

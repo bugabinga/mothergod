@@ -27,6 +27,13 @@ All notable changes to this project are documented here. Format follows
   lost where it does not help, because the encoder keeps the 1 MiB frame when
   the 2 MiB one is not smaller. Encode takes 1.3x to 1.5x as long on those
   files; decode is unchanged. `FORMAT_VERSION` 16 to 17, ADR-0075 (#1423).
+- codec: `compress` reaches up to 16 MiB back on input over 2 MiB when that
+  shrinks the frame, so repeats anywhere in a 16 MiB block now match: Silesia
+  is 1.44% smaller in total, up to 3.5% on `webster` and 2.0% on `nci`, and
+  no file grows, because the encoder keeps the narrower frame when the far
+  one is not smaller. Encode takes 1.3x to 1.6x as long on those files;
+  decode time is unchanged, and streaming decode of such a frame holds up to
+  16 MiB. `FORMAT_VERSION` 17 to 18, ADR-0078 (#1790).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
   status first, each superseded decision linked to the one that replaced
   it, searchable in the browser, so a reader learns what is decided today
@@ -145,12 +152,12 @@ All notable changes to this project are documented here. Format follows
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 17, specified in
+- Bitstream format at `FORMAT_VERSION` 18, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 17 no longer decode: no release ever wrote them, and
+- Format versions below 18 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.

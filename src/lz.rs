@@ -16,23 +16,29 @@ use crate::codec::copy_checked;
 pub const WINDOW: usize = 1 << 20;
 
 /// Largest backward distance a match may reference at [`Reach::Wide`]:
-/// `2^21 - 1`, the last distance the offset code's top bucket
-/// (`OFFSET_BUCKETS`, `bucket(WINDOW)` plus its 20 raw bits) can name.
-/// A window past it needs a wider `OFFSET_BUCKETS`, a format change of
-/// its own.
+/// `2^21 - 1`, the last distance the top bucket of a 21-bucket offset
+/// alphabet (`bucket(WINDOW)` plus its 20 raw bits) can name.
 pub const WIDE_WINDOW: usize = (1 << 21) - 1;
 
+/// Largest backward distance a match may reference at [`Reach::Far`]:
+/// `2^24 - 1`, every distance inside one 16 MiB `compress` block, named
+/// by a 24-bucket offset alphabet (`research/JOURNAL.md` S2-A137).
+pub const FAR_WINDOW: usize = (1 << 24) - 1;
+
 /// How far back a frame's matches may reach, declared on the wire by the
-/// payload selector's top bit (`docs/format/SPEC.md`). The encoder picks
-/// per payload by trial (`research/JOURNAL.md` S2-R35, S2-A127); the decoder
-/// bounds both its distance check and its streaming ring by it, so a
-/// hostile frame cannot name a reach its header did not declare.
+/// payload selector's top two bits (`docs/format/SPEC.md`). The encoder
+/// picks per payload by trial (`research/JOURNAL.md` S2-R35, S2-A127,
+/// S2-A137); the decoder bounds its distance check, its offset alphabet and
+/// its streaming ring by it, so a hostile frame cannot name a reach its
+/// header did not declare.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
     /// Distances up to [`WINDOW`].
     Standard,
     /// Distances up to [`WIDE_WINDOW`].
     Wide,
+    /// Distances up to [`FAR_WINDOW`].
+    Far,
 }
 
 impl Reach {
@@ -42,7 +48,21 @@ impl Reach {
         match self {
             Self::Standard => WINDOW,
             Self::Wide => WIDE_WINDOW,
+            Self::Far => FAR_WINDOW,
         }
+    }
+
+    /// The [`bucket`] alphabet a match distance at this reach is coded and
+    /// priced in: `bucket(window) + 1`, 21 for [`Self::Standard`] and
+    /// [`Self::Wide`], 24 for [`Self::Far`]. Sized by the reach, not by
+    /// the widest one, because an adaptive model's probabilities depend on
+    /// its alphabet: a shared 24-bucket alphabet would move every narrow
+    /// frame's bits for buckets it can never use.
+    #[must_use]
+    pub const fn offset_buckets(self) -> usize {
+        // `window` is at least 2^20, so `leading_zeros` < 64 and the
+        // difference is `floor(log2(window)) + 1`.
+        (usize::BITS - self.window().leading_zeros()) as usize
     }
 }
 
@@ -221,10 +241,13 @@ impl RepCache {
 }
 
 /// Fixed-capacity ring buffer over the last [`Reach::window`] decoded bytes,
-/// for [`crate::codec`]'s streaming decode (bounded memory, ROADMAP M4). A
+/// or the frame's declared length when that is shorter, for
+/// [`crate::codec`]'s streaming decode (bounded memory, ROADMAP M4). A
 /// byte older than that is silently overwritten, which is sound because
-/// `crate::codec::ensure_within_window` rejects any distance wider before it
-/// reaches here, and the caller has already handed every byte to its sink.
+/// `crate::codec::ensure_within_window` rejects any distance wider than the
+/// reach, and the streaming sink any distance past the bytes written (which
+/// never exceed the declared length), before it reaches here; the caller
+/// has already handed every byte to its sink.
 pub(crate) struct Window {
     buf: Box<[u8]>,
     /// Total bytes ever pushed, unbounded (mirrors `decode`'s
@@ -235,12 +258,21 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    /// An empty window: [`Reach::window`] bytes of backing storage, nothing
-    /// written yet. Fallible so an allocator failure on the decode path
-    /// returns `Err` instead of aborting (hard rule 2, `tests/torture.rs`).
-    pub(crate) fn try_new(reach: Reach) -> Result<Self, std::collections::TryReserveError> {
+    /// An empty window for a frame of `declared_len` output bytes at
+    /// `reach`: [`Reach::window`] bytes of backing storage, or
+    /// `declared_len` when fewer (at least one, so the ring's modulus is
+    /// never zero), nothing written yet. Bounding by the declared length
+    /// keeps a hostile short frame that declares [`Reach::Far`] from
+    /// costing a 16 MiB ring. Fallible so an allocator failure on the
+    /// decode path returns `Err` instead of aborting (hard rule 2,
+    /// `tests/torture.rs`).
+    pub(crate) fn try_new(
+        reach: Reach,
+        declared_len: usize,
+    ) -> Result<Self, std::collections::TryReserveError> {
+        let capacity = reach.window().min(declared_len).max(1);
         Ok(Self {
-            buf: crate::try_filled_vec(reach.window(), 0u8)?.into_boxed_slice(),
+            buf: crate::try_filled_vec(capacity, 0u8)?.into_boxed_slice(),
             written: 0,
         })
     }
@@ -792,11 +824,6 @@ fn literal_price_index(data: &[u8], pos: usize) -> usize {
 /// [`Model`]: crate::model::Model
 pub(crate) const LENGTH_BUCKETS: usize = 17;
 
-/// [`bucket`] values a match distance ever falls into: `bucket(WINDOW)`
-/// (2^20) is 20. Shared with [`crate::codec`], same reason as
-/// [`LENGTH_BUCKETS`].
-pub(crate) const OFFSET_BUCKETS: usize = 21;
-
 /// Flat price, in bits, of the flag bit selecting a literal over a
 /// match/rep; not modelled.
 const FLAG_BIT_PRICE: f64 = 1.0;
@@ -828,7 +855,7 @@ pub(crate) fn bucket(v: u32) -> usize {
 fn extra_bits(bucket_index: usize) -> f64 {
     #[allow(
         clippy::cast_precision_loss,
-        reason = "bucket_index < OFFSET_BUCKETS (21), far below f64's exact integer range (2^53)"
+        reason = "bucket_index < Reach::Far.offset_buckets() (24), far below f64's exact integer range (2^53)"
     )]
     {
         bucket_index as f64
@@ -857,7 +884,8 @@ struct PriceTable {
     literal: Vec<f64>,
     /// Match/rep length price by [`bucket`], [`LENGTH_BUCKETS`] entries.
     length: Vec<f64>,
-    /// Match distance price by [`bucket`], `OFFSET_BUCKETS` entries.
+    /// Match distance price by [`bucket`], [`Reach::offset_buckets`]
+    /// entries of the reach being parsed.
     offset: Vec<f64>,
     /// Flat price of choosing a rep over a normal match, independent of
     /// slot or length.
@@ -885,19 +913,21 @@ struct PriceCounts {
 }
 
 impl PriceCounts {
-    fn new() -> Self {
+    /// Laplace-smoothed counts with `reach`'s offset alphabet.
+    fn new(reach: Reach) -> Self {
         Self {
             literal: vec![1; LITERAL_CONTEXTS * ALPHABET],
             length: vec![1; LENGTH_BUCKETS],
-            offset: vec![1; OFFSET_BUCKETS],
+            offset: vec![1; reach.offset_buckets()],
             rep: 1,
         }
     }
 
-    /// Tallies `tokens`; `data` supplies each literal's preceding-byte
-    /// context, which a token does not carry.
-    fn tally(tokens: &[Token], data: &[u8]) -> Self {
-        let mut counts = Self::new();
+    /// Tallies `tokens`, every distance of which is within `reach`; `data`
+    /// supplies each literal's preceding-byte context, which a token does
+    /// not carry.
+    fn tally(tokens: &[Token], data: &[u8], reach: Reach) -> Self {
+        let mut counts = Self::new(reach);
         let mut pos = 0usize;
         for token in tokens {
             match *token {
@@ -1122,9 +1152,9 @@ impl DpState {
 /// coincides with a cached one (hard rule 1).
 ///
 /// `reach` bounds [`BinaryTreeMatchFinder`]'s reach, the frame being encoded's
-/// (`research/JOURNAL.md` S2-A61). Both [`Reach`] windows keep
-/// `bucket(window as u32) < OFFSET_BUCKETS`, so every distance the finder
-/// returns indexes `prices.offset`.
+/// (`research/JOURNAL.md` S2-A61). `prices` must be priced at the same
+/// `reach`: `bucket(reach.window())` is `reach.offset_buckets() - 1`, so
+/// every distance the finder returns indexes `prices.offset`.
 ///
 /// `ring_cap` is [`DpState`]'s ring cap, a parameter so a test can compare
 /// the wrapped ring against one that never wraps; [`RING_LEN`] otherwise.
@@ -1295,7 +1325,7 @@ pub fn parse_rounds(data: &[u8], reach: Reach, rounds: usize) -> Vec<Token> {
     }
     let mut round = parse_greedy(data);
     for _ in 0..rounds {
-        let prices = PriceCounts::tally(&round, data).prices(round.len());
+        let prices = PriceCounts::tally(&round, data, reach).prices(round.len());
         // The prices are all the next round takes from these tokens, and a
         // token list the parse grew by doubling holds up to 192 MiB of
         // capacity for a 16 MiB block: kept, it is live beside `parent` and

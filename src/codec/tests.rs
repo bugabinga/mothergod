@@ -248,7 +248,7 @@ fn length_streams_through_both_split_models_roundtrip() {
     let data = vec![0u8; 4 + 30 * 50 + 30 * 5];
 
     let mut frame = Candidate::Identity.to_header_bytes().to_vec();
-    frame.extend(encode_tokens_with(&data, None, &tokens));
+    frame.extend(encode_tokens_with(&data, None, Reach::Standard, &tokens));
 
     assert_decode_matches(&frame, &data, "match and rep lengths, split models");
 }
@@ -263,7 +263,7 @@ fn length_match_and_rep_models_adapt_independently() {
     // the real EncodeSink path, then checks that a fresh models.length_rep
     // (never trained) still prices 10 at its untrained, higher cost —
     // proving the two fields are genuinely independent state, not aliases.
-    let mut models = Models::new();
+    let mut models = Models::new(Reach::Standard);
     let mut ac = Encoder::new();
     for _ in 0..50 {
         EncodeSink {
@@ -321,7 +321,7 @@ fn offsets_through_length_keyed_models_roundtrip() {
     let data = vec![0u8; 4 + 30 * short_len as usize + 30 * long_len as usize];
 
     let mut frame = Candidate::Identity.to_header_bytes().to_vec();
-    frame.extend(encode_tokens_with(&data, None, &tokens));
+    frame.extend(encode_tokens_with(&data, None, Reach::Standard, &tokens));
 
     assert_decode_matches(&frame, &data, "offsets keyed on match length");
 }
@@ -338,7 +338,7 @@ fn offset_models_adapt_independently_by_length_state() {
     // trained, a far longer match's own state) still prices 10 at its
     // untrained, higher cost — proving the four entries are genuinely
     // independent state, not aliases.
-    let mut models = Models::new();
+    let mut models = Models::new(Reach::Standard);
     let mut ac = Encoder::new();
     let short_len = u32::try_from(lz::MIN_MATCH_LEN).expect("MIN_MATCH_LEN fits u32");
     for _ in 0..50 {
@@ -496,7 +496,7 @@ fn decode_clamps_a_max_len_above_max_decoded_len() {
 /// [`decode`] reads: the decoder meets exactly the distance named, never
 /// garbage from a mismatched model. `declared_len` is 4, one match's worth.
 fn single_match_payload(distance: u32) -> Vec<u8> {
-    let mut models = Models::new();
+    let mut models = Models::new(Reach::Standard);
     let mut ac = Encoder::new();
     models.flag[0].encode(&mut ac, FlagKind::Match.index());
     let mut sink = EncodeSink {
@@ -550,7 +550,7 @@ const OVERRUN_DECLARED_LEN: u32 = 8;
 fn overrun_payload() -> Vec<u8> {
     let data: Vec<u8> = (0..OVERRUN_TOKENS).collect();
     let tokens: Vec<Token> = data.iter().map(|&byte| Token::Literal(byte)).collect();
-    let coded = encode_tokens_with(&data, None, &tokens);
+    let coded = encode_tokens_with(&data, None, Reach::Standard, &tokens);
     let (header, stream) = split_token_header(&coded).expect("the encoder wrote a header");
     lz_payload(
         Candidate::Identity.to_header_bytes(),
@@ -606,8 +606,9 @@ fn a_streaming_decode_writes_no_byte_past_the_declared_len() {
 
 #[test]
 fn match_distance_beyond_window_is_rejected() {
-    // OFFSET_BUCKETS (21) lets decode_offset represent distances up
-    // to 2 * lz::WINDOW - 1, wider than any real encoder ever emits
+    // A standard frame's 21-bucket offset alphabet lets decode_offset
+    // represent distances up to 2 * lz::WINDOW - 1, wider than any real
+    // standard encoder ever emits
     // (its match finder never searches past lz::WINDOW): a distance
     // one past the window must be rejected on its own, before
     // ensure_room or copy_checked's own bounds checks even run.
@@ -627,7 +628,7 @@ fn ensure_within_window_accepts_the_boundary_and_rejects_one_past() {
     // testing the extracted comparison directly, at exactly the
     // boundary in both directions, is the only way to tell `>` apart
     // from its neighbors without driving a window-sized decode.
-    for reach in [Reach::Standard, Reach::Wide] {
+    for reach in [Reach::Standard, Reach::Wide, Reach::Far] {
         let window = u32::try_from(reach.window()).expect("the window fits u32");
         assert_eq!(
             ensure_within_window(
@@ -672,7 +673,7 @@ fn far_match_frame(distance: usize, reach: Reach) -> (Vec<u8>, Vec<u8>) {
     });
     let data = lz::replay(&tokens);
     let mut frame = selector(Candidate::Identity, reach).to_vec();
-    frame.extend(encode_tokens_with(&data, None, &tokens));
+    frame.extend(encode_tokens_with(&data, None, reach, &tokens));
     (frame, data)
 }
 
@@ -683,6 +684,27 @@ fn a_wide_frame_decodes_a_match_at_the_widest_distance_both_ways() {
     let (frame, data) = far_match_frame(lz::WIDE_WINDOW, Reach::Wide);
 
     assert_decode_matches(&frame, &data, "a wide frame at WIDE_WINDOW");
+}
+
+#[test]
+fn a_far_frame_decodes_a_match_at_the_farthest_distance_both_ways() {
+    // The far reach's 24-bucket offset alphabet names 2^24 - 1, and the
+    // streaming ring, sized by the declared length here, still holds the
+    // byte this match reads.
+    let (frame, data) = far_match_frame(lz::FAR_WINDOW, Reach::Far);
+
+    assert_decode_matches(&frame, &data, "a far frame at FAR_WINDOW");
+}
+
+#[test]
+fn reach_offset_alphabets_name_exactly_their_window() {
+    // Standard and wide share the 21 buckets every frame before the far
+    // reach used, so their bodies are byte-identical to the old encoder's.
+    for (reach, buckets) in [(Reach::Standard, 21), (Reach::Wide, 21), (Reach::Far, 24)] {
+        assert_eq!(reach.offset_buckets(), buckets, "{reach:?}");
+        let window = u32::try_from(reach.window()).expect("the window fits u32");
+        assert_eq!(lz::bucket(window), buckets - 1, "{reach:?}");
+    }
 }
 
 #[test]
@@ -702,18 +724,16 @@ fn a_standard_frame_rejects_a_match_past_the_standard_window_both_ways() {
 }
 
 #[test]
-fn selector_carries_reach_in_the_top_bit_and_splits_back() {
+fn selector_carries_reach_in_the_top_two_bits_and_splits_back() {
     for candidate in [
         Candidate::Identity,
         Candidate::Delta(crate::test_support::nz(4)),
         Candidate::ReverseDelta(crate::test_support::nz(20)),
     ] {
-        let narrow = selector(candidate, Reach::Standard);
-        let wide = selector(candidate, Reach::Wide);
-        assert_eq!(narrow, candidate.to_header_bytes());
-        assert_eq!(wide[0], narrow[0] | 0x80);
-        assert_eq!(wide[1], narrow[1]);
-        for (bytes, reach) in [(narrow, Reach::Standard), (wide, Reach::Wide)] {
+        let narrow = candidate.to_header_bytes();
+        for (code, reach) in [(0u8, Reach::Standard), (1, Reach::Wide), (2, Reach::Far)] {
+            let bytes = selector(candidate, reach);
+            assert_eq!(bytes, [narrow[0] | code << REACH_SHIFT, narrow[1]]);
             let payload = [bytes[0], bytes[1], 9];
             let (split_candidate, split_reach, rest) =
                 split_selector(&payload).expect("a selector");
@@ -722,9 +742,23 @@ fn selector_carries_reach_in_the_top_bit_and_splits_back() {
                 (candidate, reach, &[9u8][..])
             );
         }
+        // Reach code 3 names no reach, whatever the filter.
+        assert_eq!(
+            split_selector(&[narrow[0] | 3 << REACH_SHIFT, narrow[1], 0]),
+            Err(Error::Corrupt)
+        );
     }
-    // A wide bit on a kind no candidate has is still no candidate.
-    assert_eq!(split_selector(&[0x80 | 7, 0, 0]), Err(Error::Corrupt));
+    // A reach on a kind no candidate has is still no candidate.
+    assert_eq!(
+        split_selector(&[1 << REACH_SHIFT | 7, 0, 0]),
+        Err(Error::Corrupt)
+    );
+}
+
+/// The [`Reach`] an encoded payload's selector declares.
+fn declared_reach(encoded: &[u8]) -> Reach {
+    let (_, reach, _) = split_selector(encoded).expect("an encoded payload opens with a selector");
+    reach
 }
 
 #[test]
@@ -738,7 +772,7 @@ fn encode_declares_the_wide_reach_when_a_repeat_sits_past_the_standard_window() 
 
     let encoded = encode(&data);
 
-    assert_eq!(encoded[0] & 0x80, 0x80, "the selector declares Reach::Wide");
+    assert_eq!(declared_reach(&encoded), Reach::Wide);
     assert_decode_matches(&encoded, &data, "a repeat past the standard window");
 }
 
@@ -750,12 +784,40 @@ fn encode_keeps_the_standard_reach_when_the_wide_parse_buys_nothing() {
 
     let encoded = encode(&data);
 
-    assert_eq!(
-        encoded[0] & 0x80,
-        0,
-        "the selector declares Reach::Standard"
-    );
+    assert_eq!(declared_reach(&encoded), Reach::Standard);
     assert_decode_matches(&encoded, &data, "a run longer than the window");
+}
+
+#[test]
+fn encode_declares_the_far_reach_when_a_repeat_sits_past_the_wide_window() {
+    // A record, a run of zeros past the wide window, the record again:
+    // only a far match reaches the first copy.
+    let record = crate::test_support::record_text(2);
+    let mut data = record.clone();
+    data.resize(lz::WIDE_WINDOW + record.len() + 4096, 0);
+    data.extend_from_slice(&record);
+
+    let encoded = encode(&data);
+
+    assert_eq!(declared_reach(&encoded), Reach::Far);
+    assert_decode_matches(&encoded, &data, "a repeat past the wide window");
+}
+
+#[test]
+fn encode_keeps_the_wide_reach_when_the_far_parse_buys_nothing() {
+    // Longer than the wide window, with its one far-reaching repeat
+    // inside it: the far parse finds the same tokens, a tie, which goes
+    // to the reach already kept.
+    let record = crate::test_support::record_text(2);
+    let mut data = record.clone();
+    data.resize(lz::WINDOW + record.len() + 4096, 0);
+    data.extend_from_slice(&record);
+    data.resize(lz::WIDE_WINDOW + 4096, 0);
+
+    let encoded = encode(&data);
+
+    assert_eq!(declared_reach(&encoded), Reach::Wide);
+    assert_decode_matches(&encoded, &data, "a wide repeat in a far-sized input");
 }
 
 #[test]
@@ -993,7 +1055,7 @@ fn length_residual_trees_roundtrip_through_a_frame() {
     let data = vec![0u8; 4 + 30 * 50];
 
     let mut frame = Candidate::Identity.to_header_bytes().to_vec();
-    frame.extend(encode_tokens_with(&data, None, &tokens));
+    frame.extend(encode_tokens_with(&data, None, Reach::Standard, &tokens));
 
     assert_decode_matches(&frame, &data, "residual bits through trees");
 }
@@ -1003,7 +1065,7 @@ fn length_residual_trees_adapt_independently_by_kind() {
     // Trains the match tree through the real EncodeSink path, then checks
     // the rep tree still prices the same value at its fresh, higher cost:
     // two genuinely separate trees, not aliases a round-trip cannot tell.
-    let mut models = Models::new();
+    let mut models = Models::new(Reach::Standard);
     let mut ac = Encoder::new();
     for _ in 0..50 {
         EncodeSink {

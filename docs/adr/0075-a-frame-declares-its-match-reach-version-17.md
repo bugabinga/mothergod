@@ -1,6 +1,6 @@
 # ADR-0075: A frame declares its match reach, 1 MiB or 2 MiB; version 17
 
-Status: accepted · Date: 2026-10-20 · Applies ADR-0063 · Serves issue #1342 · `FORMAT_VERSION` 16 to 17
+Status: superseded by ADR-0078 · Date: 2026-10-20 · Applies ADR-0063 · Serves issue #1342 · `FORMAT_VERSION` 16 to 17
 
 ## Context
 

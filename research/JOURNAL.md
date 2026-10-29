@@ -2908,7 +2908,9 @@ record.
   `lz::Reach` is measured through `compress`. S1-P4 stays open: S2-A128
   lists a reach past the offset code's ceiling unmeasured. Twenty-fourth
   slice, S2-R38: the first candidate's wide trial beside the narrow winner's,
-  rejected; full record in S2-R38's own entry.
+  rejected; full record in S2-R38's own entry. Twenty-fifth slice, S2-A137:
+  a far reach to `2^24 - 1` with its own offset alphabet, accepted
+  (`FORMAT_VERSION` 18, ADR-0078); full record in S2-A137's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9597,3 +9599,64 @@ record.
   by count, a finer or interpolated `stretch` table that holds the train
   mean, the wire model's own cost, and #1775's questions 4 and 5.
   `research/progress.jsonl` it230, it231.
+- S2-A137 | ACCEPTED | Lead S1-P4, the reach past the offset code's
+  ceiling S2-A128 left unmeasured. Hypothesis: a third reach, `Reach::Far`
+  to `2^24 - 1` (every distance in a 16 MiB block) with a 24-bucket offset
+  alphabet of its own, trialled on the kept candidate after the wide trial
+  on input over `2^21 - 1` bytes and kept only when strictly smaller,
+  shrinks real files with repeats between 2 and 16 MiB back, and leaves
+  every standard and wide body byte-identical, so no input grows. |
+  Mechanism: the alphabet is per reach, `floor(log2(window)) + 1`, in both
+  the coder's offset models and the parse's price table, because an
+  adaptive model's probabilities depend on its alphabet: a scratch probe
+  that widened the one shared alphabet to 24 and the wide window to
+  `2^24 - 1` at `-2` (no trial) moved `mr` +0.191% and `x-ray` +0.745%
+  beside `nci` -3.591% and `webster` -2.195%, and at `-3` on train it grew
+  `x86_dense_code` +360 bytes. With the alphabet per reach, every
+  `v17-` golden pair re-encodes to its `v18-` frame with only the version
+  byte, the selector byte and the check value changed. The reach becomes a
+  2-bit field in the selector's `kind` byte (ADR-0078, `FORMAT_VERSION`
+  18). | Measured, release build, AMD EPYC 9V74 4 logical cores runner,
+  the shipped `mothergod -3 -c` path with filter trials and the real
+  decoder, every output decoded and compared, main at `fc023e0` against
+  the branch. Train, 4,000,000 bytes at seed `0xC0FFEE123456789A`
+  (S2-A127's length, because no `baseline::cases()` case reaches past
+  `lz::WINDOW`), bytes main to branch: `base64_wrapped` 188,490 to 188,465,
+  `sqlite_like_records` 1,610,659 to 1,610,408, the other four
+  byte-identical; mean **-0.000092** b/B. Sealed, read once, same length
+  at `sealed_seed` of that key: `access_log` 352,427 and `gradient_image`
+  2,848,584, both byte-identical; mean **0.000000**. `baseline_gate --
+  write` moved `bench/baseline.json` by digest only, every `bpb` equal.
+  Decode cost, `baseline_gate -- speed`, two runs each: main 112.56 and
+  112.90, branch 112.31 and 111.43 steps per byte, a delta of -0.86 inside
+  the run-to-run spread. Finals, read once and not a verdict input
+  (`research/corpus/POLICY.md`), all 12 Silesia files whole at the
+  `bench/corpus.toml` pins, serial, bytes main to branch, encode seconds
+  main to branch: `dickens` 2,899,385 to 2,858,017 (-1.43%), 53.4 to
+  76.1 s; `mozilla` 15,349,871 to 15,160,411 (-1.23%), 306.2 to 394.5 s;
+  `mr` 3,044,817 to 3,025,709 (-0.63%), 39.3 to 59.1 s; `nci` 1,943,762 to
+  1,905,148 (-1.99%), 108.5 to 137.9 s; `ooffice` 2,246,969 to 2,236,307
+  (-0.47%), 41.2 to 52.0 s; `osdb` 2,923,188 to 2,904,840 (-0.63%), 53.4
+  to 77.6 s; `reymont` 1,361,868 to 1,341,954 (-1.46%), 33.7 to 49.2 s;
+  `samba` 4,174,293 to 4,095,694 (-1.88%), 131.7 to 166.4 s; `sao`
+  4,896,324 to 4,887,701 (-0.18%), 57.1 to 83.9 s; `webster` 9,113,592 to
+  8,794,766 (-3.50%), 197.2 to 271.3 s; `x-ray` 4,695,620 to 4,675,717
+  (-0.42%), 47.5 to 61.8 s; `xml` 467,470 both, 10.8 to 17.3 s; twelve
+  files 53,117,159 to 52,353,734 bytes (-1.44%), aggregate 2.005002 to
+  1.976185 b/B. Main's bytes reproduce S2-A127 and S2-A128 to the byte.
+  Decode seconds within 12% either way, one run each. Peak encode RSS
+  within 1% on seven files, up to 960,832 KiB on `webster` (from 882,036),
+  under 1 GiB. | Verdict: **accepted**, train improvement and no sealed
+  regression, sealed zero by construction and measured zero. Against
+  `zstd -19` (`docs/benchmarks/silesia.md` as of 2026-10-26, whose
+  mothergod column main reproduces), `reymont` flips from a loss to a win
+  (+0.0162 to -0.0079 b/B), and the Silesia aggregate falls below
+  `zstd -19`'s 1.996629; six losses remain, each narrower: `dickens`
+  +0.0063, `mozilla` +0.0139, `nci` +0.0573, `samba` +0.0744, `webster`
+  +0.0222, `xml` +0.0213 (unchanged, its repeats all inside the wide
+  reach). Encode costs 1.26x to 1.60x, the third parse running after the
+  wide one. | **Not measured:** Canterbury (every file under 2 MiB, so
+  byte-identical by construction), the far trial beside the narrow trials
+  on idle cores, a far reach at `-2` behind a trial, `memory-check`'s CI
+  reading of the new peak, and a far case in `baseline_gate check` beside
+  `wide_reach_repeat`. `research/progress.jsonl` it232.
