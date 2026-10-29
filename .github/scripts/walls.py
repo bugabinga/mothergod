@@ -45,12 +45,18 @@ def note(hook: str, line: str) -> None:
         _append(summary, f"{hook}: {line}\n")
 
 
-def denied(hook: str, tool: str, line: str) -> None:
+def denied(hook: str, tool: str, line: str, detail: str | None = None) -> None:
     """`note`, plus the record the audit lifts into `permission_denials.reasons`.
 
     `tool` is what was refused: the tool name a PreToolUse hook saw, or
-    `Stop` for a Stop hook's block.
+    `Stop` for a Stop hook's block. `detail` is the hook's class for the
+    hit, one lowercase word of its fixed vocabulary, which rides the line
+    as a bracketed suffix (`denied Bash via shell & [quoted]`) and lands in
+    the walls table's `detail` column (audit_facts.wall_of, #1793); a hook
+    with no class for a hit passes none and the column stays NULL.
     """
+    if detail:
+        line = f"{line} [{detail}]"
     note(hook, line)
     path = record_path()
     if path:

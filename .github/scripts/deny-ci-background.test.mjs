@@ -182,8 +182,37 @@ test("a shell-& deny writes its own summary line", () => {
   assert.equal(run(call, env).status, 2);
   assert.match(
     readFileSync(summary, "utf8"),
-    /^deny-ci-background: denied Bash via shell &$/m,
+    /^deny-ci-background: denied Bash via shell & \[unquoted\]$/m,
   );
+});
+
+test("a shell-detach deny names where its match sat, and the class never changes the exit (#1793)", () => {
+  // The decision stays quote-blind (#355); the record says which hits
+  // were inert text, so the week's census can price the accepted cost.
+  const classed = [
+    ["cargo test &", "via shell & [unquoted]"],
+    ["bash <<EOF\ncargo test &\nEOF", "via shell & [unquoted]"],
+    ["echo \"fish & chips\"", "via shell & [quoted]"],
+    ["grep -n \"coproc\" .github/scripts/deny-ci-background", "via coproc [quoted]"],
+    ["git commit -m 'guard: mention the setsid -f trap'", "via setsid fork [quoted]"],
+    ["cargo test # fish & chips", "via shell & [quoted]"],
+    ["sh -c 'setsid -f cargo test'", "via setsid fork [quoted]"], // the hole #355 named, counted
+    ["echo \"a\" & echo 'b & c'", "via shell & [unquoted]"], // one live match outranks the quoted one
+    ["echo \"fish & chips\"; setsid -f x", "via shell & [unquoted]"], // across patterns too
+    ["echo \"$(sleep 1 &)\"", "via shell & [quoted]"], // literal: bash runs it, the label says quote
+    ["echo 'unterminated &", "via shell & [unparsed]"],
+    ["echo $'a' &", "via shell & [unparsed]"],
+  ];
+  for (const [command, expected] of classed) {
+    const temp = mkdtempSync(join(tmpdir(), "deny-"));
+    const env = { ...ciEnv, RUNNER_TEMP: temp };
+    assert.equal(run({ tool_name: "Bash", tool_input: { command } }, env).status, 2, command);
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(temp, "walls.jsonl"), "utf8")),
+      { tool: "Bash", type: "hook", reason: `deny-ci-background: denied Bash ${expected}` },
+      command,
+    );
+  }
 });
 
 test("a deny writes the tool name to GITHUB_STEP_SUMMARY and the audit's record", () => {

@@ -152,6 +152,19 @@ CREATE TABLE IF NOT EXISTS walls (
   wall     TEXT    NOT NULL,   -- the hook's name (deny-em-dash, deny-unpushed-work, ...) or the harness's decision type (mode, rule)
   PRIMARY KEY (run_id, attempt, tool, wall)
 );
+-- detail (#1793): the hook's class for the hit, the bracketed suffix it
+-- writes on its reason (walls.py). deny-ci-background says where the
+-- idioms it matched sat: 'unquoted' when any is outside a quote or
+-- comment, 'quoted' when all are inside one, 'unparsed' past a quote the
+-- scan could not close. 'quoted' is literal, not inert: a `$(...)` in
+-- double quotes counts as quoted though bash runs it. A run whose hits
+-- on one wall carried several classes says 'mixed'
+-- (audit_facts.walls_rows). NULL is a wall that names no class, or a row
+-- written before the column, whose reason carried no class for any
+-- rewrite to recover. Read by `sessions sql` for the question
+-- #1793 asks: how many of a guard's runs an allow for quoted text would
+-- have spared, before the guard's decision is touched.
+ALTER TABLE walls ADD COLUMN detail TEXT;
 
 -- vitals: one row a minute from the VM a heartbeat session runs on
 -- (#1665). Written by .github/scripts/vitals-sidecar.py, which

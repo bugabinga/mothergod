@@ -45,7 +45,10 @@ new one observed in the wild gets appended here, not to prose.
 Liveness: every deny appends a line to GITHUB_STEP_SUMMARY, the durable
 trace, and to the audit's record (`walls.py`), the only way a deny reaches
 the artifact, which excludes transcripts by design; a broken hook
-reference errors loudly in-session.
+reference errors loudly in-session. A shell-detach deny's line also
+names where its match sat (`[quoted]`, `[unquoted]`, `[unparsed]`), the
+class the walls table's `detail` column carries, so the week's census
+can tell inert text from a live detach (#1793).
 """
 
 import json
@@ -76,6 +79,14 @@ DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 # the list names what never executes, so an unknown reader fails
 # closed; so does an unquoted delimiter, whose body bash expands before
 # any reader sees it. Each entry: (pattern, step-summary reason).
+#
+# What the decision refuses to know, the record still says (#1793):
+# each shell-detach deny is labeled by `span_class` with where its
+# match sat, inside a quote or comment or outside one, so the census
+# over a week of walls can tell the prose cost from the detaches the
+# guard rightly stopped, before anyone argues for an allow. The label
+# never touches the exit code: `sh -c 'setsid -f x'` is denied and
+# labeled quoted, the hole #355 named, now counted.
 SHELL_DETACH = (
     # Bare `&` control operator. The lookbehind clears `&&`, `>&`,
     # `<&`, `|&`; the lookahead clears `&&`, `&>`, and ampersands
@@ -115,6 +126,28 @@ SHELL_DETACH_MESSAGE = (
 )
 
 
+def span_class(scanned: str) -> str:
+    """Where the detach idioms matched in `scanned` sat, for the record only.
+
+    `unquoted` when any SHELL_DETACH pattern still matches with every
+    quoted span and comment masked (heredoc.mask_quoted), so at least one
+    match is live shell; `quoted` when masking removes every match;
+    `unparsed` when the text ends inside a quote the scan could not
+    close, or after a `$'` it does not model, so the masking is not
+    trusted to say. Every pattern is tested, not only the one the reason
+    names: in `echo "fish & chips"; setsid -f x` the reason is the
+    quoted `&`, and the live setsid makes the class `unquoted`. The
+    newline closes a comment that runs to the end, which is closed text,
+    as `heredoc.continues` reads it; a quote stays open across it.
+    "Quoted" is literal: a `$(...)` inside double quotes is masked too,
+    though bash runs it.
+    """
+    masked, open_span = heredoc.mask_quoted(scanned + "\n")
+    if any(pattern.search(masked) for pattern, _ in SHELL_DETACH):
+        return "unquoted"
+    return "unparsed" if open_span else "quoted"
+
+
 def main() -> int:
     """Allow (0) or deny (2) the tool call described on stdin."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -129,6 +162,7 @@ def main() -> int:
         tool_input = {}
     background = tool_input.get("run_in_background")
     reason = None
+    detail = None
     if tool in DEFAULT_FOREGROUND:
         command = tool_input.get("command")
         if background is True:
@@ -138,12 +172,13 @@ def main() -> int:
             for pattern, why in SHELL_DETACH:
                 if pattern.search(scanned):
                     reason = why
+                    detail = span_class(scanned)
                     break
     elif tool in DEFAULT_BACKGROUND and background is not False:
         reason = "in background"
     if reason is None:
         return 0
-    walls.denied("deny-ci-background", tool, f"denied {tool} {reason}")
+    walls.denied("deny-ci-background", tool, f"denied {tool} {reason}", detail)
     message = DETACH_MESSAGE if reason == "in background" else SHELL_DETACH_MESSAGE
     print(message, file=sys.stderr)
     return 2

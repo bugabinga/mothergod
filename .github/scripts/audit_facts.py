@@ -25,6 +25,7 @@ import collections
 import io
 import json
 import math
+import re
 import subprocess
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -241,15 +242,24 @@ def tools_rows(meta):
 
 
 # The walls table's row: one wall one run hit, the guard or harness rule
-# that refused a tool (#1241). `at` and `role` are the session's, joined
-# on (run_id, attempt), never repeated here.
-WALLS_COLUMNS = ("run_id", "attempt", "tool", "wall")
+# that refused a tool (#1241), and the hook's class for the hit where it
+# wrote one (#1793). `at` and `role` are the session's, joined on
+# (run_id, attempt), never repeated here.
+WALLS_COLUMNS = ("run_id", "attempt", "tool", "wall", "detail")
 # A run's reasons are distinct triples, a handful at most; past MAX_WALLS
 # the artifact is not a run's.
 MAX_WALLS = 100
 # A wall's name is a hook's file name or the harness's decision type, both
 # fixed vocabulary; a longer one is not a name and is cut, never stored.
 WALL_NAME_CAP = 64
+# A hook's class for a hit, the bracketed suffix walls.denied writes: one
+# lowercase word, so model text, which carries spaces, digits and case,
+# cannot pass as one.
+DETAIL = re.compile(r" \[([a-z]{1,32})\]$")
+# The row's word when one run's hits on one wall carried several classes:
+# the key is (run, tool, wall), so the classes share a row, and a row that
+# kept one of them would claim a run was all prose or all live.
+MIXED = "mixed"
 
 
 def walls_insert(rows):
@@ -259,23 +269,30 @@ def walls_insert(rows):
 
 
 def wall_of(entry):
-    """(tool, wall) for one reasons entry, or None for one of another shape.
+    """(tool, wall, detail) for one reasons entry, or None for one of another shape.
 
     A hook-path denial's reason is `hook: line` (walls.py), the hook being
-    the wall; a denial the harness decided itself carries its
-    decision_reason_type (mode, rule) as `type`, which is the wall, or
-    `unlisted` where it carried none, a tool outside `--allowedTools`
-    (audit-extract.py, #1742). Fixed vocabulary all three ways, so the
-    name is an identifier, never the model's text, and the keys-only
-    rule for model prose (ADR-0019) holds.
+    the wall, and `line` may end in the hook's bracketed class for the
+    hit, the detail (#1793), None where it names none; a denial the
+    harness decided itself carries its decision_reason_type (mode, rule)
+    as `type`, which is the wall, or `unlisted` where it carried none, a
+    tool outside `--allowedTools` (audit-extract.py, #1742). Fixed
+    vocabulary all four ways, so the name is an identifier, never the
+    model's text, and the keys-only rule for model prose (ADR-0019) holds.
     """
     if not isinstance(entry, dict):
         return None
     tool, kind, why = entry.get("tool"), entry.get("type"), entry.get("reason")
     if not all(isinstance(v, str) for v in (tool, kind, why)) or not tool:
         return None
-    wall = why.split(":", 1)[0].strip() if kind == "hook" else kind
-    return (tool, wall[:WALL_NAME_CAP]) if wall else None
+    detail = None
+    if kind == "hook":
+        wall = why.split(":", 1)[0].strip()
+        classed = DETAIL.search(why)
+        detail = classed.group(1) if classed else None
+    else:
+        wall = kind
+    return (tool, wall[:WALL_NAME_CAP], detail) if wall else None
 
 
 def walls_rows(meta):
@@ -286,7 +303,9 @@ def walls_rows(meta):
     absence the tools table keeps for an artifact before #946. An entry of
     another shape is skipped, not raised on: a skipped entry loses one
     row and invents nothing, where a tools count of the wrong shape would
-    have invented a zero.
+    have invented a zero. The row's detail is the one class the run's hits
+    on that wall carried, MIXED when they carried several, None when none
+    did (#1793).
     """
     run_id = as_int(meta.get("run_id"))
     tele = meta.get("telemetry") if isinstance(meta.get("telemetry"), dict) else {}
@@ -295,8 +314,16 @@ def walls_rows(meta):
     if run_id is None or not isinstance(reasons, list):
         return []
     attempt = as_int(meta.get("run_attempt")) or 1
-    hits = {(run_id, attempt) + named for named in map(wall_of, reasons) if named}
-    return sorted(hits)[:MAX_WALLS]
+    classes = collections.defaultdict(set)
+    for named in map(wall_of, reasons):
+        if named:
+            tool, wall, detail = named
+            classes[(run_id, attempt, tool, wall)].add(detail)
+    rows = []
+    for key in sorted(classes):
+        found = sorted(classes[key] - {None})
+        rows.append(key + (found[0] if len(found) == 1 else MIXED if found else None,))
+    return rows[:MAX_WALLS]
 
 
 def statements(values, readings, tool_rows, wall_rows):
