@@ -400,7 +400,7 @@ const LOGISTIC_INITIAL_WEIGHT: f64 = 1.0 / 6.0;
 /// One gradient step of [`SurpriseLogisticMix`]'s weight vector for a single
 /// bit-tree node: the node's error, target bit minus the pre-refine mix
 /// `p`, nudges each expert's weight by `rate` scaled by that expert's own
-/// stretched input. Split out of [`Literal::code_bit_walk`] so this
+/// stretched input. Split out of [`Literal::walk_logit_sse`] so this
 /// arithmetic is checkable against the walk's chained state.
 fn logistic_gradient_step(
     weights: &mut [f64; EXPERTS],
@@ -418,7 +418,7 @@ fn logistic_gradient_step(
 /// One bit-tree node's six-expert logit-domain mix: `prefix`'s per-expert
 /// prefix sums at `(lo, mid, hi)` give each expert's upper-half
 /// probability, [`stretch`]ed and weighted-summed against `weights`.
-/// [`Literal::code_bit_walk`]'s first step at each node, before its rate
+/// [`Literal::walk_logit_sse`]'s first step at each node, before its rate
 /// schedule. Split out so it is checkable against directly-chosen prefix
 /// sums, independent of the walk's chained state.
 fn logistic_mix_node(
@@ -918,50 +918,6 @@ impl Literal {
         prefix
     }
 
-    /// The [`SurpriseLogisticMix`] counterpart of [`bittree::walk_sse`],
-    /// shared by encode, decode and pricing so they cannot drift apart:
-    /// blends the six expert banks in the logit domain under `mixer`'s
-    /// `weight_index` vector, refines through its calibration table, and
-    /// takes one gradient step per node at [`surprise_rate`]. `code_bit`
-    /// receives each node's midpoint and refined probability and returns the
-    /// bit the node resolved to.
-    ///
-    /// Every expert's upper-half probability lies strictly inside `(0, 1)`
-    /// before [`clamp_logistic_probability`] even runs: every bank
-    /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
-    /// every node's range holds at least one symbol on each side.
-    fn code_bit_walk(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-        weight_index: usize,
-        mixer: &mut SurpriseLogisticMix,
-        mut code_bit: impl FnMut(usize, f64) -> bool,
-    ) -> u8 {
-        let prefix = self.expert_prefix_sums(bank_indices);
-        bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let (stretched, dot) =
-                logistic_mix_node(&prefix, &mixer.weights[weight_index], lo, mid, hi);
-            let p = clamp_logistic_probability(squash(dot));
-            let node_context = bittree::sse_context(depth, node_prefix);
-            let refined = mixer.sse.refine(node_context, p);
-            let bit = code_bit(mid, refined);
-            mixer.sse.update(node_context, p, bit);
-            let rate = surprise_rate(
-                mixer.recent_sq_error[weight_index],
-                mixer.baseline_sq_error[weight_index],
-            );
-            logistic_gradient_step(&mut mixer.weights[weight_index], &stretched, rate, bit, p);
-            surprise_error_tracking_step(
-                &mut mixer.recent_sq_error[weight_index],
-                &mut mixer.baseline_sq_error[weight_index],
-                SURPRISE_RECENT_DECAY,
-                bit,
-                p,
-            );
-            bit
-        })
-    }
-
     /// Codes `byte` through `encoder` under `context`, mixed by `mixer`'s
     /// logit-domain walk and refined through [`LogitSse`]
     /// (`research/JOURNAL.md` S2-A106, S2-A108). The six expert banks
@@ -1001,19 +957,49 @@ impl Literal {
 
     /// One byte's walk under `context` and `mixer`, the step
     /// [`Self::encode_logit_sse`], [`Self::decode_logit_sse`] and the
-    /// benchmark harness's whole-stream pricing share: `code_bit` receives
-    /// each node's midpoint and refined probability that the node's bit is
-    /// `1` (the byte is at or above the midpoint) and returns the bit the
-    /// node resolved to; the six expert banks then update on the landed
-    /// byte, which is returned.
+    /// benchmark harness's whole-stream pricing share, so they cannot drift
+    /// apart: at each node it blends the six expert banks in the logit
+    /// domain under `mixer`'s weight vector for `context`, refines through
+    /// `mixer`'s calibration table, and takes one gradient step at
+    /// [`surprise_rate`]. `code_bit` receives each node's midpoint and
+    /// refined probability that the node's bit is `1` (the byte is at or
+    /// above the midpoint) and returns the bit the node resolved to; the six
+    /// expert banks then update on the landed byte, which is returned.
+    ///
+    /// Every expert's upper-half probability lies strictly inside `(0, 1)`
+    /// before [`clamp_logistic_probability`] even runs: every bank
+    /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
+    /// every node's range holds at least one symbol on each side.
     pub fn walk_logit_sse(
         &mut self,
         context: Context,
         mixer: &mut SurpriseLogisticMix,
-        code_bit: impl FnMut(usize, f64) -> bool,
+        mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
-        let byte = self.code_bit_walk(&bank_indices, weight_index, mixer, code_bit);
+        let prefix = self.expert_prefix_sums(&bank_indices);
+        let byte = bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
+            let (stretched, dot) =
+                logistic_mix_node(&prefix, &mixer.weights[weight_index], lo, mid, hi);
+            let p = clamp_logistic_probability(squash(dot));
+            let node_context = bittree::sse_context(depth, node_prefix);
+            let refined = mixer.sse.refine(node_context, p);
+            let bit = code_bit(mid, refined);
+            mixer.sse.update(node_context, p, bit);
+            let rate = surprise_rate(
+                mixer.recent_sq_error[weight_index],
+                mixer.baseline_sq_error[weight_index],
+            );
+            logistic_gradient_step(&mut mixer.weights[weight_index], &stretched, rate, bit, p);
+            surprise_error_tracking_step(
+                &mut mixer.recent_sq_error[weight_index],
+                &mut mixer.baseline_sq_error[weight_index],
+                SURPRISE_RECENT_DECAY,
+                bit,
+                p,
+            );
+            bit
+        });
         self.update(&bank_indices, weight_index, usize::from(byte), exp);
         byte
     }
