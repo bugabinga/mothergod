@@ -558,7 +558,7 @@ fn changelog_unreleased(text: &str) -> Range<usize> {
     start..end
 }
 
-/// `CHANGELOG.md`'s "Ratio" bullet names only three of the four columns the
+/// `CHANGELOG.md`'s ratio highlight names only three of the four columns the
 /// other surfaces carry, in this order: `[mothergod, zstd -19, xz -9e]`. It
 /// never names gzip, so it maps onto `aggregate_from_report`'s four-wide
 /// array by skipping index 1.

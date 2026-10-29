@@ -6,13 +6,40 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+mothergod is a general-purpose lossless compressor, built for compression
+ratio rather than speed.
+
+Each release carries one archive per platform: Linux x86-64
+(`x86_64-unknown-linux-gnu`), macOS on Apple silicon (`aarch64-apple-darwin`)
+and Windows x86-64 (`x86_64-pc-windows-msvc`). Beside each sits a `.sha256`
+file; download both into one directory and run `sha256sum -c` on it
+(`shasum -a 256 -c` on macOS). Building from source is in the
+[README](https://github.com/bugabinga/mothergod#try-it).
+
+- Smaller files than `zstd -19`, on the held-out final corpora
+  ([`bench/corpus.toml`](https://github.com/bugabinga/mothergod/blob/main/bench/corpus.toml),
+  pinned by URL and SHA-256): it beats both `zstd -19` and `xz -9e` in
+  aggregate on Canterbury (1.347 bits/byte vs 1.470 and 1.403), and beats
+  `zstd -19` and trails `xz -9e` in aggregate on Silesia (1.976 vs 1.997 and
+  1.829). Per-file tables and the reproduction command:
+  [`docs/benchmarks/`](https://github.com/bugabinga/mothergod/tree/main/docs/benchmarks).
+- Faster when asked: against the default `-3`, on Silesia, `-2` writes 10.0%
+  more bytes and encodes about 7x faster, and `-1` writes 17.8% more and
+  encodes about 12x faster.
+- Damage is an error, never wrong bytes: a bit flip anywhere in a frame fails
+  its CRC-32 before any of it is written, and truncated or hostile input gets
+  an error, never a crash. The `format:` and `Trust:` entries below carry the
+  details.
+
+The sections below list every change since the project began. "Changed" and
+"Fixed" compare against earlier builds from source, not against an earlier
+release.
+
 ### Added
 
-- cli, library: `-1` and `-2` trade size for encode speed, `-3` being the
-  default and what the compressor always wrote: on Silesia, `-2` writes 10.0%
-  more bytes and encodes about 7x faster, `-1` writes 17.8% more and encodes
-  about 12x faster. Any digit but `-1` to `-3`, and any digit beside `-d` or
-  `-t`, is refused. The library takes the same choice as `mothergod::Level`,
+- cli, library: `-1` and `-2` trade size for encode speed, as measured above,
+  `-3` being the default and what the compressor always wrote. Any digit but
+  `-1` to `-3`, and any digit beside `-d` or `-t`, is refused. The library takes the same choice as `mothergod::Level`,
   through `compress_level`, `copy_encode_level` and
   `write::Encoder::with_level`. Every level writes frames the one decoder
   reads, so nothing about decoding changes (#1709).
@@ -161,12 +188,6 @@ All notable changes to this project are documented here. Format follows
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.
-- Ratio, on the held-out finals ([`bench/corpus.toml`](bench/corpus.toml),
-  pinned by URL and SHA-256): beats both `zstd -19` and `xz -9e` in
-  aggregate on Canterbury (1.347 bits/byte vs 1.470 and 1.403); beats
-  `zstd -19` and trails `xz -9e` in aggregate on Silesia (1.976 vs 1.997 and
-  1.829). Per-file tables and
-  the reproduction command: [`docs/benchmarks/`](docs/benchmarks/).
 - Trust: a frame of incompressible data cut short is now an error with
   exit status 1 instead of a silent prefix with exit status 0; the price
   is 8 bytes on such a frame (#1019).
