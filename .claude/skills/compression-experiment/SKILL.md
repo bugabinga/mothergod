@@ -111,9 +111,9 @@ pairing driver by hand and the third divided by the wrong byte count
 The candidate's class picks the pair: the try driver reads train only,
 the keeper driver reads sealed once.
 The class is the stream the candidate prices, not what it changes: a
-whole-stream candidate is a model variant too, and the literal pair's
-denominator, the parse's literal count, hides the repetition it models
-(S1-L6).
+whole-stream candidate is a model variant too, and the literal pair
+prices only the parse's literal stream, which hides the repetition it
+models (S1-L6).
 
 - Literal candidate, an unwired model variant priced inside the parse's
   literal stream (issue #828): try `literal_pairing::case_delta_bpb` over
@@ -123,12 +123,12 @@ denominator, the parse's literal count, hides the repetition it models
   `whole_stream::case_delta_vs_real_bitstream` over `baseline::cases()`;
   keeper `whole_stream::train_and_sealed_vs_real_bitstream`, which reads
   both sealed kinds.
-- Wired change on real bitstreams, an encoder-only choice (the one
-  decode-changing candidate takes the keeper alone): try `baseline_gate --
-  measure > <champion file>` on the champion, then `baseline_gate -- delta
-  <champion file>` on the try, which prints each case's move and the train
-  mean and never writes `bench/baseline.json`; keeper the two sealed kinds
-  at `sealed_seed(CASE_SEED)`.
+- Wired change on real bitstreams: try `baseline_gate -- measure >
+  <champion file>` on the champion, then `baseline_gate -- delta <champion
+  file>` on the try, which prints each case's move and the train mean and
+  never writes `bench/baseline.json`; keeper the two sealed kinds at
+  `sealed_seed(CASE_SEED)`. A candidate that changes what `decode` does
+  has no try (route step 3) and takes the keeper alone.
 
 ## Loop
 
