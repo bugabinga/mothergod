@@ -15,8 +15,8 @@
 //! (`research/JOURNAL.md` S1-A2), which biases against it by an amount
 //! that depends on the case: on `base64_wrapped` at [`crate::baseline::CASE_LEN`]
 //! the six shipped experts cost 1.2617 bits/byte on the raw case and 0.7169
-//! on the unwrapped bytes, so the filter alone is 0.545 of that case's
-//! delta. A positive delta is a candidate worse than the bitstream, by at
+//! on the unwrapped bytes, so the filter alone is 0.545 bits/byte of that
+//! case's 0.8663 delta. A positive delta is a candidate worse than the bitstream, by at
 //! most the filter's share on a filtered case; the verdict rules are
 //! `research/corpus/POLICY.md`'s, unchanged.
 
