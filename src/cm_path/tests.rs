@@ -127,6 +127,57 @@ fn decode_rejects_a_length_over_its_bound_before_any_work() {
     );
 }
 
+/// A caller's bound past [`MAX_DECODED_LEN`] buys it nothing: issue
+/// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work.
+#[test]
+fn decode_caps_a_callers_bound_at_the_decoded_length_ceiling() {
+    assert_eq!(
+        decode(&[], MAX_DECODED_LEN + 1, u32::MAX),
+        Err(Error::TooLarge {
+            len: MAX_DECODED_LEN + 1,
+            max: MAX_DECODED_LEN
+        })
+    );
+}
+
+/// Issue #1808's repro, an empty stream declaring 4 MiB, cost 17.5 s of
+/// walks; the floor refuses it, and every stream short of one byte per
+/// [`MAX_EXPANSION`] output bytes, before any work.
+#[test]
+fn decode_refuses_a_stream_too_short_for_its_length() {
+    assert_eq!(decode(&[], 4 << 20, MAX_DECODED_LEN), Err(Error::Truncated));
+    assert_eq!(decode(&[], 1, MAX_DECODED_LEN), Err(Error::Truncated));
+    assert_eq!(
+        decode(&[0], MAX_EXPANSION + 1, MAX_DECODED_LEN),
+        Err(Error::Truncated)
+    );
+    let at_the_floor = decode(&[0], MAX_EXPANSION, MAX_DECODED_LEN).expect("one byte holds it");
+    assert_eq!(u32::try_from(at_the_floor.len()), Ok(MAX_EXPANSION));
+    assert_eq!(decode(&[], 0, MAX_DECODED_LEN), Ok(Vec::new()));
+}
+
+/// The floor's worst case, independent of how well the model learns:
+/// every node of every byte coded at the clamp's certainty, the cheapest
+/// [`encode`] can ever code one. The stream still holds more than one
+/// byte per [`MAX_EXPANSION`] output bytes, at the 1157-byte crossover
+/// [`MAX_EXPANSION`]'s doc derives and far past it.
+#[test]
+fn the_cheapest_possible_stream_stays_above_the_floor() {
+    for len in [0u32, 1, 1156, 1157, 1158, 4097, 1 << 20] {
+        let mut encoder = Encoder::new();
+        for node in 0..8 * len {
+            let bit = node % 3 == 0;
+            encoder.encode_bit(bit, clamp(f64::from(u8::from(bit))));
+        }
+        let stream = encoder.finish();
+        assert!(
+            u64::from(len) <= u64::from(MAX_EXPANSION) * stream.len() as u64,
+            "{len} bytes in a {}-byte stream",
+            stream.len()
+        );
+    }
+}
+
 /// Hard rule 2: any stream decodes to exactly the length asked for, a
 /// truncated or flipped one to wrong bytes, never a panic.
 #[test]
@@ -135,7 +186,7 @@ fn damaged_streams_decode_to_the_asked_length_without_panicking() {
     let stream = encode(&data);
     let len = u32::try_from(data.len()).expect("a test input is far below 4 GiB");
 
-    for cut in [0, 1, stream.len() / 2, stream.len() - 1] {
+    for cut in [1, stream.len() / 2, stream.len() - 1] {
         let decoded = decode(&stream[..cut], len, MAX_DECODED_LEN).expect("only the bound fails");
         assert_eq!(decoded.len(), data.len());
     }

@@ -29,10 +29,30 @@ use crate::coder::{Decoder, Encoder};
 use crate::literal::{Context, Literal, SurpriseLogisticMix};
 use crate::{Error, logistic, try_filled_vec};
 
+/// The reciprocal of [`PROBABILITY_FLOOR`], and so the most bytes one
+/// stream byte decodes to: [`decode`]'s bomb guard.
+///
+/// Invariant: every node codes at a probability inside the floor, so it
+/// costs at least `-log2(1 - PROBABILITY_FLOOR)`, which exceeds
+/// `PROBABILITY_FLOOR / ln 2` bits; the coder's 16-bit quantization
+/// rounds `1 - PROBABILITY_FLOOR` exactly (`2^16` is a multiple of this
+/// reciprocal), and its narrowing rounds a range of more than `2^30`, so
+/// the `1 / ln 2` margin absorbs both. A byte is 8 nodes, more than
+/// `8 / MAX_EXPANSION` bits, so `L` stream bytes hold fewer than
+/// `MAX_EXPANSION * L` output bytes. The coder writes at most one bit
+/// fewer than its cost, its interval starting at `2^32` and ending above
+/// `2^30`, plus its final bit; the margin covers that bit past 1157
+/// output bytes, and below them [`encode`]'s one byte at least does.
+const MAX_EXPANSION: u32 = 4096;
+
 /// Every probability the outer mixer stretches or codes is clamped to
 /// `[PROBABILITY_FLOOR, 1 - PROBABILITY_FLOOR]`, bounding a stretch to
 /// `ln(4095)` and a node's cost to 12 bits.
-const PROBABILITY_FLOOR: f64 = 1.0 / 4096.0;
+#[allow(
+    clippy::cast_lossless,
+    reason = "f64::from is not const; a u32 converts to f64 exactly"
+)]
+const PROBABILITY_FLOOR: f64 = 1.0 / MAX_EXPANSION as f64;
 
 /// The outer mixer's gradient step.
 const MIXER_RATE: f64 = 0.005;
@@ -505,21 +525,28 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 
 /// The `len` bytes [`encode`] coded into `stream`.
 ///
-/// `len` is the caller's declared length, checked against `max_len` before
-/// any allocation; the caller caps `max_len` at
-/// [`crate::codec::MAX_DECODED_LEN`], as [`crate::codec::decode`]'s does,
-/// which bounds both the output buffer and the decode work, one walk per
-/// byte. The model's tables are constants and allocate fallibly.
+/// `len` is the caller's declared length, checked before any allocation
+/// against `max_len` capped at [`crate::codec::MAX_DECODED_LEN`], which
+/// bounds the output buffer, and against `MAX_EXPANSION` bytes per stream
+/// byte, the most any encoding holds, which bounds the decode work, one
+/// walk per byte, by the input. The model's tables are constants and
+/// allocate fallibly.
 ///
 /// # Errors
 ///
-/// [`Error::TooLarge`] when `len` exceeds `max_len`, [`Error::OutOfMemory`]
-/// when the allocator refuses the output or a table. Any other stream
-/// decodes to some `len` bytes: the coder reads past the end as zero bits
-/// and every probability is the model's own, so a damaged stream is wrong
-/// output, which the frame's check value catches, never a panic.
+/// [`Error::TooLarge`] when `len` exceeds the capped `max_len`,
+/// [`Error::Truncated`] when `stream` is too short for any encoding of
+/// `len` bytes, [`Error::OutOfMemory`] when the allocator refuses the
+/// output or a table. Any other stream decodes to some `len` bytes: the
+/// coder reads past the end as zero bits and every probability is the
+/// model's own, so a damaged stream is wrong output, which the frame's
+/// check value catches, never a panic.
 pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
+    let max_len = max_len.min(crate::codec::MAX_DECODED_LEN);
     Error::ensure_within(u64::from(len), max_len)?;
+    if u64::from(len) > u64::from(MAX_EXPANSION).saturating_mul(stream.len() as u64) {
+        return Err(Error::Truncated);
+    }
     let len = usize::try_from(len).map_err(|_| Error::TooLarge { len, max: max_len })?;
     let mut output = Vec::new();
     output.try_reserve_exact(len)?;
