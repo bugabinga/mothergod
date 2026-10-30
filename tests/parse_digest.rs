@@ -2,7 +2,7 @@
 //! `parse_optimal`'s token stream and one of `parse_greedy`'s, over inputs
 //! this file generates plus every `tests/golden/*.plaintext`.
 //!
-//! `tests/golden.rs` pins `compress()` on ten plaintexts, which a parse
+//! `tests/golden.rs` pins `compress()` on its plaintexts, which a parse
 //! change confined to long rep runs or the carry cache can pass. A refactor
 //! that claims "no behaviour change" cites this test green instead of
 //! building a throwaway hasher over inputs of its own choosing (#1524).
@@ -38,9 +38,9 @@ use fixture_dirs::golden_dir;
 use mothergod::lz::{RepSlot, Token, parse_greedy, parse_optimal};
 
 /// Digest of the per-input digests of `parse_optimal`.
-const OPTIMAL_DIGEST: u64 = 0xd788_54fa_ba56_7995;
+const OPTIMAL_DIGEST: u64 = 0x22a5_0aec_ab0f_241c;
 /// Digest of the per-input digests of `parse_greedy`.
-const GREEDY_DIGEST: u64 = 0xc89d_e5bb_b3b6_60b8;
+const GREEDY_DIGEST: u64 = 0xe8d9_0a62_8bbf_ca8e;
 
 /// Seeded xorshift64*: the generated inputs must be identical on every
 /// platform and toolchain, which `std` offers no source for.

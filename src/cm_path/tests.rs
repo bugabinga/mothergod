@@ -119,25 +119,35 @@ fn decode_rejects_a_length_over_its_bound_before_any_work() {
         })
     );
     assert_eq!(
-        decode(&[], u32::MAX, MAX_DECODED_LEN),
+        decode(&[], u32::MAX, MAX_OUTPUT_LEN),
         Err(Error::TooLarge {
             len: u32::MAX,
-            max: MAX_DECODED_LEN
+            max: MAX_OUTPUT_LEN
         })
     );
 }
 
-/// A caller's bound past [`MAX_DECODED_LEN`] buys it nothing: issue
-/// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work.
+/// A caller's bound past [`MAX_OUTPUT_LEN`] buys it nothing: issue
+/// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work, and
+/// [`MAX_DECODED_LEN`] about 1,400 s of it. The ceiling itself is admitted,
+/// so the empty stream falls to the floor instead.
 #[test]
-fn decode_caps_a_callers_bound_at_the_decoded_length_ceiling() {
-    assert_eq!(
-        decode(&[], MAX_DECODED_LEN + 1, u32::MAX),
-        Err(Error::TooLarge {
-            len: MAX_DECODED_LEN + 1,
-            max: MAX_DECODED_LEN
-        })
-    );
+fn decode_caps_a_callers_bound_at_the_output_ceiling() {
+    for bound in [MAX_DECODED_LEN, u32::MAX] {
+        assert_eq!(
+            decode(&[], MAX_OUTPUT_LEN + 1, bound),
+            Err(Error::TooLarge {
+                len: MAX_OUTPUT_LEN + 1,
+                max: MAX_OUTPUT_LEN
+            }),
+            "bound {bound}"
+        );
+        assert_eq!(
+            decode(&[], MAX_OUTPUT_LEN, bound),
+            Err(Error::Truncated),
+            "bound {bound}"
+        );
+    }
 }
 
 /// Issue #1808's repro, an empty stream declaring 4 MiB, cost 17.5 s of
@@ -429,4 +439,166 @@ fn a_counter_learns_fast_when_fresh_and_its_count_stops_at_the_limit() {
     }
     assert_eq!(counter.count[0], COUNTER_LIMIT);
     assert!(counter.p(0) > 0.99);
+}
+
+/// A little-endian `u32` counter stepping by a constant: `pick` shortlists
+/// `Delta(4)`, which turns it into one repeated row, so a filter's trial is
+/// the shortest and [`encode_payload`] must find it among the others.
+fn counter_rows() -> Vec<u8> {
+    (0u32..1500)
+        .flat_map(|i| i.wrapping_mul(40_503).to_le_bytes())
+        .collect()
+}
+
+fn payload_text() -> Vec<u8> {
+    b"a frame declares its extent; a model learns its context. ".repeat(30)
+}
+
+#[test]
+fn a_payload_round_trips_and_declares_its_extent() {
+    let base64 = filters::base64_unwrap::try_decode(&random_bytes(29, 900))
+        .expect("a small buffer allocates");
+    for data in [
+        Vec::new(),
+        b"x".to_vec(),
+        payload_text(),
+        counter_rows(),
+        random_bytes(23, 3000),
+        base64,
+    ] {
+        let payload = encode_payload(&data, NonZeroUsize::MIN);
+        assert_eq!(
+            decode_payload(&payload, MAX_DECODED_LEN).as_deref(),
+            Ok(data.as_slice())
+        );
+        assert_eq!(
+            declared_extent(&payload[..EXTENT_PREFIX_LEN]),
+            Ok(Extent {
+                payload_len: payload.len(),
+                output_len: data.len() as u64,
+            }),
+            "the prefix alone names the payload's span and its output"
+        );
+    }
+}
+
+#[test]
+fn the_payload_keeps_the_shortest_trial_whatever_the_workers() {
+    let data = counter_rows();
+    let payload = encode_payload(&data, NonZeroUsize::MIN);
+    let shortest = filters::select::pick(&data)
+        .into_iter()
+        .map(|candidate| encode(&codec::apply_filter(candidate, &data)).len())
+        .min()
+        .expect("pick shortlists the identity");
+    assert_eq!(payload.len(), EXTENT_PREFIX_LEN + shortest);
+    assert_ne!(
+        payload[..SELECTOR_LEN],
+        Candidate::Identity.to_header_bytes(),
+        "a filter wins on counter rows"
+    );
+    for workers in [2, 3, 8] {
+        let workers = NonZeroUsize::new(workers).expect("nonzero");
+        assert_eq!(encode_payload(&data, workers), payload, "{workers} workers");
+    }
+}
+
+/// Every cut is short of the header or of the stream it declares; the
+/// prefix's own fields come first, so no cut reaches the model.
+#[test]
+fn a_cut_payload_is_truncated() {
+    let payload = encode_payload(&payload_text(), NonZeroUsize::MIN);
+    for cut in [
+        0,
+        1,
+        SELECTOR_LEN,
+        EXTENT_PREFIX_LEN - 1,
+        EXTENT_PREFIX_LEN,
+        payload.len() - 1,
+    ] {
+        assert_eq!(
+            decode_payload(&payload[..cut], MAX_DECODED_LEN),
+            Err(Error::Truncated),
+            "cut at {cut}"
+        );
+    }
+}
+
+#[test]
+fn a_byte_after_the_stream_is_corrupt() {
+    let mut payload = encode_payload(&payload_text(), NonZeroUsize::MIN);
+    payload.push(0);
+    assert_eq!(
+        decode_payload(&payload, MAX_DECODED_LEN),
+        Err(Error::Corrupt)
+    );
+}
+
+/// The path declares no reach, so a reach code in the kind byte's top bits
+/// names no filter, as an unknown kind does: refused from the prefix alone,
+/// even one cut short of its lengths.
+#[test]
+fn a_selector_naming_no_filter_is_corrupt() {
+    let payload = encode_payload(&payload_text(), NonZeroUsize::MIN);
+    for kind in [0x40, 0x80, 0xc0, 7] {
+        let mut bad = payload.clone();
+        bad[0] = kind;
+        bad[1] = 0;
+        assert_eq!(
+            decode_payload(&bad, MAX_DECODED_LEN),
+            Err(Error::Corrupt),
+            "{kind:#x}"
+        );
+        assert_eq!(
+            declared_extent(&bad[..SELECTOR_LEN]),
+            Err(Error::Corrupt),
+            "{kind:#x}"
+        );
+    }
+}
+
+#[test]
+fn an_output_past_the_bound_is_too_large_before_any_work() {
+    let data = payload_text();
+    let payload = encode_payload(&data, NonZeroUsize::MIN);
+    let len = u32::try_from(data.len()).expect("a test input is far below 4 GiB");
+    assert_eq!(
+        decode_payload(&payload, len - 1),
+        Err(Error::TooLarge { len, max: len - 1 })
+    );
+    let mut bomb = payload[..EXTENT_PREFIX_LEN].to_vec();
+    bomb[SELECTOR_LEN..SELECTOR_LEN + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    bomb[SELECTOR_LEN + 4..].copy_from_slice(&0u64.to_le_bytes());
+    assert_eq!(
+        decode_payload(&bomb, u32::MAX),
+        Err(Error::TooLarge {
+            len: u32::MAX,
+            max: MAX_OUTPUT_LEN
+        }),
+        "a caller's bound past the ceiling buys nothing"
+    );
+}
+
+/// The frame's output, not only the filtered bytes [`decode`] sees, meets
+/// [`MAX_OUTPUT_LEN`]: one byte past it is refused from the header, and the
+/// ceiling itself passes to the stream's floor.
+#[test]
+fn a_frame_output_past_the_ceiling_is_too_large() {
+    let header = |declared_len: u32| {
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&declared_len.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        payload
+    };
+    assert_eq!(
+        decode_payload(&header(MAX_OUTPUT_LEN + 1), MAX_DECODED_LEN),
+        Err(Error::TooLarge {
+            len: MAX_OUTPUT_LEN + 1,
+            max: MAX_OUTPUT_LEN
+        })
+    );
+    assert_eq!(
+        decode_payload(&header(MAX_OUTPUT_LEN), MAX_DECODED_LEN),
+        Err(Error::Truncated)
+    );
 }

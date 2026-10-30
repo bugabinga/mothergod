@@ -18,16 +18,50 @@
 //! other input 0, so the path starts as the wire model and the mixer only
 //! adds what it learns pays.
 //!
-//! Unwired: no [`crate::Method`] names this path, so no frame carries it
-//! (issue #1775). [`encode`] and [`decode`] are the payload's coded stream
-//! alone, and `mothergod_bench::cm_path` prices through [`CmPath::walk`].
+//! A [`crate::Method::Cm`] frame carries it, written at
+//! [`crate::Level::Extreme`] when smaller than the hybrid's (ADR-0079).
+//! [`encode_payload`] and [`decode_payload`] are that frame's payload;
+//! [`encode`] and [`decode`] its coded stream alone, and
+//! `mothergod_bench::cm_path` prices through [`CmPath::walk`].
 //! Every value both sides compute goes through IEEE basic operations and
 //! the codec's own [`logistic::stretch`] and [`logistic::squash`], never
 //! libm (ADR-0024, S2-A134).
+//!
+//! # Payload layout
+//!
+//! ```text
+//! offset  size  field
+//! 0       2     selector: [kind, param] (`filters::select::Candidate`)
+//! 2       4     declared length of the filtered bytes, u32 LE
+//! 6       8     coded length: the stream's byte count, u64 LE
+//! 14      ...   the stream [`encode`] codes the FILTERED bytes to
+//! ```
 
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
+
+use crate::codec::{self, Extent, MAX_DECODED_LEN, SELECTOR_LEN};
 use crate::coder::{Decoder, Encoder};
+use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal, SurpriseLogisticMix};
-use crate::{Error, logistic, try_filled_vec};
+use crate::{Error, logistic, rejoin, try_filled_vec};
+
+/// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
+/// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
+/// pays a full walk and none is a copy. Measured on random streams of 1 KiB,
+/// 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB (release build,
+/// INTEL XEON PLATINUM 8573C, one run each): 5.0 to 5.4 µs per output byte
+/// whatever the stream, and one declaring this ceiling decoded in 88 s, so
+/// the worst case is linear and a hostile frame here costs under a third of
+/// `Lz`'s measured 314 s at [`MAX_DECODED_LEN`]. It equals the block length
+/// [`crate::compress`] cuts at, so no frame this crate writes is refused.
+pub const MAX_OUTPUT_LEN: u32 = 16 * 1024 * 1024;
+
+const _: () = assert!(
+    MAX_OUTPUT_LEN <= MAX_DECODED_LEN,
+    "a Cm frame is a coded frame, under the coded frames' ceiling"
+);
 
 /// The reciprocal of [`PROBABILITY_FLOOR`], and so the most bytes one
 /// stream byte decodes to: [`decode`]'s bomb guard.
@@ -555,10 +589,10 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// The `len` bytes [`encode`] coded into `stream`.
 ///
 /// `len` is the caller's declared length, checked before any allocation
-/// against `max_len` capped at [`crate::codec::MAX_DECODED_LEN`], which
-/// bounds the output buffer, and against `MAX_EXPANSION` bytes per stream
-/// byte, the most any encoding holds, which bounds the decode work, one
-/// walk per byte, by the input. The model's tables are constants and
+/// against `max_len` capped at [`MAX_OUTPUT_LEN`], which
+/// bounds the output buffer and the decode work, one walk per byte, and
+/// against `MAX_EXPANSION` bytes per stream byte, the most any encoding
+/// holds, which bounds both by the input. The model's tables are constants and
 /// allocate fallibly.
 ///
 /// # Errors
@@ -571,7 +605,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// model's own, so a damaged stream is wrong output, which the frame's
 /// check value catches, never a panic.
 pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
-    let max_len = max_len.min(crate::codec::MAX_DECODED_LEN);
+    let max_len = max_len.min(MAX_OUTPUT_LEN);
     Error::ensure_within(u64::from(len), max_len)?;
     if u64::from(len) > u64::from(MAX_EXPANSION).saturating_mul(stream.len() as u64) {
         return Err(Error::Truncated);
@@ -588,6 +622,151 @@ pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
         context = context.after_literal(byte);
     }
     Ok(output)
+}
+
+/// Byte length of a payload's fields between its selector and its stream:
+/// the declared length of the filtered bytes, a `u32` as `Method::Lz`'s is,
+/// then the coded length, a `u64` for the reason `Method::Lz`'s is.
+const LENGTHS_LEN: usize = size_of::<u32>() + size_of::<u64>();
+
+/// Bytes at the front of a [`crate::Method::Cm`] payload that
+/// [`declared_extent`] reads: the selector and both lengths.
+pub(crate) const EXTENT_PREFIX_LEN: usize = SELECTOR_LEN + LENGTHS_LEN;
+
+/// The fields of a [`crate::Method::Cm`] payload before its stream.
+struct Header {
+    candidate: Candidate,
+    declared_len: u32,
+    coded_len: u64,
+}
+
+/// Reads the [`EXTENT_PREFIX_LEN`] header off the front of `payload`,
+/// returning it and the bytes after it. The selector is read first, so a bad
+/// one in a prefix cut short is [`Error::Corrupt`], as `Method::Lz`'s is.
+fn split_header(payload: &[u8]) -> Result<(Header, &[u8]), Error> {
+    let (&selector, rest) = payload.split_first_chunk().ok_or(Error::Truncated)?;
+    // `Method::Lz` carries its reach in the kind byte's top bits; this path
+    // has no reach, so a set bit names no kind and is rejected here.
+    let candidate = Candidate::from_header_bytes(selector).ok_or(Error::Corrupt)?;
+    let (&declared_len, rest) = rest.split_first_chunk().ok_or(Error::Truncated)?;
+    let (&coded_len, rest) = rest.split_first_chunk().ok_or(Error::Truncated)?;
+    let header = Header {
+        candidate,
+        declared_len: u32::from_le_bytes(declared_len),
+        coded_len: u64::from_le_bytes(coded_len),
+    };
+    Ok((header, rest))
+}
+
+/// The [`Extent`] the first [`EXTENT_PREFIX_LEN`] bytes of a
+/// [`crate::Method::Cm`] payload declare, trusting nothing else: no decode
+/// work and no allocation, as [`codec::declared_extent`] is for `Method::Lz`.
+///
+/// # Errors
+///
+/// [`Error::Truncated`] if `bytes` is shorter than the prefix or the coded
+/// length overflows `usize`; [`Error::Corrupt`] if the selector names no
+/// [`Candidate`].
+pub(crate) fn declared_extent(bytes: &[u8]) -> Result<Extent, Error> {
+    let (header, _) = split_header(bytes)?;
+    let coded_len = usize::try_from(header.coded_len).map_err(|_| Error::Truncated)?;
+    Ok(Extent {
+        payload_len: EXTENT_PREFIX_LEN
+            .checked_add(coded_len)
+            .ok_or(Error::Truncated)?,
+        output_len: header.candidate.output_len(header.declared_len),
+    })
+}
+
+/// The [`crate::Method::Cm`] payload for `data`: every filter
+/// [`filters::select::pick`] shortlists, applied and coded by [`encode`]
+/// through a fresh model, the shortest stream kept and a tie to the earlier
+/// candidate, so the payload is the one a serial search writes. Up to
+/// `workers` trials run at once, the calling thread being one; a trial holds
+/// its filtered copy and one model's constant tables, not the block-sized
+/// working set of a `Method::Lz` trial.
+///
+/// # Panics
+///
+/// If `data.len()` exceeds `u32::MAX`: [`crate::compress`] stores such input
+/// before any trial.
+#[must_use]
+pub fn encode_payload(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
+    let candidates = filters::select::pick(data);
+    let next = AtomicUsize::new(0);
+    let (_, candidate, declared_len, stream) = thread::scope(|scope| {
+        let work = || {
+            let mut kept: Option<(usize, Candidate, usize, Vec<u8>)> = None;
+            loop {
+                // Relaxed: the counter hands out each index once and orders
+                // nothing else.
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(&candidate) = candidates.get(index) else {
+                    break;
+                };
+                let filtered = codec::apply_filter(candidate, data);
+                let stream = encode(&filtered);
+                if kept.as_ref().is_none_or(|(.., incumbent)| {
+                    crate::candidate_beats_incumbent(stream.len(), incumbent.len())
+                }) {
+                    kept = Some((index, candidate, filtered.len(), stream));
+                }
+            }
+            kept
+        };
+        // A refused spawn leaves the work to the threads that did start,
+        // this one included.
+        let helpers: Vec<_> = (1..workers.get().min(candidates.len()))
+            .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
+            .collect();
+        let mut kept: Vec<_> = work().into_iter().collect();
+        for helper in helpers {
+            kept.extend(rejoin(helper.join()));
+        }
+        kept.into_iter()
+            .min_by_key(|(index, .., stream)| (stream.len(), *index))
+            .expect("filters::select::pick always returns at least Candidate::Identity")
+    });
+    let declared_len = u32::try_from(declared_len).expect("a block's filtered length fits u32");
+    let coded_len = u64::try_from(stream.len()).expect("usize is at most 64 bits");
+    let mut out = Vec::with_capacity(EXTENT_PREFIX_LEN + stream.len());
+    out.extend_from_slice(&candidate.to_header_bytes());
+    out.extend_from_slice(&declared_len.to_le_bytes());
+    out.extend_from_slice(&coded_len.to_le_bytes());
+    out.extend(stream);
+    out
+}
+
+/// The bytes a [`crate::Method::Cm`] `payload` decodes to: its stream
+/// through [`decode`] at the declared length, then the selector's filter
+/// undone.
+///
+/// The frame's output, [`Candidate::output_len`] of the declared length, is
+/// checked against `max_len` capped at [`MAX_OUTPUT_LEN`] before any
+/// allocation; [`decode`] bounds the work by the stream's bytes and
+/// allocates fallibly, and so does the filter's undo.
+///
+/// # Errors
+///
+/// - [`Error::Truncated`] if `payload` is shorter than its header, than the
+///   stream it declares, or than any stream of the declared length.
+/// - [`Error::TooLarge`] if the output exceeds the capped `max_len`.
+/// - [`Error::Corrupt`] if the selector names no [`Candidate`] or bytes
+///   follow the stream.
+/// - [`Error::OutOfMemory`] if the allocator refuses the output, a table or
+///   the undo buffer.
+///
+/// A stream damaged past its header decodes to wrong bytes of the declared
+/// length, never a panic; the frame's check value is what catches it.
+pub fn decode_payload(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
+    let (header, stream) = split_header(payload)?;
+    let max_len = max_len.min(MAX_OUTPUT_LEN);
+    Error::ensure_within(header.candidate.output_len(header.declared_len), max_len)?;
+    codec::ensure_coded_len(stream, header.coded_len)?;
+    // Every kind's output is at least its filtered bytes, so `max_len` bounds
+    // the declared length too.
+    let filtered = decode(stream, header.declared_len, max_len)?;
+    codec::undo_filter(header.candidate, filtered)
 }
 
 #[cfg(test)]

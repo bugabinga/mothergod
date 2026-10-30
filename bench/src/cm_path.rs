@@ -4,8 +4,10 @@
 //!
 //! The model lives in the codec crate, where [`mothergod::cm_path::encode`]
 //! codes it through the range coder; this module prices the same walk at
-//! ideal cost, [`coded_bits`] reads the coded stream's real size, and
-//! [`decode_costs_vs_hybrid`] times its decode in the speed gate's unit.
+//! ideal cost, [`coded_bits`] reads the coded stream's real size,
+//! [`decode_costs_vs_hybrid`] times its decode in the speed gate's unit, and
+//! [`extreme_frames_vs_real_bitstream`] reads the frames the wired path
+//! writes.
 //! `cost_bits` stays libm `log2` (`bench/clippy.toml`) because it prices a
 //! decision, and a stream codes that decision instead.
 
@@ -145,6 +147,25 @@ pub fn decode_costs_vs_hybrid() -> DecodeCosts {
 #[must_use]
 pub fn coded_train_and_sealed_vs_real_bitstream() -> PairingReport {
     literal_pairing::pair_cases(|data| whole_stream::delta_vs_real_bitstream(data, coded_bits))
+}
+
+/// The recorded experiment: whole frames of `compress_level` at
+/// [`mothergod::Level::Extreme`], the wired path kept only where it is
+/// smaller, against `compress`'s over the train and sealed cases
+/// (`research/JOURNAL.md` S2-A142).
+#[must_use]
+pub fn extreme_frames_vs_real_bitstream() -> PairingReport {
+    literal_pairing::pair_cases(|data| {
+        whole_stream::delta_vs_real_bitstream(data, |data| {
+            let frame = mothergod::compress_level(data, mothergod::Level::Extreme);
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "a single measurement case stays far below 2^53 bits"
+            )]
+            let bits = (frame.len() * 8) as f64;
+            bits
+        })
+    })
 }
 
 #[cfg(test)]

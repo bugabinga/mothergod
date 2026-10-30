@@ -219,8 +219,10 @@ the rest of a module's inline tests are scaffold ("Two classes" above).
 - Decode-API differential agreement (`decompress`, `decompress_bounded`,
   `decompress_to_writer` must all agree on every frame `compress` can
   produce) is a `proptest` property in `src/lib.rs` (`#452`), swept over a
-  mix of noise and repeated patterns so both `Method::Stored` and
-  `Method::Lz` frames get exercised. Case count is trimmed to 64 (a
+  mix of noise, repeated patterns and small-vocabulary text so
+  `Method::Stored` and `Method::Lz` frames get exercised, and a sibling at
+  `Level::Extreme` adds `Method::Cm` frames and `read::Decoder`. Case count
+  is trimmed to 64 (a
   quarter of the filter properties' default 256): `compress` runs the
   full optimal-parse LZ encoder, far heavier per case than a filter
   round-trip.

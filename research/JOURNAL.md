@@ -9830,3 +9830,47 @@ record.
   `CASE_LEN`, where the 16 MiB order tables (S2-R39) miss cache by a
   different share; any other CPU model; where decode time goes beyond
   pricing's. `research/progress.jsonl` it247.
+- S2-A142 | ACCEPTED | Issue #1775's wiring slice: S2-A138's candidate
+  in a frame. Hypothesis: a `Method::Cm` frame, the path behind the
+  shortest of `select::pick`'s filters, kept only where strictly smaller
+  than `-3`'s `Lz` frame, makes `-4` smaller than `-3` on every train
+  and sealed case where the path won at ideal cost and no larger
+  anywhere, by S2-A140's coded deltas less the frame bytes around the
+  stream. | Mechanism: `cm_path::encode_payload` trial-codes every
+  shortlisted filter, up to `workers` at once, and writes a selector
+  without a reach, the filtered length, the coded length and the stream;
+  `compress_block` at `Level::Extreme` keeps it where it beats the `Lz`
+  body; `cm_path::decode_payload` checks the output against
+  `cm_path::MAX_OUTPUT_LEN`, 16 MiB, and the stream's
+  4096-bytes-per-byte bound before it allocates
+  (`FORMAT_VERSION` 19, ADR-0079). The default level is untouched, so the
+  decode ratchet does not move. | Measured through
+  `mothergod_bench::cm_path::extreme_frames_vs_real_bitstream`, whole
+  `-4` frames against `compress`'s, release build, INTEL XEON PLATINUM
+  8573C 4 logical cores runner: train mean **-0.225731**, per case
+  `entropy_ladder_h1` -0.222400, `_h2` -0.335200, `_h4` -0.313120, `_h6`
+  -0.096480, `_h8` 0.000000 (both `Stored`), `markov_h8_2_trap` -0.334560,
+  `json_records` -0.114720, `base64_wrapped` -0.068320,
+  `interleaved_audio16` -0.180800, `sqlite_like_records` -0.063360,
+  `x86_dense_code` -0.754080. Sealed, read once: `access_log`
+  **-0.151200**, `gradient_image` **-0.144000**. Against S2-A140's bare
+  coded stream the train mean rises 0.003491, about the 24 bytes a `Cm`
+  frame adds around its stream, 0.00384 b/B on a case. `baseline_gate --
+  write` moved `bench/baseline.json` by digest only, every `bpb` equal,
+  and `check` read 108.10 steps per byte, inside the margin. A 4 MiB
+  slice of this repository's `git log -p`, not a corpus and not a verdict
+  input, one run each: `-3` 791,578 bytes, 21.5 s encode, 0.74 s decode;
+  `-4` 698,351 bytes (-11.8%), 64.0 s encode, 21.0 s decode (28x),
+  peak encode RSS 277 MB both. Worst-case decode, `cm_path::decode` on
+  pseudo-random streams, same runner, one run each: 1 KiB, 512 KiB and
+  4 MiB less 64 bytes, each declaring 4 MiB, 5,348, 5,045 and 5,172 ns
+  per output byte; 4 KiB declaring 16 MiB, 88.3 s, 5,265 ns per byte.
+  The cost is linear and flat across streams, so the 16 MiB ceiling caps
+  a hostile frame at under a third of `Lz`'s 314 s; at
+  `codec::MAX_DECODED_LEN` it would be about 1,400 s, extrapolated. | Verdict: **accepted**, train
+  improvement and no sealed regression, no case
+  larger. | **Not measured:** the finals (issue #1824 owns the `-4`
+  report row); decode cost on
+  real files, where the 28x on text the hybrid matches well says S2-A141's
+  6.7x is no ceiling; running the path's trials beside the `Lz`
+  search instead of after it. `research/progress.jsonl` it248.
