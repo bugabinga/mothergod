@@ -4675,7 +4675,8 @@ record.
   under that ceiling is measurable through the crate's real adaptive
   models today, no bitstream change needed. Two new functions carry
   `window` down to where `dp_round` was hardcoded to the wired `WINDOW`:
-  `lz::parse_optimal_with_window(data, window)` (`parse_optimal` is now a
+  `lz::parse_optimal_with_window(data, window)` (left main in #1818;
+  `parse_rounds` took its place; `parse_optimal` is now a
   thin wrapper passing `WINDOW`; `parse_greedy`'s seed pass stays bound by
   the wired `WINDOW` regardless, since it only shapes the first round's
   starting price table, not correctness) and

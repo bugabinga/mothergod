@@ -466,7 +466,7 @@ fn encode_tokens(data: &[u8], columns: Option<NonZeroUsize>, reach: Reach) -> Ve
         data,
         columns,
         reach,
-        &lz::parse_optimal_with_window(data, reach),
+        &lz::parse_rounds(data, reach, lz::DP_ROUNDS),
     )
 }
 

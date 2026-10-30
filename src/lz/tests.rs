@@ -712,7 +712,7 @@ fn price_counts_prices_computes_shannon_price_per_literal_context() {
 
 #[test]
 fn optimal_wide_reaches_a_repeat_past_standard_window() {
-    // research/JOURNAL.md S1-P4: parse_optimal_with_window must thread
+    // research/JOURNAL.md S1-P4: parse_rounds must thread
     // its reach through all three dp_round rounds, not just the first, and
     // stay lossless (hard rule 1) either way. Template (low-range bytes)
     // and filler (high-range pseudo-random bytes) stay in disjoint byte
@@ -729,7 +729,7 @@ fn optimal_wide_reaches_a_repeat_past_standard_window() {
     let distance = filler.len() + template.len();
     assert!(WINDOW < distance && distance <= WIDE_WINDOW);
 
-    let standard = parse_optimal_with_window(&data, Reach::Standard);
+    let standard = parse_rounds(&data, Reach::Standard, DP_ROUNDS);
     assert_eq!(replay(&standard), data, "standard roundtrip mismatch");
     assert!(
         standard.iter().all(|t| !matches!(
@@ -739,7 +739,7 @@ fn optimal_wide_reaches_a_repeat_past_standard_window() {
         "Reach::Standard must never produce a fresh match past WINDOW"
     );
 
-    let wide = parse_optimal_with_window(&data, Reach::Wide);
+    let wide = parse_rounds(&data, Reach::Wide, DP_ROUNDS);
     assert_eq!(replay(&wide), data, "wide roundtrip mismatch");
     assert!(
         wide.iter().any(|t| matches!(
