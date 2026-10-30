@@ -397,6 +397,56 @@ impl MatchModel {
     }
 }
 
+/// The hashed orders: one [`Bucket`] table per [`ORDERS`] entry, and the
+/// bucket each currently owns for the nibble being walked.
+#[derive(Debug, Clone)]
+struct Orders {
+    tables: Vec<Vec<Bucket>>,
+    claimed: [usize; ORDERS.len()],
+}
+
+impl Orders {
+    fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        let mut tables = Vec::new();
+        tables.try_reserve_exact(ORDERS.len())?;
+        for _ in ORDERS {
+            tables.push(try_filled_vec(1 << ORDER_BUCKET_BITS, Bucket::FRESH)?);
+        }
+        Ok(Self {
+            tables,
+            claimed: [0; ORDERS.len()],
+        })
+    }
+
+    /// [`claim`]s each order's bucket for the nibble rooted at `node`, from
+    /// the byte's context `hashes`. A nibble starts at node 1 or at 16 to
+    /// 31, which names the high nibble, so the low nibble's buckets key on
+    /// it.
+    fn claim_nibble(&mut self, hashes: &[u64; ORDERS.len()], node: usize) {
+        let nibble_key = (node as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        for ((claimed, &h), table) in self.claimed.iter_mut().zip(hashes).zip(&mut self.tables) {
+            let h = mix64(h ^ nibble_key);
+            *claimed = claim(table, slot(h, ORDER_BUCKET_BITS), check_of(h));
+        }
+    }
+
+    /// Each order's stretched probability at `nibble_node`.
+    fn stretches(&self, nibble_node: usize) -> [f64; ORDERS.len()] {
+        let i = nibble_node - 1;
+        let mut out = [0.0; ORDERS.len()];
+        for ((out, table), &b) in out.iter_mut().zip(&self.tables).zip(&self.claimed) {
+            *out = stretch(table[b].slots[i].p());
+        }
+        out
+    }
+
+    fn update(&mut self, nibble_node: usize, bit: bool) {
+        for (table, &b) in self.tables.iter_mut().zip(&self.claimed) {
+            table[b].slots[nibble_node - 1].update(bit);
+        }
+    }
+}
+
 /// The path's model: [`Literal`]'s wire walk plus the match model and the
 /// hashed orders under one outer logistic mixer. Fresh per stream.
 #[derive(Debug, Clone)]
@@ -404,7 +454,7 @@ pub struct CmPath {
     literal: Literal,
     literal_mixer: SurpriseLogisticMix,
     match_model: MatchModel,
-    orders: Vec<Vec<Bucket>>,
+    orders: Orders,
     weights: Vec<[f64; INPUTS]>,
 }
 
@@ -428,16 +478,11 @@ impl CmPath {
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
         let mut start = [0.0; INPUTS];
         start[0] = 1.0;
-        let mut orders = Vec::new();
-        orders.try_reserve_exact(ORDERS.len())?;
-        for _ in ORDERS {
-            orders.push(try_filled_vec(1 << ORDER_BUCKET_BITS, Bucket::FRESH)?);
-        }
         Ok(Self {
             literal: Literal::try_new()?,
             literal_mixer: SurpriseLogisticMix::try_new()?,
             match_model: MatchModel::try_new()?,
-            orders,
+            orders: Orders::try_new()?,
             weights: try_filled_vec(WEIGHT_SETS, start)?,
         })
     }
@@ -467,7 +512,6 @@ impl CmPath {
 
         let (mut lo, mut hi, mut node) = (0usize, 256usize, 1usize);
         let mut nibble_node = 1usize;
-        let mut order_buckets = [0usize; ORDERS.len()];
         literal.walk_logit_sse(context, literal_mixer, |mid, literal_p| {
             let mut inputs = [0.0; INPUTS];
             inputs[0] = stretch(literal_p);
@@ -486,23 +530,10 @@ impl CmPath {
                 }
             }
 
-            // A nibble starts at node 1 or at 16 to 31, which names the
-            // high nibble, so the low nibble's buckets key on it.
             if nibble_node == 1 {
-                let nibble_key = (node as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-                for ((index, &h), table) in order_buckets
-                    .iter_mut()
-                    .zip(&order_hashes)
-                    .zip(&mut *orders)
-                {
-                    let h = mix64(h ^ nibble_key);
-                    *index = claim(table, slot(h, ORDER_BUCKET_BITS), check_of(h));
-                }
+                orders.claim_nibble(&order_hashes, node);
             }
-            let i = nibble_node - 1;
-            for ((input, table), &b) in inputs[2..].iter_mut().zip(&*orders).zip(&order_buckets) {
-                *input = stretch(table[b].slots[i].p());
-            }
+            inputs[2..].copy_from_slice(&orders.stretches(nibble_node));
 
             let set = bucket * 2 + usize::from(node >= NIBBLE_NODES);
             let w = &mut weights[set];
@@ -517,9 +548,7 @@ impl CmPath {
             if let Some(s) = confidence_slot {
                 match_model.confidence.update(s, bit);
             }
-            for (table, &b) in orders.iter_mut().zip(&order_buckets) {
-                table[b].slots[i].update(bit);
-            }
+            orders.update(nibble_node, bit);
 
             if bit {
                 lo = mid;

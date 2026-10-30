@@ -92,14 +92,14 @@ exclude_re = [
   # the indices of a table it reads and updates through the same index,
   # every entry starting equal, so the mix and every coded bit are
   # unchanged:
-  #   483:43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
+  #   527:43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
   #           and a live match's bucket is at least 6, so nothing wraps.
-  #   483:74  the predicted bit inverted swaps the pair 2b, 2b + 1.
-  #   507:53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
+  #   527:74  the predicted bit inverted swaps the pair 2b, 2b + 1.
+  #   538:53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
   # Pinned: the function carries catchable `+` and `>=` mutants. 3 mutants.
-  "^src/cm_path\\.rs:483:43: replace \\+ with -",
-  "^src/cm_path\\.rs:483:74: replace >= with <",
-  "^src/cm_path\\.rs:507:53: replace >= with <",
+  "^src/cm_path\\.rs:527:43: replace \\+ with -",
+  "^src/cm_path\\.rs:527:74: replace >= with <",
+  "^src/cm_path\\.rs:538:53: replace >= with <",
 
   # Non-terminating: the renorm loops exit only when `low` and `high`
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or
