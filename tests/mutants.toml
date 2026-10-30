@@ -86,20 +86,20 @@ exclude_re = [
   # update adds rate * error * 0: the mix and every coded bit are
   # unchanged. Pinned: the expression has no function to scope by.
   # 1 mutant.
-  "^src/cm_path\\.rs:108:25: replace \\+ with \\*$",
+  "^src/cm_path\\.rs:142:25: replace \\+ with \\*$",
 
   # Equivalent: three relabelings in CmPath::walk, each a bijection on
   # the indices of a table it reads and updates through the same index,
   # every entry starting equal, so the mix and every coded bit are
   # unchanged:
-  #   449:43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
+  #   483:43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
   #           and a live match's bucket is at least 6, so nothing wraps.
-  #   449:74  the predicted bit inverted swaps the pair 2b, 2b + 1.
-  #   473:53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
+  #   483:74  the predicted bit inverted swaps the pair 2b, 2b + 1.
+  #   507:53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
   # Pinned: the function carries catchable `+` and `>=` mutants. 3 mutants.
-  "^src/cm_path\\.rs:449:43: replace \\+ with -",
-  "^src/cm_path\\.rs:449:74: replace >= with <",
-  "^src/cm_path\\.rs:473:53: replace >= with <",
+  "^src/cm_path\\.rs:483:43: replace \\+ with -",
+  "^src/cm_path\\.rs:483:74: replace >= with <",
+  "^src/cm_path\\.rs:507:53: replace >= with <",
 
   # Non-terminating: the renorm loops exit only when `low` and `high`
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or

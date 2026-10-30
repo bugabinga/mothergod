@@ -3,14 +3,24 @@ use proptest::prelude::*;
 
 /// Pure noise (drives `compress` to `Method::Stored`, the incompressible
 /// control) mixed with a short pattern repeated many times (drives it to
-/// `Method::Lz`), so the sweep exercises both frame shapes rather than
+/// `Method::Lz`) and words drawn from a small vocabulary (drives
+/// `Level::Extreme` to `Method::Cm`), so the sweep exercises every frame
+/// shape rather than
 /// only whichever one uniform random bytes happen to produce
 /// (`test-craft`'s "generate the distribution the codec targets").
 fn data() -> impl Strategy<Value = Vec<u8>> {
+    const WORDS: [&[u8]; 8] = [
+        b"the ", b"of ", b"frame ", b"model ", b"and ", b"a ", b"stream ", b"to ",
+    ];
     prop_oneof![
         proptest::collection::vec(any::<u8>(), 0..512),
         (proptest::collection::vec(any::<u8>(), 1..32), 1usize..16)
             .prop_map(|(pattern, reps)| pattern.repeat(reps)),
+        proptest::collection::vec(0..WORDS.len(), 1..200).prop_map(|words| words
+            .iter()
+            .flat_map(|&word| WORDS[word])
+            .copied()
+            .collect()),
     ]
 }
 
@@ -44,15 +54,32 @@ proptest! {
     /// and its `Lz` sibling, not by this property.
     #[test]
     fn decode_apis_agree(input in data()) {
-        let frame = compress(&input);
-        let via_decompress = decompress(&frame).unwrap();
-        prop_assert_eq!(&via_decompress, &input);
-        prop_assert_eq!(
-            decompress_bounded(&frame, codec::MAX_DECODED_LEN),
-            Ok(via_decompress.clone())
-        );
-        let mut out = Vec::new();
-        decompress_to_writer(&frame, codec::MAX_DECODED_LEN, &mut out).unwrap();
-        prop_assert_eq!(out, via_decompress);
+        apis_agree(&compress(&input), &input)?;
     }
+
+    /// The same agreement on what [`Level::Extreme`] writes, where the
+    /// vocabulary above comes out as `Method::Cm` frames, plus
+    /// [`read::Decoder`], which decodes a `Cm` frame through its own
+    /// dispatch.
+    #[test]
+    fn decode_apis_agree_at_extreme(input in data()) {
+        let frame = compress_level(&input, Level::Extreme);
+        apis_agree(&frame, &input)?;
+        let mut read = Vec::new();
+        std::io::Read::read_to_end(&mut read::Decoder::new(frame.as_slice()), &mut read).unwrap();
+        prop_assert_eq!(read, input);
+    }
+}
+
+fn apis_agree(frame: &[u8], input: &[u8]) -> Result<(), TestCaseError> {
+    let via_decompress = decompress(frame).unwrap();
+    prop_assert_eq!(&via_decompress, input);
+    prop_assert_eq!(
+        decompress_bounded(frame, codec::MAX_DECODED_LEN),
+        Ok(via_decompress.clone())
+    );
+    let mut out = Vec::new();
+    decompress_to_writer(frame, codec::MAX_DECODED_LEN, &mut out).unwrap();
+    prop_assert_eq!(out, via_decompress);
+    Ok(())
 }

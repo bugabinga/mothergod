@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 18)
+# mothergod bitstream format (FORMAT_VERSION 19)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 18)
+4       1     format version (currently 19)
 5       1     method byte
 6       ...   payload (method-defined)
 end-4   4     check value: CRC-32 of every byte before it, u32 LE
@@ -24,7 +24,7 @@ end-4   4     check value: CRC-32 of every byte before it, u32 LE
 
 A decoder MUST reject: input shorter than 6 bytes (`Truncated`), wrong magic
 (`BadMagic`), version greater than it supports (`UnsupportedVersion`),
-unknown method (`UnknownMethod`). A frame of either method additionally
+unknown method (`UnknownMethod`). A frame of every method additionally
 requires exactly the current format version: every earlier version was
 retired outright under ADR-0050, no release ever having written one
 (ADR-0063), so a decoder rejects a frame naming any other version as
@@ -44,7 +44,7 @@ the base64 filter and derived a frame's output length from its filtered
 length (ADR-0071); 15 added the reverse filter (ADR-0072); 16 added
 reverse then delta (ADR-0073); 17 declared the match reach in the selector
 (ADR-0075); 18 added the far reach, a 2-bit reach field with an offset
-alphabet of its own (ADR-0078).
+alphabet of its own (ADR-0078); 19 added the `Cm` method (ADR-0079).
 
 ## Check value (ADR-0068)
 
@@ -52,10 +52,10 @@ Every frame ends in the CRC-32 of the frame's bytes from the magic through
 the last payload byte, as a `u32` LE. The CRC is CRC-32/ISO-HDLC, the one
 gzip, zlib and xz use: reflected polynomial `0xEDB88320`, initial value and
 final XOR `0xFFFFFFFF`, and `"123456789"` checks to `0xCBF43926`. It is
-always present, for both methods, and never optional.
+always present, for every method, and never optional.
 
 The check value follows the payload's extent, which the method names (the
-`Stored` data length, the `Lz` coded length), so a decoder finds it without
+`Stored` data length, the `Lz` or `Cm` coded length), so a decoder finds it without
 decoding. A decoder MUST verify it before it decodes the payload or writes
 any byte of the frame, and MUST reject a mismatch as `BadChecksum`. A frame
 with fewer bytes than its extent and check value need is `Truncated`. The
@@ -69,7 +69,7 @@ it for forged bytes, so no decoder bound may rely on it (invariants below).
 
 A compressed stream is one or more frames, back to back, decoded in order;
 its output is their outputs concatenated. Every frame names its own extent
-(the `Stored` data length, the `Lz` coded length) and ends in its check
+(the `Stored` data length, the `Lz` or `Cm` coded length) and ends in its check
 value, so a decoder finds where one ends without decoding it. Nothing else may follow the last frame: a
 decoder MUST reject bytes that are not a frame, as the next frame's
 `Truncated` (fewer than 6 bytes, or a payload or check value cut short) or
@@ -79,11 +79,11 @@ frame costs at least its own input bytes. A caller's output bound below
 `codec::MAX_DECODED_LEN` covers the stream's total, and a frame whose
 output would carry the total past it is `TooLarge` before any of its
 decode work. At or above that ceiling no total covers `Stored` frames, each as long as the
-input it was read from. The `Lz` frames of a stream held in memory
-(`decompress`, `decompress_bounded`) are capped together at the same
-ceiling, since an `Lz` frame's output is not bounded by its input; a decoder
+input it was read from. The coded (`Lz` and `Cm`) frames of a stream held in
+memory (`decompress`, `decompress_bounded`) are capped together at the same
+ceiling, since a coded frame's output is not bounded by its input; a decoder
 that hands its output on (`decompress_to_writer`) holds none across frames and
-caps each `Lz` frame alone, so a stream of any length decodes under the same
+caps each coded frame alone, so a stream of any length decodes under the same
 per-frame worst case a single frame has.
 
 ## Methods
@@ -92,6 +92,7 @@ per-frame worst case a single frame has.
 |------|--------|---------|
 | 0x00 | Stored | declared length, then the original data, verbatim |
 | 0x01 | Lz     | see below |
+| 0x02 | Cm     | see below |
 
 ### `Stored` (ADR-0065)
 
@@ -240,20 +241,57 @@ repeat-offset cache to reuse) is coded as a symbol through the separate
 never be misread as an offset bucket or vice versa — the shape of the
 founding port bug this section's invariant exists to rule out.
 
+### `Cm` (`src/cm_path.rs`, ADR-0079)
+
+A trial-selected filter, from the same shortlist and with the same meaning
+as `Lz`'s, applied to the frame data, then every filtered byte coded as 8
+binary decisions through one context-mixing model (`cm_path::CmPath`): the
+`Lz` literal model's own probability, a match model's and four hashed order
+contexts' (orders 3 to 6), blended by a logistic mixer and coded over the
+same adaptive range coder. Every table has a constant size and starts fresh
+per frame. Every value is computed with IEEE basic operations and the codec's
+own `stretch` and `squash`, never a libm call (ADR-0024).
+
+```
+offset  size  field
+0       2     selector: [kind, param]
+2       4     declared length of the filtered bytes, u32 LE
+6       8     coded length: the range-coded stream's byte count, u64 LE
+14      ...   range-coded stream, of the FILTERED bytes
+```
+
+The selector is `Lz`'s with no reach: `kind` names the filter alone, so a
+decoder MUST reject a set top bit, as any other unknown `[kind, param]`
+pair, as `Corrupt`. The output length derives from the declared length by
+`kind` exactly as for `Lz`, and the decoder undoes the filter after the
+stream as `Lz`'s does. Stream bytes past the coded length are `Corrupt`,
+fewer are `Truncated`, and the Stored floor binds as for `Lz`: a `Cm` payload
+longer than `8 + output length` bytes is `Corrupt` from the header alone.
+
+Every node codes at a probability clamped to `[1/4096, 1 - 1/4096]`, so a
+stream of `L` bytes holds fewer than `4096 * L` output bytes; a decoder MUST
+reject a declared length past that as `Truncated` before it allocates. A
+stream damaged past its header decodes to wrong bytes of the declared
+length, which the check value has already refused. A decoder reads the
+whole output so far, so it holds the frame's output whole; no `Cm` frame
+streams.
+
 ## Invariants (binding on every future method)
 
 - Lossless: decode(encode(x)) == x for all x.
 - Stored floor: an encoder MUST NOT emit a frame larger than
   `header + 8 + len(x) + 4` (the header, the `Stored` length field and the
   check value) — fall back to Stored (JOURNAL S1-L1). A decoder MUST reject
-  an `Lz` frame that breaks it as `Corrupt` before reading its payload
-  (ADR-0069).
+  an `Lz` or `Cm` frame that breaks it as `Corrupt` before reading its
+  payload (ADR-0069).
 - Decoders never panic and allocate at most a bounded multiple of the
   declared output size for any input. For `Lz`, "declared output size" is
   the payload's own length field, which bounds the filtered bytes, and the
   output length derived from it is what the ceiling below caps: the decoder
   never preallocates from it, only grows toward it, and rejects a token the
-  instant it would exceed it. That output length is itself capped (`codec::MAX_DECODED_LEN`, currently 256
+  instant it would exceed it. For `Cm` it is the same field, and the decoder
+  allocates the filtered bytes once that field has passed the ceiling below
+  and the stream's 4096-bytes-per-byte bound. That output length is itself capped (`codec::MAX_DECODED_LEN`, currently 256
   MiB): a ratio check against the payload's own byte count cannot bound
   this format's amplification, because its adaptive models saturate fast
   enough that a legitimate maximal-ratio frame and a forged header become
@@ -261,15 +299,21 @@ founding port bug this section's invariant exists to rule out.
   a ~3,158:1 ratio at 60,000 input bytes, with the encoded size barely
   moving as input grows past that). The ceiling is a decoder policy, not a
   wire-format field, so raising it is not a `FORMAT_VERSION` bump. It bounds
-  one `Lz` frame's output and the total `Lz` output of a stream the buffered
+  one coded frame's output and the total coded output of a stream the buffered
   `mothergod::decompress` holds in memory; it is no file-size limit, because
   `mothergod::compress` cuts its input into 16 MiB frames up to that length
   (past it, one `Stored` frame) and `mothergod::decompress_to_writer`
   carries a stream of any length at a `max_len` of that or more
   (ADR-0067). `mothergod::decompress_bounded` lets a caller tighten this
   ceiling to its own memory budget (clamped, never raised, since 256 MiB is
-  the only value this decoder's worst-case decode time has been measured
-  against; `research/JOURNAL.md` S1-P7, S2-A71).
+  the only value this decoder's worst-case `Lz` decode time has been
+  measured against; `research/JOURNAL.md` S1-P7, S2-A71). A `Cm` frame's
+  output is capped lower, at 16 MiB (`cm_path::MAX_OUTPUT_LEN`), as
+  `TooLarge` from its declared length before any allocation, because its
+  decode costs about 5 µs per output byte whatever the stream: 88 s
+  measured at that cap against `Lz`'s 314 s at 256 MiB (ADR-0079). The
+  cap is the block length `mothergod::compress` cuts at, so it refuses no
+  frame this encoder writes.
 - Bit-identical output across platforms for the same input and version:
   IEEE-754 basic float operations (`+ - * /`) are correctly rounded and
   reproducible, but libm transcendentals are not, so nothing on the decode

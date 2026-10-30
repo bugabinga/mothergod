@@ -185,7 +185,7 @@ fn level_digit() -> Seen {
         let (frame, code) = run(bin().arg(digit), &sample());
         code == 0 && run(bin().arg("-d"), &frame) == (sample(), 0)
     };
-    seen(["-1", "-2", "-3"].into_iter().all(encodes))
+    seen(["-1", "-2", "-3", "-4"].into_iter().all(encodes))
 }
 
 /// `true` when `flag` exits 0 having written something. The stream is not

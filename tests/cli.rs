@@ -87,7 +87,7 @@ fn unknown_options_fail_with_usage_naming_the_option() {
     }
 }
 
-/// Text on which the three levels write three different sizes.
+/// Text on which the four levels write four different sizes.
 fn records() -> Vec<u8> {
     (0..2000)
         .flat_map(|i| format!("{{\"id\":{i},\"score\":{}}}\n", i * 37 % 1000).into_bytes())
@@ -101,6 +101,7 @@ fn a_level_digit_writes_the_frame_the_library_writes_at_that_level() {
         (&["-1"][..], Level::Fastest),
         (&["-2"], Level::Fast),
         (&["-3"], Level::Best),
+        (&["-4"], Level::Extreme),
         (&[], Level::Best),
         // The last digit wins, whether it comes as an option or in a cluster.
         (&["-1", "-3"], Level::Best),
@@ -121,12 +122,12 @@ fn a_level_digit_writes_the_frame_the_library_writes_at_that_level() {
 
 #[test]
 fn a_digit_that_names_no_level_fails_with_usage_naming_the_levels() {
-    for option in ["-0", "-4", "-9", "-1d4"] {
+    for option in ["-0", "-5", "-9", "-1d5"] {
         let output = run_output(bin().arg(option), b"");
         assert!(!output.status.success(), "{option} must fail");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("the levels are -1 to -3"),
+            stderr.contains("the levels are -1 to -4"),
             "{option}: {stderr}"
         );
         assert!(stderr.contains("usage:"), "{option}: {stderr}");

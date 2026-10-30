@@ -1,50 +1,50 @@
 {
   "base64_wrapped": {
     "bpb": 0.39536,
-    "digest": "05ed0c144bc78246"
+    "digest": "204778aaa494fcab"
   },
   "entropy_ladder_h1": {
     "bpb": 1.25312,
-    "digest": "e36c909c37ee0881"
+    "digest": "9f3f127b5726598c"
   },
   "entropy_ladder_h2": {
     "bpb": 2.37248,
-    "digest": "c34b8a92a7bf5ffb"
+    "digest": "cc575682866db468"
   },
   "entropy_ladder_h4": {
     "bpb": 4.36512,
-    "digest": "17f4e4156cfefedc"
+    "digest": "9de91405812b2f30"
   },
   "entropy_ladder_h6": {
     "bpb": 6.14592,
-    "digest": "0551154c8e47a47f"
+    "digest": "326a3b3811a7c451"
   },
   "entropy_ladder_h8": {
     "bpb": 8.00288,
-    "digest": "552cc7ca6e4bfe24"
+    "digest": "b755877c899c60f3"
   },
   "interleaved_audio16": {
     "bpb": 5.7544,
-    "digest": "1494183c8bfb5d56"
+    "digest": "dd3905c582348faa"
   },
   "json_records": {
     "bpb": 0.51936,
-    "digest": "d1367cd3d2456f8d"
+    "digest": "3416e043796db2c3"
   },
   "markov_h8_2_trap": {
     "bpb": 2.37264,
-    "digest": "0e767d342f86473c"
+    "digest": "b33b894553d64745"
   },
   "sqlite_like_records": {
     "bpb": 3.24672,
-    "digest": "b0823cdc7b111ee5"
+    "digest": "54fabe8e6ff1a1aa"
   },
   "wide_reach_repeat": {
     "bpb": 1.187756,
-    "digest": "8d85f0b56f834986"
+    "digest": "20028850890afc83"
   },
   "x86_dense_code": {
     "bpb": 2.65184,
-    "digest": "87c6e4dfbb18822b"
+    "digest": "8ad5ade2871c9f82"
   }
 }

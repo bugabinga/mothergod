@@ -220,7 +220,7 @@
         <b>Status</b>
         <p>
           <strong>Pre-alpha: no release, no packaged binary, no version
-            tag.</strong> The container format (version 18) is specified and
+            tag.</strong> The container format (version 19) is specified and
           versioned, not frozen. Before the first release, each format change
           retires the version before it, so the next build that changes the
           format will not read a file you compress today. After that, until 1.0
@@ -440,13 +440,16 @@ cmp FILE FILE.out</pre>
           is it passing. Given a file, it writes <code>&lt;file&gt;.mgdc</code>
           beside it, and unlike <code>gzip</code> it never deletes the input.
           <code>--help</code> lists the rest on one screen: flags you know from
-          <code>gzip</code>, three encoder levels, and no tuning knobs. On
+          <code>gzip</code>, four encoder levels, and no tuning knobs. On
           Silesia, <code>-2</code> writes 2.205 bits/byte at 1.426 MB/s and
           <code>-1</code> writes 2.361 bits/byte at 2.362 MB/s, against the
           default <code>-3</code>'s 1.976 bits/byte at 0.153 MB/s.
           <code>zstd -6</code> still writes smaller files than <code>-1</code>,
           and faster: the levels shorten the wait, they do not make mothergod
-          fast. Every level writes frames the one decoder reads.
+          fast. <code>-4</code> goes the other way: it also codes every byte
+          through one context-mixing model and keeps that file where it is
+          smaller, at a cost in encode time and far more in decode time, not yet
+          measured on Silesia. Every level writes frames the one decoder reads.
           <code>--version</code> also prints the format version the build reads;
           put it in a bug report.
         </p>

@@ -1,8 +1,9 @@
 //! Layer 5 of `docs/TESTING.md`: golden-frame regression tests.
 //!
 //! `tests/golden/` holds one `<name>.mgdc`/`<name>.plaintext` pair per
-//! fixture, named `v<FORMAT_VERSION>-...`. Two claims, of different
-//! strength:
+//! fixture, named `v<FORMAT_VERSION>-...`, and `v<FORMAT_VERSION>-extreme-...`
+//! for a frame only `Level::Extreme` writes, a `Method::Cm` frame
+//! (ADR-0079). Two claims, of different strength:
 //!
 //! - **Decode is pinned across platforms.** `decompress(golden) ==
 //!   plaintext` is a real cross-platform guarantee: the decode path is
@@ -12,7 +13,8 @@
 //!   fixtures were generated on. Every fixture in `tests/golden/`, current or
 //!   superseded, carries this claim.
 //! - **Re-encoding is pinned per libm as a regression check, not
-//!   guaranteed across platforms.** `compress(plaintext) == golden` holds
+//!   guaranteed across platforms.** `compress(plaintext) == golden`, at the
+//!   fixture's level, holds
 //!   only as far as `f64::log2` agrees between libms: `lz.rs`'s match
 //!   pricing and `filters.rs`'s filter scoring keep it (ADR-0024
 //!   decision 3, encoder-only), and libm does not promise bit-identical
@@ -68,6 +70,16 @@ fn superseded_dir() -> PathBuf {
     golden_dir().join("superseded")
 }
 
+/// The level a fixture's frame was written at, from the name segment after
+/// its version: `extreme` is [`mothergod::Level::Extreme`], anything else
+/// the default.
+fn level_of(name: &str) -> mothergod::Level {
+    match name.split('-').nth(1) {
+        Some("extreme") => mothergod::Level::Extreme,
+        _ => mothergod::Level::default(),
+    }
+}
+
 /// Checks one `.mgdc`/`.plaintext` pair's decode pin, and its re-encode pin
 /// when `check_reencode` is set and the fixture's declared version is the
 /// current `FORMAT_VERSION`. Returns the fixture's declared version.
@@ -101,7 +113,7 @@ fn check_fixture(path: &Path, check_reencode: bool) -> u8 {
 
     if check_reencode && declared_version == mothergod::FORMAT_VERSION {
         assert_eq!(
-            mothergod::compress(&plaintext),
+            mothergod::compress_level(&plaintext, level_of(&name)),
             golden,
             "fixture {name:?}: current build re-encoded the pinned plaintext to a \
              different frame than the committed golden one.\n\
