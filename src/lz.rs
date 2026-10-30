@@ -1296,26 +1296,15 @@ fn reconstruct(parent: &[Option<Token>]) -> Vec<Token> {
 /// price-seeding first pass).
 #[must_use]
 pub fn parse_optimal(data: &[u8]) -> Vec<Token> {
-    parse_optimal_with_window(data, Reach::Standard)
+    parse_rounds(data, Reach::Standard, DP_ROUNDS)
 }
 
-/// [`parse_optimal`], with the `dp_round` rounds' match reach bound by
-/// `reach` instead of [`Reach::Standard`]. The [`parse_greedy`] seed pass
-/// stays bound by [`WINDOW`]: it only informs the first round's price
-/// table, so a seed that sees less than `reach` costs a worse initial
-/// guess, not correctness.
-///
-/// # Panics
-///
-/// Same as [`parse_optimal`].
-#[must_use]
-pub fn parse_optimal_with_window(data: &[u8], reach: Reach) -> Vec<Token> {
-    parse_rounds(data, reach, DP_ROUNDS)
-}
-
-/// [`parse_optimal_with_window`] with the number of `dp_round` rounds a
-/// parameter: the encoder's speed dial (`crate::Level`). Zero rounds is the
-/// [`parse_greedy`] seed itself, so `reach` has no effect there.
+/// [`parse_optimal`] with the `dp_round` rounds' match reach bound by `reach`
+/// and their number a parameter: the encoder's speed dial (`crate::Level`).
+/// Zero rounds is the [`parse_greedy`] seed itself, so `reach` has no effect
+/// there. The seed pass stays bound by [`WINDOW`] at every `reach`: it only
+/// informs the first round's price table, so a seed that sees less than
+/// `reach` costs a worse initial guess, not correctness.
 ///
 /// # Panics
 ///
@@ -1338,8 +1327,7 @@ pub fn parse_rounds(data: &[u8], reach: Reach, rounds: usize) -> Vec<Token> {
     round
 }
 
-/// Number of `dp_round` reseed-and-relax passes [`parse_optimal_with_window`]
-/// runs. S2-A56 measured a third round winning and S2-R4 a fourth losing on
+/// Number of `dp_round` reseed-and-relax passes [`parse_optimal`] runs. S2-A56 measured a third round winning and S2-R4 a fourth losing on
 /// the sealed split, so the count stays three until new evidence reopens it
 /// (`research/JOURNAL.md` S1-P2).
 pub(crate) const DP_ROUNDS: usize = 3;
