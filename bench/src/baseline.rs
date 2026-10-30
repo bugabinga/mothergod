@@ -57,8 +57,9 @@ pub const TOLERANCE_BITS: f64 = 0.02;
 pub struct Case {
     /// Stable name, this case's key in `bench/baseline.json`.
     pub name: &'static str,
-    /// Input bytes: [`CASE_LEN`] bytes at [`CASE_SEED`] from the named
-    /// generator (the entropy ladder additionally keyed by its target).
+    /// Input bytes: [`CASE_LEN`] bytes, or [`cases_of_len`]'s length, at
+    /// [`CASE_SEED`] from the named generator (the entropy ladder
+    /// additionally keyed by its target).
     pub data: Vec<u8>,
 }
 
@@ -80,34 +81,29 @@ fn entropy_ladder_case_name(bits: u8) -> &'static str {
     }
 }
 
-/// Stable case name and [`CASE_LEN`]/[`CASE_SEED`] bytes for one
-/// non-ladder, train-eligible [`DatasetKind`]. `None` for
+/// Stable case name and `len` bytes at [`CASE_SEED`] for one non-ladder,
+/// train-eligible [`DatasetKind`]. `None` for
 /// [`DatasetKind::EntropyLadder`] (handled separately by
 /// [`entropy_ladder_case_name`], since it needs a ladder target) and for a
 /// sealed-only kind (`DatasetKind::sealed_only`, excluded from this gate by
 /// design).
-fn dataset_case(kind: DatasetKind) -> Option<Case> {
+fn dataset_case(kind: DatasetKind, len: usize) -> Option<Case> {
     let (name, data): (&'static str, Vec<u8>) = match kind {
         DatasetKind::EntropyLadder | DatasetKind::AccessLog | DatasetKind::GradientImage => {
             return None;
         }
-        DatasetKind::MarkovH82Trap => (
-            "markov_h8_2_trap",
-            crate::markov_h8_2_trap(CASE_LEN, CASE_SEED),
-        ),
-        DatasetKind::JsonRecords => ("json_records", crate::json_records(CASE_LEN, CASE_SEED)),
-        DatasetKind::Base64Wrapped => {
-            ("base64_wrapped", crate::base64_wrapped(CASE_LEN, CASE_SEED))
-        }
+        DatasetKind::MarkovH82Trap => ("markov_h8_2_trap", crate::markov_h8_2_trap(len, CASE_SEED)),
+        DatasetKind::JsonRecords => ("json_records", crate::json_records(len, CASE_SEED)),
+        DatasetKind::Base64Wrapped => ("base64_wrapped", crate::base64_wrapped(len, CASE_SEED)),
         DatasetKind::InterleavedAudio16 => (
             "interleaved_audio16",
-            crate::interleaved_audio16(CASE_LEN, CASE_SEED),
+            crate::interleaved_audio16(len, CASE_SEED),
         ),
         DatasetKind::SqliteLikeRecords => (
             "sqlite_like_records",
-            crate::sqlite_like_records(CASE_LEN, CASE_SEED),
+            crate::sqlite_like_records(len, CASE_SEED),
         ),
-        DatasetKind::X86DenseCode => ("x86_dense_code", crate::x86_dense_code(CASE_LEN, CASE_SEED)),
+        DatasetKind::X86DenseCode => ("x86_dense_code", crate::x86_dense_code(len, CASE_SEED)),
     };
     Some(Case { name, data })
 }
@@ -116,14 +112,26 @@ fn dataset_case(kind: DatasetKind) -> Option<Case> {
 /// non-ladder, non-sealed-only [`DatasetKind`].
 #[must_use]
 pub fn cases() -> Vec<Case> {
+    cases_of_len(CASE_LEN)
+}
+
+/// [`cases`] at `len` bytes each, same names, kinds, order and seed: the
+/// train set for a candidate whose behavior depends on the input's length,
+/// which no [`CASE_LEN`] case can show (`research/JOURNAL.md` S2-A140).
+#[must_use]
+pub fn cases_of_len(len: usize) -> Vec<Case> {
     let mut out: Vec<Case> = ENTROPY_LADDER_TARGETS
         .into_iter()
         .map(|bits| Case {
             name: entropy_ladder_case_name(bits),
-            data: crate::entropy_ladder(bits, CASE_LEN, CASE_SEED),
+            data: crate::entropy_ladder(bits, len, CASE_SEED),
         })
         .collect();
-    out.extend(DatasetKind::ALL.into_iter().filter_map(dataset_case));
+    out.extend(
+        DatasetKind::ALL
+            .into_iter()
+            .filter_map(|kind| dataset_case(kind, len)),
+    );
     out
 }
 

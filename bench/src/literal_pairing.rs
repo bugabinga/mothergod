@@ -77,7 +77,8 @@ pub struct CaseDelta {
     /// Case name (`baseline::Case::name`, or `"access_log (sealed)"`/
     /// `"gradient_image (sealed)"` for the two sealed kinds).
     pub name: &'static str,
-    /// `(candidate_bits - champion_bits) / CASE_LEN`.
+    /// `(candidate_bits - champion_bits) / case length`, `CASE_LEN` unless
+    /// the driver names another.
     pub delta_bpb: f64,
 }
 
@@ -98,31 +99,32 @@ pub struct PairingReport {
     pub sealed: Vec<CaseDelta>,
 }
 
-/// The two sealed-only cases every pairing in this lead measures,
-/// `CASE_LEN` bytes at `sealed_seed(CASE_SEED)`: `baseline::cases()`
+/// The two sealed-only cases every pairing in this lead measures, `len`
+/// bytes at `sealed_seed(CASE_SEED)`: `baseline::cases()`
 /// excludes both by design (`research/corpus/POLICY.md`'s "no agent ever
 /// tunes against it"), so a pairing driver that also wants the sealed
 /// read generates them itself, same length and seed rule. Every pairing
 /// driver in this crate reads them through [`pair_cases`].
-fn sealed_cases() -> [(&'static str, Vec<u8>); 2] {
+fn sealed_cases(len: usize) -> [(&'static str, Vec<u8>); 2] {
     let seed = sealed_seed(CASE_SEED);
     [
-        ("access_log (sealed)", crate::access_log(CASE_LEN, seed)),
-        (
-            "gradient_image (sealed)",
-            crate::gradient_image(CASE_LEN, seed),
-        ),
+        ("access_log (sealed)", crate::access_log(len, seed)),
+        ("gradient_image (sealed)", crate::gradient_image(len, seed)),
     ]
 }
 
 /// Builds a [`PairingReport`] from `delta_for_case`, the candidate-minus-
-/// champion bits/byte of one case's bytes: the eleven `baseline::cases()`
-/// train cases, then the two sealed cases. The one place that fixes which
+/// champion bits/byte of one case's bytes: the eleven
+/// `baseline::cases_of_len(len)` train cases, then the two sealed cases at
+/// the same length. The one place that fixes which
 /// cases a pairing reads, in which order, so a driver over a different
 /// sub-stream ([`crate::whole_stream`]) differs from this module's in its
 /// pricing alone.
-pub(crate) fn pair_cases(mut delta_for_case: impl FnMut(&[u8]) -> f64) -> PairingReport {
-    let train: Vec<CaseDelta> = baseline::cases()
+pub(crate) fn pair_cases(
+    len: usize,
+    mut delta_for_case: impl FnMut(&[u8]) -> f64,
+) -> PairingReport {
+    let train: Vec<CaseDelta> = baseline::cases_of_len(len)
         .into_iter()
         .map(|case| CaseDelta {
             name: case.name,
@@ -136,7 +138,7 @@ pub(crate) fn pair_cases(mut delta_for_case: impl FnMut(&[u8]) -> f64) -> Pairin
     )]
     let train_mean = train_sum / train.len() as f64;
 
-    let sealed: Vec<CaseDelta> = sealed_cases()
+    let sealed: Vec<CaseDelta> = sealed_cases(len)
         .into_iter()
         .map(|(name, data)| CaseDelta {
             name,
@@ -172,7 +174,9 @@ where
     DF: FnMut() -> D,
     D: FnMut(&mut Literal, Context, u8) -> f64,
 {
-    pair_cases(|data| case_delta_bpb(data, champion_for_case(), candidate_for_case()))
+    pair_cases(CASE_LEN, |data| {
+        case_delta_bpb(data, champion_for_case(), candidate_for_case())
+    })
 }
 
 #[cfg(test)]

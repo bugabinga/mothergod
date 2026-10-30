@@ -64,21 +64,41 @@ const COUNTER_LIMIT: u16 = 1023;
 /// The hashed context orders, each one input, in mixer order.
 const ORDERS: [usize; 4] = [3, 4, 5, 6];
 
-/// [`Bucket`]s per order table, as a power of two, the size the train
-/// mean picked at `CASE_LEN` (`research/JOURNAL.md` S2-A138). Under
-/// [`claim`]'s replacement a smaller table forgets rarely seen contexts
-/// sooner, which priced lower at that length; a longer input fills the
-/// same table faster, so this is a load per case byte, not a size for
-/// every input.
-const ORDER_BUCKET_BITS: u32 = 16;
+/// Fewest [`Bucket`]s per order table, as a power of two: the size the
+/// train mean picked at `CASE_LEN` (`research/JOURNAL.md` S2-A138), so
+/// no input up to `2^16` bytes sizes its tables differently.
+const MIN_ORDER_BUCKET_BITS: u32 = 16;
+
+/// Most [`Bucket`]s per order table, as a power of two: the cap that
+/// bounds the four tables' memory whatever the declared length.
+const MAX_ORDER_BUCKET_BITS: u32 = 20;
+
+/// [`Bucket`]s per order table for a stream of `len` bytes, as a power of
+/// two: one bucket per byte, rounded up, inside the floor and the cap
+/// (`research/JOURNAL.md` S2-A140). Under [`claim`]'s replacement a
+/// smaller table forgets rarely seen contexts sooner, so the size is a
+/// load per byte, not a constant. [`encode`] and [`decode`] both derive
+/// it from the length alone, the one value both sides hold before the
+/// first byte.
+fn order_bucket_bits(len: usize) -> u32 {
+    (usize::BITS - len.saturating_sub(1).leading_zeros())
+        .clamp(MIN_ORDER_BUCKET_BITS, MAX_ORDER_BUCKET_BITS)
+}
 
 /// Buckets in the set a context may occupy: the aligned run of this many
 /// holding its hashed index.
 const ORDER_WAYS: usize = 4;
 
 const _: () = assert!(
-    ORDER_WAYS.is_power_of_two() && ORDER_WAYS <= 1 << ORDER_BUCKET_BITS,
+    ORDER_WAYS.is_power_of_two() && ORDER_WAYS <= 1 << MIN_ORDER_BUCKET_BITS,
     "a table splits into whole sets"
+);
+
+const _: () = assert!(
+    MIN_ORDER_BUCKET_BITS <= MAX_ORDER_BUCKET_BITS
+        && MAX_ORDER_BUCKET_BITS <= 20
+        && MATCH_TABLE_BITS <= 20,
+    "slot's 20-bit mask and check_of's disjoint top bits hold every table"
 );
 
 /// Bit-tree nodes per nibble, numbered `1..NIBBLE_NODES` from the
@@ -137,7 +157,7 @@ fn hash_bytes(seed: u64, bytes: &[u8]) -> u64 {
 /// `h` reduced to a table index under `bits`.
 #[allow(
     clippy::cast_possible_truncation,
-    reason = "masked to at most 20 bits first, which fits usize on every target"
+    reason = "masked to at most 20 bits first, both tables' cap, which fits usize on every target"
 )]
 fn slot(h: u64, bits: u32) -> usize {
     (h & ((1u64 << bits) - 1)) as usize
@@ -274,7 +294,7 @@ fn claim(table: &mut [Bucket], index: usize, check: u16) -> usize {
 }
 
 /// The bits of `h` a [`Bucket`] keeps as its check: the top 16, disjoint
-/// from the low [`ORDER_BUCKET_BITS`] that index it.
+/// from the low [`MAX_ORDER_BUCKET_BITS`] or fewer that index it.
 fn check_of(h: u64) -> u16 {
     u16::try_from(h >> 48).expect("a u64 shifted right 48 fits u16")
 }
@@ -364,45 +384,47 @@ impl MatchModel {
 }
 
 /// The path's model: [`Literal`]'s wire walk plus the match model and the
-/// hashed orders under one outer logistic mixer. Fresh per stream.
+/// hashed orders under one outer logistic mixer. Fresh per stream, sized
+/// by the stream's length.
 #[derive(Debug, Clone)]
 pub struct CmPath {
     literal: Literal,
     literal_mixer: SurpriseLogisticMix,
     match_model: MatchModel,
+    /// [`order_bucket_bits`] of the stream's length; every order table
+    /// holds `1 << order_bucket_bits` buckets.
+    order_bucket_bits: u32,
     orders: Vec<Vec<Bucket>>,
     weights: Vec<[f64; INPUTS]>,
 }
 
-impl Default for CmPath {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CmPath {
-    /// A fresh model: every counter at one half, the outer mixer weighing
-    /// the wire model 1 and every other input 0.
+    /// A fresh model for a stream of `len` bytes: every counter at one
+    /// half, the outer mixer weighing the wire model 1 and every other
+    /// input 0, the order tables sized by [`order_bucket_bits`].
     #[must_use]
-    pub fn new() -> Self {
-        crate::abort_on_oom(Self::try_new())
+    pub fn new(len: usize) -> Self {
+        crate::abort_on_oom(Self::try_new(len))
     }
 
     /// [`Self::new`], returning `Err` if the allocator cannot satisfy a
-    /// table: [`decode`]'s constructor (hard rule 2). Every size is a
-    /// constant, none read from a stream.
-    fn try_new() -> Result<Self, std::collections::TryReserveError> {
+    /// table: [`decode`]'s constructor (hard rule 2). The order tables
+    /// grow with `len` only up to [`MAX_ORDER_BUCKET_BITS`]; every other
+    /// size is a constant.
+    fn try_new(len: usize) -> Result<Self, std::collections::TryReserveError> {
         let mut start = [0.0; INPUTS];
         start[0] = 1.0;
+        let order_bucket_bits = order_bucket_bits(len);
         let mut orders = Vec::new();
         orders.try_reserve_exact(ORDERS.len())?;
         for _ in ORDERS {
-            orders.push(try_filled_vec(1 << ORDER_BUCKET_BITS, Bucket::FRESH)?);
+            orders.push(try_filled_vec(1 << order_bucket_bits, Bucket::FRESH)?);
         }
         Ok(Self {
             literal: Literal::try_new()?,
             literal_mixer: SurpriseLogisticMix::try_new()?,
             match_model: MatchModel::try_new()?,
+            order_bucket_bits,
             orders,
             weights: try_filled_vec(WEIGHT_SETS, start)?,
         })
@@ -427,6 +449,7 @@ impl CmPath {
             literal,
             literal_mixer,
             match_model,
+            order_bucket_bits,
             orders,
             weights,
         } = self;
@@ -462,7 +485,7 @@ impl CmPath {
                     .zip(&mut *orders)
                 {
                     let h = mix64(h ^ nibble_key);
-                    *index = claim(table, slot(h, ORDER_BUCKET_BITS), check_of(h));
+                    *index = claim(table, slot(h, *order_bucket_bits), check_of(h));
                 }
             }
             let i = nibble_node - 1;
@@ -507,7 +530,7 @@ impl CmPath {
 /// length and no header; the frame that wires it declares both.
 #[must_use]
 pub fn encode(data: &[u8]) -> Vec<u8> {
-    let mut model = CmPath::new();
+    let mut model = CmPath::new(data.len());
     let mut encoder = Encoder::new();
     let mut context = Context::default();
     for (position, &byte) in data.iter().enumerate() {
@@ -529,8 +552,9 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// against `max_len` capped at [`crate::codec::MAX_DECODED_LEN`], which
 /// bounds the output buffer, and against `MAX_EXPANSION` bytes per stream
 /// byte, the most any encoding holds, which bounds the decode work, one
-/// walk per byte, by the input. The model's tables are constants and
-/// allocate fallibly.
+/// walk per byte, by the input. The model's tables allocate fallibly; the
+/// order tables grow with `len` but stop at [`MAX_ORDER_BUCKET_BITS`], so
+/// no declared length allocates past that constant.
 ///
 /// # Errors
 ///
@@ -550,7 +574,7 @@ pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
     let len = usize::try_from(len).map_err(|_| Error::TooLarge { len, max: max_len })?;
     let mut output = Vec::new();
     output.try_reserve_exact(len)?;
-    let mut model = CmPath::try_new()?;
+    let mut model = CmPath::try_new(len)?;
     let mut decoder = Decoder::new(stream);
     let mut context = Context::default();
     while output.len() < len {
