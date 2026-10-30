@@ -4,12 +4,15 @@
 //!
 //! The model lives in the codec crate, where [`mothergod::cm_path::encode`]
 //! codes it through the range coder; this module prices the same walk at
-//! ideal cost. `cost_bits` stays libm `log2` (`bench/clippy.toml`) because
-//! it prices a decision, and a stream codes that decision instead.
+//! ideal cost, and [`coded_bits`] reads the coded stream's real size.
+//! `cost_bits` stays libm `log2` (`bench/clippy.toml`) because it prices a
+//! decision, and a stream codes that decision instead.
 
-use crate::literal_pairing::PairingReport;
+use crate::literal_pairing::{self, PairingReport};
 use crate::whole_stream;
 use mothergod::cm_path::CmPath;
+use mothergod::codec;
+use mothergod::filters::select;
 use mothergod::literal::Context;
 
 /// Bits a decision costs: `bit` coded at `probability_of_one`, which
@@ -46,6 +49,33 @@ pub fn train_and_sealed_vs_real_bitstream() -> PairingReport {
         let mut candidate = CmPath::new();
         move |context, prefix, byte| price(&mut candidate, context, prefix, byte)
     })
+}
+
+/// Bits of the shortest stream [`mothergod::cm_path::encode`] codes `data`
+/// to behind any filter [`select::pick`] shortlists, each trial through a
+/// fresh model: [`whole_stream::filtered_whole_stream_bits`]'s search with
+/// the range coder in place of the ideal price. The stream alone, short of
+/// whatever a frame carrying it would add around it.
+#[must_use]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "a single measurement case stays far below 2^53 bits"
+)]
+pub fn coded_bits(data: &[u8]) -> f64 {
+    select::pick(data)
+        .into_iter()
+        .map(|filter| mothergod::cm_path::encode(&codec::apply_filter(filter, data)).len())
+        .min()
+        .map_or(0.0, |len| (len * 8) as f64)
+}
+
+/// [`train_and_sealed_vs_real_bitstream`]'s cases and champion with the
+/// candidate's bits [`coded_bits`]: the real coder's size in place of the
+/// ideal price, so a case's delta against that report is the coder's
+/// overhead (`research/JOURNAL.md` S2-A140).
+#[must_use]
+pub fn coded_train_and_sealed_vs_real_bitstream() -> PairingReport {
+    literal_pairing::pair_cases(|data| whole_stream::delta_vs_real_bitstream(data, coded_bits))
 }
 
 #[cfg(test)]
@@ -121,5 +151,52 @@ mod tests {
             coded_bits <= priced * 1.005 + 64.0,
             "{coded_bits} vs {priced}"
         );
+    }
+
+    /// A little-endian `u32` counter stepping by a constant: `pick`
+    /// shortlists `Delta(4)`, which turns it into one repeated row, so the
+    /// shortest trial is not the identity's and [`coded_bits`] must find
+    /// it among the others.
+    fn counter_rows() -> Vec<u8> {
+        (0u32..1500)
+            .flat_map(|i| i.wrapping_mul(40_503).to_le_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn coded_bits_is_the_shortest_shortlisted_trial_in_bits() {
+        let data = counter_rows();
+        let trials: Vec<usize> = select::pick(&data)
+            .into_iter()
+            .map(|filter| mothergod::cm_path::encode(&codec::apply_filter(filter, &data)).len())
+            .collect();
+        let identity = mothergod::cm_path::encode(&data).len();
+        let shortest = *trials.iter().min().expect("pick shortlists the identity");
+        assert!(shortest < identity, "a filter must win here: {trials:?}");
+
+        let bits = coded_bits(&data);
+
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "a test stream is far below 2^53 bits"
+        )]
+        let expected = (shortest * 8) as f64;
+        assert!((bits - expected).abs() < 1e-9, "{bits} vs {expected}");
+    }
+
+    /// The coded search lands where the priced search does, within the
+    /// coder's overhead, so the two reports differ by that overhead alone.
+    #[test]
+    fn coded_bits_is_the_filtered_price_within_the_coders_overhead() {
+        let data = counter_rows();
+        let priced = whole_stream::filtered_whole_stream_bits(&data, || {
+            let mut candidate = CmPath::new();
+            move |context, prefix, byte| price(&mut candidate, context, prefix, byte)
+        });
+
+        let coded = coded_bits(&data);
+
+        assert!(coded >= priced - 8.0, "{coded} vs {priced}");
+        assert!(coded <= priced * 1.005 + 64.0, "{coded} vs {priced}");
     }
 }
