@@ -413,7 +413,7 @@ fn a_bad_selector_is_corrupt_even_when_the_source_ends_after_it() {
 #[test]
 fn a_streamed_lz_total_past_max_decoded_len_is_read_not_rejected() {
     // Pins `Decoder::with_max_len`'s call site of `Budget::new` (#1273),
-    // which `only_a_collecting_budget_caps_the_lz_total` cannot: a reader
+    // which `only_a_collecting_budget_caps_the_coded_total` cannot: a reader
     // over the concatenation of large `Lz` outputs (ADR-0067) reads to the
     // end, as `decompress_to_writer` writes it (#1088).
     let stream = lz_total_past_max_decoded_len();

@@ -4,8 +4,8 @@
 use std::io::{self, Read};
 
 use super::{
-    Budget, CHECK_LEN, Error, Frames, HEADER_LEN, Method, STORED_LEN_BYTES, codec, declared_extent,
-    extent_prefix_len, parse_header,
+    Budget, CHECK_LEN, Error, Frames, HEADER_LEN, Method, STORED_LEN_BYTES, cm_path, codec,
+    declared_extent, extent_prefix_len, parse_header,
 };
 
 /// The most [`Decoder::fill`] asks for beyond the bytes the source has
@@ -84,7 +84,7 @@ pub struct Decoder<R> {
 
 impl<R: Read> Decoder<R> {
     /// A decoder over `source`, bounded as [`decompress`](crate::decompress)
-    /// is: no `Lz` frame decodes to more than [`codec::MAX_DECODED_LEN`].
+    /// is: no coded frame decodes to more than [`codec::MAX_DECODED_LEN`].
     pub fn new(source: R) -> Self {
         Self::with_max_len(source, codec::MAX_DECODED_LEN)
     }
@@ -94,8 +94,8 @@ impl<R: Read> Decoder<R> {
     /// [`decompress_to_writer`](crate::decompress_to_writer) does for its
     /// `max_len`: checked from each frame's header, before the frame's
     /// payload is read or any decode work is done. A `max_len` at or above
-    /// [`codec::MAX_DECODED_LEN`] caps no total, only each `Lz` frame. The
-    /// payload an `Lz` frame may buffer is bounded by the output it
+    /// [`codec::MAX_DECODED_LEN`] caps no total, only each coded frame. The
+    /// payload a coded frame may buffer is bounded by the output it
     /// declares, so by `max_len` plus a few bytes, not by what the source
     /// sends (ADR-0069).
     pub fn with_max_len(source: R, max_len: u32) -> Self {
@@ -165,18 +165,19 @@ impl<R: Read> Decoder<R> {
             .ok_or(Error::Truncated)?;
         self.fill(total)?;
         let frame = Frames::new(&self.frame).next().ok_or(Error::Truncated)??;
-        match frame.method {
-            Method::Lz => {
-                self.out = codec::decode(frame.payload, codec::MAX_DECODED_LEN)?;
-                self.pos = 0;
-                self.end = self.out.len();
-            }
+        let decoded = match frame.method {
+            Method::Lz => codec::decode(frame.payload, codec::MAX_DECODED_LEN)?,
+            Method::Cm => cm_path::decode_payload(frame.payload, codec::MAX_DECODED_LEN)?,
             Method::Stored => {
                 std::mem::swap(&mut self.frame, &mut self.out);
                 self.pos = HEADER_LEN + STORED_LEN_BYTES;
                 self.end = HEADER_LEN + payload_len;
+                return Ok(true);
             }
-        }
+        };
+        self.out = decoded;
+        self.pos = 0;
+        self.end = self.out.len();
         Ok(true)
     }
 }

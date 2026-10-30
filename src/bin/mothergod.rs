@@ -9,9 +9,10 @@
 //! is kept anyway. `-t` decodes without writing anything, so a silent exit 0
 //! says the file is intact (ADR-0066). `-v` reports each input's sizes on
 //! stderr and leaves stdout alone; `-q` cancels it, the later of the two
-//! winning, and no flag silences an error. `-1` to `-3` pick the encoder
-//! level, `-3` being the default and, on real data, the smallest output, `-1`
-//! the quickest encode; decompression reads a file of any level the same way:
+//! winning, and no flag silences an error. `-1` to `-4` pick the encoder
+//! level, `-3` being the default, `-4` the smallest output and the slowest
+//! encode and decode, `-1` the quickest encode; decompression reads a file of
+//! any level the same way:
 //!
 //! ```text
 //! mothergod    < input       > input.mgdc   # stdin/stdout
@@ -60,10 +61,10 @@ use mothergod::Level;
 /// Suffix a compressed file carries, matching `tests/golden/*.mgdc`.
 const SUFFIX: &str = ".mgdc";
 
-const USAGE: &str = "usage: mothergod [-1|-2|-3] [-d] [-c] [-k] [-f] [-t] [-v] [-q] [--] [file ...]\n       \
+const USAGE: &str = "usage: mothergod [-1|-2|-3|-4] [-d] [-c] [-k] [-f] [-t] [-v] [-q] [--] [file ...]\n       \
 mothergod <-h|--help|-V|--version>\n\n\
 Compresses; -d (--decompress) decompresses. -c (--stdout) writes to stdout.\n\
--1 is the fastest encoder level and the largest output, -3 the slowest and, on real data, the smallest, the default; the last digit wins and only compression takes one.\n\
+-1 is the fastest encoder level and the largest output, -3 the default, -4 the slowest and the smallest, its output also much slower to decompress; the last digit wins and only compression takes one.\n\
 -k (--keep) keeps the input, which is the default. -f (--force) overwrites an existing output file.\n\
 -t (--test) checks that each input decompresses and writes nothing.\n\
 -v (--verbose) reports each input's sizes on stderr; -q (--quiet) cancels it, the later wins.\n\
@@ -129,13 +130,14 @@ fn main() -> ExitCode {
 }
 
 /// The encoder level a digit option names: `-1` is the fastest, `-3` the
-/// default and, on real data, the smallest. The only digits there are, because an accepted digit
+/// default, `-4` the smallest. The only digits there are, because an accepted digit
 /// that chose nothing is what `tests/fit/cli.txt`'s `level-digit` declined on.
 fn level_digit(digit: char) -> Option<Level> {
     match digit {
         '1' => Some(Level::Fastest),
         '2' => Some(Level::Fast),
         '3' => Some(Level::Best),
+        '4' => Some(Level::Extreme),
         _ => None,
     }
 }
@@ -143,7 +145,7 @@ fn level_digit(digit: char) -> Option<Level> {
 /// Reads the genre's grammar: option clusters (`-dc`), long options, `--` to
 /// end options, and `-` as an operand naming stdin. `-h` and `-V` answer at
 /// once, wherever they stand. `-k` is accepted and changes nothing: the
-/// input is kept without it. A level digit (`-1` to `-3`) sets the encoder
+/// input is kept without it. A level digit (`-1` to `-4`) sets the encoder
 /// level, the last one winning, and is refused beside `-d` or `-t`, where it
 /// would choose nothing.
 fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
@@ -196,7 +198,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                     Some(named) => level = Some(named),
                     None => {
                         return Err(format!(
-                            "unknown option \"-{digit}\": the levels are -1 to -3"
+                            "unknown option \"-{digit}\": the levels are -1 to -4"
                         ));
                     }
                 },
@@ -207,7 +209,7 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
     // `-t` wins over `-d` wherever each stands, as in gzip.
     let mode = if test_only { Mode::Test } else { mode };
     if level.is_some() && !matches!(mode, Mode::Compress) {
-        return Err("-1 to -3 select an encoder level, which only compression has".to_owned());
+        return Err("-1 to -4 select an encoder level, which only compression has".to_owned());
     }
     Ok(Request::Run {
         mode,

@@ -517,20 +517,23 @@ fn collected_lz_output_is_capped_in_total_but_streamed_output_is_not() {
 }
 
 #[test]
-fn only_a_collecting_budget_caps_the_lz_total() {
+fn only_a_collecting_budget_caps_the_coded_total() {
     // `decompress_to_writer` holds one write buffer however long the
-    // stream is, so it is exempt from the `Lz` total the `Vec`-returning
+    // stream is, so it is exempt from the coded total the `Vec`-returning
     // functions carry; the block-split streams past 256 MiB rely on it.
-    let lz = (Method::Lz, u64::from(codec::MAX_DECODED_LEN));
+    // `Lz` and `Cm` frames share the one total, and `Stored` adds nothing.
+    let max = u64::from(codec::MAX_DECODED_LEN);
     let mut streaming = Budget::new(u32::MAX, false);
-    assert_eq!(streaming.admit(lz.0, lz.1), Ok(()));
-    assert_eq!(streaming.admit(lz.0, lz.1), Ok(()));
+    assert_eq!(streaming.admit(Method::Lz, max), Ok(()));
+    assert_eq!(streaming.admit(Method::Cm, max), Ok(()));
     let mut collecting = Budget::new(u32::MAX, true);
-    assert_eq!(collecting.admit(lz.0, lz.1), Ok(()));
+    assert_eq!(collecting.admit(Method::Lz, max - 1), Ok(()));
+    assert_eq!(collecting.admit(Method::Stored, max), Ok(()));
+    assert_eq!(collecting.admit(Method::Cm, 1), Ok(()));
     assert_eq!(
-        collecting.admit(lz.0, lz.1),
+        collecting.admit(Method::Cm, 1),
         Err(Error::TooLarge {
-            len: 2 * codec::MAX_DECODED_LEN,
+            len: codec::MAX_DECODED_LEN + 1,
             max: codec::MAX_DECODED_LEN,
         })
     );
@@ -539,7 +542,7 @@ fn only_a_collecting_budget_caps_the_lz_total() {
 #[test]
 fn a_streamed_lz_total_past_max_decoded_len_is_written_not_rejected() {
     // Pins `decompress_to_writer`'s call site of `Budget::new` (#1088),
-    // which `only_a_collecting_budget_caps_the_lz_total` cannot: the
+    // which `only_a_collecting_budget_caps_the_coded_total` cannot: the
     // concatenation of two large `Lz` outputs (ADR-0067) decodes through
     // the writer, one frame past the cap `admit` tests with `>`; the
     // reader's site is pinned beside the reader (#1273).
@@ -685,6 +688,39 @@ fn a_base64_frame_round_trips_through_every_entry_point_and_budgets_its_output()
         .read_to_end(&mut read)
         .expect("reads");
     assert_eq!(read, wrapped);
+}
+
+#[test]
+fn a_cm_frame_round_trips_through_every_entry_point_and_budgets_its_output() {
+    use std::io::Read as _;
+
+    let text = word_salad(3000);
+    let frame = compress_level(&text, Level::Extreme);
+    assert_eq!(frame_methods(&frame), [Method::Cm]);
+
+    assert_eq!(decompress(&frame).as_deref(), Ok(text.as_slice()));
+    let len = u32::try_from(text.len()).expect("small");
+    assert_eq!(
+        decompress_bounded(&frame, len).as_deref(),
+        Ok(text.as_slice())
+    );
+    assert_eq!(
+        decompress_bounded(&frame, len - 1),
+        Err(Error::TooLarge { len, max: len - 1 })
+    );
+    let mut written = Vec::new();
+    decompress_to_writer(&frame, len, &mut written).expect("writes");
+    assert_eq!(written, text);
+    let mut refused = Vec::new();
+    assert!(decompress_to_writer(&frame, len - 1, &mut refused).is_err());
+    assert!(refused.is_empty(), "rejected before a byte is written");
+    assert_eq!(decodes_incrementally(&frame), Ok(false));
+
+    let mut read = Vec::new();
+    read::Decoder::new(frame.as_slice())
+        .read_to_end(&mut read)
+        .expect("reads");
+    assert_eq!(read, text);
 }
 
 #[test]
@@ -1119,6 +1155,63 @@ fn every_level_roundtrips_a_multi_block_input_and_every_writer_agrees_on_the_str
         streams[0] != streams[1] && streams[1] != streams[2] && streams[0] != streams[2],
         "each level writes its own stream"
     );
+}
+
+/// Words drawn at random from a small vocabulary, space-separated: short
+/// repeats at every distance, which an LZ parse codes as many short
+/// matches and a context model learns, so `Method::Cm` is the smaller
+/// payload.
+fn word_salad(len: usize) -> Vec<u8> {
+    const WORDS: [&[u8]; 12] = [
+        b"the", b"of", b"frame", b"model", b"and", b"a", b"stream", b"to", b"byte", b"is",
+        b"context", b"in",
+    ];
+    let mut out = Vec::with_capacity(len + 8);
+    for word in test_support::Xorshift32::new(7) {
+        out.extend_from_slice(WORDS[word as usize % WORDS.len()]);
+        out.push(b' ');
+        if out.len() >= len {
+            break;
+        }
+    }
+    out.truncate(len);
+    out
+}
+
+#[test]
+fn extreme_writes_cm_frames_where_smaller_and_every_writer_agrees_on_the_stream() {
+    const BLOCK: usize = 4096;
+    let input = word_salad(3 * BLOCK + 100);
+    let stream = compress_blocks(&input, BLOCK, Level::Extreme);
+    assert_eq!(frame_methods(&stream), [Method::Cm; 4]);
+    assert_eq!(decompress(&stream).as_ref(), Ok(&input));
+    assert!(stream.len() < compress_blocks(&input, BLOCK, Level::Best).len());
+
+    let mut copied = Vec::new();
+    copy_encode_blocks(&input[..], &mut copied, BLOCK, Level::Extreme)
+        .expect("a Vec does not fail");
+    assert_eq!(copied, stream, "copy_encode_level");
+
+    // Two workers send every block but the last through a thread of its
+    // own, the path that carries the level across it.
+    let mut encoder =
+        write::Encoder::with_workers(Vec::new(), BLOCK, test_support::nz(2), Level::Extreme);
+    std::io::Write::write_all(&mut encoder, &input).expect("a Vec does not fail");
+    assert_eq!(
+        encoder.finish().expect("a Vec does not fail"),
+        stream,
+        "write::Encoder"
+    );
+}
+
+#[test]
+fn extreme_keeps_the_lz_frame_where_the_path_is_not_smaller() {
+    // A run is a handful of LZ bytes at any length; the path codes every
+    // byte, so `Lz` wins and `Extreme` writes `Best`'s frame.
+    let input = vec![b'a'; 20_000];
+    let frame = compress_level(&input, Level::Extreme);
+    assert_eq!(frame_methods(&frame), [Method::Lz]);
+    assert_eq!(frame, compress_level(&input, Level::Best));
 }
 
 #[test]

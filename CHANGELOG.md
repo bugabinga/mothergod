@@ -61,6 +61,14 @@ release.
   one is not smaller. Encode takes 1.3x to 1.6x as long on those files;
   decode time is unchanged, and streaming decode of such a frame holds up to
   16 MiB. `FORMAT_VERSION` 17 to 18, ADR-0078 (#1790).
+- cli, library: `-4` (`Level::Extreme`) writes smaller files than `-3` on
+  data a context model predicts well: it also codes every byte through one
+  context-mixing model and keeps that frame where it is smaller, 0.226
+  bits/byte smaller on average over `bench/`'s 11 synthetic training cases
+  and about 0.15 on its two held-out ones, never larger. The price is a slower
+  encode and a far slower decode of the frames it changes, 6.7x to 6.9x the
+  `-3` decode time on those training cases; not yet measured on Silesia. `-1` to `-3` write what they wrote. `FORMAT_VERSION`
+  18 to 19, ADR-0079 (#1775).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
   status first, each superseded decision linked to the one that replaced
   it, searchable in the browser, so a reader learns what is decided today
@@ -179,12 +187,12 @@ release.
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 18, specified in
+- Bitstream format at `FORMAT_VERSION` 19, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 18 no longer decode: no release ever wrote them, and
+- Format versions below 19 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.

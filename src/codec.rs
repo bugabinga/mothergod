@@ -118,7 +118,11 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// separately remeasured. The length and distance model selection costs
 /// a cheap `CopyKind` branch or array index per copy token, strictly
 /// cheaper than the per-byte literal cost this bound is measured against.
-/// It bounds one `Lz` frame's output and the total `Lz` output of a stream
+/// A `Method::Cm` frame's worst case at this ceiling is not measured: it
+/// codes every byte through [`crate::cm_path`], whose decode costs 6.7x to
+/// 6.9x the hybrid's on the speed gate's cases (`research/JOURNAL.md`
+/// S2-A141), and its stream must hold one byte per 4096 output bytes.
+/// It bounds one coded frame's output and the total coded output of a stream
 /// [`crate::decompress`] buffers; it is no file-size ceiling, because
 /// [`crate::compress`] cuts its input into 16 MiB frames up to this length
 /// (past it, one `Stored` frame) and [`crate::decompress_to_writer`]
@@ -302,7 +306,7 @@ pub fn apply_filter(candidate: Candidate, data: &[u8]) -> Vec<u8> {
 /// Returns [`Error::OutOfMemory`] if the allocator cannot satisfy the
 /// undo buffer a non-`Identity` candidate needs (hard rule 2,
 /// `rust-craft` skill's allocation-discipline, `tests/torture.rs`, #453).
-fn undo_filter(candidate: Candidate, mut data: Vec<u8>) -> Result<Vec<u8>, Error> {
+pub(crate) fn undo_filter(candidate: Candidate, mut data: Vec<u8>) -> Result<Vec<u8>, Error> {
     match candidate {
         Candidate::Identity => Ok(data),
         Candidate::Delta(stride) => Ok(filters::delta::try_decode(&data, stride)?),
@@ -665,7 +669,9 @@ pub fn encode_level(data: &[u8], workers: NonZeroUsize, level: Level) -> Vec<u8>
     let candidates = filters::select::pick(data);
     let first = candidates.first().copied();
     let (candidate, reach, body) = match level {
-        Level::Best => search(data, &candidates, workers),
+        // `Extreme` is `Best`'s search here; `crate::compress_block` trials
+        // `Method::Cm` beside it.
+        Level::Best | Level::Extreme => search(data, &candidates, workers),
         Level::Fast => first.map(|candidate| {
             let reach = if data.len() > lz::WINDOW {
                 Reach::Wide
@@ -878,8 +884,9 @@ fn leader(sizes: &[AtomicUsize]) -> Option<usize> {
 /// (ADR-0065): no bound short of `u64` is proved for what the coder emits.
 const TOKEN_HEADER_LEN: usize = 2 * size_of::<u32>() + size_of::<u64>();
 
-/// Byte length of the selector that opens a `Method::Lz` payload.
-const SELECTOR_LEN: usize = 2;
+/// Byte length of the selector that opens a `Method::Lz` or `Method::Cm`
+/// payload.
+pub(crate) const SELECTOR_LEN: usize = 2;
 
 /// Where a selector's `kind` byte holds the frame's [`Reach`]: its top two
 /// bits, 0 [`Reach::Standard`], 1 [`Reach::Wide`], 2 [`Reach::Far`], 3
@@ -942,8 +949,9 @@ fn split_token_header(rest: &[u8]) -> Result<(TokenHeader, &[u8]), Error> {
     Ok((header, rest))
 }
 
-/// What a frame's framing needs of a `Method::Lz` payload without decoding
-/// it: how many bytes it spans and how many it decodes to.
+/// What a frame's framing needs of a coded payload, `Method::Lz` or
+/// `Method::Cm`, without decoding it: how many bytes it spans and how many it
+/// decodes to.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Extent {
     /// Bytes the payload spans: selector, header and range-coded stream.
@@ -1001,11 +1009,22 @@ fn read_header(
     let (header, stream) = split_token_header(payload)?;
     let output_len = candidate.output_len(header.declared_len);
     Error::ensure_within(output_len, max_len)?;
-    match u64::try_from(stream.len()).map(|len| len.cmp(&header.coded_len)) {
+    ensure_coded_len(stream, header.coded_len)?;
+    Ok((header.declared_len as usize, header.token_count, stream))
+}
+
+/// Checks that `stream`, the bytes of one frame's payload past its header,
+/// is exactly the `coded_len` bytes the header declares: the rule a
+/// `Method::Lz` and a `Method::Cm` payload share.
+///
+/// # Errors
+///
+/// [`Error::Truncated`] if `stream` is shorter, [`Error::Corrupt`] if bytes
+/// follow it.
+pub(crate) fn ensure_coded_len(stream: &[u8], coded_len: u64) -> Result<(), Error> {
+    match u64::try_from(stream.len()).map(|len| len.cmp(&coded_len)) {
         Ok(std::cmp::Ordering::Less) => Err(Error::Truncated),
-        Ok(std::cmp::Ordering::Equal) => {
-            Ok((header.declared_len as usize, header.token_count, stream))
-        }
+        Ok(std::cmp::Ordering::Equal) => Ok(()),
         _ => Err(Error::Corrupt),
     }
 }
