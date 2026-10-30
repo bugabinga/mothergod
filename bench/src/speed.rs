@@ -85,29 +85,45 @@ pub fn calibration_seconds() -> f64 {
     best
 }
 
-/// Decode time summed over `cases`, each compressed once outside the timer
-/// and decoded `REPEATS` times with the minimum kept, plus the total
-/// original bytes.
+/// Wall time of one `decode` call, best of `REPEATS`. The last output is
+/// compared with `expected` outside the timer, so no time is reported for
+/// a decode that does not round-trip.
 ///
 /// # Panics
 ///
-/// Panics if a case's own compressed form fails to decode, which would be a
-/// round-trip bug the `ratio` gate's tests catch first.
+/// Panics if the output differs from `expected`.
+pub fn best_decode_seconds(mut decode: impl FnMut() -> Vec<u8>, expected: &[u8]) -> f64 {
+    let mut best = f64::MAX;
+    let mut decoded = Vec::new();
+    for _ in 0..REPEATS {
+        let start = Instant::now();
+        decoded = black_box(decode());
+        best = best.min(start.elapsed().as_secs_f64());
+    }
+    assert!(decoded == expected, "a timed decode must round-trip");
+    best
+}
+
+/// Decode time summed over `cases`, each compressed once outside the timer
+/// and timed by [`best_decode_seconds`], plus the total original bytes.
+///
+/// # Panics
+///
+/// Panics if a case's own compressed form fails to decode to the case,
+/// which would be a round-trip bug the `ratio` gate's tests catch first.
 #[must_use]
 pub fn decode_seconds(cases: &[Case]) -> (f64, usize) {
     let mut seconds = 0.0;
     let mut bytes = 0;
     for case in cases {
         let compressed = mothergod::compress(&case.data);
-        let mut best = f64::MAX;
-        for _ in 0..REPEATS {
-            let start = Instant::now();
-            let decoded = mothergod::decompress(black_box(&compressed))
-                .expect("a case's own compressed form decodes");
-            black_box(decoded);
-            best = best.min(start.elapsed().as_secs_f64());
-        }
-        seconds += best;
+        seconds += best_decode_seconds(
+            || {
+                mothergod::decompress(black_box(&compressed))
+                    .expect("a case's own compressed form decodes")
+            },
+            &case.data,
+        );
         bytes += case.data.len();
     }
     (seconds, bytes)
@@ -301,6 +317,12 @@ mod tests {
         let (seconds, bytes) = decode_seconds(&cases);
         assert_eq!(bytes, 1000);
         assert!(seconds > 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a timed decode must round-trip")]
+    fn a_decode_that_does_not_round_trip_reports_no_time() {
+        let _ = best_decode_seconds(|| vec![1, 2, 3], &[1, 2, 4]);
     }
 
     #[test]

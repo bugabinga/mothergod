@@ -9800,3 +9800,33 @@ record.
   `CASE_LEN`; decode speed; any input past `CASE_LEN`; the finals. Open
   for the wiring slice: a `Method`, `FORMAT_VERSION` 19, its ADR and
   golden fixture. `research/progress.jsonl` it246.
+- S2-A141 | ACCEPTED, unwired | Issue #1775 question 3, the decode speed
+  S2-A139 to S2-A140 left unmeasured, in the speed gate's own unit.
+  Hypothesis: S2-A136's untested reading, that a decoder walking the same
+  tables slows by the pricing ratio, holds: issue #1775's 8.4x (S2-A133's
+  pricing against `decompress`), times S2-A134's 1.16 and over S2-A136's
+  1.47 and S2-A138's 1.10, puts the path's decode near 6.0x the hybrid's.
+  | Mechanism: `mothergod_bench::cm_path::decode_seconds` codes each
+  `baseline::cases()` case once behind the shortlisted filter whose
+  `cm_path::encode` stream is shortest, the trial `coded_bits` keeps, then
+  times `cm_path::decode` of that stream through
+  `speed::best_decode_seconds`, the gate's own best-of-five loop, now
+  shared by `speed::decode_seconds` and checking the last output against
+  the expected bytes outside the timer; `decode_costs_vs_hybrid` divides
+  both by one `speed::calibration_seconds` run. Read three times in one
+  process, release build, AMD EPYC 7763 4 logical cores runner, hybrid
+  and path in calibration steps per byte: 104.02 and 706.04, 99.66 and
+  685.05, 105.03 and 704.40; the path costs **6.71x to 6.87x** the
+  hybrid. | Verdict: **accepted**, a measurement; the reading holds in
+  direction and misses by 11% to 14% in magnitude, unattributed, the coder's
+  `decode_bit` against pricing's `log2` being one untested difference.
+  Consequence for the wiring slice: every train case prices under the
+  hybrid at `CASE_LEN` (S2-A136), so a frame kept only when smaller decodes
+  every gate case through the path, and `baseline_gate check` reads
+  5.7x to 5.9x `speed::BASELINE_DECODE_COST`, past `MAX_SLOWDOWN`'s margin: the
+  slice moves the constant with the trade stated, or is rejected on it
+  (#907). | **Not measured:** the inverse filter after the stream, which a
+  wired frame adds and `decompress`'s side already pays; any input past
+  `CASE_LEN`, where the 16 MiB order tables (S2-R39) miss cache by a
+  different share; any other CPU model; where decode time goes beyond
+  pricing's. `research/progress.jsonl` it247.

@@ -4,16 +4,19 @@
 //!
 //! The model lives in the codec crate, where [`mothergod::cm_path::encode`]
 //! codes it through the range coder; this module prices the same walk at
-//! ideal cost, and [`coded_bits`] reads the coded stream's real size.
+//! ideal cost, [`coded_bits`] reads the coded stream's real size, and
+//! [`decode_costs_vs_hybrid`] times its decode in the speed gate's unit.
 //! `cost_bits` stays libm `log2` (`bench/clippy.toml`) because it prices a
 //! decision, and a stream codes that decision instead.
 
+use crate::baseline::{self, Case};
 use crate::literal_pairing::{self, PairingReport};
-use crate::whole_stream;
+use crate::{speed, whole_stream};
 use mothergod::cm_path::CmPath;
 use mothergod::codec;
 use mothergod::filters::select;
 use mothergod::literal::Context;
+use std::hint::black_box;
 
 /// Bits a decision costs: `bit` coded at `probability_of_one`, which
 /// [`CmPath::walk`] has already clamped off certainty.
@@ -51,6 +54,20 @@ pub fn train_and_sealed_vs_real_bitstream() -> PairingReport {
     })
 }
 
+/// `data` behind the filter [`coded_bits`] keeps, and that filtered
+/// data's stream.
+fn shortest_trial(data: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    select::pick(data)
+        .into_iter()
+        .map(|filter| {
+            let filtered = codec::apply_filter(filter, data);
+            let stream = mothergod::cm_path::encode(&filtered);
+            (filtered, stream)
+        })
+        .min_by_key(|(_, stream)| stream.len())
+        .expect("pick always shortlists the identity")
+}
+
 /// Bits of the shortest stream [`mothergod::cm_path::encode`] codes `data`
 /// to behind any filter [`select::pick`] shortlists, each trial through a
 /// fresh model: [`whole_stream::filtered_whole_stream_bits`]'s search with
@@ -62,11 +79,63 @@ pub fn train_and_sealed_vs_real_bitstream() -> PairingReport {
     reason = "a single measurement case stays far below 2^53 bits"
 )]
 pub fn coded_bits(data: &[u8]) -> f64 {
-    select::pick(data)
-        .into_iter()
-        .map(|filter| mothergod::cm_path::encode(&codec::apply_filter(filter, data)).len())
-        .min()
-        .map_or(0.0, |len| (len * 8) as f64)
+    (shortest_trial(data).1.len() * 8) as f64
+}
+
+/// [`mothergod::cm_path::decode`]'s time summed over `cases`, each coded
+/// once outside the timer behind the filter [`coded_bits`] keeps and timed by
+/// [`speed::best_decode_seconds`], plus the total original bytes:
+/// [`speed::decode_seconds`]'s shape, so both divide by one calibration.
+/// The timed decode yields the filtered bytes; the inverse filter a wired
+/// frame adds after it is not timed.
+///
+/// # Panics
+///
+/// Panics if a case's stream fails to decode to its filtered bytes, or a
+/// case exceeds `u32::MAX` bytes.
+#[must_use]
+pub fn decode_seconds(cases: &[Case]) -> (f64, usize) {
+    let mut seconds = 0.0;
+    let mut bytes = 0;
+    for case in cases {
+        let (filtered, stream) = shortest_trial(&case.data);
+        let len = u32::try_from(filtered.len()).expect("a measurement case fits u32");
+        seconds += speed::best_decode_seconds(
+            || {
+                mothergod::cm_path::decode(black_box(&stream), len, len)
+                    .expect("a case's own stream decodes")
+            },
+            &filtered,
+        );
+        bytes += case.data.len();
+    }
+    (seconds, bytes)
+}
+
+/// [`speed::decode_cost`] of the hybrid's `decompress` and of the path's
+/// decode on the same cases, calibration steps per byte, lower is faster.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecodeCosts {
+    /// [`speed::decode_seconds`]'s cost, what `baseline_gate -- speed`
+    /// prints.
+    pub hybrid: f64,
+    /// [`decode_seconds`]'s cost.
+    pub cm_path: f64,
+}
+
+/// The recorded experiment: both [`DecodeCosts`] over `baseline::cases()`
+/// under one calibration (`research/JOURNAL.md` S2-A141).
+#[must_use]
+pub fn decode_costs_vs_hybrid() -> DecodeCosts {
+    let cases = baseline::cases();
+    let calibration = speed::calibration_seconds();
+    let (seconds, bytes) = speed::decode_seconds(&cases);
+    let hybrid = speed::decode_cost(seconds, bytes, calibration);
+    let (seconds, bytes) = decode_seconds(&cases);
+    DecodeCosts {
+        hybrid,
+        cm_path: speed::decode_cost(seconds, bytes, calibration),
+    }
 }
 
 /// [`train_and_sealed_vs_real_bitstream`]'s cases and champion with the
@@ -182,6 +251,21 @@ mod tests {
         )]
         let expected = (shortest * 8) as f64;
         assert!((bits - expected).abs() < 1e-9, "{bits} vs {expected}");
+    }
+
+    /// `counter_rows`' kept trial is filtered, so a decode checked against
+    /// the case's own bytes would panic here; the timer reports the
+    /// filtered round trip and counts the original bytes.
+    #[test]
+    fn decode_seconds_times_the_kept_trial_and_counts_original_bytes() {
+        let data = counter_rows();
+        let len = data.len();
+        let (seconds, bytes) = decode_seconds(&[Case {
+            name: "counter_rows",
+            data,
+        }]);
+        assert_eq!(bytes, len);
+        assert!(seconds > 0.0);
     }
 
     /// The coded search lands where the priced search does, within the
