@@ -67,9 +67,9 @@ const ORDERS: [usize; 4] = [3, 4, 5, 6];
 /// [`Bucket`]s per order table, as a power of two, the size the train
 /// mean picked at `CASE_LEN` (`research/JOURNAL.md` S2-A138). Under
 /// [`claim`]'s replacement a smaller table forgets rarely seen contexts
-/// sooner, which priced lower at that length; a longer input fills the
-/// same table faster, so this is a load per case byte, not a size for
-/// every input.
+/// sooner, which priced lower at that length. A size that grows with the
+/// stream's length, one bucket per byte under a cap, was rejected on the
+/// sealed set (S2-R39), so the size is the same for every input.
 const ORDER_BUCKET_BITS: u32 = 16;
 
 /// Buckets in the set a context may occupy: the aligned run of this many
