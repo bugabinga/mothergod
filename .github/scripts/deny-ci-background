@@ -90,8 +90,12 @@ DEFAULT_BACKGROUND = ("Agent", "Task", "Workflow")
 SHELL_DETACH = (
     # Bare `&` control operator. The lookbehind clears `&&`, `>&`,
     # `<&`, `|&`; the lookahead clears `&&`, `&>`, and ampersands
-    # embedded in tokens (`?a=1&b=2`).
-    (re.compile(r"(?<![&<>|])&(?=[\s;)]|$)"), "via shell &"),
+    # embedded in tokens (`?a=1&b=2`). The closers after the `;` are
+    # every one bash accepts directly against a control operator: the
+    # subshell's `)`, a backtick substitution's closing backtick, and a
+    # brace group's `}` (#1798: `{ x &}` runs, and the class had only
+    # the first).
+    (re.compile(r"(?<![&<>|])&(?=[\s;)`}]|$)"), "via shell &"),
     # setsid's fork flag daemonizes with no `&` anywhere, and setsid
     # ships on the Actions runner. Bundled short flags count; the
     # wait flag would block anyway, denied conservatively.

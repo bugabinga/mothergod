@@ -54,6 +54,9 @@ test("denies a shell-& detach in the command string", () => {
     "cargo x check > /tmp/x.log 2>&1 &",
     "nohup cargo test & echo started",
     "(cargo test &)",
+    // #1798: bash runs both, and the lookahead's class had only `)`.
+    "echo `cargo test &`",
+    "bash -c '{ cargo test &}'",
   ];
   for (const command of detached) {
     const call = { tool_name: "Bash", tool_input: { command } };
