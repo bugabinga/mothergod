@@ -59,26 +59,37 @@ where
         .fold(f64::INFINITY, f64::min)
 }
 
-/// One case's `(candidate_bits / data.len()) - champion_bpb`:
-/// `research/README.md`'s schema denominator, the case's whole length, and
-/// the champion the real `compress` output over the same bytes. The
-/// candidate's bits are [`filtered_whole_stream_bits`], so both sides
-/// choose among the same filters. `0.0` for an empty `data`, the
-/// convention [`bits_per_byte`] already holds.
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "a single measurement case stays far below 2^53 bytes (CASE_LEN is 50,000)"
-)]
+/// One case's [`delta_vs_real_bitstream`] with the candidate's bits
+/// [`filtered_whole_stream_bits`], so both sides choose among the same
+/// filters. The denominator is `research/README.md`'s, the case's whole
+/// length.
 pub fn case_delta_vs_real_bitstream<DF, D>(data: &[u8], candidate_for_trial: DF) -> f64
 where
     DF: FnMut() -> D,
     D: FnMut(Context, &[u8], u8) -> f64,
 {
+    delta_vs_real_bitstream(data, |data| {
+        filtered_whole_stream_bits(data, candidate_for_trial)
+    })
+}
+
+/// `(candidate_bits(data) / data.len()) - champion_bpb`, the champion
+/// `mothergod::compress`'s real output over the same bytes: the one
+/// denominator every whole-stream delta divides by, whether the candidate's
+/// bits are priced ([`case_delta_vs_real_bitstream`]) or coded
+/// ([`crate::cm_path::coded_bits`]). `0.0` for an empty `data`, the
+/// convention [`bits_per_byte`] already holds, and `candidate_bits` is
+/// then not called.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "a single measurement case stays far below 2^53 bytes (CASE_LEN is 50,000)"
+)]
+pub fn delta_vs_real_bitstream(data: &[u8], candidate_bits: impl FnOnce(&[u8]) -> f64) -> f64 {
     if data.is_empty() {
         return 0.0;
     }
     let champion_bpb = bits_per_byte(mothergod::compress(data).len(), data.len());
-    filtered_whole_stream_bits(data, candidate_for_trial) / data.len() as f64 - champion_bpb
+    candidate_bits(data) / data.len() as f64 - champion_bpb
 }
 
 /// The standard whole-stream pairing: every `baseline::cases()` train case

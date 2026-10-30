@@ -9772,3 +9772,30 @@ record.
   is smooth 2-D data whose order-3 to order-6 contexts rarely recur
   exactly, the iid rungs' case, so it pays for retention as they do.
   `research/progress.jsonl` it242 to it245.
+- S2-A140 | ACCEPTED, unwired | Issue #1775's measurement S2-A139 left
+  unmade: the real coder's overhead over ideal cost on train and sealed.
+  Hypothesis: `cm_path::encode`'s stream, behind the shortest of the
+  filters `select::pick` shortlists, lands within 0.1% and a few bytes of
+  the ideal price on every train and sealed case, so S2-A133 to S2-A138's
+  verdicts, read at ideal cost, hold on real bitstreams. | Mechanism:
+  `mothergod_bench::cm_path::coded_bits` runs the priced driver's filter
+  search with `cm_path::encode`'s length in place of the price, and
+  `coded_train_and_sealed_vs_real_bitstream` reports it against
+  `compress` over the same cases, so a case's coded delta minus its
+  priced delta is the coder's overhead. Read once, release build, AMD
+  EPYC 7763 4 logical cores runner: the priced side reproduced S2-A138's
+  keeper to the last digit recorded (train mean -0.229310545, sealed
+  -0.155078 and -0.148004). Coded against `compress`: train mean
+  **-0.229221818**, overhead +0.000089; per case +0.000015
+  (`json_records`) to +0.000172 (`base64_wrapped`), at `CASE_LEN` at most
+  1.1 bytes, the coder's flush and no fraction of the stream. Sealed:
+  `access_log` **-0.155040** (+0.000038), `gradient_image` **-0.147840**
+  (+0.000164). | Verdict: **accepted**, the hypothesis holds on every
+  case; the path's lead over the hybrid survives the real coder. **Not
+  measured:** the bytes a frame through the path adds around its stream
+  (header and check value, 10 bytes, plus whatever selector and declared
+  length the wiring slice's ADR defines), which `compress`'s side already
+  pays, so the coded deltas overstate the path by that constant over
+  `CASE_LEN`; decode speed; any input past `CASE_LEN`; the finals. Open
+  for the wiring slice: a `Method`, `FORMAT_VERSION` 19, its ADR and
+  golden fixture. `research/progress.jsonl` it246.
