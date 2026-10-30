@@ -66,9 +66,12 @@ release.
   context-mixing model and keeps that frame where it is smaller, 0.226
   bits/byte smaller on average over `bench/`'s 11 synthetic training cases
   and about 0.15 on its two held-out ones, never larger. The price is a slower
-  encode and a far slower decode of the frames it changes, 6.7x to 6.9x the
-  `-3` decode time on those training cases; not yet measured on Silesia. `-1` to `-3` write what they wrote. `FORMAT_VERSION`
-  18 to 19, ADR-0079 (#1825).
+  encode and a far slower decode of the frames it changes: 6.7x to 6.9x the
+  `-3` decode time on those training cases, and 28x on a 4 MiB slice of
+  `git log -p` text, where `-3` already matches well; not yet measured on
+  Silesia. A decoder refuses such a frame past 16 MiB of output, which caps a
+  hostile one's decode at about 90 s. `-1` to `-3` write what they wrote.
+  `FORMAT_VERSION` 18 to 19, ADR-0079 (#1825).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
   status first, each superseded decision linked to the one that replaced
   it, searchable in the browser, so a reader learns what is decided today

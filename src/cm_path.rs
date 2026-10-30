@@ -47,6 +47,22 @@ use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal, SurpriseLogisticMix};
 use crate::{Error, logistic, rejoin, try_filled_vec};
 
+/// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
+/// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
+/// pays a full walk and none is a copy. Measured on random streams of 1 KiB,
+/// 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB (release build,
+/// INTEL XEON PLATINUM 8573C, one run each): 5.0 to 5.4 µs per output byte
+/// whatever the stream, and one declaring this ceiling decoded in 88 s, so
+/// the worst case is linear and a hostile frame here costs under a third of
+/// `Lz`'s measured 314 s at [`MAX_DECODED_LEN`]. It equals the block length
+/// [`crate::compress`] cuts at, so no frame this crate writes is refused.
+pub const MAX_OUTPUT_LEN: u32 = 16 * 1024 * 1024;
+
+const _: () = assert!(
+    MAX_OUTPUT_LEN <= MAX_DECODED_LEN,
+    "a Cm frame is a coded frame, under the coded frames' ceiling"
+);
+
 /// The reciprocal of [`PROBABILITY_FLOOR`], and so the most bytes one
 /// stream byte decodes to: [`decode`]'s bomb guard.
 ///
@@ -544,10 +560,10 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// The `len` bytes [`encode`] coded into `stream`.
 ///
 /// `len` is the caller's declared length, checked before any allocation
-/// against `max_len` capped at [`MAX_DECODED_LEN`], which
-/// bounds the output buffer, and against `MAX_EXPANSION` bytes per stream
-/// byte, the most any encoding holds, which bounds the decode work, one
-/// walk per byte, by the input. The model's tables are constants and
+/// against `max_len` capped at [`MAX_OUTPUT_LEN`], which
+/// bounds the output buffer and the decode work, one walk per byte, and
+/// against `MAX_EXPANSION` bytes per stream byte, the most any encoding
+/// holds, which bounds both by the input. The model's tables are constants and
 /// allocate fallibly.
 ///
 /// # Errors
@@ -560,7 +576,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// model's own, so a damaged stream is wrong output, which the frame's
 /// check value catches, never a panic.
 pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
-    let max_len = max_len.min(MAX_DECODED_LEN);
+    let max_len = max_len.min(MAX_OUTPUT_LEN);
     Error::ensure_within(u64::from(len), max_len)?;
     if u64::from(len) > u64::from(MAX_EXPANSION).saturating_mul(stream.len() as u64) {
         return Err(Error::Truncated);
@@ -697,7 +713,7 @@ pub fn encode_payload(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
 /// undone.
 ///
 /// The frame's output, [`Candidate::output_len`] of the declared length, is
-/// checked against `max_len` capped at [`MAX_DECODED_LEN`] before any
+/// checked against `max_len` capped at [`MAX_OUTPUT_LEN`] before any
 /// allocation; [`decode`] bounds the work by the stream's bytes and
 /// allocates fallibly, and so does the filter's undo.
 ///
@@ -715,7 +731,7 @@ pub fn encode_payload(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
 /// length, never a panic; the frame's check value is what catches it.
 pub fn decode_payload(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     let (header, stream) = split_header(payload)?;
-    let max_len = max_len.min(MAX_DECODED_LEN);
+    let max_len = max_len.min(MAX_OUTPUT_LEN);
     Error::ensure_within(header.candidate.output_len(header.declared_len), max_len)?;
     codec::ensure_coded_len(stream, header.coded_len)?;
     // Every kind's output is at least its filtered bytes, so `max_len` bounds

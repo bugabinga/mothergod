@@ -465,8 +465,9 @@ struct Budget {
     /// `Some` only when the caller's `max_len` is strictly tighter than
     /// [`codec::MAX_DECODED_LEN`]: then it caps the stream's total output,
     /// `Stored` frames included. At or above it there is no total cap and
-    /// each coded frame stays under [`codec::MAX_DECODED_LEN`], the only
-    /// ceiling its worst-case decode time has been measured against. A
+    /// each coded frame stays under [`codec::MAX_DECODED_LEN`], and a
+    /// [`Method::Cm`] frame under [`cm_path::MAX_OUTPUT_LEN`], the ceilings
+    /// their worst-case decode times have been measured against. A
     /// `Stored` frame's length is read from `input`, never spoofable past
     /// what was already loaded, so [`codec::MAX_DECODED_LEN`] buys it no
     /// safety margin, only a compatibility break for large incompressible
@@ -669,6 +670,11 @@ pub(crate) fn candidate_beats_incumbent(candidate_len: usize, incumbent_len: usi
 /// real data peaks above zeros (S2-A124).
 const BLOCK_LEN: usize = 16 * 1024 * 1024;
 
+const _: () = assert!(
+    BLOCK_LEN <= cm_path::MAX_OUTPUT_LEN as usize,
+    "a block's Method::Cm frame stays under the ceiling its decoder enforces"
+);
+
 /// Compresses `input` into a self-describing stream of frames.
 ///
 /// Cuts `input` into blocks of 16 MiB, one frame each, so the
@@ -802,9 +808,10 @@ pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// Like [`decompress`], but rejects a stream whose total output would exceed
 /// `max_len` bytes, checked frame by frame from its header before any
 /// allocation or decode work (`rust-craft` skill's allocation-discipline).
-/// A coded frame is never allowed past [`codec::MAX_DECODED_LEN`] whatever
-/// `max_len` says: that constant is the only ceiling this decoder's
-/// worst-case decode time has been measured against (see its docs), so a
+/// A coded frame is never allowed past [`codec::MAX_DECODED_LEN`], nor a
+/// [`Method::Cm`] frame past [`cm_path::MAX_OUTPUT_LEN`], whatever `max_len`
+/// says: those are the ceilings this decoder's worst-case decode time has
+/// been measured against (see their docs), so a
 /// caller can tighten the bound for its own memory budget but never loosen
 /// it past what has been proven safe. A `max_len` at or above it caps no
 /// total of its own, but the coded frames' output together is still held to

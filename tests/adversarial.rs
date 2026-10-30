@@ -34,6 +34,7 @@ const PINS: &[(&str, Error)] = &[
     ("bad-magic-bitflip", Error::BadMagic),
     ("cm-declared-size-bomb", Error::TooLarge { len: 0, max: 0 }),
     ("cm-expansion-bomb", Error::Truncated),
+    ("cm-over-output-ceiling", Error::TooLarge { len: 0, max: 0 }),
     ("cm-over-stored-floor", Error::Corrupt),
     ("cm-selector-with-reach", Error::Corrupt),
     ("empty", Error::Truncated),

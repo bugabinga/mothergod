@@ -118,10 +118,9 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// separately remeasured. The length and distance model selection costs
 /// a cheap `CopyKind` branch or array index per copy token, strictly
 /// cheaper than the per-byte literal cost this bound is measured against.
-/// A `Method::Cm` frame's worst case at this ceiling is not measured: it
-/// codes every byte through [`crate::cm_path`], whose decode costs 6.7x to
-/// 6.9x the hybrid's on the speed gate's cases (`research/JOURNAL.md`
-/// S2-A141), and its stream must hold one byte per 4096 output bytes.
+/// A `Method::Cm` frame codes every byte through [`crate::cm_path`], at
+/// about 5 µs per output byte whatever its stream, so it has its own
+/// measured ceiling below this one, [`crate::cm_path::MAX_OUTPUT_LEN`].
 /// It bounds one coded frame's output and the total coded output of a stream
 /// [`crate::decompress`] buffers; it is no file-size ceiling, because
 /// [`crate::compress`] cuts its input into 16 MiB frames up to this length

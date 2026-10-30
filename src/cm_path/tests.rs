@@ -119,25 +119,35 @@ fn decode_rejects_a_length_over_its_bound_before_any_work() {
         })
     );
     assert_eq!(
-        decode(&[], u32::MAX, MAX_DECODED_LEN),
+        decode(&[], u32::MAX, MAX_OUTPUT_LEN),
         Err(Error::TooLarge {
             len: u32::MAX,
-            max: MAX_DECODED_LEN
+            max: MAX_OUTPUT_LEN
         })
     );
 }
 
-/// A caller's bound past [`MAX_DECODED_LEN`] buys it nothing: issue
-/// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work.
+/// A caller's bound past [`MAX_OUTPUT_LEN`] buys it nothing: issue
+/// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work, and
+/// [`MAX_DECODED_LEN`] about 1,400 s of it. The ceiling itself is admitted,
+/// so the empty stream falls to the floor instead.
 #[test]
-fn decode_caps_a_callers_bound_at_the_decoded_length_ceiling() {
-    assert_eq!(
-        decode(&[], MAX_DECODED_LEN + 1, u32::MAX),
-        Err(Error::TooLarge {
-            len: MAX_DECODED_LEN + 1,
-            max: MAX_DECODED_LEN
-        })
-    );
+fn decode_caps_a_callers_bound_at_the_output_ceiling() {
+    for bound in [MAX_DECODED_LEN, u32::MAX] {
+        assert_eq!(
+            decode(&[], MAX_OUTPUT_LEN + 1, bound),
+            Err(Error::TooLarge {
+                len: MAX_OUTPUT_LEN + 1,
+                max: MAX_OUTPUT_LEN
+            }),
+            "bound {bound}"
+        );
+        assert_eq!(
+            decode(&[], MAX_OUTPUT_LEN, bound),
+            Err(Error::Truncated),
+            "bound {bound}"
+        );
+    }
 }
 
 /// Issue #1808's repro, an empty stream declaring 4 MiB, cost 17.5 s of
@@ -563,8 +573,32 @@ fn an_output_past_the_bound_is_too_large_before_any_work() {
         decode_payload(&bomb, u32::MAX),
         Err(Error::TooLarge {
             len: u32::MAX,
-            max: MAX_DECODED_LEN
+            max: MAX_OUTPUT_LEN
         }),
         "a caller's bound past the ceiling buys nothing"
+    );
+}
+
+/// The frame's output, not only the filtered bytes [`decode`] sees, meets
+/// [`MAX_OUTPUT_LEN`]: one byte past it is refused from the header, and the
+/// ceiling itself passes to the stream's floor.
+#[test]
+fn a_frame_output_past_the_ceiling_is_too_large() {
+    let header = |declared_len: u32| {
+        let mut payload = Candidate::Identity.to_header_bytes().to_vec();
+        payload.extend_from_slice(&declared_len.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        payload
+    };
+    assert_eq!(
+        decode_payload(&header(MAX_OUTPUT_LEN + 1), MAX_DECODED_LEN),
+        Err(Error::TooLarge {
+            len: MAX_OUTPUT_LEN + 1,
+            max: MAX_OUTPUT_LEN
+        })
+    );
+    assert_eq!(
+        decode_payload(&header(MAX_OUTPUT_LEN), MAX_DECODED_LEN),
+        Err(Error::Truncated)
     );
 }

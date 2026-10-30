@@ -9840,8 +9840,9 @@ record.
   shortlisted filter, up to `workers` at once, and writes a selector
   without a reach, the filtered length, the coded length and the stream;
   `compress_block` at `Level::Extreme` keeps it where it beats the `Lz`
-  body; `cm_path::decode_payload` checks the output against the ceiling
-  and the stream's 4096-bytes-per-byte bound before it allocates
+  body; `cm_path::decode_payload` checks the output against
+  `cm_path::MAX_OUTPUT_LEN`, 16 MiB, and the stream's
+  4096-bytes-per-byte bound before it allocates
   (`FORMAT_VERSION` 19, ADR-0079). The default level is untouched, so the
   decode ratchet does not move. | Measured through
   `mothergod_bench::cm_path::extreme_frames_vs_real_bitstream`, whole
@@ -9860,11 +9861,16 @@ record.
   slice of this repository's `git log -p`, not a corpus and not a verdict
   input, one run each: `-3` 791,578 bytes, 21.5 s encode, 0.74 s decode;
   `-4` 698,351 bytes (-11.8%), 64.0 s encode, 21.0 s decode (28x),
-  peak encode RSS 277 MB both. | Verdict: **accepted**, train
+  peak encode RSS 277 MB both. Worst-case decode, `cm_path::decode` on
+  pseudo-random streams, same runner, one run each: 1 KiB, 512 KiB and
+  4 MiB less 64 bytes, each declaring 4 MiB, 5,348, 5,045 and 5,172 ns
+  per output byte; 4 KiB declaring 16 MiB, 88.3 s, 5,265 ns per byte.
+  The cost is linear and flat across streams, so the 16 MiB ceiling caps
+  a hostile frame at under a third of `Lz`'s 314 s; at
+  `codec::MAX_DECODED_LEN` it would be about 1,400 s, extrapolated. | Verdict: **accepted**, train
   improvement and no sealed regression, no case
   larger. | **Not measured:** the finals (issue #1824 owns the `-4`
   report row); decode cost on
   real files, where the 28x on text the hybrid matches well says S2-A141's
-  6.7x is no ceiling; a `Cm` frame's worst-case decode at
-  `codec::MAX_DECODED_LEN`; running the path's trials beside the `Lz`
+  6.7x is no ceiling; running the path's trials beside the `Lz`
   search instead of after it. `research/progress.jsonl` it248.
