@@ -2,7 +2,7 @@
 //! `FORMAT_VERSION`, the
 //! decode promise `docs/format/SPEC.md` makes about it, the published
 //! aggregate bits/byte numbers, the published aggregate
-//! encode/decode MB/s and `xz -9e`'s beside them, the benchmark CPU model, the per-file win count and the files named behind it, the
+//! encode/decode MB/s and `xz -9e`'s beside them, the benchmark CPU model, the per-file win count and the files named behind it, each encoder level's Silesia cost, the
 //! measurement date, the
 //! reference compressor
 //! versions, the pre-alpha/no-release state of the project, and the CLI
@@ -977,11 +977,137 @@ fn published_throughput_matches_its_generated_reports() {
 /// The frontier row's encode and decode MB/s for `level`, from the
 /// generated report's every-level table.
 fn frontier_throughput(report_file: &str, level: &str) -> [f64; 2] {
-    let text = read(&format!("docs/benchmarks/{report_file}"));
-    let row = line_containing(&text, &format!("| {level} |"));
-    // Columns after the level: b/B, encode MB/s, decode MB/s, peak MiB.
-    let numbers = markdown_numbers(row);
+    let numbers = frontier_numbers(report_file, &format!("| {level} |"));
     [numbers[1], numbers[2]]
+}
+
+/// The frontier row containing `needle`: b/B, encode MB/s, decode MB/s,
+/// peak MiB. mothergod's rows are bold, so their needle is `**mothergod -1**`.
+fn frontier_numbers(report_file: &str, needle: &str) -> Vec<f64> {
+    let text = read(&format!("docs/benchmarks/{report_file}"));
+    markdown_numbers(line_containing(&text, needle))
+}
+
+/// Byte ranges of the prose numbers in `region` whose next word, past
+/// whitespace, starts with one of `units`: `"-2 writes 2.205 bits/byte"`
+/// yields the ratio and not the level's digit.
+fn unit_number_spans(text: &str, region: Range<usize>, units: &[&str]) -> Vec<Range<usize>> {
+    prose_number_spans(text, region)
+        .into_iter()
+        .filter(|span| {
+            let after = text[span.end..].trim_start();
+            units.iter().any(|unit| after.starts_with(unit))
+        })
+        .collect()
+}
+
+/// `marker` to the first `"MB/s."` after it: one sentence of README's or the
+/// site's "Try it".
+fn sentence_after(text: &str, marker: &str) -> Range<usize> {
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} not found"));
+    let end = text[start..]
+        .find("MB/s.")
+        .unwrap_or_else(|| panic!("no \"MB/s.\" after {marker:?}"))
+        + start;
+    start..end + "MB/s".len()
+}
+
+/// README, site and the changelog's lead quote what each encoder level
+/// costs on Silesia, from the generated report's frontier rows (issue
+/// #1702). The changelog's first per-level figures came from a scratch run
+/// on another CPU whose `-3` predated a codec gain, and nothing compared
+/// them, so they understated both the size cost and the speedup. README and site carry the
+/// rows' own figures, `-2`, `-1`, then the default; the changelog derives
+/// each faster level's extra size in percent and its encode speedup,
+/// rounded to the "about Nx" it prints. "`zstd -6` still writes smaller
+/// files than `-1`, and faster" is a derived claim: it holds while the
+/// report names that level as the fastest at least as good as `-1` and its
+/// encode rate beats `-1`'s.
+#[test]
+fn per_level_figures_match_their_generated_report() {
+    let source = "docs/benchmarks/silesia.md";
+    let two = frontier_numbers("silesia.md", "**mothergod -2**");
+    let one = frontier_numbers("silesia.md", "**mothergod -1**");
+    let three = frontier_numbers("silesia.md", "**mothergod**");
+    let rows = [("-2", &two), ("-1", &one), ("-3", &three)];
+
+    let truth: Vec<String> = rows
+        .iter()
+        .flat_map(|(_, row)| [three_decimals(row[0]), three_decimals(row[1])])
+        .collect();
+    let name = |index: usize| {
+        let what = ["bits/byte", "encode MB/s"][index % 2];
+        format!("Silesia {} {what}", rows[index / 2].0)
+    };
+    let units = ["bits/byte", "MB/s"];
+    check_figures(
+        "README.md",
+        source,
+        |text| {
+            unit_number_spans(
+                text,
+                sentence_after(text, "On Silesia, `-2` writes"),
+                &units,
+            )
+        },
+        &truth,
+        name,
+    );
+    check_figures(
+        "site/index.html",
+        source,
+        |text| {
+            let region = sentence_after(text, "Silesia, <code>-2</code> writes");
+            unit_number_spans(text, region, &units)
+        },
+        &truth,
+        name,
+    );
+
+    let trade = |row: &[f64]| {
+        [
+            format!("{:.1}", (row[0] / three[0] - 1.0) * 100.0),
+            format!("{:.0}", row[1] / three[1]),
+        ]
+    };
+    let truth: Vec<String> = [trade(&two), trade(&one)].concat();
+    check_figures_within(
+        "CHANGELOG.md",
+        source,
+        changelog_unreleased,
+        |text| {
+            let start = text
+                .find("Faster when asked:")
+                .expect("the levels highlight");
+            let end = text[start..]
+                .find("\n- ")
+                .map_or(text.len(), |at| start + at);
+            unit_number_spans(text, start..end, &["%", "x "])
+        },
+        &truth,
+        |index| {
+            let what = ["extra size %", "encode speedup"][index % 2];
+            format!("Silesia {} {what} over -3", ["-2", "-1"][index / 2])
+        },
+    );
+
+    let report = read(source);
+    let rival = line_containing(&report, "fastest level at least as good as mothergod -1: ")
+        .rsplit(": ")
+        .next()
+        .expect("the line names a level");
+    assert_eq!(
+        rival, "zstd -6",
+        "README.md and site/index.html say zstd -6 beats -1 on size and speed, {source} names {rival} the fastest level at least as good"
+    );
+    let rival_encode = frontier_throughput("silesia.md", rival)[0];
+    assert!(
+        rival_encode > one[1],
+        "README.md and site/index.html say zstd -6 encodes Silesia faster than -1, {source} says {rival_encode} MB/s against {}",
+        one[1]
+    );
 }
 
 /// README and site anchor "slow" against `xz -9e` on Silesia: they quote its

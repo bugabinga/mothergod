@@ -96,10 +96,13 @@ cmp FILE FILE.out   # silence means the round trip was lossless
 
 Given a file, it writes `<file>.mgdc` beside it, and unlike `gzip` it never
 deletes the input. `--help` lists the rest on one screen: flags you know from
-`gzip`, three encoder levels, `-1` the fastest and `-3` the default and slowest,
-and no tuning knobs. Every level writes frames the one decoder reads.
+`gzip`, three encoder levels, and no tuning knobs. On Silesia, `-2` writes
+2.205 bits/byte at 1.426 MB/s and `-1` writes 2.361 bits/byte at 2.362 MB/s,
+against the default `-3`'s 1.976 bits/byte at 0.153 MB/s. `zstd -6` still
+writes smaller files than `-1`, and faster: the levels shorten the wait, they
+do not make mothergod fast. Every level writes frames the one decoder reads.
 `--version` also prints the format version the build reads; put it in a bug
-report. Expect the encode to take a while at the default, at the rates above.
+report.
 
 Library API (subject to change until 1.0):
 

@@ -440,12 +440,15 @@ cmp FILE FILE.out</pre>
           is it passing. Given a file, it writes <code>&lt;file&gt;.mgdc</code>
           beside it, and unlike <code>gzip</code> it never deletes the input.
           <code>--help</code> lists the rest on one screen: flags you know from
-          <code>gzip</code>, three encoder levels, <code>-1</code> the fastest
-          and <code>-3</code> the default and slowest, and no tuning knobs.
-          Every level writes frames the one decoder reads.
+          <code>gzip</code>, three encoder levels, and no tuning knobs. On
+          Silesia, <code>-2</code> writes 2.205 bits/byte at 1.426 MB/s and
+          <code>-1</code> writes 2.361 bits/byte at 2.362 MB/s, against the
+          default <code>-3</code>'s 1.976 bits/byte at 0.153 MB/s.
+          <code>zstd -6</code> still writes smaller files than <code>-1</code>,
+          and faster: the levels shorten the wait, they do not make mothergod
+          fast. Every level writes frames the one decoder reads.
           <code>--version</code> also prints the format version the build reads;
-          put it in a bug report. Expect the encode to take a while at the
-          default, at the rates above.
+          put it in a bug report.
         </p>
       </section>
 
