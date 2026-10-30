@@ -9852,17 +9852,18 @@ record.
   `json_records` -0.114720, `base64_wrapped` -0.068320,
   `interleaved_audio16` -0.180800, `sqlite_like_records` -0.063360,
   `x86_dense_code` -0.754080. Sealed, read once: `access_log`
-  **-0.151200**, `gradient_image` **-0.144000**. Against S2-A140's coded
-  stream the train mean rises 0.003491, the frame header, check value and
-  `Cm` lengths that S2-A140 left out, less `Lz`'s. `baseline_gate --
+  **-0.151200**, `gradient_image` **-0.144000**. Against S2-A140's bare
+  coded stream the train mean rises 0.003491, about the 24 bytes a `Cm`
+  frame adds around its stream, 0.00384 b/B on a case. `baseline_gate --
   write` moved `bench/baseline.json` by digest only, every `bpb` equal,
   and `check` read 108.10 steps per byte, inside the margin. A 4 MiB
   slice of this repository's `git log -p`, not a corpus and not a verdict
   input, one run each: `-3` 791,578 bytes, 21.5 s encode, 0.74 s decode;
   `-4` 698,351 bytes (-11.8%), 64.0 s encode, 21.0 s decode (28x),
-  peak encode RSS 277 MB both. | Verdict: **accepted**, train improvement
-  and no sealed regression, no case larger. | **Not measured:** the
-  finals (issue #1824 owns the `-4` report row); decode cost on
+  peak encode RSS 277 MB both. | Verdict: **accepted**, train
+  improvement and no sealed regression, no case
+  larger. | **Not measured:** the finals (issue #1824 owns the `-4`
+  report row); decode cost on
   real files, where the 28x on text the hybrid matches well says S2-A141's
   6.7x is no ceiling; a `Cm` frame's worst-case decode at
   `codec::MAX_DECODED_LEN`; running the path's trials beside the `Lz`

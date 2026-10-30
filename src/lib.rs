@@ -423,8 +423,8 @@ fn declared_extent(method: Method, after_header: &[u8]) -> Result<(usize, u64), 
             let payload_len = STORED_LEN_BYTES.checked_add(len).ok_or(Error::Truncated)?;
             Ok((payload_len, declared))
         }
-        Method::Lz => under_stored_floor(codec::declared_extent(after_header)?),
-        Method::Cm => under_stored_floor(cm_path::declared_extent(after_header)?),
+        Method::Lz => under_stored_floor(&codec::declared_extent(after_header)?),
+        Method::Cm => under_stored_floor(&cm_path::declared_extent(after_header)?),
     }
 }
 
@@ -433,7 +433,7 @@ fn declared_extent(method: Method, after_header: &[u8]) -> Result<(usize, u64), 
 /// "Invariants"): no conforming encoder writes a coded payload longer than
 /// the `Stored` payload of the same output, so a reader that has seen only
 /// the header may refuse before it buffers a byte.
-fn under_stored_floor(extent: codec::Extent) -> Result<(usize, u64), Error> {
+fn under_stored_floor(extent: &codec::Extent) -> Result<(usize, u64), Error> {
     if u64::try_from(extent.payload_len).map_err(|_| Error::Truncated)?
         > extent.output_len + STORED_LEN_BYTES as u64
     {
