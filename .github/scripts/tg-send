@@ -93,13 +93,17 @@ EM_DASH = re.compile("(?m)^\u2014[ \t]*|[ \t]*\u2014[ \t]*")
 # footer, not emphasis, and the naive form runs from that underscore to
 # whichever one comes next, three lines later.
 #
-# The scrubber's marker goes first and comes out as typed. It is three
-# asterisks a side and bold is two, so the bold rule read `***REDACTED***`
-# as `*<b>REDACTED</b>*` (#598). The marker is one constant across every
-# exit so a reader recognises it anywhere; teaching this renderer the
-# constant is what keeps it one.
+# A `<pre>` block goes first and comes out whole: it is a fence's lines or
+# a pasted table's rows, as typed, and the only `<` in the text by then is
+# this renderer's own, since escaping ran before. The scrubber's marker
+# goes next and comes out as typed. It is three asterisks a side and bold
+# is two, so the bold rule read `***REDACTED***` as `*<b>REDACTED</b>*`
+# (#598). The marker is one constant across every exit so a reader
+# recognises it anywhere; teaching this renderer the constant is what
+# keeps it one.
 INLINE = re.compile(
-    rf"(?P<marker>{re.escape(REDACTION)})"
+    r"(?P<pre><pre>[^<]*</pre>)"
+    rf"|(?P<marker>{re.escape(REDACTION)})"
     r"|`(?P<code>[^`\n]+)`"
     r"|\[(?P<label>[^\]\n]+)\]\((?P<href>[^)\s\"]+)\)"
     r"|\*\*(?P<bold>[^*\n]+)\*\*"
@@ -119,7 +123,11 @@ DOT = "•"  # Telegram has no list markup; this is what a human would type
 # a human types to say a table in a chat. A row is a line opening with a
 # pipe; a block is a table only when its second row is a delimiter row of
 # the header's width, GFM's own test, so a lone piped line stays the text
-# it is.
+# it is. Naming every cell is several times the source, and a table nobody
+# would say in a chat (120 rows, 2006 chars in, 7330 out, #1795) passed
+# Telegram's cap that way and the notice was refused. When the chat form
+# passes the cap, every table goes as typed instead, one `<pre>` block, the
+# form a human pastes a big table in.
 ROW = re.compile(r"^ {0,3}\|")
 DELIMITER = re.compile(r"^:?-+:?$")
 # A cell boundary is a bare pipe. An escaped one is GFM's way to put a pipe
@@ -245,19 +253,29 @@ def render(body: str, repo: str) -> str:
     by the time the patterns see it and cannot be read as a tag. Only the
     forms Telegram has a tag for survive; everything else stays literal,
     which is the honest outcome for a subset this small and the reason the
-    subset can stay small. A fenced block is the one run of lines no form
-    touches: it arrives as one `<pre>` block, as typed.
+    subset can stay small. A fenced block is a run of lines no form touches:
+    it arrives as one `<pre>` block, as typed, and so does every table once
+    the chat form of the message passes Telegram's cap (#1795).
     """
-    parts = []
     escaped = html.escape(body, quote=False).split("\n")
-    for fenced, block in segments(escaped):
-        if fenced:
-            text = "\n".join(block)
-            if text:
-                parts.append(f"<pre>{text}</pre>")
-        else:
-            parts.append(INLINE.sub(lambda m: inline(m, repo), "\n".join(prose(block))))
-    return "\n".join(parts)
+    text = markup(escaped, repo, pasted=False)
+    if len(text) > LIMIT:
+        text = markup(escaped, repo, pasted=True)
+    return text
+
+
+def markup(lines: list[str], repo: str, pasted: bool) -> str:
+    """Escaped lines as Telegram's markup; `pasted` sends every table as typed."""
+    parts = []
+    for fenced, block in segments(lines):
+        parts.extend(quoted(block) if fenced else prose(block, pasted))
+    return INLINE.sub(lambda m: inline(m, repo), "\n".join(parts))
+
+
+def quoted(lines: list[str]) -> list[str]:
+    """Lines as one `<pre>` block, as typed; no block at all when there are none."""
+    text = "\n".join(lines)
+    return [f"<pre>{text}</pre>"] if text else []
 
 
 def segments(lines: list[str]):
@@ -290,12 +308,12 @@ def segments(lines: list[str]):
         yield False, prose_lines
 
 
-def prose(lines: list[str]) -> list[str]:
+def prose(lines: list[str], pasted: bool) -> list[str]:
     """Lines outside a fence: a table as chat lines, every other line by form."""
     out = []
     for is_row, block in groupby(lines, key=lambda line: ROW.match(line) is not None):
         block = list(block)
-        out.extend(table(block) if is_row else map(line_form, block))
+        out.extend(table(block, pasted) if is_row else map(line_form, block))
     return out
 
 
@@ -307,17 +325,20 @@ def line_form(line: str) -> str:
     return BULLET.sub(rf"\1{DOT} ", line)
 
 
-def table(rows: list[str]) -> list[str]:
+def table(rows: list[str], pasted: bool) -> list[str]:
     """Consecutive piped lines as chat lines; without a delimiter row, as typed.
 
     Nothing the sender wrote is dropped except what GitHub drops too: a
     body row's cells past the header's width, which GFM ignores. A header
-    with no body rows is still content, so it stays as one line.
+    with no body rows is still content, so it stays as one line. A pasted
+    table is its rows as typed in one `<pre>` block, delimiter row included.
     """
     grid = [cells(row) for row in rows]
     if (len(grid) < 2 or len(grid[1]) != len(grid[0])
             or not all(DELIMITER.match(cell) for cell in grid[1])):
         return rows
+    if pasted:
+        return quoted(rows)
     header, body = grid[0], grid[2:]
     if not body:
         return [", ".join(name for name in header if name)]
@@ -347,6 +368,8 @@ def cells(row: str) -> list[str]:
 
 def inline(match: re.Match, repo: str) -> str:
     """One inline form, rendered. Exactly one group of INLINE is ever set."""
+    if match["pre"] is not None:
+        return match["pre"]
     if match["marker"] is not None:
         return match["marker"]
     if match["code"] is not None:

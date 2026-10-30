@@ -237,3 +237,23 @@ test("a shorter backtick run inside a fence is content, and an unclosed fence ru
   assert.equal(status, 0);
   assert.equal(seen.at(-1).text, "<pre>```\ncode\n```</pre>\n<pre>tail</pre>");
 });
+
+// A table's chat lines name every cell by its header, several times the
+// source for a table nobody would say in a chat: 120 rows of three cells went
+// in at 2006 chars and came out at 7330, over Telegram's cap, and the notice
+// was refused (#1795). Past the cap every table goes as typed, one pre block,
+// the form a human pastes a big table in; the prose around it keeps its forms.
+test("a table whose chat lines would pass the cap is pasted as one pre block", async () => {
+  const rows = Array.from({ length: 120 }, (_, i) => `| f${i} | **1** | #${i} |`);
+  const table = [
+    "| name | compressed size bytes | decompression time seconds |",
+    "|---|---|---|",
+    ...rows,
+  ].join("\n");
+  const { status } = await send("tok-ok", { body: `# sizes\n${table}\nsee #1` });
+  assert.equal(status, 0);
+  assert.equal(
+    seen.at(-1).text,
+    `<b>sizes</b>\n<pre>${table}</pre>\nsee <a href="https://github.com/bugabinga/mothergod/issues/1">#1</a>`,
+  );
+});
