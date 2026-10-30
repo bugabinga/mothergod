@@ -767,10 +767,7 @@ const OPTIMAL_MIN_LEN: usize = 64;
 /// Match length at and above which [`rep_match_len`]'s rep-cache scan
 /// reuses the previous position's result instead of re-walking
 /// [`match_len`] from scratch: a run this long at position `i` is `len -
-/// 1` bytes long at `i + 1` too, at the same distance. Also the breakpoint
-/// below which [`DpState::relax_match_candidate`] prices every
-/// [`LENGTH_STEPS`] entry for a fresh match instead of only the full
-/// length; unrelated to the reuse, the two merely share the value.
+/// 1` bytes long at `i + 1` too, at the same distance.
 const CARRY_MIN_LEN: usize = 64;
 
 /// A rep distance's match `len` as measured at position `measured_at`, kept
@@ -802,6 +799,11 @@ const SHORT_MATCH_MAX_DISTANCE: u32 = 4096;
 /// a long match is never left
 /// unpriced merely for falling between two breakpoints.
 const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63];
+
+/// Match length below which [`DpState::relax_match_candidate`] prices every
+/// [`LENGTH_STEPS`] entry for a fresh match; at or above it, only the full
+/// length.
+const STEPPED_LEN_LIMIT: usize = 64;
 
 /// Previous-byte high-nibble contexts the literal price table conditions
 /// on (16 contexts of [`ALPHABET`] symbols each).
@@ -1089,7 +1091,7 @@ impl DpState {
     /// a length-[`SHORT_MATCH_LEN`] candidate when the distance is close
     /// enough, and — for a real
     /// [`MIN_MATCH_LEN`]-or-longer match — each [`LENGTH_STEPS`]
-    /// breakpoint under [`CARRY_MIN_LEN`] plus the real match length
+    /// breakpoint under [`STEPPED_LEN_LIMIT`] plus the real match length
     /// itself.
     fn relax_match_candidate(
         &mut self,
@@ -1124,7 +1126,7 @@ impl DpState {
             return;
         }
         let full_len = to_u32(match_len_here);
-        if (full_len as usize) < CARRY_MIN_LEN {
+        if match_len_here < STEPPED_LEN_LIMIT {
             for &len in &LENGTH_STEPS {
                 if len > full_len {
                     break;
