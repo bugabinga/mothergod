@@ -23,9 +23,9 @@ file; download both into one directory and run `sha256sum -c` on it
   `zstd -19` and trails `xz -9e` in aggregate on Silesia (1.976 vs 1.997 and
   1.829). Per-file tables and the reproduction command:
   [`docs/benchmarks/`](https://github.com/bugabinga/mothergod/tree/main/docs/benchmarks).
-- Faster when asked: against the default `-3`, on Silesia, `-2` writes 10.0%
-  more bytes and encodes about 7x faster, and `-1` writes 17.8% more and
-  encodes about 12x faster.
+- Faster when asked: against the default `-3`, on Silesia, `-2` writes 11.6%
+  more bytes and encodes about 9x faster, and `-1` writes 19.5% more and
+  encodes about 15x faster.
 - Damage is an error, never wrong bytes: a bit flip anywhere in a frame fails
   its CRC-32 before any of it is written, and truncated or hostile input gets
   an error, never a crash. The `format:` and `Trust:` entries below carry the

@@ -20,6 +20,32 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-10-30: Editorial: each level names its price, and the release notes' price was stale
+
+#1702. "Try it" on README and `/` named three levels with no number, so a
+reader choosing one had to open `docs/benchmarks/silesia.md`. Both now quote
+`-2`, `-1` and the default's Silesia bits/byte and encode MB/s, copied from
+the report's frontier rows that #1799 published, and
+`per_level_figures_match_their_generated_report` holds them.
+
+**The changelog's highlight was already false.** Its "10.0% more bytes,
+about 7x faster" and "17.8%, about 12x" came from research's scratch tier
+table, measured against a `-3` that a later codec gain improved and on a
+different CPU. The published report says 11.6% and 9x, 19.5% and 15x. The
+same test now derives those from the report, so the next gain moves them
+under `MOTHERGOD_BLESS_CLAIMS=1` instead of leaving them behind.
+
+**The levels sentence says what the levels do not do.** `zstd -6` writes
+smaller Silesia files than `-1` and encodes about 40 times faster. A reader
+who sees "-1 the fastest" may take it for "fast"; one clause stops that, and
+the test fails when the report stops naming `zstd -6` the fastest level at
+least as good as `-1`. "Expect the encode to take a while" went, because
+the default's rate now sits in the same sentence.
+
+**Rejected: "-3 the smallest".** #1710 shows `-2` beating `-3` on a
+long-range repeat, so the sentence names Silesia and never ranks the levels
+in general.
+
 ## 2026-10-29: Editorial: the first release's notes open with what it is and how to check it
 
 #1783, from this morning's survey study of the Rust release announcement.
