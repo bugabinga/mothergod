@@ -9728,3 +9728,47 @@ record.
   the declared length under a cap, a `Method`, `FORMAT_VERSION` 19, its
   ADR and golden fixture, and the finals read. `research/progress.jsonl`
   it241.
+- S2-R39 | REJECTED | Issue #1775 question 4's open rule from S2-A138
+  and S2-A139: `cm_path`'s order tables sized by the stream's length
+  under a cap. Hypothesis: one bucket per stream byte, rounded up to a
+  power of two, between 2^16 and 2^20 buckets per order, both sides
+  deriving it from the length alone, lowers the train mean past
+  `CASE_LEN` without a sealed regression, and moves nothing at or below
+  2^16 bytes, so every recorded `CASE_LEN` number holds by construction.
+  | Mechanism: `CmPath::new` took the stream's length; the bench pairing
+  took a case length (`baseline::cases()`'s kinds and seed at that
+  length) and handed each filter trial's model the trial's own byte
+  count, what a decoder of that trial is told. An ablation of the cap,
+  each train mean against main's fixed 2^16 through
+  `whole_stream::case_delta_vs_real_bitstream`, at 1,048,576 and
+  2,097,152 bytes per case: it242 cap 2^18, -0.000069 and -0.002441;
+  it243 cap 2^19, -0.000048 at 1 MiB only; it244 cap 2^20, the rule as
+  hypothesized, -0.000052 and **-0.003458**; it245 cap 2^21, identical at
+  1 MiB by construction and -0.003637 at 2 MiB, a further -0.000179 for
+  tables of 512 MiB instead of 256, so the keeper kept 2^20 on memory.
+  The keeper's 2 MiB train move is mostly one case: `interleaved_audio16`
+  -0.187661 to -0.222247 against the hybrid, `json_records` -0.004825,
+  `base64_wrapped` -0.001821, `sqlite_like_records` -0.001286, while
+  `entropy_ladder_h4` and `_h6` rise by 0.002107 and 0.002131, S2-A138's
+  reading from the other side: a bigger table keeps once-seen contexts
+  on iid rungs. Sealed, read once for the keeper at 2,097,152 bytes and
+  `sealed_seed(CASE_SEED)` through
+  `cm_path::train_and_sealed_vs_real_bitstream`, against main read at
+  the same length: `access_log` -0.216195 to -0.218149 (-0.001954),
+  `gradient_image` -0.225411 to **-0.225307 (+0.000104)**. | Verdict:
+  **rejected**, a sealed regression under the corpus policy, though the
+  train mean fell at both lengths. Code, tests and the length-taking
+  pairing deleted whole; `ORDER_BUCKET_BITS` stays the constant 2^16 and
+  its doc points here. Consequence for the wiring slice: the order
+  tables are 16 MiB at every length, so the decoder's table allocation
+  does not grow with a declared length. Peak RSS of the pricing process
+  at 2 MiB, release build, AMD EPYC 9V74 4 logical cores runner: main
+  199,824 to 250,148 KiB, cap 2^20 368,136, cap 2^21 644,712; pricing
+  time within 3% across caps 2^16 to 2^20 run side by side. | **Not
+  measured:** lengths past 2 MiB,
+  where the train gain grew from 1 MiB to 2 MiB and the sealed
+  trade may differ; cap 2^19 at 2 MiB; a size keyed
+  on anything but length; the finals. Untested reading: `gradient_image`
+  is smooth 2-D data whose order-3 to order-6 contexts rarely recur
+  exactly, the iid rungs' case, so it pays for retention as they do.
+  `research/progress.jsonl` it242 to it245.

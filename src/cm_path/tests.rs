@@ -42,7 +42,7 @@ fn a_fresh_model_codes_the_first_byte_at_the_wire_models_probabilities() {
         usize::from(byte) >= mid
     });
 
-    let p = probabilities(&mut CmPath::new(1), &[byte]);
+    let p = probabilities(&mut CmPath::new(), &[byte]);
 
     assert_eq!(p.len(), wire_p.len());
     for (p, wire_p) in p.iter().zip(&wire_p) {
@@ -58,8 +58,8 @@ fn every_probability_is_inside_the_floor_and_a_rerun_walks_identically() {
     let data: Vec<u8> = (0u32..3000)
         .map(|i| u8::try_from(i * 7 % 251).expect("below 251"))
         .collect();
-    let first = probabilities(&mut CmPath::new(data.len()), &data);
-    let second = probabilities(&mut CmPath::new(data.len()), &data);
+    let first = probabilities(&mut CmPath::new(), &data);
+    let second = probabilities(&mut CmPath::new(), &data);
     assert!(
         first
             .iter()
@@ -98,37 +98,6 @@ fn round_trips_text_repeats_runs_and_noise() {
     round_trips(&random_bytes(7, 20_000));
     let half = random_bytes(11, 3000);
     round_trips(&[half.as_slice(), &text, half.as_slice()].concat());
-}
-
-/// Past `2^16` bytes [`decode`] must size its tables from the declared
-/// length exactly as [`encode`] sized them from the input's; a mismatch
-/// indexes different buckets and lands on different bytes.
-#[test]
-fn round_trips_a_stream_long_enough_to_grow_the_tables() {
-    let len = (1 << MIN_ORDER_BUCKET_BITS) + 1;
-    assert!(order_bucket_bits(len) > MIN_ORDER_BUCKET_BITS);
-    let text = b"the quick brown fox jumps over the lazy dog; ".repeat(800);
-    let data = [random_bytes(23, len - text.len()), text].concat();
-    assert_eq!(data.len(), len);
-    round_trips(&data);
-}
-
-/// One bucket per byte, rounded up to a power of two, never below the
-/// size S2-A138 measured and never above the cap, for every length a
-/// `usize` holds.
-#[test]
-fn order_tables_hold_one_bucket_per_byte_between_the_floor_and_the_cap() {
-    let floor = 1usize << MIN_ORDER_BUCKET_BITS;
-    let cap = 1usize << MAX_ORDER_BUCKET_BITS;
-    for len in [0, 1, 50_000, floor] {
-        assert_eq!(order_bucket_bits(len), MIN_ORDER_BUCKET_BITS, "len {len}");
-    }
-    assert_eq!(order_bucket_bits(floor + 1), MIN_ORDER_BUCKET_BITS + 1);
-    assert_eq!(order_bucket_bits(cap - 1), MAX_ORDER_BUCKET_BITS);
-    assert_eq!(order_bucket_bits(cap), MAX_ORDER_BUCKET_BITS);
-    for len in [cap + 1, usize::MAX] {
-        assert_eq!(order_bucket_bits(len), MAX_ORDER_BUCKET_BITS, "len {len}");
-    }
 }
 
 /// Matches longer than [`MATCH_VERIFY_LIMIT`] and past the last

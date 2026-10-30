@@ -47,20 +47,15 @@ where
 /// The fewest bits [`whole_stream_bits`] prices `data` at behind any filter
 /// [`select::pick`] shortlists for it, each filter's bytes through a fresh
 /// model from `candidate_for_trial`: the search `codec::encode` runs, with
-/// the candidate in the parse's seat. The factory receives the length of
-/// the bytes the trial prices, the filter's output, which is what a
-/// decoder of that trial would be told (`research/JOURNAL.md` S2-A140).
+/// the candidate in the parse's seat.
 pub fn filtered_whole_stream_bits<DF, D>(data: &[u8], mut candidate_for_trial: DF) -> f64
 where
-    DF: FnMut(usize) -> D,
+    DF: FnMut() -> D,
     D: FnMut(Context, &[u8], u8) -> f64,
 {
     select::pick(data)
         .into_iter()
-        .map(|filter| {
-            let filtered = codec::apply_filter(filter, data);
-            whole_stream_bits(&filtered, candidate_for_trial(filtered.len()))
-        })
+        .map(|filter| whole_stream_bits(&codec::apply_filter(filter, data), candidate_for_trial()))
         .fold(f64::INFINITY, f64::min)
 }
 
@@ -76,7 +71,7 @@ where
 )]
 pub fn case_delta_vs_real_bitstream<DF, D>(data: &[u8], candidate_for_trial: DF) -> f64
 where
-    DF: FnMut(usize) -> D,
+    DF: FnMut() -> D,
     D: FnMut(Context, &[u8], u8) -> f64,
 {
     if data.is_empty() {
@@ -86,26 +81,20 @@ where
     filtered_whole_stream_bits(data, candidate_for_trial) / data.len() as f64 - champion_bpb
 }
 
-/// The standard whole-stream pairing: every train case plus both sealed
-/// cases at `len` bytes each (`CASE_LEN` is `baseline::cases()`), each
-/// filter trial priced by a fresh closure from
+/// The standard whole-stream pairing: every `baseline::cases()` train case
+/// plus both sealed cases, each filter trial priced by a fresh closure from
 /// `candidate_for_trial` (a candidate's state never carries between
 /// unrelated corpora, nor between two filterings of one) against
 /// `mothergod::compress` on the same bytes.
 /// Same cases, same order and same report as
 /// [`literal_pairing::train_and_sealed_delta_bpb`], so a verdict reads
 /// both alike.
-pub fn train_and_sealed_vs_real_bitstream<DF, D>(
-    len: usize,
-    mut candidate_for_trial: DF,
-) -> PairingReport
+pub fn train_and_sealed_vs_real_bitstream<DF, D>(mut candidate_for_trial: DF) -> PairingReport
 where
-    DF: FnMut(usize) -> D,
+    DF: FnMut() -> D,
     D: FnMut(Context, &[u8], u8) -> f64,
 {
-    literal_pairing::pair_cases(len, |data| {
-        case_delta_vs_real_bitstream(data, &mut candidate_for_trial)
-    })
+    literal_pairing::pair_cases(|data| case_delta_vs_real_bitstream(data, &mut candidate_for_trial))
 }
 
 #[cfg(test)]
@@ -159,7 +148,7 @@ mod tests {
         let champion_bpb = bits_per_byte(mothergod::compress(&data).len(), data.len());
         assert!(champion_bpb < 0.1, "a one-byte run is nearly free");
 
-        let delta = case_delta_vs_real_bitstream(&data, |_| |_, _, _| FLAT_BITS);
+        let delta = case_delta_vs_real_bitstream(&data, || |_, _, _| FLAT_BITS);
 
         assert!(
             (delta - (FLAT_BITS - champion_bpb)).abs() < 1e-9,
@@ -177,14 +166,14 @@ mod tests {
         let data = vec![b'x'; 10_000];
         assert!(select::pick(&data).contains(&select::Candidate::Base64));
 
-        let bits = filtered_whole_stream_bits(&data, |_| |_, _, _| FLAT_BITS);
+        let bits = filtered_whole_stream_bits(&data, || |_, _, _| FLAT_BITS);
 
         assert!((bits - 6.0 * 10_000.0).abs() < 1e-9, "got {bits}");
     }
 
     #[test]
     fn case_delta_of_an_empty_case_is_zero() {
-        let delta = case_delta_vs_real_bitstream(&[], |_| |_, _, _| panic!("no byte to price"));
+        let delta = case_delta_vs_real_bitstream(&[], || |_, _, _| panic!("no byte to price"));
         assert!(delta.abs() < 1e-12, "got {delta}");
     }
 
@@ -202,11 +191,11 @@ mod tests {
         assert!(sentence.len() > 96, "past `select`'s widest delta stride");
         let data: Vec<u8> = sentence.iter().copied().cycle().take(20_000).collect();
 
-        let delta = case_delta_vs_real_bitstream(&data, |_| {
+        let delta = case_delta_vs_real_bitstream(&data, || {
             let mut model = Literal::new();
             move |context, _, byte| model.ideal_cost_bits_sse(context, byte)
         });
-        let flat_delta = case_delta_vs_real_bitstream(&data, |_| |_, _, _| FLAT_BITS);
+        let flat_delta = case_delta_vs_real_bitstream(&data, || |_, _, _| FLAT_BITS);
 
         assert!(delta < flat_delta, "the model learns the text: {delta}");
         assert!(
@@ -217,8 +206,7 @@ mod tests {
 
     #[test]
     fn the_standard_pairing_reads_the_same_cases_as_the_literal_pairing() {
-        let report =
-            train_and_sealed_vs_real_bitstream(baseline::CASE_LEN, |_| |_, _, _| FLAT_BITS);
+        let report = train_and_sealed_vs_real_bitstream(|| |_, _, _| FLAT_BITS);
         let literal_report = literal_pairing::train_and_sealed_delta_bpb(
             || |_: &mut Literal, _, _| 0.0,
             || |_: &mut Literal, _, _| 0.0,

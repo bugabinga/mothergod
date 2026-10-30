@@ -37,15 +37,13 @@ pub fn price(model: &mut CmPath, context: Context, prefix: &[u8], byte: u8) -> f
     bits
 }
 
-/// The recorded experiment: a fresh [`CmPath`] per filter trial, sized by
-/// the trial's bytes, over the 11 train cases and both sealed kinds at
-/// `len` bytes each, against `compress`'s real bitstream
-/// (`research/JOURNAL.md` S2-A133; `CASE_LEN` is `baseline::cases()`,
-/// S2-A140 reads a longer `len`).
+/// The recorded experiment: a fresh [`CmPath`] per case over the 11
+/// `baseline::cases()` and both sealed kinds, against `compress`'s real
+/// bitstream (`research/JOURNAL.md` S2-A133).
 #[must_use]
-pub fn train_and_sealed_vs_real_bitstream(len: usize) -> PairingReport {
-    whole_stream::train_and_sealed_vs_real_bitstream(len, |trial_len| {
-        let mut candidate = CmPath::new(trial_len);
+pub fn train_and_sealed_vs_real_bitstream() -> PairingReport {
+    whole_stream::train_and_sealed_vs_real_bitstream(|| {
+        let mut candidate = CmPath::new();
         move |context, prefix, byte| price(&mut candidate, context, prefix, byte)
     })
 }
@@ -80,7 +78,7 @@ mod tests {
             bit
         });
 
-        let bits = price(&mut CmPath::new(1), Context::default(), &[], byte);
+        let bits = price(&mut CmPath::new(), Context::default(), &[], byte);
 
         assert!(
             (bits - wire_bits).abs() < 1e-9,
@@ -93,8 +91,8 @@ mod tests {
         let data: Vec<u8> = (0u32..3000)
             .map(|i| u8::try_from(i * 7 % 251).expect("below 251"))
             .collect();
-        let first = price_all(&mut CmPath::new(data.len()), &data);
-        let second = price_all(&mut CmPath::new(data.len()), &data);
+        let first = price_all(&mut CmPath::new(), &data);
+        let second = price_all(&mut CmPath::new(), &data);
         assert!(first.iter().all(|b| b.is_finite() && *b > 0.0));
         assert_eq!(first, second, "no state leaks between fresh candidates");
     }
@@ -110,7 +108,7 @@ mod tests {
             five dozen liquor jugs. sphinx of black quartz, judge my vow. "
             .repeat(80);
 
-        let priced: f64 = price_all(&mut CmPath::new(data.len()), &data).iter().sum();
+        let priced: f64 = price_all(&mut CmPath::new(), &data).iter().sum();
         let coded = mothergod::cm_path::encode(&data).len();
 
         #[allow(
