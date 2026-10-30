@@ -68,7 +68,7 @@ release.
   and about 0.15 on its two held-out ones, never larger. The price is a slower
   encode and a far slower decode of the frames it changes, 6.7x to 6.9x the
   `-3` decode time on those training cases; not yet measured on Silesia. `-1` to `-3` write what they wrote. `FORMAT_VERSION`
-  18 to 19, ADR-0079 (#1775).
+  18 to 19, ADR-0079 (#1825).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
   status first, each superseded decision linked to the one that replaced
   it, searchable in the browser, so a reader learns what is decided today
