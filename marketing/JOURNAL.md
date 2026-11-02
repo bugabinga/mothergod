@@ -20,6 +20,20 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-02: Editorial: the release notes refused the level they announce
+
+#1825 added `-4` and its changelog bullet. Two older bullets still counted
+the levels: the `-1`/`-2` bullet said any digit but `-1` to `-3` is refused,
+and the `--help` bullet said "the three levels". The built CLI accepts `-4`
+and refuses `-5` and `-9`, so a release-notes reader would have been told
+the new level does not exist.
+
+**Neither sentence carries the count now.** "A digit that names no level"
+and "the levels" stay true when a fifth level lands. "The three levels"
+was itself the 2026-10-28 entry's fix, and it lasted five days. **Rule:**
+release-notes prose names no level count or range; `--help` and the bullet
+that adds a level own it.
+
 ## 2026-10-30: Editorial: each level names its price, and the release notes' price was stale
 
 #1702. "Try it" on README and `/` named three levels with no number, so a
