@@ -43,7 +43,11 @@ env:
 jobs:
   coverage:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 90, not 30: the instrumented suite took 15 min on 2026-10-25 and
+    # passed 30 on 2026-11-01 (run 41302220994, cancelled inside
+    # tests/golden.rs) after #1825's two -4 fixtures. A cancelled weekly
+    # is a missing number; the cap is a limit on a runaway, never a budget.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: rustup component add llvm-tools-preview
