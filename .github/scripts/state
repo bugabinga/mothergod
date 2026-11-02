@@ -19,9 +19,10 @@ Facts, in the order the prompt names them:
     checks     every workflow agent-alarm.yml watches, read from its
                `on.workflow_run.workflows` so the list lives there and
                nowhere else, with the newest completed run on main that
-               concluded. `skipped` and `cancelled` are routine, not
-               conclusions: bot events the actor filter rejects, and the
-               debounce (ADR-0014). A red names the `bug` issues whose TITLE
+               concluded. `skipped` is routine, and `cancelled` off the
+               clock: bot events the actor filter rejects, and the debounce
+               (ADR-0014); a scheduled or dispatched run cancelled is a job
+               cap or a hand on the button, and red. A red names the `bug` issues whose TITLE
                carries the workflow name whole (`deny-ci-background` names no
                `ci`, #1457), in any case, and that moved since the run: an
                open one is the filed fix, a closed one is a fix that landed
@@ -107,8 +108,18 @@ SEARCH_PAGE = 50
 # a long gap), so the render says `100+` rather than a count that looks whole.
 COMMIT_PAGE = 100
 
-# Conclusions that say nothing about health, agent-alarm's own exclusions.
-ROUTINE = {"skipped", "cancelled"}
+# Conclusions that say nothing about health, agent-alarm's own exclusions:
+# `skipped` always, `cancelled` only off the clock. The actor filter and
+# the debounce cancel event-driven runs; a cancelled scheduled or
+# dispatched run is a job cap or a hand on the button, and coverage-check's
+# 2026-11-01 cap (run 41302220994) read as `green 7d` for a day.
+CLOCK = {"schedule", "workflow_dispatch"}
+
+
+def routine(run):
+    """True when `run`'s conclusion says nothing about health."""
+    conclusion = run.get("conclusion")
+    return conclusion == "skipped" or (conclusion == "cancelled" and run.get("event") not in CLOCK)
 
 # The reviewer's verdict labels (CLAUDE.md "Issue/PR conventions"): a
 # completed review applies exactly one.
@@ -172,7 +183,7 @@ def newest_run(runs):
     """The newest run on main that concluded, or None. Newest is sorted here, not trusted (#902)."""
     ordered = sorted(runs, key=lambda run: iso(run["created_at"]), reverse=True)
     for run in ordered:
-        if run.get("head_branch") == "main" and run.get("conclusion") not in ROUTINE:
+        if run.get("head_branch") == "main" and not routine(run):
             return run
     return None
 

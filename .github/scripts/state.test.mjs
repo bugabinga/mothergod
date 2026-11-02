@@ -282,6 +282,23 @@ test("newest_run judges main only, skips skipped and cancelled, and sorts rather
   assert.equal(call("newest_run", [[run("2026-10-10T00:00:00Z", "failure", "claude/x")]]), null);
 });
 
+// A cancelled run off the clock is the actor filter or the debounce; one on
+// the clock is a job cap or a hand on the button, and coverage-check's
+// 2026-11-01 cap (run 41302220994) read as `green 7d` for a day.
+test("newest_run reads a cancelled scheduled or dispatched run as newest, an event-driven one as routine", () => {
+  const run = (created, conclusion, event) => ({ created_at: created, conclusion, head_branch: "main", event });
+  const got = call("newest_run", [[
+    run("2026-11-01T11:31:01Z", "cancelled", "schedule"),
+    run("2026-10-25T09:27:27Z", "success", "schedule"),
+  ]]);
+  assert.equal(got.created_at, "2026-11-01T11:31:01Z");
+  assert.equal(
+    call("newest_run", [[run("2026-11-01T11:31:01Z", "cancelled", "workflow_dispatch")]]).created_at,
+    "2026-11-01T11:31:01Z",
+  );
+  assert.equal(call("newest_run", [[run("2026-11-01T11:31:01Z", "cancelled", "issue_comment")]]), null);
+});
+
 test("cite lists open issues before closed ones, newest first within each", () => {
   const got = call("cite", [[
     { number: 1013, state: "closed", closed_at: "2026-10-10T12:23:33Z" },
