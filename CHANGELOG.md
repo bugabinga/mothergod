@@ -38,9 +38,10 @@ release.
 ### Added
 
 - cli, library: `-1` and `-2` trade size for encode speed, as measured above,
-  `-3` being the default and what the compressor always wrote. Any digit but
-  `-1` to `-3`, and any digit beside `-d` or `-t`, is refused. The library takes the same choice as `mothergod::Level`,
-  through `compress_level`, `copy_encode_level` and
+  `-3` being the default and what the compressor always wrote. A digit that
+  names no level, and any digit beside `-d` or `-t`, is refused. The library
+  takes the same choice as `mothergod::Level`, through `compress_level`,
+  `copy_encode_level` and
   `write::Encoder::with_level`. Every level writes frames the one decoder
   reads, so nothing about decoding changes (#1709).
 - site: mothergod.dev/status's "Is it tested?" panel shows the mutation
@@ -178,7 +179,7 @@ release.
   `OutOfMemory`, every other failure is `InvalidData`; the conversion boxes
   nothing, so a decode error cannot abort under memory pressure.
 - cli: `--help` and `--version` (or `-h` and `-V`) are the rest of the
-  interface beside the three levels, with no tuning knobs (#1036).
+  interface beside the levels, with no tuning knobs (#1036).
   `--version` prints the frame format version the build reads, the one fact
   a bug report or packaging script needs to say which files decode (#977).
 - Library crate (`mothergod::compress`/`decompress`, plus
