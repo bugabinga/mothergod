@@ -238,6 +238,24 @@ test("a shorter backtick run inside a fence is content, and an unclosed fence ru
   assert.equal(seen.at(-1).text, "<pre>```\ncode\n```</pre>\n<pre>tail</pre>");
 });
 
+// A tilde fence is a fence too, and the two kinds do not close each other
+// (#1805): a heading inside `~~~` reached the phone bold where GitHub draws
+// it as code. A tilde fence's info string may hold a backtick.
+test("a tilde fence is a pre block, and a backtick run inside it is content", async () => {
+  const { status } = await send("tok-ok", { body: "~~~ `sh`\n# c\n```\n~~~\n**z**" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "<pre># c\n```</pre>\n<b>z</b>");
+});
+
+// A CRLF body's closing fence ended in a carriage return `$` never saw, so
+// the fence ran to the end of the body (#1805). Line endings are made one
+// ahead of every line pattern, and none reaches the phone.
+test("a CRLF body closes its fence and carries no carriage return", async () => {
+  const { status } = await send("tok-ok", { body: "a\r\n```\r\nx **b**\r\n```\r\nz **c**" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "a\n<pre>x **b**</pre>\nz <b>c</b>");
+});
+
 // A table's chat lines name every cell by its header, several times the
 // source for a table nobody would say in a chat: 120 rows of three cells went
 // in at 2006 chars and came out at 7330, over Telegram's cap, and the notice

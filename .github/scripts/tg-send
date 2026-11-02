@@ -139,11 +139,12 @@ PIPE = re.compile(r"\\.|`[^`]*`|(\|)")
 # arriving as bullets is not (#1794). Telegram's form for it is `<pre>`, so
 # a fence's lines pass through as one, with no line or inline form applied.
 # GFM's rules, which GitHub renders the same text by: the opening fence is
-# three or more backticks after at most three spaces with no backtick in
-# its info string, the closing fence is at least as long and alone on its
-# line, and an unclosed fence runs to the end of the body.
-FENCE = re.compile(r"^ {0,3}(`{3,})(?!.*`)")
-CLOSE = re.compile(r"^ {0,3}(`{3,})[ \t]*$")
+# three or more backticks, or three or more tildes, after at most three
+# spaces, a backtick fence's info string holding no backtick (a tilde
+# fence's may); the closing fence is the same character, at least as long
+# and alone on its line; an unclosed fence runs to the end of the body.
+FENCE = re.compile(r"^ {0,3}(`{3,}(?!.*`)|~{3,})")
+CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 
 
 def main() -> int:
@@ -257,7 +258,9 @@ def render(body: str, repo: str) -> str:
     it arrives as one `<pre>` block, as typed, and so does every table once
     the chat form of the message passes Telegram's cap (#1795).
     """
-    escaped = html.escape(body, quote=False).split("\n")
+    # One line ending ahead of every line pattern: a CRLF body left `\r` on
+    # each line, and `$` in CLOSE, ROW and DELIMITER never saw the end.
+    escaped = html.escape(body, quote=False).replace("\r\n", "\n").split("\n")
     text = markup(escaped, repo, pasted=False)
     if len(text) > LIMIT:
         text = markup(escaped, repo, pasted=True)
@@ -282,27 +285,27 @@ def segments(lines: list[str]):
     """Runs of lines, fenced or not, in order; the fence lines are consumed.
 
     Yields `(fenced, lines)`. A prose run is never empty; a fenced run can
-    be. A backtick run shorter than the opening fence is content inside it,
-    which is how a fence shows a fence.
+    be. A run shorter than the opening fence, or of the other fence
+    character, is content inside it, which is how a fence shows a fence.
     """
-    prose_lines, code, width = [], None, None
+    prose_lines, code, fence = [], None, None
     for line in lines:
-        if width is None:
+        if fence is None:
             opening = FENCE.match(line)
             if opening:
                 if prose_lines:
                     yield False, prose_lines
-                prose_lines, code, width = [], [], len(opening[1])
+                prose_lines, code, fence = [], [], opening[1]
             else:
                 prose_lines.append(line)
         else:
             closing = CLOSE.match(line)
-            if closing and len(closing[1]) >= width:
+            if closing and closing[1][0] == fence[0] and len(closing[1]) >= len(fence):
                 yield True, code
-                code, width = None, None
+                code, fence = None, None
             else:
                 code.append(line)
-    if width is not None:
+    if fence is not None:
         yield True, code
     elif prose_lines:
         yield False, prose_lines
