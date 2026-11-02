@@ -255,7 +255,7 @@
           Aggregate bits per byte on the two named corpora, lower is better.
           Canterbury is 11 files and 2.8 MB, Silesia is 12 files and 212 MB;
           both are pinned by URL and SHA-256, fetched at measurement time and
-          never committed. Measured 2026-10-30 against <code>gzip 1.12</code>,
+          never committed. Measured 2026-10-31 against <code>gzip 1.12</code>,
           <code>Zstandard 1.5.7</code> and <code>XZ Utils 5.4.5</code>, at the
           flags in the header row.
         </p>
@@ -352,23 +352,23 @@
           <tbody>
             <tr>
               <th scope="row">Canterbury</th>
-              <td>0.247</td>
-              <td>3.615</td>
+              <td>0.249</td>
+              <td>3.579</td>
             </tr>
             <tr>
               <th scope="row">Silesia</th>
-              <td>0.131</td>
-              <td>2.444</td>
+              <td>0.132</td>
+              <td>2.423</td>
             </tr>
           </tbody>
         </table>
         <p>
           Silesia's 212 MB took about twenty-seven minutes to compress and about
           a minute and a half to read back. Encoding carries the optimal parse,
-          so it runs roughly nineteen times slower than decoding. In the same
+          so it runs roughly eighteen times slower than decoding. In the same
           run,
-          <code>xz -9e</code> encoded Silesia at 1.971 MB/s and decoded it at
-          68.257 MB/s, more than nine times faster to encode and more than
+          <code>xz -9e</code> encoded Silesia at 1.927 MB/s and decoded it at
+          69.276 MB/s, more than nine times faster to encode and more than
           twenty times faster to decode. The reports set every level of gzip,
           zstd and xz beside mothergod, peak memory included.
         </p>
@@ -377,7 +377,7 @@
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.4 to 19.5 MB/s</span>. Speed is measured on every
+          <span class="rate">0.4 to 18.0 MB/s</span>. Speed is measured on every
           benchmark run, but ratio is the target: a faster decoder means a
           second decoding path and a format change, and the roadmap holds it
           until a user asks. If decode speed is what keeps you from using
@@ -441,9 +441,9 @@ cmp FILE FILE.out</pre>
           beside it, and unlike <code>gzip</code> it never deletes the input.
           <code>--help</code> lists the rest on one screen: flags you know from
           <code>gzip</code>, four encoder levels, and no tuning knobs. On
-          Silesia, <code>-2</code> writes 2.205 bits/byte at 1.205 MB/s and
-          <code>-1</code> writes 2.361 bits/byte at 1.925 MB/s, against the
-          default <code>-3</code>'s 1.976 bits/byte at 0.131 MB/s.
+          Silesia, <code>-2</code> writes 2.205 bits/byte at 1.193 MB/s and
+          <code>-1</code> writes 2.361 bits/byte at 1.958 MB/s, against the
+          default <code>-3</code>'s 1.976 bits/byte at 0.132 MB/s.
           <code>zstd -6</code> still writes smaller files than <code>-1</code>,
           and faster: the levels shorten the wait, they do not make mothergod
           fast. <code>-4</code> goes the other way: it also codes every byte
