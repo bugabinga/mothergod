@@ -145,6 +145,46 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-11-02: deep survey. Docs-intel round 2026-10-31 (#578): five
+  changed reference pages, none added. env-vars re-read:
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`,
+  `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS` and
+  `CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING` ADOPTED in
+  `.claude/settings.json` (#1842): the harness's own move of a timed-out
+  command to the background is the case `deny-ci-background` cannot see
+  (CLAUDE.md rule 12), the bundled skills' descriptions ride every
+  session's prompt and no seat has called one (the `tools` table), and no
+  headless run rewinds; `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  rejected, it also stops feature-flag fetching for a list of features
+  left unread; `CLAUDE_CODE_MAX_TURNS` noted, `--max-turns` in
+  `claude_args` already takes precedence. hooks re-read: the page lists
+  33 events now (`PostToolUseFailure`, `StopFailure`, `PermissionDenied`
+  with `retry`, model-switch and worktree hooks) and the `once`, `async`
+  and `statusMessage` handler fields; none adopted, because the four deny
+  hooks and the SessionStart scrub are the whole surface a headless run
+  needs and the new events serve a terminal session. skills re-read:
+  `paths` (a skill loaded by file glob) and `effort` frontmatter
+  rejected: automatic loading puts a manual's body into every run that
+  touches the path, where the seats' own Skill calls show the
+  descriptions trigger (the maintainer loaded 18 in 54 runs), and a
+  per-skill effort lasts one turn; `/skill-doctor` (v2.1.252+) noted,
+  interactive. settings re-read: the page split its key reference out;
+  `maxEffortLevel` (a lower cap from any scope, v2.1.267+) and
+  `crossSessionInbound` do not apply, every seat's effort is explicit in
+  `agents/models.json`. github-actions re-read: `allowed_bots`,
+  federation and the `plugins` inputs unchanged, nothing new for a fleet
+  on an OAuth token. Ladders (`agents/models.json`): reviewed, unchanged.
+  #164's snapshot has the same top rungs; its index scores opus 5.5 above
+  fable 5.1 (58.4 to 49.0) and the director stays on fable on lived
+  experience, 26 runs this week at p50 50 turns and 0 errors, the
+  evidence ADR-0031 weighs over a third party's number. #110 lists no
+  live entry. Every seat's week shipped its deliverable (`sessions roles
+  --since 7d` on 2026-11-02: 252 runs, 0 errors; the maintainer's p50
+  turns rose 20 to 31.5 on a format-version bump and three research
+  slices, the spend ADR-0077 intends). Roster unchanged. Context audit:
+  the maintainer's second pass, #1835 (fd01abf ("heartbeat: the prompt
+  loses three restatements, 5,205 to 4,791 bytes")). No Cloudflare work.
+
 - 2026-10-28: `sessions roles --since 14d` and `research/progress.jsonl`,
   read for ADR-0077: maintainer ladder ADOPTED opus first, sonnet floor and
   thrift (the one seat on the journal, two modeling experiments in three
