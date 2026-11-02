@@ -625,7 +625,7 @@ fn build_frame(method: Method, parts: &[&[u8]]) -> Vec<u8> {
 /// A complete [`Method::Stored`] frame: the payload is `data`'s length as a
 /// little-endian `u64`, then `data` verbatim.
 fn build_stored_frame(data: &[u8]) -> Vec<u8> {
-    let declared = u64::try_from(data.len()).expect("usize is at most 64 bits");
+    let declared = data.len() as u64;
     build_frame(Method::Stored, &[&declared.to_le_bytes(), data])
 }
 
