@@ -154,9 +154,12 @@ btultra2-class parse (S1-P2), PPM escape (S1-P3), per-expert rate gating
 (S2-R33), the previous-token flag state (S2-R34).
 
 Live thread: the model, not the parse, under ADR-0077, with large windows
-(S1-P4) second. The hybrid's Silesia ceiling is measured: 2.005 b/B with every xz level from -4 up smaller and
-faster both ways (`docs/benchmarks/silesia.md`), and S2-R37 put the floor
-in the model, 86% of the cheapest encoder tier's time. A context-mixing
+(S1-P4) second. The hybrid's Silesia aggregate is 1.976 b/B since the
+16 MiB reach (S2-A137, #1790), under zstd -19's 1.997 for the first time
+and the Scorecard's rung 1 on both corpora since 2026-10-29, with every
+xz level from -4 up still smaller and faster both ways
+(`docs/benchmarks/silesia.md`); S2-R37 put the floor in the model, 86%
+of the cheapest encoder tier's time. A context-mixing
 path over every byte, a match model as an expert and no LZ tokens, was
 charter #1763 and is wired at `-4` (ADR-0079, S2-A142), its finals read
 and the default's choice open under #1775, worked ahead of S1-P4's
