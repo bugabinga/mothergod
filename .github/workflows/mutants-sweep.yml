@@ -47,8 +47,8 @@
 # after the next push to main; a retry costs the whole matrix, so the
 # cut-is-not-red rule above is what keeps a slow month from costing two.
 #
-# Monthly first (#455's gate): 19.1 runner-hours on 2026-11-01 (run
-# 41316596797, ten shard steps summing to 1146 min with 271 mutants
+# Monthly first (#455's gate): 20.8 runner-hours on 2026-11-01 (run
+# 41316596797, ten shard steps summing to 1246 min with 271 mutants
 # unrun), up to 40 under the budget above, on a public repository's free
 # minutes, twelve of the account's twenty concurrent jobs for up to 200
 # minutes. Weekly only if that stays cheap and the score still
