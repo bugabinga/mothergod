@@ -610,7 +610,7 @@ pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
     if u64::from(len) > u64::from(MAX_EXPANSION).saturating_mul(stream.len() as u64) {
         return Err(Error::Truncated);
     }
-    let len = usize::try_from(len).map_err(|_| Error::TooLarge { len, max: max_len })?;
+    let len = len as usize;
     let mut output = Vec::new();
     output.try_reserve_exact(len)?;
     let mut model = CmPath::try_new()?;
@@ -728,7 +728,7 @@ pub fn encode_payload(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
             .expect("filters::select::pick always returns at least Candidate::Identity")
     });
     let declared_len = u32::try_from(declared_len).expect("a block's filtered length fits u32");
-    let coded_len = u64::try_from(stream.len()).expect("usize is at most 64 bits");
+    let coded_len = stream.len() as u64;
     let mut out = Vec::with_capacity(EXTENT_PREFIX_LEN + stream.len());
     out.extend_from_slice(&candidate.to_header_bytes());
     out.extend_from_slice(&declared_len.to_le_bytes());
