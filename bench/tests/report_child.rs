@@ -9,9 +9,10 @@ use std::process::{Command, Stdio};
 
 fn round_trips_through_child_mode(program: &str) {
     let data = b"report binaries serve child mode first. ".repeat(100);
-    let run = |mode: &str, input: &[u8]| {
+    let run = |args: &[&str], input: &[u8]| {
         let mut process = Command::new(program)
-            .args(["--child", mode])
+            .arg("--child")
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -23,12 +24,12 @@ fn round_trips_through_child_mode(program: &str) {
             .write_all(input)
             .expect("small input");
         let output = process.wait_with_output().expect("child exits");
-        assert!(output.status.success(), "{program} --child {mode}");
+        assert!(output.status.success(), "{program} --child {args:?}");
         output.stdout
     };
-    let packed = run("compress", &data);
+    let packed = run(&["compress", "3"], &data);
     assert!(packed.len() < data.len());
-    assert_eq!(run("decompress", &packed), data);
+    assert_eq!(run(&["decompress"], &packed), data);
 }
 
 #[test]
