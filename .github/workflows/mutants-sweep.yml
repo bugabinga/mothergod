@@ -17,7 +17,13 @@
 # runs the rest of the suite because `cargo test` has no fail-fast within a
 # binary, and at `-j 4` eight mutants took 226 s, 28 s each. One job would
 # run about 14.5 h; the first sharded run (40132179750, 3f089bc) took 65 to
-# 130 min per shard of 188 mutants, under the 140 the step allows. The
+# 130 min per shard of 188 mutants, under the 140 the step allowed. The
+# 2026-11-01 sweep (41316596797, 02865a5) had 2034 mutants, 203 a shard:
+# five of ten shards hit the 140 and 271 never ran, the second month
+# without a score, so from 2026-11-02 it is twelve shards of about 170
+# under 200 min: the finished shards took 101 to 118 min, the cut ones
+# needed about 170 to 190 by their unreached count, scaled by 170/203
+# that is 143 to 160, and 200 leaves a quarter for a crate that grows. The
 # release profile was measured too and rejected: the suite drops
 # to 40 s but every mutant rebuilds at opt-level 3, and the two slowest
 # binaries (the lib's unit tests and tests/encode_memory.rs, 25 s each in
@@ -42,8 +48,8 @@
 # cut-is-not-red rule above is what keeps a slow month from costing two.
 #
 # Monthly first (#455's gate): about 15 runner-hours a run on a public
-# repository's free minutes, ten of the account's twenty concurrent jobs
-# for ninety minutes. Weekly only if that stays cheap and the score still
+# repository's free minutes, twelve of the account's twenty concurrent jobs
+# for up to 200 minutes. Weekly only if that stays cheap and the score still
 # moves; the cadence decision lives in this comment, not in an issue.
 #
 # The 1st at 07:41 UTC is clear of every other cron (`grep -n cron:
@@ -72,18 +78,18 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_MUTANTS_VERSION: "27.1.0"
   # The matrix below lists 0..SHARDS-1; change both together.
-  SHARDS: "10"
+  SHARDS: "12"
 
 jobs:
   mutate:
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
-    timeout-minutes: 160
+    timeout-minutes: 220
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -95,14 +101,14 @@ jobs:
       # install rebuilds from source on every hit (mutants-check.yml).
       - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
 
-      # 140 minutes inside the step, under the step's own 150: the inner
+      # 200 minutes inside the step, under the step's own 210: the inner
       # `timeout` interrupts cargo-mutants, which has written every decided
       # outcome by then, and exits 124 (137 when the kill was needed), the
       # cut the report reads as undecided. 0, 2 and 3 are cargo-mutants'
       # own verdicts (clean, missed, timeouts), judged by the report, not
       # here. Anything else is a run that could not complete, and red.
       - name: Mutate shard
-        timeout-minutes: 150
+        timeout-minutes: 210
         env:
           SHARD: ${{ matrix.shard }}
         run: |
@@ -111,14 +117,14 @@ jobs:
           # allocates what it should not fails there instead of swapping
           # the runner to death; four jobs at the cap fit 16 GiB.
           set +e
-          timeout --signal=INT --kill-after=120 8400 \
+          timeout --signal=INT --kill-after=120 12000 \
             cargo mutants --config tests/mutants.toml --package mothergod \
               --shard "$SHARD/$SHARDS" --timeout-multiplier 10 -j 4
           status=$?
           set -e
           case $status in
             0 | 2 | 3) ;;
-            124 | 137) echo "::warning::shard $SHARD/$SHARDS cut at 140 min; its unreached mutants are undecided" ;;
+            124 | 137) echo "::warning::shard $SHARD/$SHARDS cut at 200 min; its unreached mutants are undecided" ;;
             *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
           esac
 
