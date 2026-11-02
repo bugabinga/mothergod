@@ -31,7 +31,7 @@
     "is an ordinary app-token commit. Each seat's $comment carries its current",
     "reason; the history is agents/SOURCES.md's adoption log."
   ],
-  "reviewed": "2026-10-28",
+  "reviewed": "2026-11-02",
   "roles": {
     "bdfl": {
       "$comment": "Thrift restored (ADR-0077): #897 suspended it until the agent-system backlog was down, and on 2026-10-28 it was (0 bugs, 0 red checks, 0 stalled PRs, 11 enhancements), weeks after the condition held. Fable while the projection reaches the reset, opus when it does not; the clock tick is every eight hours (CLOCK). The codec's seat holds the strong rung from here, and the director's week is the cheaper one.",
