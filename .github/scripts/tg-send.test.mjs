@@ -256,6 +256,14 @@ test("a CRLF body closes its fence and carries no carriage return", async () => 
   assert.equal(seen.at(-1).text, "a\n<pre>x **b**</pre>\nz <b>c</b>");
 });
 
+// GFM ends a line on a lone carriage return as well, so one is a line
+// ending here too and never reaches the phone.
+test("a lone carriage return is a line ending", async () => {
+  const { status } = await send("tok-ok", { body: "a\rb\n```\nx\r```\rz **c**" });
+  assert.equal(status, 0);
+  assert.equal(seen.at(-1).text, "a\nb\n<pre>x</pre>\nz <b>c</b>");
+});
+
 // A table's chat lines name every cell by its header, several times the
 // source for a table nobody would say in a chat: 120 rows of three cells went
 // in at 2006 chars and came out at 7330, over Telegram's cap, and the notice

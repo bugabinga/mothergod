@@ -258,9 +258,12 @@ def render(body: str, repo: str) -> str:
     it arrives as one `<pre>` block, as typed, and so does every table once
     the chat form of the message passes Telegram's cap (#1795).
     """
-    # One line ending ahead of every line pattern: a CRLF body left `\r` on
-    # each line, and `$` in CLOSE, ROW and DELIMITER never saw the end.
-    escaped = html.escape(body, quote=False).replace("\r\n", "\n").split("\n")
+    # GFM's three line endings become `\n` ahead of the line patterns: a CRLF
+    # body left `\r` on each line, CLOSE's `$` never matched, and the `\r`
+    # rode inside `<pre>`. Not `splitlines`, which also breaks on `\f`, `\v`
+    # and Unicode separators GitHub draws as text.
+    escaped = (html.escape(body, quote=False)
+               .replace("\r\n", "\n").replace("\r", "\n").split("\n"))
     text = markup(escaped, repo, pasted=False)
     if len(text) > LIMIT:
         text = markup(escaped, repo, pasted=True)
