@@ -127,7 +127,8 @@ The advisory `mutants-check` workflow runs on pull requests that touch
 
 The advisory `mutants-sweep` workflow runs on the first of each month at
 07:41 UTC and on manual dispatch: every mutant of `src/` under
-`tests/mutants.toml`, split across ten shards of `cargo mutants --shard`,
+`tests/mutants.toml`, split into as many `cargo mutants --shard` shards as
+the workflow's `SHARDS` names,
 merged by `.github/scripts/mutants-sweep` (layer 4, #455). The mutation
 score, caught over caught plus missed, goes to the trust ledger; it is
 written null when a shard is missing or was cut by its budget, because a

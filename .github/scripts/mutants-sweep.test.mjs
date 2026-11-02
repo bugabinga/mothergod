@@ -1,4 +1,4 @@
-// Fixtures for mutants-sweep: ten shards must merge into one honest score and
+// Fixtures for mutants-sweep: the shards must merge into one honest score and
 // one refreshed issue. Both failure directions are pinned without spawning gh
 // or cargo: a score over part of the crate (a shard missing, a shard cut) is
 // the lie the null guards against; a decode-safety survivor dropped from the
