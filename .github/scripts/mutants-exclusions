@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Red when an exclude_re in tests/mutants.toml matches no mutant, so a dead pin has a reader.
+"""Red when an exclude_re block in tests/mutants.toml matches other than the count its proof claims.
 
 Extensionless and executable, like mutants-debt: a decision nobody was
 making gets made here, by the workflow itself, on every PR that can move
@@ -15,6 +15,18 @@ passes on coder.rs whose contract is no behaviour change, which a doc-only
 cut satisfies while moving every line below it. Each drift revived four
 non-terminating decoder mutants, and a sweep that reaches one spends its
 whole timeout on it.
+
+Two checks, because pinning an entry by column and function instead of
+by line (#1813) trades the dead pin for the silent over-match:
+
+- per entry, dead: it matches no mutant name, so the mutants it proved
+  are live again.
+- per block, miscounted: the mutants its entries match differ from the
+  count its `# mutants: N` line declares, in either direction. A block is
+  a run of lines in the `exclude_re` array between blank lines, its proof
+  comment and its entries. A block whose proof covers whatever matches,
+  by design, declares `# mutants: any`; a block that declares neither is
+  red, because an uncounted block is where an over-match hides.
 
 The check is two lists of strings. `cargo mutants --list --no-config`
 prints every mutant's name without the config applied (with it, an
@@ -36,20 +48,23 @@ Usage: mutants-exclusions <config.toml> <list.txt>
                    --colors=never`, one name per line
 
 Prints one line per entry, the count of names it matches then the entry,
-so the toml's own "N mutants" claims can be read against it, then one line
-per finding and a footer:
+then one line per finding and a footer:
 
-    mutants-exclusions: entries N | live L | dead D | unreadable U | mutants M
+    mutants-exclusions: entries N | live L | dead D | unreadable U | blocks B | miscounted K | uncounted C | mutants M
 
-Exits 0 when every entry matches at least one name, 1 on any dead or
-unreadable entry, 2 when an input could not be read: a list with no names
-is a broken run, not a crate with no mutants, and reads UNREADABLE rather
-than as zero dead.
+Exits 0 when every entry matches at least one name and every block
+matches its declared count, 1 on any finding, 2 when an input could not
+be read: a list with no names is a broken run, not a crate with no
+mutants, and an array laid out so its blocks do not reproduce the parsed
+entries is a config this cannot count; both read UNREADABLE rather than
+as zero findings.
 """
 
 import re
 import sys
 import tomllib
+
+DECLARED = re.compile(r"#\s*mutants:\s*(\d+|any)\s*$")
 
 
 def entries(config_text):
@@ -63,6 +78,35 @@ def entries(config_text):
 def names(list_text):
     """The mutant names, one per non-blank line."""
     return [line.strip() for line in list_text.splitlines() if line.strip()]
+
+
+def blocks(config_text):
+    """The `exclude_re` array's blocks in file order, each (first line number,
+    declared, entries): declared is an int, "any", or None when the block has no
+    single `# mutants:` line. A run of lines with no entry is not a block."""
+    lines = config_text.splitlines()
+    start = next((i for i, line in enumerate(lines) if re.match(r"exclude_re\s*=\s*\[\s*$", line)), None)
+    if start is None:
+        return []
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].strip() == "]"), None)
+    if end is None:
+        raise ValueError("exclude_re has no closing `]` on a line of its own")
+    found, run = [], []
+    # The trailing "" closes the last block the way a blank line closes the rest.
+    for number, line in enumerate([*lines[start + 1 : end], ""], start + 2):
+        if line.strip():
+            run.append((number, line.strip()))
+            continue
+        texts = [text for _, text in run if not text.startswith("#")]
+        if texts:
+            declared = [m.group(1) for _, text in run if (m := DECLARED.match(text))]
+            value = None
+            if len(declared) == 1:
+                value = declared[0] if declared[0] == "any" else int(declared[0])
+            parsed = [e for text in texts for e in tomllib.loads(f"v = [{text}\n]")["v"]]
+            found.append((run[0][0], value, parsed))
+        run = []
+    return found
 
 
 def check(exclude_re, mutant_names):
@@ -80,19 +124,40 @@ def check(exclude_re, mutant_names):
     return rows
 
 
-def render(rows, mutant_count, out=sys.stdout):
+def count_blocks(config_blocks, mutant_names):
+    """Per block: (line, declared, matched), matched the distinct names any of its
+    entries matches, or None when an entry is unreadable and the count unknowable."""
+    counted = []
+    for line, declared, block_entries in config_blocks:
+        try:
+            patterns = [re.compile(e) for e in block_entries]
+        except re.error:
+            counted.append((line, declared, None))
+            continue
+        matched = sum(1 for name in mutant_names if any(p.search(name) for p in patterns))
+        counted.append((line, declared, matched))
+    return counted
+
+
+def render(rows, counted, mutant_count, config_path, out=sys.stdout):
     """Print the table, the findings and the footer; return the exit status."""
     for entry, _, count in rows:
         print(f"{count:>5}  {entry}", file=out)
     dead = [entry for entry, state, _ in rows if state == "dead"]
     unreadable = [entry for entry, state, _ in rows if state == "unreadable"]
-    if dead or unreadable:
+    uncounted = [line for line, declared, _ in counted if declared is None]
+    miscounted = [
+        (line, declared, matched)
+        for line, declared, matched in counted
+        if isinstance(declared, int) and matched is not None and matched != declared
+    ]
+    if dead or unreadable or uncounted or miscounted:
         print(file=out)
     for entry in dead:
         print(
             f"::error::dead exclusion: {entry!r} matches no mutant; the mutants it"
-            " proved are live again. Repin it to the current line, or delete it if"
-            " the mutant left, in tests/mutants.toml.",
+            " proved are live again. Rescope it to the mutant's current name, or"
+            " delete it if the mutant left, in tests/mutants.toml.",
             file=out,
         )
     for entry in unreadable:
@@ -102,12 +167,30 @@ def render(rows, mutant_count, out=sys.stdout):
             " (no \\p{} classes).",
             file=out,
         )
+    for line, declared, matched in miscounted:
+        print(
+            f"::error::miscounted exclusion block at {config_path}:{line}: its entries"
+            f" match {matched} mutants where its `# mutants: {declared}` line claims"
+            f" {declared}. More is an entry hiding a mutant its proof does not cover:"
+            " narrow it, by line if column and function cannot tell the two apart."
+            " Fewer is an entry that lost its mutant: rescope it. A changed proof"
+            " changes the line with it.",
+            file=out,
+        )
+    for line in uncounted:
+        print(
+            f"::error::uncounted exclusion block at {config_path}:{line}: it declares"
+            " no single `# mutants: N` line, so an over-match in it would be silent."
+            " Add one, or `# mutants: any` where its proof covers whatever matches.",
+            file=out,
+        )
     print(
         f"\nmutants-exclusions: entries {len(rows)} | live {len(rows) - len(dead) - len(unreadable)}"
-        f" | dead {len(dead)} | unreadable {len(unreadable)} | mutants {mutant_count}",
+        f" | dead {len(dead)} | unreadable {len(unreadable)} | blocks {len(counted)}"
+        f" | miscounted {len(miscounted)} | uncounted {len(uncounted)} | mutants {mutant_count}",
         file=out,
     )
-    return 1 if dead or unreadable else 0
+    return 1 if dead or unreadable or uncounted or miscounted else 0
 
 
 def main(argv):
@@ -117,11 +200,21 @@ def main(argv):
     config_path, list_path = argv[1], argv[2]
     try:
         with open(config_path, encoding="utf-8") as f:
-            exclude_re = entries(f.read())
+            config_text = f.read()
+        exclude_re = entries(config_text)
+        config_blocks = blocks(config_text)
         with open(list_path, encoding="utf-8") as f:
             mutant_names = names(f.read())
     except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
         print(f"mutants-exclusions: UNREADABLE ({e})", file=sys.stderr)
+        return 2
+    if [e for _, _, block_entries in config_blocks for e in block_entries] != exclude_re:
+        print(
+            f"mutants-exclusions: UNREADABLE ({config_path}'s exclude_re blocks do not"
+            " reproduce its entries; keep the array one `exclude_re = [` line, blocks"
+            " split by blank lines, and a closing `]` on its own line)",
+            file=sys.stderr,
+        )
         return 2
     if not mutant_names:
         print(
@@ -130,7 +223,8 @@ def main(argv):
             file=sys.stderr,
         )
         return 2
-    return render(check(exclude_re, mutant_names), len(mutant_names))
+    rows = check(exclude_re, mutant_names)
+    return render(rows, count_blocks(config_blocks, mutant_names), len(mutant_names), config_path)
 
 
 if __name__ == "__main__":
