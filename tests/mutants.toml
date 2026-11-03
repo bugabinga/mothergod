@@ -18,9 +18,18 @@
 # match lets noise resurface in the next sweep, which is visible and
 # self-healing; an entry that over-matches hides a real mutant silently.
 # So entries scope to function + operator only where every current match
-# is proven, and pin file:line:col where the same function also contains
-# catchable mutants of that operator (decode's `value` line, coder.rs:263,
-# is catchable garbage, not a hang, and stays live).
+# is proven, and pin file, column, operator and function where the same
+# function also contains catchable mutants of that operator (decode's
+# `value` line is catchable garbage, not a hang, and stays live). A pin
+# carries no line: the line moves with every edit above it and tells the
+# site apart from nothing the column and function do not, except where
+# two sites agree on all of them, and that entry says so (#1813).
+#
+# Each block's comment carries one `# mutants: N` line, the count its
+# entries match, or `# mutants: any` where its proof covers whatever
+# matches. .github/scripts/mutants-exclusions is red on any PR where a
+# block matches other than its count, so an over-match is as visible as
+# an entry that matches nothing.
 #
 # After editing src/coder.rs's constants or renormalization, re-verify:
 # diff `cargo mutants --config tests/mutants.toml --package mothergod --list
@@ -33,22 +42,23 @@ exclude_re = [
   # preceding `-= HALF` vs `+= HALF` differ by 2*HALF = TOP, which the
   # mask erases; QUARTER likewise (the shift doubles the 2*QUARTER gap
   # to TOP). The decoder's `-= offset` is HALF or QUARTER, so the same
-  # argument covers it. Proof in #391. 7 mutants: 4 in the encoder, 3
-  # in the decoder (it was 10 until #991 folded six `-= HALF` and
-  # `-= QUARTER` lines into three `-= offset`).
+  # argument covers it. Proof in #391.
+  # mutants: 7
   "replace -= with \\+= in Encoder::encode$",
   "replace -= with \\+= in Decoder<'a>::decode$",
 
   # Equivalent: `(x << 1) | b` ORs into a bit position the shift just
   # cleared, so `|` and `^` agree. Same shape at every `|` in these four
-  # functions. 5 mutants.
+  # functions.
+  # mutants: 5
   "replace \\| with \\^ in Encoder::emit$",
   "replace \\| with \\^ in Encoder::encode$",
   "replace \\| with \\^ in Decoder<'a>::decode$",
   "replace \\| with \\^ in Decoder<'a>::decode_bits$",
 
   # Equivalent: base64 assembles disjoint 6-bit fields, so `|` on
-  # non-overlapping bits equals `^`. 5 mutants.
+  # non-overlapping bits equals `^`.
+  # mutants: 5
   "replace \\| with \\^ in base64_unwrap::(strict_decode|encode_into)$",
 
   # Equivalent: banks ORs four disjoint pairs: prev1 (bits 0-7) with
@@ -57,49 +67,56 @@ exclude_re = [
   # (bits 0-3); and prev1>>4 (bits 0-3) with after_copy*16 (bit 4).
   # Every `|` in the function ORs operands whose bits cannot overlap, so
   # `|` and `^` agree. Function scope: every current `|` in it is proven
-  # above; a `|` added later must repeat this proof or narrow to
-  # file:line:col (issue #695). 4 mutants.
+  # above; a `|` added later must repeat this proof or narrow to a pin
+  # (issue #695).
+  # mutants: 4
   "replace \\| with \\^ in banks$",
 
   # Equivalent: ResidualTree::decode ORs `top << raw`, whose low `raw`
   # bits are zero, with `decode_bits(raw)`, which sets only those bits, so
   # `|` and `^` agree. Function scope: this is the function's only `|`, and
-  # a later one must repeat this proof or narrow to file:line:col (#932).
-  # 1 mutant.
+  # a later one must repeat this proof or narrow to a pin (#932).
+  # mutants: 1
   "replace \\| with \\^ in ResidualTree::decode$",
 
   # Equivalent: decode_offset ORs `1 << bits` with `decode_bits(bits)`,
   # which sets only the low `bits` bits, below the one the shift sets, so
   # `|` and `^` agree. Function scope: this is the function's only `|`,
-  # and a later one must repeat this proof or narrow to file:line:col
-  # (#1334). 1 mutant.
+  # and a later one must repeat this proof or narrow to a pin (#1334).
+  # mutants: 1
   "replace \\| with \\^ in decode_offset$",
 
   # Equivalent: Slot::update ORs `units << COUNT_BITS`, whose low
   # COUNT_BITS bits are zero, with a count below 2^COUNT_BITS, so `|` and
   # `^` agree. Function scope: this is the function's only `|`, and a
-  # later one must repeat this proof or narrow to file:line:col. 1 mutant.
+  # later one must repeat this proof or narrow to a pin.
+  # mutants: 1
   "replace \\| with \\^ in Slot::update$",
 
   # Equivalent: cm_path's INPUTS at `2 * ORDERS.len()` adds two mixer
   # inputs no line writes, so each stays 0, its weight starts 0, and its
   # update adds rate * error * 0: the mix and every coded bit are
-  # unchanged. Pinned: the expression has no function to scope by.
-  # 1 mutant.
-  "^src/cm_path\\.rs:142:25: replace \\+ with \\*$",
+  # unchanged. Pinned: the expression has no function to scope by, and
+  # the `$` after the operator matches only a mutant outside every
+  # function.
+  # mutants: 1
+  "^src/cm_path\\.rs:\\d+:25: replace \\+ with \\*$",
 
   # Equivalent: three relabelings in CmPath::walk, each a bijection on
   # the indices of a table it reads and updates through the same index,
   # every entry starting equal, so the mix and every coded bit are
   # unchanged:
-  #   527:43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
+  #   col 43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
   #           and a live match's bucket is at least 6, so nothing wraps.
-  #   527:74  the predicted bit inverted swaps the pair 2b, 2b + 1.
-  #   538:53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
-  # Pinned: the function carries catchable `+` and `>=` mutants. 3 mutants.
-  "^src/cm_path\\.rs:527:43: replace \\+ with -",
-  "^src/cm_path\\.rs:527:74: replace >= with <",
-  "^src/cm_path\\.rs:538:53: replace >= with <",
+  #   col 74  the predicted bit inverted swaps the pair 2b, 2b + 1.
+  #   col 53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
+  # Pinned: the function carries catchable `+` and `>=` mutants. The col
+  # 43 pin keeps its line: `node * 2 + usize::from(bit)` further down is
+  # the same `+` at the same column in the same function, and catchable.
+  # mutants: 3
+  "^src/cm_path\\.rs:527:43: replace \\+ with - in CmPath::walk$",
+  "^src/cm_path\\.rs:\\d+:74: replace >= with < in CmPath::walk$",
+  "^src/cm_path\\.rs:\\d+:53: replace >= with < in CmPath::walk$",
 
   # Non-terminating: the renorm loops exit only when `low` and `high`
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or
@@ -107,48 +124,51 @@ exclude_re = [
   # the `| 1`) makes the exit unreachable; encode also grows `out`
   # without bound. Encoder::encode's only `&` and `<<` sites are its two
   # shift lines, so function scope is exact there; Decoder<'a>::decode
-  # also carries catchable `&` and `<<` mutants on its `value` line
-  # (coder.rs:263), so its two shift lines are pinned instead. Two more
-  # decode mutants break the exit the same way (#1621's undecided pair,
-  # both timed out at 10x the baseline):
-  #   coder.rs:261:43  `| 1` to `& 1` leaves `high` in {0, 1} after the
-  #                    first shift, and `break` needs `high >= HALF`.
-  #   coder.rs:248:26  `high >= HALF` to `high < HALF` puts the only
-  #                    `break` behind the inverted test; (low, high) =
-  #                    (0, MASK), which `decode(0, 1, 1)` reaches, is a
-  #                    fixed point of the shift with no exit.
-  # 10 mutants.
+  # also carries catchable `&` and `<<` mutants on its `value` line, so
+  # its two shift lines' sites are pinned instead. Two more decode
+  # mutants break the exit the same way (#1621's undecided pair, both
+  # timed out at 10x the baseline):
+  #   col 43  `| 1` to `& 1` leaves `high` in {0, 1} after the first
+  #           shift, and `break` needs `high >= HALF`.
+  #   col 26  `high >= HALF` to `high < HALF` puts the only `break`
+  #           behind the inverted test; (low, high) = (0, MASK), which
+  #           `decode(0, 1, 1)` reaches, is a fixed point of the shift
+  #           with no exit.
+  # mutants: 10
   "replace & with \\| in Encoder::encode$",
   "replace << with >> in Encoder::encode$",
-  "^src/coder\\.rs:260:34: replace << with >>",
-  "^src/coder\\.rs:260:40: replace & with \\|",
-  "^src/coder\\.rs:261:37: replace << with >>",
-  "^src/coder\\.rs:261:48: replace & with \\|",
-  "^src/coder\\.rs:261:43: replace \\| with &",
-  "^src/coder\\.rs:248:26: replace >= with <",
+  "^src/coder\\.rs:\\d+:34: replace << with >> in Decoder<'a>::decode$",
+  "^src/coder\\.rs:\\d+:40: replace & with \\| in Decoder<'a>::decode$",
+  "^src/coder\\.rs:\\d+:37: replace << with >> in Decoder<'a>::decode$",
+  "^src/coder\\.rs:\\d+:48: replace & with \\| in Decoder<'a>::decode$",
+  "^src/coder\\.rs:\\d+:43: replace \\| with & in Decoder<'a>::decode$",
+  "^src/coder\\.rs:\\d+:26: replace >= with < in Decoder<'a>::decode$",
 
   # Non-terminating: the reader's two loops exit only on a state the
   # mutant moves out of reach (#1621's undecided pair in src/read.rs).
-  #   read.rs:139:21  `read == 0` to `read != 0` in Decoder<R>::fill: the
-  #                   only `break` on end of source needs `read == 0`, so
-  #                   at EOF the loop reserves, reads 0, truncates and
-  #                   goes round again with `frame.len() < len` still
-  #                   true. Pinned: the function's other `==` (133:44)
-  #                   is caught by the Interrupted tests.
+  #   col 21  `read == 0` to `read != 0` in Decoder<R>::fill: the
+  #           only `break` on end of source needs `read == 0`, so
+  #           at EOF the loop reserves, reads 0, truncates and
+  #           goes round again with `frame.len() < len` still
+  #           true. Pinned: the function's other `==` (col 44)
+  #           is caught by the Interrupted tests.
   #   read_frame -> Ok(true): the body never loads a frame, so `read`'s
-  #                   `while self.pos == self.end` never leaves. Exact
-  #                   text: the `Ok(false)` twin is caught.
-  # 2 mutants, both timed out at 60s on the `read::` tests alone.
-  "^src/read\\.rs:139:21: replace == with != in Decoder<R>::fill$",
+  #           `while self.pos == self.end` never leaves. Exact
+  #           text: the `Ok(false)` twin is caught.
+  # Both timed out at 60s on the `read::` tests alone.
+  # mutants: 2
+  "^src/read\\.rs:\\d+:21: replace == with != in Decoder<R>::fill$",
   "replace Decoder<R>::read_frame -> io::Result<bool> with Ok\\(true\\)$",
 
   # Non-terminating, constant geometry: HALF doubled past TOP makes
   # `high < HALF` a tautology; MASK = TOP + 1 or TOP pins the interval
   # to {0, TOP} through the `& MASK` shifts. QUARTER's and
   # THREE_QUARTERS' mutants misprice the underflow branch but still
-  # terminate, so they stay live. 3 mutants.
-  "^src/coder\\.rs:14:23: replace >> with <<$",
-  "^src/coder\\.rs:17:23: replace - with [+/]$",
+  # terminate, so they stay live. The `$` after the operator matches only
+  # a mutant outside every function.
+  # mutants: 3
+  "^src/coder\\.rs:\\d+:23: replace >> with <<$",
+  "^src/coder\\.rs:\\d+:23: replace - with [+/]$",
 
   # Undecidable by cargo test: `try_new -> Result<Self, TryReserveError>`
   # with its body replaced by `Ok(Default::default())` is byte-identical
@@ -161,6 +181,7 @@ exclude_re = [
   # purpose: a try_new whose Default is not its infallible twin is caught
   # by the ordinary tests regardless, so excluding its mutant loses
   # nothing.
+  # mutants: any
   "::try_new -> Result<Self, std::collections::TryReserveError> with Ok\\((Default|Self)::default\\(\\)\\)$",
 ]
 
