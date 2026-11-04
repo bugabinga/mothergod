@@ -4,8 +4,8 @@
 use std::io::{self, Read};
 
 use super::{
-    Budget, CHECK_LEN, Error, Frames, HEADER_LEN, Method, STORED_LEN_BYTES, cm_path, codec,
-    declared_extent, extent_prefix_len, parse_header,
+    Budget, CHECK_LEN, Error, Frames, HEADER_LEN, Method, STORED_LEN_BYTES, codec, declared_extent,
+    extent_prefix_len, parse_header,
 };
 
 /// The most [`Decoder::fill`] asks for beyond the bytes the source has
@@ -165,17 +165,13 @@ impl<R: Read> Decoder<R> {
             .ok_or(Error::Truncated)?;
         self.fill(total)?;
         let frame = Frames::new(&self.frame).next().ok_or(Error::Truncated)??;
-        let decoded = match frame.method {
-            Method::Lz => codec::decode(frame.payload, codec::MAX_DECODED_LEN)?,
-            Method::Cm => cm_path::decode_payload(frame.payload, codec::MAX_DECODED_LEN)?,
-            Method::Stored => {
-                std::mem::swap(&mut self.frame, &mut self.out);
-                self.pos = HEADER_LEN + STORED_LEN_BYTES;
-                self.end = HEADER_LEN + payload_len;
-                return Ok(true);
-            }
-        };
-        self.out = decoded;
+        if frame.method == Method::Stored {
+            std::mem::swap(&mut self.frame, &mut self.out);
+            self.pos = HEADER_LEN + STORED_LEN_BYTES;
+            self.end = HEADER_LEN + payload_len;
+            return Ok(true);
+        }
+        self.out = frame.decode()?;
         self.pos = 0;
         self.end = self.out.len();
         Ok(true)

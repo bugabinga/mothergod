@@ -320,6 +320,19 @@ struct Frame<'a> {
     output_len: u64,
 }
 
+impl Frame<'_> {
+    /// The bytes the frame decodes to, a coded method under
+    /// [`codec::MAX_DECODED_LEN`] because the caller's [`Budget`] admitted
+    /// the frame against any tighter bound.
+    fn decode(&self) -> Result<Vec<u8>, Error> {
+        match self.method {
+            Method::Stored => Ok(try_vec_from_slice(stored_data(self.payload))?),
+            Method::Lz => codec::decode(self.payload, codec::MAX_DECODED_LEN),
+            Method::Cm => cm_path::decode_payload(self.payload, codec::MAX_DECODED_LEN),
+        }
+    }
+}
+
 /// Width of the declared-length field that opens a [`Method::Stored`]
 /// payload: `u64`, not the `u32` an `Lz` payload declares, because
 /// [`compress`] stores inputs longer than `u32::MAX` bytes.
@@ -837,11 +850,7 @@ pub fn decompress_bounded(input: &[u8], max_len: u32) -> Result<Vec<u8>, Error> 
     for frame in Frames::new(input) {
         let frame = frame?;
         budget.admit(frame.method, frame.output_len)?;
-        let data = match frame.method {
-            Method::Stored => try_vec_from_slice(stored_data(frame.payload))?,
-            Method::Lz => codec::decode(frame.payload, codec::MAX_DECODED_LEN)?,
-            Method::Cm => cm_path::decode_payload(frame.payload, codec::MAX_DECODED_LEN)?,
-        };
+        let data = frame.decode()?;
         match &mut output {
             None => output = Some(data),
             Some(output) => {
