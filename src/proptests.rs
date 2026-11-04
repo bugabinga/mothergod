@@ -65,8 +65,16 @@ proptest! {
     fn decode_apis_agree_at_extreme(input in data()) {
         let frame = compress_level(&input, Level::Extreme);
         apis_agree(&frame, &input)?;
+        // One byte past the input: a reader whose position never advances
+        // yields the same bytes forever, which an unbounded `read_to_end`
+        // turns into a hang that grows its Vec until the process dies.
         let mut read = Vec::new();
-        std::io::Read::read_to_end(&mut read::Decoder::new(frame.as_slice()), &mut read).unwrap();
+        let bound = input.len() as u64 + 1;
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(read::Decoder::new(frame.as_slice()), bound),
+            &mut read,
+        )
+        .unwrap();
         prop_assert_eq!(read, input);
     }
 }

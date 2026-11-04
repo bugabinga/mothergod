@@ -921,7 +921,14 @@ fn decompress_roundtrips_a_stored_payload_past_max_decoded_len() {
     // fallback; this test's target is decompress, not compress.
     let payload = vec![0xA5u8; (codec::MAX_DECODED_LEN + 1) as usize];
     let frame = build_stored_frame(&payload);
-    assert_eq!(decompress(&frame), Ok(payload));
+    // Not `assert_eq!`: a failing one formats both 256 MiB sides with
+    // `Debug`, which is a hang where a failure is meant.
+    let decoded = decompress(&frame).expect("a stored frame decodes whatever its length");
+    assert!(
+        decoded == payload,
+        "decoded {} bytes, not the payload",
+        decoded.len()
+    );
 }
 
 #[test]
