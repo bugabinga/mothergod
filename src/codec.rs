@@ -508,7 +508,7 @@ fn encode_tokens_with(
     );
 
     let stream = ac.finish();
-    let coded_len = u64::try_from(stream.len()).expect("usize is at most 64 bits");
+    let coded_len = stream.len() as u64;
     let mut out = Vec::with_capacity(TOKEN_HEADER_LEN + stream.len());
     out.extend_from_slice(&declared_len.to_le_bytes());
     out.extend_from_slice(&token_count.to_le_bytes());
@@ -1021,10 +1021,10 @@ fn read_header(
 /// [`Error::Truncated`] if `stream` is shorter, [`Error::Corrupt`] if bytes
 /// follow it.
 pub(crate) fn ensure_coded_len(stream: &[u8], coded_len: u64) -> Result<(), Error> {
-    match u64::try_from(stream.len()).map(|len| len.cmp(&coded_len)) {
-        Ok(std::cmp::Ordering::Less) => Err(Error::Truncated),
-        Ok(std::cmp::Ordering::Equal) => Ok(()),
-        _ => Err(Error::Corrupt),
+    match (stream.len() as u64).cmp(&coded_len) {
+        std::cmp::Ordering::Less => Err(Error::Truncated),
+        std::cmp::Ordering::Equal => Ok(()),
+        std::cmp::Ordering::Greater => Err(Error::Corrupt),
     }
 }
 
