@@ -43,6 +43,21 @@ fn roundtrip_various_data() {
 }
 
 #[test]
+fn try_decode_matches_decode() {
+    // The cycle holds 0xE8 and 0xE9, so `decode` rewrites operands and the
+    // result differs from the input: a stub returning the empty or a
+    // constant vector cannot match it at any length.
+    for len in [0, 1, 4, 5, 100, 2000] {
+        let filtered = encode(&(0..=255u8).cycle().take(len).collect::<Vec<u8>>());
+        assert_eq!(
+            try_decode(&filtered).unwrap(),
+            decode(&filtered),
+            "len {len}"
+        );
+    }
+}
+
+#[test]
 fn roundtrip_adjacent_instructions() {
     let mut data = vec![];
     for _ in 0..20 {
