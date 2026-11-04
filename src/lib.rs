@@ -434,9 +434,7 @@ fn declared_extent(method: Method, after_header: &[u8]) -> Result<(usize, u64), 
 /// the `Stored` payload of the same output, so a reader that has seen only
 /// the header may refuse before it buffers a byte.
 fn under_stored_floor(extent: &codec::Extent) -> Result<(usize, u64), Error> {
-    if u64::try_from(extent.payload_len).map_err(|_| Error::Truncated)?
-        > extent.output_len + STORED_LEN_BYTES as u64
-    {
+    if extent.payload_len as u64 > extent.output_len + STORED_LEN_BYTES as u64 {
         return Err(Error::Corrupt);
     }
     Ok((extent.payload_len, extent.output_len))
