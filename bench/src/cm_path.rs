@@ -132,11 +132,11 @@ pub fn decode_costs_vs_hybrid() -> DecodeCosts {
     let cases = baseline::cases();
     let calibration = speed::calibration_seconds();
     let (seconds, bytes) = speed::decode_seconds(&cases);
-    let hybrid = speed::decode_cost(seconds, bytes, calibration);
+    let hybrid = speed::decode_cost(speed::Kernel::Walk, seconds, bytes, calibration);
     let (seconds, bytes) = decode_seconds(&cases);
     DecodeCosts {
         hybrid,
-        cm_path: speed::decode_cost(seconds, bytes, calibration),
+        cm_path: speed::decode_cost(speed::Kernel::Walk, seconds, bytes, calibration),
     }
 }
 
