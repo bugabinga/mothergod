@@ -580,17 +580,28 @@ pub(crate) fn rescale_bank(freq: &mut [u32], total: &mut u32, symbol: usize, rat
     }
 }
 
-/// Builds a `Vec<T>` of `n` clones of `value`, returning `Err` instead of
+/// Builds a `Vec<T>` of `n` copies of `value`, returning `Err` instead of
 /// aborting if the allocator cannot satisfy `n` (hard rule 2, `rust-craft`
-/// skill's allocation-discipline, #453). `resize` after `try_reserve_exact`
-/// never asks the allocator for more than was reserved.
-pub(crate) fn try_filled_vec<T: Clone>(
+/// skill's allocation-discipline, #453). No `extend_from_within` after
+/// `try_reserve_exact` grows the length past `n`, so none asks the allocator
+/// for more than was reserved.
+///
+/// The fill doubles the filled prefix, about `log2(n)` memcpys, instead of
+/// one store per element: under the fuzz build's trace-compares every loop
+/// iteration calls into the sanitizer runtime, and a per-element fill of a
+/// fresh [`literal::Literal`]'s 2.4M-entry table cost most of an empty
+/// input's execution (#1862).
+pub(crate) fn try_filled_vec<T: Copy>(
     n: usize,
     value: T,
 ) -> Result<Vec<T>, std::collections::TryReserveError> {
+    let chunk = (16 * 1024 / size_of::<T>().max(1)).max(1);
     let mut v = Vec::new();
     v.try_reserve_exact(n)?;
-    v.resize(n, value);
+    v.resize(n.min(chunk), value);
+    while v.len() < n {
+        v.extend_from_within(..chunk.min(n - v.len()));
+    }
     Ok(v)
 }
 

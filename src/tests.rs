@@ -1227,3 +1227,15 @@ fn compress_is_compress_level_at_the_default_level_best() {
     assert_eq!(Level::default(), Level::Best);
     assert_eq!(compress(&input), compress_level(&input, Level::Best));
 }
+
+#[test]
+fn try_filled_vec_fills_exactly_n_without_regrowing() {
+    // Every length either side of a power of two: the doubling's last copy
+    // is the partial one, and a wrong bound there over- or under-fills.
+    for n in 0..=130 {
+        let v = try_filled_vec(n, 0xA5A5_0001u32).expect("a small vec fits");
+        assert_eq!(v.len(), n);
+        assert!(v.iter().all(|&x| x == 0xA5A5_0001), "n = {n}");
+        assert_eq!(v.capacity(), n, "n = {n}: the fill reallocated");
+    }
+}
