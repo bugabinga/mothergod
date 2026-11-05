@@ -586,11 +586,14 @@ pub(crate) fn rescale_bank(freq: &mut [u32], total: &mut u32, symbol: usize, rat
 /// `try_reserve_exact` grows the length past `n`, so none asks the allocator
 /// for more than was reserved.
 ///
-/// The fill doubles the filled prefix, about `log2(n)` memcpys, instead of
-/// one store per element: under the fuzz build's trace-compares every loop
-/// iteration calls into the sanitizer runtime, and a per-element fill of a
-/// fresh [`literal::Literal`]'s 2.4M-entry table cost most of an empty
-/// input's execution (#1862).
+/// The fill stores at most one 16 KiB chunk element by element, then
+/// memcpys that chunk across the rest, about `n * size_of::<T>() / 16 KiB`
+/// copies: under the fuzz build's trace-compares every loop iteration calls
+/// into the sanitizer runtime, and a per-element fill of a fresh
+/// [`literal::Literal`]'s 2.4M-entry table cost most of an empty input's
+/// execution (#1862). The source stays one cache-sized chunk because a
+/// doubling copy's source outgrows the cache and costs release time
+/// (`research/JOURNAL.md` S2-R40).
 pub(crate) fn try_filled_vec<T: Copy>(
     n: usize,
     value: T,

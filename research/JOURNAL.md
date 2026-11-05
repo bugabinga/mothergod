@@ -9874,3 +9874,50 @@ record.
   real files, where the 28x on text the hybrid matches well says S2-A141's
   6.7x is no ceiling; running the path's trials beside the `Lz`
   search instead of after it. `research/progress.jsonl` it248.
+- S2-A143 | ACCEPTED | Issue #1862's fuzz floor: under the fuzz build an
+  empty `roundtrip` execution costs about 150 ms against about 0.56 ms in
+  release, so `roundtrip` and `frame_recipe` replay seeds instead of
+  mutating (#1859). Hypothesis: `try_filled_vec`'s per-element fill of a
+  fresh `literal::Literal`'s 2.4M-entry `freq` table is most of it,
+  because trace-compares call into the sanitizer runtime on every loop
+  iteration, and a fill that stores one 16 KiB chunk element by element
+  and memcpys it across the rest removes it without a release cost. |
+  Mechanism: `resize` to at most the chunk, then `extend_from_within` of
+  at most the chunk until `n`, so the instrumented loop runs at most 4096
+  times per table and every copy reads a cache-resident source. Measured
+  on an AMD EPYC 9V74 4 logical cores runner, inputs an empty file and
+  512 bytes from Python's `random.seed(1862); random.randbytes(512)`,
+  sha256 `61a2c062`. Fuzz build (`cargo fuzz build roundtrip`, 0.13.2,
+  ASan defaults), the same file five times per run, warm executions,
+  three interleaved rounds: empty main 146 to 149 ms, chunk 23 to 26 ms
+  (**about 6x**); 512 bytes main 360 to 405 ms, chunk 132 to 163 ms.
+  Release, `compress` then `decompress`, minimum of 200 calls, four
+  interleaved rounds: empty main 0.556 to 0.561 ms, chunk 0.530 to 0.550
+  ms; 512 bytes main 8.81 to 8.93 ms, chunk 8.84 to 9.06 ms, inside each
+  other's spread. | Verdict: **accepted**; codec output is byte-identical
+  (`tests/golden.rs` unchanged), so ratio deltas are 0 by construction.
+  | What remains of an empty fuzz execution is mostly page faults: 20
+  empty executions in one process, `/usr/bin/time -v`, 0.59 s system
+  against 0.32 s user, 207,349 minor faults, about 10,400 per execution.
+  Untested reading: ASan's quarantine keeps freed tables from reuse, so
+  each call faults in fresh pages where glibc in release reuses its heap.
+  The floor is still about 40x release, past #1862's "within 10x". |
+  **Not measured:** smaller fresh tables, an `ASAN_OPTIONS` quarantine
+  size. `research/progress.jsonl` it249.
+- S2-R40 | REJECTED | Issue #1862's alternatives to S2-A143's chunk copy.
+  Hypothesis: a doubling fill (store one element, then `extend_from_within`
+  the whole filled prefix until `n`, about `log2(n)` memcpys) fixes the
+  fuzz floor as well at no release cost. | Mechanism: same runner, inputs
+  and method as S2-A143, interleaved with it. Fuzz build: empty 21 to 23
+  ms, 512 bytes 129 to 151 ms, level with the chunk copy. Release: empty
+  **0.669 to 0.677 ms** against main's 0.558 to 0.561 ms (+0.11 ms, about
+  20%); 512 bytes 8.99 to 9.11 ms, above both other builds in every
+  round. The source of the last copies is megabytes, past cache, so each
+  copy reads as much as it writes from memory where a 16 KiB source
+  stays in L1. | Verdict: **rejected** on the release cost. A second
+  candidate, storing `freq` as count minus one so a fresh table is
+  zeros, was rejected unmeasured: without `unsafe`, which the crate
+  forbids, a fallible allocation cannot ask the OS for zeroed pages, so
+  the memset remains, and every hot read of `freq` gains a `+1`. |
+  Conditions: a crate that admits `unsafe` for `alloc_zeroed` reopens
+  the second candidate. `research/progress.jsonl` it250.
