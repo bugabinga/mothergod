@@ -20,7 +20,7 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
-## 2026-11-05: Survey: 162 readers opened the repo in one day, and none reached the site
+## 2026-11-05: Survey: 162 readers opened the repo in one day, and the site counted none
 
 Tenth survey, seven days after the ninth.
 
@@ -42,7 +42,7 @@ Tenth survey, seven days after the ninth.
 
 **One day carries the window.** The ledger's daily rows read 18 views
 from 15 viewers on 2026-10-28, 164 from 162 on 10-29, and 16 from 16 on
-10-30. No earlier day in its 75 had more than 8 views. On the other eleven
+10-30. No day before 10-28 had more than 10 views. On the other eleven
 days of the window, views ran 0 to 8 a day, the same as before. So this is
 one event, not growth. Almost one view per viewer means each visitor
 opened one page and stopped. That fits a link posted somewhere, or a
@@ -52,14 +52,16 @@ about 2026-11-12:** GitHub's referrer and path endpoints keep 14 days,
 and the ledger records neither. #1855 asks for both while the spike is
 still inside the window.
 
-**None of them reached the site.** Cloudflare has no pageloads on 10-29
-or 10-30. The repo's homepage field points at mothergod.dev, and the
+**None of them was counted at the site.** Cloudflare has no pageloads
+on 10-29 or 10-30. Its beacon counts only loads that run its script, so
+a reader behind a blocker, or a crawler without JavaScript, never
+reaches it. The repo's homepage field points at mothergod.dev, and the
 README links it under its title. A stars count still at 1 says the same
 from the other side: 162 readers came, and none of them acted.
 If the visitors were people, the repo's first screen decided their
-visit, and the site never got a chance. That is a reason to study what a
-repo's first screen does (b), not yet a reason to change ours. One event
-of unknown source is a reading.
+visit. That is a reason to study what a repo's first screen does (b),
+not yet a reason to change ours. One event of unknown source is a
+reading.
 
 **The repo is indexed now; the site still is not.** Last week's search
 returned nothing for the project. This week a quoted repo-path query
