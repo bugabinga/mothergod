@@ -22,8 +22,8 @@
 //! MB/s published in `silesia.md` is a rate only if nothing runs beside
 //! it (issue #1321). Only the untimed reference compressors run one
 //! thread per file. `frontier_section` then times every gzip, zstd and xz
-//! level and mothergod's two faster levels the same way and appends the
-//! frontier table (issues #1340, #1708).
+//! level and mothergod's other three levels the same way and appends the
+//! frontier table (issues #1340, #1708, #1824).
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint

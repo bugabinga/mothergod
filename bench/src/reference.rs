@@ -279,7 +279,7 @@ pub fn measure_all(
 
 /// The frontier section of a finals report (issue #1340): every level of
 /// gzip, zstd and xz measured on `files`, one process at a time, beside the
-/// mothergod row `measurements` already holds and a row for each faster
+/// mothergod row `measurements` already holds and a row for each other
 /// level, timed in a child of `mothergod_program` as [`measure_all`] times
 /// the default (issue #1708).
 ///
@@ -297,7 +297,7 @@ pub fn frontier_section(
     measurements: &[FileMeasurement],
     mothergod_program: &Path,
 ) -> Result<String, String> {
-    let faster = LEVELS
+    let others = LEVELS
         .into_iter()
         .filter(|&level| level != Level::Best)
         .map(|level| {
@@ -332,7 +332,7 @@ pub fn frontier_section(
         .collect::<Result<Vec<_>, String>>()?;
     Ok(format_section(
         &Row::mothergod(measurements),
-        &faster,
+        &others,
         &field,
     ))
 }

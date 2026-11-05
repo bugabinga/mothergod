@@ -63,13 +63,14 @@ fn frontier_section_has_a_row_per_level_and_mothergod() {
     // The header, every competitor level and mothergod; the divider
     // starts `|-`.
     let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
-    assert_eq!(table_rows, 1 + competitors().len() + 3, "{section}");
+    assert_eq!(table_rows, 1 + competitors().len() + 4, "{section}");
     for label in [
         "| gzip -1 |",
         "| zstd -22 |",
         "| xz -9e |",
         "| **mothergod -1** |",
         "| **mothergod -2** |",
+        "| **mothergod -4** |",
         "| **mothergod** |",
     ] {
         assert!(section.contains(label), "missing {label}: {section}");
@@ -113,7 +114,7 @@ fn child(program: &str, args: &[&str], input: &[u8]) -> (Vec<u8>, bool) {
 )]
 fn child_mode_round_trips_and_rejects_bad_input() {
     let data = fixture();
-    for digit in ["1", "2", "3"] {
+    for digit in ["1", "2", "3", "4"] {
         let (packed, ok) = child(CHILD, &["compress", digit], &data);
         assert!(ok && packed.len() < data.len(), "-{digit}");
         let (unpacked, ok) = child(CHILD, &["decompress"], &packed);
@@ -125,7 +126,7 @@ fn child_mode_round_trips_and_rejects_bad_input() {
         &["sideways"][..],
         &["compress"],
         &["compress", "0"],
-        &["compress", "4"],
+        &["compress", "5"],
         &["compress", "13"],
         &["decompress", "3"],
     ] {
