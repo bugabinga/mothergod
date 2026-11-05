@@ -162,7 +162,7 @@ xz level from -4 up still smaller and faster both ways
 of the cheapest encoder tier's time. A context-mixing
 path over every byte, a match model as an expert and no LZ tokens, was
 charter #1763 and is wired at `-4` (ADR-0079, S2-A142), its finals read
-and the default's choice open under #1775, worked ahead of S1-P4's
+and the default kept at the hybrid (ADR-0080), worked ahead of S1-P4's
 remainder (S2-A137's far reach, a whole 16 MiB block, flipped `reymont`
 and narrowed the six Silesia losses to zstd -19 that remain). The filter bank thread (selector kinds 4 to 6, `FORMAT_VERSION`
 14 to 16, it193 to it195) ended with the per-field byte-order rejection
