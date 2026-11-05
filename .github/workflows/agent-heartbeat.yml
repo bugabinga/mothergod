@@ -218,9 +218,8 @@ jobs:
                is over (rule 12), so resume from it rebased on main,
                brief in its commit message and issue thread (#1322).
                One whose work another PR already landed is deleted,
-               `gh api -X DELETE repos/$GITHUB_REPOSITORY/git/refs/heads/<branch>`
-               on the app token, which can (#1849's handoff stood three
-               sessions).
+               `GH_TOKEN=$(cat "$GH_TOKEN_FILE") gh api -X DELETE repos/$GITHUB_REPOSITORY/git/refs/heads/<branch>`,
+               not reported again (#1849's handoff stood three sessions).
                Implement the smallest useful slice, push it with
                `.github/scripts/push-branch`, and open a PR whose body
                names the ROADMAP, journal or issue id it serves, with a

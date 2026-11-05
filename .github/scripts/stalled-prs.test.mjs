@@ -442,6 +442,13 @@ test("a branch pushed and never PR'd, past grace, is stalled work", () => {
   assert.equal(found.kind, "branch-orphaned");
   assert.match(found.detail, /2026-09-02T22:20:48Z/);
   assert.match(found.rescue, /gh-pr claude\/bdfl-miri-lane/);
+  // The third outcome, a handoff another PR already landed, is deleted on
+  // the sidecar's token: the session's own has died by the time a long run
+  // meets the branch (#1860's review).
+  assert.match(
+    found.rescue,
+    /GH_TOKEN=\$\(cat "\$GH_TOKEN_FILE"\) gh api -X DELETE repos\/\$GITHUB_REPOSITORY\/git\/refs\/heads\/claude\/bdfl-miri-lane/,
+  );
 });
 
 test("a branch pushed minutes ago is a live session, not a stall", () => {

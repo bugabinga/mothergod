@@ -635,7 +635,8 @@ def classify_branch(branch, now):
         f"`.github/scripts/gh-pr {branch['name']} \"<title>\"` with that body; "
         "work it calls unfinished is the heartbeat's handoff through the issue "
         "it names, leave it; work already on main under another PR is deleted: "
-        f"`gh api -X DELETE repos/$GITHUB_REPOSITORY/git/refs/heads/{branch['name']}`",
+        "`GH_TOKEN=$(cat \"$GH_TOKEN_FILE\") gh api -X DELETE "
+        f"repos/$GITHUB_REPOSITORY/git/refs/heads/{branch['name']}`",
     )
 
 
