@@ -73,12 +73,11 @@ pub struct Decoder<R> {
     budget: Budget,
     /// The frame being read, header first. Scratch between frames.
     frame: Vec<u8>,
-    /// Decoded bytes of the current frame, of which `out[pos..end]` is
-    /// unread. A [`Method::Stored`] frame is served from its own bytes, so
-    /// this holds the frame and `frame` the buffer it replaced.
+    /// Decoded bytes of the current frame, of which `out[pos..]` is unread.
+    /// A [`Method::Stored`] frame is served from its own bytes, so this holds
+    /// the frame, its check value cut off, and `frame` the buffer it replaced.
     out: Vec<u8>,
     pos: usize,
-    end: usize,
     state: State,
 }
 
@@ -105,7 +104,6 @@ impl<R: Read> Decoder<R> {
             frame: Vec::new(),
             out: Vec::new(),
             pos: 0,
-            end: 0,
             state: State::Start,
         }
     }
@@ -167,13 +165,12 @@ impl<R: Read> Decoder<R> {
         let frame = Frames::new(&self.frame).next().ok_or(Error::Truncated)??;
         if frame.method == Method::Stored {
             std::mem::swap(&mut self.frame, &mut self.out);
+            self.out.truncate(HEADER_LEN + payload_len);
             self.pos = HEADER_LEN + STORED_LEN_BYTES;
-            self.end = HEADER_LEN + payload_len;
             return Ok(true);
         }
         self.out = frame.decode()?;
         self.pos = 0;
-        self.end = self.out.len();
         Ok(true)
     }
 }
@@ -184,7 +181,7 @@ impl<R: Read> Read for Decoder<R> {
             return Ok(0);
         }
         // A frame may decode to nothing, so a read waits on the next one.
-        while self.pos == self.end {
+        while self.pos == self.out.len() {
             match self.state {
                 State::Done => return Ok(0),
                 State::Failed(kind) => return Err(kind.into()),
@@ -198,8 +195,9 @@ impl<R: Read> Read for Decoder<R> {
                 },
             }
         }
-        let len = buf.len().min(self.end - self.pos);
-        buf[..len].copy_from_slice(&self.out[self.pos..self.pos + len]);
+        let unread = &self.out[self.pos..];
+        let len = buf.len().min(unread.len());
+        buf[..len].copy_from_slice(&unread[..len]);
         self.pos += len;
         Ok(len)
     }
