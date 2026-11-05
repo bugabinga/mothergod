@@ -976,10 +976,7 @@ pub fn decompress_to_writer<W: std::io::Write>(
             Method::Lz => {
                 codec::decode_to_writer(frame.payload, codec::MAX_DECODED_LEN, &mut writer)?;
             }
-            Method::Cm => writer.write_all(&cm_path::decode_payload(
-                frame.payload,
-                codec::MAX_DECODED_LEN,
-            )?)?,
+            Method::Cm => writer.write_all(&frame.decode()?)?,
         }
     }
     writer.flush()?;
