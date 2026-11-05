@@ -134,19 +134,15 @@ pub const MAX_DECODED_LEN: u32 = 256 * 1024 * 1024;
 /// before every token.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum FlagKind {
-    Literal,
-    Match,
-    Rep,
+    Literal = 0,
+    Match = 1,
+    Rep = 2,
 }
 
 impl FlagKind {
     /// The [`Model`] symbol this kind codes as.
     const fn index(self) -> usize {
-        match self {
-            Self::Literal => 0,
-            Self::Match => 1,
-            Self::Rep => 2,
-        }
+        self as usize
     }
 
     /// Inverse of [`Self::index`]. `models.flag`'s alphabet is
@@ -897,12 +893,7 @@ const REACH_SHIFT: u32 = 6;
 /// bytes, `kind` carrying `reach` in its top two bits.
 fn selector(candidate: Candidate, reach: Reach) -> [u8; SELECTOR_LEN] {
     let [kind, param] = candidate.to_header_bytes();
-    let code: u8 = match reach {
-        Reach::Standard => 0,
-        Reach::Wide => 1,
-        Reach::Far => 2,
-    };
-    [kind | code << REACH_SHIFT, param]
+    [kind | (reach as u8) << REACH_SHIFT, param]
 }
 
 /// Splits a `Method::Lz` payload into the filter [`Candidate`] and the

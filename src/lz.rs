@@ -34,11 +34,11 @@ pub const FAR_WINDOW: usize = (1 << 24) - 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
     /// Distances up to [`WINDOW`].
-    Standard,
+    Standard = 0,
     /// Distances up to [`WIDE_WINDOW`].
-    Wide,
+    Wide = 1,
     /// Distances up to [`FAR_WINDOW`].
-    Far,
+    Far = 2,
 }
 
 impl Reach {
@@ -133,11 +133,11 @@ pub type Distance = NonZeroU32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepSlot {
     /// Most recently used distance.
-    First,
+    First = 0,
     /// Second most recently used distance.
-    Second,
+    Second = 1,
     /// Third most recently used distance.
-    Third,
+    Third = 2,
 }
 
 impl RepSlot {
@@ -147,11 +147,7 @@ impl RepSlot {
     /// This slot's position in [`RepCache`]'s backing array, and the
     /// [`Model`](crate::model::Model) symbol [`crate::codec`] codes it as.
     pub(crate) const fn index(self) -> usize {
-        match self {
-            Self::First => 0,
-            Self::Second => 1,
-            Self::Third => 2,
-        }
+        self as usize
     }
 
     /// Inverse of [`Self::index`]. [`Model::decode`](crate::model::Model::decode)
