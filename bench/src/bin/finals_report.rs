@@ -16,8 +16,8 @@
 //! both binaries) times `mothergod` one file at a time: the published
 //! MB/s is a rate only if nothing runs beside it (issue #1321).
 //! `frontier_section` then times every gzip, zstd and xz level and mothergod's
-//! two faster levels the same way and appends the frontier table (issues
-//! #1340, #1708).
+//! other three levels the same way and appends the frontier table (issues
+//! #1340, #1708, #1824).
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
 //! --bin finals_report`. Markdown is linted, not formatted (`cargo x lint

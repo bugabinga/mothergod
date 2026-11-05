@@ -140,19 +140,19 @@ pub fn neighbours<'a>(mothergod: &Row, field: &'a [Row]) -> Neighbours<'a> {
     Neighbours { as_good, as_fast }
 }
 
-/// `mothergod`, its `faster` levels and `field` as one markdown table,
+/// `mothergod`, its `others` and `field` as one markdown table,
 /// best-compressing first, every mothergod row in bold, followed by one
 /// line per neighbour.
 ///
 /// `mothergod` is the default level and carries the bare lines `/status`
-/// reads, `fastest level at least as good: <level>`. Each of `faster`, the
-/// other levels a user may pick, carries its own pair, `... as <its label>:
+/// reads, `fastest level at least as good: <level>`. Each of `others`, the
+/// other levels a user may pick, `-1`, `-2` and `-4`, carries its own pair, `... as <its label>:
 /// <level>`, so a level no competitor row sits beside is still placed.
 #[must_use]
-pub fn format_table(mothergod: &Row, faster: &[Row], field: &[Row]) -> String {
+pub fn format_table(mothergod: &Row, others: &[Row], field: &[Row]) -> String {
     let mut rows: Vec<(&Row, bool)> = field.iter().map(|r| (r, false)).collect();
     rows.push((mothergod, true));
-    rows.extend(faster.iter().map(|r| (r, true)));
+    rows.extend(others.iter().map(|r| (r, true)));
     // A stable sort: a tie keeps `field`'s order and puts mothergod last.
     rows.sort_by(|(a, _), (b, _)| a.bpb().total_cmp(&b.bpb()));
 
@@ -181,7 +181,7 @@ pub fn format_table(mothergod: &Row, faster: &[Row], field: &[Row]) -> String {
     }
 
     let lines = std::iter::once((mothergod, String::new()))
-        .chain(faster.iter().map(|r| (r, format!(" as {}", r.label))));
+        .chain(others.iter().map(|r| (r, format!(" as {}", r.label))));
     for (row, of) in lines {
         let Neighbours { as_good, as_fast } = neighbours(row, field);
         for (what, neighbour) in [
@@ -201,7 +201,7 @@ pub fn format_table(mothergod: &Row, faster: &[Row], field: &[Row]) -> String {
 /// Starts with a blank line, so it follows `finals::format_report`'s last
 /// row directly.
 #[must_use]
-pub fn format_section(mothergod: &Row, faster: &[Row], field: &[Row]) -> String {
+pub fn format_section(mothergod: &Row, others: &[Row], field: &[Row]) -> String {
     format!(
         "\n## Frontier: every level of gzip, zstd and xz beside mothergod\n\n\
          Each row sums this corpus's files. Every process ran one at a time, \
@@ -209,10 +209,10 @@ pub fn format_section(mothergod: &Row, faster: &[Row], field: &[Row]) -> String 
          MB/s are total bytes over total wall-clock seconds, and peak MiB is \
          the largest resident set of any one process (`/usr/bin/time -f %M`). \
          The speed axis of the neighbour lines is encode MB/s (issue \
-         #1340). `mothergod` is the default level, `-3`; `mothergod -1` and \
-         `mothergod -2` are the faster ones, each with its own neighbour \
-         lines (issue #1708).\n\n{}",
-        format_table(mothergod, faster, field)
+         #1340). `mothergod` is the default level, `-3`; `mothergod -1`, \
+         `mothergod -2` and `mothergod -4` are the other levels, each with \
+         its own neighbour lines (issues #1708, #1824).\n\n{}",
+        format_table(mothergod, others, field)
     )
 }
 

@@ -234,10 +234,10 @@ pub fn measure(competitor: &Competitor, data: &[u8]) -> io::Result<FieldPoint> {
 /// The first argument that puts a report binary in child mode.
 const CHILD_FLAG: &str = "--child";
 
-/// Every encoder level the reports measure, quickest first. Not
-/// [`Level::Extreme`] yet: its trials and decode would add most of an hour
-/// to a report run (issue #1824).
-pub const LEVELS: [Level; 3] = [Level::Fastest, Level::Fast, Level::Best];
+/// Every encoder level the reports measure, quickest first, one row each
+/// (ROADMAP M5, issue #1340). [`Level::Extreme`] adds its path trials and a
+/// decode two orders slower than `-3`'s to a report run (issue #1824).
+pub const LEVELS: [Level; 4] = [Level::Fastest, Level::Fast, Level::Best, Level::Extreme];
 
 /// The digit the CLI selects `level` by.
 fn level_digit(level: Level) -> char {
