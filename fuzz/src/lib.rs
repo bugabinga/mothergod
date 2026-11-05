@@ -25,3 +25,20 @@ pub mod frame_gen;
 /// real seed these targets carry (frame_gen's largest preimage is a few
 /// KB) without reintroducing the bomb-shaped worst case.
 pub const FUZZ_MAX_DECODED_LEN: u32 = 1 << 20;
+
+/// The most bytes a fuzz target hands to [`mothergod::compress`]:
+/// `roundtrip` truncates its input to it, and one
+/// [`frame_gen::PreimageRecipe`] materializes no more, whole buffer
+/// included (a `ColumnarDrift`'s `columns * rows` is held to it, not each
+/// factor alone).
+///
+/// The cost that sets it is the fuzz build's, not release's: under
+/// cargo-fuzz's instrumentation one `compress` ran about 65 to 110 times
+/// slower than release (issue #1859: 104 s for the former 64 x 4096
+/// drift, 6.5 s for 4096 random bytes), and `frame_recipe` and
+/// `roundtrip` replayed their seeds at seconds each without mutating
+/// one. libFuzzer's default `-max_len` is 4096 or the largest seed, so
+/// `roundtrip` has no bound but this one. Under the address sanitizer,
+/// with #1864's table fill, one `roundtrip` execution of random bytes
+/// costs about 20 ms empty, 0.35 s at 512 bytes and 2.6 s at 4096.
+pub const FUZZ_MAX_PREIMAGE_LEN: usize = 512;
