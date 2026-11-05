@@ -213,18 +213,21 @@ fn pseudo_random(mut seed: u32, len: usize) -> Vec<u8> {
     data
 }
 
-/// One dimension (a length, a row count) a recipe hands to a generator
-/// below. Capped well under the tens-to-low-thousands range the
-/// hand-picked [`preimages`] already use: this module's doc comment
-/// measured a 1 MiB preimage at 1.6s/`compress` in release and unfinished
-/// after 280s in debug, because `encode` trials every filter candidate
-/// through the full optimal-parse pipeline per call. `columns` in
-/// [`PreimageRecipe::ColumnarDrift`] is capped separately and tighter,
-/// since it multiplies against a row count rather than standing alone.
-const MAX_DIM: usize = 4096;
+/// The most bytes one [`PreimageRecipe`] materializes, whole buffer
+/// included: a [`PreimageRecipe::ColumnarDrift`]'s `columns * rows` is
+/// held to it too, not each factor alone. The cost that sets it is the
+/// fuzz build's, not release's: under cargo-fuzz's instrumentation one
+/// `compress` ran about 65 to 110 times slower than release (issue #1859:
+/// 104 s for the former 64 x 4096 drift, 6.5 s for 4096 random bytes),
+/// and `frame_recipe` replayed its seeds at seconds each, past its whole
+/// nightly slice, without mutating one. At 512 bytes one execution costs
+/// at most about 1 s under the address sanitizer, against about 0.25 s
+/// for an empty input,
+/// a per-call floor this cap cannot lower (#1862).
+const MAX_PREIMAGE_LEN: usize = 512;
 
-fn bound_dim(raw: u16) -> usize {
-    usize::from(raw) % (MAX_DIM + 1)
+fn bound_len(raw: u16) -> usize {
+    usize::from(raw) % (MAX_PREIMAGE_LEN + 1)
 }
 
 /// Structured recipe for one preimage (issue #451, mechanism item 3):
@@ -244,10 +247,11 @@ pub enum PreimageRecipe {
     /// The 0..=255 byte cycle `cyclic_bytes` fixes at 5000 bytes, varying
     /// length only: distance-256 repeat structure throughout.
     Cyclic { len: u16 },
-    /// `columnar_drift`'s shape, generalized: `columns` capped at 64 so
-    /// `columns * rows` cannot run away the way an unbounded `u16 * u16`
-    /// would (frame_gen's own doc comment on why whole-buffer size
-    /// matters here). `pick_selects_delta_for_columnar_drift` and
+    /// `columnar_drift`'s shape, generalized: `columns` capped at 64 and
+    /// `rows` cut so `columns * rows` stays within [`MAX_PREIMAGE_LEN`],
+    /// where an unbounded `u8 * u16` would run away (that constant's doc
+    /// on why whole-buffer size matters).
+    /// `pick_selects_delta_for_columnar_drift` and
     /// `pick_shortlists_transpose_for_column_structured_data` (in
     /// `src/filters.rs`) key off exactly this shape at columns 4 and 8;
     /// other column counts explore neighboring filter-selection behavior
@@ -268,40 +272,46 @@ impl PreimageRecipe {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         match *self {
-            PreimageRecipe::RepeatedByte { byte, len } => vec![byte; bound_dim(len)],
-            PreimageRecipe::Cyclic { len } => (0..=255u8).cycle().take(bound_dim(len)).collect(),
+            PreimageRecipe::RepeatedByte { byte, len } => vec![byte; bound_len(len)],
+            PreimageRecipe::Cyclic { len } => (0..=255u8).cycle().take(bound_len(len)).collect(),
             PreimageRecipe::ColumnarDrift { columns, rows } => {
-                columnar_drift(usize::from(columns) % 65, bound_dim(rows))
+                let columns = usize::from(columns) % 65;
+                let max_rows = MAX_PREIMAGE_LEN.checked_div(columns).unwrap_or(0);
+                columnar_drift(columns, bound_len(rows).min(max_rows))
             }
-            PreimageRecipe::BcjDense { len } => bcj_opcode_dense(bound_dim(len)),
-            PreimageRecipe::PseudoRandom { seed, len } => pseudo_random(seed, bound_dim(len)),
+            PreimageRecipe::BcjDense { len } => bcj_opcode_dense(bound_len(len)),
+            PreimageRecipe::PseudoRandom { seed, len } => pseudo_random(seed, bound_len(len)),
         }
     }
 }
 
-fn wants_nontrivial_len(len: u16) -> bool {
-    len > 256
+/// Judged on the materialized bytes, not the raw fields, because
+/// [`bound_len`] wraps a raw length past [`MAX_PREIMAGE_LEN`] back
+/// toward zero: a seed picked on its raw `len` could replay as an empty
+/// preimage.
+fn is_nontrivial(recipe: &PreimageRecipe) -> bool {
+    recipe.to_bytes().len() > 256
 }
 
 fn is_repeated_byte(recipe: &PreimageRecipe) -> bool {
-    matches!(recipe, PreimageRecipe::RepeatedByte { len, .. } if wants_nontrivial_len(*len))
+    matches!(recipe, PreimageRecipe::RepeatedByte { .. }) && is_nontrivial(recipe)
 }
 
 fn is_cyclic(recipe: &PreimageRecipe) -> bool {
-    matches!(recipe, PreimageRecipe::Cyclic { len } if wants_nontrivial_len(*len))
+    matches!(recipe, PreimageRecipe::Cyclic { .. }) && is_nontrivial(recipe)
 }
 
 fn is_columnar_drift(recipe: &PreimageRecipe) -> bool {
-    matches!(recipe, PreimageRecipe::ColumnarDrift { columns, rows }
-        if *columns >= 2 && wants_nontrivial_len(*rows))
+    matches!(recipe, PreimageRecipe::ColumnarDrift { columns, .. } if *columns % 65 >= 2)
+        && is_nontrivial(recipe)
 }
 
 fn is_bcj_dense(recipe: &PreimageRecipe) -> bool {
-    matches!(recipe, PreimageRecipe::BcjDense { len } if wants_nontrivial_len(*len))
+    matches!(recipe, PreimageRecipe::BcjDense { .. }) && is_nontrivial(recipe)
 }
 
 fn is_pseudo_random(recipe: &PreimageRecipe) -> bool {
-    matches!(recipe, PreimageRecipe::PseudoRandom { len, .. } if wants_nontrivial_len(*len))
+    matches!(recipe, PreimageRecipe::PseudoRandom { .. }) && is_nontrivial(recipe)
 }
 
 /// Raw byte buffers that `arbitrary` decodes into a non-trivial instance
@@ -460,7 +470,7 @@ mod tests {
                 seed: 0xdead_beef,
                 len: 2048,
             },
-            // Every field at its type's max: MAX_DIM/column-cap bounding
+            // Every field at its type's max: MAX_PREIMAGE_LEN bounding
             // must hold even at the widest input Arbitrary can hand this
             // enum, the case a corpus-less fuzz run reaches first.
             PreimageRecipe::ColumnarDrift {
@@ -480,18 +490,31 @@ mod tests {
     }
 
     #[test]
-    fn preimage_recipe_dimensions_stay_bounded() {
-        let recipe = PreimageRecipe::PseudoRandom {
-            seed: 0,
-            len: u16::MAX,
-        };
-        assert!(recipe.to_bytes().len() <= MAX_DIM);
-
-        let recipe = PreimageRecipe::ColumnarDrift {
-            columns: u8::MAX,
-            rows: u16::MAX,
-        };
-        assert!(recipe.to_bytes().len() <= 64 * MAX_DIM);
+    fn preimage_recipe_lengths_stay_bounded() {
+        let recipes = [
+            PreimageRecipe::PseudoRandom {
+                seed: 0,
+                len: u16::MAX,
+            },
+            PreimageRecipe::PseudoRandom { seed: 0, len: 512 },
+            // 60 columns of 384 rows before the product cap.
+            PreimageRecipe::ColumnarDrift {
+                columns: u8::MAX,
+                rows: u16::MAX,
+            },
+            // 64 columns of 512 rows before the product cap.
+            PreimageRecipe::ColumnarDrift {
+                columns: 64,
+                rows: 512,
+            },
+        ];
+        for recipe in recipes {
+            let len = recipe.to_bytes().len();
+            assert!(
+                len <= MAX_PREIMAGE_LEN,
+                "{recipe:?} materialized {len} bytes"
+            );
+        }
     }
 
     #[test]
@@ -512,6 +535,10 @@ mod tests {
             assert!(
                 right_shape,
                 "seed {name} decoded into {recipe:?}, wrong shape"
+            );
+            assert!(
+                is_nontrivial(&recipe),
+                "seed {name} decoded into {recipe:?}, which materializes 256 bytes or fewer"
             );
         }
     }
