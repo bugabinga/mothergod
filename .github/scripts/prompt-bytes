@@ -81,7 +81,7 @@ PINNED = {
     "deslop": 2024,
     "heartbeat": 4791,
     "herald": 1947,
-    "review": 5614,
+    "review": 5796,
 }
 
 # The fleet's budget, UTF-8 bytes summed over every seat (#1629). Raise it in

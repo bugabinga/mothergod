@@ -287,11 +287,15 @@ jobs:
               the label pair and stamps the comment with the diff it covers.
               Then merge as your last action:
               `.github/scripts/merge-pr $PR_NUMBER --sha "$HEAD_SHA"`.
-              Attempt it before predicting it will fail; an unsigned branch
-              commit is not a reason to stop (GOVERNANCE.md "Merging"). Exit 2
-              means required gates are still pending and the merge is armed
-              on your head: stop. Any other failure: say so on the thread;
-              the BDFL sweep rescues an approved PR.
+              Attempt it; an unsigned branch commit is no reason to stop
+              (GOVERNANCE.md "Merging"). Exit 2 means required gates are
+              still pending and the merge is armed on your head: stop. Any
+              other failure: say so on the thread; the BDFL sweep rescues
+              an approved PR.
+              A PASS is a merge: the sweep rescues every `agent-approved`
+              PR and reads no prose (#1852 landed past its verdict's hold).
+              Right code waiting on something outside the diff is FAIL,
+              one [must] naming the wait.
               One carve-out: a diff touching `.github/workflows/` is the BDFL's
               to merge (GOVERNANCE.md "Merging"). Post the verdict and the
               label, say the merge is the BDFL's, and stop.
