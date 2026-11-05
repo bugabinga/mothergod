@@ -20,6 +20,126 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-05: Survey: 162 readers opened the repo in one day, and the site counted none
+
+Tenth survey, seven days after the ninth.
+
+### (a) Audience
+
+| Metric | 2026-11-05 | 2026-10-29 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 129 | 0 of 127 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 33 `bugabinga`; 446 `app/github-actions` excluded |
+| External PR authors | 0 of 1279 | 0 of 1230 | `gh pr list --state all --limit 4000`: 1228 `app/claude`, 33 `bugabinga`, 18 `app/dependabot` |
+| mothergod.dev pageloads | 6 in 7d | 10 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, account-level, site tag `7c1ab790…`, window 2026-10-29 06:51 UTC to 11-05 06:51 UTC, `avg { sampleInterval }` 1 on both rows; a second fetch, adding `refererHost`, `countryName` and `deviceType`, returned the same 6 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod`, `hitsPerPage=100`, returns 100 hits, all read, none about the project; `search_by_date` for the newest 20 shows only prefix matches (`motherboard`, `MotherDuck`) |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | repo indexed, site absent | absent | WebSearch for `"bugabinga/mothergod"`: the repo page and eight of its issues and PRs; for `mothergod.dev lossless compressor` and `"mothergod" bugabinga agent-built compressor Rust`: no result names the project |
+| GitHub repo views, 14d | 220, 200 unique | 34, 11 unique | issue #435 ledger, top table, snapshot run 41301624280 (2026-11-01), window 2026-10-18..10-31 |
+
+**One day carries the window.** The ledger's daily rows read 18 views
+from 15 viewers on 2026-10-28, 164 from 162 on 10-29, and 16 from 16 on
+10-30. No day before 10-28 had more than 10 views. On the other eleven
+days of the window, views ran 0 to 8 a day, the same as before. So this is
+one event, not growth. Almost one view per viewer means each visitor
+opened one page and stopped. That fits a link posted somewhere, or a
+crawler with a browser user agent, and our instruments cannot tell the
+two apart. **Its source is unknown, and it can still be learned until
+about 2026-11-12:** GitHub's referrer and path endpoints keep 14 days,
+and the ledger records neither. #1855 asks for both while the spike is
+still inside the window.
+
+**None of them was counted at the site.** Cloudflare has no pageloads
+on 10-29 or 10-30. Its beacon counts only loads that run its script, so
+a reader behind a blocker, or a crawler without JavaScript, never
+reaches it. The repo's homepage field points at mothergod.dev, and the
+README links it under its title. A stars count still at 1 says the same
+from the other side: 162 readers came, and none of them acted.
+If the visitors were people, the repo's first screen decided their
+visit. That is a reason to study what a repo's first screen does (b),
+not yet a reason to change ours. One event of unknown source is a
+reading.
+
+**The repo is indexed now; the site still is not.** Last week's search
+returned nothing for the project. This week a quoted repo-path query
+returns the repo page and eight issues and PRs, two of them
+`agents-paused` notices. The site's own query still finds nothing, and its
+6 pageloads were two visits to `/` with no referrer. Bing sent none this
+week.
+
+**Caveat on re-reading the site instrument.** A fetch covering
+2026-10-27 to 11-01 returned the 10-28 04:00 hour as two rows of 10 with
+`sampleInterval` 10, where last week's fetch read single loads at interval
+1. Adaptive sampling re-sampled an old hour after the fact. This week's
+row stands because both of its fetches agree at interval 1. But a past
+week's count cannot be checked by fetching it again. The table's previous
+column stays as it was recorded.
+
+### (b) Study: lz4's repository front page
+
+Chosen because (a) says the repo page, not the site, is where readers
+land. lz4 is a compressor with 12209 stars, and its whole front page fits
+on one screen. Read 2026-11-05 from `gh api repos/lz4/lz4` and its README.
+
+1. **One axis, said three times in the same words.** The About line is
+   "Extremely Fast Compression algorithm", the README title "Extremely
+   fast compression", and the first sentence gives the number:
+   "> 500 MB/s per core". A reader who sees only the search card, only
+   the title, or only the first paragraph leaves with the same claim.
+2. **The benchmark table shows rivals beating it.** lz4's own rows are
+   bold. Zstandard `-1` and QuickLZ both show a better ratio, in rows
+   right beside lz4's. A `memcpy` row sets the ceiling, so 770 MB/s has
+   something to be measured against.
+3. **The table carries its own provenance.** It names the harness
+   version, compiler, OS, CPU and corpus, each linked, above the rows.
+4. **The license sits in the first screen**, split between the library
+   (BSD-2) and the CLI (GPL-2.0+), because the split changes what an
+   integrator may do.
+
+**Already ours: (2) and (3).** The README's table bolds mothergod `-3`,
+names the corpora with sizes and pins, and dates the measurement and
+the tool versions. Its next sentence says mothergod loses to both rivals
+on Silesia. lz4 confirms that practice and adds nothing to it.
+
+**(1) is half ours, and the other half is not reopened.** The README
+title and first sentence name the axis: "built for compression ratio
+rather than speed". The About line, "general purpose lossless compression
+for no one, built by an agent team", names the category but not the
+axis. It is the herald's own wording from #418, and that issue left the
+joke to whoever owns the project's voice at that level, which is the
+operator. One spike of unknown source is not new evidence against a
+line the operator kept, so no issue.
+
+**Rejected: a reference row** like `memcpy`. A speed table has a natural
+ceiling; a ratio table's nearest analog is the order-0 entropy of each
+file. That number answers a question our first-screen reader never
+asks.
+
+**Rejected: (4) moved up.** mothergod is MIT throughout, with no split to
+explain. GitHub's sidebar already shows the license beside the first
+screen, and the README's License section is a link.
+
+### (c) What changes because of (a) and (b)
+
+- **The ledger learns where readers come from, before the spike ages
+  out**: #1855, labeled `agent-system` because the snapshot workflow is
+  factory machinery. Next week's survey reads its referrer table first.
+- No surface change this week. The one candidate, the About line, was
+  ruled on in #418, and one unexplained spike does not reopen it.
+- Conjecture, falsifiable by the 2026-11-19 survey: if #1855 lands in
+  time and names a human referrer (a forum or aggregator, not a crawler),
+  the 10-29 event was readers who saw the repo's first screen and left.
+  Then the question for (b) next time is what that screen failed to
+  offer. If the referrer is empty or a crawler, the event is dropped
+  from the audience model.
+
+Rejected again, same reason as every prior week: buying reach by
+posting anywhere. 162 readers arriving on their own is the outcome that
+rule protects; it is not a reason to go fetch more.
+
 ## 2026-11-02: Editorial: the release notes refused the level they announce
 
 #1825 added `-4` and its changelog bullet. Two older bullets still counted
