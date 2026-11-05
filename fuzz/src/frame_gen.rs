@@ -26,6 +26,8 @@
 
 use arbitrary::{Arbitrary, Unstructured};
 
+use crate::FUZZ_MAX_PREIMAGE_LEN;
+
 /// One named, deterministic preimage: the raw bytes handed to
 /// [`mothergod::compress`], not a frame itself. Exposed alongside
 /// [`frames`] so a caller seeding the always-valid `roundtrip` fuzz
@@ -213,21 +215,8 @@ fn pseudo_random(mut seed: u32, len: usize) -> Vec<u8> {
     data
 }
 
-/// The most bytes one [`PreimageRecipe`] materializes, whole buffer
-/// included: a [`PreimageRecipe::ColumnarDrift`]'s `columns * rows` is
-/// held to it too, not each factor alone. The cost that sets it is the
-/// fuzz build's, not release's: under cargo-fuzz's instrumentation one
-/// `compress` ran about 65 to 110 times slower than release (issue #1859:
-/// 104 s for the former 64 x 4096 drift, 6.5 s for 4096 random bytes),
-/// and `frame_recipe` replayed its seeds at seconds each, past its whole
-/// nightly slice, without mutating one. At 512 bytes one execution costs
-/// at most about 1 s under the address sanitizer, against about 0.25 s
-/// for an empty input,
-/// a per-call floor this cap cannot lower (#1862).
-const MAX_PREIMAGE_LEN: usize = 512;
-
 fn bound_len(raw: u16) -> usize {
-    usize::from(raw) % (MAX_PREIMAGE_LEN + 1)
+    usize::from(raw) % (FUZZ_MAX_PREIMAGE_LEN + 1)
 }
 
 /// Structured recipe for one preimage (issue #451, mechanism item 3):
@@ -248,7 +237,7 @@ pub enum PreimageRecipe {
     /// length only: distance-256 repeat structure throughout.
     Cyclic { len: u16 },
     /// `columnar_drift`'s shape, generalized: `columns` capped at 64 and
-    /// `rows` cut so `columns * rows` stays within [`MAX_PREIMAGE_LEN`],
+    /// `rows` cut so `columns * rows` stays within [`FUZZ_MAX_PREIMAGE_LEN`],
     /// where an unbounded `u8 * u16` would run away (that constant's doc
     /// on why whole-buffer size matters).
     /// `pick_selects_delta_for_columnar_drift` and
@@ -276,7 +265,7 @@ impl PreimageRecipe {
             PreimageRecipe::Cyclic { len } => (0..=255u8).cycle().take(bound_len(len)).collect(),
             PreimageRecipe::ColumnarDrift { columns, rows } => {
                 let columns = usize::from(columns) % 65;
-                let max_rows = MAX_PREIMAGE_LEN.checked_div(columns).unwrap_or(0);
+                let max_rows = FUZZ_MAX_PREIMAGE_LEN.checked_div(columns).unwrap_or(0);
                 columnar_drift(columns, bound_len(rows).min(max_rows))
             }
             PreimageRecipe::BcjDense { len } => bcj_opcode_dense(bound_len(len)),
@@ -286,7 +275,7 @@ impl PreimageRecipe {
 }
 
 /// Judged on the materialized bytes, not the raw fields, because
-/// [`bound_len`] wraps a raw length past [`MAX_PREIMAGE_LEN`] back
+/// [`bound_len`] wraps a raw length past [`FUZZ_MAX_PREIMAGE_LEN`] back
 /// toward zero: a seed picked on its raw `len` could replay as an empty
 /// preimage.
 fn is_nontrivial(recipe: &PreimageRecipe) -> bool {
@@ -470,7 +459,7 @@ mod tests {
                 seed: 0xdead_beef,
                 len: 2048,
             },
-            // Every field at its type's max: MAX_PREIMAGE_LEN bounding
+            // Every field at its type's max: FUZZ_MAX_PREIMAGE_LEN bounding
             // must hold even at the widest input Arbitrary can hand this
             // enum, the case a corpus-less fuzz run reaches first.
             PreimageRecipe::ColumnarDrift {
@@ -511,7 +500,7 @@ mod tests {
         for recipe in recipes {
             let len = recipe.to_bytes().len();
             assert!(
-                len <= MAX_PREIMAGE_LEN,
+                len <= FUZZ_MAX_PREIMAGE_LEN,
                 "{recipe:?} materialized {len} bytes"
             );
         }
