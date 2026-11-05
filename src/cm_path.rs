@@ -116,7 +116,7 @@ const _: () = assert!(
 );
 
 /// Bit-tree nodes per nibble, numbered `1..NIBBLE_NODES` from the
-/// nibble's root, `node * 2 + bit` per step, as the byte's tree is; so
+/// nibble's root, one [`child`] per step, as the byte's tree is; so
 /// also the byte's node id at which the low nibble starts.
 const NIBBLE_NODES: usize = 16;
 
@@ -324,6 +324,13 @@ fn length_bucket(length: usize) -> usize {
         128..=255 => 19,
         _ => 20,
     }
+}
+
+/// The child of bit-tree `node` that `bit` selects: root `1`, children
+/// `2n` and `2n + 1`, so a node id holds the path's bits below its top
+/// `1`.
+fn child(node: usize, bit: bool) -> usize {
+    node * 2 + usize::from(bit)
 }
 
 /// lpaq1's match model over the reconstructed stream: the most recent
@@ -555,8 +562,8 @@ impl CmPath {
             } else {
                 hi = mid;
             }
-            node = node * 2 + usize::from(bit);
-            nibble_node = nibble_node * 2 + usize::from(bit);
+            node = child(node, bit);
+            nibble_node = child(nibble_node, bit);
             if nibble_node >= NIBBLE_NODES {
                 nibble_node = 1;
             }
