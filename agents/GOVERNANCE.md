@@ -338,6 +338,13 @@ bound until #1382). That branch is the heartbeat's handoff, not a PR
 to open: the heartbeat's claim check resumes from it, and the row
 stands every wake until its PR exists. A third parked branch makes
 the case for a commit trailer `stalled-prs` reads instead of a human.
+A handoff whose work another PR already landed is neither: delete it,
+`GH_TOKEN=$(cat "$GH_TOKEN_FILE") gh api -X DELETE
+repos/<owner>/<repo>/git/refs/heads/<branch>`, on the sidecar's fresh
+mint because the session's own token is the one that dies at the hour.
+Three maintainer sessions called `claude/bcj-try-decode-mutants`
+superseded by #1849 and left it standing, one on an expired token, one
+believing the seat could not delete a branch; it can.
 
 This one cannot be fixed the way the comment half was. Issue creation
 moved to the workflow token and stopped expiring; PR creation cannot
