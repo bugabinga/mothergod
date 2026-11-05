@@ -20,6 +20,29 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-05: Editorial: words beside a table name bands, not roundings
+
+#1834. The site's Silesia sentence said "roughly eighteen times slower
+than decoding" and "about twenty-six minutes to compress". Both were
+rounded from rates the table under them already shows. A run inside
+ordinary spread moved them: eighteen had been nineteen a publish earlier,
+twenty-six had been twenty-seven. Two of three publishes paid a hand edit
+for a digit that told the reader nothing the table did not.
+
+**The sentence now says "under half an hour", "under two minutes" and
+"more than ten times".** These are the shapes a reader decides with: wait
+a coffee, not an afternoon; reading back is fast. `tests/claims.rs` holds
+each word to a band. One end keeps it true. The other end keeps it from
+understating by a whole band: compress at 15 to 30 minutes, read back at
+1 to 2, the slowdown at 10 to 100 times. Today's report sits at 26.4
+minutes, 1.5 minutes and 17.6 times, so noise has room on every side.
+
+**Rule:** a word derived from a table it sits beside names a band, with
+the test holding both ends. A rounded figure belongs in the table, where
+`bench-report --publish` stamps it. Rejected: stamping the sentence from a
+template at publish time (#1834's option 2). That builds machinery for a
+single sentence, and the stamped digit would still carry nothing.
+
 ## 2026-11-05: Survey: 162 readers opened the repo in one day, and the site counted none
 
 Tenth survey, seven days after the ninth.
