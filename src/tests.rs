@@ -1230,12 +1230,19 @@ fn compress_is_compress_level_at_the_default_level_best() {
 
 #[test]
 fn try_filled_vec_fills_exactly_n_without_regrowing() {
-    // Every length either side of a power of two: the doubling's last copy
-    // is the partial one, and a wrong bound there over- or under-fills.
-    for n in 0..=130 {
-        let v = try_filled_vec(n, 0xA5A5_0001u32).expect("a small vec fits");
+    fn check<T: Copy + PartialEq + std::fmt::Debug>(n: usize, value: T) {
+        let v = try_filled_vec(n, value).expect("a small vec fits");
         assert_eq!(v.len(), n);
-        assert!(v.iter().all(|&x| x == 0xA5A5_0001), "n = {n}");
+        assert!(v.iter().all(|&x| x == value), "n = {n}");
         assert_eq!(v.capacity(), n, "n = {n}: the fill reallocated");
+    }
+    // A 4 KiB element makes the 16 KiB chunk four elements, so every length
+    // here crosses chunk boundaries and ends on a partial last copy or not.
+    for n in 0..=13 {
+        check(n, [0xA5u8; 4096]);
+    }
+    // The table type `Literal` fills, either side of its chunk multiples.
+    for n in [0, 1, 4095, 4096, 4097, 8191, 8192, 8193, 3 * 4096 + 5] {
+        check(n, 0xA5A5_0001u32);
     }
 }
