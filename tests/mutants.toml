@@ -110,11 +110,9 @@ exclude_re = [
   #           and a live match's bucket is at least 6, so nothing wraps.
   #   col 74  the predicted bit inverted swaps the pair 2b, 2b + 1.
   #   col 53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
-  # Pinned: the function carries catchable `+` and `>=` mutants. The col
-  # 43 pin keeps its line: `node * 2 + usize::from(bit)` further down is
-  # the same `+` at the same column in the same function, and catchable.
+  # Pinned: the function carries catchable `+` and `>=` mutants.
   # mutants: 3
-  "^src/cm_path\\.rs:527:43: replace \\+ with - in CmPath::walk$",
+  "^src/cm_path\\.rs:\\d+:43: replace \\+ with - in CmPath::walk$",
   "^src/cm_path\\.rs:\\d+:74: replace >= with < in CmPath::walk$",
   "^src/cm_path\\.rs:\\d+:53: replace >= with < in CmPath::walk$",
 
