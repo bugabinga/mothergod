@@ -11,8 +11,7 @@
 //! `sealed_seed(baseline::CASE_SEED)`, same length, denominated by
 //! `research/README.md`'s schema (`CASE_LEN`, never the literal count).
 
-use crate::baseline::{self, CASE_LEN, CASE_SEED};
-use crate::sealed_seed;
+use crate::baseline::{self, CASE_LEN};
 use mothergod::literal::{Context, Literal};
 use mothergod::lz::{self, Token};
 
@@ -98,23 +97,6 @@ pub struct PairingReport {
     pub sealed: Vec<CaseDelta>,
 }
 
-/// The two sealed-only cases every pairing in this lead measures,
-/// `CASE_LEN` bytes at `sealed_seed(CASE_SEED)`: `baseline::cases()`
-/// excludes both by design (`research/corpus/POLICY.md`'s "no agent ever
-/// tunes against it"), so a pairing driver that also wants the sealed
-/// read generates them itself, same length and seed rule. Every pairing
-/// driver in this crate reads them through [`pair_cases`].
-fn sealed_cases() -> [(&'static str, Vec<u8>); 2] {
-    let seed = sealed_seed(CASE_SEED);
-    [
-        ("access_log (sealed)", crate::access_log(CASE_LEN, seed)),
-        (
-            "gradient_image (sealed)",
-            crate::gradient_image(CASE_LEN, seed),
-        ),
-    ]
-}
-
 /// Builds a [`PairingReport`] from `delta_for_case`, the candidate-minus-
 /// champion bits/byte of one case's bytes: the eleven `baseline::cases()`
 /// train cases, then the two sealed cases. The one place that fixes which
@@ -136,11 +118,11 @@ pub(crate) fn pair_cases(mut delta_for_case: impl FnMut(&[u8]) -> f64) -> Pairin
     )]
     let train_mean = train_sum / train.len() as f64;
 
-    let sealed: Vec<CaseDelta> = sealed_cases()
+    let sealed: Vec<CaseDelta> = baseline::sealed_cases(CASE_LEN)
         .into_iter()
-        .map(|(name, data)| CaseDelta {
-            name,
-            delta_bpb: delta_for_case(&data),
+        .map(|case| CaseDelta {
+            name: case.name,
+            delta_bpb: delta_for_case(&case.data),
         })
         .collect();
 

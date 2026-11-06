@@ -10,9 +10,10 @@
 //! `research/corpus/POLICY.md`'s "no agent ever tunes against it"), plus one
 //! case per entropy-ladder target since a single [`crate::DatasetKind::EntropyLadder`]
 //! case cannot name which of the ladder's five points it measured.
-//! [`measure_all`] compresses every case with `mothergod::compress` and
+//! [`measure_gate`] compresses every case with `mothergod::compress` and
 //! records, per case, its bits/byte and a digest of the compressed bytes
-//! (an [`Entry`]); [`format_baseline`]/[`parse_baseline`] round-trip that
+//! (an [`Entry`]); a [`Probe`] measures the same way at a chosen level and
+//! case length, over the train or the sealed cases, for the research loop; [`format_baseline`]/[`parse_baseline`] round-trip that
 //! [`Snapshot`] through `bench/baseline.json`; [`regressions`] compares a
 //! freshly measured bits/byte map against the committed baseline, and
 //! [`output_changes`] names the cases whose compressed bytes differ from the
@@ -20,6 +21,7 @@
 //! input set (issue #1182).
 
 use crate::DatasetKind;
+use mothergod::Level;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
@@ -57,8 +59,10 @@ pub const TOLERANCE_BITS: f64 = 0.02;
 pub struct Case {
     /// Stable name, this case's key in `bench/baseline.json`.
     pub name: &'static str,
-    /// Input bytes: [`CASE_LEN`] bytes at [`CASE_SEED`] from the named
-    /// generator (the entropy ladder additionally keyed by its target).
+    /// Input bytes: [`CASE_LEN`] bytes (or a [`Probe`]'s length) at
+    /// [`CASE_SEED`] from the named generator (the entropy ladder
+    /// additionally keyed by its target), or at its [`crate::sealed_seed`]
+    /// for a sealed case.
     pub data: Vec<u8>,
 }
 
@@ -80,34 +84,29 @@ fn entropy_ladder_case_name(bits: u8) -> &'static str {
     }
 }
 
-/// Stable case name and [`CASE_LEN`]/[`CASE_SEED`] bytes for one
-/// non-ladder, train-eligible [`DatasetKind`]. `None` for
+/// Stable case name and `len` bytes at [`CASE_SEED`] for one non-ladder,
+/// train-eligible [`DatasetKind`]. `None` for
 /// [`DatasetKind::EntropyLadder`] (handled separately by
 /// [`entropy_ladder_case_name`], since it needs a ladder target) and for a
 /// sealed-only kind (`DatasetKind::sealed_only`, excluded from this gate by
 /// design).
-fn dataset_case(kind: DatasetKind) -> Option<Case> {
+fn dataset_case(kind: DatasetKind, len: usize) -> Option<Case> {
     let (name, data): (&'static str, Vec<u8>) = match kind {
         DatasetKind::EntropyLadder | DatasetKind::AccessLog | DatasetKind::GradientImage => {
             return None;
         }
-        DatasetKind::MarkovH82Trap => (
-            "markov_h8_2_trap",
-            crate::markov_h8_2_trap(CASE_LEN, CASE_SEED),
-        ),
-        DatasetKind::JsonRecords => ("json_records", crate::json_records(CASE_LEN, CASE_SEED)),
-        DatasetKind::Base64Wrapped => {
-            ("base64_wrapped", crate::base64_wrapped(CASE_LEN, CASE_SEED))
-        }
+        DatasetKind::MarkovH82Trap => ("markov_h8_2_trap", crate::markov_h8_2_trap(len, CASE_SEED)),
+        DatasetKind::JsonRecords => ("json_records", crate::json_records(len, CASE_SEED)),
+        DatasetKind::Base64Wrapped => ("base64_wrapped", crate::base64_wrapped(len, CASE_SEED)),
         DatasetKind::InterleavedAudio16 => (
             "interleaved_audio16",
-            crate::interleaved_audio16(CASE_LEN, CASE_SEED),
+            crate::interleaved_audio16(len, CASE_SEED),
         ),
         DatasetKind::SqliteLikeRecords => (
             "sqlite_like_records",
-            crate::sqlite_like_records(CASE_LEN, CASE_SEED),
+            crate::sqlite_like_records(len, CASE_SEED),
         ),
-        DatasetKind::X86DenseCode => ("x86_dense_code", crate::x86_dense_code(CASE_LEN, CASE_SEED)),
+        DatasetKind::X86DenseCode => ("x86_dense_code", crate::x86_dense_code(len, CASE_SEED)),
     };
     Some(Case { name, data })
 }
@@ -116,15 +115,112 @@ fn dataset_case(kind: DatasetKind) -> Option<Case> {
 /// non-ladder, non-sealed-only [`DatasetKind`].
 #[must_use]
 pub fn cases() -> Vec<Case> {
+    train_cases(CASE_LEN)
+}
+
+/// [`cases`]' names and generators at `len` bytes each.
+fn train_cases(len: usize) -> Vec<Case> {
     let mut out: Vec<Case> = ENTROPY_LADDER_TARGETS
         .into_iter()
         .map(|bits| Case {
             name: entropy_ladder_case_name(bits),
-            data: crate::entropy_ladder(bits, CASE_LEN, CASE_SEED),
+            data: crate::entropy_ladder(bits, len, CASE_SEED),
         })
         .collect();
-    out.extend(DatasetKind::ALL.into_iter().filter_map(dataset_case));
+    out.extend(
+        DatasetKind::ALL
+            .into_iter()
+            .filter_map(|kind| dataset_case(kind, len)),
+    );
     out
+}
+
+/// The two sealed-only kinds at `len` bytes, at [`crate::sealed_seed`] of
+/// [`CASE_SEED`]: the held-out seed and the held-out kinds
+/// (`research/corpus/POLICY.md`). Never a gate case, because a gate an
+/// agent reacts to is a tuning loop. The one generator of the sealed read,
+/// for the pairing drivers at [`CASE_LEN`] and a [`Probe`] at any length.
+#[must_use]
+pub fn sealed_cases(len: usize) -> [Case; 2] {
+    let seed = crate::sealed_seed(CASE_SEED);
+    [
+        Case {
+            name: "access_log (sealed)",
+            data: crate::access_log(len, seed),
+        },
+        Case {
+            name: "gradient_image (sealed)",
+            data: crate::gradient_image(len, seed),
+        },
+    ]
+}
+
+/// Which cases a [`Probe`] reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CaseSet {
+    /// [`cases`]' names and generators: what every try reads.
+    #[default]
+    Train,
+    /// [`sealed_cases`]: read once per session, for the keeper
+    /// (`research/README.md`).
+    Sealed,
+}
+
+impl CaseSet {
+    /// How a report names the set's mean: `train` or `sealed`.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Train => "train",
+            Self::Sealed => "sealed",
+        }
+    }
+}
+
+/// A research measurement of whole frames on the real bitstream: `set`'s
+/// cases at `len` bytes each, compressed by `compress_level` at `level`.
+/// [`Probe::default`] is what `baseline_gate measure` reads with no
+/// option: the train cases at [`CASE_LEN`] through `compress`. A wired
+/// change visible only past a length or at a level (a reach past
+/// [`mothergod::lz::WIDE_WINDOW`], a `-2` trial) is measured by moving
+/// those two, every case one length, so the mean's denominator stays one
+/// length (`research/README.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Probe {
+    /// The cases read.
+    pub set: CaseSet,
+    /// The level every case is compressed at.
+    pub level: Level,
+    /// Bytes generated per case.
+    pub len: usize,
+}
+
+impl Default for Probe {
+    fn default() -> Self {
+        Self {
+            set: CaseSet::Train,
+            level: Level::default(),
+            len: CASE_LEN,
+        }
+    }
+}
+
+impl Probe {
+    /// The cases this probe compresses, in [`cases`]' order for the train
+    /// set and [`sealed_cases`]' for the sealed one.
+    #[must_use]
+    pub fn cases(self) -> Vec<Case> {
+        match self.set {
+            CaseSet::Train => train_cases(self.len),
+            CaseSet::Sealed => sealed_cases(self.len).into(),
+        }
+    }
+
+    /// Every case's [`Entry`] at this probe's level.
+    #[must_use]
+    pub fn measure(self) -> Snapshot {
+        measure(&self.cases(), self.level)
+    }
 }
 
 /// Bytes of the block a [`ReachCase`] repeats.
@@ -243,7 +339,8 @@ pub struct Entry {
 }
 
 /// Every case's [`Entry`], keyed by [`Case::name`]: what one
-/// [`measure_all`] run or one `bench/baseline.json` holds.
+/// [`Probe::measure`] or [`measure_gate`] run or one `bench/baseline.json`
+/// holds.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Snapshot {
     /// Entries in name order, the order the file is written in.
@@ -281,30 +378,24 @@ impl Snapshot {
     }
 }
 
-/// Compresses every [`cases`] entry through `mothergod::compress` and
-/// records each one's bits/byte and output digest, keyed by [`Case::name`].
-/// The train measurement: `measure` and `delta` use it, because their mean
-/// counts [`CASE_LEN`]-byte cases only.
-#[must_use]
-pub fn measure_all() -> Snapshot {
-    measure(&cases())
-}
-
-/// [`measure_all`] plus the [`REACH_CASES`]: what `check` and `write` hold
+/// Every [`cases`] entry plus the [`REACH_CASES`], compressed through
+/// `mothergod::compress`: what `check` and `write` hold
 /// `bench/baseline.json` to.
 #[must_use]
 pub fn measure_gate() -> Snapshot {
     let mut gate = cases();
     gate.extend(REACH_CASES.map(ReachCase::case));
-    measure(&gate)
+    measure(&gate, Level::default())
 }
 
-/// Compresses each of `cases` and records its [`Entry`].
-fn measure(cases: &[Case]) -> Snapshot {
+/// Compresses each of `cases` at `level` and records its [`Entry`].
+/// `Level::default()` is `mothergod::compress`, by that function's
+/// definition.
+fn measure(cases: &[Case], level: Level) -> Snapshot {
     let cases = cases
         .iter()
         .map(|case| {
-            let compressed = mothergod::compress(&case.data);
+            let compressed = mothergod::compress_level(&case.data, level);
             let entry = Entry {
                 bpb: bits_per_byte(compressed.len(), case.data.len()),
                 digest: fnv1a(&compressed),
@@ -615,10 +706,12 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, Entry, REACH_BLOCK_LEN, REACH_CASES, Snapshot,
-        TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a, format_baseline, hold_at_best,
-        mean_delta, output_changes, parse_baseline, regressions,
+        BaselineParseError, CASE_LEN, CASE_SEED, CaseSet, Entry, Probe, REACH_BLOCK_LEN,
+        REACH_CASES, Snapshot, TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a,
+        format_baseline, hold_at_best, mean_delta, output_changes, parse_baseline, regressions,
+        sealed_cases,
     };
+    use mothergod::Level;
     use mothergod::lz::Reach;
     use std::collections::BTreeMap;
 
@@ -692,6 +785,85 @@ mod tests {
         assert!(
             REACH_CASES[1].input_len() > mothergod::lz::WIDE_WINDOW,
             "compress runs the far trial only past the wide window"
+        );
+    }
+
+    #[test]
+    fn the_default_probe_reads_the_gate_cases() {
+        assert_eq!(Probe::default().cases(), cases());
+    }
+
+    /// A probe's length moves every case's bytes and no case's name: the
+    /// train cases at a length are the gate's generators run longer.
+    #[test]
+    fn a_probe_generates_its_set_at_its_length() {
+        let len = CASE_LEN + 1;
+        let train = Probe {
+            len,
+            ..Probe::default()
+        }
+        .cases();
+        let names = |cases: &[super::Case]| cases.iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names(&train), names(&cases()));
+        assert_eq!(
+            train[0].data,
+            crate::entropy_ladder(1, len, CASE_SEED),
+            "same generator and seed, longer"
+        );
+        let sealed = Probe {
+            set: CaseSet::Sealed,
+            len,
+            ..Probe::default()
+        }
+        .cases();
+        assert_eq!(sealed, sealed_cases(len));
+        for case in train.iter().chain(&sealed) {
+            assert_eq!(case.data.len(), len, "case {}", case.name);
+        }
+    }
+
+    #[test]
+    fn sealed_cases_are_the_held_out_kinds_at_the_held_out_seed() {
+        let seed = crate::sealed_seed(CASE_SEED);
+        let [access_log, gradient_image] = sealed_cases(CASE_LEN);
+        assert_eq!(access_log.name, "access_log (sealed)");
+        assert_eq!(access_log.data, crate::access_log(CASE_LEN, seed));
+        assert_eq!(gradient_image.name, "gradient_image (sealed)");
+        assert_eq!(gradient_image.data, crate::gradient_image(CASE_LEN, seed));
+    }
+
+    /// A probe's snapshot is `compress_level` at its level on its cases,
+    /// byte for byte: every level writes a different frame on at least one
+    /// case, so a probe that ignored its level would fail here.
+    #[test]
+    fn a_probe_measures_its_cases_at_its_level() {
+        let len = 4096;
+        let snapshots = [Level::Fastest, Level::Best].map(|level| {
+            let probe = Probe {
+                level,
+                len,
+                ..Probe::default()
+            };
+            let measured = probe.measure();
+            for case in probe.cases() {
+                let frame = mothergod::compress_level(&case.data, level);
+                let entry = measured.cases[case.name];
+                assert_eq!(entry.digest, fnv1a(&frame), "{level:?} {}", case.name);
+                assert!(
+                    (entry.bpb - bits_per_byte(frame.len(), len)).abs() < 1e-12,
+                    "{level:?} {}",
+                    case.name
+                );
+            }
+            measured
+        });
+        let [fastest, best] = snapshots;
+        assert!(
+            fastest
+                .cases
+                .iter()
+                .any(|(name, entry)| best.cases[name].digest != entry.digest),
+            "the two levels write the same frame on every case"
         );
     }
 
