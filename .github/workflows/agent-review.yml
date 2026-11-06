@@ -250,19 +250,18 @@ jobs:
                goes unmentioned: the ruleset and `merge-pr --sha` already hold
                the merge on it, so naming it changes no reader's action.
                So does a `cancelled` one at 0 s with no log: this workflow's
-               earlier run on the head, cancelled by the debounce when a later
-               event on the PR arrived (ADR-0014). `gh pr checks` prints the
-               cancel as fail; it is not a red.
+               earlier run on the head, debounced (ADR-0014), not a red.
                Spend your Bash budget on what CI does not check: check out the
                branch and run whatever the PR's specific claims rest on.
                Anything that executes PR code runs through
                `.github/scripts/probe <command>` (its header says why); gh
                stays outside probe. A claim of the PR's you did not execute
-               is unverified: say so. The gates' own coverage is no such
-               claim: "fmt, clippy, test and doc unverified by me" is the
-               pending clause with another verb (PR #1056's review).
-            3. Codec changes: round-trip the change's data class plus
-               truncated and bit-flipped inputs; no test, guard, benchmark or
+               is unverified: say so. Never list the gates as unverified:
+               that is the pending clause with another verb (PR #1056).
+            3. Codec changes: round-trip the change's data class, then
+               `cargo run -p mothergod-bench --release --bin frame_probe --
+               <file>...` on its inputs, cited by its `silent 0` line
+               (#1210); no test, guard, benchmark or
                corpus weakened to flatter a metric (JOURNAL S1-L5); journal and
                progress.jsonl entries present; every quoted number names its
                corpus. A regenerated current-version tests/golden/ pair is
