@@ -95,11 +95,9 @@ pub mod delta {
         /// each result feeds the call `stride` bytes later.
         pub(crate) fn apply(&mut self, filtered_byte: u8) -> u8 {
             let slot = self.count % self.stride;
-            let raw = if self.count < self.stride {
-                filtered_byte
-            } else {
-                filtered_byte.wrapping_add(self.history[slot])
-            };
+            // `history` starts zeroed, so the first `stride` bytes, which
+            // `encode` leaves as they are, add nothing.
+            let raw = filtered_byte.wrapping_add(self.history[slot]);
             self.history[slot] = raw;
             self.count += 1;
             raw
