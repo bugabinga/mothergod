@@ -19,7 +19,7 @@ recorded experiment in
 Aggregate bits per byte, lower is better, on the held-out final corpora:
 Canterbury (11 files, 2.8 MB) and Silesia (12 files, 212 MB), each pinned by
 URL and SHA-256 in [`bench/corpus.toml`](bench/corpus.toml), fetched at
-measurement time and never committed. Measured 2026-11-05 against
+measurement time and never committed. Measured 2026-11-06 against
 `gzip 1.12`, `Zstandard 1.5.7` and `XZ Utils 5.4.5` at the flags below.
 
 | corpus | **mothergod -3** | gzip -9 | zstd -19 | xz -9e |
@@ -41,9 +41,9 @@ attached. Every file's numbers:
 [Silesia](docs/benchmarks/silesia.md).
 
 **It is slow, single-run, on one CI machine.** mothergod encoded Canterbury at
-0.251 MB/s and decoded it at 3.517 MB/s; it encoded Silesia at 0.134 MB/s and
-decoded it at 2.363 MB/s. In the same run, `xz -9e` encoded Silesia at 2.009
-MB/s and decoded it at 67.392 MB/s, more than nine times faster to encode and
+0.249 MB/s and decoded it at 3.606 MB/s; it encoded Silesia at 0.132 MB/s and
+decoded it at 2.447 MB/s. In the same run, `xz -9e` encoded Silesia at 2.029
+MB/s and decoded it at 68.872 MB/s, more than nine times faster to encode and
 more than twenty times faster to decode.
 The same two reports name the machine, give every file's rates, and end
 with every level of gzip, zstd and xz beside mothergod, peak memory
@@ -97,13 +97,13 @@ cmp FILE FILE.out   # silence means the round trip was lossless
 Given a file, it writes `<file>.mgdc` beside it, and unlike `gzip` it never
 deletes the input. `--help` lists the rest on one screen: flags you know from
 `gzip`, four encoder levels, and no tuning knobs. On Silesia, `-2` writes
-2.205 bits/byte at 1.222 MB/s and `-1` writes 2.361 bits/byte at 1.970 MB/s,
-against the default `-3`'s 1.976 bits/byte at 0.134 MB/s. `zstd -6` still
+2.205 bits/byte at 1.210 MB/s and `-1` writes 2.361 bits/byte at 1.962 MB/s,
+against the default `-3`'s 1.976 bits/byte at 0.132 MB/s. `zstd -6` still
 writes smaller files than `-1`, and faster: the levels shorten the wait, they
 do not make mothergod fast. `-4` goes the other way: it also codes every
 byte through one context-mixing model and keeps that file where it is
 smaller. On Silesia, `-4` writes 1.736 bits/byte at 0.043 MB/s and reads it
-back at 0.163 MB/s, against `-3`'s 2.363 MB/s. Every level writes frames the
+back at 0.165 MB/s, against `-3`'s 2.447 MB/s. Every level writes frames the
 one decoder reads.
 `--version` also prints the format version the build reads; put it in a bug
 report.
