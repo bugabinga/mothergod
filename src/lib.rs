@@ -118,8 +118,10 @@ pub enum Level {
     Best,
     /// [`Level::Best`]'s frame, or a [`Method::Cm`] frame when that is
     /// strictly smaller: the slowest encode, and on `bench/`'s train and
-    /// sealed cases the smallest frame, whose decode is several times
-    /// slower than the hybrid's (`research/JOURNAL.md` S2-A141, ADR-0079).
+    /// sealed cases the smallest frame. Its output decodes about an order
+    /// of magnitude slower than the hybrid's on the held-out finals,
+    /// Silesia and Canterbury, whose frontier tables in `docs/benchmarks/`
+    /// carry the measured figures (ADR-0079).
     Extreme,
 }
 
