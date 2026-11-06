@@ -233,7 +233,7 @@ release.
   16 MiB of `webster` 13% to 26% faster (86 to 103 s down to 75 to 76 s) on
   a 4-core runner, with output bytes unchanged and peak memory under 1 GiB.
   A stream past 16 MiB is unchanged, because its earlier blocks encode one
-  trial at a time.
+  trial at a time (#1884).
 - encode: a file over 1 MiB on two or more cores starts the 2 MiB reach trial
   on the thread that would otherwise wait for the other filter trials, so
   Silesia `reymont` compresses 23% faster (251 s to 194 s) and `dickens` 8%
