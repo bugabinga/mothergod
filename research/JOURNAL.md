@@ -2912,7 +2912,8 @@ record.
   a far reach to `2^24 - 1` with its own offset alphabet, accepted
   (`FORMAT_VERSION` 18, ADR-0078); full record in S2-A137's own entry. Twenty-sixth
   slice, S2-A145: a far case in `baseline_gate check`, accepted; full
-  record in S2-A145's own entry.
+  record in S2-A145's own entry. Twenty-seventh slice, S2-A146: the far
+  trial beside the wide one, accepted; full record in S2-A146's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9971,3 +9972,37 @@ record.
   in `bench/baseline.json`, so ratio deltas are 0 by construction. |
   **Not measured:** the `ratio` job's time on CI's runner.
   `research/progress.jsonl` it252.
+- S2-A146 | ACCEPTED | Lead S1-P4, the far trial beside the narrow and
+  wide trials that S2-A137 left unmeasured. Hypothesis: on a block over
+  `lz::WIDE_WINDOW` encoded with two workers, the far trial runs beside
+  the wide one instead of after it, which cuts encode wall-clock with
+  output bytes unchanged and peak RSS under the 1 GiB bound, because the
+  far trial ran alone after `widen` while one of two cores idled. |
+  Mechanism: `widen` takes the far trial over from the removed
+  `reach_far`. A right guess (S2-A129) is already the wide trial, so the
+  caller runs the far trial while it finishes. With no guess and two
+  workers, the far trial goes to a second thread while the caller runs
+  the wide one. A wrong guess still holds a working set until the scope
+  ends, so the far trial waits until after the wide one, as before. Live
+  trials never pass `workers`, and the payload is the serial one because
+  each reach is kept only when strictly smaller, whichever thread ran it.
+  A stream's blocks before the last encode with one worker (`write.rs`),
+  so only a single-block input gains. | Measured, release build, AMD EPYC
+  9V45 4 logical cores runner, `mothergod -3 -c` from stdin, wall-clock
+  and peak RSS from `/usr/bin/time`, main at `25054a6` against the
+  branch, Silesia files at the `bench/corpus.toml` pins (SHA-256
+  verified), two rounds interleaved, the second in reverse order. First
+  16,777,215 bytes of `webster`: main 103.41 and 86.33 s, branch 76.21
+  and 75.06 s (-26% and -13%); peak 887,012 and 880,812 KiB against
+  880,784 and 880,676 KiB. `dickens`: main 61.62 and 58.18 s, branch
+  53.25 and 49.71 s (-14% and -15%); peak 546,460 and 543,560 KiB against
+  543,536 and 546,500 KiB. Whole `webster`, three blocks, one run each:
+  main 201.94 s, branch 208.32 s, inside noise, peak 881,888 and 882,132
+  KiB. Every output is `cmp`-identical to main's (`dickens` 2,858,017 and
+  whole `webster` 8,794,766 bytes, S2-A137's), and the branch's decodes
+  equal the inputs. | Verdict: **accepted**; codec output unchanged, so
+  ratio deltas are 0 by construction. Main's two `webster` prefix runs
+  differ by 17 s, so the spread is wide and the gain sits between 13% and
+  26%. | **Not measured:** the other Silesia files, the tail block of a
+  stream when nothing is left in flight, and how often the guess is
+  wrong, which the payload cannot show. `research/progress.jsonl` it253.
