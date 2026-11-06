@@ -227,6 +227,13 @@ release.
 
 ### Changed
 
+- encode: input between 2 and 16 MiB on two or more cores runs the 16 MiB
+  reach trial beside the 2 MiB one instead of after it, so Silesia `dickens`
+  compresses 14% to 15% faster (62 s to 53 s, 58 s to 50 s) and the first
+  16 MiB of `webster` 13% to 26% faster (86 to 103 s down to 75 to 76 s) on
+  a 4-core runner, with output bytes unchanged and peak memory under 1 GiB.
+  A stream past 16 MiB is unchanged, because its earlier blocks encode one
+  trial at a time.
 - encode: a file over 1 MiB on two or more cores starts the 2 MiB reach trial
   on the thread that would otherwise wait for the other filter trials, so
   Silesia `reymont` compresses 23% faster (251 s to 194 s) and `dickens` 8%

@@ -783,56 +783,66 @@ fn search(data: &[u8], candidates: &[Candidate], workers: NonZeroUsize) -> Optio
             .into_iter()
             .flatten()
             .min_by_key(|(index, _, body)| (body.len(), *index))?;
-        let kept = if has_wide_trial {
-            widen(data, winner, trial)
+        Some(if has_wide_trial {
+            widen(scope, data, winner, trial, workers)
         } else {
             let (_, candidate, body) = winner;
             (candidate, Reach::Standard, body)
-        };
-        Some(if data.len() > lz::WIDE_WINDOW {
-            reach_far(data, kept)
-        } else {
-            kept
         })
     })
 }
 
-/// [`search`]'s step after [`widen`] on input longer than
-/// [`lz::WIDE_WINDOW`]: the kept candidate at [`Reach::Far`], its body
-/// kept only when strictly smaller than `kept`'s, at whichever reach
-/// [`widen`] chose, so where the far parse loses the payload is the one
-/// [`widen`] wrote. It runs after [`widen`], alone, because a trial on a
-/// block holds a block-sized working set and the narrow and wide trials
-/// already fill `workers` (`research/JOURNAL.md` S2-A126, S2-A137).
-fn reach_far(data: &[u8], kept: Trial) -> Trial {
-    let (candidate, _, body) = &kept;
-    let far = trial_body(data, *candidate, Reach::Far);
-    if crate::candidate_beats_incumbent(far.len(), body.len()) {
-        (*candidate, Reach::Far, far)
-    } else {
-        kept
-    }
-}
-
 /// [`search`]'s last step: the narrow `winner` against its wide trial, the
-/// wide body kept only when strictly smaller. `trial` is the early guess
-/// and the index it was made for; it is joined when that index is the
-/// winner's, and any other guess is left running and joined when the scope
-/// ends, the real wide trial running here instead. Either way the result is
-/// what a serial search writes.
-fn widen(
-    data: &[u8],
+/// wide body kept only when strictly smaller, then, on input longer than
+/// [`lz::WIDE_WINDOW`], the same candidate at [`Reach::Far`], its body kept
+/// only when strictly smaller than both. Where a reach loses, the payload is
+/// the one the narrower reach wrote, and the result is what a serial search
+/// writes whichever thread ran each trial.
+///
+/// `trial` is the early guess and the index it was made for. A right guess
+/// is the wide trial: it is joined, and the caller runs the far trial beside
+/// it. Without a guess the far trial runs on a second thread beside the
+/// wide one when `workers` allows. A wrong guess is left running and joined
+/// when the scope ends; it holds a working set until then, so the real wide
+/// trial runs here and the far trial after it. Every trial on a block holds
+/// a block-sized working set, so live trials never pass `workers`
+/// (`research/JOURNAL.md` S2-A126, S2-A137, S2-A146).
+fn widen<'scope>(
+    scope: &'scope thread::Scope<'scope, '_>,
+    data: &'scope [u8],
     (index, candidate, body): Winner,
-    trial: Option<(usize, WideTrial<'_>)>,
+    trial: Option<(usize, WideTrial<'scope>)>,
+    workers: NonZeroUsize,
 ) -> Trial {
-    let wide = match trial {
-        Some((guessed, handle)) if guessed == index => rejoin(handle.join()),
-        _ => trial_body(data, candidate, Reach::Wide),
+    let has_far_trial = data.len() > lz::WIDE_WINDOW;
+    let far_trial = move || trial_body(data, candidate, Reach::Far);
+    let (wide, far) = match trial {
+        Some((guessed, handle)) if guessed == index => {
+            let far = has_far_trial.then(far_trial);
+            (rejoin(handle.join()), far)
+        }
+        None if has_far_trial && workers.get() > 1 => {
+            // A refused spawn (the process is out of threads) runs the far
+            // trial serially below.
+            let handle = thread::Builder::new().spawn_scoped(scope, far_trial).ok();
+            let wide = trial_body(data, candidate, Reach::Wide);
+            (wide, handle.map(|handle| rejoin(handle.join())))
+        }
+        _ => (trial_body(data, candidate, Reach::Wide), None),
     };
-    if crate::candidate_beats_incumbent(wide.len(), body.len()) {
+    let kept = if crate::candidate_beats_incumbent(wide.len(), body.len()) {
         (candidate, Reach::Wide, wide)
     } else {
         (candidate, Reach::Standard, body)
+    };
+    if !has_far_trial {
+        return kept;
+    }
+    let far = far.unwrap_or_else(far_trial);
+    if crate::candidate_beats_incumbent(far.len(), kept.2.len()) {
+        (candidate, Reach::Far, far)
+    } else {
+        kept
     }
 }
 
