@@ -21,11 +21,17 @@
 //! (issue #1169): `measure` prints the gate cases' bits/byte in
 //! `bench/baseline.json`'s own format, so a champion measured in the
 //! session is a file; `delta <file>` prints every case's move against such
-//! a file and the train mean, and exits 0 whatever the sign, because it
+//! a file and the mean, and exits 0 whatever the sign, because it
 //! reports and `check` gates. Neither touches `bench/baseline.json`, and
-//! both measure [`mothergod_bench::baseline::cases`] only, never a sealed
-//! case and never the reach case (issue #1434), which `check` and `write`
-//! add and whose length would break the train mean's denominator.
+//! neither reads a reach case (issue #1434), which `check` and `write`
+//! add and whose length would break the mean's denominator. Both read a
+//! [`Probe`]: by default [`mothergod_bench::baseline::cases`] through
+//! `compress`; `--level <1-4>` compresses at the CLI's level of that digit,
+//! `--len <bytes>` generates every case at that length, so a reach past
+//! `lz::WIDE_WINDOW` is measurable, and `--sealed` reads the two sealed
+//! cases instead, the keeper's one read (`research/README.md`). A `delta`
+//! is meaningful only against a file `measure` wrote with the same
+//! options, which the file does not record.
 //!
 //! `spread` is the table #1184 validates on (issue #1186): it reads CI log
 //! text on stdin and prints per-CPU runs, min, median, max and range of the
@@ -39,12 +45,15 @@
 //! so an accepted loosening is a hand edit of the JSON) or `... -- speed` (print the
 //! decode cost, to commit as `BASELINE_DECODE_COST` after an accepted
 //! slowdown) or `... -- measure` or `... -- delta <file>` or
-//! `... -- spread [--fp] < logs` (see [`SPREAD_USAGE`]).
+//! `... -- spread [--fp] < logs` (see [`SPREAD_USAGE`]). `measure` and
+//! `delta <file>` take the [`parse_probe`] options after their own
+//! arguments.
 
 use mothergod_bench::baseline::{
-    Snapshot, deltas, format_baseline, hold_at_best, mean_delta, measure_all, measure_gate,
+    CaseSet, Probe, Snapshot, deltas, format_baseline, hold_at_best, mean_delta, measure_gate,
     output_changes, parse_baseline, regressions,
 };
+use mothergod_bench::field::level_of_digit;
 use mothergod_bench::reference::cpu_model;
 use mothergod_bench::speed;
 use std::collections::BTreeMap;
@@ -92,10 +101,14 @@ fn report_slowdown(slow: &speed::Slowdown) {
 }
 
 /// Every case's move of `measured` against the baseline file at `path`,
-/// one line per case, then the train mean. `Err` only when the file cannot
-/// be read or parsed: a regression is a line in the report, never an `Err`,
-/// because `delta` reports and `check` gates.
-fn delta_report(path: &Path, measured: &BTreeMap<String, f64>) -> Result<String, String> {
+/// one line per case, then the mean, named by the `set` measured. `Err`
+/// only when the file cannot be read or parsed: a regression is a line in
+/// the report, never an `Err`, because `delta` reports and `check` gates.
+fn delta_report(
+    path: &Path,
+    measured: &BTreeMap<String, f64>,
+    set: CaseSet,
+) -> Result<String, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let baseline = parse_baseline(&text).map_err(|err| format!("{}: {err}", path.display()))?;
@@ -114,7 +127,8 @@ fn delta_report(path: &Path, measured: &BTreeMap<String, f64>) -> Result<String,
     }
     writeln!(
         out,
-        "train mean {:+.6} bits/byte over {} cases",
+        "{} mean {:+.6} bits/byte over {} cases",
+        set.label(),
         mean_delta(&found),
         found.len()
     )
@@ -234,6 +248,43 @@ fn write(measured: &Snapshot) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The [`Probe`] `measure`'s and `delta`'s options select, from the
+/// arguments after the mode's own: `--level <1-4>`, `--len <bytes>` (at
+/// least one) and `--sealed`, in any order, each at most once in effect
+/// (a repeat overrides). `Err` names the first argument it cannot read.
+fn parse_probe(args: impl IntoIterator<Item = String>) -> Result<Probe, String> {
+    let mut probe = Probe::default();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--sealed" => probe.set = CaseSet::Sealed,
+            "--level" => {
+                let value = args.next().unwrap_or_default();
+                let mut chars = value.chars();
+                probe.level = match (chars.next(), chars.next()) {
+                    (Some(digit), None) => level_of_digit(digit),
+                    _ => None,
+                }
+                .ok_or_else(|| format!("--level {value:?}: the levels are 1 to 4"))?;
+            }
+            "--len" => {
+                let value = args.next().unwrap_or_default();
+                probe.len = value
+                    .parse()
+                    .ok()
+                    .filter(|&len| len > 0)
+                    .ok_or_else(|| format!("--len {value:?}: a byte count of at least 1"))?;
+            }
+            other => {
+                return Err(format!(
+                    "unknown option {other:?}, expected --level, --len or --sealed"
+                ));
+            }
+        }
+    }
+    Ok(probe)
+}
+
 /// `spread`'s `--help`: what it reads and the pipe that fetches it.
 const SPREAD_USAGE: &str = "\
 usage: baseline_gate spread [--fp] < logs
@@ -285,19 +336,36 @@ fn main() -> ExitCode {
         measure_decode_cost();
         return ExitCode::SUCCESS;
     }
-    let baseline_file = args.next().map(PathBuf::from);
-    if mode == "delta" && baseline_file.is_none() {
-        eprintln!("usage: baseline_gate delta <baseline file>");
-        return ExitCode::FAILURE;
-    }
+    let baseline_file = if mode == "delta" {
+        let Some(file) = args.next() else {
+            eprintln!(
+                "usage: baseline_gate delta <baseline file> [--level <1-4>] [--len <bytes>] [--sealed]"
+            );
+            return ExitCode::FAILURE;
+        };
+        Some(PathBuf::from(file))
+    } else {
+        None
+    };
+    let probe = if matches!(mode.as_str(), "measure" | "delta") {
+        match parse_probe(args) {
+            Ok(probe) => probe,
+            Err(err) => {
+                eprintln!("{err}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        Probe::default()
+    };
     match mode.as_str() {
         "measure" => {
-            print!("{}", format_baseline(&measure_all()));
+            print!("{}", format_baseline(&probe.measure()));
             ExitCode::SUCCESS
         }
         "delta" => {
-            let path = baseline_file.expect("checked above");
-            match delta_report(&path, &measure_all().bpb()) {
+            let path = baseline_file.expect("delta always reads its file argument above");
+            match delta_report(&path, &probe.measure().bpb(), probe.set) {
                 Ok(report) => {
                     print!("{report}");
                     ExitCode::SUCCESS
@@ -321,7 +389,10 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{BTreeMap, PathBuf, Snapshot, delta_report, format_baseline};
+    use super::{
+        BTreeMap, CaseSet, PathBuf, Probe, Snapshot, delta_report, format_baseline, parse_probe,
+    };
+    use mothergod::Level;
     use mothergod_bench::baseline::Entry;
 
     fn scratch_baseline(name: &str, text: &str) -> PathBuf {
@@ -352,8 +423,8 @@ mod tests {
     fn delta_report_is_ok_on_a_regression_past_the_gate_tolerance() {
         let path = scratch_baseline("regression", &baseline_text(&[("a", 1), ("b", 2)]));
         let measured = BTreeMap::from([("a".to_string(), 5.0), ("b".to_string(), 1.0)]);
-        let report =
-            delta_report(&path, &measured).expect("a regression is a report, not an error");
+        let report = delta_report(&path, &measured, CaseSet::Train)
+            .expect("a regression is a report, not an error");
         std::fs::remove_file(&path).unwrap();
         assert_eq!(
             report,
@@ -364,12 +435,62 @@ mod tests {
     }
 
     #[test]
+    fn delta_report_names_the_sealed_mean_on_a_sealed_read() {
+        let path = scratch_baseline("sealed", &baseline_text(&[("a", 2)]));
+        let measured = BTreeMap::from([("a".to_string(), 1.0)]);
+        let report = delta_report(&path, &measured, CaseSet::Sealed).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            report.ends_with("sealed mean -1.000000 bits/byte over 1 cases\n"),
+            "{report}"
+        );
+    }
+
+    #[test]
     fn delta_report_errs_on_an_unreadable_or_malformed_file() {
         let missing = std::env::temp_dir().join("mothergod-delta-no-such-file");
-        assert!(delta_report(&missing, &BTreeMap::new()).is_err());
+        assert!(delta_report(&missing, &BTreeMap::new(), CaseSet::Train).is_err());
         let path = scratch_baseline("malformed", "{\n  not valid\n}\n");
-        let result = delta_report(&path, &BTreeMap::new());
+        let result = delta_report(&path, &BTreeMap::new(), CaseSet::Train);
         std::fs::remove_file(&path).unwrap();
         assert!(result.is_err());
+    }
+
+    fn probe(args: &[&str]) -> Result<Probe, String> {
+        parse_probe(args.iter().map(ToString::to_string))
+    }
+
+    #[test]
+    fn no_option_is_the_default_probe() {
+        assert_eq!(probe(&[]), Ok(Probe::default()));
+    }
+
+    #[test]
+    fn every_option_moves_its_own_field() {
+        let read = probe(&["--len", "4000000", "--sealed", "--level", "2"]).unwrap();
+        assert_eq!(
+            read,
+            Probe {
+                set: CaseSet::Sealed,
+                level: Level::Fast,
+                len: 4_000_000,
+            }
+        );
+    }
+
+    #[test]
+    fn an_unreadable_option_is_an_error_naming_it() {
+        for (args, named) in [
+            (&["--level", "5"][..], "\"5\""),
+            (&["--level", "22"], "\"22\""),
+            (&["--level"], "\"\""),
+            (&["--len", "0"], "\"0\""),
+            (&["--len", "-1"], "\"-1\""),
+            (&["--len"], "\"\""),
+            (&["--train"], "\"--train\""),
+        ] {
+            let err = probe(args).expect_err(&format!("{args:?}"));
+            assert!(err.contains(named), "{args:?}: {err}");
+        }
     }
 }

@@ -2914,6 +2914,9 @@ record.
   slice, S2-A145: a far case in `baseline_gate check`, accepted; full
   record in S2-A145's own entry. Twenty-seventh slice, S2-A146: the far
   trial beside the wide one, accepted; full record in S2-A146's own entry.
+  Twenty-eighth slice, S2-A147: `baseline_gate measure` and `delta` read
+  a level and a case length, the driver S2-A137's unmeasured far reach at
+  `-2` needs; full record in S2-A147's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -10006,3 +10009,27 @@ record.
   26%. | **Not measured:** the other Silesia files, the tail block of a
   stream when nothing is left in flight, and how often the guess is
   wrong, which the payload cannot show. `research/progress.jsonl` it253.
+- S2-A147 | ACCEPTED | Lead S1-P4, the capability S2-A137's unmeasured
+  "far reach at `-2` behind a trial" lacks. Hypothesis: `baseline_gate
+  measure` and `delta` taking `--level <1-4>`, `--len <bytes>` and
+  `--sealed` make a wired change visible only at a level or past
+  `lz::WIDE_WINDOW` measurable by the bench crate's try and keeper
+  drivers, where S2-A127 and S2-A137 read their 4,000,000-byte cases
+  outside it, and leave the default read byte-identical. | Mechanism: a
+  `baseline::Probe` names the case set, the level and the length; the
+  train cases are `cases()`' generators at that length, and the sealed
+  cases have one generator, `baseline::sealed_cases`, which the pairing
+  drivers now read at `CASE_LEN` instead of a private copy. Every case in
+  one probe has one length, so the mean's denominator stays one length
+  (`research/README.md`). A `delta` file records no options, so it is
+  read with the options that wrote it. | Measured, release build, AMD
+  EPYC 9V74 4 logical cores runner, main at `70725da` against the branch:
+  `measure` with no option prints a file `cmp`-identical to main's.
+  `measure --level 2 --len 4000000` took 98.70 s at 202,524 KiB peak RSS
+  for the eleven train cases; `delta` of that file under the same options
+  printed every case at +0.000000, mean +0.000000. `baseline_gate check`
+  passes, 13 cases, output unchanged. No sealed case was generated. |
+  Verdict: **accepted**, a capability patch with no comparable benchmark,
+  so both deltas are null. | **Not measured:** the far reach at `-2`
+  itself, and the 4,000,000-byte sealed read's time.
+  `research/progress.jsonl` it254.

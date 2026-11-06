@@ -250,6 +250,15 @@ fn level_digit(level: Level) -> char {
     }
 }
 
+/// The level the CLI's digit `digit` selects, `None` for any other
+/// character: the inverse of [`level_label`]'s digit, over [`LEVELS`].
+#[must_use]
+pub fn level_of_digit(digit: char) -> Option<Level> {
+    LEVELS
+        .into_iter()
+        .find(|&level| level_digit(level) == digit)
+}
+
 /// How a report names `level`: `mothergod -3`, as a user types it.
 #[must_use]
 pub fn level_label(level: Level) -> String {
@@ -360,7 +369,19 @@ pub fn measure_mothergod(program: &Path, level: Level, data: &[u8]) -> io::Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{Tool, competitors, measure, parse_peak_rss_kib};
+    use super::{
+        LEVELS, Tool, competitors, level_digit, level_of_digit, measure, parse_peak_rss_kib,
+    };
+
+    #[test]
+    fn level_of_digit_inverts_level_digit_and_refuses_any_other_character() {
+        for level in LEVELS {
+            assert_eq!(level_of_digit(level_digit(level)), Some(level));
+        }
+        for digit in ['0', '5', '9', 'x', '-'] {
+            assert_eq!(level_of_digit(digit), None, "{digit:?}");
+        }
+    }
 
     #[test]
     fn competitors_lists_every_level_each_tool_offers() {
