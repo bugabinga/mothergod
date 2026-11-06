@@ -170,6 +170,25 @@ jobs:
           CHANGES: ${{ toJSON(github.event.changes) }}
         run: .github/scripts/verdict-stands "$PR" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+      # A standing PASS is a merge nobody may have executed: the run that
+      # posted it was cancelled by this run's own event before its
+      # merge-pr (#1871, seven seconds after the verdict, six hours
+      # approved and green). land-standing-pass executes it, on an app
+      # token minted once here because this job runs no sidecar and a
+      # squash on github.token raises no runs on main (#590); the states
+      # it declines are in its docstring, each one line and exit 0.
+      - if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands == 'true'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN_FILE: ${{ runner.temp }}/app-token
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            | env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN python3 .github/scripts/token-sidecar.py \
+              --path "$GH_TOKEN_FILE" --interval 0 --rounds 1 --max-minutes 2
+          .github/scripts/land-standing-pass "$PR" "$HEAD_SHA"
+
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
         with:
