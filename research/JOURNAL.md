@@ -9921,3 +9921,30 @@ record.
   the memset remains, and every hot read of `freq` gains a `+1`. |
   Conditions: a crate that admits `unsafe` for `alloc_zeroed` reopens
   the second candidate. `research/progress.jsonl` it250.
+- S2-A144 | ACCEPTED | Issue #1775 question 5, the finals S2-A142 left
+  unread, through #1824's `-4` row. Hypothesis: S2-A142's train and
+  sealed lead carries to the finals, `-4` smaller than `-3` on both
+  aggregates, at S2-A141's decode cost or worse on real text. |
+  Measured by `bench-report.yml` run 41994577267 at `d2c0a92`, the
+  frontier sections of `docs/benchmarks/silesia.md` and `canterbury.md`
+  as published in `4300dab`, release build, AMD EPYC 7763 4 logical
+  cores runner, every process alone, one pass. Per level b/B, encode
+  MB/s, decode MB/s, peak MiB. Silesia, 211,938,580 bytes: `-3`
+  1.976185, 0.134, 2.363, 951.7; `-4` **1.736011** (-0.240174, -12.2%),
+  0.043, 0.163, 951.7. Canterbury, 2,810,784 bytes: `-3` 1.347100,
+  0.251, 3.517, 56.6; `-4` **1.143402** (-0.203698, -15.1%), 0.055,
+  0.356, 81.9. | Verdict: **accepted**, a measurement of S2-A142's
+  accepted level, not a new candidate; the finals are not a verdict
+  input (`research/corpus/POLICY.md`). Both aggregates sit under xz
+  -9e's, 1.829058 and 1.403395. The price is 3.1x and 4.6x the default's
+  encode time and 14.5x and 9.9x its decode time: above S2-A141's 6.7x
+  on the gate cases, under S2-A142's 28x on one text slice. Silesia's
+  peak RSS is equal at both levels and under 1 GiB. The pass took 170
+  minutes, 10 under the 180 cap `bench-report.yml` carried before
+  d2c0a92 ("bench-report: the pass cap is 300 minutes, room for the -4
+  row (#1857)") and 130 under the 300 it carries now; #1857's
+  extrapolated 188 overstated it by 18. | **Not measured:** `-4` per file, which
+  the reports do not print, so which files keep a `Cm` frame and whether
+  `-4` wins or ties every file against zstd -19 is unread; run-to-run
+  spread. ADR-0080 decides the default switch ADR-0079 deferred to this
+  read: the default stays `-3`. `research/progress.jsonl` it251.
