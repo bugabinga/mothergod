@@ -20,6 +20,23 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-06: Editorial: `-4`'s price is its decode rate, quoted from its row
+
+#1880. "Try it" on README and `/` said `-4` costs "far more in decode
+time, not yet measured on Silesia". 4300dab ("bench: publish the reports
+regenerated at d2c0a927f16b (#1866)") had already measured it. The issue
+left one question open: a number, or a pointer to the report.
+
+**A number, the row's own, beside `-3`'s.** The paragraph already quotes
+`-2` and `-1` from their frontier rows, and a test holds those figures. A
+pointer would make `-4` the one level whose cost the reader has to go and
+look up. The sentence quotes the decode rate next to `-3`'s, because
+decode is the cost that sets `-4` apart, and two rates side by side show
+the gap without a derived "14.5x" that would drift. This does not break
+yesterday's band rule. That rule covers words derived from a table; these
+are the table's own figures, which `extreme_level_figures_match_their_generated_report`
+rewrites on bless and fails on drift.
+
 ## 2026-11-05: Editorial: words beside a table name bands, not roundings
 
 #1834. The site's Silesia sentence said "roughly eighteen times slower

@@ -102,8 +102,9 @@ against the default `-3`'s 1.976 bits/byte at 0.134 MB/s. `zstd -6` still
 writes smaller files than `-1`, and faster: the levels shorten the wait, they
 do not make mothergod fast. `-4` goes the other way: it also codes every
 byte through one context-mixing model and keeps that file where it is
-smaller, at a cost in encode time and far more in decode time, not yet
-measured on Silesia. Every level writes frames the one decoder reads.
+smaller. On Silesia, `-4` writes 1.736 bits/byte at 0.043 MB/s and reads it
+back at 0.163 MB/s, against `-3`'s 2.363 MB/s. Every level writes frames the
+one decoder reads.
 `--version` also prints the format version the build reads; put it in a bug
 report.
 
