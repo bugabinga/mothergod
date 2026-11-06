@@ -31,7 +31,9 @@
 //! `lz::WIDE_WINDOW` is measurable, and `--sealed` reads the two sealed
 //! cases instead, the keeper's one read (`research/README.md`). A `delta`
 //! is meaningful only against a file `measure` wrote with the same
-//! options, which the file does not record.
+//! options, which the file does not record; `delta` refuses a file that
+//! lacks a measured case, which catches a mismatched `--sealed` but not a
+//! mismatched `--level` or `--len`, whose case names agree.
 //!
 //! `spread` is the table #1184 validates on (issue #1186): it reads CI log
 //! text on stdin and prints per-CPU runs, min, median, max and range of the
@@ -102,8 +104,13 @@ fn report_slowdown(slow: &speed::Slowdown) {
 
 /// Every case's move of `measured` against the baseline file at `path`,
 /// one line per case, then the mean, named by the `set` measured. `Err`
-/// only when the file cannot be read or parsed: a regression is a line in
-/// the report, never an `Err`, because `delta` reports and `check` gates.
+/// when the file cannot be read or parsed, or when a measured case is
+/// absent from it: the mean's denominator is every measured case or
+/// there is no mean (issue #1892, where a sealed read of a train file
+/// printed a mean of `+0.000000` over 0 cases and exited 0). A case only
+/// the file holds is skipped, so `bench/baseline.json`, which adds the
+/// reach cases, still reads. A regression is a line in the report, never
+/// an `Err`, because `delta` reports and `check` gates.
 fn delta_report(
     path: &Path,
     measured: &BTreeMap<String, f64>,
@@ -112,7 +119,24 @@ fn delta_report(
     let text = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let baseline = parse_baseline(&text).map_err(|err| format!("{}: {err}", path.display()))?;
-    let found = deltas(&baseline.bpb(), measured);
+    let baseline = baseline.bpb();
+    let missing: Vec<&str> = measured
+        .keys()
+        .filter(|name| !baseline.contains_key(*name))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "{}: holds {} of the {} {} cases measured (missing: {}); \
+             delta reads a file `measure` wrote with the same options",
+            path.display(),
+            measured.len() - missing.len(),
+            measured.len(),
+            set.label(),
+            missing.join(", ")
+        ));
+    }
+    let found = deltas(&baseline, measured);
     let mut out = String::new();
     for case in &found {
         writeln!(
@@ -443,6 +467,41 @@ mod tests {
         assert!(
             report.ends_with("sealed mean -1.000000 bits/byte over 1 cases\n"),
             "{report}"
+        );
+    }
+
+    #[test]
+    fn delta_report_skips_a_case_only_the_file_holds() {
+        let path = scratch_baseline("file-only", &baseline_text(&[("a", 2), ("reach", 3)]));
+        let measured = BTreeMap::from([("a".to_string(), 1.0)]);
+        let report = delta_report(&path, &measured, CaseSet::Train).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            report,
+            "a: 2.000000 -> 1.000000 bits/byte (-1.000000)\n\
+             train mean -1.000000 bits/byte over 1 cases\n"
+        );
+    }
+
+    #[test]
+    fn delta_report_errs_naming_a_measured_case_the_file_lacks() {
+        // #1892: a sealed read of a train file shares no case name.
+        let path = scratch_baseline("disjoint", &baseline_text(&[("train", 2)]));
+        let sealed = BTreeMap::from([("s1".to_string(), 1.0), ("s2".to_string(), 1.0)]);
+        let disjoint = delta_report(&path, &sealed, CaseSet::Sealed);
+        // One shared case of two still leaves the mean without a denominator.
+        let partial = BTreeMap::from([("s1".to_string(), 1.0), ("train".to_string(), 1.0)]);
+        let partial = delta_report(&path, &partial, CaseSet::Train);
+        std::fs::remove_file(&path).unwrap();
+        let err = disjoint.expect_err("no shared case is no mean");
+        assert!(
+            err.contains("holds 0 of the 2 sealed cases measured (missing: s1, s2)"),
+            "{err}"
+        );
+        let err = partial.expect_err("a missing case is no mean");
+        assert!(
+            err.contains("holds 1 of the 2 train cases measured (missing: s1)"),
+            "{err}"
         );
     }
 
