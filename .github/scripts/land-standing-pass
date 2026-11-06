@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Execute a standing PASS: the merge a review run posted the verdict for and never reached.
+
+agent-review.yml runs this when verdict-stands skipped the model
+(`stands=true`). The run that posts a PASS runs merge-pr as its next
+action, and the PR's next event cancels it in between: PR #1871 was
+opened, edited eight seconds later, passed, and cancelled seven seconds
+after its PASS. Nothing was merged or armed, the survivor stood on the
+verdict believing the auto-merge "that round armed" would land it, and
+the PR sat approved and green for six hours while main moved under it.
+The stand route's assumption is now this script: a standing verdict is
+executed, not only honoured.
+
+Three states print one line and exit 0 with no merge attempted:
+- the standing verdict is not a PASS (no `agent-approved` label);
+- the PR touches `.github/workflows/`, the BDFL's to land (GOVERNANCE
+  "Merging"), where merge-pr refuses every other seat;
+- GH_TOKEN_FILE names no token: a squash on github.token raises no runs
+  on main (#590), so the merge stays the sweep's rather than happen
+  silently.
+Otherwise `merge-pr <pr> --sha <head>` runs beside this file, and its 0
+(merged) and 2 (gates pending, auto-merge armed on that head) are both
+the state the verdict meant; any other code is this script's exit, red,
+for the stall sweep to read. An unreadable PR is exit 1 for the same
+reason: a skipped merge that was owed must not look like a judgment.
+
+Usage: land-standing-pass <pr-number> <head-sha>
+Tested by land-standing-pass.test.mjs with a stub `gh` and `merge-pr`.
+"""
+import json
+import os
+import subprocess
+import sys
+
+WORKFLOWS = ".github/workflows/"
+
+
+def main(argv):
+    """Land the standing PASS on `argv[0]` at head `argv[1]`, or say why not."""
+    if len(argv) != 2:
+        print("usage: land-standing-pass <pr-number> <head-sha>", file=sys.stderr)
+        return 2
+    pr, head = argv
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    proc = subprocess.run(
+        ["gh", "pr", "view", pr, "--repo", repo, "--json", "labels,files"],
+        capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        print(f"land-standing-pass: PR #{pr} did not read: {proc.stderr.strip()}", file=sys.stderr)
+        return 1
+    try:
+        view = json.loads(proc.stdout)
+        labels = [label["name"] for label in view["labels"]]
+        files = [entry["path"] for entry in view["files"]]
+    except (ValueError, KeyError, TypeError) as err:
+        print(f"land-standing-pass: PR #{pr} did not parse: {err}", file=sys.stderr)
+        return 1
+    if "agent-approved" not in labels:
+        print(f"land-standing-pass: the standing verdict on #{pr} is not a PASS; nothing to land")
+        return 0
+    if any(path.startswith(WORKFLOWS) for path in files):
+        print(f"land-standing-pass: #{pr} touches {WORKFLOWS}, the BDFL's to land (GOVERNANCE 'Merging')")
+        return 0
+    token_file = os.environ.get("GH_TOKEN_FILE", "")
+    if not token_file or not os.path.isfile(token_file) or os.path.getsize(token_file) == 0:
+        print(f"land-standing-pass: no app token minted; the standing PASS on #{pr} is the sweep's to land")
+        return 0
+    merge_pr = os.path.join(os.path.dirname(os.path.abspath(__file__)), "merge-pr")
+    status = subprocess.run([merge_pr, pr, "--sha", head], check=False).returncode
+    if status in (0, 2):
+        return 0
+    print(f"land-standing-pass: merge-pr exited {status} on #{pr}", file=sys.stderr)
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

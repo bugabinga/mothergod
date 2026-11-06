@@ -38,7 +38,9 @@ Two routes stand, and `stands=true` skips the model on either:
               the id of this same diff under the title and body as they
               were BEFORE the edit, or as they are NOW: either way the
               edit moved no head, the head is the one that round reviewed,
-              and the auto-merge that round armed lands it. The pre-edit
+              and agent-review.yml's landing step executes the merge,
+              because the round that posted the PASS may have been
+              cancelled before its own merge-pr (#1871). The pre-edit
               stamp is the edit that followed a PASS (#1243); the current
               stamp is the PASS that followed the edit, posted by a
               cancelled run whose Claude step outlived the cancel (PR
