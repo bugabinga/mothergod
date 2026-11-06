@@ -45,7 +45,7 @@ use crate::codec::{self, Extent, MAX_DECODED_LEN, SELECTOR_LEN};
 use crate::coder::{Decoder, Encoder};
 use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal, SurpriseLogisticMix};
-use crate::{Error, logistic, rejoin, try_filled_vec};
+use crate::{Error, fan_out, logistic, try_filled_vec};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
 /// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
@@ -721,16 +721,9 @@ pub fn encode_payload(data: &[u8], workers: NonZeroUsize) -> Vec<u8> {
             }
             kept
         };
-        // A refused spawn leaves the work to the threads that did start,
-        // this one included.
-        let helpers: Vec<_> = (1..workers.get().min(candidates.len()))
-            .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
-            .collect();
-        let mut kept: Vec<_> = work().into_iter().collect();
-        for helper in helpers {
-            kept.extend(rejoin(helper.join()));
-        }
-        kept.into_iter()
+        fan_out(scope, workers.get().min(candidates.len()), work)
+            .into_iter()
+            .flatten()
             .min_by_key(|(index, .., stream)| (stream.len(), *index))
             .expect("filters::select::pick always returns at least Candidate::Identity")
     });

@@ -64,7 +64,7 @@ use crate::filters::{
 use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
 use crate::lz::{self, Reach, RepCache, RepSlot, Token};
 use crate::model::Model;
-use crate::{Error, Level, rejoin};
+use crate::{Error, Level, fan_out, rejoin};
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -773,22 +773,15 @@ fn search(data: &[u8], candidates: &[Candidate], workers: NonZeroUsize) -> Optio
             (best, trial)
         };
 
-        // A refused spawn leaves the work to the threads that did start,
-        // this one included.
-        let helpers: Vec<_> = (1..workers.get().min(candidates.len()))
-            .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
-            .collect();
-        let (own, own_trial) = work();
-        let mut winners: Vec<Winner> = own.into_iter().collect();
-        let mut trial = own_trial;
-        for helper in helpers {
-            let (winner, helper_trial) = rejoin(helper.join());
-            winners.extend(winner);
-            trial = trial.or(helper_trial);
-        }
+        let (winners, trials): (Vec<_>, Vec<_>) =
+            fan_out(scope, workers.get().min(candidates.len()), work)
+                .into_iter()
+                .unzip();
+        let trial = trials.into_iter().flatten().next();
         // Smallest body, a tie to the earlier candidate: the serial rule.
         let winner = winners
             .into_iter()
+            .flatten()
             .min_by_key(|(index, _, body)| (body.len(), *index))?;
         let kept = if has_wide_trial {
             widen(data, winner, trial)
