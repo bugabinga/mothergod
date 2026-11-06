@@ -129,6 +129,21 @@ test("allows &&, fd duplication, |&, and embedded ampersands", () => {
   }
 });
 
+test("a bare & directly before a word, quote, # or $( is the URL lookahead's hole, pinned (#1822)", () => {
+  const unseen = [
+    "sleep 2 &true",
+    "sleep 2 &#c",
+    "sleep 2 &\"a\"",
+    "sleep 2 &'x'",
+    "sleep 2 &$(true)",
+    "if true; then sleep 2 &fi",
+  ];
+  for (const command of unseen) {
+    const call = { tool_name: "Bash", tool_input: { command } };
+    assert.equal(run(call).status, 0, command);
+  }
+});
+
 test("quoted prose ampersand denies: the accepted cost, pinned", () => {
   const call = {
     tool_name: "Bash",
