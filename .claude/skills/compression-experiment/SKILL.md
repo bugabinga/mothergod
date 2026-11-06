@@ -126,8 +126,12 @@ models (S1-L6).
 - Wired change on real bitstreams: try `baseline_gate -- measure >
   <champion file>` on the champion, then `baseline_gate -- delta <champion
   file>` on the try, which prints each case's move and the train mean and
-  never writes `bench/baseline.json`; keeper the two sealed kinds at
-  `sealed_seed(CASE_SEED)`. A candidate that changes what `decode` does
+  never writes `bench/baseline.json`; keeper the same pair with
+  `--sealed`, the two sealed kinds at `sealed_seed(CASE_SEED)`. A change
+  visible only at a level or past `lz::WIDE_WINDOW` adds `--level <1-4>`
+  or `--len <bytes>` to both commands of a pair, the same on each: the
+  file records no options, so `delta` cannot tell a mismatched level or
+  length (S2-A147, S2-A148). A candidate that changes what `decode` does
   has no try (route step 3) and takes the keeper alone.
 
 ## Loop
