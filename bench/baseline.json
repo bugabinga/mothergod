@@ -23,6 +23,10 @@
     "bpb": 8.00288,
     "digest": "b755877c899c60f3"
   },
+  "far_reach_repeat": {
+    "bpb": 0.891599,
+    "digest": "2f8ce399fa20525e"
+  },
   "interleaved_audio16": {
     "bpb": 5.7544,
     "digest": "dd3905c582348faa"
