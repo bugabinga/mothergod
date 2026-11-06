@@ -261,7 +261,12 @@ The first two signatures are found on open `agent-approved` PRs:
   still open: the branch tip is unsigned, so GitHub's own evaluation
   sits at `blocked` while the REST squash merge succeeds immediately
   (first hit PR #84; PR #571 sat so for 2h38m; same porcelain/API
-  asymmetry as PR #25). `stalled-prs --rescue` runs
+  asymmetry as PR #25). The same state with nothing armed is a review
+  run cancelled by the PR's next event between its verdict and its
+  merge-pr (PR #1871: edited eight seconds after `opened`, cancelled
+  seven seconds after its PASS, six hours approved and green);
+  agent-review.yml's landing step executes a standing PASS on that
+  next event, and this sweep is the fallback. `stalled-prs --rescue` runs
   `merge-pr <pr> --sha <head>` itself, after two checks it holds on:
   the PR touches no file under `.github/workflows/` (those are the
   BDFL's, "Merging" below), and the `agent-approved` label postdates
