@@ -31,9 +31,8 @@
 //! `lz::WIDE_WINDOW` is measurable, and `--sealed` reads the two sealed
 //! cases instead, the keeper's one read (`research/README.md`). A `delta`
 //! is meaningful only against a file `measure` wrote with the same
-//! options, which the file does not record; `delta` refuses a file that
-//! lacks a measured case, which catches a mismatched `--sealed` but not a
-//! mismatched `--level` or `--len`, whose case names agree.
+//! options, so `measure` records them in the file and `delta` refuses a
+//! file whose record differs (issue #1894), before it measures anything.
 //!
 //! `spread` is the table #1184 validates on (issue #1186): it reads CI log
 //! text on stdin and prints per-CPU runs, min, median, max and range of the
@@ -102,23 +101,42 @@ fn report_slowdown(slow: &speed::Slowdown) {
     );
 }
 
-/// Every case's move of `measured` against the baseline file at `path`,
-/// one line per case, then the mean, named by the `set` measured. `Err`
-/// when the file cannot be read or parsed, or when a measured case is
-/// absent from it: the mean's denominator is every measured case or
-/// there is no mean (issue #1892, where a sealed read of a train file
-/// printed a mean of `+0.000000` over 0 cases and exited 0). A case only
-/// the file holds is skipped, so `bench/baseline.json`, which adds the
-/// reach cases, still reads. A regression is a line in the report, never
-/// an `Err`, because `delta` reports and `check` gates.
+/// Every case's move of `measure(probe)` against the baseline file at
+/// `path`, one line per case, then the mean, named by the set measured.
+/// `Err` when the file cannot be read or parsed, when the probe it records
+/// is not `probe` (issue #1894: a file measured at another `--level` or
+/// `--len` shares every case name, and each move would be the gap between
+/// two unrelated reads), or when a measured case is absent from it: the
+/// mean's denominator is every measured case or there is no mean (issue
+/// #1892, where a sealed read of a train file printed a mean of
+/// `+0.000000` over 0 cases and exited 0). A file with no probe record,
+/// `bench/baseline.json` among them, reads as [`Probe::default`]. The
+/// probe is checked before `measure` runs, so a refusal costs no
+/// measurement. A case only the file holds is skipped, so
+/// `bench/baseline.json`, which adds the reach cases, still reads. A
+/// regression is a line in the report, never an `Err`, because `delta`
+/// reports and `check` gates.
 fn delta_report(
     path: &Path,
-    measured: &BTreeMap<String, f64>,
-    set: CaseSet,
+    probe: Probe,
+    measure: impl FnOnce(Probe) -> BTreeMap<String, f64>,
 ) -> Result<String, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let baseline = parse_baseline(&text).map_err(|err| format!("{}: {err}", path.display()))?;
+    let recorded = match baseline.probe {
+        Some(recorded) => format!("was measured with `{recorded}`"),
+        None => format!("records no probe, read as `{}`", Probe::default()),
+    };
+    if baseline.probe.unwrap_or_default() != probe {
+        return Err(format!(
+            "{}: {recorded}, this delta reads `{probe}`; \
+             delta reads a file `measure` wrote with the same options",
+            path.display()
+        ));
+    }
+    let set = probe.set;
+    let measured = &measure(probe);
     let baseline = baseline.bpb();
     let missing: Vec<&str> = measured
         .keys()
@@ -284,12 +302,8 @@ fn parse_probe(args: impl IntoIterator<Item = String>) -> Result<Probe, String> 
             "--sealed" => probe.set = CaseSet::Sealed,
             "--level" => {
                 let value = args.next().unwrap_or_default();
-                let mut chars = value.chars();
-                probe.level = match (chars.next(), chars.next()) {
-                    (Some(digit), None) => level_of_digit(digit),
-                    _ => None,
-                }
-                .ok_or_else(|| format!("--level {value:?}: the levels are 1 to 4"))?;
+                probe.level = level_of_digit(&value)
+                    .ok_or_else(|| format!("--level {value:?}: the levels are 1 to 4"))?;
             }
             "--len" => {
                 let value = args.next().unwrap_or_default();
@@ -389,7 +403,7 @@ fn main() -> ExitCode {
         }
         "delta" => {
             let path = baseline_file.expect("delta always reads its file argument above");
-            match delta_report(&path, &probe.measure().bpb(), probe.set) {
+            match delta_report(&path, probe, |probe| probe.measure().bpb()) {
                 Ok(report) => {
                     print!("{report}");
                     ExitCode::SUCCESS
@@ -426,8 +440,9 @@ mod tests {
         path
     }
 
-    /// A baseline file of `(name, bpb)` rows in the shape `write` emits.
-    fn baseline_text(rows: &[(&str, u32)]) -> String {
+    /// A baseline file of `(name, bpb)` rows recording `probe`, in the
+    /// shape `measure` emits, or `write` when `probe` is `None`.
+    fn baseline_text(probe: Option<Probe>, rows: &[(&str, u32)]) -> String {
         let cases = rows
             .iter()
             .map(|&(name, bpb)| {
@@ -440,16 +455,46 @@ mod tests {
                 )
             })
             .collect();
-        format_baseline(&Snapshot { cases })
+        format_baseline(&Snapshot { probe, cases })
+    }
+
+    /// The default probe with the sealed set.
+    fn sealed() -> Probe {
+        Probe {
+            set: CaseSet::Sealed,
+            ..Probe::default()
+        }
+    }
+
+    /// `delta_report` against `rows` recording `recorded`, read by `probe`,
+    /// with `measured` as the measurement.
+    fn delta(
+        name: &str,
+        recorded: Option<Probe>,
+        rows: &[(&str, u32)],
+        probe: Probe,
+        measured: &[(&str, f64)],
+    ) -> Result<String, String> {
+        let path = scratch_baseline(name, &baseline_text(recorded, rows));
+        let measured = measured
+            .iter()
+            .map(|&(name, bpb)| (name.to_string(), bpb))
+            .collect::<BTreeMap<_, _>>();
+        let report = delta_report(&path, probe, |_| measured);
+        std::fs::remove_file(&path).unwrap();
+        report
     }
 
     #[test]
     fn delta_report_is_ok_on_a_regression_past_the_gate_tolerance() {
-        let path = scratch_baseline("regression", &baseline_text(&[("a", 1), ("b", 2)]));
-        let measured = BTreeMap::from([("a".to_string(), 5.0), ("b".to_string(), 1.0)]);
-        let report = delta_report(&path, &measured, CaseSet::Train)
-            .expect("a regression is a report, not an error");
-        std::fs::remove_file(&path).unwrap();
+        let report = delta(
+            "regression",
+            Some(Probe::default()),
+            &[("a", 1), ("b", 2)],
+            Probe::default(),
+            &[("a", 5.0), ("b", 1.0)],
+        )
+        .expect("a regression is a report, not an error");
         assert_eq!(
             report,
             "a: 1.000000 -> 5.000000 bits/byte (+4.000000)\n\
@@ -460,10 +505,14 @@ mod tests {
 
     #[test]
     fn delta_report_names_the_sealed_mean_on_a_sealed_read() {
-        let path = scratch_baseline("sealed", &baseline_text(&[("a", 2)]));
-        let measured = BTreeMap::from([("a".to_string(), 1.0)]);
-        let report = delta_report(&path, &measured, CaseSet::Sealed).unwrap();
-        std::fs::remove_file(&path).unwrap();
+        let report = delta(
+            "sealed",
+            Some(sealed()),
+            &[("a", 2)],
+            sealed(),
+            &[("a", 1.0)],
+        )
+        .unwrap();
         assert!(
             report.ends_with("sealed mean -1.000000 bits/byte over 1 cases\n"),
             "{report}"
@@ -471,32 +520,86 @@ mod tests {
     }
 
     #[test]
-    fn delta_report_skips_a_case_only_the_file_holds() {
-        let path = scratch_baseline("file-only", &baseline_text(&[("a", 2), ("reach", 3)]));
-        let measured = BTreeMap::from([("a".to_string(), 1.0)]);
-        let report = delta_report(&path, &measured, CaseSet::Train).unwrap();
-        std::fs::remove_file(&path).unwrap();
+    fn delta_report_reads_a_file_without_a_probe_record_as_the_default_probe() {
+        // `bench/baseline.json`'s shape: no record, a reach case no probe reads.
+        let rows = [("a", 2), ("reach", 3)];
+        let report = delta("gate", None, &rows, Probe::default(), &[("a", 1.0)]).unwrap();
         assert_eq!(
             report,
             "a: 2.000000 -> 1.000000 bits/byte (-1.000000)\n\
              train mean -1.000000 bits/byte over 1 cases\n"
         );
+        let err = delta("gate-sealed", None, &rows, sealed(), &[]).unwrap_err();
+        assert!(
+            err.contains(
+                "records no probe, read as `--level 3 --len 50000`, \
+                 this delta reads `--level 3 --len 50000 --sealed`"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn delta_report_refuses_a_file_measured_at_another_level_or_length_before_measuring() {
+        // #1894: the case names agree, so only the record tells the reads apart.
+        let recorded = Probe {
+            len: 20_000,
+            ..Probe::default()
+        };
+        for (probe, named) in [
+            (
+                Probe {
+                    len: 50_000,
+                    ..recorded
+                },
+                "this delta reads `--level 3 --len 50000`",
+            ),
+            (
+                Probe {
+                    level: Level::Fast,
+                    ..recorded
+                },
+                "this delta reads `--level 2 --len 20000`",
+            ),
+            (
+                sealed(),
+                "this delta reads `--level 3 --len 50000 --sealed`",
+            ),
+        ] {
+            let path = scratch_baseline("mismatch", &baseline_text(Some(recorded), &[("a", 2)]));
+            let result = delta_report(&path, probe, |_| panic!("measured past a refusal"));
+            std::fs::remove_file(&path).unwrap();
+            let err = result.expect_err(named);
+            assert!(
+                err.contains("was measured with `--level 3 --len 20000`"),
+                "{err}"
+            );
+            assert!(err.contains(named), "{err}");
+        }
     }
 
     #[test]
     fn delta_report_errs_naming_a_measured_case_the_file_lacks() {
-        // #1892: a sealed read of a train file shares no case name.
-        let path = scratch_baseline("disjoint", &baseline_text(&[("train", 2)]));
-        let sealed = BTreeMap::from([("s1".to_string(), 1.0), ("s2".to_string(), 1.0)]);
-        let disjoint = delta_report(&path, &sealed, CaseSet::Sealed);
-        // One shared case of two still leaves the mean without a denominator.
-        let partial = BTreeMap::from([("s1".to_string(), 1.0), ("train".to_string(), 1.0)]);
-        let partial = delta_report(&path, &partial, CaseSet::Train);
-        std::fs::remove_file(&path).unwrap();
+        // #1892: a sealed read of a file holding no sealed case has no mean.
+        let disjoint = delta(
+            "disjoint",
+            Some(sealed()),
+            &[("train", 2)],
+            sealed(),
+            &[("s1", 1.0), ("s2", 1.0)],
+        );
         let err = disjoint.expect_err("no shared case is no mean");
         assert!(
             err.contains("holds 0 of the 2 sealed cases measured (missing: s1, s2)"),
             "{err}"
+        );
+        // One shared case of two still leaves the mean without a denominator.
+        let partial = delta(
+            "partial",
+            None,
+            &[("train", 2)],
+            Probe::default(),
+            &[("s1", 1.0), ("train", 1.0)],
         );
         let err = partial.expect_err("a missing case is no mean");
         assert!(
@@ -508,9 +611,9 @@ mod tests {
     #[test]
     fn delta_report_errs_on_an_unreadable_or_malformed_file() {
         let missing = std::env::temp_dir().join("mothergod-delta-no-such-file");
-        assert!(delta_report(&missing, &BTreeMap::new(), CaseSet::Train).is_err());
+        assert!(delta_report(&missing, Probe::default(), |_| BTreeMap::new()).is_err());
         let path = scratch_baseline("malformed", "{\n  not valid\n}\n");
-        let result = delta_report(&path, &BTreeMap::new(), CaseSet::Train);
+        let result = delta_report(&path, Probe::default(), |_| BTreeMap::new());
         std::fs::remove_file(&path).unwrap();
         assert!(result.is_err());
     }
