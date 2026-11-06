@@ -28,7 +28,9 @@ measurement time and never committed. Measured 2026-11-06 against
 | Silesia | **1.976** | 2.553 | 1.997 | 1.829 |
 
 mothergod beats both `zstd -19` and `xz -9e` in aggregate on Canterbury; on
-Silesia it beats `zstd -19` and loses to `xz -9e`. Per file, against whichever of the two
+Silesia it beats `zstd -19` and loses to `xz -9e`. Its slowest level, `-4`,
+writes both corpora smaller than any level of `gzip`, `zstd` or `xz` in the
+same run, and pays for that in decode time, quoted under [Try it](#try-it). Per file, against whichever of the two
 is stronger on that file, it wins 7 of 11 on Canterbury and 1 of 12 on
 Silesia. The wins are Canterbury's six smallest text and source files
 (`alice29.txt`, `asyoulik.txt`, `cp.html`, `fields.c`, `grammar.lsp`,

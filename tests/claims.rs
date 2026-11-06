@@ -1156,6 +1156,26 @@ fn extreme_level_figures_match_their_generated_report() {
     );
 }
 
+/// README and site say `-4` "writes both corpora smaller than any level of
+/// `gzip`, `zstd` or `xz` in the same run". Each report's frontier table
+/// holds every level of the three, and its neighbour line names the fastest
+/// one at least as good as `-4`; the claim holds while both lines read
+/// `none`, because a level that ties or beats `-4` would be named there.
+#[test]
+fn extreme_level_smallest_claim_matches_its_generated_reports() {
+    for report_file in ["canterbury.md", "silesia.md"] {
+        let report = read(&format!("docs/benchmarks/{report_file}"));
+        let rival = line_containing(&report, "fastest level at least as good as mothergod -4: ")
+            .rsplit(": ")
+            .next()
+            .expect("the line names a level");
+        assert_eq!(
+            rival, "none",
+            "README.md and site/index.html say -4 writes every corpus smaller than any level of gzip, zstd or xz, docs/benchmarks/{report_file} names {rival} at least as good"
+        );
+    }
+}
+
 /// README and site anchor "slow" against `xz -9e` on Silesia: they quote its
 /// rates from the same run and call it "more than nine times faster to
 /// encode and more than twenty times faster to decode". The rates are

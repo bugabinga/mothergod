@@ -20,6 +20,30 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-06: Editorial: the smallest files we write were mentioned only as a price
+
+Queue blocked: #1800 waits on #537's release, #1640 on the 2026-12-01
+sweep. Both reports' frontier tables put `mothergod -4` first, above
+every level of gzip, zstd and xz (Silesia 1.736 against `xz -9e`'s
+1.829, Canterbury 1.143 against 1.401), and both neighbour lines read
+"fastest level at least as good as mothergod -4: none". The surface
+mentioned `-4` once, in "Try it", as a cost. The verdict paragraph
+told a reader "loses to `xz -9e`" on Silesia, which is true for the
+default, and stopped there.
+
+**One sentence, no numbers, beside the verdict.** It says what the
+neighbour lines say and points at "Try it" for the decode price. It
+carries no figures, so no second copy of the row's numbers exists to
+drift, and `extreme_level_smallest_claim_matches_its_generated_reports`
+fails the day either line names a level.
+
+**Kept: the headline table and verdict strip stay on `-3`.** The
+2026-10-27 rule said the default answers "how small can it get". `-4`
+now answers that better, but the default is what a user gets without
+asking. And a headline at 0.165 MB/s decode would be a ratio
+unaccompanied by its price. The sentence sits after the honest
+verdict, not in place of it.
+
 ## 2026-11-06: Editorial: `-4`'s price is its decode rate, quoted from its row
 
 #1880. "Try it" on README and `/` said `-4` costs "far more in decode
