@@ -155,8 +155,8 @@ pub(crate) fn bcj_call_dense_data() -> Vec<u8> {
 
 /// Fixed-width records whose columns each cycle through their own
 /// period (`research/JOURNAL.md` S1-P5's target shape, same
-/// construction as `tests/golden/v11-tabular-columns`), with a fraction
-/// of bytes jittered off the clean pattern so the literal model, not
+/// construction as the `tabular-columns` fixture in `tests/golden/`), with
+/// a fraction of bytes jittered off the clean pattern so the literal model, not
 /// just `lz::parse_optimal`'s LZ matches, carries real weight — the
 /// data this ADR-0046 slice's own real-bitstream measurement used.
 pub(crate) fn tabular_columns_data(columns: usize, rows: usize, seed: u32) -> Vec<u8> {

@@ -209,7 +209,7 @@ fn single_byte_round_trips_through_column_expert() {
 fn tabular_columns_round_trip_through_column_expert() {
     // The shape this path targets (research/JOURNAL.md S1-P5): fixed-
     // width records, each column cycling through its own small period,
-    // the same class tests/golden/v11-tabular-columns pins.
+    // the same class the `tabular-columns` fixture in tests/golden/ pins.
     let columns = 8;
     let rows: Vec<u8> = (0..600u32)
         .map(|i| u8::try_from((i * 7 + i / u32::try_from(columns).unwrap()) % 251).unwrap())
