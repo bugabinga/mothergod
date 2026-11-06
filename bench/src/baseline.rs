@@ -127,47 +127,80 @@ pub fn cases() -> Vec<Case> {
     out
 }
 
-/// Name of the one case [`reach_case`] builds, its key in
-/// `bench/baseline.json`.
-pub const REACH_CASE_NAME: &str = "wide_reach_repeat";
-
-/// Bytes of the block [`reach_case`] repeats.
+/// Bytes of the block a [`ReachCase`] repeats.
 const REACH_BLOCK_LEN: usize = 128 * 1024;
 
-/// Bytes between the two copies of that block's start: the standard match
-/// reach, a block and slack, so the copy sits past [`mothergod::lz::WINDOW`]
-/// and inside [`mothergod::lz::WIDE_WINDOW`] (`lz::Reach`).
-const REACH_DISTANCE: usize = mothergod::lz::WINDOW + REACH_BLOCK_LEN + 64 * 1024;
+/// Bytes a [`ReachCase`]'s repeat sits past the reach it escapes, beyond
+/// the block itself, so no boundary off-by-one lets that reach see it.
+const REACH_SLACK: usize = 64 * 1024;
 
-/// Bytes in [`reach_case`]'s input: the distance to the second copy, then
-/// that copy. The baseline page quotes it beside [`CASE_LEN`].
-pub const REACH_CASE_LEN: usize = REACH_DISTANCE + REACH_BLOCK_LEN;
-
-/// The gate's one input past the standard match reach (issue #1434): a
-/// uniform-random block, [`crate::json_records`] filler, then the block
-/// again one standard reach, a block and some slack after its first copy.
-/// The block is incompressible on its own, so a parse that reaches the first copy saves
-/// the whole second one and one that cannot pays for it in full: a
-/// reach-class change moves this case's bits/byte by whole bits where the
-/// [`CASE_LEN`] cases, all inside the standard reach, cannot feel it.
+/// One gate input past a match reach (issue #1434, `research/JOURNAL.md`
+/// S2-A137): a uniform-random block, [`crate::json_records`] filler, then
+/// the block again, [`Self::distance`] after its first copy: `past`'s
+/// window, a block and `REACH_SLACK`. The block is incompressible on its
+/// own, so a parse that reaches the first copy saves the whole second one
+/// and one that cannot pays for it in full: a change to the reach above
+/// `past` moves this case's bits/byte far past [`TOLERANCE_BITS`], where
+/// an input inside `past` cannot feel it.
 ///
 /// Not part of [`cases`]: its length is not [`CASE_LEN`], so it does not
 /// enter the train mean (`research/README.md`) or the decode-speed
 /// calibration, which both count [`cases`] only.
-#[must_use]
-pub fn reach_case() -> Case {
-    let block = crate::entropy_ladder(8, REACH_BLOCK_LEN, CASE_SEED);
-    let mut data = block.clone();
-    data.extend(crate::json_records(
-        REACH_DISTANCE - REACH_BLOCK_LEN,
-        CASE_SEED,
-    ));
-    data.extend_from_slice(&block);
-    Case {
-        name: REACH_CASE_NAME,
-        data,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReachCase {
+    /// Stable name, this case's key in `bench/baseline.json`.
+    pub name: &'static str,
+    /// The widest reach that cannot see the repeat.
+    pub past: mothergod::lz::Reach,
+}
+
+impl ReachCase {
+    /// Bytes between the two copies of the block's start.
+    #[must_use]
+    pub const fn distance(self) -> usize {
+        self.past.window() + REACH_BLOCK_LEN + REACH_SLACK
+    }
+
+    /// Bytes in the input: the distance to the second copy, then that copy.
+    /// The baseline page quotes it beside [`CASE_LEN`].
+    #[must_use]
+    pub const fn input_len(self) -> usize {
+        self.distance() + REACH_BLOCK_LEN
+    }
+
+    /// The input bytes, at [`CASE_SEED`].
+    #[must_use]
+    pub fn case(self) -> Case {
+        let block = crate::entropy_ladder(8, REACH_BLOCK_LEN, CASE_SEED);
+        let mut data = block.clone();
+        data.extend(crate::json_records(
+            self.distance() - REACH_BLOCK_LEN,
+            CASE_SEED,
+        ));
+        data.extend_from_slice(&block);
+        Case {
+            name: self.name,
+            data,
+        }
     }
 }
+
+/// The gate's inputs past a match reach, one per reach above
+/// [`mothergod::lz::Reach::Standard`]: each sits past the reach below its
+/// own, so a regression in either the wide or the far trial (`compress`,
+/// `research/JOURNAL.md` S2-A127, S2-A137) moves a pinned bits/byte. The
+/// far case is also longer than [`mothergod::lz::WIDE_WINDOW`], the input
+/// length at which `compress` runs the far trial at all.
+pub const REACH_CASES: [ReachCase; 2] = [
+    ReachCase {
+        name: "wide_reach_repeat",
+        past: mothergod::lz::Reach::Standard,
+    },
+    ReachCase {
+        name: "far_reach_repeat",
+        past: mothergod::lz::Reach::Wide,
+    },
+];
 
 /// Bits/byte of `compressed_len` bytes encoding `original_len` original
 /// bytes. `0.0` when `original_len` is `0` (nothing to measure a ratio
@@ -257,12 +290,12 @@ pub fn measure_all() -> Snapshot {
     measure(&cases())
 }
 
-/// [`measure_all`] plus the [`reach_case`]: what `check` and `write` hold
+/// [`measure_all`] plus the [`REACH_CASES`]: what `check` and `write` hold
 /// `bench/baseline.json` to.
 #[must_use]
 pub fn measure_gate() -> Snapshot {
     let mut gate = cases();
-    gate.push(reach_case());
+    gate.extend(REACH_CASES.map(ReachCase::case));
     measure(&gate)
 }
 
@@ -582,10 +615,11 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, Entry, REACH_BLOCK_LEN, REACH_CASE_LEN, REACH_CASE_NAME,
-        Snapshot, TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a, format_baseline,
-        hold_at_best, mean_delta, output_changes, parse_baseline, reach_case, regressions,
+        BaselineParseError, CASE_LEN, Entry, REACH_BLOCK_LEN, REACH_CASES, Snapshot,
+        TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a, format_baseline, hold_at_best,
+        mean_delta, output_changes, parse_baseline, regressions,
     };
+    use mothergod::lz::Reach;
     use std::collections::BTreeMap;
 
     /// A snapshot of `(name, bpb, digest)` rows.
@@ -629,24 +663,35 @@ mod tests {
     }
 
     #[test]
-    fn reach_case_repeats_its_block_past_the_standard_reach_inside_the_wide_one() {
-        let case = reach_case();
-        assert_eq!(case.data.len(), REACH_CASE_LEN);
-        // The first copy starts at 0, so the second's offset is the distance.
-        let distance = case.data.len() - REACH_BLOCK_LEN;
-        assert_eq!(case.data[..REACH_BLOCK_LEN], case.data[distance..]);
+    fn each_reach_case_repeats_its_block_past_one_reach_inside_the_next() {
+        let train: Vec<&str> = cases().iter().map(|c| c.name).collect();
+        for (reach_case, sees) in REACH_CASES.into_iter().zip([Reach::Wide, Reach::Far]) {
+            let name = reach_case.name;
+            let case = reach_case.case();
+            assert_eq!(case.name, name);
+            assert_eq!(case.data.len(), reach_case.input_len(), "{name}");
+            // The first copy starts at 0, so the second's offset is the distance.
+            let distance = case.data.len() - REACH_BLOCK_LEN;
+            assert_eq!(distance, reach_case.distance(), "{name}");
+            assert_eq!(
+                case.data[..REACH_BLOCK_LEN],
+                case.data[distance..],
+                "{name}"
+            );
+            assert!(
+                distance > reach_case.past.window(),
+                "{name}: {:?} sees it",
+                reach_case.past
+            );
+            assert!(distance <= sees.window(), "{name}: {sees:?} cannot see it");
+            assert!(
+                !train.contains(&name),
+                "{name}: the train cases and the reach cases are disjoint"
+            );
+        }
         assert!(
-            distance > mothergod::lz::WINDOW,
-            "the standard reach sees it"
-        );
-        assert!(
-            distance <= mothergod::lz::WIDE_WINDOW,
-            "the wide reach cannot see it"
-        );
-        assert_eq!(case.name, REACH_CASE_NAME);
-        assert!(
-            cases().iter().all(|c| c.name != REACH_CASE_NAME),
-            "the train cases and the reach case are disjoint"
+            REACH_CASES[1].input_len() > mothergod::lz::WIDE_WINDOW,
+            "compress runs the far trial only past the wide window"
         );
     }
 

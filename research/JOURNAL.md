@@ -2910,7 +2910,9 @@ record.
   slice, S2-R38: the first candidate's wide trial beside the narrow winner's,
   rejected; full record in S2-R38's own entry. Twenty-fifth slice, S2-A137:
   a far reach to `2^24 - 1` with its own offset alphabet, accepted
-  (`FORMAT_VERSION` 18, ADR-0078); full record in S2-A137's own entry.
+  (`FORMAT_VERSION` 18, ADR-0078); full record in S2-A137's own entry. Twenty-sixth
+  slice, S2-A145: a far case in `baseline_gate check`, accepted; full
+  record in S2-A145's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -9948,3 +9950,24 @@ record.
   `-4` wins or ties every file against zstd -19 is unread; run-to-run
   spread. ADR-0080 decides the default switch ADR-0079 deferred to this
   read: the default stays `-3`. `research/progress.jsonl` it251.
+- S2-A145 | ACCEPTED | Lead S1-P4, the far case in `baseline_gate check`
+  that S2-A137 left unmeasured. Hypothesis: a gate input whose repeat sits
+  past `lz::WIDE_WINDOW` and inside `lz::FAR_WINDOW`, on an input longer
+  than `WIDE_WINDOW`, pins the far trial the way `wide_reach_repeat` pins
+  the wide one (#1434), so a far-trial regression fails the `ratio` check
+  where every other gate case cannot feel it. | Mechanism: the two long
+  cases are one table, `baseline::REACH_CASES`, each a `ReachCase` naming
+  the widest reach that cannot see its repeat; the distance derives from
+  that reach's window, so `wide_reach_repeat` keeps its 1,376,256 bytes
+  and its digest, and `far_reach_repeat` is 2,424,831 bytes. Measured,
+  release build, AMD EPYC 9V74 4 logical cores runner, main at `d8f77c2`:
+  `far_reach_repeat` compresses to 270,247 bytes (0.891599 b/B) against
+  401,454 for the same input with its second block XORed by `0x5A`, the
+  131,072-byte block saved by the far reach. With the far trial disabled
+  in `codec.rs` (scratch, reverted) `baseline_gate check` fails on it,
+  0.891599 to 1.183809 b/B (+0.292210, tolerance 0.02). Gate wall time
+  17.4 to 38.7 s, peak RSS 79 to 181 MiB, one run each. | Verdict:
+  **accepted**; codec output unchanged, the twelve old cases byte-identical
+  in `bench/baseline.json`, so ratio deltas are 0 by construction. |
+  **Not measured:** the `ratio` job's time on CI's runner.
+  `research/progress.jsonl` it252.

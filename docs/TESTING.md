@@ -431,10 +431,11 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `compress()`'s output over the fixed inputs, so a refactor's
   "bitstream unchanged" is a green check and an output change is declared
   by `baseline_gate -- write` in the same PR, the rule an encoder-only
-  change already follows for `tests/golden.rs`. One of those inputs is
-  longer than the rest, a repeat past the standard match reach
-  (`baseline::reach_case`, issue #1434): the others sit inside it and
-  cannot feel a reach-class change.
+  change already follows for `tests/golden.rs`. Two of those inputs are
+  longer than the rest, each a repeat past one match reach and inside the
+  next (`baseline::REACH_CASES`, issue #1434, `research/JOURNAL.md`
+  S2-A137): the others sit inside the standard reach and cannot feel a
+  reach-class change.
 - The held-out finals reports (`docs/benchmarks/canterbury.md`,
   `docs/benchmarks/silesia.md`) are not checked by `baseline_gate`: they
   fetch real corpora over the network, too slow and non-hermetic for every
