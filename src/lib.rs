@@ -622,6 +622,23 @@ pub(crate) fn rejoin<T>(joined: std::thread::Result<T>) -> T {
     joined.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
+/// Runs `work` on up to `threads` threads of `scope`, the calling thread
+/// being one, and returns every run's value: the caller's first, then each
+/// helper's in spawn order. A refused spawn (the process is out of threads)
+/// leaves the work to the threads that did start, this one included.
+pub(crate) fn fan_out<'scope, T: Send + 'scope>(
+    scope: &'scope std::thread::Scope<'scope, '_>,
+    threads: usize,
+    work: impl Fn() -> T + Copy + Send + 'scope,
+) -> Vec<T> {
+    let helpers: Vec<_> = (1..threads)
+        .filter_map(|_| std::thread::Builder::new().spawn_scoped(scope, work).ok())
+        .collect();
+    let mut values = vec![work()];
+    values.extend(helpers.into_iter().map(|helper| rejoin(helper.join())));
+    values
+}
+
 /// Fallible `data.to_vec()`: `Err` instead of an abort if the allocator
 /// cannot satisfy `data.len()` bytes (#453).
 pub(crate) fn try_vec_from_slice(
