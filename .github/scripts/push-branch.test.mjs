@@ -514,6 +514,7 @@ test("a HEAD that descends from the base passes the stale guard; a sibling of th
     const sibling = guard(child);
     assert.equal(sibling.died, true, "HEAD is the child's sibling: pushing f.txt would revert the child");
     assert.match(sibling.stderr, /would revert the base's version/);
+    assert.match(sibling.stderr, /git rebase --autostash/, "the recipe keeps the edit: no reset --hard");
 
     git("checkout", "-q", child);
     const descendant = guard(base);
