@@ -167,13 +167,21 @@ pub enum CaseSet {
 }
 
 impl CaseSet {
-    /// How a report names the set's mean: `train` or `sealed`.
+    /// How a report names the set's mean and a [`Probe`] record names the
+    /// set: `train` or `sealed`.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Train => "train",
             Self::Sealed => "sealed",
         }
+    }
+
+    /// The set [`Self::label`] names, `None` for any other text.
+    fn of_label(label: &str) -> Option<Self> {
+        [Self::Train, Self::Sealed]
+            .into_iter()
+            .find(|set| set.label() == label)
     }
 }
 
@@ -216,12 +224,41 @@ impl Probe {
         }
     }
 
-    /// Every case's [`Entry`] at this probe's level.
+    /// Every case's [`Entry`] at this probe's level, the snapshot recording
+    /// this probe, so a file [`format_baseline`] writes from it names what
+    /// it measured.
     #[must_use]
     pub fn measure(self) -> Snapshot {
-        measure(&self.cases(), self.level)
+        Snapshot {
+            probe: Some(self),
+            ..measure(&self.cases(), self.level)
+        }
     }
 }
+
+impl fmt::Display for Probe {
+    /// The `baseline_gate measure` options that read this probe, every one
+    /// spelled out: `--level 3 --len 50000`, then ` --sealed` on the sealed
+    /// set.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "--level {} --len {}",
+            crate::field::level_digit(self.level),
+            self.len
+        )?;
+        if self.set == CaseSet::Sealed {
+            f.write_str(" --sealed")?;
+        }
+        Ok(())
+    }
+}
+
+/// The key a [`Snapshot::probe`] record sits under in the file, beside the
+/// case names. No case is named this (`no_case_is_named_the_probe_key`),
+/// so [`parse_baseline`] reads an object under it as the probe, never as a
+/// case.
+const PROBE_KEY: &str = "probe";
 
 /// Bytes of the block a [`ReachCase`] repeats.
 const REACH_BLOCK_LEN: usize = 128 * 1024;
@@ -343,6 +380,11 @@ pub struct Entry {
 /// holds.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Snapshot {
+    /// The probe that measured the cases, `None` for [`measure_gate`]'s
+    /// snapshot and so for `bench/baseline.json`, whose reach cases no
+    /// probe reads (issue #1894). The gate's train cases are the default
+    /// probe's, which is how `delta` reads an absent record.
+    pub probe: Option<Probe>,
     /// Entries in name order, the order the file is written in.
     pub cases: BTreeMap<String, Entry>,
 }
@@ -359,8 +401,8 @@ impl Snapshot {
     }
 
     /// This snapshot with each case's bits/byte replaced by its value in
-    /// `bpb`, digests kept; a case absent from `bpb` keeps its own. How a
-    /// [`hold_at_best`] result becomes the snapshot to write.
+    /// `bpb`, digests and probe kept; a case absent from `bpb` keeps its
+    /// own. How a [`hold_at_best`] result becomes the snapshot to write.
     #[must_use]
     pub fn with_bpb(&self, bpb: &BTreeMap<String, f64>) -> Snapshot {
         let cases = self
@@ -374,7 +416,10 @@ impl Snapshot {
                 (name.clone(), entry)
             })
             .collect();
-        Snapshot { cases }
+        Snapshot {
+            probe: self.probe,
+            cases,
+        }
     }
 }
 
@@ -403,14 +448,16 @@ fn measure(cases: &[Case], level: Level) -> Snapshot {
             (case.name.to_string(), entry)
         })
         .collect();
-    Snapshot { cases }
+    Snapshot { probe: None, cases }
 }
 
 /// Writes `snapshot` as the `bench/baseline.json` this module reads back
 /// with [`parse_baseline`]: an object keyed by case name, keys sorted
 /// (`snapshot.cases` is a [`BTreeMap`]), each value an object of `bpb`
 /// rounded to six decimal places with the trailing zeros trimmed (`8.0`
-/// prints `8`) and `digest` as 16 lowercase hex digits. That is the form
+/// prints `8`) and `digest` as 16 lowercase hex digits. A
+/// [`Snapshot::probe`] comes first, under the key `"probe"`, as an object of
+/// `set` ([`CaseSet::label`]), `level` (the CLI's digit) and `len`. That is the form
 /// `cargo x fmt` leaves the file in, so a freshly written one already passes
 /// `cargo x fmt --check` (issue #943). Not a general JSON writer: it only
 /// needs to round-trip its own output, the same scope the `corpus` module's
@@ -420,6 +467,17 @@ fn measure(cases: &[Case], level: Level) -> Snapshot {
 pub fn format_baseline(snapshot: &Snapshot) -> String {
     let mut out = String::from("{\n");
     let mut remaining = snapshot.cases.len();
+    if let Some(probe) = snapshot.probe {
+        let comma = if remaining == 0 { "" } else { "," };
+        writeln!(
+            out,
+            "  \"{PROBE_KEY}\": {{\n    \"set\": \"{}\",\n    \"level\": {},\n    \"len\": {}\n  }}{comma}",
+            probe.set.label(),
+            crate::field::level_digit(probe.level),
+            probe.len
+        )
+        .expect("writing to a String never fails");
+    }
     for (name, entry) in &snapshot.cases {
         remaining -= 1;
         let comma = if remaining == 0 { "" } else { "," };
@@ -466,7 +524,8 @@ impl std::error::Error for BaselineParseError {}
 /// [`Snapshot`]. Not a general JSON reader: it understands exactly one
 /// shape (an opening `{`, per case a `"name": {` line, a `"bpb": number`
 /// line, a `"digest": "<16 hex digits>"` line and a closing `}`, an
-/// optional trailing comma on any line, a closing `}`) and rejects anything
+/// optional trailing comma on any line, a closing `}`, and the probe record
+/// [`format_baseline`] writes under `"probe"`) and rejects anything
 /// else line by line, the same deliberate scope limit the `corpus`
 /// module's manual TOML reader (behind the `corpus-fetch` feature) takes
 /// for `bench/corpus.toml`.
@@ -474,18 +533,24 @@ impl std::error::Error for BaselineParseError {}
 /// # Errors
 ///
 /// Returns [`BaselineParseError`] naming the first line that is not blank,
-/// `{`, `}`, or part of a case in that shape, a case missing its `bpb` or
-/// its `digest`, or the line that opened a case the text never closes.
+/// `{`, `}`, or part of a case or the probe record in that shape, a case
+/// missing its `bpb` or its `digest`, a probe record missing its `set`,
+/// `level` or `len`, or the line that opened an object the text never
+/// closes.
 pub fn parse_baseline(text: &str) -> Result<Snapshot, BaselineParseError> {
-    /// The case being read: its name, the line that opened it, and the
-    /// fields seen so far.
+    /// The object being read: its name, the line that opened it, and the
+    /// fields seen so far, a case's two or the probe record's three.
     struct Open {
         name: String,
         line: usize,
         bpb: Option<f64>,
         digest: Option<u64>,
+        set: Option<CaseSet>,
+        level: Option<Level>,
+        len: Option<usize>,
     }
     let mut cases = BTreeMap::new();
+    let mut probe = None;
     let mut open: Option<Open> = None;
     let mut opened_at = String::new();
     for (idx, raw_line) in text.lines().enumerate() {
@@ -511,27 +576,46 @@ pub fn parse_baseline(text: &str) -> Result<Snapshot, BaselineParseError> {
                 line: idx + 1,
                 bpb: None,
                 digest: None,
+                set: None,
+                level: None,
+                len: None,
             });
             continue;
         };
+        let is_probe = case.name == PROBE_KEY;
         if line == "}" {
-            let (Some(bpb), Some(digest)) = (case.bpb, case.digest) else {
-                return Err(err());
-            };
-            cases.insert(case.name.clone(), Entry { bpb, digest });
+            if is_probe {
+                let (Some(set), Some(level), Some(len)) = (case.set, case.level, case.len) else {
+                    return Err(err());
+                };
+                probe = Some(Probe { set, level, len });
+            } else {
+                let (Some(bpb), Some(digest)) = (case.bpb, case.digest) else {
+                    return Err(err());
+                };
+                cases.insert(case.name.clone(), Entry { bpb, digest });
+            }
             open = None;
             continue;
         }
         let (key, value) = split_pair(line).ok_or_else(err)?;
-        match key {
-            "bpb" => case.bpb = Some(value.parse().map_err(|_| err())?),
-            "digest" => {
-                let hex = value
-                    .strip_prefix('"')
-                    .and_then(|v| v.strip_suffix('"'))
+        match (is_probe, key) {
+            (false, "bpb") => case.bpb = Some(value.parse().map_err(|_| err())?),
+            (false, "digest") => {
+                let hex = unquote(value)
                     .filter(|hex| hex.len() == 16 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
                     .ok_or_else(err)?;
                 case.digest = Some(u64::from_str_radix(hex, 16).map_err(|_| err())?);
+            }
+            (true, "set") => {
+                case.set = Some(unquote(value).and_then(CaseSet::of_label).ok_or_else(err)?);
+            }
+            (true, "level") => {
+                case.level = Some(crate::field::level_of_digit(value).ok_or_else(err)?);
+            }
+            (true, "len") => {
+                let len = value.parse().ok().filter(|&len: &usize| len > 0);
+                case.len = Some(len.ok_or_else(err)?);
             }
             _ => return Err(err()),
         }
@@ -541,8 +625,14 @@ pub fn parse_baseline(text: &str) -> Result<Snapshot, BaselineParseError> {
             line: case.line,
             content: opened_at,
         }),
-        None => Ok(Snapshot { cases }),
+        None => Ok(Snapshot { probe, cases }),
     }
+}
+
+/// `value` without the double quotes that open and close it, `None` when
+/// it is not quoted.
+fn unquote(value: &str) -> Option<&str> {
+    value.strip_prefix('"')?.strip_suffix('"')
 }
 
 /// `"key": value` as the unquoted key and the trimmed value text; `None`
@@ -706,7 +796,7 @@ pub fn mean_delta(deltas: &[CaseDelta]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BaselineParseError, CASE_LEN, CASE_SEED, CaseSet, Entry, Probe, REACH_BLOCK_LEN,
+        BaselineParseError, CASE_LEN, CASE_SEED, CaseSet, Entry, PROBE_KEY, Probe, REACH_BLOCK_LEN,
         REACH_CASES, Snapshot, TOLERANCE_BITS, bits_per_byte, cases, deltas, fnv1a,
         format_baseline, hold_at_best, mean_delta, output_changes, parse_baseline, regressions,
         sealed_cases,
@@ -721,7 +811,7 @@ mod tests {
             .iter()
             .map(|&(name, bpb, digest)| (name.to_string(), Entry { bpb, digest }))
             .collect();
-        Snapshot { cases }
+        Snapshot { probe: None, cases }
     }
 
     #[test]
@@ -982,6 +1072,87 @@ mod tests {
     #[test]
     fn parse_baseline_accepts_the_empty_object() {
         assert!(parse_baseline("{\n}\n").unwrap().cases.is_empty());
+    }
+
+    /// [`CASE`] measured by a sealed probe at level 2 and 4,000,000 bytes.
+    const PROBED: &str = "{\n  \"probe\": {\n    \"set\": \"sealed\",\n    \"level\": 2,\n    \
+        \"len\": 4000000\n  },\n  \"a\": {\n    \"bpb\": 1,\n    \
+        \"digest\": \"00000000000000ff\"\n  }\n}\n";
+
+    #[test]
+    fn format_baseline_writes_the_probe_first_and_parse_baseline_reads_it_back() {
+        let probe = Probe {
+            set: CaseSet::Sealed,
+            level: Level::Fast,
+            len: 4_000_000,
+        };
+        let probed = Snapshot {
+            probe: Some(probe),
+            ..snapshot(&[("a", 1.0, 0xff)])
+        };
+        assert_eq!(format_baseline(&probed), PROBED);
+        assert_eq!(parse_baseline(PROBED).unwrap(), probed);
+        let alone = Snapshot {
+            probe: Some(Probe::default()),
+            cases: BTreeMap::new(),
+        };
+        assert_eq!(parse_baseline(&format_baseline(&alone)).unwrap(), alone);
+        assert_eq!(parse_baseline(CASE).unwrap().probe, None);
+    }
+
+    #[test]
+    fn parse_baseline_rejects_a_probe_record_missing_a_field_or_with_a_bad_one() {
+        for damaged in [
+            PROBED.replace("    \"set\": \"sealed\",\n", ""),
+            PROBED.replace("    \"level\": 2,\n", ""),
+            PROBED.replace(",\n    \"len\": 4000000", ""),
+            PROBED.replace("\"sealed\"", "\"finals\""),
+            PROBED.replace("\"sealed\"", "sealed"),
+            PROBED.replace("\"level\": 2", "\"level\": 5"),
+            PROBED.replace("\"level\": 2", "\"level\": 22"),
+            PROBED.replace("4000000", "0"),
+            PROBED.replace("4000000", "-1"),
+            PROBED.replace("\"len\"", "\"bpb\""),
+            // A case field inside the record, a record field inside a case.
+            PROBED.replace("\"bpb\": 1", "\"len\": 1"),
+        ] {
+            assert!(parse_baseline(&damaged).is_err(), "accepted {damaged}");
+        }
+    }
+
+    #[test]
+    fn no_case_is_named_the_probe_key() {
+        let names = cases()
+            .into_iter()
+            .chain(sealed_cases(CASE_LEN))
+            .map(|case| case.name)
+            .chain(REACH_CASES.map(|reach| reach.name));
+        for name in names {
+            assert_ne!(name, PROBE_KEY);
+        }
+    }
+
+    #[test]
+    fn a_probe_prints_the_measure_options_that_read_it() {
+        assert_eq!(Probe::default().to_string(), "--level 3 --len 50000");
+        let sealed = Probe {
+            set: CaseSet::Sealed,
+            level: Level::Fastest,
+            len: 7,
+        };
+        assert_eq!(sealed.to_string(), "--level 1 --len 7 --sealed");
+    }
+
+    #[test]
+    fn a_probe_measurement_records_its_probe_and_the_gate_records_none() {
+        let probe = Probe {
+            set: CaseSet::Sealed,
+            level: Level::Fastest,
+            len: 1_000,
+        };
+        assert_eq!(probe.measure().probe, Some(probe));
+        let gate = snapshot(&[("a", 1.0, 0)]);
+        assert_eq!(gate.with_bpb(&BTreeMap::new()).probe, None);
     }
 
     #[test]

@@ -241,7 +241,7 @@ const CHILD_FLAG: &str = "--child";
 pub const LEVELS: [Level; 4] = [Level::Fastest, Level::Fast, Level::Best, Level::Extreme];
 
 /// The digit the CLI selects `level` by.
-fn level_digit(level: Level) -> char {
+pub(crate) fn level_digit(level: Level) -> char {
     match level {
         Level::Fastest => '1',
         Level::Fast => '2',
@@ -250,10 +250,14 @@ fn level_digit(level: Level) -> char {
     }
 }
 
-/// The level the CLI's digit `digit` selects, `None` for any other
-/// character: the inverse of [`level_label`]'s digit, over [`LEVELS`].
+/// The level the CLI's digit selects when `text` is that one digit, `None`
+/// for any other text: the inverse of [`level_label`]'s digit, over
+/// [`LEVELS`]. Text, not a `char`, because every caller reads an argument
+/// or a file field, where `22` must not read as `2`.
 #[must_use]
-pub fn level_of_digit(digit: char) -> Option<Level> {
+pub fn level_of_digit(text: &str) -> Option<Level> {
+    let mut chars = text.chars();
+    let digit = chars.next().filter(|_| chars.next().is_none())?;
     LEVELS
         .into_iter()
         .find(|&level| level_digit(level) == digit)
@@ -376,9 +380,9 @@ mod tests {
     #[test]
     fn level_of_digit_inverts_level_digit_and_refuses_any_other_character() {
         for level in LEVELS {
-            assert_eq!(level_of_digit(level_digit(level)), Some(level));
+            assert_eq!(level_of_digit(&level_digit(level).to_string()), Some(level));
         }
-        for digit in ['0', '5', '9', 'x', '-'] {
+        for digit in ["0", "5", "9", "x", "-", "", "22", "3 ", "-3"] {
             assert_eq!(level_of_digit(digit), None, "{digit:?}");
         }
     }
