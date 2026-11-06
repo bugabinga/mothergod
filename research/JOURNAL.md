@@ -2920,7 +2920,9 @@ record.
   S2-A148: `delta` refuses a file lacking a measured case, accepted; full
   record in S2-A148's own entry. Thirtieth slice, S2-A149: `measure`
   records its probe and `delta` refuses another's, accepted; full record
-  in S2-A149's own entry.
+  in S2-A149's own entry. Thirty-first slice, S2-R41: the far reach at
+  `-2`, as its one parse and as a second parse kept only when smaller,
+  rejected; full record in S2-R41's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -10084,3 +10086,36 @@ record.
   benchmark, so both deltas are null. | **Not measured:** the far reach
   at `-2` itself, still S2-A147's open measurement.
   `research/progress.jsonl` it256.
+- S2-R41 | REJECTED | Lead S1-P4, the far reach at `-2` that S2-A137 left
+  unmeasured and S2-A147 to S2-A149 built the read for. Hypothesis:
+  `Level::Fast` reaching `Reach::Far` on input longer than
+  `lz::WIDE_WINDOW` shrinks the train cases at 4,000,000 bytes, either as
+  its one parse or as a second parse kept only when strictly smaller. |
+  Mechanism: a loop session (ADR-0070), two tries, `baseline_gate measure`
+  and `delta` at `--level 2 --len 4000000`, release build, AMD EPYC 9V45 4
+  logical cores runner, main at `4a0220c` as champion. Try 1, it257, the
+  far reach as `-2`'s one parse: train **+0.000774** b/B, reverted. Nine
+  of 11 cases grow (`x86_dense_code` +0.002976, `entropy_ladder_h4`
+  +0.002716), `markov_h8_2_trap` falls 0.000302 and the incompressible
+  `entropy_ladder_h8` is unchanged: S2-A137's alphabet cost, 24 offset
+  buckets where the wide reach has 21, in the parse's prices and the
+  coder's models. How much is the alphabet and how much is far matches
+  the one-round parse buys was not split. Try 2, it258, the wide parse
+  kept and a far parse after it, the far body kept only when strictly
+  smaller, so no case can grow: train **-0.000027**, all of it
+  `markov_h8_2_trap` (-0.000302); the keeper. Sealed, read once:
+  `access_log` unchanged, `gradient_image` -0.000200, mean **-0.000100**.
+  Encode cost, the gate's wall time, one run each: train 57.88 to 125.66 s
+  (2.17x), sealed 13.63 to 29.17 s (2.14x); peak RSS 202,676 to 218,004
+  KiB on train. | Verdict: **rejected** on the encode trade; the corpus
+  policy alone would accept. `-2` is S2-R37's tier 5b, one parse and no
+  trial, a speed rung (S2-A130). A stream's blocks before a lone last one
+  encode with one worker (`write.rs`), so a second parse runs serially on
+  every block over 2 MiB, and on the gate's inputs it more than doubled
+  encode time for a gain on 2 of 13 cases, none past 0.0003 b/B. Code
+  deleted with the verdict. | Conditions: a cheap predictor of a far win
+  reopens it, so the second parse runs only where it pays; S2-R11's
+  long-range detector is the one such predictor tried, for the wide
+  reach, and it failed. **Not measured:** the finals at `-2`, and
+  wall time on a single-block input with the far parse on a second
+  thread. `research/progress.jsonl` it257, it258.
